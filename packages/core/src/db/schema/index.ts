@@ -7,6 +7,7 @@ import {
 } from "./accounts.ts";
 import { boardBallotKeys, boardCheckpoints, boardEntries, boardSubtrees } from "./board.ts";
 import { electionDefinitions, electionRegistrations } from "./definitions.ts";
+import { displayTexts } from "./display-texts.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 
@@ -20,6 +21,7 @@ export {
   boardCheckpoints,
   boardEntries,
   boardSubtrees,
+  displayTexts,
   electionDefinitions,
   electionRegistrations,
   identityBackups,
@@ -57,5 +59,5 @@ export const TABLE_CLASSES = {
     "account_verifications",
   ],
   identity: ["identity_backups"],
-  operational: ["moderation_actions", "moderation_reports", "schema_migrations"],
+  operational: ["display_texts", "moderation_actions", "moderation_reports", "schema_migrations"],
 } as const;

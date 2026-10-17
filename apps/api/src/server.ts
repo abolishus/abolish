@@ -39,7 +39,7 @@ export type Log = (line: RequestLogLine | ErrorLogLine) => void;
 /** A ballot of `MAX_BOARD_PAYLOAD` bytes as hex, its election ID and the JSON around them. */
 export const MAX_REQUEST_BODY = 2 * MAX_BOARD_PAYLOAD + 1024;
 
-const METHODS = new Set(["GET", "POST"]);
+const METHODS = new Set(["GET", "POST", "OPTIONS"]);
 
 /** `METHOD /path` of every contract procedure; anything else is logged as unmatched. */
 const ROUTES: ReadonlySet<string> = new Set(
@@ -51,10 +51,71 @@ const ROUTES: ReadonlySet<string> = new Set(
   ),
 );
 
+/** Each procedure's path and its one method, for CORS preflights. */
+const METHOD_OF: ReadonlyMap<string, string> = new Map(
+  [...ROUTES].map((r) => {
+    const [method, path] = r.split(" ") as [string, string];
+    return [path, method];
+  }),
+);
+
 function routeOf(req: IncomingMessage): string {
-  const path = (req.url ?? "").split("?", 1)[0];
+  const path = (req.url ?? "").split("?", 1)[0] ?? "";
+  // A preflight is logged under its path, from the same fixed list.
+  if (req.method === "OPTIONS") return METHOD_OF.has(path) ? `OPTIONS ${path}` : "unmatched";
   const key = `${req.method} ${path}`;
   return ROUTES.has(key) ? key : "unmatched";
+}
+
+/**
+ * The origins whose pages may read this API's answers, checked once: each an
+ * exact `https:` origin, or `http:` on a loopback host for a local client.
+ */
+function corsOriginSet(origins: readonly string[]): ReadonlySet<string> {
+  for (const origin of origins) {
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      throw new RangeError(`CORS origin ${JSON.stringify(origin)} is not a URL`);
+    }
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (
+      url.origin !== origin ||
+      !(url.protocol === "https:" || (url.protocol === "http:" && loopback))
+    )
+      throw new RangeError(`CORS origin ${JSON.stringify(origin)} is not an exact https origin`);
+  }
+  return new Set(origins);
+}
+
+/** How long a browser may cache a preflight's answer, in seconds. */
+const PREFLIGHT_MAX_AGE = 600;
+
+/**
+ * Answers a CORS preflight for `path`: allowed only from a listed origin, for
+ * the procedure's own method, with no request header but `content-type`.
+ * Nothing else is ever allowed: no credentials, so a browser never sends a
+ * cookie here (T-10), and no other header a page could use to smuggle state.
+ */
+function preflight(req: IncomingMessage, res: ServerResponse, path: string, allowed: boolean) {
+  const method = METHOD_OF.get(path);
+  const headers = (req.headers["access-control-request-headers"] ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h !== "");
+  if (
+    !allowed ||
+    method === undefined ||
+    req.headers["access-control-request-method"] !== method ||
+    headers.some((h) => h !== "content-type")
+  )
+    return refuse(res, 403);
+  res.statusCode = 204;
+  res.setHeader("access-control-allow-methods", method);
+  if (headers.length > 0) res.setHeader("access-control-allow-headers", "content-type");
+  res.setHeader("access-control-max-age", String(PREFLIGHT_MAX_AGE));
+  res.end();
 }
 
 /**
@@ -128,6 +189,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 
 const REFUSALS: Record<number, string> = {
   400: "BAD_REQUEST",
+  403: "FORBIDDEN",
   404: "NOT_FOUND",
   413: "PAYLOAD_TOO_LARGE",
   415: "UNSUPPORTED_MEDIA_TYPE",
@@ -172,6 +234,14 @@ export interface ApiOptions {
    * slot either (T-52). Default 60 s.
    */
   readonly deadlineMs?: number;
+  /**
+   * Origins whose pages may read this API's answers (CORS): the ballot
+   * client's, each an exact origin. Without them no CORS header is sent and
+   * browsers let no other origin's page read an answer. Every route is
+   * public and none takes credentials, so this only keeps other sites'
+   * pages from using their visitors' browsers as clients (T-52).
+   */
+  readonly corsOrigins?: readonly string[];
 }
 
 /** A whole request (headers and body) must arrive within this. */
@@ -188,9 +258,11 @@ export function createApiServer({
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
+  corsOrigins = [],
 }: ApiOptions): Server {
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
+  const allowedOrigins = corsOriginSet(corsOrigins);
   let inFlight = 0;
   const handler = new OpenAPIHandler(router, {
     // Procedures' own errors (ELECTION_NOT_FOUND, …) are answers, not
@@ -223,6 +295,11 @@ export function createApiServer({
       );
       res.setHeader("x-content-type-options", "nosniff");
       res.setHeader("cache-control", "no-store");
+      // Set before any refusal, so a listed client can read why it was refused.
+      const origin = req.headers.origin;
+      const allowed = origin !== undefined && allowedOrigins.has(origin);
+      if (allowedOrigins.size > 0) res.setHeader("vary", "origin");
+      if (allowed) res.setHeader("access-control-allow-origin", origin);
       if (inFlight >= maxInFlight) {
         res.setHeader("connection", "close");
         res.setHeader("retry-after", "1");
@@ -237,6 +314,12 @@ export function createApiServer({
       try {
         if (carriesAccountCredential(req)) return refuse(res, 400);
         if (route === "unmatched") return refuse(res, 404);
+        if (req.method === "OPTIONS") {
+          // A preflight carries no input, so no body either (T-31).
+          if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
+            return refuse(res, 400);
+          return preflight(req, res, route.slice("OPTIONS ".length), allowed);
+        }
         if (req.method === "POST") {
           // A POST takes its input from the body alone, so nothing that keys on
           // the URL (a cache, a rate limiter) sees a different request (T-31).

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 import { generateOpenApi, renderOpenApi } from "../scripts/openapi.ts";
-import { contract, MAX_BOARD_PAYLOAD } from "../src/index.ts";
+import { contract, MAX_BOARD_PAYLOAD, MAX_DISPLAY_TEXT } from "../src/index.ts";
 
 const root = join(import.meta.dirname, "..");
 const repo = join(root, "../..");
@@ -178,6 +178,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/by-code",
       "GET /elections/code",
       "GET /elections/definition",
+      "GET /elections/display-text",
       "GET /moderation/log",
       "GET /moderation/status",
       "POST /backups",
@@ -195,6 +196,12 @@ describe("spec ties", () => {
     const table = readFileSync(join(repo, "docs/spec/parameters.md"), "utf8");
     const row = /^\|\s*`MAX_BOARD_PAYLOAD`\s*\|\s*([\d,]+)\s*\|/m.exec(table);
     expect(row?.[1]?.replaceAll(",", "")).toBe(String(MAX_BOARD_PAYLOAD));
+  });
+
+  test("MAX_DISPLAY_TEXT matches docs/spec/parameters.md", () => {
+    const table = readFileSync(join(repo, "docs/spec/parameters.md"), "utf8");
+    const row = /^\|\s*`MAX_DISPLAY_TEXT`\s*\|\s*([\d,]+)\s*\|/m.exec(table);
+    expect(row?.[1]?.replaceAll(",", "")).toBe(String(MAX_DISPLAY_TEXT));
   });
 
   test("source imports zod only as zod/mini", () => {

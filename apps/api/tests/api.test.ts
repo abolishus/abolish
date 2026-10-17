@@ -1,6 +1,7 @@
 import {
   BOARD_TREE,
   checkBoard,
+  checkElectionToShow,
   decodeElectionDefinition,
   encodeElectionDefinition,
   identityBackupId,
@@ -27,6 +28,7 @@ import {
   RESTORE_REASONS as CORE_RESTORE_REASONS,
   shortCode,
   storeDefinition,
+  storeDisplayText,
 } from "@abolishus/core";
 import {
   IDENTITY_BACKUP_ENVELOPE,
@@ -130,6 +132,229 @@ describe("elections.getDefinition", () => {
     const e = await election();
     for (const electionId of [e.idHex.toUpperCase(), `0x${e.idHex}`, e.idHex.slice(2)])
       expect((await get("/elections/definition", { electionId })).status).toBe(400);
+  });
+});
+
+describe("elections.getDisplayText (T-34, T-68)", () => {
+  interface TextVector {
+    id: string;
+    encoding: string;
+    definition?: { optionCount: string; displayTextCommitment: string };
+  }
+  const good = (
+    JSON.parse(
+      readFileSync(
+        new URL("../../../docs/spec/vectors/display-text.json", import.meta.url),
+        "utf8",
+      ),
+    ).vectors as TextVector[]
+  ).find((v) => v.id === "display-text-two-languages")!;
+
+  /** A stored election committing to the good text, closing at `closesAt`, with the text stored. */
+  async function withText(closesAt = typical.closes_at, store = true) {
+    const id = b32();
+    const definition = encodeElectionDefinition({
+      ...typical,
+      election_id: id,
+      closes_at: closesAt,
+      option_count: Number(good.definition!.optionCount),
+      display_text_commitment: unhex(good.definition!.displayTextCommitment),
+    });
+    const { definitionHash } = await storeDefinition(app, definition);
+    if (store) await storeDisplayText(app, id, unhex(good.encoding));
+    return { id, idHex: hex(id), definition, definitionHash };
+  }
+  const text = (electionId: string) => get("/elections/display-text", { electionId });
+
+  test("serves the stored text, which passes the client's check against the definition", async () => {
+    const e = await withText();
+    const r = await text(e.idHex);
+    expect(r.status).toBe(200);
+    const body = await json(r);
+    expect(body).toEqual({ displayText: good.encoding });
+    const checked = checkElectionToShow(
+      e.id,
+      e.definitionHash,
+      e.definition,
+      unhex(body["displayText"] as string),
+    );
+    expect(checked.ok).toBe(true);
+  });
+
+  test("an unknown election is ELECTION_NOT_FOUND, a known one without text DISPLAY_TEXT_NOT_FOUND", async () => {
+    const unknown = await text(hex(b32()));
+    expect([unknown.status, (await json(unknown))["code"]]).toEqual([404, "ELECTION_NOT_FOUND"]);
+    const none = await text((await withText(typical.closes_at, false)).idHex);
+    expect([none.status, (await json(none))["code"]]).toEqual([404, "DISPLAY_TEXT_NOT_FOUND"]);
+  });
+
+  test("a hidden poll's text is DISPLAY_TEXT_WITHHELD, and served again once restored", async () => {
+    const e = await withText();
+    await moderate(app, e.id, { action: "hide", reason: "spam", moderator: "mod-1" });
+    const r = await text(e.idHex);
+    expect([r.status, (await json(r))["code"]]).toEqual([451, "DISPLAY_TEXT_WITHHELD"]);
+    await moderate(app, e.id, { action: "restore", reason: "error", moderator: "mod-1" });
+    expect((await text(e.idHex)).status).toBe(200);
+  });
+
+  test("an open poll hidden as a threat is served by the server's clock until it can take no ballot", async () => {
+    const closesAt = BigInt(Math.floor(Date.now() / 1000)) + 86_400n;
+    const e = await withText(closesAt);
+    await moderate(app, e.id, { action: "hide", reason: "threat", moderator: "mod-1" });
+    expect((await text(e.idHex)).status).toBe(200);
+    const later = createApiServer({
+      sql: app,
+      log: () => {},
+      now: () => closesAt + BigInt(typical.l1_inclusion_bound),
+    });
+    await new Promise<void>((r) => later.listen(0, "127.0.0.1", r));
+    const port = (later.address() as AddressInfo).port;
+    const r = await fetch(`http://127.0.0.1:${port}/elections/display-text?electionId=${e.idHex}`);
+    await new Promise((res) => later.close(res));
+    expect(r.status).toBe(451);
+  });
+
+  test("refuses an election ID in any spelling but lowercase hex", async () => {
+    const e = await withText();
+    for (const electionId of [e.idHex.toUpperCase(), `0x${e.idHex}`, e.idHex.slice(2)])
+      expect((await text(electionId)).status).toBe(400);
+  });
+});
+
+describe("CORS for the ballot client", () => {
+  const client = "https://ballot.example";
+  let cors: Server;
+  let corsBase: string;
+  const corsLogs: unknown[] = [];
+  beforeAll(async () => {
+    cors = createApiServer({
+      sql: app,
+      log: (l) => corsLogs.push(l),
+      corsOrigins: [client, "http://localhost:4173"],
+    });
+    await new Promise<void>((r) => cors.listen(0, "127.0.0.1", r));
+    corsBase = `http://127.0.0.1:${(cors.address() as AddressInfo).port}`;
+  });
+  afterAll(() => new Promise((r) => cors?.close(r)));
+
+  const preflight = (path: string, origin: string, method: string, headers?: string) =>
+    fetch(`${corsBase}${path}`, {
+      method: "OPTIONS",
+      headers: {
+        origin,
+        "access-control-request-method": method,
+        ...(headers !== undefined && { "access-control-request-headers": headers }),
+      },
+    });
+
+  test("a listed origin may read answers and refusals, and nothing allows credentials", async () => {
+    const e = await election();
+    const read = await fetch(`${corsBase}/elections/definition?electionId=${e.idHex}`, {
+      headers: { origin: client },
+    });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBe(client);
+    expect(read.headers.get("vary")).toBe("origin");
+    expect(read.headers.get("access-control-allow-credentials")).toBeNull();
+    const refused = await fetch(`${corsBase}/nope`, { headers: { origin: client } });
+    expect(refused.status).toBe(404);
+    expect(refused.headers.get("access-control-allow-origin")).toBe(client);
+    const local = await fetch(`${corsBase}/elections/definition?electionId=${e.idHex}`, {
+      headers: { origin: "http://localhost:4173" },
+    });
+    expect(local.headers.get("access-control-allow-origin")).toBe("http://localhost:4173");
+  });
+
+  test("any other origin gets no allow header, and a server with no list sends no CORS header", async () => {
+    const e = await election();
+    for (const origin of [
+      "https://ballot.example.evil",
+      "https://evil.example",
+      "http://ballot.example",
+      "https://ballot.example:443",
+      "null",
+    ]) {
+      const r = await fetch(`${corsBase}/elections/definition?electionId=${e.idHex}`, {
+        headers: { origin },
+      });
+      expect([origin, r.headers.get("access-control-allow-origin")]).toEqual([origin, null]);
+      expect((await preflight("/ballots", origin, "POST", "content-type")).status).toBe(403);
+    }
+    const plain = await fetch(`${base}/elections/definition?electionId=${e.idHex}`, {
+      headers: { origin: client },
+    });
+    expect(plain.headers.get("access-control-allow-origin")).toBeNull();
+    expect(plain.headers.get("vary")).toBeNull();
+    expect(
+      (await fetch(`${base}/ballots`, { method: "OPTIONS", headers: { origin: client } })).status,
+    ).toBe(403);
+  });
+
+  test("a preflight allows the procedure's own method and no request header but content-type", async () => {
+    const ok = await preflight("/ballots", client, "POST", "Content-Type");
+    expect(ok.status).toBe(204);
+    expect(ok.headers.get("access-control-allow-origin")).toBe(client);
+    expect(ok.headers.get("access-control-allow-methods")).toBe("POST");
+    expect(ok.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(ok.headers.get("access-control-allow-credentials")).toBeNull();
+    const get = await preflight("/elections/display-text", client, "GET");
+    expect(get.status).toBe(204);
+    expect(get.headers.get("access-control-allow-methods")).toBe("GET");
+    expect(get.headers.get("access-control-allow-headers")).toBeNull();
+    for (const [path, method, headers] of [
+      ["/ballots", "GET", undefined],
+      ["/ballots", "PUT", "content-type"],
+      ["/elections/definition", "POST", "content-type"],
+      ["/ballots", "POST", "content-type, authorization"],
+      ["/ballots", "POST", "x-session"],
+    ] as const)
+      expect([
+        path,
+        method,
+        headers,
+        (await preflight(path, client, method, headers)).status,
+      ]).toEqual([path, method, headers, 403]);
+    expect((await preflight("/nope", client, "GET")).status).toBe(404);
+    expect((await preflight("/ballots", client, "POST", "content-type, CONTENT-TYPE")).status).toBe(
+      204,
+    );
+  });
+
+  test("a preflight with a body is refused", async () => {
+    const r = await fetch(`${corsBase}/ballots`, {
+      method: "OPTIONS",
+      headers: { origin: client, "access-control-request-method": "POST" },
+      body: "{}",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  test("a preflight is logged under its route from the fixed list", async () => {
+    corsLogs.length = 0;
+    await preflight("/ballots", client, "POST", "content-type");
+    await preflight("/nope", client, "GET");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(corsLogs).toEqual([
+      expect.objectContaining({ method: "OPTIONS", route: "OPTIONS /ballots", status: 204 }),
+      expect.objectContaining({ method: "OPTIONS", route: "unmatched", status: 404 }),
+    ]);
+    expect(JSON.stringify(corsLogs)).not.toContain("ballot.example");
+  });
+
+  test("a CORS origin that isn't an exact https or loopback http origin is refused at start", () => {
+    for (const origin of [
+      "https://ballot.example/",
+      "https://ballot.example/path",
+      "http://ballot.example",
+      "https://ballot.example:443",
+      "*",
+      "",
+      "HTTPS://ballot.example",
+    ])
+      expect(
+        () => createApiServer({ sql: app, log: () => {}, corsOrigins: [origin] }),
+        origin,
+      ).toThrow(RangeError);
   });
 });
 

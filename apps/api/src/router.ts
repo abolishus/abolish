@@ -12,6 +12,7 @@ import {
   putIdentityBackup,
   readConsistencyProof,
   readDefinition,
+  readServedDisplayText,
   readEntries,
   readHead,
   readIdentityBackup,
@@ -82,6 +83,19 @@ export const router = os.router({
       const definition = await readDefinition(context.sql, fromHex(input.electionId));
       if (definition === undefined) throw errors.ELECTION_NOT_FOUND();
       return { definition: toHex(definition) };
+    }),
+    // What is served follows the moderation policy, which core applies
+    // (docs/moderation-policy.md, Open polls; T-68).
+    getDisplayText: os.elections.getDisplayText.handler(async ({ input, context, errors }) => {
+      const text = await readServedDisplayText(
+        context.sql,
+        fromHex(input.electionId),
+        context.now(),
+      );
+      if (text === undefined) throw errors.ELECTION_NOT_FOUND();
+      if (text.served === "withheld") throw errors.DISPLAY_TEXT_WITHHELD();
+      if (text.served === "none") throw errors.DISPLAY_TEXT_NOT_FOUND();
+      return { displayText: toHex(text.displayText) };
     }),
     // Short links (docs/design/sharing.md). A refusal never quotes the input,
     // and the request log records only the route (T-11, T-67).

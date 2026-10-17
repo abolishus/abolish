@@ -10,6 +10,7 @@ import {
   IdentityBackupLocator,
   MAX_BOARD_ENTRY,
   MAX_BOARD_PAYLOAD,
+  MAX_DISPLAY_TEXT,
   MAX_PAGE,
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
@@ -59,6 +60,30 @@ const getDefinition = oc
   .errors(electionNotFound)
   .input(ElectionQuery)
   .output(z.strictObject({ definition: hexBytes(MAX_BOARD_PAYLOAD) }));
+
+const getDisplayText = oc
+  .route({
+    method: "GET",
+    path: "/elections/display-text",
+    summary: "An election's display text",
+    description:
+      "The display-text record (0x0009) the election's definition commits to: its question, options and translations. Callers check it against the commitment in the definition whose hash the election registry on the L2 holds, and against the spec's rules, before showing it (docs/spec/display-text.md, Checks; T-34, T-41). Moderation decides what is served (docs/moderation-policy.md): a hidden poll's text is withheld, except while a poll hidden as a threat is still open.",
+    tags: ["elections"],
+  })
+  .errors({
+    ...electionNotFound,
+    DISPLAY_TEXT_NOT_FOUND: {
+      status: 404,
+      message: "This server holds no display text for this election.",
+    },
+    DISPLAY_TEXT_WITHHELD: {
+      status: 451,
+      message:
+        "This poll's text is withheld under the moderation policy; see GET /moderation/status.",
+    },
+  })
+  .input(ElectionQuery)
+  .output(z.strictObject({ displayText: hexBytes(MAX_DISPLAY_TEXT) }));
 
 const listElections = oc
   .route({
@@ -391,7 +416,7 @@ const registerTier0 = oc
 
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
-  elections: { list: listElections, getDefinition, resolveCode, getCode },
+  elections: { list: listElections, getDefinition, getDisplayText, resolveCode, getCode },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },

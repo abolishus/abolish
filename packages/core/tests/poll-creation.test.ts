@@ -491,7 +491,7 @@ describe("account_polls' creation columns", () => {
     ).rejects.toThrow(/check/);
     await expect(
       app`INSERT INTO poll_creation_txs VALUES (${chain.creator}, 0, ${Uint8Array.of(1)},
-        ${new Uint8Array(32).fill(7)}, now())`,
+        ${new Uint8Array(32).fill(7)}, now(), 'create')`,
     ).rejects.toThrow(/duplicate key/);
   });
 

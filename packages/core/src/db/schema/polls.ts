@@ -3,14 +3,15 @@ import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql,
-// 0015_poll_anchor_check.sql, 0016_poll_roots.sql, 0017_poll_stubs.sql and
-// 0018_ceremony_runs.sql; a test checks the two agree. `account_polls` is in the account class: whose poll it is, never
+// 0015_poll_anchor_check.sql, 0016_poll_roots.sql, 0017_poll_stubs.sql,
+// 0018_ceremony_runs.sql and 0019_poll_registration.sql; a test checks the
+// two agree. `account_polls` is in the account class: whose poll it is, never
 // who answered it (ADR 0032, rule 15; T-10). `poll_creation_txs` is
-// operational: the creation key's public transactions, naming no account,
-// poll or election. `ceremony_stubs` is operational: the coordinator's
-// stubs, public once registered, naming no account or poll; so are
-// `ceremony_runs`, `ceremony_messages` and `ceremony_approvals`, what it
-// relays and collects for each stub's run.
+// operational: the creation key's public transactions, creations and
+// registrations, naming no account, poll or election. `ceremony_stubs` is
+// operational: the coordinator's stubs, public once registered, naming no
+// account or poll; so are `ceremony_runs`, `ceremony_messages` and
+// `ceremony_approvals`, what it relays and collects for each stub's run.
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -34,6 +35,9 @@ export const accountPolls = pgTable("account_polls", {
   abandonedIds: smallint("abandoned_ids").notNull().default(0),
   electorate: jsonb("electorate"),
   stubHash: bytea("stub_hash"),
+  ceremonyTxHash: bytea("ceremony_tx_hash"),
+  registerTxHash: bytea("register_tx_hash"),
+  registeredBlock: bigint("registered_block", { mode: "bigint" }),
 });
 
 export const pollCreationTxs = pgTable(
@@ -44,6 +48,7 @@ export const pollCreationTxs = pgTable(
     tx: bytea("tx").notNull(),
     txHash: bytea("tx_hash").notNull(),
     sentAt: at("sent_at").notNull(),
+    kind: text("kind").notNull(),
   },
   (t) => [primaryKey({ columns: [t.creatorAddress, t.nonce] })],
 );

@@ -12,11 +12,13 @@ import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { randomScalar } from "./ballot-validity.ts";
 import {
   bytesFixed,
+  type Codec,
   type CodecValue,
   DecodeError,
   type DecodeErrorCode,
   decode,
   encode,
+  EncodeError,
   list,
   struct,
   u64,
@@ -741,6 +743,181 @@ export function keySetHash(entries: readonly KeySetEntry[]): Uint8Array {
     return { index, kem_key_hash: kemKeyHash, signing_key: signingKey };
   });
   return H(ds("abolish/v1/key-set", encode(KEY_SET, encoded)));
+}
+
+// A signing key as the trustee registry takes it: the point `(x, y)`, two
+// 32-byte big-endian coordinates, since the contract can't decompress the
+// 33-byte encoding (docs/spec/contracts.md, Trustee registry, Registration).
+// The point has exactly one compressed encoding, `u8(0x02 + (y mod 2)) ‖ x`,
+// so reading it back gives the key the seat registered.
+const P256_POINT: Codec<Uint8Array> = {
+  minLength: 64,
+  write(w, value) {
+    const key = new Uint8Array(encode(p256Key, value));
+    const { x, y } = p256.Point.fromBytes(key).toAffine();
+    w.bytes(p256.Point.Fp.toBytes(x));
+    w.bytes(p256.Point.Fp.toBytes(y));
+  },
+  read(r) {
+    const at = r.offset;
+    const b = r.take(64);
+    const x = bigEndian(b.subarray(0, 32));
+    const y = bigEndian(b.subarray(32));
+    const { Fp } = p256.Point;
+    // x, y < p, and on the curve: the registry's `P256.isValidPublicKey`.
+    if (x >= Fp.ORDER || y >= Fp.ORDER) throw new DecodeError("non-canonical", at);
+    let point;
+    try {
+      point = p256.Point.fromAffine({ x, y });
+      point.assertValidity();
+    } catch {
+      throw new DecodeError("non-canonical", at);
+    }
+    return point.toBytes(true);
+  },
+};
+
+function bigEndian(b: Uint8Array): bigint {
+  let v = 0n;
+  for (const x of b) v = (v << 8n) | BigInt(x);
+  return v;
+}
+
+// The record's lists count in one byte, where the codec's `list` counts in
+// four; each holds seats in strictly increasing order from 1, so at most
+// `MAX_TRUSTEES` of them.
+function seatList<T extends { readonly index: number }>(of: Codec<T>): Codec<readonly T[]> {
+  return {
+    minLength: 1,
+    write(w, value) {
+      if (!Array.isArray(value)) throw new EncodeError("seat list: expected an array");
+      const items = value as readonly T[];
+      const n = items.length;
+      if (n > MAX_TRUSTEES) throw new EncodeError(`seat list: ${n} seats is over MAX_TRUSTEES`);
+      w.uint(1, n);
+      let previous = 0;
+      for (let i = 0; i < n; i++) {
+        const item = items[i] as T;
+        of.write(w, item);
+        // Checked after the write, which checked it is a u8.
+        if (item.index <= previous)
+          throw new EncodeError("seat list: seats must be strictly increasing, from 1");
+        previous = item.index;
+      }
+    },
+    read(r) {
+      const at = r.offset;
+      const n = r.uint(1);
+      if (n > MAX_TRUSTEES) throw new DecodeError("length-over-max", at);
+      const out: T[] = [];
+      let previous = 0;
+      for (let i = 0; i < n; i++) {
+        const itemAt = r.offset;
+        const item = of.read(r);
+        if (item.index <= previous) throw new DecodeError("non-canonical", itemAt);
+        previous = item.index;
+        out.push(item);
+      }
+      return out;
+    },
+  };
+}
+
+const CEREMONY_REGISTRATION_RECORD = struct([
+  ["panel_id", bytesFixed(32)],
+  ["stub_hash", bytesFixed(32)],
+  ["ceremony_transcript_hash", bytesFixed(32)],
+  [
+    "seats",
+    seatList(
+      struct([
+        ["index", u8],
+        ["kem_key_hash", bytesFixed(32)],
+        ["signing_key", P256_POINT],
+      ] as const),
+    ),
+  ],
+  [
+    "approvals",
+    seatList(
+      struct([
+        ["index", u8],
+        ["signature", p256Sig],
+      ] as const),
+    ),
+  ],
+] as const);
+
+/** One seat's approval in a ceremony registration record. */
+export interface CeremonyRecordApproval {
+  readonly index: number;
+  /** The seat's `p256-sig` on the ceremony registration statement. */
+  readonly signature: Uint8Array;
+}
+
+/**
+ * The record `registerCeremony(bytes)` takes (docs/spec/contracts.md,
+ * Trustee registry, Registration): the stub, the transcript the quorum
+ * approved, the registered key set and the approvals.
+ */
+export interface CeremonyRegistrationRecord {
+  readonly panelId: Uint8Array;
+  readonly stubHash: Uint8Array;
+  readonly ceremonyTranscriptHash: Uint8Array;
+  /** The registered key set, in seat order, as `keySetHash` takes it. */
+  readonly keySet: readonly KeySetEntry[];
+  /** In strictly increasing seat order. */
+  readonly approvals: readonly CeremonyRecordApproval[];
+}
+
+/**
+ * `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(seats) ‖ seat × seats ‖
+ * u8(count) ‖ approval × count`, exactly `98 + 97 · seats + 65 · count`
+ * bytes. Refuses what the registry's checks 2 and 7 to 9 would: no seats,
+ * seats or approvals out of order, a key that isn't a canonical P-256 point,
+ * a signature outside the low-s rule. It checks no signature and no quorum:
+ * the registry does, under the panel it pins (T-37, T-14).
+ */
+export function encodeCeremonyRegistration(record: CeremonyRegistrationRecord): Uint8Array {
+  const { panelId: id, stubHash, ceremonyTranscriptHash, keySet, approvals } = record;
+  if (!Array.isArray(keySet) || keySet.length === 0)
+    throw new EncodeError("ceremony registration: no seats");
+  return encode(CEREMONY_REGISTRATION_RECORD, {
+    panel_id: id,
+    stub_hash: stubHash,
+    ceremony_transcript_hash: ceremonyTranscriptHash,
+    seats: keySet.map((e) => ({
+      index: e.index,
+      kem_key_hash: e.kemKeyHash,
+      signing_key: e.signingKey,
+    })),
+    approvals: (approvals as readonly CeremonyRecordApproval[]).map((a) => ({
+      index: a.index,
+      signature: a.signature,
+    })),
+  });
+}
+
+/**
+ * Strictly decodes a ceremony registration record, as `CeremonyRegistered`
+ * carries it: the layout and the order and form checks of
+ * `encodeCeremonyRegistration`, with each signing key in its one compressed
+ * encoding. Throws `DecodeError`.
+ */
+export function decodeCeremonyRegistration(bytes: Uint8Array): CeremonyRegistrationRecord {
+  const r = decode(CEREMONY_REGISTRATION_RECORD, bytes);
+  if (r.seats.length === 0) throw new DecodeError("non-canonical", 96);
+  return {
+    panelId: r.panel_id,
+    stubHash: r.stub_hash,
+    ceremonyTranscriptHash: r.ceremony_transcript_hash,
+    keySet: r.seats.map((e) => ({
+      index: e.index,
+      kemKeyHash: e.kem_key_hash,
+      signingKey: e.signing_key,
+    })),
+    approvals: r.approvals.map((a) => ({ index: a.index, signature: a.signature })),
+  };
 }
 
 export type CeremonyCheck =

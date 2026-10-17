@@ -1,21 +1,16 @@
 import {
-  answersMessage,
   type CeremonyParams,
-  type CeremonyTranscript,
   ceremonyKeygen,
   challengesMessage,
   checkCeremonyTranscript,
   decodeCeremonyTranscript,
   decodeElectionDefinitionV5,
-  electionStubV5Hash,
   encodeCeremonyTranscript,
   identityKey,
   keySetEntry,
   keySetHash,
   keysMessage,
   type Panel,
-  revealsMessage,
-  type SeatSecrets,
   signCeremonyRegistration,
   tierTreeRoot,
   verifyCeremonyRegistration,
@@ -44,6 +39,7 @@ import {
   stubPolls,
   submitPollDraft,
 } from "../src/index.ts";
+import { Seat } from "./ceremony-seats.ts";
 import { type TestDb, testDb } from "./db.ts";
 
 // The coordinator (ADR 0032, rules 5 to 7; P2-22 part 4c): whole ceremonies
@@ -159,108 +155,10 @@ async function stubbed(
   return Uint8Array.from(row!["stub_hash"]);
 }
 
-const FIELDS = ["keys", "challenges", "answers", "reveals"] as const;
 const EMPTY = { keys: [], challenges: [], answers: [], reveals: [] };
-
-/**
- * One honest seat, as apps/trustee-node's runs it but without its store:
- * fresh keys per run, one message per round over the rounds it is shown,
- * and an approval of a transcript that checks with rule 7's quorum.
- */
-class Seat {
-  readonly index: number;
-  readonly #runs = new Map<
-    string,
-    { secrets: SeatSecrets; mus?: readonly Uint8Array[]; approved?: boolean }
-  >();
-
-  constructor(index: number) {
-    this.index = index;
-  }
-
-  /** Fetches the seat's requests and answers each; returns what each post got. */
-  async act(client: Sql = app, now = NOW): Promise<string[]> {
-    const outcomes = [];
-    for (const r of await coordinatorRequests(client, DEPLOYMENT, this.index)) {
-      const stub = decodeElectionDefinitionV5(r.stub);
-      const stubHash = electionStubV5Hash(stub);
-      const t = decodeCeremonyTranscript(r.transcript, 1);
-      const params: CeremonyParams = {
-        l2ChainId: stub.l2_chain_id,
-        trusteeRegistry: stub.trustee_registry,
-        electionId: stub.election_id,
-        stubHash,
-        panel: PANEL,
-        runId: t.run_id,
-      };
-      const key = Buffer.from(t.run_id).toString("hex");
-      let run = this.#runs.get(key);
-      if (run === undefined) {
-        run = { secrets: ceremonyKeygen(this.index, SECRETS[this.index - 1]!) };
-        this.#runs.set(key, run);
-      }
-      const open = FIELDS.findIndex((f) => t[f].length === 0);
-      if (open === -1) {
-        const { runId: _, ...election } = params;
-        const check = checkCeremonyTranscript(election, r.transcript, 1);
-        if (!check.ok) throw new Error("seat: the transcript doesn't check");
-        const registration = {
-          l2ChainId: params.l2ChainId,
-          trusteeRegistry: params.trusteeRegistry,
-          index: this.index,
-          stubHash,
-          ceremonyTranscriptHash: check.hash,
-          keySetHash: keySetHash(check.registered.map(keySetEntry)),
-        };
-        outcomes.push(
-          await postCeremonyApproval(
-            client,
-            DEPLOYMENT,
-            this.index,
-            {
-              stubHash,
-              ceremonyTranscriptHash: registration.ceremonyTranscriptHash,
-              keySetHash: registration.keySetHash,
-              signature: signCeremonyRegistration(SECRETS[this.index - 1]!, PANEL, registration),
-            },
-            { now },
-          ),
-        );
-        continue;
-      }
-      const message = this.#message(open, params, run, t);
-      const post: CeremonyTranscript = { run_id: t.run_id, ...EMPTY, [FIELDS[open]!]: [message] };
-      outcomes.push(
-        await postCeremonyMessage(
-          client,
-          DEPLOYMENT,
-          this.index,
-          { stubHash, transcript: encodeCeremonyTranscript(post) },
-          { now },
-        ),
-      );
-    }
-    return outcomes;
-  }
-
-  #message(
-    open: number,
-    params: CeremonyParams,
-    run: { secrets: SeatSecrets; mus?: readonly Uint8Array[] },
-    t: CeremonyTranscript,
-  ) {
-    if (open === 0) return keysMessage(params, run.secrets);
-    if (open === 1) {
-      const c = challengesMessage(params, run.secrets, t.keys);
-      run.mus = c.secrets;
-      return c.message;
-    }
-    if (open === 2) return answersMessage(params, run.secrets, t.keys, t.challenges);
-    return revealsMessage(params, run.secrets, t, run.mus ?? []);
-  }
-}
-
-const seats = () => [new Seat(1), new Seat(2), new Seat(3)];
+const seat = (index: number) =>
+  new Seat(index, { deployment: DEPLOYMENT, secrets: SECRETS, client: () => app, now: NOW });
+const seats = () => [seat(1), seat(2), seat(3)];
 
 const runRow = async (stubHash: Uint8Array) => {
   const [r] = await db.admin`
@@ -406,7 +304,7 @@ describe("a whole ceremony", () => {
   test("ends a run whose round closes below rule 7's quorum", async () => {
     const stubHash = await stubbed();
     await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
-    expect(await new Seat(1).act()).toEqual(["accepted"]);
+    expect(await seat(1).act()).toEqual(["accepted"]);
     expect(await close(ROUND_SECONDS)).toEqual({ closed: 1, ended: { "too-few-messages": 1 } });
     expect(await runRow(stubHash)).toMatchObject({ round: 6, outcome: "too-few-messages" });
     expect(await approvedCeremony(app, stubHash)).toBeUndefined();
@@ -656,7 +554,7 @@ describe("the coordinator's tables", () => {
   test("keep what seats sent append-only, and a run's checked fields together", async () => {
     const stubHash = await stubbed();
     await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
-    await new Seat(1).act();
+    await seat(1).act();
     await expect(app`UPDATE ceremony_messages SET seat = 2`).rejects.toThrow(/permission/);
     await expect(app`DELETE FROM ceremony_messages`).rejects.toThrow(/permission/);
     await expect(app`DELETE FROM ceremony_runs`).rejects.toThrow(/permission/);

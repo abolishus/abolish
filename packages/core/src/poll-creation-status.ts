@@ -46,7 +46,7 @@ export interface CreationKeyRecords {
   readonly unincluded: number;
   /** Recorded at a nonce not yet spent in finalized history. */
   readonly unfinalized: number;
-  /** Recorded in the 24 hours before `now`, the window the daily ceiling counts. */
+  /** Creations recorded in the 24 hours before `now`, what the daily ceiling counts. */
   readonly lastDay: number;
   /**
    * Nonces the node has seen included with no ledger row: transactions of
@@ -98,7 +98,12 @@ export async function creationKeyRecords(
     counted(),
     counted(gte(pollCreationTxs.nonce, nonces.latest)),
     counted(gte(pollCreationTxs.nonce, nonces.finalized)),
-    counted(gte(pollCreationTxs.sentAt, new Date(now.getTime() - DAY_MS))),
+    counted(
+      and(
+        eq(pollCreationTxs.kind, "create"),
+        gte(pollCreationTxs.sentAt, new Date(now.getTime() - DAY_MS)),
+      ),
+    ),
     counted(lt(pollCreationTxs.nonce, nonces.latest)),
   ]);
   return {

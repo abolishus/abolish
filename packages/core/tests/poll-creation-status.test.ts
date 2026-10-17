@@ -197,6 +197,12 @@ describe("creationKeyRecords", () => {
     expect(await records(chain, new Date(NOW.getTime() + 24 * HOUR + 1))).toMatchObject({
       lastDay: 0,
     });
+    // A registration of the key's is in its ledger, never in the ceiling.
+    await db.admin`
+      INSERT INTO poll_creation_txs (creator_address, nonce, tx, tx_hash, sent_at, kind)
+      VALUES (${chain.creator}, 1, '\\x01', ${new Uint8Array(32).fill(9)}, ${NOW},
+        'register-definition')`;
+    expect(await records(chain)).toMatchObject({ recorded: 2, lastDay: 1 });
   });
 
   test("lists at most KEY_POLLS_LISTED polls and counts the rest", async () => {

@@ -230,11 +230,12 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
   // This worker has no Tier 0 job, pins no panel, has no registry sync,
-  // roots or stub step and holds no creation key, so those queues have no
-  // keys here (tests/tier0.test.ts, tests/ballots.test.ts,
-  // tests/registry-sync.test.ts, tests/poll-roots.test.ts and
-  // tests/poll-stubs.test.ts cover the first five; the creation worker's
-  // test below checks its keys).
+  // roots or stub step (nor the coordinator beside it) and holds no
+  // creation key, so those queues have no keys here (tests/tier0.test.ts,
+  // tests/ballots.test.ts, tests/registry-sync.test.ts,
+  // tests/poll-roots.test.ts, tests/poll-stubs.test.ts and
+  // tests/ceremony.test.ts cover the first six; the creation worker's test
+  // below checks its keys).
   const tags = Object.entries(QUEUES)
     .filter(
       ([key]) =>
@@ -245,6 +246,7 @@ test("every key the worker uses is under its queue's hash tag", async () => {
           "pollCreate",
           "pollRoot",
           "pollStub",
+          "ceremonyCoordinate",
         ].includes(key),
     )
     .map(([, q]) => `${prefix}:${q.name}:`);
@@ -292,6 +294,7 @@ test("a handler's own error message is neither logged nor kept, the events strea
       pollRoot: async () => {},
       // Not scheduled: this worker has no stub step.
       pollStub: async () => {},
+      ceremonyCoordinate: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
         throw new Error(`params: ${MARKER}`);

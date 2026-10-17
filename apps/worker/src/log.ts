@@ -5,6 +5,8 @@
 
 import type {
   AnchorFindingCode,
+  CloseRoundsReport,
+  OpenRunsReport,
   BoardAuditCode,
   DefinitionErrorCode,
   RegistrationErrorCode,
@@ -174,6 +176,14 @@ export interface PollStubLine {
   readonly failed: Partial<Record<StubFailure, number>>;
 }
 
+/**
+ * What a coordinator run did, in counts only (T-10, T-67), written only when
+ * a run opened, was left unopened, or a round or run closed.
+ */
+export interface CeremonyCoordinateLine extends OpenRunsReport, CloseRoundsReport {
+  readonly queue: "{ceremony-coordinate}";
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -200,5 +210,6 @@ export type LogLine =
   | PollCreationLine
   | PollRootLine
   | PollStubLine
+  | CeremonyCoordinateLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

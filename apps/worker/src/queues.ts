@@ -102,6 +102,19 @@ export const QUEUES = {
    */
   pollStub: { name: "{poll-stub}", side: "account", data: z.strictObject({}) },
   /**
+   * The key ceremony's coordinator (core's openCeremonyRuns and
+   * closeCeremonyRounds; ADR 0032, rule 5): opens a run for each stubbed
+   * poll and closes rounds and approvals at their deadlines, while the API
+   * serves the seats' side. Runs on a schedule, only beside the stub step,
+   * whose default panel it relays between, and takes no data: no poll,
+   * author, stub or seat is ever queued (T-10, T-54).
+   */
+  ceremonyCoordinate: {
+    name: "{ceremony-coordinate}",
+    side: "account",
+    data: z.strictObject({}),
+  },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

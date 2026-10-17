@@ -62,6 +62,16 @@ export interface CoordinatorRequest {
   readonly transcript: Uint8Array;
 }
 
+/**
+ * How long a round, or the approvals, stay open for seats that haven't sent.
+ * A run has five deadlines at most, so a run with a withheld seat ends
+ * within 15 minutes, half of `SETUP_SECONDS`, leaving the rest for
+ * registration before the stub's `opens_at` (ADR 0032, rule 10). Seats poll
+ * every minute or so, and a round with every seat in closes when the last
+ * one sends, so an honest run waits on no deadline.
+ */
+export const CEREMONY_ROUND_SECONDS = 3 * 60;
+
 /** Most requests one poll returns, as the seats' transport bounds them. */
 export const MAX_COORDINATOR_REQUESTS = 16;
 

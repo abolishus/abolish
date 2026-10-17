@@ -17,6 +17,7 @@
   "dependencies": {
     "@abolishus/api-contract": "workspace:*",
     "@abolishus/core": "workspace:*",
+    "@abolishus/trustee-node": "workspace:*",
     "@abolishus/worker": "workspace:*",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",

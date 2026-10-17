@@ -442,6 +442,9 @@ importers:
       '@abolishus/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@abolishus/trustee-node':
+        specifier: workspace:*
+        version: link:../trustee-node
       '@abolishus/worker':
         specifier: workspace:*
         version: link:../worker

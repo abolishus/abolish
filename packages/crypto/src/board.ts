@@ -90,12 +90,25 @@ export const BOARD_PAYLOAD_TYPES_V6: readonly number[] = Object.freeze([
   RECORD_TYPES.runningOpening,
 ]);
 
+/**
+ * Record types a version-7 entry may carry: version 5's, and the author
+ * panel's approvals of its transcript (docs/spec/ceremony.md, Author panel),
+ * for an election with an author panel only (verifier 2.3). Version 7 fixes
+ * the approvals' version, 1. Not version 6's running opening: a live poll
+ * with an author panel can't run yet (docs/spec/tally.md, Live results).
+ */
+export const BOARD_PAYLOAD_TYPES_V7: readonly number[] = Object.freeze([
+  ...BOARD_PAYLOAD_TYPES_V5,
+  RECORD_TYPES.authorApprovals,
+]);
+
 const PAYLOAD_TYPES_BY_VERSION = {
   1: BOARD_PAYLOAD_TYPES,
   3: BOARD_PAYLOAD_TYPES_V3,
   4: BOARD_PAYLOAD_TYPES_V4,
   5: BOARD_PAYLOAD_TYPES_V5,
   6: BOARD_PAYLOAD_TYPES_V6,
+  7: BOARD_PAYLOAD_TYPES_V7,
 } as const;
 
 /**
@@ -166,8 +179,9 @@ const entryV3 = entryFields(BOARD_PAYLOAD_TYPES_V3);
 const entryV4 = entryFields(BOARD_PAYLOAD_TYPES_V4);
 const entryV5 = entryFields(BOARD_PAYLOAD_TYPES_V5);
 const entryV6 = entryFields(BOARD_PAYLOAD_TYPES_V6);
+const entryV7 = entryFields(BOARD_PAYLOAD_TYPES_V7);
 
-/** Board entry, version 1, 3, 4, 5 or 6 (docs/spec/board.md). */
+/** Board entry, version 1, 3, 4, 5, 6 or 7 (docs/spec/board.md). */
 export type BoardEntry = CodecValue<typeof entryV1>;
 
 /** Record type `0x0007`: the envelope that places a record on the board. */
@@ -177,6 +191,7 @@ export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, {
   4: entryV4,
   5: entryV5,
   6: entryV6,
+  7: entryV7,
 });
 
 /** A board-entry version this release reads and writes. */

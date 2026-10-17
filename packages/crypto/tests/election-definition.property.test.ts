@@ -504,6 +504,8 @@ describe("2.3's profile combination", () => {
     // definition (version 6 or 7) may pin it, never these (tally.md,
     // Tally-opening version 2).
     if (board === 6) return "profile-combination";
+    // Board-entry version 7 is only for a definition with an author panel.
+    if (board === 7) return "profile-combination";
     if (![1, 3, 4, 5].includes(board)) return "unsupported-version";
     if (ballot !== 1) return "profile-combination";
     const carriesDelivery = board === 3 || board === 4 || board === 5;
@@ -521,8 +523,8 @@ describe("2.3's profile combination", () => {
     return events === 5 ? undefined : "unsupported-version";
   };
 
-  test("board-entry versions 1 to 7 against ballot, tally-opening and contract-event versions", () => {
-    for (let board = 1; board <= 7; board++)
+  test("board-entry versions 1 to 8 against ballot, tally-opening and contract-event versions", () => {
+    for (let board = 1; board <= 8; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)
           for (const events of [1, 2, 3, 4, 5, 6, 255])

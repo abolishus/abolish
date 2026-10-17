@@ -289,7 +289,16 @@ export function authorPanelRule(
  * (T-37). Never stored: every reader recomputes it from the definition.
  */
 export function authorPanelId(panel: Panel): Uint8Array {
-  const { threshold, keys } = checkedPanel(panel, 1);
+  return authorPanelIdOf(checkedPanel(panel, 1));
+}
+
+function authorPanelIdOf({
+  threshold,
+  keys,
+}: {
+  threshold: number;
+  keys: Uint8Array[];
+}): Uint8Array {
   return H(ds("abolish/v1/author-panel", panelIdInput(threshold, keys)));
 }
 
@@ -323,6 +332,19 @@ export function ceremonyRegistrationMessage(panel: Panel, reg: CeremonyRegistrat
   return registration(checkedPanel(panel), reg).message;
 }
 
+/**
+ * The 157-byte statement an author seat signs (docs/spec/ceremony.md, Author
+ * panel, Approval): the same layout and tag, with `panel_id` the author panel
+ * identifier computed from `panel` (`1 ≤ k_A`), so an author seat's approval
+ * can't stand for a default seat's or another panel's (T-37).
+ */
+export function authorCeremonyRegistrationMessage(
+  panel: Panel,
+  reg: CeremonyRegistration,
+): Uint8Array {
+  return registration(checkedPanel(panel, 1), reg, "author").message;
+}
+
 // The statement and the key of its seat, both from one checked copy of the
 // panel, so the key verified against is the key the identifier hashed.
 // Each field read once, so a getter can't show the checks one value and the
@@ -337,6 +359,7 @@ function snapshot(reg: CeremonyRegistration): CeremonyRegistration {
 function registration(
   checked: { threshold: number; keys: Uint8Array[] },
   input: CeremonyRegistration,
+  kind: "default" | "author" = "default",
 ): { message: Uint8Array; key: Uint8Array } {
   const reg = snapshot(input);
   const key = Number.isSafeInteger(reg.index) ? checked.keys[reg.index - 1] : undefined;
@@ -345,7 +368,7 @@ function registration(
   const message = encode(CEREMONY_REGISTRATION, {
     l2_chain_id: reg.l2ChainId,
     trustee_registry: reg.trusteeRegistry,
-    panel_id: panelIdOf(checked),
+    panel_id: kind === "author" ? authorPanelIdOf(checked) : panelIdOf(checked),
     index: reg.index,
     stub_hash: reg.stubHash,
     ceremony_transcript_hash: reg.ceremonyTranscriptHash,
@@ -386,6 +409,48 @@ export function verifyCeremonyRegistration(
   let statement: { message: Uint8Array; key: Uint8Array };
   try {
     statement = registration(checked, reg);
+  } catch (e) {
+    if (e instanceof EncodeError) return false;
+    throw e;
+  }
+  return verifyStatement(
+    statement.key,
+    "abolish/v1/sig/ceremony-registration-2",
+    statement.message,
+    sig,
+  );
+}
+
+/** Author seat `reg.index`'s signature approving its panel's transcript (docs/spec/ceremony.md, Author panel). */
+export function signAuthorCeremonyRegistration(
+  secretKey: Uint8Array,
+  panel: Panel,
+  reg: CeremonyRegistration,
+): Uint8Array {
+  const { message, key } = registration(checkedPanel(panel, 1), reg, "author");
+  if (!equalBytes(identityKey(secretKey), key))
+    throw new RangeError("ceremony registration: secretKey is not the key of seat index");
+  return signStatement(secretKey, "abolish/v1/sig/ceremony-registration-2", message);
+}
+
+/**
+ * Whether `sig` is author seat `reg.index`'s approval, checked against the
+ * key the definition's `author_keys` put in that seat, under the author
+ * panel identifier (T-37). As `verifyCeremonyRegistration`, a seat outside
+ * the panel or a field with no encoding fails like a bad signature.
+ */
+export function verifyAuthorCeremonyRegistration(
+  panel: Panel,
+  reg: CeremonyRegistration,
+  sig: Uint8Array,
+): boolean {
+  const checked = checkedPanel(panel, 1);
+  reg = snapshot(reg);
+  if (!Number.isSafeInteger(reg.index) || reg.index < 1 || reg.index > checked.keys.length)
+    return false;
+  let statement: { message: Uint8Array; key: Uint8Array };
+  try {
+    statement = registration(checked, reg, "author");
   } catch (e) {
     if (e instanceof EncodeError) return false;
     throw e;

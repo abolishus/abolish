@@ -293,7 +293,7 @@ The record is `39 + 65·c` bytes for `c` approvals. Each statement's other field
 
 ## Vectors
 
-`docs/spec/vectors/ceremony.json`, from an independent implementation: complete transcripts (honest panels, every disqualification reason, and transcripts that fail each of the four transcript-level codes) with each one's expected result, the registered key set or the reason per seat, and its hash. `docs/spec/vectors/key-set.json` gives KEM-key and key-set hashes, key sets no seat should sign, and ceremony registration statements over key-set hashes ([[contracts]], Trustee registry).
+`docs/spec/vectors/ceremony.json`, from an independent implementation: complete transcripts (honest panels, every disqualification reason, and transcripts that fail each of the four transcript-level codes) with each one's expected result, the registered key set or the reason per seat, and its hash. `docs/spec/vectors/key-set.json` gives KEM-key and key-set hashes, key sets no seat should sign, and ceremony registration statements over key-set hashes ([[contracts]], Trustee registry). `docs/spec/vectors/author-ceremony.json`, from an independent implementation, covers the Author panel section: author runs under the author context, `duplicate-key` across both panels, `k_A = 1`, author approvals records with their check, the operator's boarding rule and decode rejections, and board-entry version 7.
 
 ## Security notes
 

@@ -105,6 +105,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- [[P2-21]]'s real-phone measurement (proving time and memory on a mid-range phone) needs a person with a phone: no agent session has one. How to run it is in its file, part 4b-2. The rest of the item goes on.
 - On 2026-10-17 the owner chose staging's origins for [[P2-8]] part 2b (`https://api-staging.abolish.us`, `https://sepolia.base.org`), and the `connect-src` change landed in #332.
 - On 2026-10-12 the owner answered [[0010-tier2-identity-provider]]'s two questions (Owner decision), unblocking [[P3-4]]'s verifier side and real-document registration through trustee attestation.
 - On 2026-10-12 the owner answered [[0006-trustees]]'s small-cell question (regions below the floor fold into a per-tier remainder cell; tiers are never merged or withheld), unblocking [[P1-15]] part 4.

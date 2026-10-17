@@ -168,6 +168,49 @@ const enUS = {
   challenge: "Check the encryption first",
   challengeExplained:
     "Checking the encryption first opens a sealed copy of your answers to show it holds exactly what you chose. That copy can never be counted, so you then send a fresh one.",
+  // Proving membership (proving.tsx); each refusal names the check that stopped it.
+  provingTitle: "Proving you can answer",
+  proving:
+    "This device is making a proof that you are one of this poll's members, without showing which one. Keep this page open.",
+  provingLabel: "Your proof",
+  provingStarting: "Starting",
+  provingSteps: "{done} of {of} steps",
+  provingLocalTitle: "Made on this device",
+  provingLocal:
+    "Your voting identity never leaves it. The proof says only that you are on the poll's list, and this device checks it before anything is sent.",
+  proofCheckTitle: "The check that stopped it",
+  proofCheckNamed: "Its name, for whoever you report this to:",
+  proofNothingSent: "No proof and no answer left this device, and nothing was counted.",
+  proofSecretTitle: "Your voting identity on this device can't be used",
+  proofSecret:
+    "The identity this device keeps for voting isn't a valid one, so no proof can be made from it.",
+  proofNotMemberTitle: "You aren't on this poll's list",
+  proofNotMember:
+    "Your voting identity isn't among the members this poll was opened to, so this device can't prove you may answer it. If you think you should be, tell whoever asked you to answer.",
+  proofRootTitle: "The list of members doesn't match the poll",
+  proofRoot:
+    "The members this device was sent don't add up to the list registered for this poll, so a server may have sent a wrong or incomplete list. Try again later.",
+  proofUnavailableTitle: "The files for making proofs couldn't be fetched",
+  proofUnavailable:
+    "This copy of the ballot didn't serve them. Check your connection and try again, or open the ballot from another address.",
+  proofZkeyTitle: "The proving key isn't the published one",
+  proofZkey:
+    "The key this device was served for making proofs isn't the one this version of the ballot pins, so it wasn't used. Open the ballot from abolishus.eth or another address Abolish lists.",
+  proofWasmTitle: "The proof's calculator isn't the published one",
+  proofWasm:
+    "The file this device was served for working out the proof isn't the one this version of the ballot pins, so it wasn't used. Open the ballot from abolishus.eth or another address Abolish lists.",
+  proofProverTitle: "The part that makes proofs didn't answer properly",
+  proofProver:
+    "It stopped, answered out of turn or took too long. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  proofStoppedTitle: "This device stopped while making the proof",
+  proofStopped:
+    "The proof didn't finish. Open the ballot from abolishus.eth or another address Abolish lists.",
+  proofWrongTitle: "The proof didn't pass this device's check",
+  proofWrong:
+    "This device checks every proof before it is sent, and this one was wrong. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  proofFaultTitle: "This device made a fault while finishing the proof",
+  proofFault:
+    "The finished proof didn't pass this device's own check, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

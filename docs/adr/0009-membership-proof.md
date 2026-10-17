@@ -84,3 +84,60 @@ What would change it: a published, reviewed proof that bb's zero-knowledge Ultra
 Under rule A (`AGENTS.md`): **option B**, with status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
 
 On 2026-10-12 the owner confirmed the reading this ADR depends on: verifying Semaphore's Groth16 proofs with the BN254 pairing from the audited `@noble/curves` composes a published protocol; it is not implementing a proof system. The `crypto-review` skill now says so. P1-17b may start.
+
+## Amendment (2026-10-17, P2-21 part 1): the prover
+
+Status: Accepted (agent) — owner may veto, listed under Decisions to review in [[STATUS]]. The ballot client needs a Groth16 prover for the key and circuit above. Any correct prover makes proofs in the same encoding that every verifier already checks, so this choice is reversible by a client release; it isn't a protocol version. It does decide what third-party code runs beside the voter's identity secret, and so what the owner is asked to admit into the client.
+
+### Measurements
+
+`packages/crypto/scripts/membership-prover-bench.mjs`, run outside the workspace on 2026-10-17, over the pinned `semaphore-32.zkey` (5,850,470 bytes; 9,418 wires, 4 public, domain 2¹⁴) and `semaphore-32.wasm` (1,859,813 bytes; sha256 `528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5`, the witness calculator Semaphore 4.14.3 downloads beside the key). The host is a 4-vCPU cloud x86-64 machine, Node 24.22 and Playwright's Chromium; each proof was checked by snarkjs's verifier.
+
+| Prover, where                                                         | One proof (median)    |
+| --------------------------------------------------------------------- | --------------------- |
+| snarkjs 0.7.5, single thread, Node                                    | 3.7 s                 |
+| snarkjs 0.7.5, four threads, Node                                     | 1.15 s                |
+| snarkjs 0.7.5, single thread, Chromium, no throttling                 | 3.7 s                 |
+| the same, Chromium CPU throttling 4× (Lighthouse's mid-tier phone)    | 16.2 s                |
+| the same, throttling 6×                                               | 24.1 s                |
+| a Groth16 prover over `@noble/curves`' BN254: its MSMs and FFTs alone | 20.6 s (≈ 80 s at 4×) |
+| re-randomising a proof over `@noble/curves` (below)                   | 34 ms                 |
+
+Node's resident memory peaked at about 500 MiB with both modes run in one process (277 MiB single-threaded alone); Chromium's JavaScript heap stayed near 65–115 MiB, with WebAssembly memory on top. The throttled rows stand in for a phone: DevTools' throttling doesn't reach dedicated workers, so the bench proves on the main thread, the same code the client's worker would run. **No real phone was measured**: a session has none, and the item's measurement on a mid-range phone stays open (Known-weak below).
+
+Two facts the prototype established beyond timing:
+
+- snarkjs's multi-threaded mode starts its own workers from `blob:` URLs, which the client's CSP (`worker-src 'self'`, Trusted Types with only `ballot-worker`) refuses, and every snarkjs entry point except `fullProve`/`prove` with `{ singleThread: true }` builds the threaded curve. The client therefore proves single-threaded and never calls snarkjs's verifier or key export (it verifies with `packages/crypto`, below). Under a policy of `script-src 'self' 'wasm-unsafe-eval'`, `connect-src 'self'` and Trusted Types with no policy, single-threaded proving raised no violation.
+- snarkjs's randomisers `r`, `s` come from `Fr.random()` of ffjavascript's WebAssembly field, which reads a ChaCha stream that ffjavascript implements itself, seeded once per thread with 32 bytes of `crypto.getRandomValues`, and seeded from `Math.random` if `crypto` is absent. That is not a randomness source this repository would choose, and the proof's zero knowledge rests on it.
+
+### Options
+
+- **A. snarkjs 0.7.5 (with ffjavascript 0.3.1), single-threaded** (chosen). The prover that made `membership-proof.json`'s proofs. The client ships upstream's prebuilt browser bundles, `snarkjs/build/browser.esm.js` and `ffjavascript/build/browser.esm.js` (they inline circom_runtime 0.1.28, fastfile 0.0.20, `@iden3/binfileutils` 0.0.12, wasmcurves 0.2.2, wasmbuilder 0.0.16 and web-worker 1.2.0), about 313 KB minified in a prover-only bundle. GPL-3.0 (circom_runtime and web-worker Apache-2.0); GPL-3.0 §13 lets it be combined with the client's AGPL-3.0-only code, a reading the owner confirms (Owner asks). Needs `'wasm-unsafe-eval'`: both the curve code and the witness calculator are WebAssembly. Upstream's bundles aren't rebuilt from source by us; reviewers read the bundled files the client ships.
+- **B. A Groth16 prover of our own over `@noble/curves`' BN254, with the witness computed in TypeScript.** No new third-party runtime code and no WebAssembly, but at least 5.5× slower on the same machine before its witness computation (about 80 s for the MSMs and FFTs alone at 4× throttling), and two new pieces the gate would have to review line by line: a prover (QAP evaluation and H, which the owner's 2026-10-12 reading covers for verification, not proving) and a witness generator that assigns every one of the circuit's 9,418 wires in circom's exact order, including the hint wires (bit decompositions, inverses) that no constraint determines. A wrong wire is a proof that fails, caught by self-verification, but the generator is a second implementation of Semaphore's circuit (T-05, T-39). Rejected on both counts: the time fails the "phone-sized" rule and the code is the kind the `crypto-review` rules keep out.
+- **C. A native prover (rapidsnark, or arkworks through a WebAssembly build).** Faster, but rapidsnark has no browser build and an arkworks build is a Rust toolchain and a WebAssembly blob we would build and pin ourselves. Left to [[P5-4]]'s native app, where a native prover fits.
+
+### Decision
+
+**A, with the prover untrusted for zero knowledge.** The client never relies on snarkjs's randomness or on its correctness:
+
+1. **Self-verification** ([[membership]], Security notes): `packages/crypto` verifies snarkjs's output under the pinned key, so a non-satisfying witness or another basis convention, which would leave a witness-dependent term in `C`, never leaves the device.
+2. **Re-randomisation in `packages/crypto`.** It then draws `t, u` uniform in `[1, r)` from `crypto.getRandomValues` and outputs `A' = t⁻¹·A`, `B' = t·B + t·u·δ₂`, `C' = C + u·A`, and verifies `A' ‖ B' ‖ C'` again. With `A ≠ 0`, `A'` is uniform over G1's non-identity points, `B'` uniform over G2 given `A'`, and `C'` the one point the verification equation leaves, which is an honest prover's distribution with fresh randomisers (up to the 1/r chance that an honest `A` is the identity). So the proof that leaves the device is perfectly zero-knowledge (for the checked key) whatever `r` and `s` snarkjs drew, even zero, and its randomness is `@noble/*` code over the platform CSPRNG, inside the gate. This is Groth16's published malleability ([[membership]], Security notes, Malleability; T-38) used on purpose; the vectors' `rerandomised` case already exercises its verifier side. It costs 34 ms.
+3. **Pinned by hash.** The zkey and the witness calculator are checked by sha256 before use (the zkey's is `MEMBERSHIP_ZKEY_SHA256`); snarkjs and ffjavascript are exact catalog pins with the lockfile's integrity, and the bundled worker is part of the hash-addressed, reproducible client release, whose record names the prover by those versions and hashes.
+
+What snarkjs is still trusted for: computing a witness and proof from the secret without leaking it. It runs in the client's Web Worker, which holds the secret anyway, with no network beyond `connect-src`; a hijacked release of it is the dependency risk the exact pins, the 7-day release age and review of the bundled files address (T-55), not a protocol one.
+
+**Where the code lives.** `packages/crypto` stays `@noble/*`-only: it gets the inputs (the path rebuilt from the tier's leaves and checked against the definition's root, the scope and message fields, the forbidden-commitment and depth checks), the key-hash check, self-verification and re-randomisation, all testable in Node. The snarkjs call is a thin adapter in a new gated package, `packages/membership-prover`, whose only runtime dependencies are `@abolishus/crypto`, snarkjs and ffjavascript, and which `packages/verifier` never imports. Making it a gated package with that rule is a `ci:` change ([[P2-21]], owner asks).
+
+**Owner asks** (each a `ci:` change under rule B; P2-21 builds everything else meanwhile):
+
+- `.github/tools/ci/src/gated.ts` and `affected.ts`: `membership-prover` as a gated package whose runtime dependencies are exactly `@abolishus/crypto`, `snarkjs` and `ffjavascript` (catalog pins), and the `crypto-review` workflow's paths to match.
+- The ballot client's bundle allow-list (`apps/ballot/tests/bundle.test.ts`, mirrored in `.github/tools/ci/src/ballot.ts`): code from those two packages' browser builds, in the worker's chunk only.
+- The client's CSP: `'wasm-unsafe-eval'` in `script-src` (it allows compiling WebAssembly, never JavaScript `eval`), and `'self'` in `connect-src` for the key and witness calculator, which the client serves from its own release, beside the origins [[P2-8]] part 2b asks for.
+- Licensing (owner-only, a legal matter): shipping GPL-3.0 code in the AGPL-3.0-only ballot client, combined under GPL-3.0 §13 as we read it, with the licences in the release's `third-party-licenses.md`.
+- The key's source: vendor `semaphore-32.zkey` and `semaphore-32.wasm` (7.7 MB) in `packages/membership-prover`, recorded in its manifest with their URLs under `snark-artifacts.pse.dev/semaphore/4.13.0/` and sha256s, and add that host as a vectors publisher so CI re-fetches both and compares, as it does for Semaphore's verification keys. The ballot build copies them into `dist/`, so the key is part of the release hash, and the client re-checks the sha256 on every use.
+
+### Known-weak
+
+- No real phone measured; the 4× and 6× rows are throttled Chromium on a cloud host. If a mid-range phone takes much longer than about 20 s, the remedies are the owner's (a smaller protocol depth in a new ballot version), never a depth the client chooses.
+- snarkjs's prebuilt bundles are trusted as published; we don't rebuild them. The witness calculator isn't rebuilt from `semaphore.circom` either (part 2 of [[P1-17b]] rebuilt only the R1CS).
+- The single-threaded prover is about 3× slower than snarkjs's threaded mode; threading through workers the client itself starts, from `'self'`, is possible later without changing anything above.

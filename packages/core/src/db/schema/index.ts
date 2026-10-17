@@ -10,9 +10,11 @@ import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
+import { accountPolls } from "./polls.ts";
 
 export {
   accountCredentials,
+  accountPolls,
   accountPasskeys,
   accountSessions,
   accountUsers,
@@ -32,8 +34,9 @@ export {
 /**
  * Every table in the schema, by class. Board tables hold public bulletin-board
  * data and are rebuilt from chain + IPFS. Account tables hold accounts
- * (better-auth): who someone is to the app, never how they voted. Operational
- * tables (drafts, moderation, caches) hold nothing a result depends on.
+ * (better-auth) and the polls each account wrote (ADR 0032): who someone is
+ * to the app, never how they voted. Operational tables (moderation, caches)
+ * hold nothing a result depends on.
  * Identity tables hold voting-identity backups (ADR 0017): operational, since
  * a wipe changes no result, but on the ballot side of the no-join rules. A
  * test fails on any table not listed here, on any foreign key that touches a
@@ -54,6 +57,7 @@ export const TABLE_CLASSES = {
   account: [
     "account_credentials",
     "account_passkeys",
+    "account_polls",
     "account_sessions",
     "account_users",
     "account_verifications",

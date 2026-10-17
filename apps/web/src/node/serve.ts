@@ -1,6 +1,7 @@
 // apps/web's HTTP front on node:http: the built Start handler for pages and
-// server functions, the account handler from @abolishus/core under /auth, and
-// the client's hashed assets from disk.
+// server functions, the account handler from @abolishus/core under /auth, an
+// author's poll drafts under /drafts (src/node/drafts.ts), and the client's
+// hashed assets from disk.
 //
 // The account system lives here, on apps/web's origin, so its host-only
 // session cookie never reaches the API or the ballot client's host (T-10,
@@ -31,8 +32,11 @@ export interface StartHandler {
 /** The account handler (`createAccounts(...).handler` from @abolishus/core). */
 export type AccountHandler = (request: Request) => Promise<Response>;
 
+/** The drafts handler (`createDraftsHandler(...)` from src/node/drafts.ts). */
+export type DraftsHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
-export type RouteClass = "page" | "server-fn" | "auth" | "asset" | "ingest" | "refused";
+export type RouteClass = "page" | "server-fn" | "auth" | "drafts" | "asset" | "ingest" | "refused";
 
 /** One request-log line: nothing a person, a session or a poll can be read from. */
 export interface RequestLogLine {
@@ -73,6 +77,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 export interface WebServerOptions {
   readonly start: StartHandler;
   readonly accounts: AccountHandler;
+  readonly drafts: DraftsHandler;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -127,6 +132,7 @@ async function readBody(req: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> 
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
+  if (path === "/drafts" || path.startsWith("/drafts/")) return "drafts";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
@@ -191,6 +197,7 @@ async function send(res: ServerResponse, response: Response, head: boolean) {
 export function createWebServer({
   start,
   accounts,
+  drafts,
   clientDir,
   origin,
   log,
@@ -266,7 +273,7 @@ export function createWebServer({
       if (value === undefined || name === "host") continue;
       // Pages and server functions never get the account cookie: nothing
       // they render can join a session to the poll it shows (T-10, T-67).
-      if (name === "cookie" && route !== "auth") continue;
+      if (name === "cookie" && route !== "auth" && route !== "drafts") continue;
       for (const v of Array.isArray(value) ? value : [value]) headers.append(name, v);
     }
     headers.set("host", base.host);
@@ -275,11 +282,12 @@ export function createWebServer({
       headers,
       ...(body === undefined ? {} : { body }),
     });
-    if (route !== "auth") return send(res, await start.fetch(request), method === "HEAD");
-    // The account handler answers JSON and sets few headers of its own
-    // (src/security.ts covers pages). A copy: a response's own headers can be
-    // immutable.
-    const answer = await accounts(request);
+    if (route !== "auth" && route !== "drafts")
+      return send(res, await start.fetch(request), method === "HEAD");
+    // The account and drafts handlers answer JSON and set few headers of
+    // their own (src/security.ts covers pages). A copy: a response's own
+    // headers can be immutable.
+    const answer = await (route === "auth" ? accounts : drafts)(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");
     response.headers.set("referrer-policy", "no-referrer");

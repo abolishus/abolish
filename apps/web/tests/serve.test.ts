@@ -3,7 +3,7 @@
 // page's own WebAuthn conversions (src/account/webauthn.ts) with a software
 // authenticator; the assets; and what the front refuses and logs.
 
-import { createAccounts } from "@abolishus/core";
+import { createAccounts, type TurnstileAction } from "@abolishus/core";
 import { SoftAuthenticator } from "@abolishus/core/test-authenticator";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -23,6 +23,7 @@ import {
 } from "../src/account/webauthn.ts";
 import type { ClientError, Page } from "../src/analytics.ts";
 import type { Analytics } from "../src/node/analytics.ts";
+import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 
 const ORIGIN = "https://abolish.test";
@@ -46,6 +47,11 @@ const analytics: Analytics = {
   exception: (source, error) => void reported.push({ kind: "exception", source, error }),
   close: async () => {},
 };
+/** Every token a poll submission's Turnstile check saw. */
+const submitted: [string | null, TurnstileAction][] = [];
+/** The drafts handler's clock. */
+const NOW = new Date("2026-10-17T12:00:00Z");
+
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
 
@@ -72,8 +78,9 @@ function streamed(): Response {
 
 beforeAll(async () => {
   db = await testDb();
+  const sql = await db.as("abolish_app");
   const accounts = createAccounts({
-    sql: await db.as("abolish_app"),
+    sql,
     secret: SECRET,
     origin: ORIGIN,
     rpID: RP_ID,
@@ -107,6 +114,18 @@ beforeAll(async () => {
       },
     },
     accounts: (request) => accounts.handler(request),
+    drafts: createDraftsHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      turnstile: {
+        verify: async (token, action) => {
+          submitted.push([token, action]);
+          return "passed";
+        },
+      },
+      origin: ORIGIN,
+      now: () => NOW,
+    }),
     clientDir,
     origin: ORIGIN,
     log: (line) => logged.push(line),
@@ -126,8 +145,13 @@ afterAll(async () => {
 class Browser {
   readonly cookies = new Map<string, string>();
 
-  async call(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
-    const headers = new Headers({ origin: ORIGIN });
+  async call(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    extra: Record<string, string> = {},
+  ): Promise<Response> {
+    const headers = new Headers({ origin: ORIGIN, ...extra });
     if (this.cookies.size)
       headers.set("cookie", [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; "));
     if (body !== undefined) headers.set("content-type", "application/json");
@@ -269,6 +293,130 @@ describe("accounts under /auth", () => {
   });
 });
 
+describe("poll drafts under /drafts", () => {
+  const closesAt = String(NOW.getTime() / 1000 + 7 * 24 * 3600);
+  const draft = {
+    language: "en",
+    title: "Lunch",
+    description: "",
+    questions: [
+      {
+        question: "Which day?",
+        description: "",
+        options: [
+          { label: "Thursday", description: "" },
+          { label: "Friday", description: "" },
+        ],
+        minSelections: 0,
+        maxSelections: 1,
+      },
+    ],
+    tiers: [0],
+    closesAt,
+  };
+
+  test("an author saves, lists, edits and submits a draft, and only they see it", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const created = await author.call("POST", "/drafts/create", { draft });
+    expect(created.status).toBe(201);
+    expect(created.headers.get("cache-control")).toBe("no-store");
+    const { id } = (await created.json()) as { id: string };
+    const edited = { ...draft, title: "Dinner" };
+    expect((await author.call("POST", "/drafts/update", { id, draft: edited })).status).toBe(200);
+    expect(await (await author.call("GET", "/drafts")).json()).toEqual({
+      polls: [
+        {
+          id,
+          state: "drafted",
+          title: "Dinner",
+          closesAt,
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+        },
+      ],
+    });
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      id,
+      draft: edited,
+    });
+
+    const other = new Browser();
+    await register(other, new SoftAuthenticator(RP_ID), true);
+    expect(await (await other.call("GET", "/drafts")).json()).toEqual({ polls: [] });
+    for (const path of ["/drafts/read", "/drafts/delete", "/drafts/submit"])
+      expect((await other.call("POST", path, { id })).status).toBe(404);
+
+    submitted.length = 0;
+    const submit = await author.call(
+      "POST",
+      "/drafts/submit",
+      { id },
+      { "x-turnstile-token": "tok" },
+    );
+    expect(submit.status).toBe(202);
+    expect(submitted).toEqual([["tok", "poll-create"]]);
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      state: "submitted",
+      submittedAt: NOW.toISOString(),
+    });
+    expect(await (await author.call("POST", "/drafts/update", { id, draft })).json()).toEqual({
+      code: "NOT_EDITABLE",
+      status: 409,
+    });
+  });
+
+  test("a draft that breaks a rule is refused with the rule and the question", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const [q] = draft.questions;
+    const res = await author.call("POST", "/drafts/create", {
+      draft: { ...draft, questions: [q, { ...q!, question: "Where?", maxSelections: 3 }] },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      code: "DRAFT_REFUSED",
+      status: 422,
+      problem: { rule: "selections", question: 1 },
+    });
+    // Outside the transport bounds, or not the contract's shape: 400.
+    for (const bad of [
+      { draft: { ...draft, extra: 1 } },
+      { draft: { ...draft, closesAt: "01" } },
+      { draft: { ...draft, title: "x".repeat(1025) } },
+      {},
+    ])
+      expect((await author.call("POST", "/drafts/create", bad)).status).toBe(400);
+    expect(await (await author.call("GET", "/drafts")).json()).toEqual({ polls: [] });
+  });
+
+  test("needs a session, our origin and JSON, and serves only its routes", async () => {
+    const signedOut = new Browser();
+    expect((await signedOut.call("GET", "/drafts")).status).toBe(401);
+    expect((await signedOut.call("POST", "/drafts/create", { draft })).status).toBe(401);
+
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...author.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const post = (headers: Record<string, string>) =>
+      fetch(`${base}/drafts/create`, {
+        method: "POST",
+        headers: { cookie, ...headers },
+        body: JSON.stringify({ draft }),
+      });
+    expect(
+      (await post({ origin: "https://elsewhere.test", "content-type": "application/json" })).status,
+    ).toBe(403);
+    expect((await post({ "content-type": "application/json" })).status).toBe(403);
+    expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+    expect((await author.call("GET", "/drafts?x=1")).status).toBe(404);
+    expect((await author.call("POST", "/drafts", {})).status).toBe(404);
+    expect((await author.call("GET", "/drafts/read")).status).toBe(404);
+    expect(await (await author.call("GET", "/drafts")).json()).toEqual({ polls: [] });
+    expect(started).toHaveLength(0);
+  });
+});
+
 /** A raw request, so the target and headers go out exactly as written. */
 function raw(
   target: string,
@@ -369,6 +517,7 @@ describe("the front", () => {
     });
     await raw("/assets/index-AbC_12-x.js");
     await raw("/auth/get-session");
+    await raw("/drafts");
     await raw("/_serverFn/abc", { method: "POST", body: Buffer.from("{}") });
     await raw("/\\evil.test/x");
     // Lines are written on "finish", after the client has its answer.
@@ -377,6 +526,7 @@ describe("the front", () => {
       "page",
       "asset",
       "auth",
+      "drafts",
       "server-fn",
       "refused",
     ]);
@@ -545,6 +695,7 @@ describe("limits", () => {
         },
       },
       accounts: async () => new Response(null, { status: 404 }),
+      drafts: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -567,6 +718,7 @@ describe("limits", () => {
     const options = {
       start: { fetch: async () => new Response() },
       accounts: async () => new Response(),
+      drafts: async () => new Response(),
       clientDir,
       log: () => {},
     };

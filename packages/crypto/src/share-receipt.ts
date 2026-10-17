@@ -12,14 +12,19 @@ import {
   ballotHash,
   type BallotHashContext,
   type BallotHashContextV3,
+  ballotHashV3,
   ballotHashV4,
   checkValidity,
+  checkValidityV3,
   type CommittedVote,
+  type CommittedVoteV3,
   type CommittedVoteV4,
   type Share,
   type ValidityCode,
   type ValidityContext,
+  type ValidityContextV3,
   shapeOk,
+  shapeOkV3,
 } from "./ballot-validity.ts";
 import { bytesFixed, type CodecValue, encode, struct, u8 } from "./codec.ts";
 import {
@@ -188,6 +193,54 @@ export function intakeShares(
   return { ok: true, ballotHash: hash, shareHash, shares: opened.shares, receipt };
 }
 
+/**
+ * `intakeShares` for ballot version 3 (docs/spec/share-encryption.md, Intake
+ * and receipts): on a version-3 committed vote with its cell and nullifier
+ * given apart, `validity-shape`, `share-hash`, the option proofs and each
+ * question's range proof, then decryption, as `intakeBallot` runs them on a
+ * version-3 record once its membership proof has passed, and the same
+ * receipt over the version-3 ballot hash. It checks no membership, so a
+ * trustee node never receipts with it; it is for simulations whose ballots
+ * carry no membership proof. The caller has decoded the vote strictly and
+ * run verifier 2.5 for the election.
+ */
+export function intakeSharesV3(
+  ctx: ValidityContextV3,
+  keys: IntakeKeys,
+  vote: CommittedVoteV3,
+  ciphertext: Uint8Array,
+):
+  | {
+      readonly ok: true;
+      readonly ballotHash: Uint8Array;
+      readonly shareHash: Uint8Array;
+      readonly shares: readonly Share[];
+      readonly receipt: Uint8Array;
+    }
+  | {
+      readonly ok: false;
+      readonly code: "validity-shape" | "option-proof" | "sum-proof" | "share-hash" | OpenCode;
+      readonly option?: number;
+      readonly question?: number;
+    } {
+  const { seat } = keys;
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > ctx.panelSize)
+    throw new RangeError("intake: seat must be a trustee seat from 1 to n");
+  if (!shapeOkV3(ctx, vote)) return { ok: false, code: "validity-shape" };
+  // As in intakeShares: the shape holds, so the ballot has exactly n share
+  // hashes, and this cheap check runs before the proofs.
+  const shareHash = shareCiphertextHash(ciphertext);
+  if (!equalBytes(shareHash, vote.share_hashes[seat - 1] as Uint8Array))
+    return { ok: false, code: "share-hash" };
+  const validity = checkValidityV3(ctx, vote);
+  if (!validity.ok) return validity;
+  const opened = openShares(ctx, seat, keys.kemSecret, vote.vss, ciphertext);
+  if (!opened.ok) return opened;
+  const hash = ballotHashV3(ctx, vote);
+  const receipt = sign(keys.signingSecret, ctx.definitionHash, hash, seat, shareHash);
+  return { ok: true, ballotHash: hash, shareHash, shares: opened.shares, receipt };
+}
+
 function sign(
   signingSecret: Uint8Array,
   definitionHash: Uint8Array,
@@ -233,6 +286,32 @@ export function checkShareReceipt(
     {
       definition_hash: ctx.definitionHash,
       ballot_hash: ballotHash(ctx, vote),
+      seat,
+      share_hash: vote.share_hashes[seat - 1] as Uint8Array,
+    },
+    signature,
+  );
+}
+
+/**
+ * `share-receipt` for ballot version 3 (docs/spec/share-encryption.md,
+ * Intake and receipts): `checkShareReceipt`'s statement, whose layout and tag
+ * version 3 keeps, over the version-3 ballot hash recomputed from the ballot.
+ * The caller has strictly decoded the ballot.
+ */
+export function checkShareReceiptV3(
+  registered: readonly ReceiptSigner[],
+  ctx: BallotHashContextV3,
+  vote: CommittedVoteV3,
+  seat: number,
+  signature: Uint8Array,
+): boolean {
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > vote.share_hashes.length) return false;
+  return checkReceiptStatement(
+    registered,
+    {
+      definition_hash: ctx.definitionHash,
+      ballot_hash: ballotHashV3(ctx, vote),
       seat,
       share_hash: vote.share_hashes[seat - 1] as Uint8Array,
     },

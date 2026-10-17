@@ -1007,6 +1007,7 @@ export {
 } from "./share-encryption.ts";
 export {
   checkShareReceipt,
+  checkShareReceiptV3,
   checkShareReceiptV4,
   intakeBallot,
   intakeBallotV4,
@@ -1017,6 +1018,7 @@ export {
   type IntakeResult,
   type IntakeResultV4,
   intakeShares,
+  intakeSharesV3,
   type PanelReceiptSigners,
   type ReceiptSigner,
   shareReceiptStatement,

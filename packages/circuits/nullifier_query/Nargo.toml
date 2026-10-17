@@ -1,0 +1,8 @@
+[package]
+name = "nullifier_query"
+type = "bin"
+authors = ["Abolish"]
+
+[dependencies]
+babyjubjub = { path = "../vendor/oprf-nr/babyjubjub" }
+keyed_nullifier = { path = "../lib/keyed_nullifier" }

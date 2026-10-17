@@ -64,6 +64,25 @@ pub fn h1(sigma: Field, x: Field) -> BabyJubJubPoint {
     map(u[0]).add(map(u[1])).multiply_by_cofactor()
 }
 
+/// The blinding scalar's bits for `scalar_mul_bits`, with `0 < r < l`
+/// (docs/spec/nullifier-query.md). `validate_babyjubjub_field` gives `r < l`;
+/// `scalar_mul` alone bounds its scalar only below `2²⁵¹`, so `r` and `r + l`
+/// would both open one `B`, and the output circuit's one `r` for `B` and `Z`
+/// would be two (T-03). `r ≠ 0` keeps `B` off the identity. Both circuits
+/// multiply by these bits, so the bound can't be skipped by one of them.
+pub fn blinding_bits(r: Field) -> [bool; 251] {
+    assert(r != 0, "r is zero");
+    BabyJubJubPoint::validate_scalar_field_with_bits(r)
+}
+
+/// `B = r · H1(σ, x)`, the blinded point both circuits fix, for `x ≠ 0`:
+/// `H1` is defined at 0, so the refusal is here, where both circuits take it
+/// (T-03).
+pub fn blind(sigma: Field, x: Field, r_bits: [bool; 251]) -> BabyJubJubPoint {
+    assert(x != 0, "x is zero");
+    h1(sigma, x).scalar_mul_bits(r_bits)
+}
+
 /// `N = H2(σ, x, U) = Sponge(tag_field(h2), σ, x, U.x, U.y)[0]`. `H2` is
 /// defined only for `U` in the prime-order subgroup, so it asserts that here
 /// rather than trusting each caller: otherwise `U + T` for a small-order `T`

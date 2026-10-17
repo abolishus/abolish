@@ -1,0 +1,4 @@
+{
+  "nullifier_query": { "acir_opcodes": 5725, "circuit_size": 10232 },
+  "nullifier_output": { "acir_opcodes": 14036, "circuit_size": 19840 }
+}

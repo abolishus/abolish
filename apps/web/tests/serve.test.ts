@@ -427,6 +427,8 @@ describe("poll drafts under /drafts", () => {
 });
 
 describe("a creator's appeals under /drafts", () => {
+  const cookieOf = (b: Browser) => [...b.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+
   /**
    * A signed-in creator with a poll set up as the worker leaves it: a stored
    * definition and the creator record naming its election.
@@ -434,8 +436,7 @@ describe("a creator's appeals under /drafts", () => {
   async function setUpPoll() {
     const creator = new Browser();
     await register(creator, new SoftAuthenticator(RP_ID), true);
-    const cookie = [...creator.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
-    const account = (await accounts.accountOf(new Headers({ cookie })))!;
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(creator) })))!;
     const electionId = await newElection(sql);
     const id = newAccountId();
     await sql`
@@ -466,6 +467,18 @@ describe("a creator's appeals under /drafts", () => {
       code: "NOT_APPEALABLE",
       status: 409,
     });
+    // A draft has no election yet, so nothing has decided about it.
+    const draft = newAccountId();
+    await sql`
+      INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at)
+      VALUES (${draft}, ${(await accounts.accountOf(new Headers({ cookie: cookieOf(creator) })))!},
+        'drafted', '{}', now(), now())`;
+    expect(await (await creator.call("POST", "/drafts/moderation", { id: draft })).json()).toEqual({
+      state: "visible",
+      appealable: false,
+      appeals: [],
+    });
+    expect((await creator.call("POST", "/drafts/appeal", { id: draft })).status).toBe(409);
 
     const { seq } = await moderate(sql, electionId, {
       action: "delist",
@@ -518,7 +531,11 @@ describe("a creator's appeals under /drafts", () => {
 
   test("only the creator sees or appeals a poll, and malformed or cross-site calls are refused", async () => {
     const { creator, id, electionId } = await setUpPoll();
-    await moderate(sql, electionId, { action: "hide", reason: "threat", moderator: handles[0]! });
+    const { seq } = await moderate(sql, electionId, {
+      action: "hide",
+      reason: "threat",
+      moderator: handles[0]!,
+    });
     const other = new Browser();
     await register(other, new SoftAuthenticator(RP_ID), true);
     for (const path of ["/drafts/moderation", "/drafts/appeal"]) {
@@ -547,6 +564,9 @@ describe("a creator's appeals under /drafts", () => {
       state: "hidden",
       appealable: true,
       appeals: [],
+    });
+    expect(await (await creator.call("POST", "/drafts/appeal", { id })).json()).toEqual({
+      decisionSeq: `${seq}`,
     });
     expect(logged.at(-1)).toMatchObject({ route: "drafts" });
   });

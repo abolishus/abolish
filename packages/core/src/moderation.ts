@@ -289,7 +289,10 @@ export async function moderationStatus(
   return statusOf(drizzle({ client }), electionId);
 }
 
-/** `moderationStatus` inside a transaction the caller holds. */
+/**
+ * `moderationStatus` inside a transaction the caller holds, for an election
+ * ID it has already checked or read from the database.
+ */
 export async function statusOf(
   db: Pick<ModerationTx, "select">,
   electionId: Uint8Array,

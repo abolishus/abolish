@@ -1,2 +1,8 @@
 [workspace]
-members = ["lib/abolish"]
+members = [
+  "lib/abolish",
+  "lib/keyed_nullifier",
+  "vendor/oprf-nr/babyjubjub",
+  "vendor/noir-poseidon/poseidon2",
+  "vendor/noir-poseidon/hash_utils",
+]

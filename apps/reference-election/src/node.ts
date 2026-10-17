@@ -70,3 +70,42 @@ export async function startNode(blocks: string): Promise<Node> {
     clearTimeout(timer);
   }
 }
+
+/** What `abolish-node verify` printed, line by line, and how it exited. */
+export interface NodeVerify {
+  readonly code: number | null;
+  readonly lines: readonly Record<string, unknown>[];
+}
+
+/**
+ * Runs `abolish-node verify` to its end, in a process of its own: every
+ * election the anchor's checkpoints name, verified from the blocks in
+ * `blocks` and from the two chains, with no input from the fixture.
+ */
+export async function nodeVerify(args: {
+  readonly blocks: string;
+  readonly reports: string;
+  readonly l1: string;
+  readonly anchor: string;
+  readonly l2: string;
+  readonly registry: string;
+}): Promise<NodeVerify> {
+  const child = spawn(
+    process.execPath,
+    [MAIN, "verify", ...Object.entries(args).flatMap(([name, value]) => [`--${name}`, value])],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const exited = Promise.race([
+    once(child, "exit"),
+    // A spawn that fails emits `error` and never `exit`.
+    once(child, "error").then(([e]) => {
+      throw e;
+    }),
+  ]);
+  exited.catch(() => {});
+  const lines: Record<string, unknown>[] = [];
+  for await (const line of createInterface({ input: child.stdout }))
+    lines.push(JSON.parse(line) as Record<string, unknown>);
+  const [code] = (await exited) as [number | null];
+  return { code, lines };
+}

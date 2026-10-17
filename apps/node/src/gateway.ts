@@ -7,12 +7,17 @@
 //
 // No path below a CID, no CAR responses and no deserialized responses: the
 // node serves blocks, never pages, so nothing it holds runs in a browser at
-// its origin (T-43).
+// its origin (T-43). The one other thing it serves is the verifier's report
+// on each election `verify` wrote, as JSON under a policy that runs nothing.
 //
 // Nothing about a request is written anywhere. Which CIDs a reader fetches
 // can say which election, or which segment, it cares about (T-11).
 
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { cidText } from "@abolishus/crypto";
 import { parseCid } from "./cid.ts";
 import type { Mirror } from "./store.ts";
@@ -20,6 +25,10 @@ import type { Mirror } from "./store.ts";
 const RAW = "application/vnd.ipld.raw";
 // Longest request target answered: `/ipfs/` and a CID, then a short query.
 const MAX_TARGET = 128;
+// `/reports/` and an election identifier in lowercase hex: one URL per report.
+const REPORT = /^\/reports\/([0-9a-f]{64})$/u;
+/** Largest report served: one of a board at the verifier's whole budget fits many times over. */
+export const MAX_REPORT_BYTES = 256 * 1024 * 1024;
 
 export interface GatewayLimits {
   /** Most connections open at once; past it, new ones are closed on accept (T-52). Default 1,024. */
@@ -30,8 +39,11 @@ export interface GatewayLimits {
   readonly requestTimeoutMs?: number;
 }
 
-/** An HTTP server answering raw-block requests from `mirror`. Not yet listening. */
-export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
+/**
+ * An HTTP server answering raw-block requests from `mirror` and, given
+ * `reports`, the reports `verify` wrote there. Not yet listening.
+ */
+export function gateway(mirror: Mirror, limits: GatewayLimits = {}, reports?: string): Server {
   const server = createServer(
     {
       headersTimeout: limits.headersTimeoutMs ?? 10_000,
@@ -43,7 +55,7 @@ export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
     },
     (req, res) => {
       res.setHeader("x-content-type-options", "nosniff");
-      answer(mirror, req, res).catch(() => {
+      answer(mirror, reports, req, res).catch(() => {
         if (!res.headersSent) refuse(res, 500);
         else res.destroy();
       });
@@ -54,7 +66,12 @@ export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
   return server;
 }
 
-async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function answer(
+  mirror: Mirror,
+  reports: string | undefined,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   // A request with a body is refused and its connection closed, so Node
   // doesn't read the body to reuse the connection.
   const body =
@@ -64,7 +81,13 @@ async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse)
     return refuse(res, 405, { allow: "GET, HEAD", ...(body ? { connection: "close" } : {}) });
   if (body) return refuse(res, 400, { connection: "close" });
   const target = req.url ?? "";
-  if (target.length > MAX_TARGET || !target.startsWith("/ipfs/")) return refuse(res, 404);
+  if (target.length > MAX_TARGET) return refuse(res, 404);
+  const report = REPORT.exec(target)?.[1];
+  if (report !== undefined)
+    return reports === undefined
+      ? refuse(res, 404)
+      : answerReport(join(reports, report, "report.json"), req, res);
+  if (!target.startsWith("/ipfs/")) return refuse(res, 404);
   const query = target.indexOf("?");
   const path = target.slice("/ipfs/".length, query === -1 ? undefined : query);
   const cid = parseCid(path);
@@ -88,6 +111,44 @@ async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse)
     "access-control-allow-origin": "*",
   });
   res.end(req.method === "HEAD" ? undefined : block);
+}
+
+// The report at `path`, opened at each request: the node keeps no cache, and
+// `verify` replaces a report by a rename, so a request reads one run's. It is
+// streamed, never held whole, so open requests cost what is in flight (T-52).
+async function answerReport(
+  path: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let file;
+  try {
+    // Non-blocking, so a FIFO put in the directory can't hold a thread.
+    file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return refuse(res, 404);
+  }
+  let streaming = false;
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.size > MAX_REPORT_BYTES) return refuse(res, 404);
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": stat.size,
+      // A later run replaces it.
+      "cache-control": "no-cache",
+      // JSON, never a page: nothing in it runs or loads at the node's origin (T-43).
+      "content-security-policy": "default-src 'none'; sandbox",
+      // A report is public and checkable by anyone who reruns the verifier.
+      "access-control-allow-origin": "*",
+    });
+    if (req.method === "HEAD" || stat.size === 0) return void res.end();
+    streaming = true;
+    // The stream closes the file when it ends or fails.
+    await pipeline(file.createReadStream({ end: stat.size - 1 }), res);
+  } finally {
+    if (!streaming) await file.close();
+  }
 }
 
 // Whether an Accept header lists the raw-block type (case-insensitively, as

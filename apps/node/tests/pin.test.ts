@@ -1,15 +1,10 @@
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   type AsyncBlockSource,
   type Checkpoint,
-  checkpointHash,
   cidText,
   contentDag,
-  encodeCheckpoint,
   objectCar,
   objectCid,
 } from "@abolishus/crypto";
@@ -19,10 +14,11 @@ import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli } from "../src/cli.ts";
 import { gateway } from "../src/gateway.ts";
-import { checkpointFromLog, finalizedHeader } from "../src/l1.ts";
+import { finalizedHeader } from "../src/l1.ts";
 import { mirrorThen, type PinReport, pinElections } from "../src/pin.ts";
-import { type Rpc, rpcClient, RpcError } from "../src/rpc.ts";
+import { type Rpc, RpcError } from "../src/rpc.ts";
 import { openMirror } from "../src/store.ts";
+import { type Anchor, type Chain, forgedLog, hex, startChain, word } from "./anvil.ts";
 import { blocksDir, close, listen, removeDirs } from "./fixture.ts";
 
 // Fetch and pin (P4-5 part 2) against a real chain: Anvil runs the board
@@ -32,78 +28,18 @@ import { blocksDir, close, listen, removeDirs } from "./fixture.ts";
 // block. A node that lies, through `hooked`, can hide checkpoints but never
 // make the node pin bytes the anchor didn't name (T-24, T-36, T-49, T-51).
 
-const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
-const word = (n: bigint) => {
-  const w = new Uint8Array(32);
-  for (let i = 31, x = n; x > 0n; i--, x >>= 8n) w[i] = Number(x & 0xffn);
-  return w;
-};
-const padded = (b: Uint8Array) => {
-  const out = new Uint8Array(Math.ceil(b.length / 32) * 32);
-  out.set(b);
-  return out;
-};
-const contractsRoot = fileURLToPath(new URL("../../../packages/contracts", import.meta.url));
-const PERIOD = 3600n;
-const DEADLINE = 43_200n;
-// One slot per epoch: Anvil's finalized block is then the latest but two.
-const FINALITY_DEPTH = 2;
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("no port")),
-      );
-    });
-  });
-}
-
-let anvil: ChildProcess;
-let rpcUrl: URL;
+let chain: Chain;
 let rpc: Rpc;
-let bytecode: string;
-let deployer: string;
-let nextAuthority = 0xa0c4000n;
+let rpcUrl: URL;
 
 beforeAll(async () => {
-  const port = await freePort();
-  rpcUrl = new URL(`http://127.0.0.1:${port}`);
-  anvil = spawn(
-    "anvil",
-    ["--host", "127.0.0.1", "--port", String(port), "--slots-in-an-epoch", "1", "--silent"],
-    { stdio: ["ignore", "ignore", "inherit"] },
-  );
-  rpc = rpcClient(rpcUrl);
-  const end = Date.now() + 20_000;
-  for (;;) {
-    if (anvil.exitCode !== null) throw new Error("anvil exited (is the toolchain installed?)");
-    try {
-      deployer = ((await rpc.call("eth_accounts", [])) as string[])[0] as string;
-      break;
-    } catch (e) {
-      if (Date.now() > end) throw e;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-  bytecode = execFileSync(
-    "forge",
-    ["inspect", "--root", contractsRoot, "src/BoardAnchor.sol:BoardAnchor", "bytecode"],
-    { encoding: "utf8" },
-  ).trim();
+  chain = await startChain();
+  rpc = chain.rpc;
+  rpcUrl = chain.url;
 }, 120_000);
 
 afterAll(async () => {
-  if (anvil !== undefined && anvil.exitCode === null) {
-    const exited = new Promise((r) => anvil.once("exit", r));
-    anvil.kill("SIGTERM");
-    await exited;
-  }
+  await chain?.stop();
 });
 
 const servers: Array<() => Promise<void>> = [];
@@ -112,71 +48,9 @@ afterEach(async () => {
   await removeDirs();
 });
 
-async function send(tx: Record<string, string>): Promise<string | null> {
-  const hash = await rpc.call("eth_sendTransaction", [tx]);
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const receipt = (await rpc.call("eth_getTransactionReceipt", [hash]).catch(() => null)) as {
-      status: string;
-      contractAddress: string | null;
-    } | null;
-    if (receipt !== null) {
-      if (receipt.status !== "0x1") throw new Error("reverted");
-      return receipt.contractAddress;
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error("not mined");
-}
-
-const mine = (blocks: number) => rpc.call("anvil_mine", [`0x${blocks.toString(16)}`]);
-
-interface Anchor {
-  readonly address: Uint8Array;
-  readonly authority: string;
-}
-
-/** A board anchor whose periods 0 to 2 have ended at the latest block. */
-async function deployAnchor(): Promise<Anchor> {
-  const latest = (await rpc.call("eth_getBlockByNumber", ["latest", false])) as {
-    timestamp: string;
-  };
-  const epoch = BigInt(latest.timestamp) - 3n * PERIOD - 60n;
-  const authority = `0x${(nextAuthority += 1n).toString(16).padStart(40, "0")}`;
-  await rpc.call("anvil_setCode", [authority, "0x00"]);
-  await rpc.call("anvil_setBalance", [authority, "0x56bc75e2d63100000"]);
-  await rpc.call("anvil_impersonateAccount", [authority]);
-  const address = await send({
-    from: deployer,
-    data: hex(
-      concatBytes(
-        hexToBytes(bytecode.slice(2)),
-        word(epoch),
-        word(PERIOD),
-        word(DEADLINE),
-        word(BigInt(authority)),
-      ),
-    ),
-  });
-  if (address === null) throw new Error("BoardAnchor wasn't deployed");
-  return { address: hexToBytes(address.slice(2)), authority };
-}
-
-/** Calldata for `anchor(bytes checkpoints, bytes locator)` with no locator, in the one encoding the contract accepts. */
-function anchorCalldata(checkpoints: readonly Checkpoint[]): Uint8Array {
-  const encoded = concatBytes(...checkpoints.map(encodeCheckpoint));
-  const selector = keccak_256(new TextEncoder().encode("anchor(bytes,bytes)")).slice(0, 4);
-  const first = concatBytes(word(BigInt(encoded.length)), padded(encoded));
-  return concatBytes(selector, word(64n), word(64n + BigInt(first.length)), first, word(0n));
-}
-
-async function anchorAll(anchor: Anchor, checkpoints: readonly Checkpoint[]): Promise<void> {
-  await send({
-    from: anchor.authority,
-    to: hex(anchor.address),
-    data: hex(anchorCalldata(checkpoints)),
-  });
-  await mine(FINALITY_DEPTH);
-}
+const deployAnchor = () => chain.deployAnchor();
+const anchorAll = (anchor: Anchor, checkpoints: readonly Checkpoint[]) =>
+  chain.anchorAll(anchor, checkpoints);
 
 const text = (s: string) => new TextEncoder().encode(s);
 // 1.5 MiB: a dag-pb root over two raw leaves, so a pin is more than one block.
@@ -565,34 +439,6 @@ describe("a node not to trust", () => {
     expect(real.number).toBeTypeOf("bigint");
   });
 });
-
-/** A log carrying `cp` in the contract's layout, with the other fields of `log`. */
-function forgedLog(log: { address: string; topics: string[]; data: string }, cp: Checkpoint) {
-  const data = concatBytes(
-    word(cp.size),
-    cp.head,
-    cp.root,
-    word(0xa0n),
-    word(0x100n),
-    word(36n),
-    padded(cp.object_cid),
-    word(36n),
-    padded(cp.hashes_cid),
-  );
-  const forged = {
-    ...log,
-    topics: [
-      log.topics[0]!,
-      hex(cp.election_id),
-      hex(word(BigInt(cp.segment))),
-      hex(checkpointHash(cp)),
-    ],
-    data: hex(data),
-  };
-  // The forged log is well formed: only the proven word refuses it.
-  expect(checkpointFromLog(forged)).toEqual(cp);
-  return forged;
-}
 
 describe("abolish-node fetch", () => {
   function io() {

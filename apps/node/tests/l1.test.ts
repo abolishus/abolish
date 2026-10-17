@@ -2,7 +2,14 @@ import { type Checkpoint, checkpointHash } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
-import { CHECKPOINT_ANCHORED, checkpointFromLog, parseAddress } from "../src/l1.ts";
+import {
+  CHECKPOINT_ANCHORED,
+  checkpointFromLog,
+  parseAddress,
+  PROOF_NODE_OVERHEAD,
+  PROOF_SLOTS_PER_REQUEST,
+  proofNodes,
+} from "../src/l1.ts";
 import { MAX_RPC_ANSWER, parseRpcUrl, rpcClient, RpcError } from "../src/rpc.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -178,5 +185,50 @@ describe("the JSON-RPC client", () => {
       "past the size limit",
     );
     expect(sent).toBeLessThanOrEqual(MAX_RPC_ANSWER + 2 * (1 << 20));
+  });
+});
+
+describe("proofNodes", () => {
+  const header = {
+    hash: new Uint8Array(32),
+    parentHash: new Uint8Array(32),
+    stateRoot: new Uint8Array(32),
+    number: 7n,
+    timestamp: 0n,
+  };
+  const anchor = new Uint8Array(20).fill(1);
+  const answering = (accountProof: unknown[]) => ({
+    call: async () => ({ accountProof, storageProof: [{ proof: ["0xc0"] }] }),
+  });
+
+  test("keeps every node of every request, 256 slots a request", async () => {
+    const requests: unknown[][] = [];
+    const rpc = {
+      call: async (_: string, params: readonly unknown[]) => {
+        requests.push(params[1] as unknown[]);
+        return { accountProof: ["0x80"], storageProof: [{ proof: ["0xc0"] }] };
+      },
+    };
+    const slots = Array.from({ length: PROOF_SLOTS_PER_REQUEST + 1 }, () => new Uint8Array(32));
+    const nodes = await proofNodes(rpc, anchor, header, slots);
+    expect(requests.map((r) => r.length)).toEqual([PROOF_SLOTS_PER_REQUEST, 1]);
+    expect(nodes.map(hex)).toEqual(["0x80", "0xc0", "0x80", "0xc0"]);
+  });
+
+  test("refuses an empty node, which no trie holds", async () => {
+    await expect(
+      proofNodes(answering(["0x"]), anchor, header, [new Uint8Array(32)]),
+    ).rejects.toThrow(RpcError);
+  });
+
+  test("counts each node's overhead against the budget, so tiny nodes can't flood it", async () => {
+    const many = Array.from({ length: 100 }, () => "0x80");
+    const budget = 100 * (1 + PROOF_NODE_OVERHEAD);
+    await expect(
+      proofNodes(answering(many), anchor, header, [new Uint8Array(32)], budget),
+    ).rejects.toThrow("proofs past the size limit");
+    expect(
+      await proofNodes(answering(many.slice(1)), anchor, header, [new Uint8Array(32)], budget),
+    ).toHaveLength(100);
   });
 });

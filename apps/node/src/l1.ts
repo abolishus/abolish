@@ -115,16 +115,26 @@ export function headerRlp(block: unknown): Uint8Array {
   return rlp;
 }
 
-/** The finalized L1 block's header: the one block everything is proven at. */
-export async function finalizedHeader(rpc: Rpc): Promise<L1Header> {
+/**
+ * The finalized L1 block's header, decoded and as RLP: the one block
+ * everything is proven at.
+ */
+export async function finalizedBlock(
+  rpc: Rpc,
+): Promise<{ readonly header: L1Header; readonly rlp: Uint8Array }> {
   const rlp = headerRlp(await rpc.call("eth_getBlockByNumber", ["finalized", false]));
   try {
-    return decodeHeader(rlp);
+    return { header: decodeHeader(rlp), rlp };
   } catch (e) {
     // Fewer fields than every fork has, or a number or time past 8 bytes.
     if (e instanceof RlpError) throw new RpcError("a block that isn't an L1 header");
     throw e;
   }
+}
+
+/** The finalized L1 block's header. */
+export async function finalizedHeader(rpc: Rpc): Promise<L1Header> {
+  return (await finalizedBlock(rpc)).header;
 }
 
 /** `CheckpointAnchored`'s topic (docs/spec/contracts.md, Board anchor, Events). */
@@ -250,6 +260,61 @@ export const PROOF_SLOTS_PER_REQUEST = 256;
 export const MAX_PROOF_BYTES = 256 * 1024 * 1024;
 
 /**
+ * What each node costs against a proof budget beyond its bytes: what holding
+ * one more array takes, so a node can't make the reader hold millions of
+ * tiny nodes within the budget (T-52).
+ */
+export const PROOF_NODE_OVERHEAD = 64;
+
+/**
+ * The account and storage proof nodes of `slots` of the anchor at the
+ * header's block, `PROOF_SLOTS_PER_REQUEST` slots a request. Nothing here is
+ * trusted: the verifier's reader walks them from the header's state root, so
+ * a changed or missing node is its `l1-proof-missing`. An answer that can't
+ * be read, an empty node (no trie holds one), or proofs past `maxBytes`,
+ * each node counted with `PROOF_NODE_OVERHEAD`, throw `RpcError`.
+ */
+export async function proofNodes(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  header: L1Header,
+  slots: readonly Uint8Array[],
+  maxBytes: number = MAX_PROOF_BYTES,
+): Promise<Uint8Array[]> {
+  const nodes: Uint8Array[] = [];
+  let held = 0;
+  const keep = (n: unknown, what: string) => {
+    const node = unhex(n, what);
+    if (node.length === 0) throw new RpcError(`${what}: an empty node`);
+    held += node.length + PROOF_NODE_OVERHEAD;
+    if (held > maxBytes) throw new RpcError("eth_getProof: proofs past the size limit");
+    nodes.push(node);
+  };
+  for (let at = 0; at < slots.length; at += PROOF_SLOTS_PER_REQUEST) {
+    const proof = (await rpc.call("eth_getProof", [
+      hex(anchor),
+      slots.slice(at, at + PROOF_SLOTS_PER_REQUEST).map(hex),
+      `0x${header.number.toString(16)}`,
+    ])) as { accountProof?: unknown; storageProof?: unknown } | null;
+    if (!Array.isArray(proof?.accountProof) || !Array.isArray(proof?.storageProof))
+      throw new RpcError("eth_getProof: not a proof");
+    for (const n of proof.accountProof) keep(n, "accountProof");
+    for (const p of proof.storageProof) {
+      const list = (p as { proof?: unknown } | null)?.proof;
+      if (!Array.isArray(list)) throw new RpcError("eth_getProof: not a proof");
+      for (const n of list) keep(n, "storageProof");
+    }
+  }
+  return nodes;
+}
+
+/** An election's proven checkpoints, and the proof nodes they were proven from. */
+export interface Proven {
+  readonly checkpoints: Checkpoint[];
+  readonly nodes: Uint8Array[];
+}
+
+/**
  * The election's checkpoints the anchor holds at the header's block, of
  * those `logged` names: the verifier's reader proves the lowest-segment word
  * and the word of every segment from the lowest anchored one to the highest
@@ -260,16 +325,19 @@ export const MAX_PROOF_BYTES = 256 * 1024 * 1024;
  * pins wait for a node that doesn't. So does a range of more than
  * `MAX_SEGMENTS_READ` segments (`l1-range-too-long`), checked before any
  * proof is asked for. An answer that can't be read, or proofs past
- * `MAX_PROOF_BYTES`, throw `RpcError`.
+ * `maxProofBytes` (`MAX_PROOF_BYTES` by default), throw `RpcError`. The
+ * proofs of `extraSlots` (a definition's receipt keys) are fetched with the
+ * others, unread here.
  */
 export async function provenCheckpoints(
   rpc: Rpc,
   anchor: Uint8Array,
   header: L1Header,
   logged: readonly Checkpoint[],
-): Promise<Checkpoint[]> {
+  options: { readonly extraSlots?: readonly Uint8Array[]; readonly maxProofBytes?: number } = {},
+): Promise<Proven> {
   const [first] = logged;
-  if (first === undefined) return [];
+  if (first === undefined) return { checkpoints: [], nodes: [] };
   const electionId = first.election_id;
   const segments = logged.map((c) => c.segment);
   const high = Math.max(...segments);
@@ -291,29 +359,13 @@ export async function provenCheckpoints(
   if (high - low + 1 > MAX_SEGMENTS_READ) throw new L1Error("l1-range-too-long");
   const slots = [lowestSegmentSlot(electionId)];
   for (let s = low; s <= high; s++) slots.push(checkpointSlot(electionId, s));
-  const nodes: Uint8Array[] = [];
-  let held = 0;
-  const keep = (n: unknown, what: string) => {
-    const node = unhex(n, what);
-    held += node.length;
-    if (held > MAX_PROOF_BYTES) throw new RpcError("eth_getProof: proofs past the size limit");
-    nodes.push(node);
-  };
-  for (let at = 0; at < slots.length; at += PROOF_SLOTS_PER_REQUEST) {
-    const proof = (await rpc.call("eth_getProof", [
-      hex(anchor),
-      slots.slice(at, at + PROOF_SLOTS_PER_REQUEST).map(hex),
-      `0x${header.number.toString(16)}`,
-    ])) as { accountProof?: unknown; storageProof?: unknown } | null;
-    if (!Array.isArray(proof?.accountProof) || !Array.isArray(proof?.storageProof))
-      throw new RpcError("eth_getProof: not a proof");
-    for (const n of proof.accountProof) keep(n, "accountProof");
-    for (const p of proof.storageProof) {
-      const list = (p as { proof?: unknown } | null)?.proof;
-      if (!Array.isArray(list)) throw new RpcError("eth_getProof: not a proof");
-      for (const n of list) keep(n, "storageProof");
-    }
-  }
+  const nodes = await proofNodes(
+    rpc,
+    anchor,
+    header,
+    [...slots, ...(options.extraSlots ?? [])],
+    options.maxProofBytes,
+  );
   // Pinning judges no timing: a word proven at the header's block is held by
   // the anchor, whenever it was written, and the board checks' windows are
   // the verifier's. A clock of period 1 from time 0 makes every segment up to
@@ -325,5 +377,44 @@ export async function provenCheckpoints(
     [],
     { epoch: 0n, period: 1n, deadline: 0n, lastSegment: high },
   );
-  return anchors.map((a) => a.anchor.checkpoint);
+  return { checkpoints: anchors.map((a) => a.anchor.checkpoint), nodes };
+}
+
+/** The anchoring clock the board anchor's deployment fixed (docs/spec/board.md, Timing). */
+export interface AnchorTiming {
+  readonly epoch: bigint;
+  readonly period: bigint;
+  readonly deadline: bigint;
+}
+
+/**
+ * The anchor's `epoch()`, `period()` and `deadline()` at the header's block.
+ * They are immutables in its code, which no storage proof reaches, so these
+ * are the node's answers: the verifier reports the clock as a local input
+ * until a release pins the deployment's clock ([[verifier]], Bundle).
+ */
+export async function anchorTiming(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  header: L1Header,
+): Promise<AnchorTiming> {
+  const read = async (getter: string) => {
+    const data = keccak_256(new TextEncoder().encode(`${getter}()`)).slice(0, 4);
+    const answer = await rpc.call("eth_call", [
+      { to: hex(anchor), data: hex(data) },
+      `0x${header.number.toString(16)}`,
+    ]);
+    if (typeof answer !== "string" || !/^0x[0-9a-fA-F]{64}$/u.test(answer))
+      throw new RpcError(`${getter}: not a word`);
+    const value = BigInt(answer);
+    if (value >= 2n ** 64n) throw new RpcError(`${getter}: not a u64`);
+    return value;
+  };
+  const timing = {
+    epoch: await read("epoch"),
+    period: await read("period"),
+    deadline: await read("deadline"),
+  };
+  if (timing.period === 0n) throw new RpcError("period: zero");
+  return timing;
 }

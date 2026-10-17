@@ -155,8 +155,20 @@ export function Opened({
   return (
     <EverydayFrame
       poll={poll}
+      // Saving comes first: the opening can't be saved once the voter leaves.
       primary={
-        <Button size="lg" className={ACTION} onClick={onAgain}>
+        href === undefined ? undefined : (
+          <a
+            href={href}
+            download={openingFileName(trackingCode)}
+            className={cn(buttonVariants({ size: "lg" }), ACTION)}
+          >
+            {t("saveOpening")}
+          </a>
+        )
+      }
+      secondary={
+        <Button size="lg" variant="outline" className={ACTION} onClick={onAgain}>
           {t("answerAgain")}
         </Button>
       }
@@ -174,17 +186,6 @@ export function Opened({
       </div>
       <Part title={t("checkElsewhereTitle")}>
         <p className="m-0">{t("checkElsewhere")}</p>
-        <div>
-          {href === undefined ? null : (
-            <a
-              href={href}
-              download={openingFileName(trackingCode)}
-              className={cn(buttonVariants({ variant: "outline", size: "lg" }), ACTION)}
-            >
-              {t("saveOpening")}
-            </a>
-          )}
-        </div>
         <p className="m-0 text-muted-foreground">{t("savedOpeningNote")}</p>
       </Part>
       <Part title={t("answerAgain")}>
@@ -226,7 +227,7 @@ export function SealStopped({
       poll={poll}
       primary={
         onAgain === undefined ? undefined : (
-          <Button className={ACTION} onClick={onAgain}>
+          <Button size="lg" className={ACTION} onClick={onAgain}>
             {t("answerAgain")}
           </Button>
         )

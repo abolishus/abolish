@@ -181,7 +181,7 @@ const enUS = {
   sealing: "This device is encrypting your answers. Nothing is sent.",
   sealedTitle: "Your answers are sealed",
   sealed:
-    "This device has encrypted your answers into a sealed ballot. No one can read it, including Abolish. Nothing has been sent.",
+    "This device has encrypted your answers into a sealed ballot. Only enough of the poll's trustees acting together could open it. Nothing has been sent.",
   trackingCodeLabel: "Tracking code of your sealed ballot",
   trackingCodeQr: "QR code of the tracking code {hash}",
   trackingCodeFingerprint: "Fingerprint of the tracking code {hash}",
@@ -189,7 +189,8 @@ const enUS = {
   scan: "If you want to check this device, scan the code with another phone or computer before you choose. It keeps the code, so it can tell later whether this device opened the same ballot it showed you.",
   chooseTitle: "Two ways to go on",
   cast: "Cast this ballot",
-  castExplained: "Sends the sealed ballot to the public board, where it counts.",
+  castExplained:
+    "Sends the sealed ballot to the public board, where it counts. This version of the ballot can't send it yet.",
   challenge: "Check the encryption first",
   challengeExplained:
     "Opens this sealed ballot so your other device can show it holds exactly what you chose. An opened ballot can never be counted, so you then answer again and seal a fresh one.",
@@ -207,7 +208,7 @@ const enUS = {
     "This screen was drawn by the device that sealed the ballot, so it can't vouch for itself. Save the opening and open it on the device that scanned the code: that device compares the two and shows what the ballot holds.",
   saveOpening: "Save the opening",
   savedOpeningNote:
-    "The opening shows how you answered this time. Keep it to yourself, and delete it once you have checked it.",
+    "Save it before you answer again: once you leave this screen it can't be saved. The opening shows how you answered this time, so keep it to yourself and delete it once you have checked it.",
   answerAgainExplained:
     "Your answers aren't kept: you answer again, and this device seals them anew.",
   // When sealing or opening stopped (sealed.tsx).

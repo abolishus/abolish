@@ -274,8 +274,9 @@ export function Ballot({
     setStep({ kind: "sealing" });
     ask(
       () => source.seal(fromHex(election.definitionHash), 0, votes),
+      // A code of any other length is the worker's fault, shown as one.
       (sealed): Step =>
-        sealed.ok
+        sealed.ok && sealed.trackingCode.length === 32
           ? { kind: "sealed", seal: sealed.seal, trackingCode: toHex(sealed.trackingCode) }
           : { kind: "stopped", problem: "seal-failed" },
       "seal-failed",

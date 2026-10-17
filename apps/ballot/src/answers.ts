@@ -159,7 +159,10 @@ export function firstUnfit(
  * What the worker seals for `answers`: 0 or 1 per option, every question's
  * options in order, as `sealBallotV3` takes them. Throws unless every answer
  * fits its question, so a vote the validity proof would refuse is never
- * sealed (T-28).
+ * sealed (T-28). The layout is the screens' (an option's index is the one
+ * `questionsOf` gave it), so it lives beside them: `sealBallotV3` checks the
+ * limits again, and an option mapped to another is what a Benaloh
+ * challenge catches (T-42).
  */
 export function votesOf(questions: readonly BallotQuestion[], answers: Answers): (0 | 1)[] {
   if (answers.length !== questions.length || firstUnfit(questions, answers) !== undefined)

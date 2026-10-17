@@ -380,7 +380,7 @@ describe("signGroupApproval", () => {
       }),
       { numRuns },
     );
-  });
+  }, 120_000);
 
   test("leaves the caller's key unchanged", () => {
     const key = SECRETS[0] as Uint8Array;

@@ -182,23 +182,24 @@ Sybil resistance is the core problem: if one person can vote many times, results
 
 ### Development, supply chain and operations (G-14)
 
-| ID       | Threat                                           | Adversary | Status  |
-| -------- | ------------------------------------------------ | --------- | ------- |
-| [[T-55]] | Malicious or hijacked npm dependency             | A-6       | Partial |
-| [[T-56]] | Compromised GitHub Action or CI runner           | A-6       | Partial |
-| [[T-57]] | Malicious insider change                         | A-2, A-8  | Partial |
-| [[T-58]] | Prompt injection against the autonomous pipeline | A-8       | Partial |
-| [[T-59]] | A PR weakens the gate that judges it             | A-8, A-2  | Partial |
-| [[T-60]] | Compromised toolchain binary                     | A-6       | Partial |
-| [[T-61]] | Release or publishing compromise                 | A-6, A-2  | Partial |
-| [[T-62]] | Contract admin abuse                             | A-2, A-1  | Planned |
-| [[T-63]] | Contract bug                                     | A-9, A-1  | Planned |
-| [[T-64]] | Deployed bytecode differs from reviewed source   | A-2, A-6  | Planned |
-| [[T-65]] | Deployer or service credential leak              | A-6, A-2  | Partial |
-| [[T-66]] | Database loss or corruption                      | A-2, A-7  | Planned |
-| [[T-67]] | Analytics and error-tracking leakage             | A-2, A-1  | Planned |
-| [[T-68]] | Moderation abuse                                 | A-2, A-1  | Planned |
-| [[T-69]] | Legal compulsion                                 | A-1, A-7  | Partial |
+| ID       | Threat                                           | Adversary     | Status  |
+| -------- | ------------------------------------------------ | ------------- | ------- |
+| [[T-55]] | Malicious or hijacked npm dependency             | A-6           | Partial |
+| [[T-56]] | Compromised GitHub Action or CI runner           | A-6           | Partial |
+| [[T-57]] | Malicious insider change                         | A-2, A-8      | Partial |
+| [[T-58]] | Prompt injection against the autonomous pipeline | A-8           | Partial |
+| [[T-59]] | A PR weakens the gate that judges it             | A-8, A-2      | Partial |
+| [[T-60]] | Compromised toolchain binary                     | A-6           | Partial |
+| [[T-61]] | Release or publishing compromise                 | A-6, A-2      | Partial |
+| [[T-62]] | Contract admin abuse                             | A-2, A-1      | Planned |
+| [[T-63]] | Contract bug                                     | A-9, A-1      | Planned |
+| [[T-64]] | Deployed bytecode differs from reviewed source   | A-2, A-6      | Planned |
+| [[T-65]] | Deployer or service credential leak              | A-6, A-2      | Partial |
+| [[T-66]] | Database loss or corruption                      | A-2, A-7      | Planned |
+| [[T-67]] | Analytics and error-tracking leakage             | A-2, A-1      | Planned |
+| [[T-68]] | Moderation abuse                                 | A-2, A-1      | Planned |
+| [[T-69]] | Legal compulsion                                 | A-1, A-7      | Partial |
+| [[T-72]] | Poll-creation service misuse                     | A-2, A-5, A-1 | Planned |
 
 ## Not mitigated
 

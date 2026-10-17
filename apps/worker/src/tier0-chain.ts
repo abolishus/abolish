@@ -48,6 +48,11 @@ export class ViemTier0Chain implements Tier0Chain {
   readonly #submit: (record: Uint8Array) => Promise<void>;
   readonly #range: bigint;
   #pin: Pin | undefined;
+  // The highest blocks this adapter has read at. A node (or a load
+  // balancer's other node) that later answers from below them is refused:
+  // an index read there could miss a batch of ours already finished, and
+  // let its commitments be signed again (T-06).
+  #seen: Pin = { finalized: 0n, latest: 0n };
 
   constructor(options: Tier0ChainOptions) {
     const range = options.logRange ?? TIER0_LOG_RANGE;
@@ -62,6 +67,7 @@ export class ViemTier0Chain implements Tier0Chain {
 
   async tier0Commitments(): Promise<Iterable<bigint>> {
     const latest = await this.#client.getBlockNumber({ cacheTime: 0 });
+    this.#advance({ finalized: this.#seen.finalized, latest });
     const tier0 = new Set<bigint>();
     for (const log of await this.#logs("GroupCreated", { tier: 0 }, latest))
       tier0.add(log.args.groupId);
@@ -73,7 +79,12 @@ export class ViemTier0Chain implements Tier0Chain {
     return all;
   }
 
+  /**
+   * Pins the node's finalized and latest blocks for this group's reads: the
+   * `additionAt` calls that follow `group()` judge against the same pair.
+   */
   async group(groupId: bigint): Promise<Tier0GroupState> {
+    this.#pin = undefined;
     const pin = await this.#pinBlocks();
     this.#pin = pin;
     // The tier from finalized history only: registrars sign for a group
@@ -89,6 +100,7 @@ export class ViemTier0Chain implements Tier0Chain {
     return { tier, finalizedSize, latestSize };
   }
 
+  /** Judged at the pin of the last `group()` call, or at a fresh one if there was none. */
   async additionAt(groupId: bigint, firstIndex: bigint): Promise<Tier0LoggedAddition | null> {
     const pin = this.#pin ?? (await this.#pinBlocks());
     const logs = await this.#logs("MembersAdded", { groupId, firstIndex }, pin.latest);
@@ -114,7 +126,15 @@ export class ViemTier0Chain implements Tier0Chain {
       this.#client.getBlock({ blockTag: "latest" }),
     ]);
     if (finalized.number > latest.number) throw new Error("the node's finalized block leads");
-    return { finalized: finalized.number, latest: latest.number };
+    const pin = { finalized: finalized.number, latest: latest.number };
+    this.#advance(pin);
+    return pin;
+  }
+
+  #advance(pin: Pin) {
+    if (pin.latest < this.#seen.latest || pin.finalized < this.#seen.finalized)
+      throw new Error("the node is behind blocks already read");
+    this.#seen = pin;
   }
 
   #groupOf(groupId: bigint, blockNumber: bigint) {
@@ -149,13 +169,14 @@ export class ViemTier0Chain implements Tier0Chain {
         // One generic call for both events: viem can't narrow the args type
         // through `E`, so the result is typed by `RegistryLog` instead.
       } as never);
-      out.push(...(logs as unknown as RegistryLog<E>[]));
+      // A node that answers with logs outside the asked range, or pending,
+      // is refused rather than read; so is one repeating another range's.
+      for (const log of logs as unknown as RegistryLog<E>[]) {
+        if (log.blockNumber === null || log.blockNumber < from || log.blockNumber > to)
+          throw new Error("a log outside the asked range");
+        out.push(log);
+      }
     }
-    // A node that answers with logs outside the asked range, or pending, is
-    // refused rather than read.
-    for (const log of out)
-      if (log.blockNumber === null || log.blockNumber < this.#from || log.blockNumber > toBlock)
-        throw new Error("a log outside the asked range");
     return out as (RegistryLog<E> & { blockNumber: bigint })[];
   }
 }
@@ -177,6 +198,8 @@ function addition(record: `0x${string}`) {
 export interface Tier0Deployment {
   readonly chainId: bigint;
   readonly registry: Address;
+  /** The registry's deployment block, as `Tier0ChainOptions.fromBlock`. */
+  readonly fromBlock: bigint;
   readonly registrars: readonly Address[];
   readonly threshold: number;
   /** The service's keys, by seat. */
@@ -184,11 +207,14 @@ export interface Tier0Deployment {
 }
 
 /**
- * The startup check (P3-2 part 4d-2b): the node is on the configured chain,
- * and the registry's finalized state pins exactly the configured registrars
- * and threshold, and each signer's key is its seat's registrar. So a
- * misconfigured job refuses to start rather than sign records the registry
- * refuses (T-06, T-62). Throws naming the mismatch, never a key.
+ * The startup check (P3-2 part 4d-2b): the node is on the configured chain;
+ * the registry's finalized state pins exactly the configured registrars and
+ * threshold; `fromBlock` is its deployment block (no code before it, and its
+ * constructor's `RegistrarsPinned`, the registry's first log, read from it),
+ * so the index misses none of its additions; and each signer's key is its
+ * seat's registrar. So a misconfigured job refuses to start rather than sign
+ * records the registry refuses, or commitments already live (T-06, T-62).
+ * Throws naming the mismatch, never a key.
  */
 export async function checkTier0Deployment(
   client: PublicClient,
@@ -207,10 +233,34 @@ export async function checkTier0Deployment(
   if (!same(registrars, deployment.registrars))
     throw new Error("the registry pins other registrars");
   if (threshold !== deployment.threshold) throw new Error("the registry pins another threshold");
+  const { fromBlock } = deployment;
+  const before =
+    fromBlock === 0n
+      ? undefined
+      : await client.getCode({ address: deployment.registry, blockNumber: fromBlock - 1n });
+  const pinned = await client.getContractEvents({
+    address: deployment.registry,
+    abi: groupRegistryAbi,
+    eventName: "RegistrarsPinned",
+    fromBlock,
+    toBlock: fromBlock,
+    strict: true,
+  });
+  const deployedThere =
+    (before === undefined || before === "0x") &&
+    pinned.length === 1 &&
+    pinned[0]?.args.threshold === threshold &&
+    same(pinned[0].args.registrars, registrars);
+  if (!deployedThere) throw new Error("fromBlock isn't the registry's deployment block");
   for (const { seat, secretKey } of deployment.signers) {
     const registrar = registrars[seat - 1];
-    const key = `0x${Buffer.from(secretKey).toString("hex")}` as const;
-    if (registrar === undefined || getAddress(registrar) !== privateKeyToAddress(key))
+    let address: Address | undefined;
+    try {
+      address = privateKeyToAddress(`0x${Buffer.from(secretKey).toString("hex")}`);
+    } catch {
+      // viem's message for an out-of-range key quotes the key.
+    }
+    if (registrar === undefined || address === undefined || getAddress(registrar) !== address)
       throw new Error(`the key for seat ${seat} isn't that seat's registrar`);
   }
 }

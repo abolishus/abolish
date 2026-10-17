@@ -26,6 +26,7 @@ import {
   type Address,
   createPublicClient,
   createWalletClient,
+  custom,
   defineChain,
   getAddress,
   type Hex,
@@ -237,11 +238,12 @@ function adapter(registry: Address, fromBlock: bigint, logRange?: bigint) {
 
 describe("the startup check", () => {
   test("passes the registry's own registrars, threshold and keys, and refuses each mismatch", async () => {
-    const { registry } = await deployRegistry();
+    const { registry, fromBlock } = await deployRegistry();
     await mine(FINALITY_DEPTH);
     const deployment = {
       chainId: BigInt(chainId),
       registry,
+      fromBlock,
       registrars: REGISTRARS,
       threshold: THRESHOLD,
       signers: SIGNERS,
@@ -256,6 +258,12 @@ describe("the startup check", () => {
     await expect(
       checkTier0Deployment(client, { ...deployment, threshold: THRESHOLD + 1 }),
     ).rejects.toThrow("another threshold");
+    // A later fromBlock would leave the deployment's logs out of the index;
+    // an earlier one isn't where the registry was deployed.
+    for (const at of [fromBlock + 1n, fromBlock - 1n])
+      await expect(checkTier0Deployment(client, { ...deployment, fromBlock: at })).rejects.toThrow(
+        "deployment block",
+      );
     // Seat 2's key put at seat 3, and the vectors' outsider at seat 1.
     await expect(
       checkTier0Deployment(client, {
@@ -269,20 +277,32 @@ describe("the startup check", () => {
         signers: [{ seat: 1, secretKey: bytes(vectors.registrars.outsiderSecretKey) }],
       }),
     ).rejects.toThrow("seat 1");
-    const error = await checkTier0Deployment(client, {
-      ...deployment,
-      signers: [{ seat: 4, secretKey: SECRETS[0] as Uint8Array }],
-    }).catch((e: unknown) => e);
-    // No key in the message.
-    expect(String(error)).not.toContain(Buffer.from(SECRETS[0] as Uint8Array).toString("hex"));
+    // No key in the message, a key out of secp256k1's range included.
+    const order = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+    for (const secretKey of [
+      SECRETS[0] as Uint8Array,
+      new Uint8Array(32),
+      new Uint8Array(32).fill(0xff),
+      bytes((order + 5n).toString(16)),
+    ]) {
+      const error = await checkTier0Deployment(client, {
+        ...deployment,
+        signers: [{ seat: secretKey === SECRETS[0] ? 4 : 1, secretKey }],
+      }).catch((e: unknown) => e);
+      expect(String(error)).toMatch(/the key for seat \d isn't that seat's registrar/);
+      const hexKey = Buffer.from(secretKey).toString("hex");
+      expect(String(error)).not.toContain(hexKey);
+      expect(String(error)).not.toContain(BigInt(`0x${hexKey}`).toString());
+    }
   });
 
   test("judges the registry's finalized state, not a deployment still unfinalized", async () => {
-    const { registry } = await deployRegistry();
+    const { registry, fromBlock } = await deployRegistry();
     await expect(
       checkTier0Deployment(client, {
         chainId: BigInt(chainId),
         registry,
+        fromBlock,
         registrars: REGISTRARS,
         threshold: THRESHOLD,
         signers: SIGNERS,
@@ -348,6 +368,147 @@ describe("the adapter", () => {
           submit: async () => {},
         }),
     ).toThrow(RangeError);
+  });
+});
+
+type Forward = (params: unknown[]) => Promise<unknown>;
+type Hook = (method: string, params: unknown[], forward: Forward) => Promise<unknown>;
+
+/** A client of the Anvil node through `hook`, which may change any request or answer: a node not to trust. */
+function nodeClient(hook: Hook): PublicClient {
+  let id = 0;
+  const forward =
+    (method: string): Forward =>
+    async (params) => {
+      const response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
+      });
+      const answer = (await response.json()) as { result?: unknown; error?: { message: string } };
+      if (answer.error !== undefined) throw new Error(answer.error.message);
+      return answer.result;
+    };
+  return createPublicClient({
+    chain,
+    transport: custom(
+      {
+        request: ({ method, params }: { method: string; params?: unknown }) =>
+          hook(method, (params ?? []) as unknown[], forward(method)),
+      },
+      { retryCount: 0 },
+    ),
+  }) as PublicClient;
+}
+
+const word = (n: bigint) => toHex(n, { size: 32 });
+
+describe("a node not to trust", () => {
+  // One group with one final addition of three at position 0.
+  let registry: Address;
+  let fromBlock: bigint;
+  beforeAll(async () => {
+    ({ registry, fromBlock } = await deployRegistry());
+    await send(registry, "createGroup", 0);
+    await send(registry, "addMembers", signedRecord(registry, 0n, 0n, commitments(3)));
+    await mine(FINALITY_DEPTH);
+  });
+  const reader = (hook: Hook, logRange?: bigint) =>
+    new ViemTier0Chain({
+      client: nodeClient(hook),
+      registry,
+      fromBlock,
+      ...(logRange === undefined ? {} : { logRange }),
+      submit: async () => {},
+    });
+  const honest: Hook = (_method, params, forward) => forward(params);
+
+  test("an honest node through the same client reads as Anvil", async () => {
+    const r = reader(honest);
+    expect(await r.group(0n)).toEqual({ tier: 0, finalizedSize: 3n, latestSize: 3n });
+    expect(await r.additionAt(0n, 0n)).toMatchObject({ final: true });
+    expect([...(await r.tier0Commitments())]).toHaveLength(3);
+  });
+
+  test("a finalized block above the latest is refused", async () => {
+    const r = reader(async (method, params, forward) => {
+      const result = (await forward(params)) as { number: Hex };
+      if (method !== "eth_getBlockByNumber" || params[0] !== "finalized") return result;
+      return { ...result, number: toHex(BigInt(result.number) + 100n) };
+    });
+    await expect(r.group(0n)).rejects.toThrow("finalized block leads");
+  });
+
+  test("a node behind blocks already read is refused", async () => {
+    let behind = 0n;
+    const r = reader(async (method, params, forward) => {
+      const result = await forward(params);
+      if (method === "eth_blockNumber") return toHex(BigInt(result as Hex) - behind);
+      if (method === "eth_getBlockByNumber") {
+        const block = result as { number: Hex };
+        return { ...block, number: toHex(BigInt(block.number) - behind) };
+      }
+      return result;
+    });
+    await r.tier0Commitments();
+    await r.group(0n);
+    behind = 1n;
+    await expect(r.tier0Commitments()).rejects.toThrow("behind blocks already read");
+    await expect(r.group(0n)).rejects.toThrow("behind blocks already read");
+  });
+
+  test("a groupOf that disagrees with the group's creation log is refused", async () => {
+    const r = reader(async (method, params, forward) => {
+      const result = (await forward(params)) as Hex;
+      // groupOf's (tier, exists, memberCount), with exists cleared.
+      if (method !== "eth_call") return result;
+      return `0x${result.slice(2, 66)}${word(0n).slice(2)}${result.slice(130)}` as Hex;
+    });
+    await expect(r.group(0n)).rejects.toThrow("reads disagree");
+  });
+
+  test("two additions at one position are refused", async () => {
+    const r = reader(async (method, params, forward) => {
+      const result = await forward(params);
+      // Only the position's query, which alone names a third topic.
+      const filter = params[0] as { topics?: (Hex | null)[] } | undefined;
+      const atPosition = method === "eth_getLogs" && typeof filter?.topics?.[2] === "string";
+      return atPosition ? [...(result as unknown[]), ...(result as unknown[])] : result;
+    });
+    await r.group(0n);
+    await expect(r.additionAt(0n, 0n)).rejects.toThrow("two additions at one position");
+  });
+
+  test("an addition answered for another position is refused", async () => {
+    // Asked for position 3, the node answers with the addition at 0.
+    const r = reader(async (method, params, forward) => {
+      if (method !== "eth_getLogs") return forward(params);
+      const filter = params[0] as { topics: (Hex | null)[] };
+      const asked = filter.topics[2];
+      if (asked === null || asked === undefined) return forward(params);
+      const topics = filter.topics.map((t, i) => (i === 2 ? word(0n) : t));
+      // Relabelled with the position asked for, as viem filters by topic.
+      const logs = (await forward([{ ...filter, topics }])) as { topics: Hex[] }[];
+      return logs.map((l) => ({ ...l, topics: l.topics.map((t, i) => (i === 2 ? asked : t)) }));
+    });
+    await r.group(0n);
+    await expect(r.additionAt(0n, 3n)).rejects.toThrow("another position");
+  });
+
+  test("logs from outside the asked range, or pending, are refused", async () => {
+    // Each one-block query answered with every log of the registry.
+    const wide = reader(async (method, params, forward) => {
+      if (method !== "eth_getLogs") return forward(params);
+      const filter = params[0] as Record<string, unknown>;
+      return forward([{ ...filter, fromBlock: toHex(fromBlock), toBlock: "latest" }]);
+    }, 1n);
+    await expect(wide.tier0Commitments()).rejects.toThrow("outside the asked range");
+    const pending = reader(async (method, params, forward) => {
+      const result = await forward(params);
+      if (method !== "eth_getLogs") return result;
+      return (result as Record<string, unknown>[]).map((l) => ({ ...l, blockNumber: null }));
+    });
+    await expect(pending.tier0Commitments()).rejects.toThrow("outside the asked range");
   });
 });
 
@@ -439,8 +600,12 @@ describe("the worker's Tier 0 jobs", () => {
       );
       expect(await redis.smembers(keys.inflight)).toEqual([]);
       expect(await redis.hgetall(keys.queue)).toEqual({});
-      for (const v of record.value.commitments)
-        expect(await redis.sismember(keys.live, commitmentKey(v))).toBe(1);
+      // The boundary refreshes the index after it finishes the batch.
+      await until("the batch in the index", 20_000, async () => {
+        for (const v of record.value.commitments)
+          if ((await redis.sismember(keys.live, commitmentKey(v))) !== 1) return undefined;
+        return true;
+      });
       expect(submitted).toHaveLength(1);
 
       // T-10, T-13: no log line names a commitment or a record.

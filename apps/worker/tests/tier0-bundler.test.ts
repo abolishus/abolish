@@ -278,6 +278,8 @@ function standInBundler(
     chainId?: Hex;
     entryPoints?: unknown;
     estimate?: unknown;
+    /** An estimate that depends on the fee the operation names, as an L2 bundler's `preVerificationGas` does. */
+    estimateAt?: (maxFeePerGas: bigint) => unknown;
     answer?: (hash: Hex) => unknown;
     sendError?: (params: unknown) => Error;
   } = {},
@@ -294,6 +296,7 @@ function standInBundler(
         const [op, at] = params as [RpcUserOperation<"0.8">, Address];
         if (getAddress(at) !== entryPoint) throw new Error("unsupported EntryPoint");
         estimated.push(op);
+        if (tamper.estimateAt) return tamper.estimateAt(BigInt(op.maxFeePerGas));
         return "estimate" in tamper ? tamper.estimate : GENEROUS;
       }
       case "eth_sendUserOperation": {
@@ -335,13 +338,18 @@ function options(d: Deployment, bundler: BundlerRequest): Tier0BundlerOptions {
 let nextCommitment = BigInt(`0x${randomBytes(8).toString("hex")}`) << 64n;
 const commitments = (n: number) => Array.from({ length: n }, () => (nextCommitment += 7919n));
 
-function signedRecord(registry: Address, firstIndex: bigint, values: bigint[]): Uint8Array {
+function signedRecord(
+  registry: Address,
+  firstIndex: bigint,
+  values: bigint[],
+  groupId = 0n,
+): Uint8Array {
   const digest = groupAdditionDigest(
     groupRegistryDomainSeparator(BigInt(chainId), bytes(registry)),
-    { groupId: 0n, tier: 0, firstIndex, commitments: values },
+    { groupId, tier: 0, firstIndex, commitments: values },
   );
   const approvals = SIGNERS.map((s) => signGroupApproval(digest, s.seat, s.secretKey));
-  return encodeGroupAddition({ groupId: 0n, firstIndex, commitments: values, approvals });
+  return encodeGroupAddition({ groupId, firstIndex, commitments: values, approvals });
 }
 
 async function count(registry: Address) {
@@ -499,8 +507,62 @@ describe("submitting", () => {
     expect(await count(d.registry)).toBe(8n);
     const op = bundler.sent[0] as UserOperation<"0.8">;
     expect(units(op) * fees.maxFeePerGas).toBeGreaterThan(MAX_COST);
-    expect(op.maxFeePerGas).toBe(MAX_COST / units(op));
+    // Taking all of the first estimate's preVerificationGas as data fee.
+    const first = BigInt((bundler.estimated[0] as RpcUserOperation<"0.8">).maxFeePerGas);
+    expect(op.maxFeePerGas).toBe(
+      (MAX_COST - 5_000_000n * first) / (units(op) - op.preVerificationGas),
+    );
     expect(op.maxPriorityFeePerGas).toBeLessThanOrEqual(op.maxFeePerGas);
+  }, 120_000);
+
+  test("estimates the lowered fee again, and sends nothing if it no longer fits the cap", async () => {
+    const d = await deployAll();
+    const fees = await client.estimateFeesPerGas();
+    // The L1 data fee as gas: a fixed cost in wei divided by the fee, beside
+    // a call limit that alone doesn't fit at the node's fee.
+    const l1 = MAX_COST / 4n;
+    const callGasLimit = ((MAX_COST / fees.maxFeePerGas) * 9n) / 10n;
+    const at = (fee: bigint) => ({
+      ...GENEROUS,
+      callGasLimit: toHex(callGasLimit),
+      preVerificationGas: toHex(60_000n + l1 / fee),
+    });
+    const fits = standInBundler(d.entryPoint, { estimateAt: at });
+    await connectTier0Bundler(options(d, fits.request)).then((submit) =>
+      submit(signedRecord(d.registry, 0n, commitments(8))),
+    );
+    // Over the cap at the node's fee, so estimated twice, and sent at the
+    // second estimate's gas within the cap.
+    const op = fits.sent[0] as UserOperation<"0.8">;
+    const [first, second] = fits.estimated.map((o) => BigInt(o.maxFeePerGas));
+    expect(fits.estimated).toHaveLength(2);
+    expect(second).toBe(op.maxFeePerGas);
+    expect(op.maxFeePerGas).toBeLessThan(first as bigint);
+    expect(op.preVerificationGas).toBe(60_000n + l1 / op.maxFeePerGas);
+    expect(units(op) * op.maxFeePerGas).toBeLessThanOrEqual(MAX_COST);
+    expect(await count(d.registry)).toBe(8n);
+
+    // A data fee above the cap fits no fee.
+    const never = standInBundler(d.entryPoint, {
+      estimateAt: (fee) => ({ ...GENEROUS, preVerificationGas: toHex((2n * MAX_COST) / fee) }),
+    });
+    const submit = await connectTier0Bundler(options(d, never.request));
+    await expect(submit(signedRecord(d.registry, 8n, commitments(8)))).rejects.toThrow(
+      "the paymaster's cap can't pay for the batch's gas",
+    );
+    expect(never.sent).toHaveLength(0);
+  }, 120_000);
+
+  test("takes each group's nonce from the key named by its ID", async () => {
+    const d = await deployAll();
+    await write(d.registry, groupRegistryAbi, "createGroup", [0]);
+    await mine(FINALITY_DEPTH);
+    const bundler = standInBundler(d.entryPoint);
+    const submit = await connectTier0Bundler(options(d, bundler.request));
+    await submit(signedRecord(d.registry, 0n, commitments(8), 1n));
+    await submit(signedRecord(d.registry, 0n, commitments(8)));
+    expect(bundler.sent.map((o) => o.nonce)).toEqual([1n << 64n, 0n]);
+    expect(await count(d.registry)).toBe(8n);
   }, 120_000);
 
   test("takes the paymaster's verification gas from the estimate, or its own when it names none", async () => {

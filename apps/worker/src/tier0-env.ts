@@ -2,7 +2,9 @@
 // 4d-2b-2b): all of it or none of it, as the API's registration route takes
 // its own. Addresses and numbers are public; the registrars' keys and the
 // account's owner key are secrets (T-69), so a malformed key is refused with
-// a message naming the variable and never quoting its value.
+// a message naming the variable and never quoting its value. The URLs may
+// carry a provider's API key in their path or query, so a malformed one is
+// named, never quoted, too.
 
 import { type Address, getAddress, isAddress } from "viem";
 import * as z from "zod";
@@ -60,7 +62,8 @@ const AddressValue = z
 const Public = z.strictObject({
   TIER0_L2_RPC_URL: Url,
   TIER0_BUNDLER_URL: Url,
-  TIER0_CHAIN_ID: Uint(2n ** 64n - 1n).refine((v) => v > 0n),
+  // viem hashes an operation with the chain ID as a JavaScript number.
+  TIER0_CHAIN_ID: Uint(BigInt(Number.MAX_SAFE_INTEGER)).refine((v) => v > 0n),
   TIER0_GROUP: Uint(2n ** 64n - 1n),
   TIER0_REGISTRY: AddressValue,
   TIER0_REGISTRY_BLOCK: Uint(2n ** 64n - 1n),
@@ -68,7 +71,9 @@ const Public = z.strictObject({
     .string()
     .transform((v) => v.split(","))
     .pipe(z.array(AddressValue).min(1).max(255)),
-  TIER0_THRESHOLD: z.coerce.number().int().min(1).max(255),
+  TIER0_THRESHOLD: Uint(255n)
+    .refine((v) => v > 0n)
+    .transform((v) => Number(v)),
   TIER0_ENTRY_POINT: AddressValue,
   TIER0_ACCOUNT: AddressValue,
   TIER0_PAYMASTER: AddressValue,

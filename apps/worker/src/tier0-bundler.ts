@@ -13,6 +13,7 @@
 // and every failure throws a fixed message: a bundler's or node's error can
 // quote the operation, and with it the record not yet on chain (T-10, T-13).
 
+import { decodeGroupAddition } from "@abolishus/crypto";
 import {
   groupRegistryAbi,
   registrationAccountAbi,
@@ -87,6 +88,8 @@ const Estimate = z.strictObject({
 
 export class Tier0BundlerError extends Error {}
 
+const min = (a: bigint, b: bigint) => (a < b ? a : b);
+
 function fail(message: string): never {
   throw new Tier0BundlerError(message);
 }
@@ -116,6 +119,9 @@ export async function connectTier0Bundler(
     // viem's message for an out-of-range key quotes the key.
   }
   if (owner === undefined) return fail("the account key isn't a secp256k1 key");
+  // viem hashes an operation with the chain ID as a JavaScript number.
+  if (chainId < 1n || chainId > BigInt(Number.MAX_SAFE_INTEGER))
+    fail("the chain ID is out of range");
 
   if (BigInt(await client.getChainId()) !== chainId) fail("the L2 node is on another chain");
   const [bundlerChain, served] = await Promise.all([
@@ -196,14 +202,22 @@ export async function connectTier0Bundler(
         }),
       ],
     });
-    // Key 0's sequence at the latest block: an operation of ours still
-    // pending takes the same nonce, so at most one of the two can land.
+    // Each group's batches take the sequence of the nonce key named by the
+    // group's ID, read at the latest block: one group's operation still
+    // pending never shares a nonce with another group's, and a resubmission
+    // while the group's last one is still pending takes its nonce, so at
+    // most one of the two lands. One that landed after core's reads leaves
+    // the resubmission the next nonce: it lands too, reverting at the
+    // registry for at most the cap (docs/spec/contracts.md, Registration
+    // paymaster, Known-weak).
+    const decoded = decodeGroupAddition(record);
+    if (!decoded.ok) return fail("the record doesn't decode");
     const [nonce, fees] = await Promise.all([
       client.readContract({
         address: entryPoint,
         abi: entryPoint08Abi,
         functionName: "getNonce",
-        args: [account, 0n],
+        args: [account, decoded.value.groupId],
         blockTag: "latest",
       }),
       client.estimateFeesPerGas(),
@@ -223,42 +237,58 @@ export async function connectTier0Bundler(
       paymasterData: "0x",
       signature: DUMMY_SIGNATURE,
     };
-    const estimate = Estimate.safeParse(
-      await bundler({
-        method: "eth_estimateUserOperationGas",
-        params: [formatUserOperationRequest(draft), entryPoint],
-      }),
-    );
-    if (!estimate.success) return fail("the bundler's estimate is malformed");
-    const gas = {
-      callGasLimit: estimate.data.callGasLimit,
-      verificationGasLimit: estimate.data.verificationGasLimit,
-      preVerificationGas: estimate.data.preVerificationGas,
-      paymasterVerificationGasLimit:
-        estimate.data.paymasterVerificationGasLimit ?? TIER0_PAYMASTER_VERIFICATION_GAS,
-      // The paymaster returns no context, so the EntryPoint never calls
-      // `postOp`: nothing is reserved for it, whatever the estimate says.
-      paymasterPostOpGasLimit: 0n,
+    const estimateAt = async (fee: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => {
+      const estimate = Estimate.safeParse(
+        await bundler({
+          method: "eth_estimateUserOperationGas",
+          params: [formatUserOperationRequest({ ...draft, ...fee }), entryPoint],
+        }),
+      );
+      if (!estimate.success) return fail("the bundler's estimate is malformed");
+      const gas = {
+        callGasLimit: estimate.data.callGasLimit,
+        verificationGasLimit: estimate.data.verificationGasLimit,
+        preVerificationGas: estimate.data.preVerificationGas,
+        paymasterVerificationGasLimit:
+          estimate.data.paymasterVerificationGasLimit ?? TIER0_PAYMASTER_VERIFICATION_GAS,
+        // The paymaster returns no context, so the EntryPoint never calls
+        // `postOp`: nothing is reserved for it, whatever the estimate says.
+        paymasterPostOpGasLimit: 0n,
+      };
+      for (const v of Object.values(gas))
+        if (v > MAX_UINT128) fail("the bundler's estimate is malformed");
+      const units =
+        gas.callGasLimit +
+        gas.verificationGasLimit +
+        gas.preVerificationGas +
+        gas.paymasterVerificationGasLimit +
+        gas.paymasterPostOpGasLimit;
+      if (units === 0n) fail("the bundler's estimate is malformed");
+      return { gas, units };
     };
-    for (const v of Object.values(gas))
-      if (v > MAX_UINT128) fail("the bundler's estimate is malformed");
     // EntryPoint v0.8 charges the deposit at most every limit times
-    // `maxFeePerGas`, which the paymaster refuses above its cap (rule
-    // `Cost`): the fee is lowered to fit rather than the operation refused,
-    // so a fee spike delays batches instead of failing them. A fee below
-    // the block's base fee waits in the bundler or is refused by it, and
-    // the record is sent again at the next boundary (T-52).
-    const units =
-      gas.callGasLimit +
-      gas.verificationGasLimit +
-      gas.preVerificationGas +
-      gas.paymasterVerificationGasLimit +
-      gas.paymasterPostOpGasLimit;
-    if (units === 0n) fail("the bundler's estimate is malformed");
-    const maxFeePerGas = fees.maxFeePerGas < cap / units ? fees.maxFeePerGas : cap / units;
-    if (maxFeePerGas === 0n) fail("the paymaster's cap can't pay for the batch's gas");
-    const maxPriorityFeePerGas =
-      fees.maxPriorityFeePerGas < maxFeePerGas ? fees.maxPriorityFeePerGas : maxFeePerGas;
+    // `maxFeePerGas`, and the paymaster refuses an operation above its cap
+    // (rule `Cost`), so a fee that doesn't fit is lowered. An L2 bundler's
+    // `preVerificationGas` carries the L1 data fee divided by the
+    // operation's fee, so it grows as the fee falls: taking all of it as
+    // that fee (`preVerificationGas · fee` wei, whatever the fee), the
+    // lowered fee is `(cap − preVerificationGas · fee) / (the other limits)`,
+    // estimated again, and must fit; otherwise nothing is sent and the
+    // record waits for the next boundary (T-52).
+    let { gas, units } = await estimateAt(fees);
+    let maxFeePerGas = fees.maxFeePerGas;
+    if (units * maxFeePerGas > cap) {
+      const dataFee = gas.preVerificationGas * maxFeePerGas;
+      const rest = units - gas.preVerificationGas;
+      maxFeePerGas = dataFee >= cap || rest === 0n ? 0n : (cap - dataFee) / rest;
+      if (maxFeePerGas === 0n) fail("the paymaster's cap can't pay for the batch's gas");
+      ({ gas, units } = await estimateAt({
+        maxFeePerGas,
+        maxPriorityFeePerGas: min(fees.maxPriorityFeePerGas, maxFeePerGas),
+      }));
+      if (units * maxFeePerGas > cap) fail("the paymaster's cap can't pay for the batch's gas");
+    }
+    const maxPriorityFeePerGas = min(fees.maxPriorityFeePerGas, maxFeePerGas);
     const op: UserOperation<"0.8"> = { ...draft, ...gas, maxFeePerGas, maxPriorityFeePerGas };
     const hash = getUserOperationHash({
       chainId: Number(chainId),
@@ -272,7 +302,9 @@ export async function connectTier0Bundler(
       method: "eth_sendUserOperation",
       params: [formatUserOperationRequest(signed), entryPoint],
     });
-    // A bundler that answers another hash took something else, or nothing.
+    // Only a bundler that answers this operation's hash may have taken it;
+    // the answer proves nothing more, and core sends the record again until
+    // it is on chain.
     if (typeof taken !== "string" || taken.toLowerCase() !== hash.toLowerCase())
       fail("the bundler answered another operation");
   }

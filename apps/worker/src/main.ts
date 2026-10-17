@@ -1,7 +1,7 @@
 import { Tier0Batches } from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
-import { createPublicClient, http } from "viem";
+import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { checkTier0Deployment, ViemTier0Chain } from "./tier0-chain.ts";
@@ -40,29 +40,47 @@ const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 // The Tier 0 batch job (docs/spec/registration.md, The batch), only when
 // configured: it starts only once the registry, the account and the
 // paymaster are the configured ones, so a misconfigured job signs nothing
-// (T-06, T-62). Each HTTP call times out well within core's batch lock.
+// (T-06, T-62). Each HTTP attempt times out after 30 s; a read that runs
+// past core's batch lock loses its writes to the lock's fence. The URLs can
+// carry a provider's API key, which viem's errors quote, so a failure here
+// is reported by step only.
 let tier0: WorkerOptions["tier0"];
 if (tier0Config !== undefined) {
   const c = tier0Config;
   const client = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
-  await checkTier0Deployment(client, {
-    chainId: c.chainId,
-    registry: c.registry,
-    fromBlock: c.registryBlock,
-    registrars: c.registrars,
-    threshold: c.threshold,
-    signers: c.signers,
-  });
-  const submit = await connectTier0Bundler({
-    client,
-    bundler: http(c.bundlerUrl, { timeout: 30_000, retryCount: 0 })({}).request,
-    chainId: c.chainId,
-    entryPoint: c.entryPoint,
-    account: c.account,
-    ownerKey: c.accountKey,
-    paymaster: c.paymaster,
-    registry: c.registry,
-  });
+  const step = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (e) {
+      // The checks' own errors name the mismatch and nothing secret; viem's
+      // quote the URL.
+      if (e instanceof BaseError)
+        throw new Error(`the Tier 0 job's ${name} couldn't reach the chain`);
+      throw e;
+    }
+  };
+  await step("deployment check", () =>
+    checkTier0Deployment(client, {
+      chainId: c.chainId,
+      registry: c.registry,
+      fromBlock: c.registryBlock,
+      registrars: c.registrars,
+      threshold: c.threshold,
+      signers: c.signers,
+    }),
+  );
+  const submit = await step("bundler check", () =>
+    connectTier0Bundler({
+      client,
+      bundler: http(c.bundlerUrl, { timeout: 30_000, retryCount: 0 })({}).request,
+      chainId: c.chainId,
+      entryPoint: c.entryPoint,
+      account: c.account,
+      ownerKey: c.accountKey,
+      paymaster: c.paymaster,
+      registry: c.registry,
+    }),
+  );
   const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
   tier0 = {
     batches: new Tier0Batches({

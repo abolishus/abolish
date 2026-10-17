@@ -240,14 +240,14 @@ describe("tallyRules", () => {
         minSelections: Number(q.min_selections),
         maxSelections: Number(q.max_selections),
       }));
-      expect(tallyRules({ version: 6, value: decodeElectionDefinitionV6(hex(v.encoding)) })).toEqual(
-        {
-          optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
-          threshold: Number(value.threshold),
-          panelSize: Number(value.panel_size),
-          questions,
-        },
-      );
+      expect(
+        tallyRules({ version: 6, value: decodeElectionDefinitionV6(hex(v.encoding)) }),
+      ).toEqual({
+        optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
+        threshold: Number(value.threshold),
+        panelSize: Number(value.panel_size),
+        questions,
+      });
     }
   });
 

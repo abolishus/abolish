@@ -756,7 +756,7 @@ type CommittedVss = BallotTally["vss"];
 
 /**
  * Each cell's tier, in partition order: under definition version 1 the
- * cells are the tiers, under versions 3 and 4 every tier's cells in
+ * cells are the tiers, under versions 3 to 6 every tier's cells in
  * `electorate` order (election-definition.md, Notes, Tally partition).
  */
 function cellTiers(definition: VerifiedDefinition): readonly number[] {

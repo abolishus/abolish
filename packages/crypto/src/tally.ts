@@ -183,8 +183,12 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
         questions,
       });
     }
-    default:
-      throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+    default: {
+      // Every version the type admits is read above; a caller's cast can
+      // still pass another, which is refused, never guessed (T-36).
+      const unread = definition as { readonly version: number };
+      throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, unread.version);
+    }
   }
 }
 

@@ -324,7 +324,6 @@ function election() {
 
 const rows = (r: ReturnType<typeof countedChecks>) => Object.fromEntries(r.rows);
 const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-const LATER = { status: "unverifiable", code: "not-implemented", at: {} };
 
 describe("an honest election", () => {
   test("every default seat's receipt delivers each ballot: 5.9 passes, and with nothing opened every cell is tally-missing", () => {

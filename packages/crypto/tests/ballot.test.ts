@@ -23,6 +23,9 @@ import {
   selectBallots,
   UnsupportedVersionError,
   verifyMembershipProof,
+  finishBallotStep,
+  finishBallotSteps,
+  stepBallot,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -152,6 +155,52 @@ describe("ballot.json", () => {
       expect(toHex(result.l1RefHash)).toBe(toHex(record.l1_ref_hash));
     }
   });
+
+  // Every vector's proof is checked twice, batched and alone, which can pass
+  // the default timeout on a shared runner.
+  test("batched together, each ballot's result is the one checking it alone gives", () => {
+    const pairs = vectors.ballots.map(
+      (b) => [electionOf(b.election, b.registered), decodeBallot(hex(b.encoding), 1)] as const,
+    );
+    const batched = finishBallotSteps(pairs.map(([e, r]) => stepBallot(e, r)));
+    for (const [i, b] of vectors.ballots.entries()) {
+      const [election, record] = pairs[i] as (typeof pairs)[number];
+      expect(codeOf(batched[i] as BallotCheck)).toBe(b.result);
+      expect(batched[i]).toEqual(checkBallot(election, record));
+    }
+  }, 60_000);
+
+  test("a passing batch of 64 and a failing one that is split each give every ballot its own result", () => {
+    const ok = vectors.ballots.filter((b) => b.result === "ok");
+    const bad = vectors.ballots.find((b) => b.id === "membership-other-proof");
+    if (bad === undefined) throw new Error("no membership-other-proof vector");
+    const step = (b: (typeof ok)[number]) =>
+      stepBallot(electionOf(b.election, b.registered), decodeBallot(hex(b.encoding), 1));
+    // The first 64 all pass; the next 66 hold one failing proof, past the split threshold.
+    const picks = [
+      ...Array.from({ length: 64 }, (_, i) => ok[i % ok.length] as (typeof ok)[number]),
+      ...Array.from({ length: 66 }, (_, i) =>
+        i === 40 ? bad : (ok[i % ok.length] as (typeof ok)[number]),
+      ),
+    ];
+    const batched = finishBallotSteps(picks.map(step));
+    expect(batched.map((r) => codeOf(r))).toEqual(picks.map((b) => b.result));
+  }, 120_000);
+
+  test("any multiset of the vectors, in any order and past a batch of 64, gets each ballot's own result", () => {
+    const steps = vectors.ballots.map((b) =>
+      stepBallot(electionOf(b.election, b.registered), decodeBallot(hex(b.encoding), 1)),
+    );
+    // Each run checks up to 80 Groth16 proofs, a third of them failing, so the
+    // runs are capped.
+    fc.assert(
+      fc.property(fc.array(fc.nat(steps.length - 1), { maxLength: 80, size: "max" }), (picks) => {
+        const batched = finishBallotSteps(picks.map((i) => steps[i] as (typeof steps)[number]));
+        expect(batched.map((r) => codeOf(r))).toEqual(picks.map((i) => vectors.ballots[i]?.result));
+      }),
+      { numRuns: Math.min(numRuns, 3) },
+    );
+  }, 120_000);
 
   test.each(vectors.decode.map((d) => [d.id, d] as const))("rejects %s", (_, d) => {
     let error: unknown;
@@ -292,6 +341,18 @@ describe("ballot context", () => {
     const copy = { ...plurality };
     expect(() => checkBallot(copy, record)).toThrow(TypeError);
     expect(() => ballotSignals(copy, record)).toThrow(TypeError);
+  });
+
+  test("finishing refuses a step stepBallot didn't make, so no caller supplies a proof's verdict", () => {
+    const step = stepBallot(plurality, decodeBallot(honest, 1));
+    for (const forged of [{}, { ...step }, { result: { ok: true } }])
+      expect(() => finishBallotStep(forged)).toThrow(TypeError);
+    expect(() => finishBallotSteps([step, {}])).toThrow(TypeError);
+    expect(() => finishBallotSteps(step as never)).toThrow(TypeError);
+    // oxlint-disable-next-line no-sparse-arrays -- the hole is the input under test
+    expect(() => finishBallotSteps([, step] as never)).toThrow(TypeError);
+    expect(codeOf(finishBallotStep(step))).toBe("ok");
+    expect(() => stepBallot({ ...plurality }, decodeBallot(honest, 1))).toThrow(TypeError);
   });
 
   test("the decoded-proof verifier refuses points the decoder didn't make", () => {

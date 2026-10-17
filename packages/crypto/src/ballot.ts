@@ -59,10 +59,12 @@ import {
 } from "./election-definition.ts";
 import { membershipScope, semaphoreField } from "./membership.ts";
 import {
+  type MembershipProofCheck,
   type MembershipSignals,
   membershipProof,
   membershipVkHash,
   verifyDecodedMembershipProof,
+  verifyDecodedMembershipProofs,
 } from "./membership-proof.ts";
 import {
   electionDefinitionHash,
@@ -836,16 +838,27 @@ export type BallotCheckV4 = BallotCheckV2;
  * L1 reference admitted (5.8) and the close rule (5.5) before selection.
  */
 export function checkBallot(election: BallotElection, ballot: BallotRecord): BallotCheck {
+  return finishBallotStep(stepBallot(election, ballot));
+}
+
+/**
+ * `checkBallot`'s checks run up to the membership proof, whose verdict
+ * `finishBallotSteps` supplies, batched with other ballots' (T-52).
+ */
+export function stepBallot(
+  election: BallotElection,
+  ballot: BallotRecord,
+): BallotStep<BallotCheck> {
   const definitionHash = madeHashOf(election, 1);
   const proof = ballot.membership_proof;
   const fields = fieldsOf(ballot);
   const { tier } = ballot;
   if (!equalBytes(fields.definitionHash, definitionHash))
-    return { ok: false, code: "ballot-stray" };
+    return stepOf({ done: { ok: false, code: "ballot-stray" } });
   const target = tierTarget(election, tier);
-  if (target === undefined) return { ok: false, code: "ballot-tier" };
+  if (target === undefined) return stepOf({ done: { ok: false, code: "ballot-tier" } });
   const named = { definitionHash, tier, nullifier: fields.nullifier };
-  return admit(election, checksOf(election, named), target, fields, proof);
+  return stepOf(admitStep(election, checksOf(election, named), target, fields, proof));
 }
 
 /**
@@ -856,17 +869,25 @@ export function checkBallot(election: BallotElection, ballot: BallotRecord): Bal
  * 5.2; T-16). A ballot that passes is ranked by the cell's tier.
  */
 export function checkBallotV2(election: CellBallotElection, ballot: BallotRecordV2): BallotCheckV2 {
+  return finishBallotStep(stepBallotV2(election, ballot));
+}
+
+/** `checkBallotV2`'s checks run up to the membership proof, for `finishBallotSteps`. */
+export function stepBallotV2(
+  election: CellBallotElection,
+  ballot: BallotRecordV2,
+): BallotStep<BallotCheckV2> {
   const definitionHash = madeHashOf(election, 2);
   const proof = ballot.membership_proof;
   const fields = fieldsOf(ballot);
   const { cell } = ballot;
   if (!equalBytes(fields.definitionHash, definitionHash))
-    return { ok: false, code: "ballot-stray" };
+    return stepOf({ done: { ok: false, code: "ballot-stray" } });
   const target = cellTarget(election, cell);
-  if (target === undefined) return { ok: false, code: "ballot-cell" };
+  if (target === undefined) return stepOf({ done: { ok: false, code: "ballot-cell" } });
   const named = { definitionHash, ballotVersion: 2, cell, nullifier: fields.nullifier } as const;
-  const result = admit(election, checksOf(election, named), target, fields, proof);
-  return result.ok ? { ...result, cell } : result;
+  const step = admitStep(election, checksOf(election, named), target, fields, proof);
+  return stepOf(mapStep(step, (result) => (result.ok ? { ...result, cell } : result)));
 }
 
 /**
@@ -882,17 +903,25 @@ export function checkBallotV3(
   election: QuestionBallotElection,
   ballot: BallotRecordV3,
 ): BallotCheckV3 {
+  return finishBallotStep(stepBallotV3(election, ballot));
+}
+
+/** `checkBallotV3`'s checks run up to the membership proof, for `finishBallotSteps`. */
+export function stepBallotV3(
+  election: QuestionBallotElection,
+  ballot: BallotRecordV3,
+): BallotStep<BallotCheckV3> {
   const definitionHash = madeHashOf(election, 3);
   const proof = ballot.membership_proof;
   const fields = fieldsOf(ballot);
   const { cell } = ballot;
   if (!equalBytes(fields.definitionHash, definitionHash))
-    return { ok: false, code: "ballot-stray" };
+    return stepOf({ done: { ok: false, code: "ballot-stray" } });
   const target = cellTarget(election, cell);
-  if (target === undefined) return { ok: false, code: "ballot-cell" };
+  if (target === undefined) return stepOf({ done: { ok: false, code: "ballot-cell" } });
   const named = { definitionHash, cell, nullifier: fields.nullifier };
-  const result = admit(election, checksOfV3(election, named), target, fields, proof);
-  return result.ok ? { ...result, cell } : result;
+  const step = admitStep(election, checksOfV3(election, named), target, fields, proof);
+  return stepOf(mapStep(step, (result) => (result.ok ? { ...result, cell } : result)));
 }
 
 /**
@@ -910,17 +939,25 @@ export function checkBallotV4(
   election: PanelBallotElection,
   ballot: BallotRecordV4,
 ): BallotCheckV4 {
+  return finishBallotStep(stepBallotV4(election, ballot));
+}
+
+/** `checkBallotV4`'s checks run up to the membership proof, for `finishBallotSteps`. */
+export function stepBallotV4(
+  election: PanelBallotElection,
+  ballot: BallotRecordV4,
+): BallotStep<BallotCheckV4> {
   const definitionHash = madeHashOf(election, 4);
   const proof = ballot.membership_proof;
   const fields = fieldsOf(ballot);
   const { cell } = ballot;
   if (!equalBytes(fields.definitionHash, definitionHash))
-    return { ok: false, code: "ballot-stray" };
+    return stepOf({ done: { ok: false, code: "ballot-stray" } });
   const target = cellTarget(election, cell);
-  if (target === undefined) return { ok: false, code: "ballot-cell" };
+  if (target === undefined) return stepOf({ done: { ok: false, code: "ballot-cell" } });
   const named = { definitionHash, cell, nullifier: fields.nullifier };
-  const result = admit(election, checksOfV4(election, named), target, fields, proof);
-  return result.ok ? { ...result, cell } : result;
+  const step = admitStep(election, checksOfV4(election, named), target, fields, proof);
+  return stepOf(mapStep(step, (result) => (result.ok ? { ...result, cell } : result)));
 }
 
 type AdmitCode = Exclude<BallotCode, "ballot-stray" | "ballot-tier">;
@@ -1053,6 +1090,91 @@ function firstUnqualified(
   return undefined;
 }
 
+// A ballot's admission checks up to its membership proof: either decided
+// before it, or waiting on the proof's verdict, with the checks after it
+// (the validity proofs) run only once the proof passes. Many ballots' proofs
+// can then be verified together (docs/spec/vouching.md, Batched
+// verification) without changing any verdict or running a validity proof
+// for a ballot whose membership proof fails (T-52).
+type Step<R> =
+  | { readonly done: R }
+  | { readonly check: MembershipProofCheck; readonly finish: (verified: boolean) => R };
+
+function mapStep<R, S>(step: Step<R>, f: (result: R) => S): Step<S> {
+  if ("done" in step) return { done: f(step.done) };
+  const { check, finish } = step;
+  return { check, finish: (verified) => f(finish(verified)) };
+}
+
+function runStep<R>(step: Step<R>): R {
+  if ("done" in step) return step.done;
+  return step.finish(verifyDecodedMembershipProof(step.check.proof, step.check.signals));
+}
+
+/**
+ * A ballot's admission checks run up to its membership proof, by
+ * `stepBallot` to `stepBallotV4`. Only `finishBallotStep` and
+ * `finishBallotSteps` read it, and only steps this module made are accepted,
+ * so no caller can finish one with a verdict it chose (T-05). The step holds
+ * the decoded record, whose validity proofs are read when it is finished:
+ * the record must not change in between, or the result would cover the
+ * hash and signals of one vote and the validity proofs of another.
+ */
+export interface BallotStep<R> {
+  /** Type-only: what finishing the step gives. Never set. */
+  readonly result?: R;
+}
+
+const STEPS = new WeakMap<BallotStep<unknown>, Step<unknown>>();
+
+function stepOf<R>(step: Step<R>): BallotStep<R> {
+  const handle: BallotStep<R> = Object.freeze({});
+  STEPS.set(handle, step);
+  return handle;
+}
+
+function stepFrom<R>(handle: BallotStep<R>): Step<R> {
+  const step = STEPS.get(handle);
+  if (step === undefined) throw new TypeError("expected a step made by stepBallot to stepBallotV4");
+  return step as Step<R>;
+}
+
+/** A step's result, its membership proof (if it reaches one) verified alone. */
+export function finishBallotStep<R>(step: BallotStep<R>): R {
+  return runStep(stepFrom(step));
+}
+
+/**
+ * Each step's result, exactly as `finishBallotStep` gives it, with the
+ * membership proofs of the steps that reach one verified together by
+ * `verifyDecodedMembershipProofs` (docs/spec/ballot-validity.md, Batched
+ * admission): in batches of at most 64, in order, each batch's coefficients
+ * drawn from the CSPRNG once every proof is held, a failed batch split until
+ * each proof's own verdict is known. A step whose proof fails is
+ * `membership-proof` and runs no validity proof; the others' validity proofs
+ * run after the batch. Batching lowers the cost of honest ballots; an
+ * invalid proof costs at most its own batch that gain (T-52).
+ */
+export function finishBallotSteps<R>(steps: readonly BallotStep<R>[]): R[] {
+  if (!Array.isArray(steps)) throw new TypeError("steps: expected an array");
+  const waiting: { readonly at: number; readonly finish: (verified: boolean) => R }[] = [];
+  const checks: MembershipProofCheck[] = [];
+  const results: (R | undefined)[] = [];
+  // By `entries`, so a hole is refused by `stepFrom` rather than skipped.
+  for (const [at, handle] of steps.entries()) {
+    const step = stepFrom<R>(handle);
+    if ("done" in step) results.push(step.done);
+    else {
+      results.push(undefined);
+      waiting.push({ at, finish: step.finish });
+      checks.push(step.check);
+    }
+  }
+  const verdicts = verifyDecodedMembershipProofs(checks);
+  for (const [i, { at, finish }] of waiting.entries()) results[at] = finish(verdicts[i] === true);
+  return results as R[];
+}
+
 // 5.1 to 5.4 once the election and the tier or cell are known, shared by
 // every version: they differ in what the ballot names, and so in where the
 // root and scope come from, and in the committed vote's checks.
@@ -1062,31 +1184,46 @@ function admit<V extends ShareHashLists>(
   target: Target,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
-): Admitted | Rejected<AdmitCode>;
-function admit<V extends ShareHashLists>(
+  delivered: SeatCiphertext,
+): Admitted | Rejected<AdmitCode | "share-hash"> {
+  return runStep(admitStep(election, checks, target, fields, proof, delivered));
+}
+
+// `admit` up to the membership proof.
+function admitStep<V extends ShareHashLists>(
+  election: AdmitPanels,
+  checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
+  target: Target,
+  fields: Fields<V>,
+  proof: BallotRecord["membership_proof"],
+): Step<Admitted | Rejected<AdmitCode>>;
+function admitStep<V extends ShareHashLists>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
   target: Target,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered: SeatCiphertext,
-): Admitted | Rejected<AdmitCode | "share-hash">;
-function admit<V extends ShareHashLists>(
+): Step<Admitted | Rejected<AdmitCode | "share-hash">>;
+function admitStep<V extends ShareHashLists>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
   target: Target,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered?: SeatCiphertext,
-): Admitted | Rejected<AdmitCode | "share-hash"> {
+): Step<Admitted | Rejected<AdmitCode | "share-hash">> {
   const { vote } = fields;
-  if (!checks.shape(vote)) return { ok: false, code: "validity-shape" };
+  if (!checks.shape(vote)) return { done: { ok: false, code: "validity-shape" } };
   const unqualified = firstUnqualified(election, vote);
   if (unqualified !== undefined)
     // Versions 1 to 3 have one panel, and their reports name no seat.
-    return election.authorQualified === undefined
-      ? { ok: false, code: "share-hash-unqualified" }
-      : { ok: false, code: "share-hash-unqualified", ...unqualified };
+    return {
+      done:
+        election.authorQualified === undefined
+          ? { ok: false, code: "share-hash-unqualified" }
+          : { ok: false, code: "share-hash-unqualified", ...unqualified },
+    };
   // The shape holds, so each list has exactly its panel's seat count, and
   // the delivered seat is a seat of its panel.
   const hashes =
@@ -1098,21 +1235,25 @@ function admit<V extends ShareHashLists>(
       (hashes as readonly Uint8Array[])[delivered.seat - 1] as Uint8Array,
     )
   )
-    return { ok: false, code: "share-hash" };
+    return { done: { ok: false, code: "share-hash" } };
   const hash = checks.hash(vote);
   const derived = signalsOf(checks.ctx.definitionHash, target, fields, hash);
-  if (!verifyDecodedMembershipProof(proof, derived.signals))
-    return { ok: false, code: "membership-proof" };
-  const validity = checks.validity(vote);
-  if (!validity.ok) return validity;
   return {
-    ok: true,
-    ballotHash: hash,
-    message: derived.message,
-    tier: target.tier,
-    nullifier: fields.nullifier,
-    l1RefNumber: fields.l1RefNumber,
-    l1RefHash: fields.l1RefHash,
+    check: { proof, signals: derived.signals },
+    finish: (verified) => {
+      if (!verified) return { ok: false, code: "membership-proof" };
+      const validity = checks.validity(vote);
+      if (!validity.ok) return validity;
+      return {
+        ok: true,
+        ballotHash: hash,
+        message: derived.message,
+        tier: target.tier,
+        nullifier: fields.nullifier,
+        l1RefNumber: fields.l1RefNumber,
+        l1RefHash: fields.l1RefHash,
+      };
+    },
   };
 }
 

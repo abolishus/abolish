@@ -156,6 +156,8 @@ describe("ballot.json", () => {
     }
   });
 
+  // Every vector's proof is checked twice, batched and alone, which can pass
+  // the default timeout on a shared runner.
   test("batched together, each ballot's result is the one checking it alone gives", () => {
     const pairs = vectors.ballots.map(
       (b) => [electionOf(b.election, b.registered), decodeBallot(hex(b.encoding), 1)] as const,
@@ -166,7 +168,7 @@ describe("ballot.json", () => {
       expect(codeOf(batched[i] as BallotCheck)).toBe(b.result);
       expect(batched[i]).toEqual(checkBallot(election, record));
     }
-  });
+  }, 60_000);
 
   test("a passing batch of 64 and a failing one that is split each give every ballot its own result", () => {
     const ok = vectors.ballots.filter((b) => b.result === "ok");

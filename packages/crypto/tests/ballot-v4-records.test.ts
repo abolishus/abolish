@@ -269,6 +269,8 @@ describe("ballot-v4-records.json", () => {
     }
   });
 
+  // Every vector's proof is checked twice, batched and alone, which can pass
+  // the default timeout on a shared runner.
   test("batched together, each ballot's result is the one checking it alone gives", () => {
     const pairs = vectors.ballots.map(
       (b) =>
@@ -283,7 +285,7 @@ describe("ballot-v4-records.json", () => {
       expect(admissionOf(batched[i] as NonNullable<(typeof batched)[number]>)).toEqual(b.admission);
       expect(batched[i]).toEqual(checkBallotV4(election, record));
     }
-  });
+  }, 60_000);
 
   test("covers every admission code version 4 can return, beside acceptance, and both panels' unqualified seats", () => {
     const codes = new Set(vectors.ballots.map((b) => b.admission.code));

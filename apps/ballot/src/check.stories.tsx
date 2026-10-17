@@ -133,6 +133,14 @@ export const PanelUnpinned: Story = {
   },
 };
 
+export const CeremonyMissing: Story = {
+  name: "Key ceremony not served",
+  args: { refusal: { problem: "ceremony-failed", code: "ceremony-transcript-missing" } },
+  play: async ({ canvasElement }) => {
+    await refusedFor(canvasElement, "The record of the trustees' keys isn't available");
+  },
+};
+
 export const CeremonyFailed: Story = {
   name: "Key ceremony fails",
   args: { refusal: { problem: "ceremony-failed", code: "ceremony-signature" } },

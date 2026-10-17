@@ -29,6 +29,9 @@ import {
   stubPolls,
   type Tier0Batches,
   Tier0LockError,
+  TIER1_RELAY_PERIOD,
+  type Tier1Batches,
+  Tier1LockError,
 } from "@abolishus/core";
 import { type Panel, TierMembershipError } from "@abolishus/crypto";
 import { OutputRootError } from "@abolishus/verifier";
@@ -60,6 +63,8 @@ export interface JobContext {
   readonly anchor?: AnchorChain;
   /** The Tier 0 batch job, when the worker is configured for it; its queues run only then. */
   readonly tier0?: Tier0Batches;
+  /** The Tier 1 relay's job, when the worker is configured for it; its queues run only then. */
+  readonly tier1?: Tier1Batches;
   /** Ballot admission, when the worker pins panels; its queue runs only then. */
   readonly ballots?: BallotBatches;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
@@ -89,6 +94,14 @@ export const TIER0_QUEUES = ["tier0Index", "tier0Boundary"] as const satisfies r
 function tier0Of(ctx: JobContext): Tier0Batches {
   if (ctx.tier0 === undefined) throw new JobError("internal");
   return ctx.tier0;
+}
+
+/** The Tier 1 relay's queues, which run only with `JobContext.tier1`. */
+export const TIER1_QUEUES = ["tier1Index", "tier1Boundary"] as const satisfies readonly QueueKey[];
+
+function tier1Of(ctx: JobContext): Tier1Batches {
+  if (ctx.tier1 === undefined) throw new JobError("internal");
+  return ctx.tier1;
 }
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -183,6 +196,47 @@ async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): 
       abandoned: r.abandoned,
       ...(r.submitFailed === undefined ? {} : { submitFailed: r.submitFailed }),
     });
+}
+
+/**
+ * Brings the Tier 1 relay's counting state and index up to the L2 node. A
+ * boundary or another refresh holding the lock is left to it: the next tick
+ * refreshes again.
+ */
+async function tier1Index(ctx: JobContext, _data: JobData<"tier1Index">): Promise<void> {
+  try {
+    if (!(await tier1Of(ctx).refreshIndex())) throw new JobError("tier1-chain-unavailable");
+  } catch (e) {
+    if (!(e instanceof Tier1LockError)) throw e;
+  }
+}
+
+/**
+ * Seconds into a relay period within which its boundary may still run: four
+ * of `TIER1_BOUNDARY_EVERY_MS`'s ticks. A worker that was down, or whose
+ * ticks all lost the lock, skips the period rather than send late, since a
+ * batch's time is what dates its requests (docs/spec/tier1-relay.md, The
+ * batch; T-13); its records wait for the next boundary.
+ */
+export const TIER1_BOUNDARY_WITHIN = 120;
+
+/**
+ * Runs the current period's relay boundary if it hasn't run and the period
+ * began less than `TIER1_BOUNDARY_WITHIN` ago, and logs what it did in
+ * counts. A lock held by an index refresh is retried at the next tick, still
+ * within that bound.
+ */
+async function tier1Boundary(ctx: JobContext, _data: JobData<"tier1Boundary">): Promise<void> {
+  const seconds = Math.floor(ctx.now().getTime() / 1000);
+  if (seconds % TIER1_RELAY_PERIOD >= TIER1_BOUNDARY_WITHIN) return;
+  let report;
+  try {
+    report = await tier1Of(ctx).runBoundary();
+  } catch (e) {
+    if (e instanceof Tier1LockError) return;
+    throw e;
+  }
+  if (report !== null) ctx.log({ queue: "{tier1-boundary}", ...report });
 }
 
 /**
@@ -387,6 +441,8 @@ export const HANDLERS: {
   identityBackupPrune,
   tier0Index,
   tier0Boundary,
+  tier1Index,
+  tier1Boundary,
   registrySync,
   pollCreate,
   pollRoot,

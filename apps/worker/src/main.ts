@@ -3,6 +3,7 @@ import {
   CREATE_DAILY_CEILING,
   L1References,
   Tier0Batches,
+  Tier1Batches,
 } from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
@@ -26,6 +27,8 @@ import {
 } from "./poll-create-env.ts";
 import { checkTier0Deployment, ViemTier0Chain } from "./tier0-chain.ts";
 import { TIER0_ENV, tier0FromEnv } from "./tier0-env.ts";
+import { checkTier1Deployment, ViemTier1Chain } from "./tier1-chain.ts";
+import { TIER1_ENV, tier1FromEnv } from "./tier1-env.ts";
 import { startWorker, type WorkerOptions } from "./worker.ts";
 
 // Entry point: reads the environment, connects to Redis (or Dragonfly) and to
@@ -92,9 +95,13 @@ const pollCreationConfig = pollCreationFromEnv(
   ),
   CREATE_DAILY_CEILING,
 );
+const tier1Config = tier1FromEnv(
+  Object.fromEntries(TIER1_ENV.map((name) => [name, process.env[name]])),
+);
 // T-65: read once; nothing later in the process, or anything it spawns,
-// finds the key in its environment.
+// finds the key in its environment. The relay's key is treated the same.
 delete process.env["CREATE_KEY"];
+delete process.env["TIER1_RELAY_KEY"];
 // The creation key runs alone (ADR 0032, rule 2): refused before any other
 // job's chain is touched, as startWorker refuses it too.
 if (
@@ -104,6 +111,7 @@ if (
     env.BALLOT_ANCHOR_EPOCH,
     env.BALLOT_ANCHOR_PERIOD,
     ...TIER0_ENV.map((name) => process.env[name]),
+    ...TIER1_ENV.map((name) => process.env[name]),
     ...REGISTRY_SYNC_ENV.map((name) => process.env[name]),
     ...POLL_ROOT_ENV.map((name) => process.env[name]),
     ...POLL_STUB_ENV.map((name) => process.env[name]),
@@ -226,6 +234,52 @@ if (tier0Config !== undefined) {
       registrars: c.registrars.map(bytes),
       threshold: c.threshold,
       signers: c.signers,
+      now: () => Math.floor(Date.now() / 1000),
+    }),
+  };
+}
+
+// The Tier 1 relay's job (docs/spec/tier1-relay.md, The batch), only when
+// configured: it starts only once the registry and the published group are
+// the configured ones, so a misconfigured relay pays for nothing (T-52,
+// T-53). As Tier 0's, each HTTP attempt times out after 30 s, and a failure
+// here is reported by step only, since viem's errors quote the URL.
+let tier1: WorkerOptions["tier1"];
+if (tier1Config !== undefined) {
+  const c = tier1Config;
+  const client = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
+  try {
+    await checkTier1Deployment(client, {
+      chainId: c.chainId,
+      registry: c.registry,
+      fromBlock: c.registryBlock,
+      registrars: c.registrars,
+      threshold: c.threshold,
+      group: c.group,
+    });
+  } catch (e) {
+    if (e instanceof BaseError)
+      throw new Error("the Tier 1 relay's deployment check couldn't reach the chain");
+    throw e;
+  }
+  const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
+  tier1 = {
+    batches: new Tier1Batches({
+      redis: connection,
+      chain: new ViemTier1Chain({
+        client,
+        chainId: c.chainId,
+        registry: c.registry,
+        fromBlock: c.registryBlock,
+        key: c.relayKey,
+        maxFeePerGas: c.maxFeePerGas,
+      }),
+      groups: new Map([[0, c.group]]),
+      chainId: c.chainId,
+      registry: bytes(c.registry),
+      registrars: c.registrars.map(bytes),
+      threshold: c.threshold,
+      version: c.eventVersion,
       now: () => Math.floor(Date.now() / 1000),
     }),
   };
@@ -399,6 +453,7 @@ const worker = await startWorker({
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   auditEveryMs: env.AUDIT_EVERY_MS,
   ...(tier0 !== undefined && { tier0 }),
+  ...(tier1 !== undefined && { tier1 }),
   ...(ballots !== undefined && { ballots }),
   ...(registry !== undefined && { registry }),
   ...(pollRoots !== undefined && { pollRoots }),

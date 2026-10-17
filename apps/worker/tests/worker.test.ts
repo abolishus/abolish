@@ -7,6 +7,7 @@ import {
   type PollRegistrationChain,
   type PollStubDeployment,
   type Tier0Batches,
+  type Tier1Batches,
 } from "@abolishus/core";
 import { identityKey, type Panel } from "@abolishus/crypto";
 import type { PollRoots, RegistrySync } from "../src/index.ts";
@@ -25,6 +26,7 @@ import {
   type RunningWorker,
   startWorker,
   TIER0_QUEUES,
+  TIER1_QUEUES,
 } from "../src/index.ts";
 
 // The worker end to end, against a live Redis and Postgres: the scheduled
@@ -231,18 +233,20 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await prunes.add("identityBackupPrune", {});
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
-  // This worker has no Tier 0 job, pins no panel, has no registry sync,
-  // roots or stub step (nor the coordinator and the opening step beside it)
-  // and holds no creation key, so those queues have no keys here
-  // (tests/tier0.test.ts, tests/ballots.test.ts, tests/registry-sync.test.ts,
-  // tests/poll-roots.test.ts, tests/poll-stubs.test.ts, tests/ceremony.test.ts
-  // and tests/poll-open.test.ts cover the first seven; the creation worker's
-  // test below checks its keys).
+  // This worker has no Tier 0 job or Tier 1 relay, pins no panel, has no
+  // registry sync, roots or stub step (nor the coordinator and the opening
+  // step beside it) and holds no creation key, so those queues have no keys
+  // here (tests/tier0.test.ts, tests/tier1.test.ts, tests/ballots.test.ts,
+  // tests/registry-sync.test.ts, tests/poll-roots.test.ts,
+  // tests/poll-stubs.test.ts, tests/ceremony.test.ts and
+  // tests/poll-open.test.ts cover the first eight; the creation worker's test
+  // below checks its keys).
   const tags = Object.entries(QUEUES)
     .filter(
       ([key]) =>
         ![
           ...TIER0_QUEUES,
+          ...TIER1_QUEUES,
           "ballotSubmit",
           "registrySync",
           "pollCreate",
@@ -289,6 +293,9 @@ test("a handler's own error message is neither logged nor kept, the events strea
       // Not scheduled: this worker has no Tier 0 job.
       tier0Index: async () => {},
       tier0Boundary: async () => {},
+      // Not scheduled: this worker has no Tier 1 relay.
+      tier1Index: async () => {},
+      tier1Boundary: async () => {},
       // Not scheduled: this worker has no registry sync.
       registrySync: async () => {},
       // Not scheduled: this worker holds no creation key.
@@ -431,6 +438,7 @@ test("a worker refuses the creation key beside any other job", async () => {
   };
   const anchor = { chain: {} as AnchorChain, everyMs: 3_600_000 };
   const tier0 = { batches: {} as Tier0Batches };
+  const tier1 = { batches: {} as Tier1Batches };
   const ballots = { admissions: {} as BallotAdmissions };
   const registry = { sync: {} as RegistrySync };
   const pollRoots = { roots: {} as PollRoots };
@@ -441,6 +449,7 @@ test("a worker refuses the creation key beside any other job", async () => {
   for (const extra of [
     { anchor },
     { tier0 },
+    { tier1 },
     { ballots },
     { registry },
     { registry, pollRoots },

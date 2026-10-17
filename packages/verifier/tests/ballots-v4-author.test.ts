@@ -23,8 +23,8 @@ import { tallyChecks } from "../src/tallies.ts";
 // verifier.md, Key ceremony, step 5, and Ballot admission; T-37, T-17).
 // These copies carry no opening, so 6.2 passes wherever admission runs
 // (openings-v3-author.test.ts judges some, delivery-v2-author.test.ts
-// delivers some); the tally beside an author panel is P2-16 part 4d-3d's, so
-// 7.4 stays not reached.
+// delivers some, tally-v3-author.test.ts tallies some); 7.4 beside an author
+// panel is P2-16 part 4d-3d-2's, so it stays not reached.
 // Fixtures:
 // docs/spec/vectors/verifier-ballots-v4-author.json (packages/crypto/scripts/
 // verifier-ballots-v4-author-vectors.py, an independent implementation of

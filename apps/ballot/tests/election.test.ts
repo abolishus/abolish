@@ -380,4 +380,21 @@ describe("a version-5 election, a poll of questions", () => {
       problem: "display-text-undecodable",
     });
   });
+
+  test("refuses a version-2 text under a version-1 definition", () => {
+    expect(
+      check(typical.election_id, encodeElectionDefinition(goodDefinition()), hex(two.encoding)),
+    ).toEqual({ ok: false, problem: "display-text-undecodable" });
+  });
+
+  // Author panels and live results aren't read by the client yet (P2-16).
+  test("refuses a version-6 definition as undecodable", () => {
+    const v6 = hex(
+      vector(vectors<DefinitionVector>("election-definition-v6"), "definition-v6-typical").encoding,
+    );
+    expect(check(new Uint8Array(32), v6, hex(two.encoding))).toEqual({
+      ok: false,
+      problem: "definition-undecodable",
+    });
+  });
 });

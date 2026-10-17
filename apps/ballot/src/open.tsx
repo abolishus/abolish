@@ -236,6 +236,9 @@ export function Ballot({
   // after the voter left this election, or on a later attempt.
   const asked = useRef(0);
   useEffect(() => () => void asked.current++, []);
+  // The seals the voter already chose for: a second tap before the screen
+  // changes neither opens a seal chosen for casting nor asks twice (T-45).
+  const chosen = useRef(new Set<number>());
   const language = pickLanguage(election.translations, languages);
   const questions = useMemo(() => questionsOf(election, language), [election, language]);
   const poll = {
@@ -279,7 +282,14 @@ export function Ballot({
     );
   }
 
+  function choose(seal: number): boolean {
+    if (chosen.current.has(seal)) return false;
+    chosen.current.add(seal);
+    return true;
+  }
+
   function challenge(seal: number, shown: string) {
+    if (!choose(seal)) return;
     setStep({ kind: "opening" });
     ask(
       () => source.challenge(seal),
@@ -315,7 +325,9 @@ export function Ballot({
           trackingCode={step.trackingCode}
           // Sending is part 3c. The page never asks to open this seal again,
           // so a ballot the voter chose to cast is never challenged (T-45).
-          onCast={() => setStep({ kind: "cast" })}
+          onCast={() => {
+            if (choose(step.seal)) setStep({ kind: "cast" });
+          }}
           onChallenge={() => challenge(step.seal, step.trackingCode)}
         />
       );

@@ -262,7 +262,8 @@ export const SealedThenChallenged: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await userEvent.click(
+    // A double tap asks once.
+    await userEvent.dblClick(
       await canvas.findByRole("button", { name: "Check the encryption first" }),
     );
     await expect(

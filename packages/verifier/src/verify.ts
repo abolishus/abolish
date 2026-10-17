@@ -1,7 +1,7 @@
 // Runs the checks of docs/spec/verifier.md over one bundle and builds the
 // report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
 // definition's decoding and well-formedness (part of 2.1) under definition
-// versions 1, 3, 4 and 5, 2.3's profile combination, 2.9's receipt keys from L1
+// versions 1, 3, 4, 5 and 6, 2.3's profile combination, 2.9's receipt keys from L1
 // state, 8.5's not-applicable case,
 // 1.3's failure for a definition naming another membership key and, for
 // formats 4 and 5, the key-ceremony
@@ -34,7 +34,7 @@ import {
   type BoardErrorCode,
   DecodeError,
   type DecodeErrorCode,
-  type ElectionDefinitionV5Rule,
+  type ElectionDefinitionV6Rule,
   membershipVkHash,
   pinnedVersion,
   profileCombinationRule,
@@ -55,6 +55,7 @@ import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import {
+  authorKeysOf,
   decodeDefinition,
   isReadable,
   readDefinition,
@@ -89,7 +90,7 @@ export type Verdict = "verified" | "failed" | "unverifiable";
 export type CheckCode =
   | BoardErrorCode
   | L1ErrorCode
-  | ElectionDefinitionV5Rule
+  | ElectionDefinitionV6Rule
   | CeremonyCode
   | AdmissionCode
   | WindowCode
@@ -118,14 +119,14 @@ export type CheckCode =
 export type CheckAt =
   | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
   | { readonly decodeError: DecodeErrorCode }
-  /** 2.1's first failing question under definition version 5. */
+  /** 2.1's first failing question under definition versions 5 and 6. */
   | { readonly question: number }
   | { readonly checkpoint: number }
   | { readonly segment: number }
   | { readonly key: number }
   /** 7.2's first failing cell, with its option or question where the code names one. */
   | { readonly cell: number; readonly option?: number; readonly question?: number }
-  /** 8.5's first registered seat that isn't `destroyed`, or isn't decided. */
+  /** 8.5's first registered seat that isn't `destroyed`, or isn't decided; 2.5's `default-seat`'s first author seat. */
   | { readonly seat: number }
   | Record<string, never>;
 
@@ -633,6 +634,7 @@ export function verifyBundle(bundle: Bundle): Report {
         definition.definition.value,
         definition.stubHash,
         bundle.panel,
+        authorKeysOf(definition.definition),
         bundle.entries,
         definition.inputs.boardEntryVersion,
       );

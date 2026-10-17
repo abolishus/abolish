@@ -137,7 +137,8 @@ const UNSUPPORTED: OpeningOutcome = { status: "unverifiable", code: "unsupported
 // pins (2.3): definition version 1's ballots (version 1) are opened by
 // opening version 1, and ballot versions 2 (definition versions 3 and 4)
 // and 3 (version 5) by opening version 2, which names a cell.
-const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2]);
+const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
+const NOT_IMPLEMENTED: OpeningOutcome = { status: "unverifiable", code: "not-implemented" };
 
 /**
  * How this definition's openings are judged, or the outcome 6.2 takes when
@@ -151,8 +152,9 @@ function judgeFor(
   const d = definition.value;
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
-  const ownBallot = definition.version === 1 ? 1 : definition.version === 5 ? 3 : 2;
-  const ownOpening = definition.version === 1 ? 1 : 2;
+  const ownBallot =
+    definition.version === 1 ? 1 : definition.version === 5 ? 3 : definition.version === 6 ? 4 : 2;
+  const ownOpening = definition.version === 1 ? 1 : definition.version === 6 ? 3 : 2;
   // An opening version this verifier doesn't read may be one a later release
   // reads, and so may a ballot version, whose cores a later opening version
   // may open: unverifiable, never failed, so releases agree (2.3; T-36). As
@@ -172,6 +174,9 @@ function judgeFor(
     admitted === undefined
   )
     return NOT_REACHED;
+  // Opening version 3 opens both halves of a version-4 core, which this
+  // release doesn't check yet (P2-16 part 4): never passed.
+  if (definition.version === 6) return NOT_IMPLEMENTED;
   if (definition.version === 1) {
     const election = ballotElection(definition.value, registered);
     return (payload) => {

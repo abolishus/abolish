@@ -18,6 +18,8 @@ import {
   encodeElectionDefinitionV6,
   PARAMETERS,
   POLL_CLASSES,
+  profileCombinationRule,
+  RECORD_TYPES,
   RESULTS_MODES,
 } from "../src/index.ts";
 import { hex, readVectorFile } from "./spec-vectors.ts";
@@ -344,5 +346,163 @@ describe("author panels", () => {
     bad[0] = 0x04;
     expect(authorPanelRule({ threshold: 1, keys: [bad] })).toBe("key");
     expect(authorPanelRule({ threshold: 1, keys: [k.subarray(1)] })).toBe("key");
+  });
+});
+
+// docs/spec/verifier.md 2.3 for definition version 6: display-text version
+// 2, ballot version 4 and spoiled-ballot opening version 3, which opens its
+// cores; a sealed poll without an author panel pins tally-opening version 1
+// and board-entry version 5; a live poll and an author panel fail until the
+// verifier reads them (P2-15 part 3, T-17), and nothing else may pin their
+// tally-opening versions (2, 3) or board-entry versions (6, 7).
+describe("2.3's profile combination under version 6", () => {
+  const minimal = decodeElectionDefinitionV6(
+    hex(vector("election-definition-v6.json", "definition-v6-minimal").encoding),
+  );
+  const FITTING: Readonly<Record<number, number>> = {
+    [RECORD_TYPES.electionDefinition]: 6,
+    [RECORD_TYPES.ballot]: 4,
+    [RECORD_TYPES.spoiledBallotOpening]: 3,
+    [RECORD_TYPES.tallyOpening]: 1,
+    [RECORD_TYPES.boardEntry]: 5,
+    [RECORD_TYPES.contractEvent]: 6,
+    [RECORD_TYPES.displayText]: 2,
+  };
+  const v6 = (
+    pins: Readonly<Record<number, number | undefined>> = {},
+    fields: Partial<ElectionDefinitionV6> = {},
+  ): ElectionDefinitionV6 => {
+    const wanted = { ...FITTING, ...pins };
+    return {
+      ...minimal,
+      ...fields,
+      profile: {
+        ...minimal.profile,
+        pins: [
+          ...minimal.profile.pins.filter((p) => !Object.hasOwn(wanted, p.record_type)),
+          ...Object.entries(wanted)
+            .filter((e): e is [string, number] => e[1] !== undefined)
+            .map(([t, version]) => ({ record_type: Number(t), version })),
+        ].sort((a, b) => a.record_type - b.record_type),
+      },
+    };
+  };
+  const authorPanel = {
+    author_threshold: 1,
+    author_keys: [POOL[0]!],
+    author_transcript_hash: new Uint8Array(32).fill(7),
+  };
+
+  test("a sealed poll without an author panel fits", () => {
+    expect(electionDefinitionV6Rule(v6())).toBeUndefined();
+    expect(profileCombinationRule(v6())).toBeUndefined();
+    // Every poll class: the default panel's kind is 2.5's, not 2.3's.
+    for (const poll_class of Object.values(POLL_CLASSES))
+      expect(profileCombinationRule(v6({}, { poll_class }))).toBeUndefined();
+  });
+
+  test("a live poll and an author panel fail whatever they pin", () => {
+    const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+    expect(electionDefinitionV6Rule(v6({}, live))).toBeUndefined();
+    expect(electionDefinitionV6Rule(v6({}, authorPanel))).toBeUndefined();
+    for (const fields of [live, authorPanel, { ...live, ...authorPanel }])
+      for (const pins of [
+        {},
+        { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 },
+        { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 },
+        // Before a board-entry version this package reads or not.
+        { [RECORD_TYPES.contractEvent]: 255 },
+      ])
+        expect(profileCombinationRule(v6(pins, fields))).toBe("profile-combination");
+  });
+
+  test("a board-entry version this package doesn't read is unsupported first", () => {
+    expect(profileCombinationRule(v6({ [RECORD_TYPES.boardEntry]: 8 }))).toBe(
+      "unsupported-version",
+    );
+  });
+
+  test("a sealed poll without an author panel pins only its own versions", () => {
+    const fails: Readonly<Record<number, number | undefined>>[] = [
+      // Ballot versions 1 to 3 carry no author half; none pinned can't vote.
+      { [RECORD_TYPES.ballot]: 1 },
+      { [RECORD_TYPES.ballot]: 2 },
+      { [RECORD_TYPES.ballot]: 3 },
+      { [RECORD_TYPES.ballot]: undefined },
+      // Opening versions 1 and 2 don't open version-4 cores.
+      { [RECORD_TYPES.spoiledBallotOpening]: 1 },
+      { [RECORD_TYPES.spoiledBallotOpening]: 2 },
+      { [RECORD_TYPES.spoiledBallotOpening]: undefined },
+      // A live poll's and an author panel's tally-opening and board versions.
+      { [RECORD_TYPES.tallyOpening]: 2 },
+      { [RECORD_TYPES.tallyOpening]: 3 },
+      { [RECORD_TYPES.tallyOpening]: undefined },
+      { [RECORD_TYPES.boardEntry]: 6 },
+      { [RECORD_TYPES.boardEntry]: 7 },
+      // No close statement, no delivery records or no destruction.
+      { [RECORD_TYPES.boardEntry]: 1 },
+      { [RECORD_TYPES.boardEntry]: 3 },
+      { [RECORD_TYPES.boardEntry]: 4 },
+      // Display-text version 1 has no questions; an unknown one fails too.
+      { [RECORD_TYPES.displayText]: 1 },
+      { [RECORD_TYPES.displayText]: 3 },
+      { [RECORD_TYPES.displayText]: undefined },
+      // Contract-event versions 1 to 5 miss board or registry events.
+      ...[1, 2, 3, 4, 5].map((events) => ({ [RECORD_TYPES.contractEvent]: events })),
+      // A failure is reported beside a version this package doesn't read.
+      { [RECORD_TYPES.boardEntry]: 1, [RECORD_TYPES.spoiledBallotOpening]: 255 },
+      { [RECORD_TYPES.ballot]: 3, [RECORD_TYPES.contractEvent]: 255 },
+    ];
+    for (const pins of fails)
+      expect(profileCombinationRule(v6(pins)), JSON.stringify(pins)).toBe("profile-combination");
+  });
+
+  test("versions a later release may read are unsupported, never failed", () => {
+    // A later release may define a ballot carrying both halves, an opening
+    // of version-4 cores or a contract-event version naming every event (T-36).
+    for (const pins of [
+      { [RECORD_TYPES.ballot]: 255 },
+      { [RECORD_TYPES.spoiledBallotOpening]: 255 },
+      { [RECORD_TYPES.contractEvent]: 255 },
+    ])
+      expect(profileCombinationRule(v6(pins)), JSON.stringify(pins)).toBe("unsupported-version");
+  });
+
+  test("ballot version 4 fails under every other definition version", () => {
+    for (const definition of [1, 3, 4, 5])
+      for (const pins of [
+        { [RECORD_TYPES.electionDefinition]: definition },
+        { [RECORD_TYPES.electionDefinition]: definition, [RECORD_TYPES.ballot]: 4 },
+      ])
+        expect(profileCombinationRule({ ...typicalV5, profile: v6(pins).profile })).toBe(
+          "profile-combination",
+        );
+  });
+
+  test("a version-6 pin on a value without version 6's fields fails, and the reverse", () => {
+    expect(profileCombinationRule({ ...typicalV5, profile: v6().profile })).toBe(
+      "profile-combination",
+    );
+    // A live version-6 value pinned as version 5 is never judged by version
+    // 5's rules, which would skip its results mode.
+    const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+    for (const definition of [1, 3, 4, 5])
+      expect(
+        profileCombinationRule(
+          v6({ [RECORD_TYPES.electionDefinition]: definition, [RECORD_TYPES.ballot]: 3 }, live),
+        ),
+      ).toBe("profile-combination");
+    expect(
+      profileCombinationRule(
+        v6(
+          {
+            [RECORD_TYPES.electionDefinition]: 5,
+            [RECORD_TYPES.ballot]: 3,
+            [RECORD_TYPES.spoiledBallotOpening]: 2,
+          },
+          { results_mode: RESULTS_MODES.sealed },
+        ),
+      ),
+    ).toBe("profile-combination");
   });
 });

@@ -5,6 +5,7 @@ import {
   decodeElectionDefinition,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV6,
   type ElectionDefinition,
   electionDefinitionV3Hash,
   type ElectionDefinitionV3,
@@ -13,7 +14,13 @@ import {
   encodeElectionDefinitionV3,
   encodeElectionDefinitionV4,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV6,
+  electionDefinitionV6Hash,
+  membershipVkHash,
+  type ElectionDefinitionV6,
+  POLL_CLASSES,
   RECORD_TYPES,
+  RESULTS_MODES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -26,6 +33,9 @@ import {
   runCli,
   verifyBundle,
 } from "../src/index.ts";
+import { judgeFor } from "../src/ballots.ts";
+import { decodeDefinition } from "../src/definition.ts";
+import { tallyChecks } from "../src/tallies.ts";
 
 // Format-3 bundles: the election identifier, the pinned board-entry version
 // and the anchor's address come from the election definition
@@ -67,9 +77,12 @@ const definitions = vectorsOf("election-definition.json");
 const definitionsV3 = vectorsOf("election-definition-v3.json");
 const definitionsV4 = vectorsOf("election-definition-v4.json");
 const definitionsV5 = vectorsOf("election-definition-v5.json");
+const definitionsV6 = vectorsOf("election-definition-v6.json");
 // Made before version 5 had a layout, so its file expects `unknown-version`;
 // a release that reads version 5 decodes it under version 5's layout instead.
 const V4_LABELLED_FIVE = "definition-v4-version-five";
+// The same for version 5's layout labelled version 6.
+const V5_LABELLED_SIX = "definition-v5-version-six";
 const l1File = read("l1-anchor.json") as {
   readonly clock: Readonly<Record<string, string>>;
   readonly electionId: string;
@@ -116,9 +129,13 @@ function format2(v: L1Vector): Report {
 }
 
 const vector = (id: string) => {
-  const d = [...definitions, ...definitionsV3, ...definitionsV4, ...definitionsV5].find(
-    (x) => x.id === id,
-  );
+  const d = [
+    ...definitions,
+    ...definitionsV3,
+    ...definitionsV4,
+    ...definitionsV5,
+    ...definitionsV6,
+  ].find((x) => x.id === id);
   if (d === undefined) throw new Error(`no definition ${id}`);
   return d;
 };
@@ -161,8 +178,8 @@ test("the fixtures cover undecodable, ill-formed and well-formed definitions", (
   expect(definitions.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
 });
 
-test("the version-3, version-4 and version-5 fixtures cover every outcome too", () => {
-  for (const file of [definitionsV3, definitionsV4, definitionsV5]) {
+test("the version-3 to version-6 fixtures cover every outcome too", () => {
+  for (const file of [definitionsV3, definitionsV4, definitionsV5, definitionsV6]) {
     expect(file.some((d) => d.error === "unknown-version")).toBe(true);
     expect(file.some((d) => d.error !== undefined && d.error !== "unknown-version")).toBe(true);
     expect(file.some((d) => d.illFormed !== undefined)).toBe(true);
@@ -173,15 +190,22 @@ test("the version-3, version-4 and version-5 fixtures cover every outcome too", 
   expect(definitionsV4.some((d) => d.illFormed === "receipt-keys")).toBe(true);
   expect(definitionsV5.some((d) => d.illFormed === "questions")).toBe(true);
   expect(definitionsV5.some((d) => d.illFormedQuestion !== undefined)).toBe(true);
+  for (const rule of ["results", "civic-sealed", "author-panel"])
+    expect(definitionsV6.some((d) => d.illFormed === rule)).toBe(true);
+  expect(definitionsV6.some((d) => d.illFormedQuestion !== undefined)).toBe(true);
 });
 
 describe("2.1: the definition decodes strictly and is well formed", () => {
   // An empty definition is rejected with the bundle: bundle hex is never
-  // empty (bundle.test.ts). Definition versions 1, 3, 4 and 5 are read,
+  // empty (bundle.test.ts). Definition versions 1, 3, 4, 5 and 6 are read,
   // each under its own layout, hash and rules.
-  for (const d of [...definitions, ...definitionsV3, ...definitionsV4, ...definitionsV5].filter(
-    (x) => x.encoding !== "" && x.id !== V4_LABELLED_FIVE,
-  ))
+  for (const d of [
+    ...definitions,
+    ...definitionsV3,
+    ...definitionsV4,
+    ...definitionsV5,
+    ...definitionsV6,
+  ].filter((x) => x.encoding !== "" && x.id !== V4_LABELLED_FIVE && x.id !== V5_LABELLED_SIX))
     test(d.id, () => {
       const r = format3(d.encoding, closed);
       // The definition is a local file: whatever it is, nothing can verify
@@ -233,24 +257,24 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
       // Decoding and well-formedness pass, but whether L2 registered this
       // hash isn't checked yet, so 2.1 can't pass.
       expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
-      // Versions 1 and 3 list no receipt keys; version 4's and 5's need the
-      // anchor's record from L1, which isn't read yet (P1-13b). A board-entry
-      // version this verifier can't read stops every check after 2.3.
+      // Versions 1 and 3 list no receipt keys; those of version 4 and later
+      // need the anchor's record from L1, which isn't read yet (P1-13b). A
+      // board-entry version this verifier can't read stops every check after 2.3.
       if (row(r, "4.1").code !== "not-reached")
         expect(row(r, "2.9")).toMatchObject(
-          hex(d.encoding)[2] === 4 || hex(d.encoding)[2] === 5
+          (hex(d.encoding)[2] as number) >= 4
             ? { status: "unverifiable", code: "not-implemented" }
             : { status: "pass" },
         );
     });
 });
 
-test("definition versions 6 and 7 stay unverifiable at their version byte, never failed", () => {
-  // This release reads version 5; a later one reads 6 and 7 (T-36).
-  for (const name of ["election-definition-v6.json", "election-definition-v7.json"]) {
+test("definition version 7 stays unverifiable at its version byte, never failed", () => {
+  // This release reads version 6; a later one reads 7 (T-36).
+  for (const name of ["election-definition-v7.json"]) {
     const later = vectorsOf(name).filter((d) => {
       const v = hex(d.encoding)[2];
-      return d.error === undefined && (v === 6 || v === 7);
+      return d.error === undefined && v === 7;
     });
     expect(later.length).toBeGreaterThan(0);
     for (const d of later) {
@@ -263,12 +287,14 @@ test("definition versions 6 and 7 stay unverifiable at their version byte, never
   }
 });
 
-test("version 4's layout labelled version 5 is read under version 5's, and doesn't decode", () => {
-  const r = format3(vector(V4_LABELLED_FIVE).encoding, closed);
-  expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });
-  expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
-  expect(r.definition).toBeUndefined();
-  notReached(r);
+test("a layout labelled the next version is read under that version's, and doesn't decode", () => {
+  for (const id of [V4_LABELLED_FIVE, V5_LABELLED_SIX]) {
+    const r = format3(vector(id).encoding, closed);
+    expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });
+    expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    expect(r.definition).toBeUndefined();
+    notReached(r);
+  }
 });
 
 describe("2.3: the profile's versions fit together", () => {
@@ -290,14 +316,15 @@ describe("2.3: the profile's versions fit together", () => {
   // (5; [[close]], Version), ballot version 2, which names a cell, needs
   // definition version 3 or 4, and ballot version 3, which carries
   // questions, definition version 5, and ballot version 4, which carries an
-  // author half, definition version 6 (these are version 1). Ballot version 5
-  // stands for a version this verifier doesn't know, with neither need: a
-  // later release judges it.
+  // author half, definition version 6 (these are version 1). Tally-opening
+  // version 2 needs board-entry version 6, a live poll's, so it never fits
+  // here. Ballot version 5 stands for a version this verifier doesn't know,
+  // with neither need: a later release judges it.
   const table: readonly (readonly [number, number, number, boolean])[] = [
     [5, 1, 1, true],
-    [5, 1, 2, true],
+    [5, 1, 2, false],
     [5, 5, 1, true],
-    [5, 5, 2, true],
+    [5, 5, 2, false],
     [5, 2, 1, false],
     [5, 2, 2, false],
     [5, 3, 1, false],
@@ -379,8 +406,18 @@ describe("2.3: the profile's versions fit together", () => {
     expect(at(4, 7)).toEqual(COMBINATION_FAILS);
   });
 
+  test("board-entry versions 6 and 7 are read, and fail 2.3 here", () => {
+    // A live poll's board and an author panel's: no profile 2.3 passes pins
+    // either yet, and the board checks still run under them (T-16, T-17).
+    for (const board of [6, 7]) {
+      const r = format3(pinning({ [RECORD_TYPES.boardEntry]: board }), closed);
+      expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
   test("a version this verifier can't read is unsupported before any combination", () => {
-    for (const board of [2, 6]) {
+    for (const board of [2, 8]) {
       const r = format3(pinning({ [RECORD_TYPES.boardEntry]: board }), closed);
       expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
       notReached(r);
@@ -620,9 +657,11 @@ describe("definition versions 3 and 4 (regional cells)", () => {
             [RECORD_TYPES.boardEntry]: board,
             [RECORD_TYPES.ballot]: ballot,
             [RECORD_TYPES.spoiledBallotOpening]: spoiled,
-            // Tally-opening version 2 stands for one with no board need, so
-            // only the ballot's needs decide.
-            [RECORD_TYPES.tallyOpening]: 2,
+            // A tally-opening version this verifier doesn't know stands for
+            // one with no board need, so only the ballot's needs decide
+            // (version 2 needs a live poll's board, version 3 an author
+            // panel's).
+            [RECORD_TYPES.tallyOpening]: 255,
             [RECORD_TYPES.contractEvent]: 6,
           }),
           closed,
@@ -759,5 +798,142 @@ describe("definition version 5 (questions)", () => {
       code: "receipt-key-unregistered",
       at: { key: 0 },
     });
+  });
+});
+
+describe("definition version 6 (poll class, results mode and author panel)", () => {
+  const minimal = decodeElectionDefinitionV6(hex(vector("definition-v6-minimal").encoding));
+  // A sealed version-6 poll without an author panel: ballot version 4,
+  // spoiled-ballot opening version 3, tally-opening version 1, display-text
+  // version 2, board-entry version 5 and contract-event version 6 (2.3).
+  const FITTING: Readonly<Record<number, number>> = {
+    [RECORD_TYPES.ballot]: 4,
+    [RECORD_TYPES.spoiledBallotOpening]: 3,
+    [RECORD_TYPES.tallyOpening]: 1,
+    [RECORD_TYPES.boardEntry]: 5,
+    [RECORD_TYPES.contractEvent]: 6,
+    [RECORD_TYPES.displayText]: 2,
+  };
+  const v6For = (
+    anchor: string,
+    versions: Partial<Record<number, number>> = {},
+    fields: Partial<ElectionDefinitionV6> = {},
+  ) => {
+    const pins = { ...FITTING, ...versions };
+    return toHex(
+      encodeElectionDefinitionV6({
+        ...minimal,
+        election_id: hex(l1File.electionId),
+        l1_anchor: hex(anchor),
+        ...fields,
+        profile: {
+          ...minimal.profile,
+          pins: minimal.profile.pins.map((p) => ({
+            ...p,
+            version: pins[p.record_type] ?? p.version,
+          })),
+        },
+      }),
+    );
+  };
+  const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+  const authorPanel = {
+    author_threshold: 1,
+    author_keys: [hex("025df0967c2d52df79f732a9b6c44067c454b77ac2105f787b80a453306a81bf0d")],
+    author_transcript_hash: new Uint8Array(32).fill(7),
+  };
+
+  test("the hash is version 6's, over its own encoding", () => {
+    const bytes = v6For(closed.anchor);
+    const r = format3(bytes, closed);
+    expect(r.definition).toEqual({
+      hash: toHex(electionDefinitionV6Hash(decodeElectionDefinitionV6(hex(bytes)))),
+    });
+    expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+  });
+
+  test("a sealed poll without an author panel passes 2.3's combination, in every poll class", () => {
+    for (const poll_class of Object.values(POLL_CLASSES)) {
+      const r = format3(v6For(closed.anchor, {}, { poll_class }), closed);
+      // 2.3's other checks aren't implemented, so it never passes here.
+      expect(row(r, "2.3")).toEqual({
+        id: "2.3",
+        kind: "election",
+        status: "unverifiable",
+        code: "not-implemented",
+      });
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+      expect(r.verdict).toBe("unverifiable");
+    }
+  });
+
+  test("a live poll and an author panel fail 2.3, and the board checks still run", () => {
+    for (const [fields, versions] of [
+      [live, {}],
+      [live, { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 }],
+      [authorPanel, {}],
+      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+    ] as const) {
+      const r = format3(v6For(closed.anchor, versions, fields), closed);
+      expect(row(r, "2.1").status).not.toBe("fail");
+      expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+      expect(r.verdictAgainstInputs).toBe("failed");
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("other pins fail 2.3, or leave it unsupported when a later release may read them", () => {
+    for (const [versions, code] of [
+      [{ [RECORD_TYPES.ballot]: 3 }, "profile-combination"],
+      [{ [RECORD_TYPES.spoiledBallotOpening]: 2 }, "profile-combination"],
+      [{ [RECORD_TYPES.displayText]: 1 }, "profile-combination"],
+      [{ [RECORD_TYPES.tallyOpening]: 3 }, "profile-combination"],
+      [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
+      [{ [RECORD_TYPES.ballot]: 255 }, "unsupported-version"],
+      [{ [RECORD_TYPES.spoiledBallotOpening]: 255 }, "unsupported-version"],
+    ] as const) {
+      const r = format3(v6For(closed.anchor, versions), closed);
+      expect(row(r, "2.3"), JSON.stringify(versions)).toEqual(
+        code === "profile-combination"
+          ? COMBINATION_FAILS
+          : { id: "2.3", kind: "election", status: "unverifiable", code, at: {} },
+      );
+    }
+    // A board-entry version this verifier can't read stops the board checks.
+    const r = format3(v6For(closed.anchor, { [RECORD_TYPES.boardEntry]: 8 }), closed);
+    expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+    notReached(r);
+  });
+
+  test("2.9 reads version 6's receipt keys from L1 state, as version 4's", () => {
+    expect(minimal.receipt_keys.length).toBeGreaterThan(0);
+    expect(row(format3(v6For(closed.anchor), closed), "2.9")).toMatchObject({
+      status: "fail",
+      code: "receipt-key-unregistered",
+    });
+  });
+
+  test("ballot admission and the tally aren't checked under version 6 yet, never passed", () => {
+    // Even with a registered key set (none is returned beside an author
+    // panel): ballot version 4's admission and version 6's tally rules come
+    // with P2-16 part 4's later parts.
+    // Under the membership key this release pins, which 1.3 checks first,
+    // and with no cell of root 0, which anyone proves membership of.
+    const pinnedKey = {
+      membership_vk_hash: membershipVkHash(),
+      electorate: minimal.electorate.map((t) => ({
+        ...t,
+        cells: t.cells.map((c) => ({ ...c, root: 1n })),
+      })),
+    };
+    const record = decodeDefinition(hex(v6For(closed.anchor, {}, pinnedKey)));
+    const notImplemented = { status: "unverifiable", code: "not-implemented" };
+    expect(judgeFor(record, [])).toEqual(notImplemented);
+    expect(tallyChecks(record, new Uint8Array(32), [], [], 5)).toEqual({ row: notImplemented });
+    // A ballot version a later release may read stays unsupported.
+    const later = decodeDefinition(
+      hex(v6For(closed.anchor, { [RECORD_TYPES.ballot]: 255 }, pinnedKey)),
+    );
+    expect(judgeFor(later, [])).toMatchObject({ code: "unsupported-version" });
   });
 });

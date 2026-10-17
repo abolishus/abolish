@@ -262,8 +262,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   const d = definition.value;
   // This release's delivery check reads ballot versions 1 and 2, whose
   // delivery records are version 1; definition version 5's ballots are
-  // version 3, which `checkDelivery` doesn't read yet.
-  if (definition.version === 5)
+  // version 3, which `checkDelivery` doesn't read yet, and version 6's are
+  // version 4, whose delivery records are version 2 (P2-16 part 4).
+  if (definition.version === 5 || definition.version === 6)
     return countedRows(
       { status: "unverifiable", code: "not-implemented", at: {} },
       inputs.destruction,
@@ -628,6 +629,7 @@ function cellTiers(definition: VerifiedDefinition): readonly number[] {
     case 3:
     case 4:
     case 5:
+    case 6:
       return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     default: {
       const unread: never = definition;

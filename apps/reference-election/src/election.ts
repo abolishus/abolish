@@ -11,14 +11,24 @@ import {
   ceremonyKeygen,
   ceremonyTranscriptHash,
   challengesMessage,
+  deriveTierCells,
   type DisplayText,
   displayTextCommitment,
+  type DisplayTextV2,
+  displayTextV2Commitment,
   type ElectionDefinition,
+  electionDefinitionHash,
   electionDefinitionRule,
+  electionDefinitionV5Hash,
+  electionDefinitionV5Rule,
+  type ElectionDefinitionV5,
   electionId,
   electionStubHash,
+  electionStubV5Hash,
   encodeBoardEntry,
   encodeCeremonyTranscript,
+  encodeElectionDefinition,
+  encodeElectionDefinitionV5,
   identityKey,
   keysMessage,
   membershipVkHash,
@@ -26,8 +36,11 @@ import {
   type Panel,
   panelId,
   pinnedVersion,
+  QUESTION_METHODS,
+  type Question,
   RECORD_TYPES,
   revealsMessage,
+  TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
@@ -91,9 +104,29 @@ export interface L2Deployment {
   readonly l1Relay: Uint8Array;
 }
 
-export interface Ceremony {
+/** A definition the fixture writes: version 1 (one question) or version 5 (questions). */
+export type FixtureDefinition =
+  | { readonly version: 1; readonly value: ElectionDefinition }
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+
+/** The definition's encoding, as the registry and the bundle take it. */
+export function definitionBytes(d: FixtureDefinition): Uint8Array {
+  return d.version === 1 ? encodeElectionDefinition(d.value) : encodeElectionDefinitionV5(d.value);
+}
+
+/** The hash the election registry holds for the definition once registered. */
+export function definitionHash(d: FixtureDefinition): Uint8Array {
+  return d.version === 1 ? electionDefinitionHash(d.value) : electionDefinitionV5Hash(d.value);
+}
+
+/** The stub hash every seat's registration signs (docs/spec/election-definition.md, Stub hash and the ceremony). */
+export function stubHash(d: FixtureDefinition): Uint8Array {
+  return d.version === 1 ? electionStubHash(d.value) : electionStubV5Hash(d.value);
+}
+
+export interface Ceremony<D extends FixtureDefinition = FixtureDefinition> {
   readonly panel: Panel;
-  readonly definition: ElectionDefinition;
+  readonly definition: D;
   readonly transcript: Uint8Array;
   /** The seats that took part. */
   readonly seats: readonly Trustee[];
@@ -121,11 +154,26 @@ const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.contractEvent, 7],
 ]);
 
-/** The profile: plurality, every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */
-function profile(): ElectionDefinition["profile"] {
+/**
+ * A version-5 definition's pins, as rule 9 serves them: ballot version 3 (one
+ * range proof per question), the spoiled-ballot opening version 2 that opens
+ * its cores, and display-text version 2, which carries the questions' text;
+ * the board entry and contract event as version 1's (T-34, T-53).
+ */
+const PINNED_V5: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.electionDefinition, 5],
+  [RECORD_TYPES.ballot, 3],
+  [RECORD_TYPES.spoiledBallotOpening, 2],
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 7],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+/** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but those in `pinned`. */
+function profile(pinned: ReadonlyMap<number, number>): ElectionDefinition["profile"] {
   const pins = [];
   for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: PINNED.get(t) ?? 1 });
+    pins.push({ record_type: t, version: pinned.get(t) ?? 1 });
   return { protocol_major: 1, pins };
 }
 
@@ -151,6 +199,49 @@ export function displayText(): DisplayText {
   };
 }
 
+const selection = (option_count: number, min_selections: number, max_selections: number) => ({
+  method: QUESTION_METHODS.selection,
+  option_count,
+  min_selections,
+  max_selections,
+});
+
+/**
+ * The multi-question poll's questions, one of each method a version-5
+ * definition expresses as limits ([[0026-multi-question-ballots]]): pick one
+ * `(0, 1)`, pick any `(0, m)` and pick exactly 2 `(2, 2)`, 11 options in all.
+ */
+export const QUESTIONS: readonly Question[] = Object.freeze([
+  selection(3, 0, 1),
+  selection(4, 0, 4),
+  selection(4, 2, 2),
+]);
+
+/** The multi-question poll's display text: a title, then each question's text and options. */
+export function questionsDisplayText(): DisplayTextV2 {
+  const names = ["pick one", "pick any", "pick exactly two"];
+  return {
+    salt: newDisplayTextSalt(),
+    translations: [
+      {
+        language: utf8("en"),
+        title: utf8("Reference election: a poll of three questions"),
+        description: utf8(
+          "A fixture run by the reference election (P1-20, P2-14). It counts for nothing.",
+        ),
+        questions: QUESTIONS.map((q, i) => ({
+          question: utf8(`Question ${i + 1}: ${names[i] ?? ""}`),
+          description: utf8(""),
+          options: Array.from({ length: q.option_count }, (_, j) => ({
+            label: utf8(`Option ${String.fromCharCode(65 + j)}`),
+            description: utf8(""),
+          })),
+        })),
+      },
+    ],
+  };
+}
+
 export interface CeremonyOptions {
   /** The election registry's counter of the election's creation. */
   readonly counter: bigint;
@@ -160,21 +251,9 @@ export interface CeremonyOptions {
   readonly electorate: { readonly root: bigint; readonly size: bigint };
 }
 
-/**
- * Writes the stub of the election `l2` created as number `counter`, runs the
- * key ceremony over it with all but `absent` of `trustees` taking part, and
- * returns the definition that binds the transcript.
- */
-export function runCeremony(
-  timing: Timing,
-  l2: L2Deployment,
-  trustees: Trustees,
-  text: DisplayText,
-  { counter, absent, electorate }: CeremonyOptions,
-): Ceremony {
-  const { panel } = trustees;
-  const stub: ElectionDefinition = {
-    profile: profile(),
+/** The fields every definition version here shares, in the stub, before the ceremony. */
+function stubFields(timing: Timing, l2: L2Deployment, panel: Panel, counter: bigint) {
+  return {
     election_id: electionId(l2.l2ChainId, l2.electionRegistry, counter),
     l2_chain_id: l2.l2ChainId,
     l1_chain_id: timing.l1ChainId,
@@ -184,20 +263,7 @@ export function runCeremony(
     group_registry: l2.groupRegistry,
     l1_anchor: timing.l1Anchor,
     l1_relay: l2.l1Relay,
-    election_type: 1,
-    tally_scheme: 1,
-    option_count: 3,
-    min_selections: 0,
-    max_selections: 1,
-    electorate: [
-      {
-        tier: 0,
-        group_id: 1n,
-        root: electorate.root,
-        root_l2_block: 1n,
-        group_size: electorate.size,
-      },
-    ],
+    tally_scheme: TALLY_SCHEMES.pedersenVss,
     // The pinned key, which verifier 1.3 requires and every ballot is proved under.
     membership_vk_hash: membershipVkHash(),
     panel_id: panelId(panel),
@@ -209,14 +275,25 @@ export function runCeremony(
     l1_inclusion_bound: timing.inclusionBound,
     sequencing_window: 3600n,
     max_sequencer_drift: 1800n,
-    display_text_commitment: displayTextCommitment(text),
-  };
+  } as const;
+}
+
+/**
+ * The key ceremony over `stub`, whose stub hash is `hash`, with all but `absent` of
+ * `trustees` taking part, through the four rounds of docs/spec/ceremony.md.
+ */
+function keyCeremony(
+  stub: Pick<ElectionDefinition, "l2_chain_id" | "trustee_registry" | "election_id">,
+  hash: Uint8Array,
+  trustees: Trustees,
+  absent: number,
+): { readonly transcript: Uint8Array; readonly seats: readonly Trustee[] } {
   const params = {
     l2ChainId: stub.l2_chain_id,
     trusteeRegistry: stub.trustee_registry,
     electionId: stub.election_id,
-    stubHash: electionStubHash(stub),
-    panel,
+    stubHash: hash,
+    panel: trustees.panel,
     runId: crypto.getRandomValues(new Uint8Array(32)),
   };
   const present = trustees.seats.slice(0, trustees.seats.length - absent);
@@ -235,15 +312,106 @@ export function runCeremony(
     answers,
     reveals,
   });
+  return { transcript, seats: present };
+}
+
+/**
+ * Writes the stub of the election `l2` created as number `counter`, runs the
+ * key ceremony over it with all but `absent` of `trustees` taking part, and
+ * returns the definition that binds the transcript.
+ */
+export function runCeremony(
+  timing: Timing,
+  l2: L2Deployment,
+  trustees: Trustees,
+  text: DisplayText,
+  { counter, absent, electorate }: CeremonyOptions,
+): Ceremony<{ readonly version: 1; readonly value: ElectionDefinition }> {
+  const { panel } = trustees;
+  const stub: ElectionDefinition = {
+    profile: profile(PINNED),
+    ...stubFields(timing, l2, panel, counter),
+    election_type: 1,
+    option_count: 3,
+    min_selections: 0,
+    max_selections: 1,
+    electorate: [
+      {
+        tier: 0,
+        group_id: 1n,
+        root: electorate.root,
+        root_l2_block: 1n,
+        group_size: electorate.size,
+      },
+    ],
+    display_text_commitment: displayTextCommitment(text),
+  };
+  const { transcript, seats } = keyCeremony(stub, electionStubHash(stub), trustees, absent);
   const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
   const rule = electionDefinitionRule(definition);
   if (rule !== undefined) throw new Error(`the fixture's definition breaks ${rule}`);
-  return { panel, definition, transcript, seats: present };
+  return { panel, definition: { version: 1, value: definition }, transcript, seats };
+}
+
+export interface QuestionCeremonyOptions {
+  /** The election registry's counter of the election's creation. */
+  readonly counter: bigint;
+  /** The Tier 0 group's leaves, in tier-tree order. */
+  readonly leaves: readonly bigint[];
+  /** The receipt keys the anchor registered before the poll opens (verifier 2.9). */
+  readonly receiptKeys: readonly Uint8Array[];
+}
+
+/**
+ * `runCeremony` for the multi-question poll: a version-5 definition with
+ * `QUESTIONS`, its one Tier 0 group in one region and so one cell, whose
+ * count, members and root `deriveTierCells` gives from the group's leaves
+ * as the verifier recomputes them (2.4, 2.8), and `receiptKeys` in the stub,
+ * fixed before the ceremony (T-26). Every seat takes part.
+ */
+export function runQuestionCeremony(
+  timing: Timing,
+  l2: L2Deployment,
+  trustees: Trustees,
+  text: DisplayTextV2,
+  { counter, leaves, receiptKeys }: QuestionCeremonyOptions,
+): Ceremony<{ readonly version: 5; readonly value: ElectionDefinitionV5 }> {
+  const { panel } = trustees;
+  const groups = [{ group_id: 1n, region: 0 }];
+  const derived = deriveTierCells({ groups, regions: [0n] }, new Map([[1n, leaves]]), new Map());
+  const stub: ElectionDefinitionV5 = {
+    profile: profile(PINNED_V5),
+    ...stubFields(timing, l2, panel, counter),
+    questions: [...QUESTIONS],
+    electorate: [
+      {
+        tier: 0,
+        root_l2_block: 1n,
+        groups,
+        regions: derived.regions,
+        cells: derived.cells.map((c) => ({ root: c.root, members: c.members })),
+      },
+    ],
+    display_text_commitment: displayTextV2Commitment(text),
+    // In ascending order of their encodings (the rule `receipt-keys`).
+    receipt_keys: [...receiptKeys].sort((a, b) => compare(a, b)),
+  };
+  const { transcript, seats } = keyCeremony(stub, electionStubV5Hash(stub), trustees, 0);
+  const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
+  const failure = electionDefinitionV5Rule(definition);
+  if (failure !== undefined) throw new Error(`the fixture's definition breaks ${failure.rule}`);
+  return { panel, definition: { version: 5, value: definition }, transcript, seats };
+}
+
+function compare(a: Uint8Array, b: Uint8Array): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++)
+    if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
+  return a.length - b.length;
 }
 
 /** The board-entry version the definition pins. */
-export function boardEntryVersion(d: ElectionDefinition): BoardEntryVersion {
-  const v = pinnedVersion(d, RECORD_TYPES.boardEntry);
+export function boardEntryVersion(d: FixtureDefinition): BoardEntryVersion {
+  const v = pinnedVersion(d.value, RECORD_TYPES.boardEntry);
   if (v === undefined || !(v in BOARD_ENTRY.versions))
     throw new Error("the definition pins no board-entry version");
   return v as BoardEntryVersion;
@@ -251,13 +419,13 @@ export function boardEntryVersion(d: ElectionDefinition): BoardEntryVersion {
 
 /** One board entry carrying `payload` at `index`, in `segment`. */
 export function boardEntry(
-  d: ElectionDefinition,
+  d: FixtureDefinition,
   index: bigint,
   segment: number,
   payload: Uint8Array,
 ): Uint8Array {
   return encodeBoardEntry(
-    { election_id: d.election_id, index, segment, payload },
+    { election_id: d.value.election_id, index, segment, payload },
     boardEntryVersion(d),
   );
 }

@@ -61,14 +61,19 @@ const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
  */
 export type CopySource = "blocks.car" | "gateway";
 
-/** Why the honest run's report isn't what the reference election requires; empty if it is. */
+/**
+ * Why an honest election's report isn't what the reference election
+ * requires; empty if it is. `passes` are the rows it must pass beyond
+ * `REQUIRED_PASSES`.
+ */
 export function checkExpectations(
   run: Pick<VerifierRun, "report" | "exitCode">,
   source: CopySource,
   ballots: ExpectedBallots,
+  { name = "honest", passes = [] }: { name?: string; passes?: readonly string[] } = {},
 ): string[] {
   const { report } = run;
-  const problems: string[] = checkBallots("honest", run, ballots);
+  const problems: string[] = checkBallots(name, run, ballots);
   const byCid = report.board?.byCid;
   if (byCid === undefined) problems.push("the board copy must be read by CID");
   else {
@@ -88,7 +93,7 @@ export function checkExpectations(
       problems.push(`the copy must be read from ${source} alone: ${JSON.stringify(byCid)}`);
   }
   const rows = new Map(report.checks.map((c) => [c.id, c]));
-  for (const id of REQUIRED_PASSES) {
+  for (const id of [...REQUIRED_PASSES, ...passes]) {
     const row = rows.get(id);
     if (row?.status !== "pass")
       problems.push(`check ${id} must pass, got ${row?.status ?? "no row"} ${row?.code ?? ""}`);

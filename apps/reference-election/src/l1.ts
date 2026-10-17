@@ -134,6 +134,25 @@ export async function l1RefAt(
   return { number: BigInt(block.number), hash: unhex(block.hash) };
 }
 
+/**
+ * Registers the receipt key `key` (33 bytes, compressed) with the anchor from
+ * the authority, in the next block (docs/spec/contracts.md, Board anchor,
+ * Receipt keys): a key registered before a poll opens judges its receipts
+ * (verifier 2.9; T-26, T-69).
+ */
+export async function registerReceiptKey(
+  rpc: Rpc,
+  anchor: DeployedAnchor,
+  key: Uint8Array,
+): Promise<void> {
+  const selector = keccak_256(new TextEncoder().encode("registerReceiptKey(bytes)")).slice(0, 4);
+  await send(rpc, {
+    from: hex(anchor.authority),
+    to: hex(anchor.address),
+    data: hex(concatBytes(selector, word(32n), word(BigInt(key.length)), padded(key))),
+  });
+}
+
 /** Anchors `checkpoints` in one call from the authority, in a block at `timestamp`. */
 export async function anchorAt(
   rpc: Rpc,
@@ -206,7 +225,8 @@ export interface Evidence {
 
 /**
  * The finalized block's header and the anchor's account and storage proofs
- * at it, for `slots` (the lowest-segment word and each segment's word).
+ * at it, for `slots` (the lowest-segment word, each segment's word and
+ * each listed receipt key's).
  */
 export async function evidence(
   rpc: Rpc,

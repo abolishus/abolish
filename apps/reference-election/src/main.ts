@@ -7,7 +7,9 @@
 // listed as such in stages.json (stages.ts), which is written however the run
 // ends.
 //
-// Besides the honest election, the run holds controls the verifier must not
+// Beside the honest election runs a poll of three questions under
+// definition version 5 (P2-14), which must verify as the honest one does.
+// Besides these, the run holds controls the verifier must not
 // pass, each with the rows it must show, so the honest run's passes can't be
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
 // [[0006-trustees]]), which the trustee registry must refuse to record and the
@@ -28,6 +30,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   checkChallengeOpening,
+  checkChallengeOpeningV2,
   type Checkpoint,
   copyCheckpoints,
   decodeOpening,
@@ -35,20 +38,36 @@ import {
   encodeBallot,
   encodeCheckpoint,
   encodeDisplayText,
-  encodeElectionDefinition,
+  encodeDisplayTextV2,
+  identityKey,
   type Panel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { type Rpc, startAnvil } from "./anvil.ts";
 import {
   castingFor,
+  castQuestions,
   castVote,
+  challengeQuestions,
   challengeVote,
   electorateOf,
   newVoters,
   proverArtifacts,
+  questionCastingFor,
 } from "./casting.ts";
-import { boardEntry, displayText, newTrustees, PANEL, runCeremony, STUBS } from "./election.ts";
+import {
+  boardEntry,
+  type Ceremony,
+  definitionBytes,
+  displayText,
+  type FixtureDefinition,
+  newTrustees,
+  PANEL,
+  questionsDisplayText,
+  runCeremony,
+  runQuestionCeremony,
+  STUBS,
+} from "./election.ts";
 import { checkBallots, checkControl, checkExpectations } from "./expectations.ts";
 import { blocksCar, segmentObjects } from "./blocks.ts";
 import {
@@ -59,6 +78,7 @@ import {
   l1RefAt,
   loggedCheckpoints,
   mineAt,
+  registerReceiptKey,
 } from "./l1.ts";
 import {
   ceremonyRegistration,
@@ -68,7 +88,7 @@ import {
   registerDefinition,
 } from "./l2.ts";
 import { startNode } from "./node.ts";
-import { anchorSlots } from "./slots.ts";
+import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import { STAGES } from "./stages.ts";
 import { runVerifier } from "./verify.ts";
 
@@ -97,16 +117,46 @@ const ANCHOR_DELAY = 60n;
 const VOTERS = 4;
 /** What the verifier must find on the honest board: every ballot cast admitted, none rejected. */
 const HONEST_BALLOTS = { admitted: 4, rejected: [] } as const;
+/**
+ * The rows the multi-question poll must pass beyond the honest run's: its
+ * receipt key judged from the anchor's record, proven from L1 state (2.9),
+ * and its cells against the definition (7.4).
+ */
+const QUESTIONS_PASSES = ["2.9", "7.4"] as const;
 
 const hex = (b: Uint8Array) => bytesToHex(b);
 const log = (line: string) => process.stdout.write(`${line}\n`);
 
-interface Election {
+interface Election<D extends FixtureDefinition = FixtureDefinition> {
   readonly name: string;
-  readonly definition: ElectionDefinition;
+  readonly definition: D;
   readonly panel: Panel;
   readonly transcript: Uint8Array;
   readonly entries: Uint8Array[];
+}
+
+/** Writes the records anyone reads the election from beside its bundle: the definition, transcript and display text. */
+function writeRecords(name: string, c: Ceremony, text: Uint8Array): void {
+  const dir = join(OUT, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "definition.bin"), definitionBytes(c.definition));
+  writeFileSync(join(dir, "ceremony-transcript.bin"), c.transcript);
+  writeFileSync(join(dir, "display-text.bin"), text);
+}
+
+/** The election as its board starts: the ceremony's transcript, entry 0, in `segment`. */
+function firstEntry<D extends FixtureDefinition>(
+  name: string,
+  c: Ceremony<D>,
+  segment: number,
+): Election<D> {
+  return {
+    name,
+    definition: c.definition,
+    panel: c.panel,
+    transcript: c.transcript,
+    entries: [boardEntry(c.definition, 0n, segment, c.transcript)],
+  };
 }
 
 /**
@@ -130,7 +180,7 @@ function writeBundle(
   mkdirSync(dir, { recursive: true });
   const bundle = {
     format: "abolish-verifier-bundle/4",
-    definition: hex(encodeElectionDefinition(e.definition)),
+    definition: hex(definitionBytes(e.definition)),
     clock: {
       epoch: clock.epoch.toString(),
       period: PERIOD.toString(),
@@ -210,7 +260,9 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     closesAt: end(first) + PERIOD / 2n,
     inclusionBound: 600,
   };
-  const elections: Election[] = [];
+  // Elections of one question (definition version 1), then the poll of
+  // questions (version 5).
+  const singles: Election<{ readonly version: 1; readonly value: ElectionDefinition }>[] = [];
   for (const [name, absent] of [
     ["honest", 0],
     ["rule-7", 2],
@@ -228,29 +280,38 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
       await registerCeremony(l2, anvil, record, "BelowQuorum(uint256,uint8)");
       await registerDefinition(l2, anvil, c.definition, "CeremonyNotRecorded(bytes32,bytes32)");
     }
-    const dir = join(OUT, name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "definition.bin"), encodeElectionDefinition(c.definition));
-    writeFileSync(join(dir, "ceremony-transcript.bin"), c.transcript);
-    writeFileSync(join(dir, "display-text.bin"), encodeDisplayText(text));
+    writeRecords(name, c, encodeDisplayText(text));
     log(
-      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony with ${c.panel.keys.length - absent} seats, election 0x${hex(c.definition.election_id)}, ${absent === 0 ? "registered on L2" : "refused by both registries"}`,
+      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony with ${c.panel.keys.length - absent} seats, election 0x${hex(c.definition.value.election_id)}, ${absent === 0 ? "registered on L2" : "refused by both registries"}`,
     );
-    elections.push({
-      name,
-      definition: c.definition,
-      panel: c.panel,
-      transcript: c.transcript,
-      entries: [boardEntry(c.definition, 0n, first, c.transcript)],
-    });
+    singles.push(firstEntry(name, c, first));
   }
+  // The poll of questions (P2-14): its receipt key registered with the anchor
+  // before the poll opens, so 2.9 judges it from L1 (T-26, T-69), and listed
+  // in the stub; no seat signs receipts with it yet (P2-13, P1-13b).
+  const receiptKey = identityKey(crypto.getRandomValues(new Uint8Array(32)));
+  await registerReceiptKey(anvil, anchor, receiptKey);
+  const questionsText = questionsDisplayText();
+  const poll = runQuestionCeremony(timing, l2, trustees, questionsText, {
+    counter: await createElection(l2, anvil),
+    leaves: electorate.leaves,
+    receiptKeys: [receiptKey],
+  });
+  await registerCeremony(l2, anvil, ceremonyRegistration(l2, trustees, poll));
+  await registerDefinition(l2, anvil, poll.definition);
+  writeRecords("questions", poll, encodeDisplayTextV2(questionsText));
+  log(
+    `stage 1 (questions): ${poll.definition.value.questions.length} questions, 4-of-7 ceremony with 7 seats, election 0x${hex(poll.definition.value.election_id)}, registered on L2 under definition version 5`,
+  );
+  const questions = firstEntry("questions", poll, first);
+  const elections: Election[] = [...singles, questions];
 
   // Stage 7: each period's checkpoints anchored in one call, inside its
   // window. A segment with nothing appended in it, the seal's always,
   // repeats the board's state after the last one that has.
   const checkpointsAt = (segment: number) =>
     elections.map((e) => {
-      const copies = copyCheckpoints(e.definition.election_id, e.entries, [first, cast]);
+      const copies = copyCheckpoints(e.definition.value.election_id, e.entries, [first, cast]);
       const c = (segment >= cast ? copies.get(cast) : undefined) ?? copies.get(first);
       if (c === undefined) throw new Error(`no checkpoint for segment ${segment}`);
       return { ...c, segment };
@@ -264,13 +325,13 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     await l1RefAt(anvil, timing.opensAt + 240n),
   ] as const;
   const artifacts = proverArtifacts();
-  const [honest, , rejected] = elections;
+  const [honest, , rejected] = singles;
   if (honest === undefined || rejected === undefined) throw new Error("an election is missing");
   const board = (e: Election, payload: Uint8Array) =>
     e.entries.push(boardEntry(e.definition, BigInt(e.entries.length), cast, payload));
   {
     const casting = castingFor(
-      honest.definition,
+      honest.definition.value,
       honest.panel,
       honest.transcript,
       electorate,
@@ -279,7 +340,7 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     // The checker: the voter's second device, with a context of its own from
     // the same records (challenge.md, Client rules, the checker's).
     const checker = castingFor(
-      honest.definition,
+      honest.definition.value,
       honest.panel,
       honest.transcript,
       electorate,
@@ -315,7 +376,7 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     // block with the proof unchanged, so its M is another and its proof
     // fails (T-38, T-45).
     const casting = castingFor(
-      rejected.definition,
+      rejected.definition.value,
       rejected.panel,
       rejected.transcript,
       electorate,
@@ -330,6 +391,46 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
       encodeBallot({ ...ballot.record, l1_ref_number: refs[1].number, l1_ref_hash: refs[1].hash }),
     );
     log(`stage 4 (rejected-ballot): an honest ballot, then one whose proof is another ballot's`);
+  }
+  {
+    // The poll of questions, as the honest election: voter 0 challenges an
+    // attempt and checks its opening on a second context against the code
+    // shown, voters 0 to 2 answer, voter 1 answers again under the later
+    // block, and voter 3 never does. Voter 1 first leaves the first two
+    // questions blank, which their limits allow.
+    const { value } = questions.definition;
+    const pollCasting = () =>
+      questionCastingFor(
+        value,
+        questions.panel,
+        questions.transcript,
+        electorate.leaves,
+        artifacts,
+      );
+    const casting = pollCasting();
+    const checker = pollCasting();
+    const attempt = [0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0] as const;
+    const challenged = challengeQuestions(casting, attempt);
+    const opened = checkChallengeOpeningV2(checker.election, decodeOpening(challenged.opening, 2));
+    if (
+      !opened.ok ||
+      hex(opened.coreHash) !== hex(challenged.shown) ||
+      opened.votes.join() !== attempt.join() ||
+      !opened.withinRules
+    )
+      throw new Error("an honest challenge of the poll failed its check");
+    const [v0, v1, v2] = voters;
+    if (v0 === undefined || v1 === undefined || v2 === undefined) throw new Error("too few voters");
+    for (const [voter, votes, ref] of [
+      [v0, [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0], refs[0]],
+      [v1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], refs[0]],
+      [v2, [0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0], refs[0]],
+      [v1, [0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1], refs[1]],
+    ] as const)
+      board(questions, await castQuestions(casting, voter, votes, ref));
+    log(
+      `stage 4 (questions): ${questions.entries.length - 1} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote; one challenged attempt checked`,
+    );
   }
 
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);
@@ -359,8 +460,12 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     // Stage 9: the verifier, on each bundle alone, with the board rebuilt from
     // L1: the checkpoints from the anchor's logs, the copy by the CIDs they name.
     for (const e of elections) {
-      const id = e.definition.election_id;
-      const l1 = await evidence(anvil, anchor.address, anchorSlots(id, first, seal));
+      const id = e.definition.value.election_id;
+      const receiptKeys = e.definition.version === 5 ? e.definition.value.receipt_keys : [];
+      const l1 = await evidence(anvil, anchor.address, [
+        ...anchorSlots(id, first, seal),
+        ...receiptKeys.map(receiptKeySlot),
+      ]);
       if (l1.timestamp < after) throw new Error("the finalized block is before the anchors");
       const checkpoints = await loggedCheckpoints(anvil, anchor.address, id);
       const clock = { epoch, lastSegment: seal };
@@ -412,6 +517,17 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
               "3.2": { status: "unverifiable", code: "not-reached" },
               "4.1": { status: "unverifiable", code: "checkpoint-missing" },
               "4.2": { status: "unverifiable", code: "checkpoint-missing" },
+            }),
+          ),
+        );
+      } else if (e.name === "questions") {
+        // The poll of questions, from its block store: every ballot admitted
+        // under definition version 5, and its own rows passing.
+        failures.push(
+          ...verify(dir, (r) =>
+            checkExpectations(r, "blocks.car", HONEST_BALLOTS, {
+              name: "questions",
+              passes: QUESTIONS_PASSES,
             }),
           ),
         );

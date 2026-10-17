@@ -1,25 +1,33 @@
 import {
   checkBallot,
+  checkBallotV3,
   checkChallengeOpening,
+  checkChallengeOpeningV2,
   decodeBallot,
   decodeOpening,
+  identityKey,
   tierTreeRoot,
 } from "@abolishus/crypto";
 import { expect, test } from "vite-plus/test";
 import {
   castingFor,
+  castQuestions,
   castVote,
+  challengeQuestions,
   challengeVote,
   electorateOf,
   newVoters,
   proverArtifacts,
+  questionCastingFor,
 } from "../src/casting.ts";
 import {
   displayText,
   type L2Deployment,
   newTrustees,
   placeholder,
+  questionsDisplayText,
   runCeremony,
+  runQuestionCeremony,
 } from "../src/election.ts";
 
 const l2: L2Deployment = {
@@ -62,9 +70,9 @@ test(
       electorate,
     });
     const artifacts = proverArtifacts();
-    const casting = castingFor(c.definition, c.panel, c.transcript, electorate, artifacts);
+    const casting = castingFor(c.definition.value, c.panel, c.transcript, electorate, artifacts);
     // A verifier's context, built apart from the casting device's.
-    const other = castingFor(c.definition, c.panel, c.transcript, electorate, artifacts);
+    const other = castingFor(c.definition.value, c.panel, c.transcript, electorate, artifacts);
     const [voter] = voters;
     if (voter === undefined) throw new Error("no voter");
 
@@ -97,6 +105,94 @@ test("a voter outside the group is refused before any proving", { timeout: 60_00
     absent: 0,
     electorate,
   });
-  const casting = castingFor(c.definition, c.panel, c.transcript, electorate, proverArtifacts());
+  const casting = castingFor(
+    c.definition.value,
+    c.panel,
+    c.transcript,
+    electorate,
+    proverArtifacts(),
+  );
   await expect(castVote(casting, outsider, [1, 0, 0], ref)).rejects.toThrow("not-a-member");
 });
+
+test(
+  "a poll of questions: its definition is version 5 with one cell, a cast ballot passes admission under a context of its own, and a challenge opens to its answers",
+  { timeout: 120_000 },
+  async () => {
+    const voters = newVoters(3);
+    const { leaves } = electorateOf(voters);
+    const c = runQuestionCeremony(timing, l2, newTrustees(), questionsDisplayText(), {
+      counter: 0n,
+      leaves,
+      receiptKeys: [
+        identityKey(new Uint8Array(32).fill(2)),
+        identityKey(new Uint8Array(32).fill(1)),
+      ],
+    });
+    const d = c.definition.value;
+    expect(c.definition.version).toBe(5);
+    expect(d.questions.map((q) => [q.option_count, q.min_selections, q.max_selections])).toEqual([
+      [3, 0, 1],
+      [4, 0, 4],
+      [4, 2, 2],
+    ]);
+    // One region of three members, below the floor: one cell, the group's tree.
+    expect(d.electorate).toHaveLength(1);
+    expect(d.electorate[0]?.regions).toEqual([3n]);
+    expect(d.electorate[0]?.cells).toEqual([{ root: tierTreeRoot(leaves), members: 3n }]);
+    // Listed in ascending order of their encodings, as the rule requires.
+    const [k0, k1] = d.receipt_keys;
+    expect(Buffer.compare(k0 as Uint8Array, k1 as Uint8Array)).toBeLessThan(0);
+
+    const artifacts = proverArtifacts();
+    const casting = questionCastingFor(d, c.panel, c.transcript, leaves, artifacts);
+    const other = questionCastingFor(d, c.panel, c.transcript, leaves, artifacts);
+    const [voter] = voters;
+    if (voter === undefined) throw new Error("no voter");
+
+    const votes = [0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0] as const;
+    const bytes = await castQuestions(casting, voter, votes, ref);
+    const decoded = decodeBallot(bytes, 3);
+    const checked = checkBallotV3(other.election, decoded);
+    expect(checked.ok).toBe(true);
+    expect(decoded.cell).toBe(0);
+    expect(decoded.l1_ref_number).toBe(ref.number);
+    expect(
+      checkBallotV3(other.election, { ...decoded, l1_ref_hash: new Uint8Array(32).fill(8) }),
+    ).toMatchObject({ ok: false, code: "membership-proof" });
+
+    const challenge = challengeQuestions(casting, votes);
+    const opened = checkChallengeOpeningV2(other.election, decodeOpening(challenge.opening, 2));
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    expect(opened.coreHash).toEqual(challenge.shown);
+    expect(opened.votes).toEqual(votes.map(BigInt));
+    expect(opened.withinRules).toBe(true);
+  },
+);
+
+test(
+  "answers outside a question's limits are refused before anything is sealed",
+  { timeout: 60_000 },
+  () => {
+    const voters = newVoters(1);
+    const { leaves } = electorateOf(voters);
+    const c = runQuestionCeremony(timing, l2, newTrustees(), questionsDisplayText(), {
+      counter: 0n,
+      leaves,
+      receiptKeys: [identityKey(new Uint8Array(32).fill(1))],
+    });
+    const casting = questionCastingFor(
+      c.definition.value,
+      c.panel,
+      c.transcript,
+      leaves,
+      proverArtifacts(),
+    );
+    // Two picks under pick one, then one pick under pick exactly two.
+    expect(() => challengeQuestions(casting, [1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0])).toThrow();
+    expect(() => challengeQuestions(casting, [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0])).toThrow();
+    // Too few answers for the poll's 11 options.
+    expect(() => challengeQuestions(casting, [1, 0, 0])).toThrow();
+  },
+);

@@ -9,10 +9,6 @@
 import { readFileSync } from "node:fs";
 import {
   checkCeremonyTranscript,
-  type ElectionDefinition,
-  electionDefinitionHash,
-  electionStubHash,
-  encodeElectionDefinition,
   keySetEntry,
   keySetHash,
   type Panel,
@@ -22,7 +18,16 @@ import { p256 } from "@noble/curves/nist.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { type Rpc, RpcError } from "./anvil.ts";
-import { type Ceremony, type L2Deployment, placeholder, type Trustees } from "./election.ts";
+import {
+  type Ceremony,
+  definitionBytes,
+  definitionHash,
+  type FixtureDefinition,
+  type L2Deployment,
+  placeholder,
+  stubHash,
+  type Trustees,
+} from "./election.ts";
 import { padded, send, word } from "./l1.ts";
 import { encodeRlp, uintBytes } from "./rlp.ts";
 
@@ -225,14 +230,14 @@ export function ceremonyRegistration(
   trustees: Trustees,
   c: Ceremony,
 ): Uint8Array {
-  const d = c.definition;
-  const stubHash = electionStubHash(d);
+  const d = c.definition.value;
+  const stub = stubHash(c.definition);
   const check = checkCeremonyTranscript(
     {
       l2ChainId: d.l2_chain_id,
       trusteeRegistry: d.trustee_registry,
       electionId: d.election_id,
-      stubHash,
+      stubHash: stub,
       panel: trustees.panel,
     },
     c.transcript,
@@ -249,7 +254,7 @@ export function ceremonyRegistration(
         l2ChainId: d.l2_chain_id,
         trusteeRegistry: l2.trusteeRegistry,
         index: t.index,
-        stubHash,
+        stubHash: stub,
         ceremonyTranscriptHash: d.ceremony_transcript_hash,
         keySetHash: setHash,
       }),
@@ -257,7 +262,7 @@ export function ceremonyRegistration(
   );
   return concatBytes(
     d.panel_id,
-    stubHash,
+    stub,
     d.ceremony_transcript_hash,
     Uint8Array.of(entries.length),
     ...entries.map((e) =>
@@ -318,36 +323,37 @@ export async function registerCeremony(
 }
 
 /**
- * Registers `d` with the election registry, or expects `refusal`; a
+ * Registers `definition` with the election registry, or expects `refusal`; a
  * registration then reads back the definition's hash and the ceremony the
  * trustee registry recorded for it.
  */
 export async function registerDefinition(
   l2: L2,
   l1: Rpc,
-  d: ElectionDefinition,
+  definition: FixtureDefinition,
   refusal?: string,
 ): Promise<void> {
   await transact(
     l2,
     l1,
     l2.electionRegistry,
-    bytesCalldata("registerDefinition(bytes)", encodeElectionDefinition(d)),
+    bytesCalldata("registerDefinition(bytes)", definitionBytes(definition)),
     refusal,
   );
+  const d = definition.value;
   const view = (data: Uint8Array, to = l2.electionRegistry) =>
     l2.rpc.call<string>("eth_call", [{ to: hex(to), data: hex(data) }, "latest"]);
   const registered = unhex(
     await view(concatBytes(selector("definitionHashOf(bytes32)"), d.election_id)),
   );
-  const want = refusal === undefined ? electionDefinitionHash(d) : new Uint8Array(32);
+  const want = refusal === undefined ? definitionHash(definition) : new Uint8Array(32);
   if (!equalBytes(registered, want))
     throw new Error(`the election registry holds definition hash ${hex(registered)}`);
   const recorded = BigInt(
     await view(
       concatBytes(
         selector("ceremonyRecorded(bytes32,bytes32,bytes32,uint8,uint8)"),
-        electionStubHash(d),
+        stubHash(definition),
         d.ceremony_transcript_hash,
         d.panel_id,
         word(BigInt(d.threshold)),

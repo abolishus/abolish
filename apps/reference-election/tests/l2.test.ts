@@ -74,7 +74,7 @@ test(
       electorate: { root: 1n, size: 1n },
     });
     const record = ceremonyRegistration(l2, trustees, c);
-    const d = c.definition;
+    const d = c.definition.value;
     const stubHash = electionStubHash(d);
     const present = PANEL.size - absent;
 

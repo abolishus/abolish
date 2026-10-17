@@ -1,6 +1,7 @@
 // The board anchor's storage words the verifier proves for one election
 // (docs/spec/contracts.md, Board anchor, Verification): the lowest anchored
-// segment plus one, and each segment's checkpoint hash, under the contract's
+// segment plus one, each segment's checkpoint hash and each listed receipt
+// key's record, under the contract's
 // ERC-7201 namespace `abolish.board-anchor`. `eth_getProof` takes the slots
 // themselves; the trie is keyed by their Keccak-256.
 
@@ -27,4 +28,16 @@ export function anchorSlots(electionId: Uint8Array, first: number, last: number)
   const slots = [lowestSegmentSlot(electionId)];
   for (let s = first; s <= last; s++) slots.push(checkpointSlot(electionId, s));
   return slots;
+}
+
+/**
+ * Slot of `receiptKeys[prefix][x]` (the struct's fifth member) for a
+ * compressed receipt key `prefix ‖ x`.
+ */
+export function receiptKeySlot(key: Uint8Array): Uint8Array {
+  if (key.length !== 33) throw new RangeError("receiptKeySlot: a receipt key is 33 bytes");
+  const inner = keccak_256(
+    concatBytes(word(BigInt(key[0] as number)), word(ANCHOR_NAMESPACE + 4n)),
+  );
+  return keccak_256(concatBytes(key.subarray(1), inner));
 }

@@ -61,19 +61,24 @@ const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
  */
 export type CopySource = "blocks.car" | "gateway";
 
-/** Why the honest run's report isn't what the reference election requires; empty if it is. */
+/**
+ * Why an honest election's report isn't what the reference election
+ * requires; empty if it is. `passes` are the rows it must pass beyond
+ * `REQUIRED_PASSES`.
+ */
 export function checkExpectations(
   run: Pick<VerifierRun, "report" | "exitCode">,
   source: CopySource,
   ballots: ExpectedBallots,
+  { name = "honest", passes = [] }: { name?: string; passes?: readonly string[] } = {},
 ): string[] {
   const { report } = run;
-  const problems: string[] = checkBallots("honest", run, ballots);
+  const problems: string[] = checkBallots(name, run, ballots);
   const byCid = report.board?.byCid;
-  if (byCid === undefined) problems.push("the board copy must be read by CID");
+  if (byCid === undefined) problems.push(`${name}: the board copy must be read by CID`);
   else {
     if (byCid.stopped !== undefined)
-      problems.push(`the copy by CID stopped short: ${JSON.stringify(byCid.stopped)}`);
+      problems.push(`${name}: the copy by CID stopped short: ${JSON.stringify(byCid.stopped)}`);
     const read =
       source === "blocks.car"
         ? byCid.storeBlocks !== undefined &&
@@ -85,26 +90,34 @@ export function checkExpectations(
           byCid.gateways.blocks > 0 &&
           byCid.gateways.blocks === byCid.gateways.requests;
     if (!read)
-      problems.push(`the copy must be read from ${source} alone: ${JSON.stringify(byCid)}`);
+      problems.push(
+        `${name}: the copy must be read from ${source} alone: ${JSON.stringify(byCid)}`,
+      );
   }
   const rows = new Map(report.checks.map((c) => [c.id, c]));
-  for (const id of REQUIRED_PASSES) {
+  for (const id of [...REQUIRED_PASSES, ...passes]) {
     const row = rows.get(id);
     if (row?.status !== "pass")
-      problems.push(`check ${id} must pass, got ${row?.status ?? "no row"} ${row?.code ?? ""}`);
+      problems.push(
+        `${name}: check ${id} must pass, got ${row?.status ?? "no row"} ${row?.code ?? ""}`,
+      );
   }
   for (const row of report.checks)
-    if (row.status === "fail") problems.push(`check ${row.id} failed: ${row.code ?? ""}`);
+    if (row.status === "fail") problems.push(`${name}: check ${row.id} failed: ${row.code ?? ""}`);
   // Every input is a local file today, so nothing can verify the election
   // yet (docs/spec/verifier.md, Bundle); a verdict of verified here would
   // mean the verifier stopped counting its inputs.
   if (report.verdict !== "unverifiable")
-    problems.push(`the verdict must be unverifiable from local inputs, got ${report.verdict}`);
+    problems.push(
+      `${name}: the verdict must be unverifiable from local inputs, got ${report.verdict}`,
+    );
   if (report.verdictAgainstInputs === "failed")
-    problems.push("the checks failed the election against its inputs");
+    problems.push(`${name}: the checks failed the election against its inputs`);
   const exit = EXIT[report.verdict as keyof typeof EXIT];
   if (run.exitCode !== exit)
-    problems.push(`the verifier exited ${run.exitCode}, not ${exit} for ${report.verdict}`);
+    problems.push(
+      `${name}: the verifier exited ${run.exitCode}, not ${exit} for ${report.verdict}`,
+    );
   return problems;
 }
 

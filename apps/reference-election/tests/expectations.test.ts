@@ -40,7 +40,7 @@ test("the copy must be read by CID, whole, from the source the run gave", () => 
   const withBoard = (board: object) => ({ ...honest, report: { ...honest.report, board } });
   // board.bin: no byCid in the report.
   expect(checkExpectations(withBoard({}), "blocks.car", none)).toEqual([
-    "the board copy must be read by CID",
+    "honest: the board copy must be read by CID",
   ]);
   expect(checkExpectations(honest, "gateway", none)).toHaveLength(1);
   expect(checkExpectations(fromGateway, "blocks.car", none)).toHaveLength(1);
@@ -65,7 +65,7 @@ test("the copy must be read by CID, whole, from the source the run gave", () => 
       "blocks.car",
       none,
     ),
-  ).toEqual(['the copy by CID stopped short: {"checkpoint":0,"reason":"unavailable"}']);
+  ).toEqual(['honest: the copy by CID stopped short: {"checkpoint":0,"reason":"unavailable"}']);
 });
 
 test("every required row must pass", () => {
@@ -82,7 +82,7 @@ test("every required row must pass", () => {
         "blocks.car",
         none,
       ),
-    ).toEqual([`check ${id} must pass, got unverifiable x`]);
+    ).toEqual([`honest: check ${id} must pass, got unverifiable x`]);
   expect(
     checkExpectations({ ...honest, report: { ...honest.report, checks: [] } }, "blocks.car", none),
   ).toHaveLength(REQUIRED_PASSES.length);
@@ -98,7 +98,7 @@ test("any failed row, a failed verdict or a verified one stops the run", () => {
       "blocks.car",
       none,
     ),
-  ).toContain("check 2.1 failed: x");
+  ).toContain("honest: check 2.1 failed: x");
   expect(
     checkExpectations(
       {
@@ -108,16 +108,16 @@ test("any failed row, a failed verdict or a verified one stops the run", () => {
       "blocks.car",
       none,
     ),
-  ).toContain("the checks failed the election against its inputs");
+  ).toContain("honest: the checks failed the election against its inputs");
   expect(
     checkExpectations(
       { exitCode: 0, report: { ...honest.report, verdict: "verified" } },
       "blocks.car",
       none,
     ),
-  ).toEqual(["the verdict must be unverifiable from local inputs, got verified"]);
+  ).toEqual(["honest: the verdict must be unverifiable from local inputs, got verified"]);
   expect(checkExpectations({ ...honest, exitCode: 0 }, "blocks.car", none)).toEqual([
-    "the verifier exited 0, not 21 for unverifiable",
+    "honest: the verifier exited 0, not 21 for unverifiable",
   ]);
 });
 
@@ -185,4 +185,22 @@ test("the transcript lists the nine stages of AGENTS.md once each, in order", ()
   expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   // A stage not yet covered names the items that bring it.
   for (const s of STAGES) if (s.coverage !== "covered") expect(s.note).toMatch(/P\d-\d+/);
+});
+
+test("an election's name and its own rows reach the report's problems", () => {
+  const options = { name: "questions", passes: ["2.9"] };
+  const withRow = (status: ReportRow["status"]) => ({
+    ...honest,
+    report: {
+      ...honest.report,
+      checks: [...honest.report.checks, { id: "2.9", status, code: "x" }],
+    },
+  });
+  expect(checkExpectations(withRow("pass"), "blocks.car", none, options)).toEqual([]);
+  expect(checkExpectations(withRow("unverifiable"), "blocks.car", none, options)).toEqual([
+    "questions: check 2.9 must pass, got unverifiable x",
+  ]);
+  expect(checkExpectations(honest, "blocks.car", none, options)).toEqual([
+    "questions: check 2.9 must pass, got no row ",
+  ]);
 });

@@ -78,6 +78,9 @@ describe("pollDraftProblem", () => {
 
   test("refuses each rule in order, naming the first failing question", () => {
     expect(rule(draft({ title: "\ud800" }))).toEqual({ rule: "text" });
+    expect(rule(draft({ questions: [{ ...question(), description: "a\u0000b" }] }))).toEqual({
+      rule: "text",
+    });
     // A pair is one code point, and fine.
     expect(rule(draft({ title: "Lunch 🍕" }))).toBeUndefined();
     expect(rule(draft({ questions: [] }))).toEqual({ rule: "questions" });
@@ -327,6 +330,39 @@ describe("account_polls", () => {
       "not-editable",
     );
     expect(calls).toHaveLength(1);
+  });
+
+  test("an edit during the challenge is judged again before the poll is submitted", async () => {
+    const author = await newAccount();
+    const id = await createPollDraft(app, author, draft(), NOW);
+    const turnstile: Turnstile = {
+      verify: async () => {
+        // Saving doesn't judge the closing time; only submission does.
+        await updatePollDraft(app, author, id, draft({ closesAt: 0n }), NOW);
+        return "passed";
+      },
+    };
+    await expect(
+      submitPollDraft(app, author, id, { turnstile, token: "t", now: NOW }),
+    ).rejects.toMatchObject({ code: "refused", problem: { rule: "closes-at" } });
+    expect(await readAccountPoll(app, author, id)).toMatchObject({ state: "drafted" });
+  });
+
+  test("a stored draft holds the draft's fields and nothing else", async () => {
+    // The no-join test reads column names only, so it can't see inside `draft` (T-10).
+    const author = await newAccount();
+    const id = await createPollDraft(app, author, draft(), NOW);
+    const [row] = await db.admin`
+      SELECT array_agg(k ORDER BY k) AS keys FROM account_polls, jsonb_object_keys(draft) AS k
+      WHERE id = ${id}`;
+    expect(row!["keys"]).toEqual([
+      "closesAt",
+      "description",
+      "language",
+      "questions",
+      "tiers",
+      "title",
+    ]);
   });
 
   test("a refused or unavailable challenge leaves the draft as it was", async () => {

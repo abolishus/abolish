@@ -114,7 +114,7 @@ const IN_SETUP: readonly PollState[] = ["submitted", "created", "rooted", "cerem
 
 /**
  * Why a draft is refused, in checking order: `text` (a string that isn't
- * well-formed Unicode), the question rules of definition version 5
+ * well-formed Unicode, or holds U+0000), the question rules of definition version 5
  * (`questions`, `option-count`, `selections`, the last two naming the first
  * failing question), `too-long` (a field over its codec bound, or the whole
  * text over `MAX_DRAFT_TEXT`), display text version 2's shape rules
@@ -139,8 +139,11 @@ export interface PollDraftProblem {
 
 const U64_MAX = (1n << 64n) - 1n;
 
-/** With the `u` flag, a surrogate pair is one code point, so this matches only a lone half. */
-const LONE_SURROGATE = /\p{Cs}/u;
+/**
+ * A lone surrogate half (with the `u` flag a pair is one code point, so only
+ * a lone half matches), or U+0000, which a jsonb column can't hold.
+ */
+const UNSTORABLE = /[\p{Cs}\0]/u;
 
 const strings = (d: PollDraft) => [
   d.language,
@@ -161,8 +164,9 @@ const strings = (d: PollDraft) => [
  */
 export function pollDraftProblem(draft: PollDraft, now?: bigint): PollDraftProblem | undefined {
   // A lone surrogate would be encoded as U+FFFD, so the text registered
-  // would differ from the draft the author saw (T-34).
-  if (strings(draft).some((s) => LONE_SURROGATE.test(s))) return { rule: "text" };
+  // would differ from the draft the author saw (T-34); U+0000 couldn't be
+  // stored at all.
+  if (strings(draft).some((s) => UNSTORABLE.test(s))) return { rule: "text" };
   // The codec bounds the list; past it, the rule's own message is clearer.
   if (draft.questions.length > DISPLAY_TEXT_V2_LIMITS.maxQuestions) return { rule: "questions" };
   const questions = draft.questions.map((q) => ({

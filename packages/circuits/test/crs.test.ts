@@ -56,7 +56,7 @@ describe("crs/", () => {
     // equalling the file ties the vendored powers to bb's x, a second source
     // beside the S3 read: install-toolchain.sh pins bb's binary by sha256.
     const bb = execFileSync("sh", ["-c", "command -v bb"], { encoding: "utf8" }).trim();
-    expect(readFileSync(bb).includes(g2Bytes)).toBe(true);
+    expect(readFileSync(bb).includes(Buffer.from(g2Bytes))).toBe(true);
   });
 
   test("is [x^i]_1 from the generator, for the x of [x]_2", () => {

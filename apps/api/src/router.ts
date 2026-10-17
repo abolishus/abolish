@@ -33,8 +33,8 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, the worker's ballot queue and Tier 0
-// registration, and nothing of the request: no handler can see a request's
+// The context holds the database, the worker's ballot queue, Tier 0
+// registration and the clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
 
@@ -45,6 +45,8 @@ export interface Context {
   readonly sql: Sql;
   /** Absent when this server has no ballot queue: it then boards no ballot. */
   readonly ballots?: BallotSubmitter | undefined;
+  /** UNIX time in seconds. */
+  readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
   readonly tier0?: Tier0Registrations | undefined;
 }

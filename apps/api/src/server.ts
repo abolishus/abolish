@@ -204,6 +204,8 @@ export interface ApiOptions {
   readonly log: Log;
   /** The worker's ballot queue; without it the server boards no ballot (`ELECTION_NOT_OPEN`). */
   readonly ballots?: BallotSubmitter;
+  /** UNIX time in seconds; the system clock by default. Injected so tests can set it. */
+  readonly now?: () => bigint;
   /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
   readonly tier0?: Tier0Registrations;
   /**
@@ -247,6 +249,7 @@ export function createApiServer({
   sql,
   log,
   ballots,
+  now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
@@ -326,7 +329,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, tier0 },
+          context: { sql, ballots, now, tier0 },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

@@ -71,7 +71,7 @@ export type GroupRegistryEvent =
       readonly record: Uint8Array;
     }
   | {
-      /** A self-paid Tier 0 group, as `SelfPaidGroupCreated` logs it (contract-event version 7). */
+      /** A self-paid Tier 0 group, as `SelfPaidGroupCreated` logs it (contract-event versions 7 and 8). */
       readonly kind: "self-paid-group-created";
       readonly block: bigint;
       readonly groupId: bigint;
@@ -85,7 +85,7 @@ export type GroupRegistryEvent =
       readonly record: Uint8Array;
     }
   | {
-      /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event versions 6 and 7). */
+      /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event versions 6 to 8). */
       readonly kind: "tier1-addition";
       readonly block: bigint;
       readonly record: Uint8Array;

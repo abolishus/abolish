@@ -87,8 +87,8 @@ def det(label):
 
 
 def pins_for(own, ballot=2, opening=2):
-    """A profile under definition version `own`: board-entry version 5, which carries every record here and the close statement, contract-event version 7, which every profile needs (close.md, Version), and the given ballot and spoiled-opening pins."""
-    own_pins = {1: own, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 7}
+    """A profile under definition version `own`: board-entry version 5, which carries every record here and the close statement, contract-event version 8, which every profile needs (close.md, Version), and the given ballot and spoiled-opening pins."""
+    own_pins = {1: own, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 8}
     return {"protocol_major": 1, "pins": [(t, own_pins.get(t, 1)) for t in range(1, 10)]}
 
 
@@ -453,9 +453,9 @@ def assemble(constants, proofs_path, out_dir):
                 code, option = b2.admission(e, bnd["registered"], b, verdict)
                 # Every ballot here is a board-path one in segment 0, and no
                 # contract-event record carries one (the profiles pin
-                # contract-event version 7, which every profile needs:
+                # contract-event version 8, which every profile needs:
                 # docs/spec/close.md, Window and Version).
-                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 7
+                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 8
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})

@@ -19,7 +19,7 @@ const full = {
   REGISTRY_SYNC_TRUSTEE_REGISTRY: address(0x11),
   REGISTRY_SYNC_GROUP_REGISTRY: address(0x12),
   REGISTRY_SYNC_BOARD: address(0x13),
-  REGISTRY_SYNC_EVENT_VERSION: "7",
+  REGISTRY_SYNC_EVENT_VERSION: "8",
 };
 
 const refusal = (env: Record<string, string>) => {
@@ -50,7 +50,7 @@ describe("the registry sync's configuration", () => {
       trusteeRegistry: "0x0000000000000000000000000000000000000011",
       groupRegistry: "0x0000000000000000000000000000000000000012",
       board: "0x0000000000000000000000000000000000000013",
-      eventVersion: 7,
+      eventVersion: 8,
     });
   });
 
@@ -75,7 +75,7 @@ describe("the registry sync's configuration", () => {
       [{ REGISTRY_SYNC_L1_CHAIN_ID: "01" }, "REGISTRY_SYNC_L1_CHAIN_ID"],
       [{ REGISTRY_SYNC_PORTAL: "0x1234" }, "REGISTRY_SYNC_PORTAL"],
       [{ REGISTRY_SYNC_BOARD: "0x1234" }, "REGISTRY_SYNC_BOARD"],
-      [{ REGISTRY_SYNC_EVENT_VERSION: "8" }, "REGISTRY_SYNC_EVENT_VERSION"],
+      [{ REGISTRY_SYNC_EVENT_VERSION: "9" }, "REGISTRY_SYNC_EVENT_VERSION"],
     ];
     for (const [change, name] of cases) {
       const message = refusal({ ...full, ...change });

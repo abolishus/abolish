@@ -108,7 +108,7 @@ const shape: ElectionDefinitionV5 = {
         [RECORD_TYPES.ceremonyTranscript, 1],
         [RECORD_TYPES.tallyOpening, 1],
         [RECORD_TYPES.boardEntry, 5],
-        [RECORD_TYPES.contractEvent, 7],
+        [RECORD_TYPES.contractEvent, 8],
         [RECORD_TYPES.displayText, 2],
       ] as const
     ).map(([record_type, version]) => ({ record_type, version })),

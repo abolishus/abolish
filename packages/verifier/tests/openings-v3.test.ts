@@ -135,6 +135,16 @@ describe("each opening is judged from its own entry", () => {
   const mixed = byId("mixed");
   const entries = entriesOf(mixed);
   const whole = new Map((run(mixed).openings ?? []).map((o) => [o.entry, o] as const));
+  // Openings are sorted by their bytes within a segment (board.md,
+  // Spoiled-ballot openings), so their entries move with the definition
+  // hash: the first honest one, and the one re-using the segment-0 ballot's
+  // commitment (entry 1).
+  const honestAt = [...whole.values()].find(
+    (o) => o.code === undefined && o.breaks.length === 0 && o.voteOutside === undefined,
+  )?.entry as number;
+  const castAt = [...whole.values()].find((o) =>
+    o.breaks.some((b) => b.code === "opening-cast" && b.ballot === 1),
+  )?.entry as number;
 
   test("any subset of the copy gives every kept opening the checks, tracking code, vote and earliness it has in the whole copy", () => {
     fc.assert(
@@ -160,14 +170,13 @@ describe("each opening is judged from its own entry", () => {
   }, 120_000);
 
   test("a cast ballot dropped from the copy no longer makes its opening cast", () => {
-    // Entry 1 is the segment-0 ballot, entry 6 the opening re-using its commitment.
-    expect(whole.get(6)?.breaks).toEqual([{ code: "opening-cast", ballot: 1 }]);
-    const r = run(mixed, join([0, 6].map((i) => entries[i] as Uint8Array)));
+    expect(whole.get(castAt)?.breaks).toEqual([{ code: "opening-cast", ballot: 1 }]);
+    const r = run(mixed, join([0, castAt].map((i) => entries[i] as Uint8Array)));
     expect(r.openings?.[0]?.breaks).toEqual([]);
   });
 
   test("any change to a passing opening's record but its cell makes it fail", () => {
-    const at = 7;
+    const at = honestAt;
     const opening = entries[at] as Uint8Array;
     expect(whole.get(at)).toMatchObject({ breaks: [] });
     expect(whole.get(at)?.code).toBeUndefined();
@@ -191,7 +200,7 @@ describe("each opening is judged from its own entry", () => {
   }, 120_000);
 
   test("another cell makes the opening one of another core, or fails opening-cell", () => {
-    const at = 7;
+    const at = honestAt;
     const opening = entries[at] as Uint8Array;
     const own = whole.get(at)?.coreHash;
     expect(own).toBeDefined();

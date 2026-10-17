@@ -532,7 +532,7 @@ describe("delivery decides the counted set, per panel and seat", () => {
   });
 });
 
-describe("contract-path records under contract-event version 7, once 4.4 passes", () => {
+describe("contract-path records under contract-event version 8, once 4.4 passes", () => {
   const T_D = d.closes_at + BigInt(d.l1_inclusion_bound) + BigInt(PARAMETERS.DELIVERY_WINDOW);
   const contracts = {
     electionRegistry: d.election_registry,
@@ -541,7 +541,7 @@ describe("contract-path records under contract-event version 7, once 4.4 passes"
     board: d.board,
   };
   const topic0 = (name: string) => {
-    const signature = CONTRACT_EVENT_SIGNATURES[7].board.find((x) => x.startsWith(`${name}(`));
+    const signature = CONTRACT_EVENT_SIGNATURES[8].board.find((x) => x.startsWith(`${name}(`));
     if (signature === undefined) throw new Error(`no board event ${name}`);
     return keccak_256(text(signature));
   };
@@ -565,9 +565,9 @@ describe("contract-path records under contract-event version 7, once 4.4 passes"
         topics: [topic0(name), ...topics],
         data: abiBytes(record),
       },
-      7,
+      8,
     );
-    const checked = checkContractEvent(decodeContractEvent(payload, 7), contracts, 7);
+    const checked = checkContractEvent(decodeContractEvent(payload, 8), contracts, 8);
     if (!checked.ok || checked.event.event !== name) throw new Error(`fixture: ${name} fails`);
     return payload;
   };

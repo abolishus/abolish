@@ -205,7 +205,7 @@ beforeAll(async () => {
     board: stand(1),
     trusteeRegistry,
     groupRegistry: stand(3),
-    eventVersion: 7,
+    eventVersion: 8,
   };
   config = {
     panel: { threshold: 3, keys: seats.map((s) => s.encoded) },
@@ -256,7 +256,7 @@ describe("the startup check", () => {
       [{ trusteeRegistry: stand(9) }, "another trustee registry"],
       [{ groupRegistry: stand(9) }, "another group registry"],
       [{ l1ChainId: 1n }, "another L1"],
-      [{ eventVersion: 6 }, "another contract-event version"],
+      [{ eventVersion: 7 }, "another contract-event version"],
       // Code that isn't a registry, and no code at all.
       [{ electionRegistry: getAddress(L1_BLOCK) }, "isn't an election registry"],
       [{ electionRegistry: deployer }, "isn't an election registry"],

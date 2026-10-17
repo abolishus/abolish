@@ -173,7 +173,7 @@ describe("storeDefinition", () => {
 
   test("refuses the published vectors, whose profiles 2.3 fails, with nothing stored", async () => {
     // No well-formed version-1 vector pins board-entry version 5 and
-    // contract-event version 7, so none has close statements and the full
+    // contract-event version 8, so none has close statements and the full
     // event archive on its board (verifier 2.3; T-35, T-50); the maximal
     // one's pins are versions this release doesn't read.
     const good = vectors.filter((v) => v.hash !== undefined && v.illFormed === undefined);
@@ -194,7 +194,7 @@ describe("storeDefinition", () => {
   });
 
   test("refuses a profile 2.3 fails or can't read, naming the rule", async () => {
-    // Version 1's profile is board-entry 5, contract-event 7, ballot,
+    // Version 1's profile is board-entry 5, contract-event 8, ballot,
     // spoiled-ballot opening, tally-opening and display-text 1 (verifier 2.3).
     const cases: [number, number, string][] = [
       [RECORD_TYPES.boardEntry, 1, "profile-combination"],
@@ -202,7 +202,7 @@ describe("storeDefinition", () => {
       [RECORD_TYPES.boardEntry, 6, "profile-combination"],
       [RECORD_TYPES.boardEntry, 7, "profile-combination"],
       [RECORD_TYPES.boardEntry, 9, "unsupported-version"],
-      [RECORD_TYPES.contractEvent, 6, "profile-combination"],
+      [RECORD_TYPES.contractEvent, 7, "profile-combination"],
       [RECORD_TYPES.contractEvent, 9, "unsupported-version"],
       [RECORD_TYPES.ballot, 2, "profile-combination"],
       [RECORD_TYPES.spoiledBallotOpening, 2, "profile-combination"],

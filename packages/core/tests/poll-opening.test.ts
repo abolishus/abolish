@@ -244,7 +244,10 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => db?.close());
 
-describe("a registered poll", () => {
+// Each test runs a whole key ceremony (five rounds by three seats) before it
+// opens anything: about 1 to 2.5 s here, past the default 5 s on a loaded CI
+// runner, and a timed-out test's seats then run into the next test's.
+describe("a registered poll", { timeout: 60_000 }, () => {
   test("opens once synced: the transcript is entry 0 in the current segment, admission takes it, and its text is served", async () => {
     const r = await registered(false);
     // The registry sync hasn't recorded it: nothing moves or is written.

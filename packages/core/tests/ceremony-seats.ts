@@ -25,8 +25,9 @@ import {
 } from "../src/index.ts";
 
 // An honest seat of the default panel for the coordinator's tests (P2-22
-// part 4c) and the registration step's (part 5a), built from crypto's own
-// round functions as apps/trustee-node's seat calls them.
+// part 4c) and the registration step's (part 5a, and the worker's against a
+// real registry in part 5b), built from crypto's own round functions as
+// apps/trustee-node's seat calls them.
 
 const FIELDS = ["keys", "challenges", "answers", "reveals"] as const;
 const EMPTY = { keys: [], challenges: [], answers: [], reveals: [] };

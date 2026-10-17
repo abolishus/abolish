@@ -335,9 +335,10 @@ if (registryConfig !== undefined) {
     };
 }
 
-// The creation step (ADR 0032, P2-22 parts 3a and 3b-1), only when
+// The creation step (ADR 0032, P2-22 parts 3a, 3b-1 and 5b), only when
 // configured, and only once the L2 node is on the configured chain with a
-// registry our definitions can name, and the L1 node on its chain with the
+// registry our definitions can name, whose trustee registry pins the
+// default panel, and the L1 node on its chain with the
 // anchor whose clock the per-slot check reads by. The URLs can carry a
 // provider's API key, which viem's errors quote, so a failure here is
 // reported by step only.
@@ -347,13 +348,15 @@ if (pollCreationConfig !== undefined) {
   const client = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
   const l1 = createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) });
   let clock;
+  let trusteeRegistry;
   try {
-    await checkPollCreationDeployment(client, {
+    ({ trusteeRegistry } = await checkPollCreationDeployment(client, {
       chainId: c.chainId,
       registry: c.registry,
       l1ChainId: c.l1ChainId,
       anchor: c.anchor,
-    });
+      panel: c.panel,
+    }));
   } catch (e) {
     if (e instanceof BaseError) throw new Error("the creation step couldn't reach the chain");
     throw e;
@@ -369,10 +372,12 @@ if (pollCreationConfig !== undefined) {
       client,
       chainId: c.chainId,
       registry: c.registry,
+      trusteeRegistry,
       key: c.key,
     }),
     dailyCeiling: c.dailyCeiling,
     anchors: new ViemCreationAnchors({ client: l1, anchor: c.anchor, clock }),
+    panel: c.panel,
   };
 }
 

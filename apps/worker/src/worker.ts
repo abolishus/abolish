@@ -10,9 +10,11 @@ import type {
   BallotAdmissions,
   CreationAnchors,
   PollCreationChain,
+  PollRegistrationChain,
   PollStubDeployment,
   Tier0Batches,
 } from "@abolishus/core";
+import type { Panel } from "@abolishus/crypto";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
@@ -106,11 +108,16 @@ export interface WorkerOptions {
    * creates polls.
    */
   readonly pollCreation?: {
-    readonly chain: PollCreationChain;
+    readonly chain: PollCreationChain & PollRegistrationChain;
     /** Creations sent in any 24 hours (rule 18). */
     readonly dailyCeiling: number;
     /** The L1 anchor each created identifier is checked against (P2-22 part 3b-1). */
     readonly anchors: CreationAnchors;
+    /**
+     * The default panel whose approved ceremonies the key registers (P2-22
+     * part 5b), as `checkPollCreationDeployment` found it pinned.
+     */
+    readonly panel: Panel;
     /** How often the step runs; `POLL_CREATE_EVERY_MS` unless a test says otherwise. */
     readonly everyMs?: number;
   };
@@ -210,6 +217,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             chain: options.pollCreation.chain,
             dailyCeiling: options.pollCreation.dailyCeiling,
             anchors: options.pollCreation.anchors,
+            panel: options.pollCreation.panel,
           },
         }),
     ...(options.ballots === undefined

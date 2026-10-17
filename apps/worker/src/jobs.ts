@@ -3,6 +3,7 @@
 
 import {
   advancePollCreations,
+  advancePollRegistrations,
   type AnchorCheckReport,
   CEREMONY_ROUND_SECONDS,
   checkCreationAnchors,
@@ -17,6 +18,8 @@ import {
   listBoards,
   openCeremonyRuns,
   type PollCreationChain,
+  type PollRegistrationChain,
+  type PollRegistrationReport,
   type PollStubDeployment,
   pruneIdentityBackups,
   RegistrationError,
@@ -25,7 +28,7 @@ import {
   type Tier0Batches,
   Tier0LockError,
 } from "@abolishus/core";
-import { TierMembershipError } from "@abolishus/crypto";
+import { type Panel, TierMembershipError } from "@abolishus/crypto";
 import { OutputRootError } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import type { BallotOutcome } from "./ballot-queue.ts";
@@ -64,13 +67,15 @@ export interface JobContext {
   /** The deployment every stub pins, beside the registry sync; its queue runs only then. */
   readonly pollStubs?: PollStubDeployment;
   /**
-   * The creation key, its daily ceiling and the L1 anchor its identifiers
-   * are checked against, in a creation worker; its queue runs only then.
+   * The creation key, its daily ceiling, the L1 anchor its identifiers are
+   * checked against and the default panel whose ceremonies it registers, in
+   * a creation worker; its queue runs only then.
    */
   readonly pollCreation?: {
-    readonly chain: PollCreationChain;
+    readonly chain: PollCreationChain & PollRegistrationChain;
     readonly dailyCeiling: number;
     readonly anchors: CreationAnchors;
+    readonly panel: Panel;
   };
 }
 
@@ -210,28 +215,54 @@ async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Pr
 
 /**
  * One run of the creation step: sends, resends and settles creations, then
- * runs the per-slot check on the created ones, and logs what moved, by
- * count. A node that can't be read fails the job; the next tick runs both
+ * registers each approved ceremony and its definition and settles those
+ * registrations (P2-22 part 5b; one queue, since both spend the key's
+ * nonces), then runs the per-slot check on the created polls, and logs what
+ * moved, by count. A node that can't be read fails the job, after the
+ * per-slot check if only the registrations threw; the next tick runs each
  * again from what is recorded.
  */
 async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promise<void> {
   if (ctx.pollCreation === undefined) throw new JobError("internal");
-  const report = await advancePollCreations(ctx.sql, ctx.pollCreation.chain, {
+  const { chain, panel } = ctx.pollCreation;
+  const report = await advancePollCreations(ctx.sql, chain, {
     now: ctx.now(),
     dailyCeiling: ctx.pollCreation.dailyCeiling,
   });
+  let registration: PollRegistrationReport | undefined;
   let anchors: AnchorCheckReport = { checked: 0, waiting: 0, abandoned: 0, overdue: 0, failed: 0 };
   try {
+    // A registration that throws (a node down, a receipt it won't read)
+    // still lets the per-slot check run, so created polls go on; the job
+    // fails after it.
+    let refused: { readonly error: unknown } | undefined;
+    try {
+      registration = await advancePollRegistrations(ctx.sql, chain, panel, { now: ctx.now() });
+    } catch (error) {
+      refused = { error };
+    }
     anchors = await checkCreationAnchors(ctx.sql, ctx.pollCreation.anchors, { now: ctx.now() });
+    if (refused !== undefined) throw refused.error;
   } finally {
-    // Logged even when the check throws, so this tick's creations are counted.
+    // Logged even when a later step throws, so this tick's creations are counted.
     const failed = { ...report.failed };
     if (anchors.failed > 0) failed["creation-anchored"] = anchors.failed;
+    const registered =
+      registration !== undefined &&
+      (registration.sent +
+        registration.resent +
+        registration.sendFailed +
+        registration.registered +
+        registration.late +
+        registration.mismatched >
+        0 ||
+        Object.keys(registration.failed).length > 0);
     const moved =
       report.sent + report.resent + report.sendFailed + report.created > 0 ||
       anchors.checked + anchors.abandoned > 0 ||
       Object.keys(failed).length > 0 ||
-      report.ceilingReached;
+      report.ceilingReached ||
+      registered;
     if (moved)
       ctx.log({
         queue: "{poll-create}",
@@ -239,6 +270,7 @@ async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promis
         checked: anchors.checked,
         abandoned: anchors.abandoned,
         failed,
+        ...(registration !== undefined && { registration }),
       });
   }
 }

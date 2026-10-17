@@ -33,10 +33,15 @@ type PollStubEnv = Partial<Record<(typeof POLL_STUB_ENV)[number], string>>;
 
 // Comma-separated compressed points, as hex: "02ab…,03cd…". Sixteen at most,
 // a panel's limit and more receipt keys than a board needs.
-const Keys = z
+export const P256_KEYS = z
   .string()
   .regex(/^(?:0[23][0-9a-fA-F]{64})(?:,0[23][0-9a-fA-F]{64}){0,15}$/)
   .transform((v) => v.split(",").map((k) => Uint8Array.from(Buffer.from(k, "hex"))));
+// A panel's threshold, as the definition's u8 holds it; the rule judges it.
+export const PANEL_THRESHOLD = z
+  .string()
+  .regex(/^[1-9][0-9]?$/)
+  .transform(Number);
 // A u64 in seconds; the rule judges the bounds.
 const Seconds = z
   .string()
@@ -45,12 +50,9 @@ const Seconds = z
   .refine((v) => v < 1n << 64n);
 
 const Env = z.strictObject({
-  POLL_STUB_PANEL_THRESHOLD: z
-    .string()
-    .regex(/^[1-9][0-9]?$/)
-    .transform(Number),
-  POLL_STUB_PANEL_KEYS: Keys,
-  POLL_STUB_RECEIPT_KEYS: Keys,
+  POLL_STUB_PANEL_THRESHOLD: PANEL_THRESHOLD,
+  POLL_STUB_PANEL_KEYS: P256_KEYS,
+  POLL_STUB_RECEIPT_KEYS: P256_KEYS,
   // A u32 in the definition.
   POLL_STUB_INCLUSION_BOUND: z
     .string()

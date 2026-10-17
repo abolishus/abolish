@@ -2,13 +2,15 @@
 // ([[0032-poll-creation-operations]], rules 1, 2 and 18; P2-22 parts 3a and
 // 3b-1; the poll-creation runbook): all of it or none of it, the daily
 // ceiling aside. The L1 node and the anchor are part of it, since nothing
-// created may go on unchecked.
+// created may go on unchecked, and so is the default panel the registration
+// step registers ceremonies of (part 5b), the same as the stub step's.
 // The creation key is a secret (T-65, T-72), so a malformed one is refused
 // with a message naming the variable and never quoting its value; so is the
 // URL, which can carry a provider's API key.
 
 import { type Address, getAddress, isAddress } from "viem";
 import * as z from "zod";
+import { P256_KEYS, PANEL_THRESHOLD } from "./poll-stub-env.ts";
 
 export interface PollCreationConfig {
   /** The L2 node the step signs against, sends to and reads. */
@@ -23,6 +25,12 @@ export interface PollCreationConfig {
   readonly anchor: Address;
   /** The creation key's 32 bytes. */
   readonly key: Uint8Array;
+  /**
+   * The default panel whose approved ceremonies are registered: its
+   * threshold and the seats' `p256-key`s, seat 1 first, as the stub step's
+   * `POLL_STUB_PANEL_*` name it.
+   */
+  readonly panel: { readonly threshold: number; readonly keys: readonly Uint8Array[] };
   /** Creations sent in any 24 hours (rule 18). */
   readonly dailyCeiling: number;
 }
@@ -35,6 +43,8 @@ export const POLL_CREATE_ENV = [
   "CREATE_L1_RPC_URL",
   "CREATE_L1_CHAIN_ID",
   "CREATE_ANCHOR",
+  "CREATE_PANEL_THRESHOLD",
+  "CREATE_PANEL_KEYS",
 ] as const;
 
 /** Optional beside the others: core's `CREATE_DAILY_CEILING` when unset. */
@@ -62,6 +72,8 @@ const Public = z.strictObject({
   CREATE_L1_RPC_URL: z.url({ protocol: /^https?$/ }),
   CREATE_L1_CHAIN_ID: chainId,
   CREATE_ANCHOR: address,
+  CREATE_PANEL_THRESHOLD: PANEL_THRESHOLD,
+  CREATE_PANEL_KEYS: P256_KEYS,
   CREATE_DAILY_CEILING: z
     .string()
     .regex(/^(0|[1-9][0-9]{0,5})$/)
@@ -94,6 +106,8 @@ export function pollCreationFromEnv(
     CREATE_L1_RPC_URL: env.CREATE_L1_RPC_URL,
     CREATE_L1_CHAIN_ID: env.CREATE_L1_CHAIN_ID,
     CREATE_ANCHOR: env.CREATE_ANCHOR,
+    CREATE_PANEL_THRESHOLD: env.CREATE_PANEL_THRESHOLD,
+    CREATE_PANEL_KEYS: env.CREATE_PANEL_KEYS,
     CREATE_DAILY_CEILING: has(POLL_CREATE_CEILING_ENV) ? env.CREATE_DAILY_CEILING : undefined,
   });
   if (!parsed.success)
@@ -111,6 +125,7 @@ export function pollCreationFromEnv(
     l1ChainId: p.CREATE_L1_CHAIN_ID,
     anchor: p.CREATE_ANCHOR,
     key: Uint8Array.from(Buffer.from(key, "hex")),
+    panel: { threshold: p.CREATE_PANEL_THRESHOLD, keys: p.CREATE_PANEL_KEYS },
     dailyCeiling: p.CREATE_DAILY_CEILING ?? defaultCeiling,
   };
 }

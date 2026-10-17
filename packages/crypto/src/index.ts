@@ -413,6 +413,17 @@ export {
 } from "./membership-prover.ts";
 export { poseidon2 } from "./poseidon.ts";
 export {
+  type BallotCastingV3,
+  BallotSealError,
+  type CastBallotV3,
+  castSealV3,
+  challengeSealV3,
+  finishSealV3,
+  type L1Reference,
+  sealBallotV3,
+  type SealedBallotV3,
+} from "./seal.ts";
+export {
   type GroupRegistryPins,
   statedTierElectorate,
   type TierChoice,

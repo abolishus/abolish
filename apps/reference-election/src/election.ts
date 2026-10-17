@@ -61,7 +61,7 @@ export const STUBS = Object.freeze({
     "the anchoring authority is a one-byte contract Anvil lets the fixture send from, not the Safe (P4-1 part 2)",
   seal: "lastSegment is two segments after the ceremony's, the one after the voting window's: no definition-derived seal yet, since no post-close window is fixed (P1-13, P1-15, P1-18)",
   l1References:
-    "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
+    "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name, and the poll's receipt keys are read at the latest block, not the latest finalized one; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
   casting:
     "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission, trustee intake or receipts (P2-8, P2-3, P2-13)",
 });
@@ -366,7 +366,7 @@ export interface QuestionCeremonyOptions {
  * `runCeremony` for the multi-question poll: a version-5 definition with
  * `QUESTIONS`, its one Tier 0 group in one region and so one cell, whose
  * count, members and root `deriveTierCells` gives from the group's leaves
- * as the verifier recomputes them (2.4, 2.8), and `receiptKeys` in the stub,
+ * as 2.4 and 2.8 are to recompute them (P1-19), and `receiptKeys` in the stub,
  * fixed before the ceremony (T-26). Every seat takes part.
  */
 export function runQuestionCeremony(

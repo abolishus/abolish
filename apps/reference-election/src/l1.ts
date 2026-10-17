@@ -242,6 +242,25 @@ export async function evidence(
   return { header: headerRlp(block), timestamp: BigInt(block.timestamp), nodes: nodes.map(unhex) };
 }
 
+/**
+ * The anchor's storage words at `slots` in the latest block, and that block's
+ * timestamp: what a ballot client reads the listed receipt keys' records from
+ * before casting (docs/spec/election-definition.md, Receipt keys).
+ */
+export async function latestWords(
+  rpc: Rpc,
+  address: Uint8Array,
+  slots: readonly Uint8Array[],
+): Promise<{ readonly words: Uint8Array[]; readonly timestamp: bigint }> {
+  const block = await rpc.call<Block>("eth_getBlockByNumber", ["latest", false]);
+  const words = await Promise.all(
+    slots.map(async (slot) =>
+      unhex(await rpc.call<string>("eth_getStorageAt", [hex(address), hex(slot), block.number])),
+    ),
+  );
+  return { words, timestamp: BigInt(block.timestamp) };
+}
+
 export interface Log {
   readonly topics: readonly string[];
   readonly data: string;

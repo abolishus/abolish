@@ -121,13 +121,13 @@ test(
   async () => {
     const voters = newVoters(3);
     const { leaves } = electorateOf(voters);
+    // Given in descending order of their encodings, so the stub must sort them.
+    const keys = [1, 2].map((b) => identityKey(new Uint8Array(32).fill(b)));
+    keys.sort((a, b) => Buffer.compare(b, a));
     const c = runQuestionCeremony(timing, l2, newTrustees(), questionsDisplayText(), {
       counter: 0n,
       leaves,
-      receiptKeys: [
-        identityKey(new Uint8Array(32).fill(2)),
-        identityKey(new Uint8Array(32).fill(1)),
-      ],
+      receiptKeys: keys,
     });
     const d = c.definition.value;
     expect(c.definition.version).toBe(5);
@@ -141,8 +141,7 @@ test(
     expect(d.electorate[0]?.regions).toEqual([3n]);
     expect(d.electorate[0]?.cells).toEqual([{ root: tierTreeRoot(leaves), members: 3n }]);
     // Listed in ascending order of their encodings, as the rule requires.
-    const [k0, k1] = d.receipt_keys;
-    expect(Buffer.compare(k0 as Uint8Array, k1 as Uint8Array)).toBeLessThan(0);
+    expect(d.receipt_keys).toEqual([...keys].reverse());
 
     const artifacts = proverArtifacts();
     const casting = questionCastingFor(d, c.panel, c.transcript, leaves, artifacts);
@@ -190,9 +189,10 @@ test(
       proverArtifacts(),
     );
     // Two picks under pick one, then one pick under pick exactly two.
-    expect(() => challengeQuestions(casting, [1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0])).toThrow();
-    expect(() => challengeQuestions(casting, [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0])).toThrow();
+    const outside = "a question's selection count is outside its limits";
+    expect(() => challengeQuestions(casting, [1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0])).toThrow(outside);
+    expect(() => challengeQuestions(casting, [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0])).toThrow(outside);
     // Too few answers for the poll's 11 options.
-    expect(() => challengeQuestions(casting, [1, 0, 0])).toThrow();
+    expect(() => challengeQuestions(casting, [1, 0, 0])).toThrow("one entry per flat option");
   },
 );

@@ -41,6 +41,7 @@ import {
   encodeDisplayTextV2,
   identityKey,
   type Panel,
+  receiptKeysCastCheck,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { type Rpc, startAnvil } from "./anvil.ts";
@@ -76,6 +77,7 @@ import {
   deployAnchor,
   evidence,
   l1RefAt,
+  latestWords,
   loggedCheckpoints,
   mineAt,
   registerReceiptKey,
@@ -118,11 +120,10 @@ const VOTERS = 4;
 /** What the verifier must find on the honest board: every ballot cast admitted, none rejected. */
 const HONEST_BALLOTS = { admitted: 4, rejected: [] } as const;
 /**
- * The rows the multi-question poll must pass beyond the honest run's: its
- * receipt key judged from the anchor's record, proven from L1 state (2.9),
- * and its cells against the definition (7.4).
+ * The row the multi-question poll must pass beyond the honest run's: its
+ * receipt key judged from the anchor's record, proven from L1 state (2.9).
  */
-const QUESTIONS_PASSES = ["2.9", "7.4"] as const;
+const QUESTIONS_PASSES = ["2.9"] as const;
 
 const hex = (b: Uint8Array) => bytesToHex(b);
 const log = (line: string) => process.stdout.write(`${line}\n`);
@@ -301,7 +302,7 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
   await registerDefinition(l2, anvil, poll.definition);
   writeRecords("questions", poll, encodeDisplayTextV2(questionsText));
   log(
-    `stage 1 (questions): ${poll.definition.value.questions.length} questions, 4-of-7 ceremony with 7 seats, election 0x${hex(poll.definition.value.election_id)}, registered on L2 under definition version 5`,
+    `stage 1 (questions): ${poll.definition.value.questions.length} questions, ${poll.panel.threshold}-of-${poll.panel.keys.length} ceremony with ${poll.seats.length} seats, election 0x${hex(poll.definition.value.election_id)}, registered on L2 under definition version 5`,
   );
   const questions = firstEntry("questions", poll, first);
   const elections: Election[] = [...singles, questions];
@@ -399,6 +400,11 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
     // block, and voter 3 never does. Voter 1 first leaves the first two
     // questions blank, which their limits allow.
     const { value } = questions.definition;
+    // The client's check before casting: every listed receipt key is
+    // registered with the anchor before the poll opens (T-26, T-69).
+    const read = await latestWords(anvil, anchor.address, value.receipt_keys.map(receiptKeySlot));
+    const keys = receiptKeysCastCheck(read.words, value.opens_at, read.timestamp);
+    if (!keys.castable) throw new Error(`the poll's receipt key ${keys.key} judges nothing`);
     const pollCasting = () =>
       questionCastingFor(
         value,

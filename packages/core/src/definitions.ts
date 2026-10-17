@@ -2,8 +2,9 @@
 // A definition is decoded and checked by @abolishus/crypto before it is
 // stored, under version 1 (one question) or version 5 (several questions,
 // P2-14), the versions a client checks before showing a poll
-// (`checkElectionRecordToShow`; T-34, T-41), so the server never serves bytes the verifier would reject on
-// decoding, well-formedness or 2.3's profile combination. Its registration on L2 is what makes it the
+// (`checkElectionRecordToShow`; T-34, T-41), so the server never serves
+// bytes the verifier would reject on decoding, well-formedness or 2.3's
+// profile combination. Its registration on L2 is what makes it the
 // election's definition: the API is never a source of truth, and every caller
 // compares the hash of what it is served with the registry (T-34).
 

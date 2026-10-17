@@ -226,6 +226,72 @@ describe("seal and challenge requests", () => {
   });
 });
 
+describe("cast requests", () => {
+  const { port1 } = new MessageChannel();
+  const cast = () => ({
+    v: PROTOCOL_VERSION,
+    id: 13,
+    kind: "cast",
+    seal: 2,
+    secret: new Uint8Array(32).fill(2),
+    leaves: [1n, 2n, 3n],
+    l1Number: 9_000_000n,
+    l1Hash: new Uint8Array(32).fill(5),
+    prover: port1,
+  });
+  port1.close();
+
+  test("accepts a well-formed request as it is, its port included", () => {
+    const parsed = parseRequest(cast());
+    expect(parsed).toEqual(cast());
+    expect(parsed?.kind === "cast" && parsed.prover).toBe(port1);
+  });
+
+  test("accepts any leaves and any u64 block number: the leaves' checks are castSealV3's", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.bigInt()),
+        fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
+        (leaves, l1Number) => {
+          const r = { ...cast(), leaves, l1Number };
+          expect(parseRequest(r)).toEqual(r);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a negative seal", { seal: -1 }],
+    ["a seal as a string", { seal: "2" }],
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a long secret", { secret: new Uint8Array(33) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["a leaf that isn't a bigint", { leaves: [1n, 2] }],
+    // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
+    ["leaves with a hole", { leaves: [1n, , 2n] }],
+    ["leaves that aren't a list", { leaves: new BigUint64Array(3) }],
+    ["a block number as a number", { l1Number: 9_000_000 }],
+    ["a negative block number", { l1Number: -1n }],
+    ["a block number past a u64", { l1Number: 2n ** 64n }],
+    ["a short block hash", { l1Hash: new Uint8Array(31) }],
+    ["a long block hash", { l1Hash: new Uint8Array(33) }],
+    ["a prover that isn't a port", { prover: {} }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...cast(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(cast())) {
+      const r: Record<string, unknown> = cast();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -235,6 +301,7 @@ describe("responses", () => {
     );
     expect(responseId({ v: PROTOCOL_VERSION, id: 6, kind: "seal", result: {} })).toBe(6);
     expect(responseId({ v: PROTOCOL_VERSION, id: 7, kind: "challenge", result: {} })).toBe(7);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 8, kind: "cast", result: {} })).toBe(8);
   });
 
   test("ignores another version's response or kind", () => {

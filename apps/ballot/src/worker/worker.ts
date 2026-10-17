@@ -32,6 +32,8 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "seal", result: session.seal(request) };
     case "challenge":
       return { v, id, kind: "challenge", result: session.challenge(request) };
+    case "cast":
+      return { v, id, kind: "cast", result: await session.cast(request) };
     case "prove-membership":
       return { v, id, kind: "prove-membership", result: await proveMembership(request) };
   }

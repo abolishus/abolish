@@ -9,11 +9,11 @@
 // nothing in the browser restricts it: only the absence of network APIs from
 // its bytes keeps it off the network (T-43).
 
-import type { MembershipProverErrorCode, Panel } from "@abolishus/crypto";
+import type { BallotV2Code, MembershipProverErrorCode, Panel } from "@abolishus/crypto";
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -64,6 +64,30 @@ export interface ChallengeRequest {
 }
 
 /**
+ * The voter cast seal `seal` (docs/spec/ballot-validity.md, Casting (version
+ * 3), steps 2 to 4): its record under the L1 block the page read
+ * (`l1Number`, `l1Hash`), proved for `secret` over its cell's `leaves` (the
+ * cell tree's, in order, which the page rebuilt from the board with
+ * `tierMembership`; the worker checks them against the cell's root, T-10,
+ * T-13) by the prover worker at the other end of `prover`. The witness goes
+ * over that port; the page gets the finished record, never the witness. A
+ * cast seal is never opened, and may be cast again with the same secret
+ * (revoting Client rule 4).
+ */
+export interface CastRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "cast";
+  readonly seal: number;
+  /** 32 bytes; the worker zeroes its copy once the witness is built. */
+  readonly secret: Uint8Array;
+  readonly leaves: readonly bigint[];
+  readonly l1Number: bigint;
+  readonly l1Hash: Uint8Array;
+  readonly prover: MessagePort;
+}
+
+/**
  * A membership proof for `secret` in the tier (or cell) whose leaves these
  * are, under the statement's values (`MembershipStatement`, which the page
  * took from a definition the worker checked). The worker builds the witness,
@@ -91,7 +115,8 @@ export type WorkerRequest =
   | CheckElectionRequest
   | ProveMembershipRequest
   | SealRequest
-  | ChallengeRequest;
+  | ChallengeRequest
+  | CastRequest;
 
 /**
  * Why no proof came back: one of `MembershipProverError`'s codes, or
@@ -113,10 +138,32 @@ export type SealResult =
   | { readonly ok: true; readonly seal: number; readonly trackingCode: Uint8Array }
   | { readonly ok: false; readonly problem: "no-election" | "refused" };
 
-/** The opening (`0x0003` version 2) of a seal, or `unknown` for one this worker doesn't hold. */
+/**
+ * The opening (`0x0003` version 2) of a seal, or why there is none: a seal
+ * this worker doesn't hold (`unknown`), or one the voter chose to cast, which
+ * is never opened (`cast`; T-45).
+ */
 export type ChallengeResult =
   | { readonly ok: true; readonly opening: Uint8Array; readonly trackingCode: Uint8Array }
-  | { readonly ok: false; readonly problem: "unknown" };
+  | { readonly ok: false; readonly problem: "unknown" | "cast" };
+
+/**
+ * A finished ballot: the record (`0x0002` version 3) as it is boarded, its
+ * hash, and each qualified seat's share ciphertext for its intake. Or why
+ * there is none: a seal this worker doesn't hold or the voter challenged
+ * (`unknown`), the membership proof's refusal (`MembershipProofProblem`), or
+ * a record that failed the client's own admission checks (`ballot`, with the
+ * verifier's code), which is never sent. None is retried by the worker.
+ */
+export type CastResult =
+  | {
+      readonly ok: true;
+      readonly ballot: Uint8Array;
+      readonly ballotHash: Uint8Array;
+      readonly ciphertexts: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+    }
+  | { readonly ok: false; readonly problem: "unknown" | MembershipProofProblem }
+  | { readonly ok: false; readonly problem: "ballot"; readonly code: BallotV2Code };
 
 export type WorkerResponse =
   | {
@@ -143,6 +190,12 @@ export type WorkerResponse =
       readonly kind: "challenge";
       readonly result: ChallengeResult;
     }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "cast";
+      readonly result: CastResult;
+    }
   /** The request was malformed or the worker failed; it names no detail, which could quote a secret. */
   | { readonly v: typeof PROTOCOL_VERSION; readonly id: number; readonly kind: "error" };
 
@@ -153,6 +206,14 @@ const isId = (x: unknown): x is number => Number.isSafeInteger(x) && (x as numbe
 
 const isBytes = (x: unknown, length?: number): x is Uint8Array =>
   x instanceof Uint8Array && (length === undefined || x.length === length);
+
+/** A list whose every element passes `is`: holes, which `every` would skip, fail too. */
+const isListOf = <T>(x: unknown, is: (e: unknown) => e is T): x is T[] =>
+  Array.isArray(x) && Array.from(x as unknown[]).every(is);
+
+const isBigint = (x: unknown): x is bigint => typeof x === "bigint";
+const isVote = (x: unknown): x is 0 | 1 => x === 0 || x === 1;
+const isAnyBytes = (x: unknown): x is Uint8Array => isBytes(x);
 
 const hasKeys = (data: Record<string, unknown>, expected: readonly string[]) => {
   const keys = Object.keys(data).sort();
@@ -172,13 +233,13 @@ const CHECK_KEYS = [
 ];
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
+const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "leaves", "prover", "seal", "secret", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
   hasKeys(x, ["keys", "threshold"]) &&
   Number.isSafeInteger(x["threshold"]) &&
-  Array.isArray(x["keys"]) &&
-  x["keys"].every((k) => isBytes(k));
+  isListOf(x["keys"], isAnyBytes);
 const PROVE_KEYS = [
   "definitionHash",
   "id",
@@ -209,10 +270,8 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       !isBytes(registeredHash, 32) ||
       !isBytes(definition) ||
       !isBytes(displayText) ||
-      !Array.isArray(entries) ||
-      !entries.every((e) => isBytes(e)) ||
-      !Array.isArray(panels) ||
-      !panels.every(isPanel)
+      !isListOf(entries, isAnyBytes) ||
+      !isListOf(panels, isPanel)
     )
       return undefined;
     return {
@@ -223,19 +282,14 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       registeredHash,
       definition,
       displayText,
-      entries: entries as Uint8Array[],
-      panels: panels as Panel[],
+      entries,
+      panels,
     };
   }
   if (data["kind"] === "seal") {
     if (!hasKeys(data, SEAL_KEYS)) return undefined;
     const { definitionHash, cell, votes } = data;
-    if (
-      !isBytes(definitionHash, 32) ||
-      !Number.isSafeInteger(cell) ||
-      !Array.isArray(votes) ||
-      !votes.every((x) => x === 0 || x === 1)
-    )
+    if (!isBytes(definitionHash, 32) || !Number.isSafeInteger(cell) || !isListOf(votes, isVote))
       return undefined;
     return {
       v,
@@ -243,20 +297,45 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       kind: "seal",
       definitionHash,
       cell: cell as number,
-      votes: votes as (0 | 1)[],
+      votes,
     };
   }
   if (data["kind"] === "challenge") {
     if (!hasKeys(data, CHALLENGE_KEYS) || !isId(data["seal"])) return undefined;
     return { v, id, kind: "challenge", seal: data["seal"] };
   }
+  if (data["kind"] === "cast") {
+    if (!hasKeys(data, CAST_KEYS)) return undefined;
+    const { seal, secret, leaves, l1Number, l1Hash, prover } = data;
+    if (
+      !isId(seal) ||
+      !isBytes(secret, 32) ||
+      !isListOf(leaves, isBigint) ||
+      typeof l1Number !== "bigint" ||
+      l1Number < 0n ||
+      l1Number >> 64n !== 0n ||
+      !isBytes(l1Hash, 32) ||
+      !(prover instanceof MessagePort)
+    )
+      return undefined;
+    return {
+      v,
+      id,
+      kind: "cast",
+      seal,
+      secret,
+      leaves,
+      l1Number,
+      l1Hash,
+      prover,
+    };
+  }
   if (data["kind"] === "prove-membership") {
     if (!hasKeys(data, PROVE_KEYS)) return undefined;
     const { secret, leaves, definitionHash, tier, root, message, prover } = data;
     if (
       !isBytes(secret, 32) ||
-      !Array.isArray(leaves) ||
-      !leaves.every((leaf) => typeof leaf === "bigint") ||
+      !isListOf(leaves, isBigint) ||
       !isBytes(definitionHash, 32) ||
       !Number.isSafeInteger(tier) ||
       typeof root !== "bigint" ||
@@ -269,7 +348,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       id,
       kind: "prove-membership",
       secret,
-      leaves: leaves as bigint[],
+      leaves,
       definitionHash,
       tier: tier as number,
       root,
@@ -290,6 +369,7 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "prove-membership",
   "seal",
   "challenge",
+  "cast",
   "error",
 ]);
 

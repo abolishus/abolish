@@ -9,7 +9,7 @@ import "../../src/worker-policy.ts";
 import { STAGING } from "../../src/deployment.ts";
 import { loadElection } from "../../src/load.ts";
 import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
-import { proveMembership } from "../../src/prover-client.ts";
+import { castBallot, proveMembership } from "../../src/prover-client.ts";
 import { BallotWorker } from "../../src/worker-client.ts";
 
 const worker = new BallotWorker();
@@ -120,6 +120,54 @@ const harness = {
     const opened = sealed.ok ? await worker.challenge(sealed.seal) : undefined;
     const again = sealed.ok ? await worker.challenge(sealed.seal) : undefined;
     return JSON.stringify({ check: check.ok, sealed, opened, again }, (_, v: unknown) =>
+      v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
+    );
+  },
+  /**
+   * Checks a version-5 poll as `sealAndChallenge` does, seals `votes` in
+   * cell 0, casts the seal for `secret` over `leaves` under the L1 block
+   * given, then tries to challenge it, with every answer.
+   */
+  async sealAndCast(
+    electionId: string,
+    registeredHash: string,
+    definition: string,
+    displayText: string,
+    entries: readonly string[],
+    panel: { readonly threshold: number; readonly keys: readonly string[] },
+    votes: readonly (0 | 1)[],
+    secret: string,
+    leaves: readonly string[],
+    l1: { readonly number: string; readonly hash: string },
+  ): Promise<string> {
+    const check = await worker.checkElection(
+      fromHex(electionId),
+      fromHex(registeredHash),
+      fromHex(definition),
+      fromHex(displayText),
+      entries.map(fromHex),
+      [{ threshold: panel.threshold, keys: panel.keys.map(fromHex) }],
+    );
+    const sealed = await worker.seal(fromHex(registeredHash), 0, votes);
+    if (!sealed.ok) return JSON.stringify({ check: check.ok, sealed });
+    const artifacts = await loadProverArtifacts({
+      base: import.meta.url,
+      fetch: (url, init) => fetch(url, init),
+      caches: globalThis.caches,
+    });
+    const cast = await castBallot(
+      worker,
+      {
+        seal: sealed.seal,
+        secret: fromHex(secret),
+        leaves: leaves.map(BigInt),
+        l1Number: BigInt(l1.number),
+        l1Hash: fromHex(l1.hash),
+      },
+      artifacts,
+    );
+    const opened = await worker.challenge(sealed.seal);
+    return JSON.stringify({ check: check.ok, sealed, cast, opened }, (_, v: unknown) =>
       v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
     );
   },

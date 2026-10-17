@@ -19,6 +19,7 @@ import {
 
 import { parseAnswer, PROVER_PROTOCOL_VERSION, type ProverWitness } from "../prover/protocol.ts";
 import {
+  type MembershipProofProblem,
   type MembershipProofResult,
   type ProveMembershipRequest,
   PROVER_TIMEOUT_MS,
@@ -44,10 +45,8 @@ export async function proveMembership(
       // secret goes now (T-12). The witness's decimal string can't be wiped.
       request.secret.fill(0);
     }
-    const answer = await ask(prover, input.witness, timeoutMs);
-    if (answer === undefined) return { ok: false, problem: "prover" };
-    if (answer.kind === "refused") return { ok: false, problem: answer.problem };
-    if (answer.kind === "error") return { ok: false, problem: "prover" };
+    const answer = await askProver(prover, input.witness, timeoutMs);
+    if (!answer.ok) return answer;
     return { ok: true, proof: finishMembershipProof(input, answer.proof) };
   } catch (e) {
     if (e instanceof MembershipProverError) return { ok: false, problem: e.code };
@@ -55,6 +54,26 @@ export async function proveMembership(
   } finally {
     prover.close();
   }
+}
+
+/**
+ * The prover's unchecked proof for `witness`, or why none came: the artifact
+ * it refused, or `prover` for a failure, a malformed first answer or none in
+ * time. The caller verifies and re-randomises the proof before anything
+ * leaves (T-12, T-55), and closes the port.
+ */
+export async function askProver(
+  prover: MessagePort,
+  witness: ProverWitness["witness"],
+  timeoutMs: number,
+): Promise<
+  | { readonly ok: true; readonly proof: Uint8Array }
+  | { readonly ok: false; readonly problem: MembershipProofProblem }
+> {
+  const answer = await ask(prover, witness, timeoutMs);
+  if (answer === undefined || answer.kind === "error") return { ok: false, problem: "prover" };
+  if (answer.kind === "refused") return { ok: false, problem: answer.problem };
+  return { ok: true, proof: answer.proof };
 }
 
 /** Sends the witness and waits for one well-formed answer; `undefined` on anything else or on timeout. */

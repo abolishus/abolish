@@ -3,12 +3,18 @@
 // transcript, and the seals made under it. A seal's votes, sharing and
 // encryption randomness stay inside @abolishus/crypto's seal; the page gets
 // a number to name it by and its tracking code, then either its opening
-// (challenged, and spent) or, from part 3b-3, its cast (T-42, T-45). A poll
-// checked anew replaces the last one, and its seals go with it.
+// (challenged, and spent) or its cast: the finished record, proved through
+// the prover worker, after which the seal is never opened (T-42, T-45). A
+// poll checked anew replaces the last one, and its seals go with it.
 
 import {
+  BallotSealError,
+  castSealV3,
   challengeSealV3,
   decodeElectionDefinitionV5,
+  finishSealV3,
+  identityCommitment,
+  MembershipProverError,
   type QuestionBallotElection,
   sealBallotV3,
   type SealedBallotV3,
@@ -16,12 +22,16 @@ import {
 } from "@abolishus/crypto";
 
 import { checkElection, type ElectionCheck } from "../election.ts";
-import type {
-  ChallengeRequest,
-  ChallengeResult,
-  CheckElectionRequest,
-  SealRequest,
-  SealResult,
+import { askProver } from "./prove.ts";
+import {
+  type CastRequest,
+  type CastResult,
+  type ChallengeRequest,
+  type ChallengeResult,
+  type CheckElectionRequest,
+  PROVER_TIMEOUT_MS,
+  type SealRequest,
+  type SealResult,
 } from "./protocol.ts";
 
 const toHex = (bytes: Uint8Array) =>
@@ -30,6 +40,12 @@ const toHex = (bytes: Uint8Array) =>
 export class BallotSession {
   #poll: { readonly definitionHash: string; readonly election: QuestionBallotElection } | undefined;
   readonly #seals = new Map<number, SealedBallotV3>();
+  /**
+   * Seals the voter chose to cast, never opened from then on even if no cast
+   * finished (T-45), each with the identity commitment of its first cast's
+   * secret once one was accepted: a recast under another is refused.
+   */
+  readonly #cast = new Map<number, bigint | undefined>();
   #nextSeal = 0;
 
   /**
@@ -41,6 +57,7 @@ export class BallotSession {
   checkElection(request: CheckElectionRequest): ElectionCheck {
     this.#poll = undefined;
     this.#seals.clear();
+    this.#cast.clear();
     const check = checkElection(
       request.electionId,
       request.registeredHash,
@@ -78,7 +95,57 @@ export class BallotSession {
   challenge(request: ChallengeRequest): ChallengeResult {
     const sealed = this.#seals.get(request.seal);
     if (sealed === undefined) return { ok: false, problem: "unknown" };
+    if (this.#cast.has(request.seal)) return { ok: false, problem: "cast" };
     this.#seals.delete(request.seal);
     return { ok: true, ...challengeSealV3(sealed) };
+  }
+
+  /**
+   * The finished ballot for a seal the voter cast: `castSealV3` builds the
+   * record and the witness here, the prover worker at `request.prover` gets
+   * the witness alone, and `finishSealV3` verifies and re-randomises its
+   * proof and runs the admission checks, so only a record this device
+   * admitted reaches the page (Casting (version 3), steps 2 to 4; T-07,
+   * T-12, T-55). The seal is marked cast before anything else, so no later
+   * challenge opens it, whatever happens here (T-45).
+   */
+  async cast(request: CastRequest, timeoutMs = PROVER_TIMEOUT_MS): Promise<CastResult> {
+    const { prover, secret } = request;
+    try {
+      const sealed = this.#seals.get(request.seal);
+      if (sealed === undefined) return { ok: false, problem: "unknown" };
+      const first = this.#cast.get(request.seal);
+      this.#cast.set(request.seal, first);
+      // One seal, one identity: its records all carry one nullifier.
+      const commitment = identityCommitment(secret);
+      if (first !== undefined && first !== commitment) return { ok: false, problem: "secret" };
+      const casting = castSealV3(sealed, secret, request.leaves, {
+        number: request.l1Number,
+        hash: request.l1Hash,
+      });
+      this.#cast.set(request.seal, commitment);
+      // castSealV3 read its own copy; this realm's copy of the secret goes
+      // now (T-12). The witness's decimal string can't be wiped.
+      secret.fill(0);
+      const answer = await askProver(prover, casting.witness, timeoutMs);
+      if (!answer.ok) return answer;
+      const cast = finishSealV3(casting, answer.proof);
+      return {
+        ok: true,
+        ballot: Uint8Array.from(cast.ballot),
+        ballotHash: Uint8Array.from(cast.ballotHash),
+        ciphertexts: cast.ciphertexts.map(({ seat, ciphertext }) => ({
+          seat,
+          ciphertext: Uint8Array.from(ciphertext),
+        })),
+      };
+    } catch (e) {
+      if (e instanceof MembershipProverError) return { ok: false, problem: e.code };
+      if (e instanceof BallotSealError) return { ok: false, problem: "ballot", code: e.code };
+      throw e;
+    } finally {
+      secret.fill(0);
+      prover.close();
+    }
   }
 }

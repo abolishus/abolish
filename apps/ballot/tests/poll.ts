@@ -1,8 +1,10 @@
 // Test only: a version-5 poll as the client opens one, with its ceremony run
 // here by every seat of the panel it names (docs/spec/ceremony.md), the
 // transcript as the board's first entry, and the hash the registry would
-// hold, computed with node:crypto rather than the code under test. For
-// tests/session.test.ts and tests/worker.e2e.ts.
+// hold, computed with node:crypto rather than the code under test. Cell 0
+// of the first tier holds four of Semaphore 4.14.3's identities
+// (docs/spec/vectors/membership-prover.json), so a seal there can be cast.
+// For tests/session.test.ts, tests/cast.test.ts and tests/worker.e2e.ts.
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -18,6 +20,7 @@ import {
   encodeBoardEntry,
   encodeCeremonyTranscript,
   encodeElectionDefinitionV5,
+  identityCommitment,
   identityKey,
   keysMessage,
   membershipVkHash,
@@ -25,6 +28,7 @@ import {
   panelId,
   RECORD_TYPES,
   revealsMessage,
+  tierTreeRoot,
 } from "@abolishus/crypto";
 
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
@@ -61,8 +65,30 @@ const text = vector("display-text-v2", "display-text-v2-two-questions") as {
 const typical = decodeElectionDefinitionV5(
   hex(vector("election-definition-v5", "definition-v5-typical").encoding),
 );
+/** The identity secrets of cell 0's members, in leaf order. */
+export const members = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/membership-prover.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { members: { secret: string }[] }
+).members
+  .slice(0, 4)
+  .map((m) => hex(m.secret));
+/** Cell 0's leaves, as the client rebuilds them from the board. */
+export const cellLeaves = members.map(identityCommitment);
+
 const shape: ElectionDefinitionV5 = {
   ...typical,
+  electorate: typical.electorate.map((t, i) =>
+    i === 0
+      ? {
+          ...t,
+          cells: t.cells.map((c, j) => (j === 0 ? { ...c, root: tierTreeRoot(cellLeaves) } : c)),
+        }
+      : t,
+  ),
   questions: text.definition.optionCounts.map((m) => ({
     method: 1,
     option_count: Number(m),

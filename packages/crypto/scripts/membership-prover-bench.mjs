@@ -11,10 +11,12 @@
 //     throttling doesn't reach dedicated workers, so the main thread stands in
 //     for the client's worker), with a CSP of the shape the ADR proposes;
 //   - the multi-scalar multiplications and FFTs a Groth16 prover over
-//     @noble/curves' BN254 would need for this key's sizes, as a lower bound on
-//     that candidate (its witness computation would come on top);
+//     @noble/curves' BN254 would need for this key's sizes, as an estimate for
+//     that candidate (random 254-bit scalars, where a real witness is mostly
+//     bits and small values; its witness computation would come on top);
 //   - re-randomising a snarkjs proof with @noble/curves and CSPRNG scalars
-//     (A/t, t·B + t·u·δ, C + u·A), checked with snarkjs's verifier.
+//     (A/t, t·B + t·u·δ, C + u·A; Baghery, Kohlweiss, Siim and Volkhov, FC 2021),
+//     checked with snarkjs's verifier.
 //
 // It runs outside the workspace, because packages/crypto depends on @noble/*
 // only. In an empty directory:
@@ -89,10 +91,11 @@ const { Fp2 } = bn254.fields;
 const R = bn254.fields.Fr.ORDER;
 const G1 = bn254.G1.Point;
 const G2 = bn254.G2.Point;
-const scalar = () => {
+// Uniform in [min, r), by rejection.
+const scalar = (min = 1n) => {
   for (;;) {
     const k = BigInt(`0x${randomBytes(32).toString("hex")}`);
-    if (k !== 0n && k < R) return k;
+    if (k >= min && k < R) return k;
   }
 };
 const g1 = ([x, y]) => G1.fromAffine({ x: BigInt(x), y: BigInt(y) });
@@ -115,7 +118,7 @@ const g2Json = (P) => {
 };
 const t0 = performance.now();
 const t = scalar();
-const u = scalar();
+const u = scalar(0n);
 const A = g1(last.proof.pi_a);
 const rerandomised = {
   ...last.proof,
@@ -127,14 +130,14 @@ report.rerandomiseMs = Math.round(performance.now() - t0);
 if (!(await groth16.verify(vk, last.publicSignals, rerandomised)))
   throw new Error("the re-randomised proof doesn't verify");
 
-// --- A lower bound on a Groth16 prover over @noble/curves. ---
+// --- An estimate for a Groth16 prover over @noble/curves. ---
 // Sizes from the zkey's header: 9,418 wires (4 public), domain 2^14.
 const WIRES = 9418;
 const DOMAIN = 16384;
 const msm = (Point, n) => {
   const points = [];
   for (let i = 0, P = Point.BASE; i < n; i++, P = P.add(Point.BASE)) points.push(P);
-  const scalars = Array.from({ length: n }, scalar);
+  const scalars = Array.from({ length: n }, () => scalar());
   const s = performance.now();
   pippenger(Point, points, scalars);
   return performance.now() - s;
@@ -158,11 +161,11 @@ const ntt = (a, w) => {
   return x;
 };
 const msmMs = [WIRES, WIRES, WIRES - 5, DOMAIN].map((n) => msm(G1, n)).concat(msm(G2, WIRES));
-const coeffs = Array.from({ length: DOMAIN }, scalar);
+const coeffs = Array.from({ length: DOMAIN }, () => scalar());
 const w = Fr.pow(5n, (R - 1n) / BigInt(DOMAIN));
 const f0 = performance.now();
 for (let i = 0; i < 6; i++) ntt(coeffs, w); // three inverse and three coset transforms
-report.nobleLowerBoundMs = Math.round(msmMs.reduce((s, v) => s + v, 0) + performance.now() - f0);
+report.nobleEstimateMs = Math.round(msmMs.reduce((s, v) => s + v, 0) + performance.now() - f0);
 
 // --- Chromium, throttled. ---
 if (rates.length > 0) {

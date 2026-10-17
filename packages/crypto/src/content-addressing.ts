@@ -72,13 +72,21 @@ export type ObjectRead =
   | { readonly ok: false; readonly reason: "unavailable" | "inconsistent" };
 
 /**
+ * What a source served for block `cid`, in the order tried. `limit` is
+ * `CHUNK_SIZE`, which no block of the layout exceeds, where a fetcher stops
+ * reading; an answer over it is never hashed.
+ */
+export type BlockSource = (cid: Uint8Array, limit: number) => readonly Uint8Array[];
+
+/** `BlockSource` for a fetcher that waits on the network. */
+export type AsyncBlockSource = (cid: Uint8Array, limit: number) => Promise<readonly Uint8Array[]>;
+
+/**
  * Reads the object of exactly `length` bytes that `cid` names, block by
- * block (docs/spec/content-addressing.md, Reading by CID). `blocks(c, limit)`
- * gives what each source served for block `c`, in the order tried, and
- * `limit` is `CHUNK_SIZE`, which no block of the layout exceeds, where a
- * fetcher stops reading; the first answer within it that hashes to `c` is
- * read, so a wrong answer is only a failed fetch from its source, and
- * sources may each serve some blocks.
+ * block (docs/spec/content-addressing.md, Reading by CID). `blocks` gives
+ * what each source served for each block; the first answer within the limit
+ * that hashes to its CID is read, so a wrong answer is only a failed fetch
+ * from its source, and sources may each serve some blocks.
  *
  * - `unavailable`: no source served some block of it. Never a verdict on the
  *   object: the sources may not hold it, or no one may.
@@ -92,33 +100,159 @@ export type ObjectRead =
  * makes a reader fetch more blocks, or keep more bytes, than that object has
  * (T-49, T-52, T-53, T-24).
  */
-export function readObject(
+export function readObject(cid: Uint8Array, length: number, blocks: BlockSource): ObjectRead {
+  return readWith(cid, length, blocks, CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE);
+}
+
+/** `readObject` over a source that waits on the network. */
+export async function readObjectAsync(
   cid: Uint8Array,
   length: number,
-  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  blocks: AsyncBlockSource,
+): Promise<ObjectRead> {
+  checkSource(blocks);
+  return driveAsync(walk(cid, exact(length), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
+}
+
+/**
+ * Reads the object that `cid` names when its length isn't fixed by a signed
+ * record but only bounded by `maxLength`, as a board segment object's is by
+ * its checkpoints' sizes (docs/spec/content-addressing.md, Reading within a
+ * bound). The length is the root's: a raw root's own length, at most one
+ * chunk, or a dag-pb root's `filesize`, over one chunk; then the object is
+ * read as `readObject` reads one of that length, the root not asked for
+ * again. A length over `maxLength` is `inconsistent`, before any other block
+ * is asked for, so no CID makes a reader fetch or keep more than
+ * `maxLength` bytes (T-49, T-52). Both outcomes stay a function of `cid` and
+ * `maxLength`: a canonical root's `filesize` is the length of its object.
+ */
+export function readObjectWithin(
+  cid: Uint8Array,
+  maxLength: number,
+  blocks: BlockSource,
 ): ObjectRead {
-  return readWith(cid, length, blocks, CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE);
+  checkSource(blocks);
+  return drive(walk(cid, bounded(maxLength), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
+}
+
+/** `readObjectWithin` over a source that waits on the network. */
+export async function readObjectWithinAsync(
+  cid: Uint8Array,
+  maxLength: number,
+  blocks: AsyncBlockSource,
+): Promise<ObjectRead> {
+  checkSource(blocks);
+  return driveAsync(walk(cid, bounded(maxLength), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
 }
 
 /** Internal: `readObject` under `dagWith`'s limits, for the deeper layouts' tests. */
 export function readWith(
   cid: Uint8Array,
   length: number,
-  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  blocks: BlockSource,
   chunkSize: number,
   maxLinks: number,
   blockLimit: number,
 ): ObjectRead {
-  if (!(cid instanceof Uint8Array)) throw new TypeError("readObject: cid must be bytes");
+  checkSource(blocks);
+  return drive(walk(cid, exact(length), chunkSize, maxLinks, blockLimit), blocks);
+}
+
+/** Internal: `readObjectWithin` under `dagWith`'s limits, for the deeper layouts' tests. */
+export function readWithinWith(
+  cid: Uint8Array,
+  maxLength: number,
+  blocks: BlockSource,
+  chunkSize: number,
+  maxLinks: number,
+  blockLimit: number,
+): ObjectRead {
+  checkSource(blocks);
+  return drive(walk(cid, bounded(maxLength), chunkSize, maxLinks, blockLimit), blocks);
+}
+
+// How long the object is: exactly `length`, or the root's own claim, refused
+// over `max`.
+type Length = { readonly exact: number } | { readonly max: number };
+
+function exact(length: number): Length {
   if (!Number.isSafeInteger(length) || length < 1)
     throw new RangeError("readObject: length must be a positive integer");
+  return { exact: length };
+}
+
+function bounded(maxLength: number): Length {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1)
+    throw new RangeError("readObjectWithin: maxLength must be a positive integer");
+  return { max: maxLength };
+}
+
+function checkSource(blocks: unknown): void {
   if (typeof blocks !== "function") throw new TypeError("readObject: blocks must be a function");
+}
+
+// One block request: the walk yields the CID and the limit, and is resumed
+// with what the sources served.
+interface Request {
+  readonly cid: Uint8Array;
+  readonly limit: number;
+}
+
+type Walk = Generator<Request, ObjectRead, readonly Uint8Array[]>;
+
+function drive(w: Walk, blocks: BlockSource): ObjectRead {
+  for (let step = w.next(); ;) {
+    if (step.done === true) return step.value;
+    step = w.next(blocks(step.value.cid, step.value.limit));
+  }
+}
+
+async function driveAsync(w: Walk, blocks: AsyncBlockSource): Promise<ObjectRead> {
+  for (let step = w.next(); ;) {
+    if (step.done === true) return step.value;
+    step = w.next(await blocks(step.value.cid, step.value.limit));
+  }
+}
+
+// The read itself, written once for both drivers: a generator that yields
+// each block it needs, in walk order, and hashes what comes back.
+function* walk(
+  cid: Uint8Array,
+  len: Length,
+  chunkSize: number,
+  maxLinks: number,
+  blockLimit: number,
+): Walk {
+  if (!(cid instanceof Uint8Array)) throw new TypeError("readObject: cid must be bytes");
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1)
     throw new RangeError("readObject: chunkSize must be a positive integer");
   if (!Number.isSafeInteger(maxLinks) || maxLinks < 2)
     throw new RangeError("readObject: maxLinks must be at least 2");
   if (!Number.isSafeInteger(blockLimit) || blockLimit < chunkSize)
     throw new RangeError("readObject: blockLimit must be an integer of at least chunkSize");
+  let length: number;
+  // The root, when the length is learnt from it, so it isn't asked for twice.
+  let root: Uint8Array | undefined;
+  if ("exact" in len) length = len.exact;
+  else {
+    const raw = hasPrefix(cid, RAW);
+    if (!raw && !hasPrefix(cid, DAG_PB)) return { ok: false, reason: "inconsistent" };
+    root = yield* fetchBlock(cid, blockLimit);
+    if (root === undefined) return { ok: false, reason: "unavailable" };
+    // An object of at most one chunk is one raw block, and only those are:
+    // so a raw root's length is the object's, and a dag-pb root's `filesize`
+    // must be over one chunk. Any other claim the canonical walk below
+    // refuses, so no root can make the read longer than its object.
+    const claimed = raw ? root.length : fileSize(root);
+    if (
+      claimed === undefined ||
+      claimed < 1 ||
+      claimed > len.max ||
+      (raw ? claimed > chunkSize : claimed <= chunkSize)
+    )
+      return { ok: false, reason: "inconsistent" };
+    length = claimed;
+  }
   const chunks = Math.ceil(length / chunkSize);
   let height = 0;
   for (let span = 1; span < chunks; span *= maxLinks) height++;
@@ -152,11 +286,16 @@ export function readWith(
   };
   // Allocated at the first leaf that hashes, so a CID no source serves costs nothing.
   let object: Uint8Array | undefined;
-  const read = (c: Uint8Array, h: number, first: number): Failure | undefined => {
+  function* read(
+    c: Uint8Array,
+    h: number,
+    first: number,
+    held: Uint8Array | undefined,
+  ): Generator<Request, Failure | undefined, readonly Uint8Array[]> {
     if (!hasPrefix(c, h === 0 ? RAW : DAG_PB)) return "inconsistent";
     // Any answer within the limit is hashed, so a CID over a block of
     // another length is the object's, never a failed fetch.
-    const bytes = fetchBlock(c, blockLimit, blocks);
+    const bytes = held ?? (yield* fetchBlock(c, blockLimit));
     if (bytes === undefined) return "unavailable";
     if (h === 0) {
       const at = first * chunkSize;
@@ -176,12 +315,12 @@ export function readWith(
     );
     if (!equal(rebuilt.bytes, bytes)) return "inconsistent";
     for (const [i, link] of links.entries()) {
-      const failed = read(link, h - 1, first + i * span);
+      const failed = yield* read(link, h - 1, first + i * span, undefined);
       if (failed !== undefined) return failed;
     }
     return undefined;
-  };
-  const failed = read(cid, height, 0);
+  }
+  const failed = yield* read(cid, height, 0, root);
   if (failed !== undefined) return { ok: false, reason: failed };
   // The walk reached every leaf, so the object was allocated.
   return { ok: true, bytes: object as Uint8Array };
@@ -207,16 +346,37 @@ function hasPrefix(c: Uint8Array, codec: number): boolean {
 
 // The first answer within `limit` that hashes to the CID; any other is its
 // source's failed fetch, and one over the limit isn't hashed.
-function fetchBlock(
+function* fetchBlock(
   c: Uint8Array,
   limit: number,
-  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
-): Uint8Array | undefined {
+): Generator<Request, Uint8Array | undefined, readonly Uint8Array[]> {
   const digest = c.subarray(4);
-  for (const b of blocks(Uint8Array.from(c), limit))
+  const answers: unknown = yield { cid: Uint8Array.from(c), limit };
+  if (!Array.isArray(answers)) throw new TypeError("readObject: blocks must return an array");
+  for (const b of answers as unknown[])
     if (b instanceof Uint8Array && b.length <= limit && equal(sha256(b), digest))
       return Uint8Array.from(b);
   return undefined;
+}
+
+// A dag-pb UnixFS root's `filesize`, where canonical form puts it: after the
+// links, the Data field opens with Type (File) and then filesize. Undefined
+// if it isn't there; the canonical walk then checks every byte of the node.
+function fileSize(node: Uint8Array): number | undefined {
+  let at = 0;
+  while (node[at] === 0x12) {
+    const link = readVarint(node, at + 1);
+    if (link === undefined) return undefined;
+    at = link.next + link.value;
+  }
+  if (node[at] !== 0x0a) return undefined;
+  const data = readVarint(node, at + 1);
+  if (data === undefined) return undefined;
+  const p = data.next;
+  if (node[p] !== 0x08 || node[p + 1] !== UNIXFS_FILE || node[p + 2] !== 0x18) return undefined;
+  const size = readVarint(node, p + 3);
+  // A varint of 8 bytes can exceed 2^53, where floating point loses digits.
+  return size !== undefined && Number.isSafeInteger(size.value) ? size.value : undefined;
 }
 
 // The CIDs of a dag-pb node's first `n` links, where canonical form puts

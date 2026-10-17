@@ -2,7 +2,13 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { type Block, dagWith, encodeCar, readWith } from "../src/content-addressing.ts";
+import {
+  type Block,
+  dagWith,
+  encodeCar,
+  readWith,
+  readWithinWith,
+} from "../src/content-addressing.ts";
 import {
   CHUNK_SIZE,
   cidText,
@@ -11,6 +17,9 @@ import {
   objectCar,
   objectCid,
   readObject,
+  readObjectAsync,
+  readObjectWithin,
+  readObjectWithinAsync,
 } from "../src/index.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -425,5 +434,204 @@ describe("reading an object by its CID", () => {
     expect(() => readWith(cid, 1, none, 0, 4, 4)).toThrow(RangeError);
     expect(() => readWith(cid, 1, none, 4, 1, 4)).toThrow(RangeError);
     expect(() => readWith(cid, 1, none, 4, 4, 3)).toThrow(RangeError);
+  });
+});
+
+describe("reading an object within a bound (content-addressing.json)", () => {
+  for (const v of vectors.vectors) {
+    test(`${v.id}: read back by its CID alone, and refused under a bound below its length`, () => {
+      const profile = vectors.profiles[v.profile] as { chunkSize: number; maxLinks: number };
+      const bytes = object(v.label, v.length);
+      const blocks =
+        v.car === undefined
+          ? dagWith(bytes, profile.chunkSize, profile.maxLinks).blocks
+          : carBlocks(Buffer.from(v.car, "hex"));
+      const cid = Buffer.from(v.cidHex, "hex");
+      const limit = Math.max(profile.chunkSize, 4096);
+      const within = (max: number, requests?: string[]) =>
+        readWithinWith(
+          cid,
+          max,
+          source(blocks, requests),
+          profile.chunkSize,
+          profile.maxLinks,
+          limit,
+        );
+      const own = within(v.length);
+      expect(own.ok && hex(own.bytes)).toBe(hex(bytes));
+      if (v.length > 1) {
+        const requests: string[] = [];
+        expect(within(v.length - 1, requests)).toEqual(inconsistent);
+        // Only the root is asked for: its claim is refused before any child.
+        expect(requests).toEqual([v.cidHex]);
+      }
+      const read = readObjectWithin(cid, v.length, source(blocks));
+      if (hex(objectCid(bytes)) === v.cidHex) expect(read.ok && hex(read.bytes)).toBe(hex(bytes));
+      else expect(read.ok).toBe(false);
+    });
+  }
+});
+
+describe("reading an object within a bound", () => {
+  const profile = { chunkSize: 64, maxLinks: 4 };
+  const within = (
+    cid: Uint8Array,
+    max: number,
+    blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  ) => readWithinWith(cid, max, blocks, profile.chunkSize, profile.maxLinks, 4096);
+  const exactly = (
+    cid: Uint8Array,
+    length: number,
+    blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  ) => readWith(cid, length, blocks, profile.chunkSize, profile.maxLinks, 4096);
+  const dagOf = (bytes: Uint8Array) => dagWith(bytes, profile.chunkSize, profile.maxLinks);
+  const objects = fc.uint8Array({ minLength: 1, maxLength: 3000 });
+
+  test("under any bound at least its length, reads what the exact read does, asking for each block once", () => {
+    fc.assert(
+      fc.property(objects, fc.nat(5000), (bytes, extra) => {
+        const dag = dagOf(bytes);
+        const asked: string[] = [];
+        const r = within(dag.root, bytes.length + extra, source(dag.blocks, asked));
+        expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+        const exact: string[] = [];
+        exactly(dag.root, bytes.length, source(dag.blocks, exact));
+        // The root the length was learnt from isn't asked for again.
+        expect(asked).toEqual(exact);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("under a bound below its length, is inconsistent after asking only for the root", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 2, maxLength: 3000 }), fc.nat(), (bytes, cut) => {
+        const dag = dagOf(bytes);
+        const asked: string[] = [];
+        const max = 1 + (cut % (bytes.length - 1));
+        expect(within(dag.root, max, source(dag.blocks, asked))).toEqual(inconsistent);
+        expect(asked).toEqual([hex(dag.root)]);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a withheld or altered block is unavailable, as in the exact read", () => {
+    fc.assert(
+      fc.property(objects, fc.nat(), fc.boolean(), (bytes, which, drop) => {
+        const dag = dagOf(bytes);
+        const target = hex((dag.blocks[which % dag.blocks.length] as Block).cid);
+        // Withhold one block, or serve it with a byte flipped: either way no
+        // answer for it hashes.
+        const blocks = dag.blocks.flatMap((b) => {
+          if (hex(b.cid) !== target) return [b];
+          if (drop) return [];
+          const c = Uint8Array.from(b.bytes);
+          c[0] = (c[0] as number) ^ 1;
+          return [{ cid: b.cid, bytes: c }];
+        });
+        expect(within(dag.root, 4000, source(blocks))).toEqual(unavailable);
+        expect(exactly(dag.root, bytes.length, source(blocks))).toEqual(unavailable);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a root claiming another filesize, hashed again, is inconsistent", () => {
+    // Two levels of the small layout: 16 leaves of 64 bytes.
+    const bytes = Uint8Array.from({ length: 16 * 64 }, (_, i) => i % 251);
+    const dag = dagOf(bytes);
+    const node = (dag.blocks[0] as Block).bytes;
+    // The root's filesize is the varint after its Data field's Type; 1,024
+    // is 0x80 0x08. Change it to 1,023 (0xff 0x07) and to 1,025 (0x81 0x08).
+    const at = node.indexOf(0x18, node.lastIndexOf(0x0a)) + 1;
+    expect([node[at], node[at + 1]]).toEqual([0x80, 0x08]);
+    for (const claim of [
+      [0xff, 0x07],
+      [0x81, 0x08],
+    ]) {
+      const changed = Uint8Array.from(node);
+      changed.set(claim, at);
+      const cid = Uint8Array.from([0x01, 0x70, 0x12, 0x20, ...sha256(changed)]);
+      expect(within(cid, 4000, source([...dag.blocks, { cid, bytes: changed }]))).toEqual(
+        inconsistent,
+      );
+    }
+  });
+
+  test("a dag-pb root over one chunk or less, an empty raw block and a CID of another form are inconsistent", () => {
+    const small = Uint8Array.from({ length: 64 }, (_, i) => i);
+    // A dag-pb root of one raw leaf: a valid UnixFS file, not the canonical DAG.
+    const wrapped = dagWith(small, 32, 4);
+    const leaf = dagWith(small, 64, 4);
+    expect(wrapped.root[1]).toBe(0x70);
+    expect(within(wrapped.root, 4000, source(wrapped.blocks))).toEqual(inconsistent);
+    expect(within(leaf.root, 4000, source(leaf.blocks))).toEqual({ ok: true, bytes: small });
+    const empty = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...sha256(new Uint8Array(0))]);
+    expect(within(empty, 4000, source([{ cid: empty, bytes: new Uint8Array(0) }]))).toEqual(
+      inconsistent,
+    );
+    const asked: string[] = [];
+    const other = Uint8Array.from([0x01, 0x71, 0x12, 0x20, ...sha256(small)]);
+    expect(within(other, 4000, source([], asked))).toEqual(inconsistent);
+    expect(asked).toEqual([]);
+  });
+
+  test("a raw root over one chunk is never hashed: an unavailable fetch", () => {
+    const big = new Uint8Array(CHUNK_SIZE + 1);
+    const cid = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...sha256(big)]);
+    expect(readObjectWithin(cid, 2 * CHUNK_SIZE, () => [big])).toEqual(unavailable);
+  });
+
+  test("refuses a bound that isn't a positive integer", () => {
+    const cid = objectCid(Uint8Array.of(1));
+    const none = () => [];
+    expect(() => readObjectWithin(cid, 0, none)).toThrow(RangeError);
+    expect(() => readObjectWithin(cid, 2.5, none)).toThrow(RangeError);
+  });
+});
+
+describe("reading over a source that waits", () => {
+  const objects = fc.uint8Array({ minLength: 1, maxLength: 3000 });
+
+  test("gives what the synchronous read gives, asking in the same order", async () => {
+    await fc.assert(
+      fc.asyncProperty(objects, fc.boolean(), fc.nat(), async (bytes, drop, which) => {
+        const dag = contentDag(bytes);
+        const target = hex((dag.blocks[which % dag.blocks.length] as Block).cid);
+        const blocks = drop ? dag.blocks.filter((b) => hex(b.cid) !== target) : dag.blocks;
+        const syncAsked: string[] = [];
+        const asyncAsked: string[] = [];
+        const held = source(blocks, asyncAsked);
+        const waiting = async (cid: Uint8Array) => {
+          await Promise.resolve();
+          return held(cid);
+        };
+        expect(await readObjectAsync(dag.root, bytes.length, waiting)).toEqual(
+          readObject(dag.root, bytes.length, source(blocks, syncAsked)),
+        );
+        expect(asyncAsked).toEqual(syncAsked);
+        expect(await readObjectWithinAsync(dag.root, 4000, waiting)).toEqual(
+          readObjectWithin(dag.root, 4000, source(blocks)),
+        );
+      }),
+      { numRuns },
+    );
+  });
+
+  test("rejects rather than throws on bad arguments", async () => {
+    const cid = objectCid(Uint8Array.of(1));
+    const none = async () => [];
+    await expect(readObjectAsync(cid, 0, none)).rejects.toThrow(RangeError);
+    await expect(readObjectWithinAsync(cid, 0, none)).rejects.toThrow(RangeError);
+  });
+
+  test("a source that throws ends the read with its error", async () => {
+    const cid = objectCid(Uint8Array.of(1));
+    await expect(
+      readObjectAsync(cid, 1, async () => {
+        throw new Error("network down");
+      }),
+    ).rejects.toThrow("network down");
   });
 });

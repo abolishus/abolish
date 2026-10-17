@@ -1,7 +1,8 @@
-// Reads the indexed group registry back, in the shape @abolishus/crypto's
-// applyGroupRecords replays. Rows are what the events carried; whether a
-// history is valid is the replay's to say, under the registrars the reader's
-// release pins (T-71, T-06).
+// Reads the index back: the group registry's records, in the shape
+// @abolishus/crypto's applyGroupRecords replays, and any contract's logs as
+// contract-event records. Rows are what the events carried; whether a
+// history is valid is the replay's and the accumulator check's to say, under
+// what the reader's release pins (T-71, T-06).
 
 import type { ContractEventRecord, GroupLogRecord } from "@abolishus/crypto";
 import type { Sql } from "postgres";

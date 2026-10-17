@@ -1,11 +1,16 @@
-// The indexer against a real chain: Anvil runs the group registry, its
-// registrars sign through Anvil's unlocked development accounts (no key is
-// held here, AGENTS.md), Ponder indexes into a fresh Postgres schema, and the
-// indexed records must replay through @abolishus/crypto to exactly the tier
-// trees the registry was given, both from a backfill and live, and again
-// after the index is wiped and rebuilt from the chain (T-66).
+// The indexer against a real chain: Anvil runs the four L2 contracts, the
+// group registry's registrars sign through Anvil's unlocked development
+// accounts (no key is held here, AGENTS.md), Ponder indexes into a fresh
+// Postgres schema, and the indexed records must replay through
+// @abolishus/crypto to exactly the tier trees the registry was given, and
+// every contract's logs to its stored event accumulator, both from a
+// backfill and live, and again after the index is wiped and rebuilt from the
+// chain (T-66). The board reads its registries through the stubs its own
+// tests use, set from ballot.json, so its ballots are the vectors'.
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -16,13 +21,19 @@ import {
   contractEventLog,
   type ContractEventRecord,
   decodeContractEvent,
+  decodeElectionDefinition,
   encodeContractEvent,
   encodeGroupAddition,
   encodeGroupRemoval,
   type GroupApproval,
   groupRegistryDomainSeparator,
 } from "@abolishus/crypto";
-import { groupRegistryAbi } from "@abolishus/contracts/abi";
+import {
+  boardAbi,
+  electionRegistryAbi,
+  groupRegistryAbi,
+  trusteeRegistryAbi,
+} from "@abolishus/contracts/abi";
 import postgres from "postgres";
 import {
   type Address,
@@ -35,12 +46,47 @@ import {
   hexToBytes,
   http,
   keccak256,
+  encodeFunctionData,
+  parseAbi,
   parseSignature,
   stringToHex,
   toHex,
 } from "viem";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { readContractEvents, readIndexedGroups } from "../src/records.ts";
+
+const ballotVectors = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
+) as {
+  readonly elections: Record<
+    string,
+    {
+      readonly definition: Hex;
+      readonly definitionHash: Hex;
+      readonly tiers: readonly { readonly tier: number; readonly root: string }[];
+    }
+  >;
+  readonly ballots: readonly {
+    readonly id: string;
+    readonly election: string;
+    readonly registered: readonly number[];
+    readonly encoding: Hex;
+  }[];
+};
+// The vectors' hex has no 0x.
+const prefixed = (h: string): Hex => (h.startsWith("0x") ? h : `0x${h}`) as Hex;
+const definitionOf = (name: string) => {
+  const e = ballotVectors.elections[name];
+  if (e === undefined) throw new Error(`ballot.json has no election ${name}`);
+  const definition = prefixed(e.definition);
+  return {
+    ...e,
+    definition,
+    definitionHash: prefixed(e.definitionHash),
+    decoded: decodeElectionDefinition(hexToBytes(definition)),
+  };
+};
+const plurality = definitionOf("plurality");
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 if (DATABASE_URL === undefined) throw new Error("TEST_DATABASE_URL is required (AGENTS.md)");
@@ -108,7 +154,14 @@ let rpcUrl: string;
 let publicClient: ReturnType<typeof createPublicClient>;
 let walletClient: ReturnType<typeof createWalletClient>;
 let registry: Address;
-let startBlock: bigint;
+let trusteeRegistry: Address;
+let electionRegistry: Address;
+let board: Address;
+let elections: Address;
+let trustees: Address;
+let deployer: Address;
+/** The block each contract was deployed in. */
+const startBlocks = new Map<Address, bigint>();
 let registrars: Address[];
 let submitter: Address;
 
@@ -143,7 +196,13 @@ async function startIndexer(): Promise<{ schema: string; child: ChildProcess; po
         INDEXER_CHAIN_ID: String(chainId),
         INDEXER_RPC_URL: rpcUrl,
         GROUP_REGISTRY_ADDRESS: registry,
-        GROUP_REGISTRY_START_BLOCK: startBlock.toString(),
+        GROUP_REGISTRY_START_BLOCK: String(startBlocks.get(registry)),
+        TRUSTEE_REGISTRY_ADDRESS: trusteeRegistry,
+        TRUSTEE_REGISTRY_START_BLOCK: String(startBlocks.get(trusteeRegistry)),
+        ELECTION_REGISTRY_ADDRESS: electionRegistry,
+        ELECTION_REGISTRY_START_BLOCK: String(startBlocks.get(electionRegistry)),
+        BOARD_ADDRESS: board,
+        BOARD_START_BLOCK: String(startBlocks.get(board)),
         PONDER_LOG_LEVEL: "info",
       },
       stdio: ["ignore", "inherit", "inherit"],
@@ -169,6 +228,116 @@ async function send(functionName: "createGroup" | "addMembers" | "removeMembers"
   } as Parameters<typeof walletClient.writeContract>[0]);
   const receipt = await publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
   if (receipt.status !== "success") throw new Error(`${functionName} reverted`);
+  sent(registry, GROUP_EVENT[functionName]);
+}
+
+const GROUP_EVENT = {
+  createGroup: "GroupCreated",
+  addMembers: "MembersAdded",
+  removeMembers: "MembersRemoved",
+} as const;
+
+/** Sends `data` to `to` from the deployer and waits for its successful receipt. */
+async function call(to: Address, data: Hex): Promise<void> {
+  const hash = await walletClient.sendTransaction({ account: deployer, chain, to, data });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
+  if (receipt.status !== "success") throw new Error(`call to ${to} reverted`);
+}
+
+/** The OP Stack's L1Block predeploy, which Anvil lacks: forge's MockL1Block stands in. */
+const L1_BLOCK = "0x4200000000000000000000000000000000000015";
+const stubAbi = parseAbi([
+  "function set(bytes32,(uint8,uint8,uint8,uint16,uint16,uint8,uint8,uint64,uint64,uint32,(uint8,uint16,uint16,uint16)[]),uint8[],uint256[])",
+  "function setCeremony(bytes32,bytes32,bytes32)",
+  "function setKeySet(bytes32,bytes32,uint256)",
+  "function set(uint64,uint64,bytes32)",
+]);
+
+/**
+ * Creates an election in the election registry, its L1 origin a made-up L1
+ * block (the registry records whatever the predeploy says).
+ */
+async function createElection(): Promise<void> {
+  const count = BigInt(emitted.get(electionRegistry)?.length ?? 0);
+  await call(
+    L1_BLOCK,
+    encodeFunctionData({
+      abi: stubAbi,
+      functionName: "set",
+      args: [100n + count, 1_700_000_000n + count, keccak256(toHex(count))],
+    }),
+  );
+  await call(
+    electionRegistry,
+    encodeFunctionData({ abi: electionRegistryAbi, functionName: "createElection" }),
+  );
+  sent(electionRegistry, "ElectionCreated");
+}
+
+/**
+ * Registers `name`'s definition with the board's stubs, as the sdk's
+ * direct-submit tests do: its parameters, a ceremony of its own, and the
+ * seats `registered` in that ceremony's key set.
+ */
+async function registerWithStubs(name: string, registered: readonly number[]): Promise<void> {
+  const e = definitionOf(name);
+  const d = e.decoded;
+  const stub = keccak256(stringToHex(`${name} stub`));
+  const panel = keccak256(stringToHex("panel"));
+  await call(
+    elections,
+    encodeFunctionData({
+      abi: stubAbi,
+      functionName: "set",
+      args: [
+        e.definitionHash,
+        [
+          1,
+          d.threshold,
+          d.panel_size,
+          d.option_count,
+          e.tiers.length,
+          0,
+          0,
+          d.opens_at,
+          d.closes_at,
+          0,
+          [[1, d.option_count, d.min_selections, d.max_selections]],
+        ],
+        e.tiers.map((t) => t.tier),
+        e.tiers.map((t) => BigInt(t.root)),
+      ],
+    }),
+  );
+  await call(
+    elections,
+    encodeFunctionData({
+      abi: stubAbi,
+      functionName: "setCeremony",
+      args: [e.definitionHash, stub, panel],
+    }),
+  );
+  const seats = registered.reduce((m, seat) => m | (1n << BigInt(seat)), 0n);
+  await call(
+    trustees,
+    encodeFunctionData({ abi: stubAbi, functionName: "setKeySet", args: [stub, panel, seats] }),
+  );
+}
+
+/** Submits ballot.json's ballot `id` directly to the board, as any voter can (T-25). */
+async function submitBallot(id: string): Promise<void> {
+  const v = ballotVectors.ballots.find((b) => b.id === id);
+  if (v === undefined) throw new Error(`ballot.json has no ballot ${id}`);
+  await registerWithStubs(v.election, v.registered);
+  await call(
+    board,
+    encodeFunctionData({
+      abi: boardAbi,
+      functionName: "submitBallot",
+      args: [prefixed(v.encoding)],
+    }),
+  );
+  sent(board, "BallotSubmitted");
 }
 
 const domain = () => ({
@@ -285,14 +454,14 @@ const accumulatorSlot =
   ) & ~0xffn;
 
 /**
- * The registry's accumulator and count after `block`, read from its storage.
+ * A contract's accumulator and count after `block`, read from its storage.
  * A verifier proves these slots under an output root (verifier 4.4); Anvil's
  * own state stands in for that proof here.
  */
-async function storedAccumulator(block: bigint) {
+async function storedAccumulator(contract: Address, block: bigint) {
   const word = async (slot: bigint) =>
     (await publicClient.getStorageAt({
-      address: registry,
+      address: contract,
       slot: toHex(slot, { size: 32 }),
       blockNumber: block,
     })) ?? "0x";
@@ -303,42 +472,61 @@ async function storedAccumulator(block: bigint) {
   };
 }
 
+/** The contract-event version every profile pins (verifier 2.3). */
+const EVENTS = 5;
+
 const eventContracts = () => ({
-  // Only the group registry is indexed; the other roles are addresses no log
-  // here comes from.
-  electionRegistry: new Uint8Array(20).fill(1),
-  trusteeRegistry: new Uint8Array(20).fill(2),
+  electionRegistry: hexToBytes(electionRegistry),
+  trusteeRegistry: hexToBytes(trusteeRegistry),
   groupRegistry: hexToBytes(registry),
-  board: new Uint8Array(20).fill(3),
+  board: hexToBytes(board),
 });
 
-/** The accumulator check of the registry's indexed logs against its storage at `block`. */
-async function accumulatorCheck(logs: readonly ContractEventRecord[], block: bigint) {
+/** The accumulator check of a contract's indexed logs against its storage at `block`. */
+async function accumulatorCheck(
+  logs: readonly ContractEventRecord[],
+  block: bigint,
+  contract: Address = registry,
+) {
   return checkEventAccumulatorProof(
     BigInt(chainId),
-    hexToBytes(registry),
+    hexToBytes(contract),
     logs.map(contractEventLog),
-    await storedAccumulator(block),
+    await storedAccumulator(contract, block),
   );
 }
 
+/** What each contract emitted, by event name in chain order, as the test sent it. */
+const emitted = new Map<Address, string[]>();
+const sent = (contract: Address, ...events: string[]) =>
+  emitted.set(contract, [...(emitted.get(contract) ?? []), ...events]);
+
 /**
- * Every log the registry emitted up to the head is indexed, as a contract-event
- * record that frames, passes the event check, and replays to the registry's
- * stored accumulator, from the constructor's `RegistrarsPinned` on (T-71).
+ * Every log each contract emitted up to the head is indexed, as a
+ * contract-event record that frames, passes the event check under its
+ * contract's role, and replays to the contract's stored accumulator, from
+ * the constructors' `RegistrarsPinned` and `PanelPinned` on (T-71, T-25).
  */
 async function expectLogsComplete(schema: string): Promise<void> {
-  const logs = await readContractEvents(sql, schema, registry);
   const head = await publicClient.getBlockNumber({ cacheTime: 0 });
-  const stored = await storedAccumulator(head);
-  expect(BigInt(logs.length)).toBe(stored.count);
-  for (const log of logs) {
-    expect(decodeContractEvent(encodeContractEvent(log, 2), 2)).toEqual(log);
-    expect(checkContractEvent(log, eventContracts(), 2).ok).toBe(true);
+  for (const contract of [electionRegistry, trusteeRegistry, registry, board]) {
+    const logs = await readContractEvents(sql, schema, contract);
+    const stored = await storedAccumulator(contract, head);
+    expect(BigInt(logs.length), contract).toBe(stored.count);
+    const names = logs.map((log) => {
+      expect(decodeContractEvent(encodeContractEvent(log, EVENTS), EVENTS)).toEqual(log);
+      const checked = checkContractEvent(log, eventContracts(), EVENTS);
+      if (!checked.ok) throw new Error(`${contract}: ${checked.error}`);
+      return checked.event.event;
+    });
+    expect(names, contract).toEqual(emitted.get(contract) ?? []);
+    expect(await accumulatorCheck(logs, head, contract), contract).toBeNull();
   }
-  const first = logs[0] && checkContractEvent(logs[0], eventContracts(), 2);
-  expect(first).toMatchObject({ ok: true, event: { event: "RegistrarsPinned", threshold: 2 } });
-  expect(await accumulatorCheck(logs, head)).toBeNull();
+  const [first] = await readContractEvents(sql, schema, registry);
+  expect(first && checkContractEvent(first, eventContracts(), EVENTS)).toMatchObject({
+    ok: true,
+    event: { event: "RegistrarsPinned", threshold: 2 },
+  });
 }
 
 beforeAll(async () => {
@@ -346,7 +534,19 @@ beforeAll(async () => {
   rpcUrl = `http://127.0.0.1:${port}`;
   anvil = spawn(
     "anvil",
-    ["--host", "127.0.0.1", "--port", String(port), "--chain-id", String(chainId), "--silent"],
+    [
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--chain-id",
+      String(chainId),
+      // A day before ballot.json's elections open, so the board's window
+      // can be reached later.
+      "--timestamp",
+      String(plurality.decoded.opens_at - 86_400n),
+      "--silent",
+    ],
     { stdio: ["ignore", "ignore", "inherit"] },
   );
   chain = anvilChain(rpcUrl);
@@ -364,25 +564,86 @@ beforeAll(async () => {
   // Anyone may submit a record: here an account that is no registrar.
   submitter = accounts[5] as Address;
 
-  // forge's build of the registry, compiled from packages/contracts' sources.
-  const bytecode = execFileSync(
-    "forge",
-    ["inspect", "--root", contractsRoot, "src/GroupRegistry.sol:GroupRegistry", "bytecode"],
-    { encoding: "utf8" },
-  ).trim() as Hex;
-  const hash = await walletClient.deployContract({
-    account: accounts[0] as Address,
-    chain,
-    abi: groupRegistryAbi,
-    bytecode,
-    args: [2, registrars],
+  deployer = accounts[0] as Address;
+
+  registry = await deploy("src/GroupRegistry.sol:GroupRegistry", groupRegistryAbi, [2, registrars]);
+  sent(registry, "RegistrarsPinned");
+
+  // A panel of three made-up seats; only their public keys are pinned.
+  const keys = [0, 1, 2].map(() => {
+    const jwk = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({
+      format: "jwk",
+    });
+    const x = hexToBigInt(toHex(Buffer.from(jwk.x as string, "base64url")));
+    const y = hexToBigInt(toHex(Buffer.from(jwk.y as string, "base64url")));
+    return {
+      x,
+      y,
+      encoded: toHex(
+        Buffer.concat([Buffer.of(2 + Number(y & 1n)), Buffer.from(jwk.x as string, "base64url")]),
+      ),
+    };
   });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
-  if (receipt.contractAddress === null || receipt.contractAddress === undefined)
-    throw new Error("GroupRegistry wasn't deployed");
-  registry = receipt.contractAddress.toLowerCase() as Address;
-  startBlock = receipt.blockNumber;
+  trusteeRegistry = await deploy("src/TrusteeRegistry.sol:TrusteeRegistry", trusteeRegistryAbi, [
+    [
+      {
+        threshold: 2,
+        quorum: 2,
+        keys: `0x${keys.map((k) => k.encoded.slice(2)).join("")}`,
+        points: keys.map((k) => [k.x, k.y]),
+      },
+    ],
+  ]);
+  sent(trusteeRegistry, "PanelPinned");
+
+  elections = await deploy("test/utils/BoardFixture.sol:ElectionsStub", [], []);
+  trustees = await deploy("test/utils/BoardFixture.sol:TrusteesStub", [], []);
+  // Nothing relays here: the relay's alias is a placeholder.
+  const relay = "0x1111111111111111111111111111111111111111";
+  board = await deploy("src/Board.sol:Board", boardAbi, [elections, trustees, relay]);
+  await publicClient.request({
+    method: "anvil_setCode",
+    params: [L1_BLOCK, forge("test/utils/MockL1Block.sol:MockL1Block", "deployedBytecode")],
+  } as never);
+  electionRegistry = await deploy(
+    "src/ElectionRegistry.sol:ElectionRegistry",
+    electionRegistryAbi,
+    [
+      {
+        board,
+        trusteeRegistry,
+        groupRegistry: registry,
+        l1ChainId: 1n,
+        l1Anchor: "0x2222222222222222222222222222222222222222",
+        l1Relay: relay,
+        epoch: 1n,
+      },
+    ],
+  );
 }, 120_000);
+
+/** forge's build of `contract`, compiled from packages/contracts' sources. */
+function forge(contract: string, field: "bytecode" | "deployedBytecode"): Hex {
+  return execFileSync("forge", ["inspect", "--root", contractsRoot, contract, field], {
+    encoding: "utf8",
+  }).trim() as Hex;
+}
+
+async function deploy(contract: string, abi: unknown, args: readonly unknown[]): Promise<Address> {
+  const hash = await walletClient.deployContract({
+    account: deployer,
+    chain,
+    abi,
+    bytecode: forge(contract, "bytecode"),
+    args,
+  } as Parameters<typeof walletClient.deployContract>[0]);
+  const receipt = await publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
+  if (receipt.status !== "success" || receipt.contractAddress == null)
+    throw new Error(`${contract} wasn't deployed`);
+  const address = receipt.contractAddress.toLowerCase() as Address;
+  startBlocks.set(address, receipt.blockNumber);
+  return address;
+}
 
 /** Drops Ponder's own schemas (its RPC cache): everything it knows then comes from the chain. */
 async function dropPonderCache(): Promise<void> {
@@ -410,6 +671,13 @@ describe("apps/indexer on the group registry", () => {
     await remove(0n, [1n, 5n]);
     await add(1n, commitments(2));
     await remove(1n, [0n]);
+    await createElection();
+    // Into the vector elections' window, where the board takes their ballots.
+    await publicClient.request({
+      method: "evm_mine",
+      params: [Number(plurality.decoded.opens_at)],
+    } as never);
+    await submitBallot("ok-tier-0");
     // Group 2 stays empty: it must still be listed, with no records.
     // Past Ponder's reorg window (600 s), so these blocks are finalized and
     // reach the index through its backfill; the next ones arrive live.
@@ -422,6 +690,9 @@ describe("apps/indexer on the group registry", () => {
       await expectLogsComplete(indexer.schema);
 
       // Live: records after the backfill reach the index too.
+      await submitBallot("ok-approval");
+      await createElection();
+      await submitBallot("ok-tier-2-blank");
       await add(2n, commitments(2));
       await remove(0n, [0n]);
       await caughtUp(indexer.port);
@@ -444,6 +715,29 @@ describe("apps/indexer on the group registry", () => {
       await stopped(indexer.child);
     }
   }, 240_000);
+
+  test("the board's direct-submitted ballots are indexed as the records it accepted (T-25)", async () => {
+    const logs = await readContractEvents(sql, schemas[1] as string, board);
+    const ballots = logs.map((log) => {
+      const checked = checkContractEvent(log, eventContracts(), EVENTS);
+      if (!checked.ok || checked.event.event !== "BallotSubmitted")
+        throw new Error("a board log that isn't a ballot");
+      return {
+        definitionHash: toHex(checked.event.definitionHash),
+        record: toHex(checked.event.record),
+      };
+    });
+    expect(ballots).toEqual(
+      ["ok-tier-0", "ok-approval", "ok-tier-2-blank"].map((id) => {
+        const v = ballotVectors.ballots.find((b) => b.id === id);
+        if (v === undefined) throw new Error(`ballot.json has no ballot ${id}`);
+        return {
+          definitionHash: definitionOf(v.election).definitionHash.toLowerCase(),
+          record: prefixed(v.encoding).toLowerCase(),
+        };
+      }),
+    );
+  });
 
   test("the index vouches for nothing: under other registrars every group's history fails", async () => {
     const groups = await readIndexedGroups(sql, schemas[1] as string);
@@ -500,7 +794,7 @@ describe("apps/indexer on the group registry", () => {
     const middle = logs[4];
     if (last === undefined || middle === undefined) throw new Error("too few logs indexed");
     // The last log is group 0's live removal of member 0, the one replay can't miss.
-    expect(checkContractEvent(last, eventContracts(), 2)).toMatchObject({
+    expect(checkContractEvent(last, eventContracts(), EVENTS)).toMatchObject({
       ok: true,
       event: { event: "MembersRemoved" },
     });

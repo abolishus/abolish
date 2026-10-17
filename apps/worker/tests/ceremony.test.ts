@@ -132,7 +132,13 @@ async function scheduledRun(now: Date) {
     prefix,
     now: () => now,
     registry: { sync: idleSync, everyMs: 3_600_000 },
-    pollStubs: { deployment: DEPLOYMENT, everyMs: 3_600_000, coordinateEveryMs: 3_600_000 },
+    pollStubs: {
+      deployment: DEPLOYMENT,
+      everyMs: 3_600_000,
+      coordinateEveryMs: 3_600_000,
+      openEveryMs: 3_600_000,
+      clock: { epoch: 0n, period: 3600n },
+    },
   });
   const queue = "{ceremony-coordinate}";
   let keys: string[];

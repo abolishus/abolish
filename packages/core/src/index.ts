@@ -337,6 +337,16 @@ export {
   type RegistrationStatus,
 } from "./poll-registration.ts";
 export {
+  type BoardClock,
+  type OpenFailure,
+  openPolls,
+  OPENS_PER_RUN,
+  type PollOpenReport,
+  pollReadBack,
+  type ReadBackMismatch,
+  type RegisteredPoll,
+} from "./poll-opening.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

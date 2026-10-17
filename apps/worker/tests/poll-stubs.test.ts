@@ -362,7 +362,7 @@ async function scheduledRun(deployment: PollStubDeployment) {
     prefix,
     now: () => NOW,
     registry: { sync: idleSync, everyMs: 3_600_000 },
-    pollStubs: { deployment, everyMs: 3_600_000 },
+    pollStubs: { deployment, everyMs: 3_600_000, clock: { epoch: 0n, period: 3600n } },
   });
   let keys: string[];
   try {

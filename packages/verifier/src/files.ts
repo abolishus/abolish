@@ -1,9 +1,19 @@
 // Reads a bundle directory (docs/spec/verifier.md, Bundle): bundle.json and
-// board.bin. The verifier contacts nothing: every input is a local file here.
+// the board copy, as board.bin or as blocks.car to read it from by CID. The
+// verifier contacts nothing: every input is a local file here.
 
-import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readBlockStore } from "./blocks.ts";
 import { type Bundle, BundleError, parseBundle } from "./bundle.ts";
+import { readBoardByCid } from "./verify.ts";
+
+/**
+ * The byte budget for a copy read by CID when the caller sets none: 1 GiB.
+ * The anchoring authority chooses how large a run's object may be, so the
+ * reader's budget is the only bound on what it holds (T-52).
+ */
+export const DEFAULT_MAX_BOARD_BYTES = 2 ** 30;
 
 function read(dir: string, name: string): Uint8Array {
   let fd: number;
@@ -29,17 +39,53 @@ function read(dir: string, name: string): Uint8Array {
   }
 }
 
-/** Reads and parses the bundle in `dir`. Throws `BundleError` if it doesn't follow the spec. */
-export function readBundle(dir: string): Bundle {
+function json(dir: string): string {
   const raw = read(dir, "bundle.json");
-  const board = read(dir, "board.bin");
-  let json: string;
   try {
     // fatal: invalid UTF-8 rejects the bundle instead of being replaced with
     // U+FFFD; ignoreBOM: a byte-order mark is kept, so JSON.parse rejects it.
-    json = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
   } catch {
     throw new BundleError("bundle.json: not UTF-8");
   }
-  return parseBundle(json, board);
+}
+
+// Whether `name` exists in `dir` as anything at all, a dangling link
+// included: a directory holding both copies is ambiguous, whichever is
+// readable.
+function present(dir: string, name: string): boolean {
+  try {
+    lstatSync(join(dir, name));
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new BundleError(`${name}: can't be read`, { cause: e });
+  }
+}
+
+/**
+ * Reads and parses the bundle in `dir`, whose board copy is board.bin.
+ * Throws `BundleError` if it doesn't follow the spec, or holds blocks.car.
+ */
+export function readBundle(dir: string): Bundle {
+  if (present(dir, "blocks.car"))
+    throw new BundleError("blocks.car: a bundle holds board.bin or blocks.car, not both");
+  return parseBundle(json(dir), read(dir, "board.bin"));
+}
+
+/**
+ * Reads the bundle in `dir` with its board copy: board.bin as it is, or,
+ * where the bundle holds blocks.car instead, a copy read by CID from its
+ * blocks within `maxBytes` (docs/spec/verifier.md, Board by CID). Throws
+ * `BundleError` if the bundle doesn't follow the spec.
+ */
+export async function loadBundle(
+  dir: string,
+  maxBytes: number = DEFAULT_MAX_BOARD_BYTES,
+): Promise<Bundle> {
+  if (!present(dir, "blocks.car")) return readBundle(dir);
+  if (present(dir, "board.bin"))
+    throw new BundleError("blocks.car: a bundle holds board.bin or blocks.car, not both");
+  const bundle = parseBundle(json(dir), new Uint8Array());
+  return readBoardByCid(bundle, readBlockStore(read(dir, "blocks.car")), maxBytes);
 }

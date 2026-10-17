@@ -7,7 +7,7 @@
 
 import { parseArgs } from "node:util";
 import { BundleError } from "./bundle.ts";
-import { readBundle } from "./files.ts";
+import { DEFAULT_MAX_BOARD_BYTES, loadBundle } from "./files.ts";
 import { authenticated, type Report, type Verdict, verifyBundle } from "./verify.ts";
 
 export interface CliOutput {
@@ -30,11 +30,14 @@ export const EXIT_CODES = Object.freeze({
   usage: 64,
 } as const);
 
-const USAGE = `Usage: abolish-verify [--] <bundle-directory>
+const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--] <bundle-directory>
 
-Verifies one election from a bundle (board.bin and bundle.json; see
-docs/spec/verifier.md, Inputs, procedure and report). Prints the JSON report
-on stdout and a summary on stderr.
+Verifies one election from a bundle (bundle.json, and board.bin or blocks.car;
+see docs/spec/verifier.md, Inputs, procedure and report). Prints the JSON
+report on stdout and a summary on stderr.
+
+--max-board-bytes caps what a board copy read by CID from blocks.car may
+hold, in bytes (default ${DEFAULT_MAX_BOARD_BYTES}); a copy past it is unverifiable.
 
 Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected,
 64 usage (and --help). Any other code is an error of the verifier, not a
@@ -128,16 +131,20 @@ export function summary(report: Report): string {
 }
 
 /** Runs the command line over `args` (without the node and script paths) and returns the exit code. */
-export function runCli(args: readonly string[], out: CliOutput): number {
+export async function runCli(args: readonly string[], out: CliOutput): Promise<number> {
   let positionals: string[];
   let help: boolean | undefined;
+  let budget: string | undefined;
   try {
     ({
       positionals,
-      values: { help },
+      values: { help, "max-board-bytes": budget },
     } = parseArgs({
       args: [...args],
-      options: { help: { type: "boolean", short: "h" } },
+      options: {
+        help: { type: "boolean", short: "h" },
+        "max-board-bytes": { type: "string" },
+      },
       allowPositionals: true,
       strict: true,
     }));
@@ -156,9 +163,15 @@ export function runCli(args: readonly string[], out: CliOutput): number {
     out.stderr(USAGE);
     return EXIT_CODES.usage;
   }
+  // Canonical decimal only, as for the bundle's integers.
+  const maxBytes = budget === undefined ? DEFAULT_MAX_BOARD_BYTES : Number(budget);
+  if (budget !== undefined && (!/^[1-9][0-9]*$/.test(budget) || !Number.isSafeInteger(maxBytes))) {
+    out.stderr(`--max-board-bytes: expected a positive integer\n${USAGE}`);
+    return EXIT_CODES.usage;
+  }
   let report: Report;
   try {
-    report = verifyBundle(readBundle(dir));
+    report = verifyBundle(await loadBundle(dir, maxBytes));
   } catch (e) {
     if (!(e instanceof BundleError)) throw e;
     // A rejected bundle has no report: it isn't evidence about any election.

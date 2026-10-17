@@ -71,10 +71,10 @@ function vectorDir(id: string): string {
   return bundleDir(json, Buffer.concat(v.entries.map((e) => Buffer.from(e, "hex"))));
 }
 
-function run(...args: string[]) {
+async function run(...args: string[]) {
   let stdout = "";
   let stderr = "";
-  const code = runCli(args, {
+  const code = await runCli(args, {
     stdout: (t) => (stdout += t),
     stderr: (t) => (stderr += t),
   });
@@ -109,10 +109,10 @@ describe("exit codes", () => {
 });
 
 describe("a bundle that parses", () => {
-  test("prints the library's report on stdout and exits on verdict, not verdictAgainstInputs", () => {
+  test("prints the library's report on stdout and exits on verdict, not verdictAgainstInputs", async () => {
     for (const id of [okId, failedId]) {
       const dir = vectorDir(id);
-      const r = run(dir);
+      const r = await run(dir);
       const report = JSON.parse(r.stdout) as Report;
       expect(report).toEqual(JSON.parse(JSON.stringify(verifyBundle(readBundle(dir)))));
       // Local inputs authenticate nothing, so the verdict is unverifiable
@@ -122,8 +122,8 @@ describe("a bundle that parses", () => {
     }
   });
 
-  test("never shows verdictAgainstInputs without the verdict and the unauthenticated inputs", () => {
-    const r = run(vectorDir(failedId));
+  test("never shows verdictAgainstInputs without the verdict and the unauthenticated inputs", async () => {
+    const r = await run(vectorDir(failedId));
     expect(r.stderr.split("\n")[0]).toBe(
       "verdict: unverifiable (unauthenticated inputs: electionId, boardEntryVersion, clock, now, anchors; against those inputs: failed)",
     );
@@ -144,19 +144,19 @@ describe("a bundle that parses", () => {
 });
 
 describe("a rejected bundle", () => {
-  test("prints no report and exits bundleRejected", () => {
-    const missing = run(join(root, "does-not-exist"));
+  test("prints no report and exits bundleRejected", async () => {
+    const missing = await run(join(root, "does-not-exist"));
     expect(missing).toEqual({
       code: EXIT_CODES.bundleRejected,
       stdout: "",
       stderr: "bundle rejected: bundle.json: can't be read\n",
     });
-    const malformed = run(bundleDir("{}", new Uint8Array()));
+    const malformed = await run(bundleDir("{}", new Uint8Array()));
     expect(malformed.code).toBe(EXIT_CODES.bundleRejected);
     expect(malformed.stdout).toBe("");
   });
 
-  test("rejects a format-2 bundle whose header isn't one, as a bundle and not a crash", () => {
+  test("rejects a format-2 bundle whose header isn't one, as a bundle and not a crash", async () => {
     const l1 = JSON.stringify({
       format: "abolish-verifier-bundle/2",
       electionId: "ab".repeat(32),
@@ -164,13 +164,13 @@ describe("a rejected bundle", () => {
       clock: { epoch: "0", period: "1", deadline: "0", lastSegment: "0" },
       l1: { anchor: "00".repeat(20), firstSegment: "0", header: "c0", nodes: [], checkpoints: [] },
     });
-    const r = run(bundleDir(l1, new Uint8Array()));
+    const r = await run(bundleDir(l1, new Uint8Array()));
     expect(r.code).toBe(EXIT_CODES.bundleRejected);
     expect(r.stdout).toBe("");
     expect(r.stderr).toMatch(/^bundle rejected: l1\.header: /);
   });
 
-  test("rejects a board.bin that isn't a regular file instead of reading it forever", () => {
+  test("rejects a board.bin that isn't a regular file instead of reading it forever", async () => {
     const ok = vectorDir(okId);
     const json = readFileSync(join(ok, "bundle.json"));
     const zero = join(root, String(dirs++));
@@ -182,7 +182,7 @@ describe("a rejected bundle", () => {
     writeFileSync(join(fifo, "bundle.json"), json);
     execFileSync("mkfifo", [join(fifo, "board.bin")]);
     for (const dir of [zero, fifo])
-      expect(run(dir)).toEqual({
+      expect(await run(dir)).toEqual({
         code: EXIT_CODES.bundleRejected,
         stdout: "",
         stderr: "bundle rejected: board.bin: not a regular file\n",
@@ -192,12 +192,12 @@ describe("a rejected bundle", () => {
     mkdirSync(linked);
     symlinkSync(join(ok, "bundle.json"), join(linked, "bundle.json"));
     symlinkSync(join(ok, "board.bin"), join(linked, "board.bin"));
-    expect(run(linked).stdout).toBe(run(ok).stdout);
+    expect((await run(linked)).stdout).toBe((await run(ok)).stdout);
   });
 
-  test("can't put terminal control characters on stderr through a member name", () => {
+  test("can't put terminal control characters on stderr through a member name", async () => {
     const hostile = "a\u001b[2J\u009b31m\u202eb\\u{1b}\r\n\u0000";
-    const r = run(
+    const r = await run(
       bundleDir(
         JSON.stringify({ format: "abolish-verifier-bundle/1", [hostile]: 1 }),
         new Uint8Array(),
@@ -323,9 +323,9 @@ describe("printable", () => {
 });
 
 describe("usage", () => {
-  test("help, no bundle, two bundles and unknown options exit usage with no report", () => {
+  test("help, no bundle, two bundles and unknown options exit usage with no report", async () => {
     for (const args of [["--help"], ["-h"], [], [""], ["--", ""], ["a", "b"], ["--json", "a"]]) {
-      const r = run(...args);
+      const r = await run(...args);
       expect(r.code).toBe(EXIT_CODES.usage);
       expect(r.stdout).not.toMatch(/"format"/);
       expect(r.stdout + r.stderr).toMatch(/^Usage: abolish-verify/m);

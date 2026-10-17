@@ -508,7 +508,7 @@ describe("the report", () => {
     ]);
   });
 
-  test("the summary names the definition as unauthenticated, not the fields taken from it", () => {
+  test("the summary names the definition as unauthenticated, not the fields taken from it", async () => {
     const json = JSON.stringify({
       format: BUNDLE_FORMAT_DEFINITION,
       definition: forElection(closed.anchor),
@@ -520,7 +520,7 @@ describe("the report", () => {
       writeFileSync(join(dir, "bundle.json"), json);
       writeFileSync(join(dir, "board.bin"), copyOf(closed));
       let stderr = "";
-      const code = runCli([dir], { stdout: () => {}, stderr: (t) => (stderr += t) });
+      const code = await runCli([dir], { stdout: () => {}, stderr: (t) => (stderr += t) });
       expect(code).toBe(EXIT_CODES.unverifiable);
       expect(stderr.split("\n")[0]).toBe(
         "verdict: unverifiable (unauthenticated inputs: clock, l1Header, firstSegment, definition; " +

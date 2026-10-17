@@ -38,6 +38,7 @@ import {
   membershipVkHash,
   pinnedVersion,
   profileCombinationRule,
+  readBoardCopy,
   RECORD_TYPES,
   verifyBoard,
 } from "@abolishus/crypto";
@@ -49,7 +50,8 @@ import {
   type WindowCode,
 } from "./ballots.ts";
 import type { L1RefCode } from "./references.ts";
-import type { Bundle, InputSource, InputSources } from "./bundle.ts";
+import type { BlockStore } from "./blocks.ts";
+import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import {
@@ -164,6 +166,8 @@ export interface Report {
     readonly entries: number;
     readonly unreadableBytes: number;
     readonly unauthenticated?: number;
+    /** A copy read by CID from blocks.car: how the read came out. */
+    readonly byCid?: CidRead;
   };
   /** The L1 block a format-2 to 5 bundle was proven at, and the anchors read from its state. */
   readonly l1?: {
@@ -473,6 +477,56 @@ function runBoard(
   }
 }
 
+/**
+ * Reads the board copy of a bundle parsed without one from a local block
+ * store, by the CIDs its counted checkpoints name (docs/spec/verifier.md,
+ * Board by CID; docs/spec/board.md, A copy from L1's CIDs), within `maxBytes`
+ * for the whole copy, and returns the bundle with that copy. The anchors are
+ * read as `verifyBundle` reads them, with no copy to match words against, so
+ * every anchored word needs its checkpoint in `l1.checkpoints`, as it would
+ * from its `CheckpointAnchored` log (T-24). Where the board checks stop
+ * before they need a copy, the read doesn't run and the copy stays empty:
+ * `verifyBundle` then reports the same stop from the bundle alone. Nothing
+ * read here is trusted: `verifyBundle` authenticates every entry against the
+ * anchored heads and roots, so the store can only leave the copy short
+ * (T-49, T-53).
+ */
+export async function readBoardByCid(
+  bundle: Bundle,
+  store: BlockStore,
+  maxBytes: number,
+): Promise<Bundle> {
+  if (bundle.entries.length !== 0 || bundle.unreadableBytes !== 0 || bundle.byCid !== undefined)
+    throw new TypeError("the bundle already holds a board copy");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new RangeError("maxBytes must be a positive integer");
+  const read = { storeBlocks: store.blocks, storeUnreadableBytes: store.unreadableBytes };
+  const notReached = { ...bundle, byCid: { ...read, stopped: { reason: "not-reached" } } } as const;
+  const definition = fromDefinition(bundle);
+  if ("rows" in definition) return notReached;
+  const input = anchoring(bundle, definition.inputs);
+  if (input instanceof L1Error) return notReached;
+  let copy;
+  try {
+    copy = await readBoardCopy(
+      definition.inputs.electionId,
+      input.anchors,
+      bundle.clock,
+      input.now,
+      store.source,
+      maxBytes,
+    );
+  } catch (e) {
+    if (!(e instanceof BoardError)) throw e;
+    return notReached;
+  }
+  return {
+    ...bundle,
+    entries: copy.encodedEntries,
+    byCid: { ...read, ...(copy.stopped !== undefined && { stopped: copy.stopped }) },
+  };
+}
+
 /** Runs every check over one bundle and reports it (docs/spec/verifier.md, Report). */
 export function verifyBundle(bundle: Bundle): Report {
   const definition = fromDefinition(bundle);
@@ -711,7 +765,7 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(counted?.tiers !== undefined && { tiers: counted.tiers }),
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
     ...(counted?.close !== undefined && { close: counted.close }),
-    board,
+    board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {
         blockHash: bytesToHex(bundle.l1.header.hash),

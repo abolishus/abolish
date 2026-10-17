@@ -32,6 +32,7 @@ import {
   bytesToHex,
   ContractFunctionExecutionError,
   encodeFunctionData,
+  ExecutionRevertedError,
   getAddress,
   type Hex,
   hexToBytes,
@@ -68,6 +69,19 @@ const GAS_HEADROOM = 120n;
  */
 export const DEFINITION_GAS_BASE = 1_500_000n;
 export const DEFINITION_GAS_PER_BYTE = 600n;
+
+/**
+ * `registerCeremony`'s gas limit when the node's estimate reverts. Anyone
+ * may register an approved record, so another sender can land it first
+ * (`AlreadyRecorded`); the definition still registers against it. Signing
+ * the ceremony's anyway, to revert cheaply, keeps that poll from holding
+ * back the key's later registrations; a record the registry refuses for
+ * another reason reverts its definition too, and the poll fails as
+ * `registration-reverted`. Linear in the record, as its seats' keys and
+ * approvals are checked one by one.
+ */
+export const CEREMONY_GAS_BASE = 1_500_000n;
+export const CEREMONY_GAS_PER_BYTE = 1_000n;
 
 /** How many of the latest base fee a transaction's fee cap allows, before its tip. */
 export const BASE_FEE_HEADROOM = 3n;
@@ -130,7 +144,23 @@ export class ViemPollCreationChain implements PollCreationChain, PollRegistratio
       functionName: "registerCeremony",
       args: [bytesToHex(record)],
     });
-    return this.#sign(nonce, this.#trusteeRegistry, data);
+    let gas;
+    try {
+      gas = await this.#client.estimateGas({
+        account: this.#account.address,
+        to: this.#trusteeRegistry,
+        data,
+      });
+    } catch (e) {
+      if (!(e instanceof BaseError && e.walk((c) => c instanceof ExecutionRevertedError))) throw e;
+      return this.#sign(
+        nonce,
+        this.#trusteeRegistry,
+        data,
+        CEREMONY_GAS_BASE + CEREMONY_GAS_PER_BYTE * BigInt(record.length),
+      );
+    }
+    return this.#sign(nonce, this.#trusteeRegistry, data, (gas * GAS_HEADROOM) / 100n);
   }
 
   async signDefinition(nonce: bigint, definition: Uint8Array): Promise<SignedCreation> {
@@ -147,8 +177,12 @@ export class ViemPollCreationChain implements PollCreationChain, PollRegistratio
   async #sign(nonce: bigint, to: Address, data: Hex, gas?: bigint): Promise<SignedCreation> {
     if (nonce < 0n || nonce > BigInt(Number.MAX_SAFE_INTEGER))
       throw new RangeError("the nonce is out of range");
-    const [estimate, block, tip] = await Promise.all([
-      gas ?? this.#client.estimateGas({ account: this.#account.address, to, data }),
+    const [limit, block, tip] = await Promise.all([
+      gas === undefined
+        ? this.#client
+            .estimateGas({ account: this.#account.address, to, data })
+            .then((g) => (g * GAS_HEADROOM) / 100n)
+        : gas,
       this.#client.getBlock({ blockTag: "latest" }),
       this.#client.estimateMaxPriorityFeePerGas(),
     ]);
@@ -159,7 +193,7 @@ export class ViemPollCreationChain implements PollCreationChain, PollRegistratio
       nonce: Number(nonce),
       to,
       data,
-      gas: gas ?? (estimate * GAS_HEADROOM) / 100n,
+      gas: limit,
       // Nothing replaces a transaction stuck under a fee rise, and it would
       // hold every later nonce of the key, so the cap is several base fees
       // ahead; EIP-1559 charges only the base fee and the tip.

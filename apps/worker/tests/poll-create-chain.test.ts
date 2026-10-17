@@ -7,6 +7,7 @@ import {
   advancePollRegistrations,
   approvedCeremony,
   createPollDraft,
+  pollRegistration,
   newAccountId,
   openCeremonyRuns,
   type PollStubDeployment,
@@ -43,6 +44,8 @@ import {
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  CEREMONY_GAS_BASE,
+  CEREMONY_GAS_PER_BYTE,
   checkPollCreationDeployment,
   DEFINITION_GAS_BASE,
   DEFINITION_GAS_PER_BYTE,
@@ -590,6 +593,59 @@ describe("the registration, through ViemPollCreationChain", () => {
     await expect(key.registration(hexToBytes(ceremonyTx))).rejects.toThrow(
       "isn't the transaction's",
     );
+  }, 120_000);
+
+  test("registers a poll whose ceremony another sender registered first", async () => {
+    const key = await adapter();
+    const id = await approvedPoll(key);
+    // Anyone may send the approved record: here the deployer, before the
+    // step runs, so the key's estimate of its own reverts (AlreadyRecorded).
+    const [row] = await db.admin`
+      SELECT p.election_id, s.stub, s.stub_hash
+      FROM account_polls p JOIN ceremony_stubs s USING (stub_hash) WHERE p.id = ${id}`;
+    const stubHash = Uint8Array.from(row!["stub_hash"]);
+    const built = pollRegistration(
+      Uint8Array.from(row!["stub"]),
+      stubHash,
+      Uint8Array.from(row!["election_id"]),
+      PANEL,
+      (await approvedCeremony(app, stubHash))!,
+    );
+    if (typeof built === "string") throw new Error(`the run doesn't check: ${built}`);
+    const first = await wallet.writeContract({
+      account: deployer,
+      chain,
+      address: trusteeRegistry,
+      abi: trusteeRegistryAbi,
+      functionName: "registerCeremony",
+      args: [bytesToHex(built.record)],
+    });
+    expect(
+      (await client.waitForTransactionReceipt({ hash: first, pollingInterval: 20 })).status,
+    ).toBe("success");
+
+    expect(await advancePollRegistrations(app, key, PANEL, { now: NOW })).toMatchObject({
+      sent: 1,
+    });
+    const [sent] = await db.admin`
+      SELECT ceremony_tx_hash, register_tx_hash FROM account_polls WHERE id = ${id}`;
+    const ceremony = await client.waitForTransactionReceipt({
+      hash: bytesToHex(sent!["ceremony_tx_hash"]),
+      pollingInterval: 20,
+    });
+    await client.waitForTransactionReceipt({
+      hash: bytesToHex(sent!["register_tx_hash"]),
+      pollingInterval: 20,
+    });
+    // The key's copy reverts, under the fallback limit, and the definition
+    // registers against the record already there.
+    expect(ceremony.status).toBe("reverted");
+    const tx = await client.getTransaction({ hash: ceremony.transactionHash });
+    expect(tx.gas).toBe(CEREMONY_GAS_BASE + CEREMONY_GAS_PER_BYTE * BigInt(built.record.length));
+    await mine(FINALITY_DEPTH);
+    expect(await advancePollRegistrations(app, key, PANEL, { now: NOW })).toMatchObject({
+      registered: 1,
+    });
   }, 120_000);
 
   test("reports a definition the registry refuses as reverted once final", async () => {

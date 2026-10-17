@@ -39,6 +39,8 @@ export {
 } from "./creation-key.ts";
 export { ViemL1Source } from "./l1-source.ts";
 export {
+  CEREMONY_GAS_BASE,
+  CEREMONY_GAS_PER_BYTE,
   checkPollCreationDeployment,
   DEFINITION_GAS_BASE,
   DEFINITION_GAS_PER_BYTE,

@@ -601,7 +601,7 @@ The paymaster pins, as immutables:
 
 - `entryPoint`, which holds its deposit and is the only caller of its validation;
 - `registry`, the group registry whose `addMembers` it sponsors;
-- `service`, the signing service's account (an ERC-4337 account whose owner key the service holds, deployed by an unsponsored transaction before use);
+- `service`, the signing service's account (Registration account, below), deployed by an unsponsored transaction before use;
 - `admin`, the `TimelockController` behind our Safe (contracts skill, Rules), never a single key;
 - `maxCost`, the most one operation may cost the deposit, in wei.
 
@@ -626,9 +626,29 @@ Anyone may add to the deposit with `deposit()`, which forwards to the EntryPoint
 ### Known-weak
 
 - **A seized service drains the deposit** (T-69, T-52): whoever holds the service's account key can act as their own bundler, naming themselves the `handleOps` beneficiary, and set gas limits and fees so each operation's charge approaches `maxCost`; the EntryPoint pays that charge (and its penalty on unused gas) from the deposit to them, whether the record is valid or refused. So the deposit is at the service key's disposal, `maxCost` per operation. Keep it to a few days' batches and top it up; the batch job's spending is visible on chain. A per-period limit would need the paymaster to write storage, which ERC-7562 allows only to a staked paymaster.
-- **The account's `execute` is assumed.** The paymaster reads `execute`'s calldata as ERC-4337's reference account decodes it; a service account whose `execute` means something else would be sponsored for whatever it does. The deployment record names the account and its code, which MUST NOT be upgradeable (the reference `SimpleAccount` is UUPS-upgradeable, and an EIP-7702 account can be re-delegated); otherwise the owner key can change what `execute` does later. Either way the loss is bounded as above.
+- **The account's `execute` is assumed.** The paymaster reads `execute`'s calldata as ERC-4337's reference account decodes it; a service account whose `execute` means something else would be sponsored for whatever it does. The deployment record names the account and its code, which MUST be the registration account below: the reference `SimpleAccount` is UUPS-upgradeable, and an EIP-7702 account can be re-delegated, so with either the owner key could change what `execute` does later. Either way the loss is bounded as above.
 - **Front-running costs the deposit.** `addMembers` is permissionless, so anyone who sees a sponsored operation before it lands can submit its record directly; the sponsored operation then reverts at the registry (`position`) and is still charged. The griefer pays about as much gas and the members land anyway, so nothing is amplified; submitting through our own or a private bundler avoids it.
 - **The bundler sees the service's operations**, with their network metadata. They carry only what the batch's event shows, so a bundler learns nothing about registrants; running our own bundler, or submitting through a public one, is a deployment choice ([[0004-l2-choice]], Paymaster).
+
+## Registration account
+
+Threats: T-62 (contract admin abuse), T-69 (a seized service), T-52 (spending our gas).
+
+The signing service's [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) account, the registration paymaster's `service`, from which it submits each Tier 0 batch ([[registration]], The batch). It is eth-infinitism's reference `BaseAccount` for EntryPoint v0.8 (account-abstraction `v0.8.0`), unmodified, with one owner and no upgrade path, so that `execute` is exactly the reference account's, the call the paymaster's rule `CallData` reads, and stays so. Like the paymaster, it is no part of what a verifier checks and emits no log.
+
+### Deployment
+
+The account pins, as immutables, `entryPoint` (EntryPoint v0.8, the deployment record's) and `owner`, the address of the signing service's key. Deployment reverts if the EntryPoint has no code or only an EIP-7702 delegation, or if `owner` is zero. Nothing can be changed later: it has no proxy, no upgrade entry, no `delegatecall` and no way to change its owner, so a new key is a new account and a new paymaster (T-62).
+
+### Operations
+
+- `validateUserOp(userOp, userOpHash, missingAccountFunds)` reverts unless its caller is the EntryPoint. It returns validation data 0 if `userOp.signature` is 65 bytes `r ‖ s ‖ v` with `s ≤ (n − 1) / 2` and recovers, over `userOpHash` as given (EntryPoint v0.8's EIP-712 digest of the operation, which binds the chain ID, the EntryPoint and the nonce), to `owner`, and 1 (`SIG_VALIDATION_FAILED`) otherwise, never reverting on a bad signature. It sets no time range and pays `missingAccountFunds` from its balance, which is always zero: the account has no `receive`, so every operation it sends must name a paymaster.
+- `execute(target, value, data)` and `executeBatch(calls)` revert unless their caller is the EntryPoint, and make the call (or calls) as given, bubbling a single call's revert. The paymaster sponsors only `execute(registry, 0, addMembers(record))`; anything else the owner signs pays for itself, and the account holds nothing to pay with.
+
+### Known-weak
+
+- **The owner key is online** in the signing service, beside the registrars' keys (T-69). Whoever holds it can spend the paymaster's deposit as above; it can't add a member without a threshold of registrars' approvals, which the registry checks.
+- **Only the tests run the vendored EntryPoint.** They compile its v0.8 source with this package's settings, so its bytecode differs from the canonical deployment's; a deployment uses the canonical EntryPoint v0.8 at the address the deployment record names.
 
 ## Board (direct submit)
 

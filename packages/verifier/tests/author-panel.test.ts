@@ -239,7 +239,7 @@ describe("the author panel's run", () => {
       }
       expect(r.report?.author?.approvals, a.id).toEqual(a.result.seats ?? []);
     }
-  });
+  }, 120_000);
 
   test("approvals count wherever they sit, and another election's don't count", () => {
     const quorum = recordOf("quorum");

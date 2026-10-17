@@ -49,6 +49,13 @@ library GroupRegistryLib {
     uint256 internal constant MAX_BATCH = 256;
     /// The leaves of a tier tree, `2³²` (docs/spec/membership.md, Tier tree).
     uint256 internal constant MAX_MEMBERS = 1 << 32;
+    /// The wei a self-paid addition must send, exactly: `2 · 10¹⁴` (0.0002
+    /// ETH). Nothing moves ether out of the registry, so every fee is locked
+    /// there for good, paying no one, us included. It prices the floods gas
+    /// alone doesn't, since every self-paid addition is a counted leaf every
+    /// listing election boards and its clients read (T-52, T-53); a change
+    /// is a new registry.
+    uint256 internal constant SELF_PAID_FEE = 2e14;
 
     /// `hashStruct(domain)` for the registry at `registry` on chain `chainId`.
     function domainSeparator(uint256 chainId, address registry) internal pure returns (bytes32) {
@@ -170,7 +177,11 @@ library VouchLib {
 /// record: a Tier 0 record counts only through at least `threshold` distinct
 /// registrars' signatures, never through who sent it (T-71, T-62, T-06), and
 /// lands at the position it was signed for, at most once, so no relay can
-/// replay, reorder or inflate a group (T-06, T-13). A Tier 1 addition is
+/// replay, reorder or inflate a group (T-06, T-13). A self-paid Tier 0 group
+/// takes one commitment per call from anyone who pays `SELF_PAID_FEE`, with
+/// no signature, so joining Tier 0 never rests on the registrars or our
+/// servers (T-25); it never takes a signed record, and no signed group takes
+/// a self-paid one, so neither path can stall the other. A Tier 1 addition is
 /// authorised by `VOUCH_K` anonymous vouches of Tier 2 members, which the
 /// registry checks only as spam control: the verifier decides what counts
 /// (docs/spec/vouching.md; T-52). It takes no election
@@ -179,14 +190,16 @@ library VouchLib {
 /// registrars can't change after deployment.
 contract GroupRegistry is EventAccumulator {
     /// A group's record: `exists` tells group 0's tier 0 from no group.
-    /// `memberCount` counts Tier 0 additions only; `createdBlock` is the L2
-    /// block of the group's `createGroup`, which a vouch's Tier 2 group is
-    /// checked against.
+    /// `memberCount` counts Tier 0 additions only, signed or self-paid;
+    /// `createdBlock` is the L2 block of the group's creation, which a
+    /// vouch's Tier 2 group is checked against; `selfPaid` is the group's
+    /// kind, fixed at creation (docs/spec/contracts.md, Group registry, Groups).
     struct Group {
         uint64 memberCount;
         uint8 tier;
         bool exists;
         uint64 createdBlock;
+        bool selfPaid;
     }
 
     /// A vouch's fields before its proofs (docs/spec/vouching.md, The vouch).
@@ -228,12 +241,24 @@ contract GroupRegistry is EventAccumulator {
     /// the deployment).
     event Tier1MemberAdded(bytes record);
 
+    /// @notice Group `groupId` was created as a self-paid group of tier 0.
+    event SelfPaidGroupCreated(uint64 indexed groupId);
+
+    /// @notice A commitment was added to self-paid group `groupId` as member
+    /// `index`, which the registry assigned: the record names no position.
+    /// `record` is the whole self-paid record.
+    event SelfPaidMemberAdded(uint64 indexed groupId, uint64 indexed index, bytes record);
+
     error InvalidRegistrars(RegistrarError reason);
     error UnsupportedTier(uint8 tier);
     error TooManyGroups();
     error MalformedRecord();
     error UnknownGroup(uint64 groupId);
     error WrongTier(uint64 groupId, uint8 tier);
+    /// A signed record naming a self-paid group, or a self-paid one naming a
+    /// signed group.
+    error WrongKind(uint64 groupId);
+    error WrongFee(uint256 value);
     error BatchSize(uint256 count);
     error WrongPosition(uint64 firstIndex, uint64 memberCount);
     error GroupFull(uint64 firstIndex, uint256 count);
@@ -262,6 +287,11 @@ contract GroupRegistry is EventAccumulator {
     uint256 private constant REMOVE_HEADER = 18;
     /// `u8(seat) ‖ bytes[32](r) ‖ bytes[32](s) ‖ u8(v)`.
     uint256 private constant APPROVAL_LENGTH = 66;
+    /// `u64(group_id) ‖ field<bn254>(commitment)`.
+    uint256 private constant SELF_PAID_LENGTH = 40;
+
+    /// The wei a self-paid addition must send (`GroupRegistryLib.SELF_PAID_FEE`).
+    uint256 public constant SELF_PAID_FEE = GroupRegistryLib.SELF_PAID_FEE;
 
     // The three immutables are the ones verifier 1.2 masks and compares with
     // its release's values; the registrars are in storage and checked
@@ -322,6 +352,11 @@ contract GroupRegistry is EventAccumulator {
         return (g.tier, g.exists, g.memberCount);
     }
 
+    /// @notice Whether a group is self-paid (false for a signed group or no group).
+    function isSelfPaid(uint64 groupId) external view returns (bool) {
+        return _groups[groupId].selfPaid;
+    }
+
     /// @notice The L2 block that created a group (0 for no group).
     function groupCreatedBlock(uint64 groupId) external view returns (uint64) {
         return _groups[groupId].createdBlock;
@@ -348,15 +383,35 @@ contract GroupRegistry is EventAccumulator {
         // The selector and one word: no bytes the call doesn't define (T-17).
         if (msg.data.length != 36) revert CanonicalCalldata.NonCanonicalCalldata();
         if (tier > 1) revert UnsupportedTier(tier);
+        groupId = _nextGroup(tier, false);
+        _log3(GroupCreated.selector, bytes32(uint256(groupId)), bytes32(uint256(tier)), "");
+    }
+
+    /// @notice Creates the next group, from the same counter, as a
+    /// self-paid group of tier 0, fixed for good. Anyone may: it has no
+    /// members until someone pays to add one.
+    function createSelfPaidGroup() external returns (uint64 groupId) {
+        // The selector alone (T-17).
+        if (msg.data.length != 4) revert CanonicalCalldata.NonCanonicalCalldata();
+        groupId = _nextGroup(0, true);
+        _log2(SelfPaidGroupCreated.selector, bytes32(uint256(groupId)), "");
+    }
+
+    /// The next group of `tier` and kind, `group_id` the counter's value.
+    function _nextGroup(uint8 tier, bool selfPaid) private returns (uint64 groupId) {
         uint256 next = groupCount;
         // group_id stays in the u64 range: after group 2⁶⁴ − 1, creation reverts.
         if (next > type(uint64).max) revert TooManyGroups();
         groupId = uint64(next);
         groupCount = next + 1;
-        // The accumulator's step below reverts on a block number past u64.
-        _groups[groupId] =
-            Group({memberCount: 0, tier: tier, exists: true, createdBlock: uint64(block.number)});
-        _log3(GroupCreated.selector, bytes32(uint256(groupId)), bytes32(uint256(tier)), "");
+        // The accumulator's step after it reverts on a block number past u64.
+        _groups[groupId] = Group({
+            memberCount: 0,
+            tier: tier,
+            exists: true,
+            createdBlock: uint64(block.number),
+            selfPaid: selfPaid
+        });
     }
 
     /// @notice Adds commitments to a group. The record is
@@ -458,6 +513,38 @@ contract GroupRegistry is EventAccumulator {
             removed[index >> 8] |= 1 << (index & 0xff);
         }
         _log2(MembersRemoved.selector, bytes32(uint256(groupId)), abi.encode(record));
+    }
+
+    /// @notice Adds one commitment to a self-paid group, with exactly
+    /// `SELF_PAID_FEE`. The record is `u64(group_id) ‖ field<bn254>(commitment)`,
+    /// checked in the order of docs/spec/contracts.md (Group registry,
+    /// Self-paid additions). It names no position: the registry assigns the
+    /// next index, so no other addition, landed first, can make it revert
+    /// (T-25). The sender is never read (T-71). There is no duplicate check:
+    /// repeats are the verifier's first-occurrence rule's, under which a
+    /// self-paid copy never displaces an earlier registration (T-16).
+    function addSelfPaidMember(bytes calldata record) external payable {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        if (record.length != SELF_PAID_LENGTH) revert MalformedRecord();
+        if (msg.value != SELF_PAID_FEE) revert WrongFee(msg.value);
+        uint64 groupId = uint64(bytes8(record[0:8]));
+        Group storage g = _groups[groupId];
+        Group memory group = g;
+        if (!group.exists) revert UnknownGroup(groupId);
+        if (!group.selfPaid) revert WrongKind(groupId);
+        uint64 index = group.memberCount;
+        if (index >= GroupRegistryLib.MAX_MEMBERS) revert GroupFull(index, 1);
+        if (GroupRegistryLib.forbidden(uint256(bytes32(record[8:40])))) {
+            revert ForbiddenCommitment(0);
+        }
+        // index < 2³², so this fits a u64.
+        g.memberCount = index + 1;
+        _log3(
+            SelfPaidMemberAdded.selector,
+            bytes32(uint256(groupId)),
+            bytes32(uint256(index)),
+            abi.encode(record)
+        );
     }
 
     /// @notice Adds one vouched-for commitment to a Tier 1 group. The record
@@ -593,10 +680,13 @@ contract GroupRegistry is EventAccumulator {
         return bytes32(record[at:at + 32]);
     }
 
-    /// The group was created here, with tier 0, the only tier the
-    /// registrars' records add to or remove from.
+    /// The group was created here as a signed group, with tier 0, the only
+    /// groups the registrars' records add to or remove from. A self-paid
+    /// addition would move the member count every signed batch in flight
+    /// binds, so the two kinds never share a group.
     function _requireTierZeroGroup(uint64 groupId, Group memory group) private pure {
         if (!group.exists) revert UnknownGroup(groupId);
+        if (group.selfPaid) revert WrongKind(groupId);
         if (group.tier != 0) revert WrongTier(groupId, group.tier);
     }
 

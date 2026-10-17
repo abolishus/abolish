@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 6
+// The contract-event record, record type 0x0008 versions 1 to 7
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -8,8 +8,8 @@
 // board's relayed-ballot and close-statement events (the close rule, T-50,
 // T-35), version 4 the board's share-receipt and share-complaint batch events
 // (T-25, P1-12d, P1-12e), version 5 its obligation-root event (T-25,
-// T-52, P1-12f), and version 6 the group registry's Tier 1 addition event
-// (T-53, P3-3).
+// T-52, P1-12f), version 6 the group registry's Tier 1 addition event
+// (T-53, P3-3), and version 7 its two self-paid events (T-25, T-53, P3-2).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -36,6 +36,7 @@ import {
   decodeGroupAddition,
   decodeGroupRemoval,
   GROUP_REGISTRY_MAX_REGISTRARS,
+  isForbiddenCommitment,
   type GroupAddition,
   type GroupRemoval,
 } from "./group-registry.ts";
@@ -79,7 +80,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 6 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 7 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -89,6 +90,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   4: contractEventV1,
   5: contractEventV1,
   6: contractEventV1,
+  7: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -96,7 +98,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -262,6 +264,17 @@ export type ContractEvent =
       readonly event: "Tier1MemberAdded";
       /** The Tier 1 addition record, which decodes strictly (docs/spec/vouching.md). */
       readonly record: Uint8Array;
+    }
+  | { readonly event: "SelfPaidGroupCreated"; readonly groupId: bigint }
+  | {
+      readonly event: "SelfPaidMemberAdded";
+      /** The `groupId` topic; the record's own `group_id` is 2.4's to compare. */
+      readonly groupId: bigint;
+      /** The `index` topic the registry assigned. */
+      readonly index: bigint;
+      /** The self-paid record, exactly 40 bytes. */
+      readonly record: Uint8Array;
+      readonly commitment: bigint;
     };
 
 export type ContractEventResult =
@@ -793,6 +806,42 @@ const TIER1_MEMBER_ADDED: EventSpec = {
   },
 };
 
+// The self-paid path (Group registry, Self-paid additions). A self-paid
+// group's creation logs its identifier only, since its tier is always 0. An
+// addition carries `u64(group_id) ‖ field<bn254>(commitment)` whole, with the
+// registry's stateless checks, exactly 40 bytes and a commitment that isn't
+// forbidden (rules 2 and 6), so every record it logs passes (T-53); the
+// group's kind, the topic against the record and the index against the
+// group's count are 2.4's replay (Group registry, Verification).
+const SELF_PAID_RECORD_LENGTH = 40;
+
+const SELF_PAID_GROUP_CREATED: EventSpec = {
+  signature: "SelfPaidGroupCreated(uint64)",
+  decode(topics, data) {
+    const [, g] = topics;
+    const groupId = g && uintWord(g, 64);
+    if (topics.length !== 2 || groupId === undefined) return "event-topics";
+    if (data.length !== 0) return "event-data";
+    return { event: "SelfPaidGroupCreated", groupId };
+  },
+};
+
+const SELF_PAID_MEMBER_ADDED: EventSpec = {
+  signature: "SelfPaidMemberAdded(uint64,uint64,bytes)",
+  decode(topics, data) {
+    const [, g, i] = topics;
+    const groupId = g && uintWord(g, 64);
+    const index = i && uintWord(i, 64);
+    if (topics.length !== 3 || groupId === undefined || index === undefined) return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: SELF_PAID_RECORD_LENGTH }])
+      ?.tails[0];
+    if (record === undefined || record.length !== SELF_PAID_RECORD_LENGTH) return "event-data";
+    const commitment = bigEndian(record.subarray(8));
+    if (isForbiddenCommitment(commitment)) return "event-data";
+    return { event: "SelfPaidMemberAdded", groupId, index, record, commitment };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -873,10 +922,29 @@ const TABLES: Readonly<
       OBLIGATION_ROOT_SUBMITTED,
     ],
   },
+  // Version 6's rows, with the group registry's two self-paid events added.
+  7: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [
+      ...BOARD_EVENTS,
+      RELAYED_BALLOT_SUBMITTED,
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED,
+      SHARE_COMPLAINT_BATCH_SUBMITTED,
+      OBLIGATION_ROOT_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -909,6 +977,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   4: signaturesOf(4),
   5: signaturesOf(5),
   6: signaturesOf(6),
+  7: signaturesOf(7),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

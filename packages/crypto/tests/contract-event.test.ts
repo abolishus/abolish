@@ -25,8 +25,9 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json (version 1) to contract-event-v6.json
-// (version 6, with its own strict Tier 1 addition decoder) come from independent
+// docs/spec/vectors/contract-event.json (version 1) to contract-event-v7.json
+// (version 6, with its own strict Tier 1 addition decoder, and version 7, with
+// its own checks of the self-paid record) come from independent
 // Python implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
 // SEC 1 decompression and accumulator, scripts/contract-event-v2-vectors.py,
@@ -94,6 +95,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   4: load("contract-event-v4.json"),
   5: load("contract-event-v5.json"),
   6: load("contract-event-v6.json"),
+  7: load("contract-event-v7.json"),
 };
 const vectors = FILES[1];
 
@@ -213,6 +215,16 @@ function project(e: ContractEvent): unknown {
       };
     case "Tier1MemberAdded":
       return { event: e.event, record: bytesToHex(e.record) };
+    case "SelfPaidGroupCreated":
+      return { event: e.event, groupId: String(e.groupId) };
+    case "SelfPaidMemberAdded":
+      return {
+        event: e.event,
+        groupId: String(e.groupId),
+        index: String(e.index),
+        record: bytesToHex(e.record),
+        commitment: e.commitment.toString(16).padStart(64, "0"),
+      };
   }
 }
 
@@ -339,6 +351,13 @@ function reencode(
       };
     case "Tier1MemberAdded":
       return { topics: [sig(e.event)], data: dyn([], tail(e.record)) };
+    case "SelfPaidGroupCreated":
+      return { topics: [sig(e.event), uintWord(e.groupId)], data: new Uint8Array() };
+    case "SelfPaidMemberAdded":
+      return {
+        topics: [sig(e.event), uintWord(e.groupId), uintWord(e.index)],
+        data: dyn([], tail(e.record)),
+      };
   }
 }
 
@@ -361,6 +380,8 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ShareComplaintBatchSubmitted: "board",
   ObligationRootSubmitted: "board",
   Tier1MemberAdded: "group-registry",
+  SelfPaidGroupCreated: "group-registry",
+  SelfPaidMemberAdded: "group-registry",
 };
 
 describe.each([
@@ -370,6 +391,7 @@ describe.each([
   [4, "contract-event-v4.json"],
   [5, "contract-event-v5.json"],
   [6, "contract-event-v6.json"],
+  [7, "contract-event-v7.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -526,7 +548,7 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test.each([1, 2, 3, 4, 5] as const)(
+  test.each([1, 2, 3, 4, 5, 7] as const)(
     "version %i: every passing record's topics and data are those rebuilt from its decoded event",
     (version) => {
       const contracts = contractsOf(FILES[version]);
@@ -775,6 +797,41 @@ describe("contract-event version 6 against version 5", () => {
     for (const v of added) {
       const record = { ...recordOf(v.fields), contract: v5.groupRegistry };
       expect(checkContractEvent(record, v5, 5)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+});
+
+describe("contract-event version 7 against version 6", () => {
+  const v7 = contractsOf(FILES[7]);
+
+  // Version 7 keeps every row of version 6 unchanged, and adds only the
+  // group registry's two self-paid events.
+  test("every version-6 vector has the same verdict under version 7", () => {
+    const all = [...FILES[6].records, ...FILES[6].eventFailures];
+    expect(all.length).toBeGreaterThan(40);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 6, 7) };
+      const result = checkContractEvent(record, v7, 7);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  test("version 6 names no self-paid event, so it refuses each as unknown-event", () => {
+    const v6 = contractsOf(FILES[6]);
+    const selfPaid = FILES[7].records.filter((r) =>
+      ["SelfPaidGroupCreated", "SelfPaidMemberAdded"].includes(
+        (r.event as { event?: string }).event ?? "",
+      ),
+    );
+    expect(selfPaid.map((r) => r.id)).toEqual(
+      (FILES[7] as Vectors & { unknownUnderVersion6: string[] }).unknownUnderVersion6,
+    );
+    expect(selfPaid.length).toBe(11);
+    for (const v of selfPaid) {
+      const record = { ...recordOf(v.fields), contract: v6.groupRegistry };
+      expect(checkContractEvent(record, v6, 6)).toEqual({ ok: false, error: "unknown-event" });
     }
   });
 });

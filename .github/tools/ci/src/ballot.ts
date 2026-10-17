@@ -58,9 +58,25 @@ export const WORKSPACE_SOURCES = [
 ] as const;
 
 /**
+ * The origins the client may make requests to, and the only ones its code may
+ * name (T-34, T-43): the API that serves definitions, display text and the
+ * board, and one L2 JSON-RPC endpoint the election registry is read through
+ * (ADR 0004: Base Sepolia while there is no mainnet). Both are
+ * untrusted: the client checks every answer against the registry before
+ * showing anything, so a hostile one can refuse service but not change a
+ * ballot. These are staging's. A release names its own, and a release build
+ * naming a staging origin is a policy failure (owner review, rule B).
+ */
+export const CONNECT_ORIGINS: readonly string[] = [
+  "https://api-staging.abolish.us",
+  "https://sepolia.base.org",
+];
+
+/**
  * The ballot client's Content Security Policy (T-43). Scripts, styles, fonts
- * and images from its own origin only; no requests (a later change that
- * fetches an election widens connect-src here, under owner review); Web
+ * and images from its own origin only; requests only to CONNECT_ORIGINS, from
+ * the main thread (a worker gets no CSP from the page, so WORKER_BANNED keeps
+ * its I/O out); Web
  * Workers from its own origin only, where encryption and proving run; Trusted
  * Types, with one named policy, `ballot-worker`, for the worker's script URL
  * (`new Worker(url)` is a script-URL sink; the client creates the policy
@@ -73,7 +89,7 @@ export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "style-src": ["'self'"],
   "font-src": ["'self'"],
   "img-src": ["'self'"],
-  "connect-src": ["'none'"],
+  "connect-src": CONNECT_ORIGINS,
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
@@ -94,6 +110,14 @@ export const INERT_URLS: ReadonlySet<string> = new Set([
   "https://react.dev/errors/",
   "https://tailwindcss.com",
 ]);
+
+/** Whether a URL in a script may appear: an inert string, or an allowed origin itself or under it. */
+export function isAllowedUrl(url: string): boolean {
+  return (
+    INERT_URLS.has(url) ||
+    CONNECT_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`))
+  );
+}
 
 /** Package names, globals and collection hosts of analytics, tracking and error-reporting SDKs (T-67). */
 export const ANALYTICS_MARKERS: readonly RegExp[] = [
@@ -326,7 +350,7 @@ export function distViolations(files: ReadonlyMap<string, string>): string[] {
     // Escaped slashes (`https:\/\/host`) are the same string in JS.
     for (const [url] of text.matchAll(/\b(?:https?|wss?):(?:\\?\/){2}[^\s"'`)<>]*/g)) {
       const trimmed = url.replace(/\\\//g, "/").replace(/[.,;\\]+$/, "");
-      if (!INERT_URLS.has(trimmed)) at(`names ${trimmed}`);
+      if (!isAllowedUrl(trimmed)) at(`names ${trimmed}`);
     }
     // A heuristic over quoted strings; the CSP's 'self' is the real barrier.
     for (const [ref] of text.matchAll(/["'`(=](?:\\?\/){2}[a-z0-9.-]+\.[a-z]{2,}/gi))

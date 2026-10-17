@@ -6,7 +6,7 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
 ## Queue
 
-**Owner priority (2026-10-17):** the end-to-end path comes before everything else, whatever the phase: [[P2-8]] part 2b (it waits on the owner's `connect-src` decision, recorded in its file; skip it while blocked), then [[P2-21]] (the membership prover) and [[P2-22]] (creating a poll), which have no owner decision in front of their first parts. Once these are done or blocked, the queue's order applies again.
+**Owner priority (2026-10-17):** the end-to-end path comes before everything else, whatever the phase: [[P2-8]] part 2b (its `connect-src` origins are decided and landed, see its file), then [[P2-21]] (the membership prover) and [[P2-22]] (creating a poll), which have no owner decision in front of their first parts. Once these are done or blocked, the queue's order applies again.
 
 Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
 

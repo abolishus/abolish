@@ -8,12 +8,12 @@
 // poll checked anew replaces the last one, and its seals go with it.
 
 import {
-  type BallotCastingV3,
   BallotSealError,
   castSealV3,
   challengeSealV3,
   decodeElectionDefinitionV5,
   finishSealV3,
+  identityCommitment,
   MembershipProverError,
   type QuestionBallotElection,
   sealBallotV3,
@@ -40,8 +40,12 @@ const toHex = (bytes: Uint8Array) =>
 export class BallotSession {
   #poll: { readonly definitionHash: string; readonly election: QuestionBallotElection } | undefined;
   readonly #seals = new Map<number, SealedBallotV3>();
-  /** Seals the voter chose to cast: never opened from then on, even if no cast finished (T-45). */
-  readonly #cast = new Set<number>();
+  /**
+   * Seals the voter chose to cast, never opened from then on even if no cast
+   * finished (T-45), each with the identity commitment of its first cast's
+   * secret once one was accepted: a recast under another is refused.
+   */
+  readonly #cast = new Map<number, bigint | undefined>();
   #nextSeal = 0;
 
   /**
@@ -106,27 +110,23 @@ export class BallotSession {
    * challenge opens it, whatever happens here (T-45).
    */
   async cast(request: CastRequest, timeoutMs = PROVER_TIMEOUT_MS): Promise<CastResult> {
-    const { prover } = request;
+    const { prover, secret } = request;
     try {
       const sealed = this.#seals.get(request.seal);
       if (sealed === undefined) return { ok: false, problem: "unknown" };
-      this.#cast.add(request.seal);
-      let casting: BallotCastingV3;
-      try {
-        casting = castSealV3(sealed, request.secret, request.leaves, {
-          number: request.l1Number,
-          hash: request.l1Hash,
-        });
-      } catch (e) {
-        // For a seal held here and never opened, the one TypeError left is a
-        // recast under another identity's secret: that secret is refused.
-        if (e instanceof TypeError) return { ok: false, problem: "secret" };
-        throw e;
-      } finally {
-        // castSealV3 read its own copy; this realm's copy of the secret goes
-        // now (T-12). The witness's decimal string can't be wiped.
-        request.secret.fill(0);
-      }
+      const first = this.#cast.get(request.seal);
+      this.#cast.set(request.seal, first);
+      // One seal, one identity: its records all carry one nullifier.
+      const commitment = identityCommitment(secret);
+      if (first !== undefined && first !== commitment) return { ok: false, problem: "secret" };
+      const casting = castSealV3(sealed, secret, request.leaves, {
+        number: request.l1Number,
+        hash: request.l1Hash,
+      });
+      this.#cast.set(request.seal, commitment);
+      // castSealV3 read its own copy; this realm's copy of the secret goes
+      // now (T-12). The witness's decimal string can't be wiped.
+      secret.fill(0);
       const answer = await askProver(prover, casting.witness, timeoutMs);
       if (!answer.ok) return answer;
       const cast = finishSealV3(casting, answer.proof);
@@ -144,6 +144,7 @@ export class BallotSession {
       if (e instanceof BallotSealError) return { ok: false, problem: "ballot", code: e.code };
       throw e;
     } finally {
+      secret.fill(0);
       prover.close();
     }
   }

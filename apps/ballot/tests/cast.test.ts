@@ -77,13 +77,24 @@ function prover(reply: (witness: unknown) => unknown) {
 }
 
 /** The real prover: snarkjs over the vendored key, as src/prover/prover.ts runs it. */
-const snarkjs = () =>
-  prover(async (witness) => {
+const snarkjs = () => {
+  const proofs: Uint8Array[] = [];
+  const p = prover(async (witness) => {
     const parsed = parseWitness({ v: PROVER_PROTOCOL_VERSION, kind: "witness", witness });
     if (parsed === undefined) return { v: PROVER_PROTOCOL_VERSION, kind: "error" };
     const proof = await proveMembership(parsed.witness, artifacts);
+    proofs.push(Uint8Array.from(proof));
     return { v: PROVER_PROTOCOL_VERSION, kind: "proof", proof };
   });
+  return { ...p, proofs };
+};
+
+// The membership proof's bytes inside an encoded version-3 record: after the
+// header, definition hash, cell, nullifier and L1 reference.
+const proofIn = (ballot: Uint8Array) => {
+  const at = 3 + 32 + 1 + 32 + 8 + 32;
+  return ballot.slice(at, at + 256);
+};
 
 const checkRequest: CheckElectionRequest = {
   v: PROTOCOL_VERSION,
@@ -157,6 +168,9 @@ describe("casting a seal", () => {
       // The worker's copy of the secret is gone (T-12).
       expect(secret.every((b) => b === 0)).toBe(true);
       expect(toHex(verdict.ballotHash)).toBe(toHex(result.ballotHash));
+      // Re-randomised: the prover's bytes never leave (T-55).
+      expect(p.proofs).toHaveLength(1);
+      expect(toHex(proofIn(result.ballot))).not.toBe(toHex(p.proofs[0] as Uint8Array));
       expect(record.cell).toBe(0);
       expect(record.l1_ref_number).toBe(L1.l1Number);
       expect(toHex(record.l1_ref_hash)).toBe(toHex(L1.l1Hash));
@@ -217,16 +231,47 @@ describe("casting a seal", () => {
     expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
   });
 
+  test("a seal whose cast was refused before any witness is never opened either (T-45)", async () => {
+    const { session, seal } = sealed();
+    const p = prover(() => undefined);
+    await expect(
+      session.cast(castRequest(seal, p.port, { secret: new Uint8Array(32) })),
+    ).resolves.toEqual({ ok: false, problem: "secret" });
+    p.close();
+    expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
+  });
+
+  test("a challenge while the cast waits on the prover is refused (T-45)", async () => {
+    const { session, seal } = sealed();
+    let release = () => {};
+    const p = prover(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ v: PROVER_PROTOCOL_VERSION, kind: "error" });
+        }),
+    );
+    const casting = session.cast(castRequest(seal, p.port));
+    expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
+    // Let the witness reach the prover before it answers.
+    await expect.poll(() => p.received.length).toBe(1);
+    release();
+    await expect(casting).resolves.toEqual({ ok: false, problem: "prover" });
+    p.close();
+    expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
+  });
+
   test("a seal the worker never made, or one challenged, isn't cast, and the prover hears nothing", async () => {
     const { session, seal } = sealed();
     expect(challenge(session, seal).ok).toBe(true);
     for (const s of [seal, seal + 1]) {
       const p = prover(() => undefined);
-      await expect(session.cast(castRequest(s, p.port))).resolves.toEqual({
+      const secret = Uint8Array.from(members[1] as Uint8Array);
+      await expect(session.cast(castRequest(s, p.port, { secret }))).resolves.toEqual({
         ok: false,
         problem: "unknown",
       });
       expect(p.received).toEqual([]);
+      expect(secret.every((b) => b === 0)).toBe(true);
       p.close();
     }
   });

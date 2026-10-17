@@ -207,6 +207,14 @@ const isId = (x: unknown): x is number => Number.isSafeInteger(x) && (x as numbe
 const isBytes = (x: unknown, length?: number): x is Uint8Array =>
   x instanceof Uint8Array && (length === undefined || x.length === length);
 
+/** A list whose every element passes `is`: holes, which `every` would skip, fail too. */
+const isListOf = <T>(x: unknown, is: (e: unknown) => e is T): x is T[] =>
+  Array.isArray(x) && Array.from(x as unknown[]).every(is);
+
+const isBigint = (x: unknown): x is bigint => typeof x === "bigint";
+const isVote = (x: unknown): x is 0 | 1 => x === 0 || x === 1;
+const isAnyBytes = (x: unknown): x is Uint8Array => isBytes(x);
+
 const hasKeys = (data: Record<string, unknown>, expected: readonly string[]) => {
   const keys = Object.keys(data).sort();
   return keys.length === expected.length && keys.every((k, i) => k === expected[i]);
@@ -231,8 +239,7 @@ const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
   hasKeys(x, ["keys", "threshold"]) &&
   Number.isSafeInteger(x["threshold"]) &&
-  Array.isArray(x["keys"]) &&
-  x["keys"].every((k) => isBytes(k));
+  isListOf(x["keys"], isAnyBytes);
 const PROVE_KEYS = [
   "definitionHash",
   "id",
@@ -263,10 +270,8 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       !isBytes(registeredHash, 32) ||
       !isBytes(definition) ||
       !isBytes(displayText) ||
-      !Array.isArray(entries) ||
-      !entries.every((e) => isBytes(e)) ||
-      !Array.isArray(panels) ||
-      !panels.every(isPanel)
+      !isListOf(entries, isAnyBytes) ||
+      !isListOf(panels, isPanel)
     )
       return undefined;
     return {
@@ -277,19 +282,14 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       registeredHash,
       definition,
       displayText,
-      entries: entries as Uint8Array[],
-      panels: panels as Panel[],
+      entries,
+      panels,
     };
   }
   if (data["kind"] === "seal") {
     if (!hasKeys(data, SEAL_KEYS)) return undefined;
     const { definitionHash, cell, votes } = data;
-    if (
-      !isBytes(definitionHash, 32) ||
-      !Number.isSafeInteger(cell) ||
-      !Array.isArray(votes) ||
-      !votes.every((x) => x === 0 || x === 1)
-    )
+    if (!isBytes(definitionHash, 32) || !Number.isSafeInteger(cell) || !isListOf(votes, isVote))
       return undefined;
     return {
       v,
@@ -297,7 +297,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       kind: "seal",
       definitionHash,
       cell: cell as number,
-      votes: votes as (0 | 1)[],
+      votes,
     };
   }
   if (data["kind"] === "challenge") {
@@ -310,8 +310,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
     if (
       !isId(seal) ||
       !isBytes(secret, 32) ||
-      !Array.isArray(leaves) ||
-      !leaves.every((leaf) => typeof leaf === "bigint") ||
+      !isListOf(leaves, isBigint) ||
       typeof l1Number !== "bigint" ||
       l1Number < 0n ||
       l1Number >> 64n !== 0n ||
@@ -325,7 +324,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       kind: "cast",
       seal,
       secret,
-      leaves: leaves as bigint[],
+      leaves,
       l1Number,
       l1Hash,
       prover,
@@ -336,8 +335,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
     const { secret, leaves, definitionHash, tier, root, message, prover } = data;
     if (
       !isBytes(secret, 32) ||
-      !Array.isArray(leaves) ||
-      !leaves.every((leaf) => typeof leaf === "bigint") ||
+      !isListOf(leaves, isBigint) ||
       !isBytes(definitionHash, 32) ||
       !Number.isSafeInteger(tier) ||
       typeof root !== "bigint" ||
@@ -350,7 +348,7 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       id,
       kind: "prove-membership",
       secret,
-      leaves: leaves as bigint[],
+      leaves,
       definitionHash,
       tier: tier as number,
       root,

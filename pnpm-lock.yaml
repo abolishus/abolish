@@ -847,6 +847,9 @@ importers:
 
   packages/circuits:
     devDependencies:
+      '@noble/curves':
+        specifier: 'catalog:'
+        version: 2.4.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1

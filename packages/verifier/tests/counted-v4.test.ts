@@ -290,7 +290,7 @@ describe("an honest election", () => {
         expect(r.delivery?.excluded).toEqual(reference.delivery?.excluded);
         expect(verdicts(r)).toEqual(verdicts(reference));
       }),
-      { numRuns: Math.min(numRuns, 50) },
+      { numRuns },
     );
   });
 });
@@ -488,6 +488,15 @@ describe("contract-path records under contract-event version 6, once 4.4 passes"
       records: [],
       rejected: [{ entry: at, decodeError: "profile-mismatch" }],
     });
+  });
+
+  test("one above the floor isn't read, and holds nothing open, whenever it was sent", () => {
+    const e = election();
+    e.deliver([ALICE], 200);
+    e.board(S_K + 1, root(T_D));
+    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
   });
 
   test("a contract-path record still waits on 4.4", () => {

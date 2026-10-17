@@ -379,6 +379,12 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       // floor is, so a record submitted after the windows never holds the
       // rows open.
       if (BigInt(segment) > floor && record.l2_timestamp > deadlines.complaint) continue;
+      // Under ballot version 4 no contract-path record delivers or excludes:
+      // the board's events carry delivery records of version 1, batches and
+      // roots only, none of which that version fixes. So one above the floor
+      // isn't read either, as a board-path one isn't, and can't hold the rows
+      // open; one at or below it is listed as the rejected entry it is.
+      if (BigInt(segment) > floor && definition.version === 6) continue;
       if (BigInt(segment) > floor)
         return countedRows(
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },

@@ -2,7 +2,7 @@
 """Independent generator for docs/spec/vectors/availability.json.
 
 A second implementation of docs/spec/availability.md: the availability
-attestation (record type 0x001b, version 1) and the fetch complaint (0x001c,
+attestation (record type 0x001b, version 1) and the availability complaint (0x001c,
 version 1), their signed messages and signatures, their strict decoders, the
 windows (c_I, t_A, c_A', t_A' and t_A' + R), and the availability check
 (verifier 4.6) over the board contract's records, with every record code and
@@ -39,7 +39,7 @@ ATTESTATION = 0x001B
 COMPLAINT = 0x001C
 VERSION = 1
 ATTESTATION_TAG = b"abolish/v1/sig/availability-attestation"
-COMPLAINT_TAG = b"abolish/v1/sig/fetch-complaint"
+COMPLAINT_TAG = b"abolish/v1/sig/availability-complaint"
 MAX_ROOTS = 32
 CID_PREFIXES = (bytes([0x01, 0x55, 0x12, 0x20]), bytes([0x01, 0x70, 0x12, 0x20]))
 
@@ -602,7 +602,7 @@ def main():
 
     data = {
         "format": "abolish-availability-vectors/1",
-        "title": "Availability attestations and fetch complaints: the records, their windows and the availability check",
+        "title": "Availability attestations and availability complaints: the records, their windows and the availability check",
         "spec": "docs/spec/availability.md",
         "generator": (
             "packages/crypto/scripts/availability-vectors.py: an independent Python implementation of "

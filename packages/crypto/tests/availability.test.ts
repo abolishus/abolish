@@ -14,17 +14,17 @@ import {
   countedAttestations,
   DecodeError,
   decodeAvailabilityAttestation,
-  decodeFetchComplaint,
+  decodeAvailabilityComplaint,
   encodeAvailabilityAttestation,
   EncodeError,
-  encodeFetchComplaint,
-  type FetchComplaint,
-  fetchComplaintMessage,
+  encodeAvailabilityComplaint,
+  type AvailabilityComplaint,
+  availabilityComplaintMessage,
   MAX_ATTESTED_ROOTS,
   PARAMETERS,
   RECORD_TYPES,
   signAvailabilityAttestation,
-  signFetchComplaint,
+  signAvailabilityComplaint,
   verifyStatement,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
@@ -92,7 +92,7 @@ const vectors = JSON.parse(
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const ATTESTATION_TAG = "abolish/v1/sig/availability-attestation";
-const COMPLAINT_TAG = "abolish/v1/sig/fetch-complaint";
+const COMPLAINT_TAG = "abolish/v1/sig/availability-complaint";
 
 const str = (v: unknown) => v as string;
 const num = (v: unknown) => v as number;
@@ -166,7 +166,7 @@ describe("availability vectors (docs/spec/vectors/availability.json)", () => {
     expect(vectors.tags).toEqual({ attestation: ATTESTATION_TAG, complaint: COMPLAINT_TAG });
     expect(vectors.recordTypes).toEqual({
       attestation: `0x${RECORD_TYPES.availabilityAttestation.toString(16).padStart(4, "0")}`,
-      complaint: `0x${RECORD_TYPES.fetchComplaint.toString(16).padStart(4, "0")}`,
+      complaint: `0x${RECORD_TYPES.availabilityComplaint.toString(16).padStart(4, "0")}`,
     });
     expect(vectors.version).toBe(1);
     expect(vectors.allowances).toEqual({
@@ -193,11 +193,11 @@ describe("availability vectors (docs/spec/vectors/availability.json)", () => {
         ).toBe(true);
       } else {
         const fields = complaintFields(v.fields);
-        expect(fetchComplaintMessage(fields), v.id).toEqual(hex(v.message));
-        const signed = signFetchComplaint(secret, fields);
+        expect(availabilityComplaintMessage(fields), v.id).toEqual(hex(v.message));
+        const signed = signAvailabilityComplaint(secret, fields);
         expect(signed.signature, v.id).toEqual(hex(v.signature));
-        expect(encodeFetchComplaint(signed), v.id).toEqual(hex(v.encoding));
-        expect(decodeFetchComplaint(hex(v.encoding), 1), v.id).toEqual(signed);
+        expect(encodeAvailabilityComplaint(signed), v.id).toEqual(hex(v.encoding));
+        expect(decodeAvailabilityComplaint(hex(v.encoding), 1), v.id).toEqual(signed);
         expect(
           verifyStatement(hex(v.signingKey), COMPLAINT_TAG, hex(v.message), signed.signature),
         ).toBe(true);
@@ -210,7 +210,9 @@ describe("availability vectors (docs/spec/vectors/availability.json)", () => {
     for (const v of vectors.decodeErrors) {
       const b = hex(v.encoding);
       const run = () =>
-        v.kind === "attestation" ? decodeAvailabilityAttestation(b, 1) : decodeFetchComplaint(b, 1);
+        v.kind === "attestation"
+          ? decodeAvailabilityAttestation(b, 1)
+          : decodeAvailabilityComplaint(b, 1);
       let err: unknown;
       try {
         run();
@@ -281,11 +283,11 @@ describe("availability records", () => {
       138 + 64,
     );
     const c = record("complaint-raw");
-    const complaint = signFetchComplaint(hex(c.signingSecret), complaintFields(c.fields));
+    const complaint = signAvailabilityComplaint(hex(c.signingSecret), complaintFields(c.fields));
     const cid = Uint8Array.from(complaint.cid);
     cid[1] = 0x71;
-    expect(() => encodeFetchComplaint({ ...complaint, cid })).toThrow(EncodeError);
-    expect(() => fetchComplaintMessage({ ...complaint, cid })).toThrow(EncodeError);
+    expect(() => encodeAvailabilityComplaint({ ...complaint, cid })).toThrow(EncodeError);
+    expect(() => availabilityComplaintMessage({ ...complaint, cid })).toThrow(EncodeError);
   });
 
   test("the signed message starts with the record header, and only it verifies", () => {
@@ -455,9 +457,9 @@ describe("availability properties", () => {
         ),
         (b) => {
           let attestation: AvailabilityAttestation | undefined;
-          let complaint: FetchComplaint | undefined;
+          let complaint: AvailabilityComplaint | undefined;
           try {
-            if (b[1] === 0x1c) complaint = decodeFetchComplaint(b, 1);
+            if (b[1] === 0x1c) complaint = decodeAvailabilityComplaint(b, 1);
             else attestation = decodeAvailabilityAttestation(b, 1);
           } catch (e) {
             expect(e).toBeInstanceOf(DecodeError);
@@ -465,7 +467,7 @@ describe("availability properties", () => {
           }
           if (attestation !== undefined)
             expect(encodeAvailabilityAttestation(attestation)).toEqual(b);
-          if (complaint !== undefined) expect(encodeFetchComplaint(complaint)).toEqual(b);
+          if (complaint !== undefined) expect(encodeAvailabilityComplaint(complaint)).toEqual(b);
         },
       ),
       { numRuns },

@@ -1,5 +1,5 @@
 // Board data availability (docs/spec/availability.md): the trustee seats'
-// availability attestations (record type 0x001b) and fetch complaints
+// availability attestations (record type 0x001b) and availability complaints
 // (0x001c), their windows, and the availability check (verifier 4.6) over
 // the records the board contract emitted. The check reads L1 and the L2's
 // events alone, never the board copy, so a withheld extent fails the election
@@ -26,7 +26,7 @@ import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { p256Sig, signStatement, verifyStatement } from "./trustee.ts";
 
 const ATTESTATION_TAG = "abolish/v1/sig/availability-attestation";
-const COMPLAINT_TAG = "abolish/v1/sig/fetch-complaint";
+const COMPLAINT_TAG = "abolish/v1/sig/availability-complaint";
 
 /** The two points a seat attests: the ballot extent (through `C_A`) and the counted extent (through `C_S`). */
 export const AVAILABILITY_POINTS = Object.freeze({ ballotExtent: 1, countedExtent: 2 } as const);
@@ -60,8 +60,8 @@ export interface AvailabilityAttestation extends AvailabilityAttestationFields {
   readonly signature: Uint8Array;
 }
 
-/** What a seat states in its fetch complaint. */
-export interface FetchComplaintFields {
+/** What a seat states in its availability complaint. */
+export interface AvailabilityComplaintFields {
   readonly definition_hash: Uint8Array;
   readonly panel: SeatPanel;
   readonly seat: number;
@@ -72,8 +72,8 @@ export interface FetchComplaintFields {
   readonly cid: Uint8Array;
 }
 
-/** Fetch complaint (`0x001c`, version 1). */
-export interface FetchComplaint extends FetchComplaintFields {
+/** Availability complaint (`0x001c`, version 1). */
+export interface AvailabilityComplaint extends AvailabilityComplaintFields {
   readonly signature: Uint8Array;
 }
 
@@ -173,15 +173,15 @@ const attestationV1: Codec<AvailabilityAttestation> = {
   },
 };
 
-function writeComplaintBody(w: Writer, value: FetchComplaintFields): void {
+function writeComplaintBody(w: Writer, value: AvailabilityComplaintFields): void {
   for (const [name, codec] of commonFields)
-    (codec as Codec<unknown>).write(w, value[name as keyof FetchComplaintFields]);
+    (codec as Codec<unknown>).write(w, value[name as keyof AvailabilityComplaintFields]);
   cid36.write(w, value.cid);
   if (!isSegmentCid(value.cid))
-    throw new EncodeError("fetch complaint: cid isn't a raw or dag-pb sha2-256 CID");
+    throw new EncodeError("availability complaint: cid isn't a raw or dag-pb sha2-256 CID");
 }
 
-const complaintV1: Codec<FetchComplaint> = {
+const complaintV1: Codec<AvailabilityComplaint> = {
   minLength: 32 + 1 + 1 + 1 + 32 + 36 + 64,
   write(w, value) {
     writeComplaintBody(w, value);
@@ -218,9 +218,11 @@ export const AVAILABILITY_ATTESTATION = recordType(RECORD_TYPES.availabilityAtte
 });
 
 /** Record type `0x001c`, fixed and carried as the attestation is. */
-export const FETCH_COMPLAINT = recordType(RECORD_TYPES.fetchComplaint, { 1: complaintV1 });
+export const AVAILABILITY_COMPLAINT = recordType(RECORD_TYPES.availabilityComplaint, {
+  1: complaintV1,
+});
 
-const SCHEMA = new RecordSchema([AVAILABILITY_ATTESTATION, FETCH_COMPLAINT]);
+const SCHEMA = new RecordSchema([AVAILABILITY_ATTESTATION, AVAILABILITY_COMPLAINT]);
 
 export function encodeAvailabilityAttestation(record: AvailabilityAttestation): Uint8Array {
   return SCHEMA.encode(AVAILABILITY_ATTESTATION, 1, record);
@@ -234,13 +236,13 @@ export function decodeAvailabilityAttestation(
   return SCHEMA.decode(AVAILABILITY_ATTESTATION, bytes, pinned).value;
 }
 
-export function encodeFetchComplaint(record: FetchComplaint): Uint8Array {
-  return SCHEMA.encode(FETCH_COMPLAINT, 1, record);
+export function encodeAvailabilityComplaint(record: AvailabilityComplaint): Uint8Array {
+  return SCHEMA.encode(AVAILABILITY_COMPLAINT, 1, record);
 }
 
-/** Strictly decodes a fetch complaint under version 1. */
-export function decodeFetchComplaint(bytes: Uint8Array, pinned: 1): FetchComplaint {
-  return SCHEMA.decode(FETCH_COMPLAINT, bytes, pinned).value;
+/** Strictly decodes a availability complaint under version 1. */
+export function decodeAvailabilityComplaint(bytes: Uint8Array, pinned: 1): AvailabilityComplaint {
+  return SCHEMA.decode(AVAILABILITY_COMPLAINT, bytes, pinned).value;
 }
 
 /**
@@ -257,15 +259,17 @@ export function availabilityAttestationMessage(fields: AvailabilityAttestationFi
 }
 
 /** `u16(0x001c) ‖ u8(1) ‖ definition_hash ‖ u8(panel) ‖ u8(seat) ‖ u8(point) ‖ checkpoint_hash ‖ cid`. */
-export function fetchComplaintMessage(fields: FetchComplaintFields): Uint8Array {
+export function availabilityComplaintMessage(fields: AvailabilityComplaintFields): Uint8Array {
   const w = new Writer();
-  u16.write(w, RECORD_TYPES.fetchComplaint);
+  u16.write(w, RECORD_TYPES.availabilityComplaint);
   u8.write(w, 1);
   writeComplaintBody(w, fields);
   return w.finish();
 }
 
-const copyFields = <T extends AvailabilityAttestationFields | FetchComplaintFields>(f: T) => ({
+const copyFields = <T extends AvailabilityAttestationFields | AvailabilityComplaintFields>(
+  f: T,
+) => ({
   definition_hash: Uint8Array.from(f.definition_hash),
   panel: f.panel,
   seat: f.seat,
@@ -292,15 +296,15 @@ export function signAvailabilityAttestation(
   };
 }
 
-/** Signs a seat's fetch complaint with its per-election signing key. */
-export function signFetchComplaint(
+/** Signs a seat's availability complaint with its per-election signing key. */
+export function signAvailabilityComplaint(
   signingSecret: Uint8Array,
-  fields: FetchComplaintFields,
-): FetchComplaint {
+  fields: AvailabilityComplaintFields,
+): AvailabilityComplaint {
   const copy = { ...copyFields(fields), cid: Uint8Array.from(fields.cid) };
   return {
     ...copy,
-    signature: signStatement(signingSecret, COMPLAINT_TAG, fetchComplaintMessage(copy)),
+    signature: signStatement(signingSecret, COMPLAINT_TAG, availabilityComplaintMessage(copy)),
   };
 }
 
@@ -437,16 +441,16 @@ export interface AvailabilityReport {
 
 type Decoded =
   | { readonly kind: "attestation"; readonly record: AvailabilityAttestation }
-  | { readonly kind: "complaint"; readonly record: FetchComplaint };
+  | { readonly kind: "complaint"; readonly record: AvailabilityComplaint };
 
 function decodeEvent(payload: Uint8Array): Decoded {
   // The type is read by the schema; only a complaint's number routes to its decoder.
   const isComplaint =
     payload.length >= 2 &&
-    payload[0] === RECORD_TYPES.fetchComplaint >> 8 &&
-    payload[1] === (RECORD_TYPES.fetchComplaint & 0xff);
+    payload[0] === RECORD_TYPES.availabilityComplaint >> 8 &&
+    payload[1] === (RECORD_TYPES.availabilityComplaint & 0xff);
   return isComplaint
-    ? { kind: "complaint", record: decodeFetchComplaint(payload, 1) }
+    ? { kind: "complaint", record: decodeAvailabilityComplaint(payload, 1) }
     : { kind: "attestation", record: decodeAvailabilityAttestation(payload, 1) };
 }
 
@@ -458,7 +462,12 @@ function verifies(key: Uint8Array, d: Decoded): boolean {
         availabilityAttestationMessage(d.record),
         d.record.signature,
       )
-    : verifyStatement(key, COMPLAINT_TAG, fetchComplaintMessage(d.record), d.record.signature);
+    : verifyStatement(
+        key,
+        COMPLAINT_TAG,
+        availabilityComplaintMessage(d.record),
+        d.record.signature,
+      );
 }
 
 function checkElection(election: AvailabilityElection): void {

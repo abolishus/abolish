@@ -200,7 +200,7 @@ export const TAG_REGISTRY = Object.freeze(
         primitive: "signature",
         status: "specified",
       },
-      { tag: "abolish/v1/sig/fetch-complaint", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/sig/availability-complaint", primitive: "signature", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

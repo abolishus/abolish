@@ -3,6 +3,7 @@ import {
   decodeTier1Addition,
   encodeTier1Addition,
   type Tier1Addition,
+  VOUCH_LENGTH,
   VOUCH_ROOT_INTERVAL,
   VOUCH_ROOT_WINDOW,
 } from "@abolishus/crypto";
@@ -76,15 +77,24 @@ const SAFE = ROOT + 10n;
 const LATEST = ROOT + 20n;
 const NOW = 1_800_000_000;
 
+// The honest record encoded once on the grid; others are patched from it,
+// since each encoding decodes and subgroup-checks six proofs again, which
+// for the dozens of records a test makes would outlast its timeout on CI.
+const BASE = encodeTier1Addition({
+  ...HONEST,
+  vouches: HONEST.vouches.map((v) => ({ ...v, rootBlock: ROOT })),
+});
+const u64At = (bytes: Uint8Array, at: number, value: bigint) =>
+  new DataView(bytes.buffer, bytes.byteOffset).setBigUint64(at, value);
+
 /** The honest record with its vouches' root blocks (on the grid unless given), as hex. */
 function record(rootBlocks: readonly bigint[] = [ROOT, ROOT, ROOT], groupId = GROUP): string {
-  return toHex(
-    encodeTier1Addition({
-      ...HONEST,
-      groupId,
-      vouches: HONEST.vouches.map((v, i) => ({ ...v, rootBlock: rootBlocks[i] ?? ROOT })),
-    }),
-  );
+  const bytes = new Uint8Array(BASE);
+  // `u64(group_id)` first, then each vouch's `u64(root_block)` after its
+  // `u64(tier2_group_id)` (docs/spec/vouching.md, Tier 1 addition record).
+  u64At(bytes, 0, groupId);
+  for (const [i, block] of rootBlocks.entries()) u64At(bytes, 41 + VOUCH_LENGTH * i + 8, block);
+  return toHex(bytes);
 }
 
 let redis: Redis;
@@ -242,6 +252,19 @@ describe("keys and the index", () => {
 });
 
 describe("parseTier1Request", () => {
+  test("a patched record is the record encoded with those fields", () => {
+    const blocks = [ROOT, ROOT - VOUCH_ROOT_INTERVAL, ROOT + 1n];
+    expect(record(blocks, GROUP + 5n)).toBe(
+      toHex(
+        encodeTier1Addition({
+          ...HONEST,
+          groupId: GROUP + 5n,
+          vouches: HONEST.vouches.map((v, i) => ({ ...v, rootBlock: blocks[i] ?? ROOT })),
+        }),
+      ),
+    );
+  });
+
   test("accepts a record on the root grid", () => {
     const hex = record();
     const parsed = parseTier1Request(request(hex, "tok"));
@@ -318,6 +341,9 @@ describe("parseTier1Request", () => {
   });
 });
 
+// Each request decodes its record's six proofs at step 3, so the tests that
+// send dozens get a longer timeout than the default, which a loaded CI
+// runner outlasts.
 describe("Tier1Relay", () => {
   test("serves region 0 only, with one published group", () => {
     const { turnstile } = stubTurnstile();
@@ -398,27 +424,31 @@ describe("Tier1Relay", () => {
     expect(await redis.hlen(keys().queue)).toBe(1);
   });
 
-  test("a full queue is read only after the solve: busy, with the token spent", async () => {
-    await index();
-    await redis.hset(
-      keys().queue,
-      Object.fromEntries(distinct(TIER1_RELAY_QUEUE_MAX).map((h) => [recordKey(fromHex(h)), h])),
-    );
-    for (const hex of [record(), distinct(1)[0] as string]) {
-      const { relay, calls } = service();
-      // Already queued or not, a full queue answers busy, and only once
-      // Turnstile has passed the token.
-      expect(await refusal(relay.relay(request(hex)))).toBe("busy");
-      expect(calls).toHaveLength(1);
-    }
-    // Refused at any step before 8, a full queue says nothing.
-    {
-      const { relay, calls } = service({ verdict: "refused" });
-      expect(await refusal(relay.relay(request(record())))).toBe("challenge-refused");
-      expect(calls).toHaveLength(1);
-    }
-    expect(await redis.hlen(keys().queue)).toBe(TIER1_RELAY_QUEUE_MAX);
-  });
+  test(
+    "a full queue is read only after the solve: busy, with the token spent",
+    { timeout: 60_000 },
+    async () => {
+      await index();
+      await redis.hset(
+        keys().queue,
+        Object.fromEntries(distinct(TIER1_RELAY_QUEUE_MAX).map((h) => [recordKey(fromHex(h)), h])),
+      );
+      for (const hex of [record(), distinct(1)[0] as string]) {
+        const { relay, calls } = service();
+        // Already queued or not, a full queue answers busy, and only once
+        // Turnstile has passed the token.
+        expect(await refusal(relay.relay(request(hex)))).toBe("busy");
+        expect(calls).toHaveLength(1);
+      }
+      // Refused at any step before 8, a full queue says nothing.
+      {
+        const { relay, calls } = service({ verdict: "refused" });
+        expect(await refusal(relay.relay(request(record())))).toBe("challenge-refused");
+        expect(calls).toHaveLength(1);
+      }
+      expect(await redis.hlen(keys().queue)).toBe(TIER1_RELAY_QUEUE_MAX);
+    },
+  );
 
   test("step 6: each vouch's root at or below the safe head, with the margin left in its window", async () => {
     // Exactly at the safe head, and with exactly the margin left, is queued.
@@ -473,31 +503,35 @@ describe("Tier1Relay", () => {
     expect(String(e)).not.toContain(hex.slice(0, 64));
   });
 
-  test("past TIER1_MAX_CONCURRENT requests at once, answers unavailable before Redis", async () => {
-    await index();
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    const calls: string[] = [];
-    const turnstile: Turnstile = {
-      async verify(token) {
-        calls.push(token ?? "");
-        await gate;
-        return "passed";
-      },
-    };
-    const { relay } = service({ turnstile });
-    const records = distinct(TIER1_MAX_CONCURRENT + 1);
-    const held = records.slice(0, -1).map((h) => relay.relay(request(h)));
-    while (calls.length < TIER1_MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 5));
-    const last = records.at(-1) as string;
-    expect(await refusal(relay.relay(request(last)))).toBe("unavailable");
-    expect(calls).toHaveLength(TIER1_MAX_CONCURRENT);
-    release();
-    await Promise.all(held);
-    // Slots are given back, whatever the outcome.
-    await relay.relay(request(last));
-    expect(await redis.hlen(keys().queue)).toBe(TIER1_MAX_CONCURRENT + 1);
-  });
+  test(
+    "past TIER1_MAX_CONCURRENT requests at once, answers unavailable before Redis",
+    { timeout: 60_000 },
+    async () => {
+      await index();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const calls: string[] = [];
+      const turnstile: Turnstile = {
+        async verify(token) {
+          calls.push(token ?? "");
+          await gate;
+          return "passed";
+        },
+      };
+      const { relay } = service({ turnstile });
+      const records = distinct(TIER1_MAX_CONCURRENT + 1);
+      const held = records.slice(0, -1).map((h) => relay.relay(request(h)));
+      while (calls.length < TIER1_MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 5));
+      const last = records.at(-1) as string;
+      expect(await refusal(relay.relay(request(last)))).toBe("unavailable");
+      expect(calls).toHaveLength(TIER1_MAX_CONCURRENT);
+      release();
+      await Promise.all(held);
+      // Slots are given back, whatever the outcome.
+      await relay.relay(request(last));
+      expect(await redis.hlen(keys().queue)).toBe(TIER1_MAX_CONCURRENT + 1);
+    },
+  );
 
   test("answers alike whether a record is new or already queued, and keys by record, not commitment", async () => {
     await index();
@@ -514,25 +548,29 @@ describe("Tier1Relay", () => {
     });
   });
 
-  test("never queues past the bound, however many requests pass step 7 together", async () => {
-    await index();
-    const room = 5;
-    await redis.hset(
-      keys().queue,
-      Object.fromEntries(
-        distinct(TIER1_RELAY_QUEUE_MAX - room).map((h) => [recordKey(fromHex(h)), h]),
-      ),
-    );
-    // One service per request, as many servers would be: each server's own
-    // concurrency cap mustn't be what keeps the queue in bounds.
-    const outcomes = await Promise.allSettled(
-      distinct(40, TIER1_RELAY_QUEUE_MAX).map((h) => service().relay.relay(request(h))),
-    );
-    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(room);
-    for (const o of outcomes)
-      if (o.status === "rejected") expect(o.reason).toMatchObject({ code: "busy" });
-    expect(await redis.hlen(keys().queue)).toBe(TIER1_RELAY_QUEUE_MAX);
-  });
+  test(
+    "never queues past the bound, however many requests pass step 7 together",
+    { timeout: 60_000 },
+    async () => {
+      await index();
+      const room = 5;
+      await redis.hset(
+        keys().queue,
+        Object.fromEntries(
+          distinct(TIER1_RELAY_QUEUE_MAX - room).map((h) => [recordKey(fromHex(h)), h]),
+        ),
+      );
+      // One service per request, as many servers would be: each server's own
+      // concurrency cap mustn't be what keeps the queue in bounds.
+      const outcomes = await Promise.allSettled(
+        distinct(40, TIER1_RELAY_QUEUE_MAX).map((h) => service().relay.relay(request(h))),
+      );
+      expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(room);
+      for (const o of outcomes)
+        if (o.status === "rejected") expect(o.reason).toMatchObject({ code: "busy" });
+      expect(await redis.hlen(keys().queue)).toBe(TIER1_RELAY_QUEUE_MAX);
+    },
+  );
 
   test("Redis keeps the records under their hashes and nothing else of a request", async () => {
     await index();

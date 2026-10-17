@@ -3,7 +3,15 @@
 // an error message (messages can quote data). Findings are their own lines
 // and carry only public board values.
 
-import type { AnchorFindingCode, BoardAuditCode, Tier0GroupOutcome } from "@abolishus/core";
+import type {
+  AnchorFindingCode,
+  BoardAuditCode,
+  DefinitionErrorCode,
+  RegistrationErrorCode,
+  RegistrySyncErrorCode,
+  RegistrySyncReason,
+  Tier0GroupOutcome,
+} from "@abolishus/core";
 import type { QueueSpec } from "./queues.ts";
 
 export interface JobLogLine {
@@ -67,6 +75,35 @@ export interface BallotL1Line {
   readonly finding: "l1-unchecked";
 }
 
+/**
+ * What a registry sync found: the index or a log refused (`incomplete`,
+ * `event-check`), a registration or definition the database refused, or a
+ * registration recorded without its definition. Every value is public chain
+ * data (T-10).
+ */
+export type RegistrySyncLine =
+  | {
+      readonly queue: "{registry-sync}";
+      readonly finding: RegistrySyncErrorCode;
+      readonly reason: RegistrySyncReason;
+    }
+  | {
+      readonly queue: "{registry-sync}";
+      readonly finding: "registration";
+      readonly reason: RegistrationErrorCode;
+    }
+  | {
+      readonly queue: "{registry-sync}";
+      readonly finding: "definition";
+      readonly reason: "conflict";
+    }
+  | {
+      readonly queue: "{registry-sync}";
+      readonly finding: "definition-unstored";
+      readonly election: string;
+      readonly reason: Exclude<DefinitionErrorCode, "conflict">;
+    };
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -79,6 +116,7 @@ export type ErrorKind =
   | "invalid-job-data"
   | "stale-job"
   | "tier0-chain-unavailable"
+  | "registry-sync-refused"
   | "internal";
 
 export type LogLine =
@@ -87,5 +125,6 @@ export type LogLine =
   | AnchorFindingLine
   | Tier0BoundaryLine
   | BallotL1Line
+  | RegistrySyncLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

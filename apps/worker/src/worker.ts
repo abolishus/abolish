@@ -14,6 +14,7 @@ import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
+import type { RegistrySync } from "./registry-sync.ts";
 
 export interface WorkerOptions {
   /** Shared by every queue and worker; BullMQ duplicates it for blocking reads. */
@@ -58,6 +59,12 @@ export interface WorkerOptions {
     /** How long a batch's first ballot waits for others; `BALLOT_BATCH_WAIT_MS` unless a test says otherwise. */
     readonly waitMs?: number;
   };
+  /** The registry sync; without it, its queue has no worker and no schedule. */
+  readonly registry?: {
+    readonly sync: RegistrySync;
+    /** How often it runs; `REGISTRY_SYNC_EVERY_MS` unless a test says otherwise. */
+    readonly everyMs?: number;
+  };
 }
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
@@ -76,6 +83,13 @@ export const TIER0_INDEX_EVERY_MS = 20_000;
  * the lock to an index refresh is retried well within the period.
  */
 export const TIER0_BOUNDARY_EVERY_MS = 30_000;
+
+/**
+ * A registration is recorded only once its block is finalized, which on an
+ * OP Stack L2 takes over ten minutes, so a minute's wait adds little, and
+ * each run reads the registry's whole log from the index.
+ */
+export const REGISTRY_SYNC_EVERY_MS = 60_000;
 
 export interface RunningWorker {
   close(): Promise<void>;
@@ -98,6 +112,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     now,
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
+    ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
     ...(options.ballots === undefined
       ? {}
       : {
@@ -114,7 +129,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const running = (key: QueueKey) =>
     key === "ballotSubmit"
       ? options.ballots !== undefined
-      : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+      : key === "registrySync"
+        ? options.registry !== undefined
+        : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -195,6 +212,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             key: "tier0Boundary",
             id: "tier0-boundary",
             every: options.tier0.boundaryEveryMs ?? TIER0_BOUNDARY_EVERY_MS,
+          },
+        ] as const)),
+    ...(options.registry === undefined
+      ? []
+      : ([
+          {
+            key: "registrySync",
+            id: "registry-sync",
+            every: options.registry.everyMs ?? REGISTRY_SYNC_EVERY_MS,
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];

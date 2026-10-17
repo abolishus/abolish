@@ -53,7 +53,7 @@ import {
   toHex,
 } from "viem";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { readContractEvents, readIndexedGroups } from "../src/records.ts";
+import { readContractEvents, readIndexedGroups, readIndexedLogs } from "../src/records.ts";
 
 const ballotVectors = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
@@ -521,6 +521,12 @@ async function expectLogsComplete(schema: string): Promise<void> {
     });
     expect(names, contract).toEqual(emitted.get(contract) ?? []);
     expect(await accumulatorCheck(logs, head, contract), contract).toBeNull();
+    // Each log's position in its block, as the node reports it.
+    const onChain = await publicClient.getLogs({ address: contract, fromBlock: 0n, toBlock: head });
+    expect(
+      (await readIndexedLogs(sql, schema, contract)).map((l) => [l.record, l.logIndex]),
+      contract,
+    ).toEqual(logs.map((log, i) => [log, onChain[i]?.logIndex]));
   }
   const [first] = await readContractEvents(sql, schema, registry);
   expect(first && checkContractEvent(first, eventContracts(), EVENTS)).toMatchObject({

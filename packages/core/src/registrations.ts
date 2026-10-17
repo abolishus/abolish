@@ -104,11 +104,7 @@ export async function recordRegistration(client: Sql, registration: Registration
     .where(eq(r.definitionHash, hash))
     .limit(1);
   if (taken !== undefined) throw new RegistrationError("conflict");
-  const [latest] = await db
-    .select({ l2Block: r.l2Block, logIndex: r.logIndex })
-    .from(r)
-    .orderBy(desc(r.l2Block), desc(r.logIndex))
-    .limit(1);
+  const latest = await latestRegistration(client);
   if (latest !== undefined) {
     if (latest.l2Block === l2Block && latest.logIndex === logIndex)
       throw new RegistrationError("conflict");
@@ -118,6 +114,19 @@ export async function recordRegistration(client: Sql, registration: Registration
   // A concurrent recorder can still get in first: the table's constraints and
   // append trigger then refuse this insert with the database's own error.
   await db.insert(r).values({ electionId: id, definitionHash: hash, l2Block, logIndex });
+}
+
+/** The position of the latest recorded registration, or `undefined` when none is. */
+export async function latestRegistration(
+  client: Sql,
+): Promise<{ readonly l2Block: bigint; readonly logIndex: number } | undefined> {
+  const r = electionRegistrations;
+  const [latest] = await drizzle({ client })
+    .select({ l2Block: r.l2Block, logIndex: r.logIndex })
+    .from(r)
+    .orderBy(desc(r.l2Block), desc(r.logIndex))
+    .limit(1);
+  return latest;
 }
 
 /** A code's poll: its election ID and the code in its one canonical form. */

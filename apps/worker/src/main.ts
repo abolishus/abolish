@@ -3,6 +3,8 @@ import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
+import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
+import { RegistrySync, ViemRegistryAccumulator } from "./registry-sync.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
 import { checkTier0Deployment, ViemTier0Chain } from "./tier0-chain.ts";
@@ -187,6 +189,49 @@ if (tier0Config !== undefined) {
   };
 }
 
+// The registry sync (P3-5 part 3a), only when configured: it reads the
+// indexer's database as a role that can only read it, and starts only once
+// the L2 node is on the configured chain. viem's errors quote the node's
+// URL, and postgres' can quote the index's, so neither is reported.
+let registry: WorkerOptions["registry"];
+let index: postgres.Sql | undefined;
+const registryConfig = registrySyncFromEnv(
+  Object.fromEntries(REGISTRY_SYNC_ENV.map((name) => [name, process.env[name]])),
+);
+if (registryConfig !== undefined) {
+  const c = registryConfig;
+  let accumulator;
+  try {
+    accumulator = await ViemRegistryAccumulator.connect(
+      createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) }),
+      c.chainId,
+    );
+  } catch (e) {
+    if (e instanceof BaseError) throw new Error("the registry sync couldn't reach the L2 node");
+    throw e;
+  }
+  const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
+  index = postgres(c.indexUrl, { onnotice: () => {}, max: 1 });
+  registry = {
+    sync: new RegistrySync({
+      sql,
+      index,
+      indexSchema: c.indexSchema,
+      accumulator,
+      deployment: {
+        chainId: c.chainId,
+        contracts: {
+          electionRegistry: bytes(c.electionRegistry),
+          trusteeRegistry: bytes(c.trusteeRegistry),
+          groupRegistry: bytes(c.groupRegistry),
+          board: bytes(c.board),
+        },
+        version: c.eventVersion,
+      },
+    }),
+  };
+}
+
 const worker = await startWorker({
   connection,
   sql,
@@ -194,12 +239,13 @@ const worker = await startWorker({
   auditEveryMs: env.AUDIT_EVERY_MS,
   ...(tier0 !== undefined && { tier0 }),
   ...(ballots !== undefined && { ballots }),
+  ...(registry !== undefined && { registry }),
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, () => {
     worker
       .close()
-      .then(() => Promise.all([sql.end(), connection.quit()]))
+      .then(() => Promise.all([sql.end(), index?.end(), connection.quit()]))
       .catch(() => process.exit(1));
   });

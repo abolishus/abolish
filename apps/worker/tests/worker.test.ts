@@ -220,10 +220,11 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await prunes.add("identityBackupPrune", {});
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
-  // This worker has no Tier 0 job and pins no panel, so those queues have no
-  // keys here (tests/tier0.test.ts and tests/ballots.test.ts cover them).
+  // This worker has no Tier 0 job, pins no panel and has no registry sync, so
+  // those queues have no keys here (tests/tier0.test.ts, tests/ballots.test.ts
+  // and tests/registry-sync.test.ts cover them).
   const tags = Object.entries(QUEUES)
-    .filter(([key]) => ![...TIER0_QUEUES, "ballotSubmit"].includes(key))
+    .filter(([key]) => ![...TIER0_QUEUES, "ballotSubmit", "registrySync"].includes(key))
     .map(([, q]) => `${prefix}:${q.name}:`);
   for (const tag of tags)
     expect(
@@ -261,6 +262,8 @@ test("a handler's own error message is neither logged nor kept, the events strea
       // Not scheduled: this worker has no Tier 0 job.
       tier0Index: async () => {},
       tier0Boundary: async () => {},
+      // Not scheduled: this worker has no registry sync.
+      registrySync: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
         throw new Error(`params: ${MARKER}`);

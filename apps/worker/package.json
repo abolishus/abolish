@@ -19,6 +19,7 @@
     "@abolishus/contracts": "workspace:*",
     "@abolishus/core": "workspace:*",
     "@abolishus/crypto": "workspace:*",
+    "@abolishus/indexer": "workspace:*",
     "bullmq": "catalog:",
     "ioredis": "catalog:",
     "postgres": "catalog:",

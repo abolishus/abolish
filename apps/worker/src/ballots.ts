@@ -8,6 +8,7 @@
 import type { BallotAdmissions, SubmitOutcome } from "@abolishus/core";
 import type { Sql } from "postgres";
 import type { BallotOutcome } from "./ballot-queue.ts";
+import type { Log } from "./log.ts";
 
 /** Ballots judged in one batch at most, and the queue's concurrency: `finishBallotSteps`' own batch. */
 export const BALLOT_BATCH = 64;
@@ -25,6 +26,8 @@ export interface BallotBatchOptions {
   readonly now: () => bigint;
   readonly batch?: number;
   readonly waitMs?: number;
+  /** Where a ballot boarded with its L1 reference unchecked is reported. */
+  readonly log?: Log;
 }
 
 interface Waiting {
@@ -56,6 +59,7 @@ export class BallotBatches {
   readonly #now: () => bigint;
   readonly #batch: number;
   readonly #waitMs: number;
+  readonly #log: Log | undefined;
   #waiting: Waiting[] = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running = false;
@@ -66,6 +70,7 @@ export class BallotBatches {
     now,
     batch = BALLOT_BATCH,
     waitMs = BALLOT_BATCH_WAIT_MS,
+    log,
   }: BallotBatchOptions) {
     if (!Number.isSafeInteger(batch) || batch < 1) throw new RangeError("batch must be at least 1");
     if (!Number.isSafeInteger(waitMs) || waitMs < 0) throw new RangeError("waitMs must be ≥ 0");
@@ -74,6 +79,7 @@ export class BallotBatches {
     this.#now = now;
     this.#batch = batch;
     this.#waitMs = waitMs;
+    this.#log = log;
   }
 
   /**
@@ -125,7 +131,11 @@ export class BallotBatches {
           for (const [i, w] of ballots.entries()) {
             const o = outcomes[i];
             if (o === undefined) w.reject(new Error("submitAll answered fewer ballots"));
-            else w.resolve(outcomeOf(o));
+            else {
+              if (o.ok && o.l1 === "unchecked")
+                this.#log?.({ queue: "{ballot-submit}", finding: "l1-unchecked" });
+              w.resolve(outcomeOf(o));
+            }
             settled.add(w);
           }
         } catch (e) {

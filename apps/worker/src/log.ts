@@ -57,6 +57,16 @@ export interface Tier0BoundaryLine {
   readonly submitFailed?: boolean;
 }
 
+/**
+ * A ballot boarded with its L1 reference unchecked (core's L1Check): the L1
+ * node couldn't be read, or isn't on the chain the definition names. The
+ * line names neither the ballot nor its election (T-10).
+ */
+export interface BallotL1Line {
+  readonly queue: "{ballot-submit}";
+  readonly finding: "l1-unchecked";
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -76,5 +86,6 @@ export type LogLine =
   | AuditFindingLine
   | AnchorFindingLine
   | Tier0BoundaryLine
+  | BallotL1Line
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

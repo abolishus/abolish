@@ -19,10 +19,12 @@ export {
   type BallotBatchOptions,
   BallotBatches,
 } from "./ballots.ts";
+export { ViemL1Source } from "./l1-source.ts";
 export { HANDLERS, type JobContext, JobError, type JobResult, TIER0_QUEUES } from "./jobs.ts";
 export type {
   AnchorFindingLine,
   AuditFindingLine,
+  BallotL1Line,
   ErrorKind,
   JobLogLine,
   Log,

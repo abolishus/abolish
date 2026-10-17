@@ -4,13 +4,15 @@ import {
   decodeElectionDefinition,
   type Panel,
 } from "@abolishus/crypto";
-import { splitEntries } from "@abolishus/verifier";
+import { electionAdmission, splitEntries } from "@abolishus/verifier";
 import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import {
   appendEntry,
   BallotAdmissions,
+  type FinalizedL1Source,
+  L1References,
   readBoard,
   readBoardedEntry,
   storeDefinition,
@@ -425,4 +427,194 @@ test("refuses options it can't run under", () => {
   expect(() => new BallotAdmissions({ panels: [panelOf("panel-4")], clock, cacheSize: 0 })).toThrow(
     RangeError,
   );
+});
+
+describe("the L1 reference (5.8), by the finalized chain an L1 node reports", () => {
+  // The fixtures' ballots name blocks 21,011,130 to 21,033,826 of chain
+  // 11155111. The stand-in chain makes a block every 12 seconds, with each
+  // named block holding the hash its ballot names, so `shift` moves where
+  // the window falls along it.
+  const CHAIN = definition.l1_chain_id;
+  const named = (() => {
+    const c = byId("admitted");
+    const entries = splitEntries(hex(c.board)).entries;
+    const a = electionAdmission(hex(c.definition), panelOf(c.panel), entries);
+    if (!a.ok) throw new Error(a.code);
+    const refs = new Map<bigint, Uint8Array>();
+    for (const e of entriesOf(c).slice(1)) {
+      const r = a.admit(e.payload);
+      if (!r.ok) throw new Error(r.code);
+      refs.set(r.l1RefNumber, r.l1RefHash);
+    }
+    return refs;
+  })();
+  const [lowest, highest] = [...named.keys()].reduce<[bigint, bigint]>(
+    ([lo, hi], n) => [n < lo ? n : lo, n > hi ? n : hi],
+    [2n ** 64n, 0n],
+  );
+
+  interface Chain {
+    /** The block at `opens_at`. */
+    readonly atOpen?: bigint;
+    readonly head?: bigint;
+    /** Blocks whose hash differs from what the ballots name. */
+    readonly forged?: readonly bigint[];
+    readonly chainId?: bigint;
+    readonly down?: boolean;
+  }
+  function source({
+    atOpen = lowest - 1_000n,
+    head = highest + 100n,
+    forged = [],
+    chainId = CHAIN,
+    down = false,
+  }: Chain = {}) {
+    const reads: bigint[] = [];
+    const s: FinalizedL1Source = {
+      chainId,
+      async finalizedHead() {
+        if (down) throw new Error("node down");
+        return head;
+      },
+      async block(n) {
+        if (down) throw new Error("node down");
+        reads.push(n);
+        const ref = named.get(n);
+        const hash =
+          ref !== undefined && !forged.includes(n)
+            ? ref
+            : Uint8Array.from(Buffer.from(n.toString(16).padStart(64, "0"), "hex"));
+        return { hash, timestamp: opensAt + 12n * (n - atOpen) };
+      },
+    };
+    return { s, reads };
+  }
+  const withL1 = (chain?: Chain) => {
+    const { s, reads } = source(chain);
+    return {
+      a: new BallotAdmissions({
+        panels: [panelOf("panel-4")],
+        clock,
+        l1: new L1References({ source: s }),
+      }),
+      reads,
+    };
+  };
+  const ballotsOf = (c: Case) =>
+    entriesOf(c)
+      .slice(1)
+      .map((e) => e.payload);
+  const verdicts = async (a: BallotAdmissions, app: Sql, ballots: readonly Uint8Array[]) =>
+    (await a.submitAll(app, electionId, ballots, during)).map((o) =>
+      o.ok ? `boarded:${o.l1}` : `${o.error.code}:${o.error.admission}`,
+    );
+
+  test("ballots naming finalized blocks by their hashes are boarded as admitted", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const { a } = withL1();
+    expect(await verdicts(a, app, ballotsOf(c))).toEqual(
+      ballotsOf(c).map(() => "boarded:admitted"),
+    );
+  });
+
+  test("a block L1 hasn't finalized yet leaves its ballot pending, and boarded", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    // Finalized up to the lowest named block only.
+    const { a } = withL1({ head: lowest });
+    const got = await verdicts(a, app, ballotsOf(c));
+    const expected = ballotsOf(c).map((b) => {
+      const r = electionAdmissionOf(c).admit(b);
+      if (!r.ok) throw new Error(r.code);
+      return r.l1RefNumber === lowest ? "boarded:admitted" : "boarded:pending";
+    });
+    expect(got).toEqual(expected);
+    expect(got).toContain("boarded:pending");
+  });
+
+  test("a finalized block by another hash is rejected (l1-ref-unknown), and nothing is written", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const { a } = withL1({ forged: [lowest] });
+    const ballots = ballotsOf(c);
+    const got = await verdicts(a, app, ballots);
+    const forgedAt = ballots.findIndex((b) => {
+      const r = electionAdmissionOf(c).admit(b);
+      return r.ok && r.l1RefNumber === lowest;
+    });
+    expect(got[forgedAt]).toBe("rejected:l1-ref-unknown");
+    expect(got.filter((v) => v === "boarded:admitted")).toHaveLength(ballots.length - 1);
+    expect(await readBoard(app, electionId)).toHaveLength(ballots.length);
+  });
+
+  test("a block from before the window is rejected (l1-ref-before-open)", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    // Every named block is more than an hour before `opens_at`.
+    const { a } = withL1({ atOpen: highest + 301n, head: highest + 1_000n });
+    const ballots = ballotsOf(c);
+    expect(await verdicts(a, app, ballots)).toEqual(
+      ballots.map(() => "rejected:l1-ref-before-open"),
+    );
+    expect(await readBoard(app, electionId)).toHaveLength(1);
+  });
+
+  test("a block stamped after closes_at is rejected (l1-ref-after-close)", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    // The highest named block is stamped 12 seconds after `closes_at`.
+    const span = (closesAt - opensAt) / 12n;
+    const { a } = withL1({ atOpen: highest - span - 1n, head: highest + 10n });
+    const got = await verdicts(a, app, ballotsOf(c));
+    expect(got).toContain("rejected:l1-ref-after-close");
+    expect(got).toContain("boarded:admitted");
+  });
+
+  test("a node that can't be read, or of another chain, leaves references unchecked; none, off", async () => {
+    const c = byId("admitted");
+    const ballots = ballotsOf(c);
+    const down = withL1({ down: true });
+    expect(await verdicts(down.a, await election(c), ballots)).toEqual(
+      ballots.map(() => "boarded:unchecked"),
+    );
+    const other = withL1({ chainId: CHAIN + 1n });
+    expect(await verdicts(other.a, await election(c), ballots)).toEqual(
+      ballots.map(() => "boarded:unchecked"),
+    );
+    expect(other.reads).toEqual([]);
+    expect(await verdicts(admissions(), await election(c), ballots)).toEqual(
+      ballots.map(() => "boarded:off"),
+    );
+  });
+
+  test("the window's start is found once per opens_at, then each ballot reads at most its block", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const { a, reads } = withL1();
+    const [first, ...rest] = ballotsOf(c);
+    await verdicts(a, app, [first!]);
+    const afterFirst = reads.length;
+    await verdicts(a, app, rest);
+    expect(reads.length - afterFirst).toBeLessThanOrEqual(rest.length);
+  });
+
+  test("a ballot 5.8 rejects is refused through submit too, with its code", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const { a } = withL1({ forged: [...named.keys()] });
+    expect(await refusal(a.submit(app, electionId, ballotsOf(c)[0]!, during))).toBe(
+      "rejected:l1-ref-unknown",
+    );
+  });
+
+  function electionAdmissionOf(c: Case) {
+    const a = electionAdmission(
+      hex(c.definition),
+      panelOf(c.panel),
+      splitEntries(hex(c.board)).entries,
+    );
+    if (!a.ok) throw new Error(a.code);
+    return a;
+  }
 });

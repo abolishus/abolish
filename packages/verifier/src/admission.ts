@@ -54,7 +54,9 @@ export type BallotAdmission =
       readonly nullifier: bigint;
       /** `M`, recomputed from the record, so a re-randomised proof doesn't hide a repeat (T-38). */
       readonly message: Uint8Array;
+      /** The L1 block the ballot names (5.8 is the caller's), as `M` binds it. */
       readonly l1RefNumber: bigint;
+      readonly l1RefHash: Uint8Array;
     }
   | {
       readonly ok: false;
@@ -68,6 +70,8 @@ export interface ElectionAdmission {
   readonly electionId: Uint8Array;
   readonly opensAt: bigint;
   readonly closesAt: bigint;
+  /** The L1 chain its ballots name blocks of (5.8). */
+  readonly l1ChainId: bigint;
   /** Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never throws on its bytes. */
   readonly admit: (payload: Uint8Array) => BallotAdmission;
   /**
@@ -162,6 +166,7 @@ export function electionAdmission(
           nullifier: checked.nullifier,
           message: checked.message,
           l1RefNumber: checked.l1RefNumber,
+          l1RefHash: new Uint8Array(checked.l1RefHash),
         }
       : { ok: false, code: checked.code };
   const admitAll = (payloads: readonly Uint8Array[]): BallotAdmission[] => {
@@ -191,6 +196,7 @@ export function electionAdmission(
     electionId: new Uint8Array(d.election_id),
     opensAt: d.opens_at,
     closesAt: d.closes_at,
+    l1ChainId: d.l1_chain_id,
     admit: (payload) => admitAll([payload])[0] as BallotAdmission,
     admitAll,
   };

@@ -5,12 +5,18 @@
 // verifier's trust base; docs/spec/board.md, Envelope: the operator MUST
 // append only payloads that decode strictly under the profile; T-17, T-52).
 // A repeat of a boarded ballot (5.7), keyed by the (tier, ν, M) that
-// admission returns, is never boarded again (T-38).
+// admission returns, is never boarded again (T-38), and with an L1 node, a
+// ballot whose L1 reference 5.8 already rejects isn't boarded at all.
 // Nothing here sees who submitted: no account, session or address reaches
 // this module (T-10).
 
 import { MAX_BOARD_PAYLOAD, type Panel, panelId, type PeriodClock } from "@abolishus/crypto";
-import { type AdmissionCode, type ElectionAdmission, electionAdmission } from "@abolishus/verifier";
+import {
+  type AdmissionCode,
+  type ElectionAdmission,
+  electionAdmission,
+  type L1RefCode,
+} from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import {
   appendEntry,
@@ -21,6 +27,7 @@ import {
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { readDefinition } from "./definitions.ts";
+import type { L1References } from "./l1-references.ts";
 
 export type SubmitErrorCode =
   /** No definition is stored for the election. */
@@ -33,26 +40,39 @@ export type SubmitErrorCode =
    */
   | "not-open"
   /**
-   * The ballot doesn't decode strictly, an admission check rejects it, or it
-   * repeats a boarded ballot in other bytes (`repeat`, verifier 5.7).
+   * The ballot doesn't decode strictly, an admission check rejects it (its
+   * L1 reference among them, 5.8, once the finalized chain decides it), or
+   * it repeats a boarded ballot in other bytes (`repeat`, verifier 5.7).
    */
   | "rejected";
+
+/** Why a ballot was rejected: the verifier's code for the check it failed. */
+export type RejectionCode = AdmissionCode | L1RefCode | "decode" | "repeat";
 
 export class SubmitError extends Error {
   override readonly name = "SubmitError";
   readonly code: SubmitErrorCode;
-  /** Under `rejected`: the verifier's code (`decode` for strict decoding, `repeat` for 5.7). */
-  readonly admission?: AdmissionCode | "decode" | "repeat";
-  constructor(code: SubmitErrorCode, admission?: AdmissionCode | "decode" | "repeat") {
+  /** Under `rejected`: the verifier's code (`decode` for strict decoding, `repeat` for 5.7, 5.8's `l1-ref-*`). */
+  readonly admission?: RejectionCode;
+  constructor(code: SubmitErrorCode, admission?: RejectionCode) {
     super(`ballot refused: ${code}${admission === undefined ? "" : ` (${admission})`}`);
     this.code = code;
     if (admission !== undefined) this.admission = admission;
   }
 }
 
+/**
+ * How a boarded ballot's L1 reference stood (5.8): `admitted` by the
+ * finalized chain, `pending` until L1 finalizes its block, `unchecked`
+ * because the node couldn't be read or is on another chain than the
+ * definition names, or `off` with no node configured. The verifier decides
+ * all but the first later; nothing here changes what counts.
+ */
+export type L1Check = "admitted" | "pending" | "unchecked" | "off";
+
 /** One ballot's outcome from `BallotAdmissions.submitAll`. */
 export type SubmitOutcome =
-  | { readonly ok: true; readonly boarded: AppendedEntry }
+  | { readonly ok: true; readonly boarded: AppendedEntry; readonly l1: L1Check }
   | { readonly ok: false; readonly error: SubmitError };
 
 export interface BallotAdmissionOptions {
@@ -66,6 +86,12 @@ export interface BallotAdmissionOptions {
   readonly clock: PeriodClock;
   /** Elections whose admission, and others whose refusal, are kept in memory at once (default 1,024 each). */
   readonly cacheSize?: number;
+  /**
+   * Finalized L1 blocks to judge references by (5.8), for elections whose
+   * definition names this node's chain. Without it, or when it can't be
+   * read, every reference is left to the verifier, as before.
+   */
+  readonly l1?: L1References;
 }
 
 /** What an election's ballots are judged by, once it can be decided. */
@@ -83,10 +109,11 @@ export class BallotAdmissions {
   readonly #panels: readonly Panel[];
   readonly #clock: PeriodClock;
   readonly #cacheSize: number;
+  readonly #l1: L1References | undefined;
   readonly #admitted = new Map<string, Decided>();
   readonly #refused = new Map<string, Decided>();
 
-  constructor({ panels, clock, cacheSize = 1024 }: BallotAdmissionOptions) {
+  constructor({ panels, clock, cacheSize = 1024, l1 }: BallotAdmissionOptions) {
     if (panels.length === 0) throw new RangeError("panels must name at least one panel");
     // A malformed panel throws PanelError here, at start, not on a ballot.
     for (const panel of panels) panelId(panel);
@@ -99,6 +126,7 @@ export class BallotAdmissions {
     this.#panels = [...panels];
     this.#clock = { epoch: clock.epoch, period: clock.period };
     this.#cacheSize = cacheSize;
+    this.#l1 = l1;
   }
 
   /**
@@ -168,6 +196,11 @@ export class BallotAdmissions {
         outcomes.push({ ok: false, error: new SubmitError("rejected", verdict.code) });
         continue;
       }
+      const l1 = await this.#l1Check(admission, verdict);
+      if (typeof l1 !== "string") {
+        outcomes.push({ ok: false, error: new SubmitError("rejected", l1.rejected) });
+        continue;
+      }
       // Labelled before the proofs ran, so a later-labelled ballot may have
       // been boarded meanwhile: this one then takes that segment, never a
       // lower one (a ballot boarded under a segment whose checkpoint may
@@ -177,13 +210,37 @@ export class BallotAdmissions {
           raiseToPrevious: true,
           ballot: { tier: verdict.tier, nullifier: verdict.nullifier, message: verdict.message },
         });
-        outcomes.push({ ok: true, boarded });
+        outcomes.push({ ok: true, boarded, l1 });
       } catch (e) {
         if (!(e instanceof AppendError && e.code === "repeat")) throw e;
         outcomes.push({ ok: false, error: new SubmitError("rejected", "repeat") });
       }
     }
     return outcomes;
+  }
+
+  /**
+   * 5.8 for one admitted ballot, as far as the finalized chain decides it: a
+   * rejection, or how it stands. Only the node's own chain is judged: a
+   * definition naming another L1 is left to the verifier.
+   */
+  async #l1Check(
+    admission: ElectionAdmission,
+    ballot: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
+  ): Promise<L1Check | { readonly rejected: L1RefCode }> {
+    const l1 = this.#l1;
+    if (l1 === undefined) return "off";
+    if (admission.l1ChainId !== l1.chainId) return "unchecked";
+    let verdict;
+    try {
+      verdict = await l1.judge(admission, ballot);
+    } catch {
+      // An unreachable or inconsistent node never refuses a ballot: 5.8 is
+      // the verifier's to decide, and refusing here would let the node's
+      // outage turn voters away (T-25). The outcome says it went unchecked.
+      return "unchecked";
+    }
+    return verdict === "admitted" || verdict === "pending" ? verdict : { rejected: verdict };
   }
 
   async #admission(client: Sql, id: Uint8Array): Promise<Decided> {

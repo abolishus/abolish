@@ -1,10 +1,13 @@
 export {
   BallotAdmissions,
   type BallotAdmissionOptions,
+  type L1Check,
+  type RejectionCode,
   SubmitError,
   type SubmitErrorCode,
   type SubmitOutcome,
 } from "./admission.ts";
+export { type FinalizedL1Source, type L1ReferenceOptions, L1References } from "./l1-references.ts";
 export {
   ANCHOR_INCLUSION_MARGIN,
   type AnchorChain,

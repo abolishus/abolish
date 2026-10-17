@@ -1,3 +1,4 @@
+import { MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
 import * as z from "zod";
 
 // Every queue the worker knows, with the job data it takes. Two rules keep
@@ -10,7 +11,8 @@ import * as z from "zod";
 //   `tests/no-join.test.ts` checks every schema here.
 // - Job data is a strict object, parsed before it is queued and again before
 //   it is handled, so no field the schema doesn't name reaches Redis or a
-//   handler. Job IDs are BullMQ's counters, never derived from the data.
+//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`,
+//   never derived from the data.
 //
 // Every key a queue uses is `abolish:{<queue>}:…`, so the braces are a hash
 // tag: Dragonfly (and Redis Cluster) keep each queue's keys in one slot,
@@ -66,6 +68,27 @@ export const QUEUES = {
    * does nothing (T-13).
    */
   tier0Boundary: { name: "{tier0-boundary}", side: "operational", data: z.strictObject({}) },
+  /**
+   * Ballots the API received, to admit and board (core's
+   * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
+   * admission; T-17, T-52). Queued by the API's `ballots.submit` through
+   * `BallotQueue` and run only when the worker pins panels; jobs waiting
+   * together are judged in one batch. A job carries the election and the
+   * ballot's bytes, never who sent them (T-10), and returns only the outcome
+   * (`BALLOT_OUTCOME`).
+   */
+  ballotSubmit: {
+    name: "{ballot-submit}",
+    side: "board",
+    data: z.strictObject({
+      electionId: z.string().regex(/^[0-9a-f]{64}$/),
+      ballot: z
+        .string()
+        .max(2 * MAX_BOARD_PAYLOAD)
+        // As the contract's: an empty ballot is the verifier's to refuse (decode).
+        .regex(/^(?:[0-9a-f]{2})*$/),
+    }),
+  },
 } as const satisfies Record<string, QueueSpec>;
 
 export type QueueKey = keyof typeof QUEUES;

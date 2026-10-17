@@ -1,15 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
-import {
-  ACCOUNT_COOKIE_PREFIX,
-  type BallotAdmissions,
-  type Tier0Registrations,
-} from "@abolishus/core";
+import { ACCOUNT_COOKIE_PREFIX, type Tier0Registrations } from "@abolishus/core";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
 import { hasDuplicateKey } from "./json.ts";
-import { router } from "./router.ts";
+import { type BallotSubmitter, router } from "./router.ts";
 
 // The HTTP transport: oRPC's OpenAPI handler on node:http, behind a front
 // that bounds request bodies and writes the request log.
@@ -206,12 +202,12 @@ function refuse(res: ServerResponse, status: number) {
 export interface ApiOptions {
   readonly sql: Sql;
   readonly log: Log;
-  /** Ballot admission; without it the server boards no ballot (`ELECTION_NOT_OPEN`). */
-  readonly admissions?: BallotAdmissions;
-  /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
-  readonly tier0?: Tier0Registrations;
+  /** The worker's ballot queue; without it the server boards no ballot (`ELECTION_NOT_OPEN`). */
+  readonly ballots?: BallotSubmitter;
   /** UNIX time in seconds; the system clock by default. Injected so tests can set it. */
   readonly now?: () => bigint;
+  /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
+  readonly tier0?: Tier0Registrations;
   /**
    * Most requests handled at once, from the first byte to the last: past it,
    * a request is refused with 503 before anything is read. Each page of the
@@ -252,9 +248,9 @@ const HEADERS_TIMEOUT_MS = 10_000;
 export function createApiServer({
   sql,
   log,
-  admissions,
-  tier0,
+  ballots,
   now = () => BigInt(Math.floor(Date.now() / 1000)),
+  tier0,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
@@ -333,7 +329,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, admissions, now, tier0 },
+          context: { sql, ballots, now, tier0 },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

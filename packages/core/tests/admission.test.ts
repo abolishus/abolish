@@ -12,8 +12,10 @@ import {
   appendEntry,
   BallotAdmissions,
   readBoard,
+  readBoardedEntry,
   storeDefinition,
   SubmitError,
+  type SubmitOutcome,
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
@@ -250,6 +252,86 @@ describe("boards what the verifier admits, and nothing else", () => {
     );
     expect(await readBoard(app, electionId)).toHaveLength(1);
   });
+});
+
+describe("submitAll: many ballots at once, as submit judges each in turn (T-52)", () => {
+  const verdictOf = (o: SubmitOutcome) =>
+    o.ok
+      ? `boarded:${o.boarded.index}`
+      : o.error.admission === undefined
+        ? o.error.code
+        : `${o.error.code}:${o.error.admission}`;
+
+  test.each(["mixed", "repeats", "admitted"])(
+    "case %s: one batch gives each ballot submit's verdict and entry, and the same board",
+    { timeout: 60_000 },
+    async (id) => {
+      const c = byId(id);
+      const batched = await election(c);
+      const alone = await election(c);
+      const ballots = entriesOf(c)
+        .slice(1)
+        .map((e) => e.payload);
+      const outcomes = await admissions().submitAll(batched, electionId, ballots, during);
+      const a = admissions();
+      const expected: string[] = [];
+      for (const b of ballots) {
+        const got = await refusal(a.submit(alone, electionId, b, during));
+        expected.push(got);
+      }
+      expect(outcomes.map((o) => (o.ok ? "boarded" : verdictOf(o)))).toEqual(expected);
+      const board = await readBoard(batched, electionId);
+      expect(board).toEqual(await readBoard(alone, electionId));
+      // Each boarded outcome is the entry that carries its bytes.
+      for (const [i, o] of outcomes.entries())
+        if (o.ok) {
+          expect(o.boarded.entry).toEqual(board[Number(o.boarded.index)]);
+          expect(decodeBoardEntry(o.boarded.entry, VERSION).payload).toEqual(ballots[i]);
+        }
+      expect(() => checkBoard(electionId, board, VERSION)).not.toThrow();
+    },
+  );
+
+  test("outside the window, or for an unknown election, every ballot gets the refusal", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const ballots = entriesOf(c)
+      .slice(1)
+      .map((e) => e.payload);
+    const late = await admissions().submitAll(app, electionId, ballots, closesAt + 1n);
+    expect(late.map(verdictOf)).toEqual(ballots.map(() => "not-open"));
+    const unknown = await admissions().submitAll(app, new Uint8Array(32).fill(7), ballots, during);
+    expect(unknown.map(verdictOf)).toEqual(ballots.map(() => "unknown-election"));
+    expect(await admissions().submitAll(app, electionId, [], during)).toEqual([]);
+    expect(await readBoard(app, electionId)).toHaveLength(1);
+  });
+
+  test("refuses inputs that aren't an election ID and an array of bytes", async () => {
+    const c = byId("admitted");
+    const app = await election(c);
+    const a = admissions();
+    await expect(a.submitAll(app, new Uint8Array(31), [], during)).rejects.toThrow(TypeError);
+    await expect(
+      a.submitAll(app, electionId, ["00" as unknown as Uint8Array], during),
+    ).rejects.toThrow(TypeError);
+    await expect(a.submitAll(app, electionId, [], -1n)).rejects.toThrow(TypeError);
+  });
+});
+
+test("readBoardedEntry reads what appendEntry returned, only for the payload at that index", async () => {
+  const c = byId("admitted");
+  const app = await election(c);
+  const [, first, second] = entriesOf(c);
+  const boarded = await admissions().submit(app, electionId, first!.payload, during);
+  expect(await readBoardedEntry(app, electionId, boarded.index, first!.payload)).toEqual(boarded);
+  // Another payload, another index, a position past the board, another election.
+  expect(await readBoardedEntry(app, electionId, boarded.index, second!.payload)).toBeUndefined();
+  expect(await readBoardedEntry(app, electionId, 0n, first!.payload)).toBeUndefined();
+  expect(await readBoardedEntry(app, electionId, 2n, first!.payload)).toBeUndefined();
+  expect(
+    await readBoardedEntry(app, new Uint8Array(32).fill(7), boarded.index, first!.payload),
+  ).toBeUndefined();
+  await expect(readBoardedEntry(app, electionId, -1n, first!.payload)).rejects.toThrow(RangeError);
 });
 
 test("a ballot labelled before a later-labelled one was boarded takes that segment", async () => {

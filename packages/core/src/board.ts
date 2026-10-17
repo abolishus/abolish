@@ -603,6 +603,39 @@ export async function readEntries(
 }
 
 /**
+ * The entry at `index` and the chain link after it, as `appendEntry`
+ * returned them, if that entry carries exactly `payload`; otherwise
+ * `undefined`. For a caller told by another process that `payload` was
+ * boarded at `index` (the worker's admission queue): what it answers is then
+ * read from the board itself, never taken on that process's word.
+ */
+export async function readBoardedEntry(
+  client: Sql,
+  electionId: Uint8Array,
+  index: bigint,
+  payload: Uint8Array,
+): Promise<AppendedEntry | undefined> {
+  const id = checkId(electionId);
+  if (!isU64(index)) throw new RangeError("index must be a u64");
+  if (!isBytes(payload)) throw new TypeError("payload must be bytes");
+  const [row] = await drizzle({ client })
+    .select({
+      segment: boardEntries.segment,
+      payload: boardEntries.payload,
+      entryHash: boardEntries.entryHash,
+      link: boardEntries.link,
+    })
+    .from(boardEntries)
+    .where(and(eq(boardEntries.electionId, id), eq(boardEntries.idx, index)));
+  if (row === undefined || !equalBytes(new Uint8Array(row.payload), payload)) return undefined;
+  const entry = encodeBoardEntry(
+    { election_id: id, index, segment: Number(row.segment), payload: new Uint8Array(payload) },
+    await storedBoardVersion(client, id),
+  );
+  return { entry, index, entryHash: new Uint8Array(row.entryHash), link: new Uint8Array(row.link) };
+}
+
+/**
  * The RFC 9162 audit path for entry `index` in the tree of the first
  * `treeSize` entries (docs/spec/board.md, Inclusion proofs).
  */

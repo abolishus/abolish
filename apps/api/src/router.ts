@@ -1,6 +1,5 @@
 import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
-  type BallotAdmissions,
   BoardReadError,
   deleteIdentityBackup,
   hasDefinition,
@@ -17,15 +16,16 @@ import {
   readHead,
   readIdentityBackup,
   readInclusionProof,
+  readBoardedEntry,
   readModerationLog,
   report,
   shortCodeOf,
-  SubmitError,
   parseTier0Request,
   Tier0RegistrationError,
   type Tier0Registrations,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
+import type { BallotQueue } from "@abolishus/worker/ballot-queue";
 import type { Sql } from "postgres";
 
 // The contract's procedures (packages/api-contract). Each handler parses its
@@ -33,16 +33,18 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, ballot admission, Tier 0 registration and
-// the clock, and
-// nothing of the request: no handler can see a request's headers, cookies or
-// address, so no procedure can tie what it serves or receives to a person or
-// session (T-10, T-11).
+// The context holds the database, the worker's ballot queue, Tier 0
+// registration and the clock, and nothing of the request: no handler can see a request's
+// headers, cookies or address, so no procedure can tie what it serves or
+// receives to a person or session (T-10, T-11).
+
+/** What `ballots.submit` needs of the worker's queue. */
+export type BallotSubmitter = Pick<BallotQueue, "submit">;
 
 export interface Context {
   readonly sql: Sql;
-  /** Absent when this server pins no panel: it then boards no ballot. */
-  readonly admissions?: BallotAdmissions | undefined;
+  /** Absent when this server has no ballot queue: it then boards no ballot. */
+  readonly ballots?: BallotSubmitter | undefined;
   /** UNIX time in seconds. */
   readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
@@ -159,32 +161,31 @@ export const router = os.router({
   },
   ballots: {
     // Admission is @abolishus/verifier's (5.1 to 5.4 against the registered
-    // key set), through core, before anything is boarded (T-17, T-52, T-53).
-    // A server that pins no panel can't judge a ballot, so it boards none and
-    // fails closed. Either way a refused voter can submit directly (T-25).
+    // key set), through core, before anything is boarded (T-17, T-52, T-53),
+    // and runs in the worker, in batches: this process verifies no proof
+    // (T-52). Only an election this server holds is queued. A server without
+    // the queue can't judge a ballot, so it boards none and fails closed.
+    // Either way a refused voter can submit directly (T-25).
     submit: os.ballots.submit.handler(async ({ input, context, errors }) => {
-      if (context.admissions === undefined) {
-        await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
-        throw errors.ELECTION_NOT_OPEN();
-      }
-      try {
-        const boarded = await context.admissions.submit(
-          context.sql,
-          fromHex(input.electionId),
-          fromHex(input.ballot),
-          context.now(),
-        );
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      if (context.ballots === undefined) throw errors.ELECTION_NOT_OPEN();
+      const ballot = fromHex(input.ballot);
+      const outcome = await context.ballots.submit(id, ballot);
+      if (outcome.ok) {
+        // The answer is read from the board, never taken on the worker's word.
+        const boarded = await readBoardedEntry(context.sql, id, BigInt(outcome.index), ballot);
+        if (boarded === undefined) throw new Error("the board doesn't carry the boarded ballot");
         return { entry: toHex(boarded.entry), link: toHex(boarded.link) };
-      } catch (e) {
-        if (!(e instanceof SubmitError)) throw e;
-        switch (e.code) {
-          case "unknown-election":
-            throw errors.ELECTION_NOT_FOUND();
-          case "not-open":
-            throw errors.ELECTION_NOT_OPEN();
-          case "rejected":
-            throw errors.BALLOT_REJECTED({ data: { code: e.admission ?? "decode" } });
-        }
+      }
+      switch (outcome.code) {
+        case "unknown-election":
+          throw errors.ELECTION_NOT_FOUND();
+        case "not-open":
+          throw errors.ELECTION_NOT_OPEN();
+        case "rejected":
+          throw errors.BALLOT_REJECTED({ data: { code: outcome.admission ?? "decode" } });
+        case "unavailable":
+          throw errors.BALLOTS_UNAVAILABLE();
       }
     }),
   },

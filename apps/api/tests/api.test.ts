@@ -686,7 +686,7 @@ describe("board", () => {
 describe("ballots.submit", () => {
   const ballot = hex(Uint8Array.of(0, 2, 1, 7));
 
-  test("without pinned panels, boards nothing: ELECTION_NOT_OPEN", async () => {
+  test("without a ballot queue, boards nothing: ELECTION_NOT_OPEN", async () => {
     const e = await election(1);
     const r = await post("/ballots", { electionId: e.idHex, ballot });
     expect(r.status).toBe(409);

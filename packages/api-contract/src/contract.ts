@@ -221,6 +221,11 @@ const submitBallot = oc
       data: z.strictObject({ code: ErrorCode }),
     },
     RATE_LIMITED: { status: 429, message: "Too many requests; retry later." },
+    // The ballot may still be boarded: the same bytes again return its entry.
+    BALLOTS_UNAVAILABLE: {
+      status: 503,
+      message: "The ballot couldn't be judged in time; submit the same bytes again.",
+    },
   })
   .input(z.strictObject({ electionId: Hash32, ballot: hexBytes(MAX_BOARD_PAYLOAD) }))
   .output(z.strictObject({ entry: hexBytes(MAX_BOARD_ENTRY), link: Hash32 }));

@@ -67,6 +67,7 @@ export type ErrorKind =
   | "board-audit-findings"
   | "board-anchor-findings"
   | "invalid-job-data"
+  | "stale-job"
   | "tier0-chain-unavailable"
   | "internal";
 

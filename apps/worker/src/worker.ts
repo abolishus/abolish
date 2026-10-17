@@ -1,13 +1,16 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
 // schedules that queue the board audit, the identity-backup prune and, when
-// configured, the board anchoring and the Tier 0 index refresh and boundary. Job
-// data is parsed against its queue's schema before it is handled, and every
-// outcome is logged by kind (T-10).
+// configured, the board anchoring and the Tier 0 index refresh and boundary.
+// The API's ballots are judged only when panels are pinned. Job data is parsed
+// against its queue's schema before it is handled, and every outcome is
+// logged by kind (T-10).
 
-import type { AnchorChain, Tier0Batches } from "@abolishus/core";
+import type { AnchorChain, BallotAdmissions, Tier0Batches } from "@abolishus/core";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
+import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
+import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
@@ -43,6 +46,18 @@ export interface WorkerOptions {
     /** How often the boundary is tried; `TIER0_BOUNDARY_EVERY_MS` unless a test says otherwise. */
     readonly boundaryEveryMs?: number;
   };
+  /**
+   * Ballot admission for the API's `{ballot-submit}` queue (T-52); without
+   * it, nothing takes that queue's jobs and the API answers each ballot
+   * unavailable once it times out.
+   */
+  readonly ballots?: {
+    readonly admissions: BallotAdmissions;
+    /** Most ballots judged in one batch; `BALLOT_BATCH` unless a test says otherwise. */
+    readonly batch?: number;
+    /** How long a batch's first ballot waits for others; `BALLOT_BATCH_WAIT_MS` unless a test says otherwise. */
+    readonly waitMs?: number;
+  };
 }
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
@@ -75,28 +90,51 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const { connection, sql, log } = options;
   const prefix = options.prefix ?? KEY_PREFIX;
   const handlers = options.handlers ?? HANDLERS;
+  const now = options.now ?? (() => new Date());
+  const batch = options.ballots?.batch ?? BALLOT_BATCH;
   const ctx = {
     sql,
     log,
-    now: options.now ?? (() => new Date()),
+    now,
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
+    ...(options.ballots === undefined
+      ? {}
+      : {
+          ballots: new BallotBatches({
+            sql,
+            admissions: options.ballots.admissions,
+            now: () => BigInt(Math.floor(now().getTime() / 1000)),
+            batch,
+            ...(options.ballots.waitMs === undefined ? {} : { waitMs: options.ballots.waitMs }),
+          }),
+        }),
   };
   const running = (key: QueueKey) =>
-    options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+    key === "ballotSubmit"
+      ? options.ballots !== undefined
+      : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
       spec.name,
-      async (job): Promise<void> => {
+      async (job): Promise<unknown> => {
         // Whatever wrote to Redis, a handler sees only the fields its
         // queue's schema names.
         // The name is kept in the events stream after the job is gone, so it
         // must be the queue's key, never something a producer chose.
         const data = spec.data.safeParse(job.data);
         if (!data.success || job.name !== key) throw new JobError("invalid-job-data");
+        // By the system clock, as the API stamped it: a ballot whose API gave
+        // up on it is never judged late (T-10, T-25).
+        if (key === "ballotSubmit" && Date.now() - job.timestamp > BALLOT_MAX_AGE_MS)
+          throw new JobError("stale-job");
         try {
-          await handlers[key](ctx, data.data);
+          // The data was parsed by this key's schema, so it is this key's.
+          return await (handlers[key] as (c: typeof ctx, d: unknown) => Promise<unknown>)(
+            ctx,
+            data.data,
+          );
         } catch (e) {
           // T-10: BullMQ writes a failure's message to the queue's events
           // stream, which removeOnFail doesn't clear, and any other error's
@@ -110,6 +148,8 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         connection,
         prefix,
         autorun: false,
+        // The ballots handled at once are what a batch gathers (T-52).
+        concurrency: key === "ballotSubmit" ? batch : 1,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 0 },
       },

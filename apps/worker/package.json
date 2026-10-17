@@ -2,11 +2,12 @@
   "name": "@abolishus/worker",
   "version": "0.0.0",
   "private": true,
-  "description": "Background jobs on BullMQ: board audits and identity-backup expiry now; proof batches, pinning and tally coordination to come. Source-only.",
+  "description": "Background jobs on BullMQ: board audits, anchoring, identity-backup expiry, Tier 0 batches and ballot admission in batches now; pinning and tally coordination to come. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ballot-queue": "./src/ballot-queue.ts"
   },
   "scripts": {
     "build": "vp exec tsc -p tsconfig.json",
@@ -25,6 +26,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@abolishus/verifier": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

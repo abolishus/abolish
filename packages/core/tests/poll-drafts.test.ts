@@ -406,9 +406,9 @@ describe("account_polls", () => {
     );
     expect(codes.filter((c) => c === "ok")).toHaveLength(MAX_POLLS_IN_SETUP);
     expect(codes.filter((c) => c === "too-many-in-setup")).toHaveLength(3);
-    // An open poll no longer holds setup capacity.
+    // A failed poll no longer holds setup capacity.
     const submitted = (await listAccountPolls(app, author)).filter((p) => p.state === "submitted");
-    await db.admin`UPDATE account_polls SET state = 'open' WHERE id = ${submitted[0]!.id}`;
+    await db.admin`UPDATE account_polls SET state = 'failed', failure = 'creation-timeout' WHERE id = ${submitted[0]!.id}`;
     const next = (await listAccountPolls(app, author)).find((p) => p.state === "drafted")!;
     expect(
       await code(submitPollDraft(app, author, next.id, { turnstile, token: "t", now: NOW })),
@@ -421,8 +421,8 @@ describe("account_polls", () => {
     const submitAt = async (now: Date) => {
       const id = await createPollDraft(app, author, draft(), now);
       const result = await code(submitPollDraft(app, author, id, { turnstile, token: "t", now }));
-      // Opened at once, so only the daily limit applies.
-      await db.admin`UPDATE account_polls SET state = 'open' WHERE user_id = ${author} AND state = 'submitted'`;
+      // Failed at once, so only the daily limit applies.
+      await db.admin`UPDATE account_polls SET state = 'failed', failure = 'creation-timeout' WHERE user_id = ${author} AND state = 'submitted'`;
       return result;
     };
     for (let i = 0; i < MAX_SUBMISSIONS_PER_DAY; i++)

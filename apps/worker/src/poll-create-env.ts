@@ -1,0 +1,94 @@
+// The creation step's configuration from the environment
+// ([[0032-poll-creation-operations]], rules 1, 2 and 18; P2-22 part 3a; the
+// poll-creation runbook): all of it or none of it, the daily ceiling aside.
+// The creation key is a secret (T-65, T-72), so a malformed one is refused
+// with a message naming the variable and never quoting its value; so is the
+// URL, which can carry a provider's API key.
+
+import { type Address, getAddress, isAddress } from "viem";
+import * as z from "zod";
+
+export interface PollCreationConfig {
+  /** The L2 node the step signs against, sends to and reads. */
+  readonly l2RpcUrl: string;
+  readonly chainId: bigint;
+  /** The election registry our definitions name. */
+  readonly registry: Address;
+  /** The creation key's 32 bytes. */
+  readonly key: Uint8Array;
+  /** Creations sent in any 24 hours (rule 18). */
+  readonly dailyCeiling: number;
+}
+
+export const POLL_CREATE_ENV = [
+  "CREATE_L2_RPC_URL",
+  "CREATE_CHAIN_ID",
+  "CREATE_REGISTRY",
+  "CREATE_KEY",
+] as const;
+
+/** Optional beside the others: core's `CREATE_DAILY_CEILING` when unset. */
+export const POLL_CREATE_CEILING_ENV = "CREATE_DAILY_CEILING";
+
+type PollCreateEnv = Partial<
+  Record<(typeof POLL_CREATE_ENV)[number] | typeof POLL_CREATE_CEILING_ENV, string>
+>;
+
+const Public = z.strictObject({
+  CREATE_L2_RPC_URL: z.url({ protocol: /^https?$/ }),
+  // viem signs with the chain ID as a JavaScript number.
+  CREATE_CHAIN_ID: z
+    .string()
+    .regex(/^[1-9][0-9]{0,15}$/)
+    .transform((v) => BigInt(v))
+    .refine((v) => v <= BigInt(Number.MAX_SAFE_INTEGER)),
+  CREATE_REGISTRY: z
+    .string()
+    .refine((v) => isAddress(v, { strict: false }))
+    .transform((v) => getAddress(v)),
+  CREATE_DAILY_CEILING: z
+    .string()
+    .regex(/^(0|[1-9][0-9]{0,5})$/)
+    .transform((v) => Number(v))
+    .optional(),
+});
+
+/**
+ * The step's configuration, or undefined if none of `POLL_CREATE_ENV` is
+ * set. Throws if only some are, if one is malformed, or if the ceiling is
+ * set without them; the key's value is never quoted.
+ */
+export function pollCreationFromEnv(
+  env: PollCreateEnv,
+  defaultCeiling: number,
+): PollCreationConfig | undefined {
+  const has = (name: keyof PollCreateEnv) => env[name] !== undefined && env[name] !== "";
+  const set = POLL_CREATE_ENV.filter(has);
+  if (set.length === 0) {
+    if (has(POLL_CREATE_CEILING_ENV))
+      throw new Error(`${POLL_CREATE_CEILING_ENV} needs the creation step configured`);
+    return undefined;
+  }
+  if (set.length !== POLL_CREATE_ENV.length)
+    throw new Error(`the creation step needs every one of ${POLL_CREATE_ENV.join(", ")}`);
+  const parsed = Public.safeParse({
+    CREATE_L2_RPC_URL: env.CREATE_L2_RPC_URL,
+    CREATE_CHAIN_ID: env.CREATE_CHAIN_ID,
+    CREATE_REGISTRY: env.CREATE_REGISTRY,
+    CREATE_DAILY_CEILING: has(POLL_CREATE_CEILING_ENV) ? env.CREATE_DAILY_CEILING : undefined,
+  });
+  if (!parsed.success)
+    throw new Error(
+      `malformed ${[...new Set(parsed.error.issues.map((i) => String(i.path[0])))].join(", ")}`,
+    );
+  const key = (env.CREATE_KEY as string).replace(/^0x/, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) throw new Error("CREATE_KEY holds a malformed key");
+  const p = parsed.data;
+  return {
+    l2RpcUrl: p.CREATE_L2_RPC_URL,
+    chainId: p.CREATE_CHAIN_ID,
+    registry: p.CREATE_REGISTRY,
+    key: Uint8Array.from(Buffer.from(key, "hex")),
+    dailyCeiling: p.CREATE_DAILY_CEILING ?? defaultCeiling,
+  };
+}

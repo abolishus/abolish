@@ -20,6 +20,18 @@ export {
   BallotBatches,
 } from "./ballots.ts";
 export { ViemL1Source } from "./l1-source.ts";
+export {
+  checkPollCreationDeployment,
+  type PollCreationChainOptions,
+  type PollCreationDeployment,
+  ViemPollCreationChain,
+} from "./poll-create-chain.ts";
+export {
+  POLL_CREATE_CEILING_ENV,
+  POLL_CREATE_ENV,
+  type PollCreationConfig,
+  pollCreationFromEnv,
+} from "./poll-create-env.ts";
 export { HANDLERS, type JobContext, JobError, type JobResult, TIER0_QUEUES } from "./jobs.ts";
 export type {
   AnchorFindingLine,
@@ -30,6 +42,7 @@ export type {
   Log,
   LogLine,
   RegistrySyncLine,
+  PollCreationLine,
   Tier0BoundaryLine,
   WorkerErrorLine,
 } from "./log.ts";
@@ -65,6 +78,7 @@ export {
 } from "./tier0-chain.ts";
 export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
+  POLL_CREATE_EVERY_MS,
   PRUNE_EVERY_MS,
   REGISTRY_SYNC_EVERY_MS,
   type RunningWorker,

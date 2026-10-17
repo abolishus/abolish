@@ -83,6 +83,7 @@ export {
   identityBackups,
   moderationActions,
   moderationReports,
+  pollCreationTxs,
   TABLE_CLASSES,
 } from "./db/schema/index.ts";
 export {
@@ -188,6 +189,18 @@ export {
   submitPollDraft,
   updatePollDraft,
 } from "./poll-drafts.ts";
+export {
+  advancePollCreations,
+  CREATE_DAILY_CEILING,
+  CREATION_DEADLINE_MS,
+  type CreationFailure,
+  type CreationStatus,
+  CREATIONS_PER_RUN,
+  type PollCreationChain,
+  type PollCreationOptions,
+  type PollCreationReport,
+  type SignedCreation,
+} from "./poll-creation.ts";
 export {
   MAX_REPORT_QUEUE,
   type PendingReport,

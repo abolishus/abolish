@@ -2,12 +2,14 @@
 // data against its queue's schema) and calls core: transports stay thin.
 
 import {
+  advancePollCreations,
   type AnchorChain,
   anchorBoards,
   auditBoard,
   BoardAuditError,
   DefinitionError,
   listBoards,
+  type PollCreationChain,
   pruneIdentityBackups,
   RegistrationError,
   RegistrySyncError,
@@ -44,6 +46,8 @@ export interface JobContext {
   readonly ballots?: BallotBatches;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
   readonly registry?: RegistrySync;
+  /** The creation key and its daily ceiling, in a creation worker; its queue runs only then. */
+  readonly pollCreation?: { readonly chain: PollCreationChain; readonly dailyCeiling: number };
 }
 
 /** The Tier 0 queues, which run only with `JobContext.tier0`. */
@@ -178,6 +182,24 @@ async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Pr
 }
 
 /**
+ * One run of the creation step: sends, resends and settles creations, and
+ * logs what moved, by count. A node that can't be read fails the job; the
+ * next tick runs the step again from what is recorded.
+ */
+async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promise<void> {
+  if (ctx.pollCreation === undefined) throw new JobError("internal");
+  const report = await advancePollCreations(ctx.sql, ctx.pollCreation.chain, {
+    now: ctx.now(),
+    dailyCeiling: ctx.pollCreation.dailyCeiling,
+  });
+  const moved =
+    report.sent + report.resent + report.sendFailed + report.created > 0 ||
+    Object.keys(report.failed).length > 0 ||
+    report.ceilingReached;
+  if (moved) ctx.log({ queue: "{poll-create}", ...report });
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -203,5 +225,6 @@ export const HANDLERS: {
   tier0Index,
   tier0Boundary,
   registrySync,
+  pollCreate,
   ballotSubmit,
 };

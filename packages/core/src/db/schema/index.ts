@@ -10,7 +10,7 @@ import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
-import { accountPolls } from "./polls.ts";
+import { accountPolls, pollCreationTxs } from "./polls.ts";
 
 export {
   accountCredentials,
@@ -29,6 +29,7 @@ export {
   identityBackups,
   moderationActions,
   moderationReports,
+  pollCreationTxs,
 };
 
 /**
@@ -63,5 +64,11 @@ export const TABLE_CLASSES = {
     "account_verifications",
   ],
   identity: ["identity_backups"],
-  operational: ["display_texts", "moderation_actions", "moderation_reports", "schema_migrations"],
+  operational: [
+    "display_texts",
+    "moderation_actions",
+    "moderation_reports",
+    "poll_creation_txs",
+    "schema_migrations",
+  ],
 } as const;

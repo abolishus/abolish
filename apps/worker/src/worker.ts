@@ -5,7 +5,12 @@
 // against its queue's schema before it is handled, and every outcome is
 // logged by kind (T-10).
 
-import type { AnchorChain, BallotAdmissions, Tier0Batches } from "@abolishus/core";
+import type {
+  AnchorChain,
+  BallotAdmissions,
+  PollCreationChain,
+  Tier0Batches,
+} from "@abolishus/core";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
@@ -65,6 +70,20 @@ export interface WorkerOptions {
     /** How often it runs; `REGISTRY_SYNC_EVERY_MS` unless a test says otherwise. */
     readonly everyMs?: number;
   };
+  /**
+   * The creation step, with the creation key ([[0032-poll-creation-operations]],
+   * rule 2): a worker given it runs the `{poll-create}` queue and nothing
+   * else, no audit, prune, anchoring, Tier 0, ballot or registry work beside the key,
+   * and refuses to start with any of those configured. Without it, nothing
+   * creates polls.
+   */
+  readonly pollCreation?: {
+    readonly chain: PollCreationChain;
+    /** Creations sent in any 24 hours (rule 18). */
+    readonly dailyCeiling: number;
+    /** How often the step runs; `POLL_CREATE_EVERY_MS` unless a test says otherwise. */
+    readonly everyMs?: number;
+  };
 }
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
@@ -91,6 +110,12 @@ export const TIER0_BOUNDARY_EVERY_MS = 30_000;
  */
 export const REGISTRY_SYNC_EVERY_MS = 60_000;
 
+/**
+ * Each run sends what was submitted since the last and checks each creation
+ * for finality, which takes minutes, so every 30 seconds adds little to setup.
+ */
+export const POLL_CREATE_EVERY_MS = 30_000;
+
 export interface RunningWorker {
   close(): Promise<void>;
 }
@@ -102,6 +127,15 @@ const elapsed = (job: { processedOn?: number | undefined; finishedOn?: number | 
 
 export async function startWorker(options: WorkerOptions): Promise<RunningWorker> {
   const { connection, sql, log } = options;
+  const creating = options.pollCreation !== undefined;
+  if (
+    creating &&
+    (options.anchor !== undefined ||
+      options.tier0 !== undefined ||
+      options.ballots !== undefined ||
+      options.registry !== undefined)
+  )
+    throw new Error("a worker holding the creation key runs nothing else");
   const prefix = options.prefix ?? KEY_PREFIX;
   const handlers = options.handlers ?? HANDLERS;
   const now = options.now ?? (() => new Date());
@@ -113,6 +147,14 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
+    ...(options.pollCreation === undefined
+      ? {}
+      : {
+          pollCreation: {
+            chain: options.pollCreation.chain,
+            dailyCeiling: options.pollCreation.dailyCeiling,
+          },
+        }),
     ...(options.ballots === undefined
       ? {}
       : {
@@ -127,11 +169,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         }),
   };
   const running = (key: QueueKey) =>
-    key === "ballotSubmit"
-      ? options.ballots !== undefined
-      : key === "registrySync"
-        ? options.registry !== undefined
-        : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+    creating
+      ? key === "pollCreate"
+      : key === "pollCreate"
+        ? false
+        : key === "ballotSubmit"
+          ? options.ballots !== undefined
+          : key === "registrySync"
+            ? options.registry !== undefined
+            : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -190,7 +236,52 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   });
   // Each scheduled job takes no data, and runs once at start, then every
   // `every` milliseconds.
-  const schedules = [
+  const schedules = (
+    creating
+      ? [
+          {
+            key: "pollCreate",
+            id: "poll-create",
+            every: options.pollCreation?.everyMs ?? POLL_CREATE_EVERY_MS,
+          },
+        ]
+      : everyOtherSchedule(options)
+  ) satisfies readonly { key: QueueKey; id: string; every: number }[];
+  const queues = schedules.map((schedule) => {
+    const name = QUEUES[schedule.key].name;
+    const queue = new Queue(name, { connection, prefix });
+    // Unheard, BullMQ prints the error and its stack to stderr.
+    queue.on("error", () => log({ queue: name, error: "worker" }));
+    return { schedule, queue };
+  });
+  const close = async () => {
+    const closed = await Promise.allSettled([
+      ...workers.map(({ worker }) => worker.close()),
+      ...queues.map(({ queue }) => queue.close()),
+    ]);
+    for (const c of closed) if (c.status === "rejected") throw c.reason;
+  };
+  try {
+    for (const { schedule, queue } of queues)
+      await queue.upsertJobScheduler(
+        schedule.id,
+        { every: schedule.every },
+        { name: schedule.key, data: {}, opts: JOB_OPTIONS },
+      );
+  } catch (e) {
+    await close();
+    throw e;
+  }
+  // Started only once the schedules are in place, so a failure there leaves
+  // nothing running.
+  for (const { name, worker } of workers)
+    worker.run().catch(() => log({ queue: name, error: "worker" }));
+  return { close };
+}
+
+/** Every schedule of a worker that doesn't hold the creation key: each takes no data. */
+function everyOtherSchedule(options: WorkerOptions) {
+  return [
     { key: "boardAudit", id: "board-audit", every: options.auditEveryMs },
     {
       key: "identityBackupPrune",
@@ -224,34 +315,4 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];
-  const queues = schedules.map((schedule) => {
-    const name = QUEUES[schedule.key].name;
-    const queue = new Queue(name, { connection, prefix });
-    // Unheard, BullMQ prints the error and its stack to stderr.
-    queue.on("error", () => log({ queue: name, error: "worker" }));
-    return { schedule, queue };
-  });
-  const close = async () => {
-    const closed = await Promise.allSettled([
-      ...workers.map(({ worker }) => worker.close()),
-      ...queues.map(({ queue }) => queue.close()),
-    ]);
-    for (const c of closed) if (c.status === "rejected") throw c.reason;
-  };
-  try {
-    for (const { schedule, queue } of queues)
-      await queue.upsertJobScheduler(
-        schedule.id,
-        { every: schedule.every },
-        { name: schedule.key, data: {}, opts: JOB_OPTIONS },
-      );
-  } catch (e) {
-    await close();
-    throw e;
-  }
-  // Started only once the schedules are in place, so a failure there leaves
-  // nothing running.
-  for (const { name, worker } of workers)
-    worker.run().catch(() => log({ queue: name, error: "worker" }));
-  return { close };
 }

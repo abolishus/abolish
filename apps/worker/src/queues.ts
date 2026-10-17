@@ -77,6 +77,15 @@ export const QUEUES = {
    */
   registrySync: { name: "{registry-sync}", side: "operational", data: z.strictObject({}) },
   /**
+   * The creation step of each submitted poll's setup (core's
+   * advancePollCreations; ADR 0032, rules 12 and 18): sends the creation
+   * key's `createElection()` for each and records the identifier once final.
+   * Runs on a schedule, only in a worker holding the creation key and
+   * running nothing else, and takes no data: no poll, author or draft is ever
+   * queued (T-10, T-72).
+   */
+  pollCreate: { name: "{poll-create}", side: "account", data: z.strictObject({}) },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

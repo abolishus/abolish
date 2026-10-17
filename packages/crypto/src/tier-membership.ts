@@ -106,6 +106,9 @@ export interface TierMembership {
 
 const MAX_U64 = (1n << 64n) - 1n;
 
+/** Most groups and regions one tier lists (docs/spec/election-definition.md, Layout (version 3)). */
+const MAX_TIER_GROUPS = 1024;
+
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
@@ -397,6 +400,12 @@ export function statedTierElectorate(
   if (typeof rootBlock !== "bigint" || rootBlock < 0n || rootBlock > MAX_U64)
     throw new RangeError("choice.root_l2_block: expected a u64");
   if (!Array.isArray(groups)) throw new RangeError("tier.groups: expected at least one group");
+  // Within what a definition can state: at most MAX_TIER_GROUPS groups and
+  // regions, so neither the count nor the regions' list can grow unbounded.
+  if (groups.length > MAX_TIER_GROUPS)
+    throw new RangeError(`tier.groups: expected at most ${MAX_TIER_GROUPS} groups`);
+  if (groups.some((g) => !Number.isSafeInteger(g.region) || g.region >= MAX_TIER_GROUPS))
+    throw new RangeError(`tier.groups: expected each region below ${MAX_TIER_GROUPS}`);
   // Regions are numbered from 0; one no group names is counted 0 and refused as `empty`.
   const regionCount = groups.reduce((n, g) => Math.max(n, Number(g.region) + 1), 0);
   checkGroups(groups, regionCount);

@@ -411,8 +411,17 @@ describe("provenGroupRecords", () => {
     expect(code(() => provenGroupRecords(chainId, registry, altered, proven))).toBe("accumulator");
     const swapped = [records[1], records[0], ...records.slice(2)] as ContractEventRecord[];
     expect(code(() => provenGroupRecords(chainId, registry, swapped, proven))).not.toBe("ok");
+    // Another registry's: its records name another contract.
     expect(code(() => provenGroupRecords(chainId, new Uint8Array(20), records, proven))).toBe(
-      "accumulator",
+      "other-contract",
+    );
+    // The accumulator doesn't bind `contract`: a relabelled record is refused all the same.
+    const relabelled = records.with(3, {
+      ...(records[3] as ContractEventRecord),
+      contract: new Uint8Array(20).fill(7),
+    });
+    expect(code(() => provenGroupRecords(chainId, registry, relabelled, proven))).toBe(
+      "other-contract",
     );
   });
 });

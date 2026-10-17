@@ -1161,5 +1161,17 @@ describe("statedTierElectorate", () => {
     expect(() =>
       statedTierElectorate(t.records, { ...choice, groups: [{ group_id: 21n, region: -1 }] }, pins),
     ).toThrow(RangeError);
+    // Beyond what a definition can list: refused before any region is counted.
+    expect(() =>
+      statedTierElectorate(
+        t.records,
+        { ...choice, groups: [{ group_id: 21n, region: 1024 }] },
+        pins,
+      ),
+    ).toThrow(RangeError);
+    const many = Array.from({ length: 1025 }, (_, i) => ({ group_id: BigInt(i), region: 0 }));
+    expect(() => statedTierElectorate(t.records, { ...choice, groups: many }, pins)).toThrow(
+      RangeError,
+    );
   });
 });

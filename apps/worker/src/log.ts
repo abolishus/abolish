@@ -150,7 +150,7 @@ export type PollRootLine =
   | {
       readonly queue: "{poll-root}";
       readonly finding: "incomplete";
-      readonly reason: EventAccumulatorProofError;
+      readonly reason: EventAccumulatorProofError | "other-contract";
     }
   | {
       readonly queue: "{poll-root}";

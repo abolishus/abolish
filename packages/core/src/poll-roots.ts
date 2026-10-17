@@ -49,11 +49,14 @@ export interface GroupRecordSource {
   read(): Promise<ProvenGroupRecords>;
 }
 
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
 /** The indexed records aren't the registry's sequence the proven accumulator vouches for. */
 export class GroupRecordsError extends Error {
   override readonly name = "GroupRecordsError";
-  readonly code: EventAccumulatorProofError;
-  constructor(code: EventAccumulatorProofError) {
+  readonly code: EventAccumulatorProofError | "other-contract";
+  constructor(code: EventAccumulatorProofError | "other-contract") {
     super(`group records refused: ${code}`);
     this.code = code;
   }
@@ -65,7 +68,8 @@ export class GroupRecordsError extends Error {
  * the registry's accumulator and count after that block, as the caller
  * proved them, so an index that drops, adds, alters, reorders or moves a
  * record is refused (`GroupRecordsError`) rather than counted (T-71). Records
- * past the count are left for a later block.
+ * past the count are left for a later block. A record naming another
+ * contract is refused too (`other-contract`).
  */
 export function provenGroupRecords(
   chainId: bigint,
@@ -73,6 +77,10 @@ export function provenGroupRecords(
   records: readonly ContractEventRecord[],
   proven: ProvenEventAccumulator,
 ): ProvenGroupRecords {
+  // The accumulator doesn't bind a record's `contract`, and the replay skips
+  // any record not the registry's, so one relabelled would drop out unseen.
+  if (records.some((r) => !equal(r.contract, registry)))
+    throw new GroupRecordsError("other-contract");
   const refused = checkEventAccumulatorProof(
     chainId,
     registry,

@@ -3,11 +3,24 @@
 // requests by id.
 
 import type { ElectionCheck } from "./election.ts";
-import { PROTOCOL_VERSION, responseId, type WorkerResponse } from "./worker/protocol.ts";
+import {
+  type MembershipProofResult,
+  type ProveMembershipRequest,
+  PROTOCOL_VERSION,
+  PROVER_TIMEOUT_MS,
+  responseId,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./worker/protocol.ts";
 import { workerScriptUrl } from "./worker-policy.ts";
 
 /** How long a request may take before the client gives up on the worker. */
 const TIMEOUT_MS = 30_000;
+/** A proof waits on the prover worker, which the ballot worker gives up on first. */
+const PROVE_TIMEOUT_MS = PROVER_TIMEOUT_MS + TIMEOUT_MS;
+
+/** A proof request as the page makes it: everything but the envelope. */
+export type MembershipProofRequest = Omit<ProveMembershipRequest, "v" | "id" | "kind">;
 
 /** Thrown when the worker answers with an error, crashes, or doesn't answer in time. */
 export class WorkerFailure extends Error {
@@ -52,15 +65,8 @@ export class BallotWorker {
     definition: Uint8Array,
     displayText: Uint8Array,
   ): Promise<ElectionCheck> {
-    if (this.#stopped) throw new WorkerFailure("the ballot worker stopped");
-    const id = this.#nextId++;
-    const response = await new Promise<WorkerResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new WorkerFailure("the ballot worker didn't answer"));
-      }, TIMEOUT_MS);
-      this.#pending.set(id, { resolve, reject, timer });
-      this.#worker.postMessage({
+    const response = await this.#request(
+      (id) => ({
         v: PROTOCOL_VERSION,
         id,
         kind: "check-election",
@@ -68,10 +74,44 @@ export class BallotWorker {
         registeredHash,
         definition,
         displayText,
-      });
-    });
+      }),
+      [],
+      TIMEOUT_MS,
+    );
     if (response.kind !== "check-election") throw new WorkerFailure("the ballot worker failed");
     return response.result;
+  }
+
+  /**
+   * A membership proof, built in the worker with the prover worker at the
+   * other end of `request.prover` (prover-client.ts). The port is
+   * transferred; the secret is copied, and the worker zeroes its copy.
+   */
+  async proveMembership(request: MembershipProofRequest): Promise<MembershipProofResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "prove-membership", ...request }),
+      [request.prover],
+      PROVE_TIMEOUT_MS,
+    );
+    if (response.kind !== "prove-membership") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  async #request(
+    message: (id: number) => WorkerRequest,
+    transfer: Transferable[],
+    timeoutMs: number,
+  ): Promise<WorkerResponse> {
+    if (this.#stopped) throw new WorkerFailure("the ballot worker stopped");
+    const id = this.#nextId++;
+    return new Promise<WorkerResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new WorkerFailure("the ballot worker didn't answer"));
+      }, timeoutMs);
+      this.#pending.set(id, { resolve, reject, timer });
+      this.#worker.postMessage(message(id), transfer);
+    });
   }
 
   terminate(): void {

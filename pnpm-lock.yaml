@@ -485,6 +485,9 @@ importers:
       '@abolishus/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      '@abolishus/membership-prover':
+        specifier: workspace:*
+        version: link:../../packages/membership-prover
       '@abolishus/ui':
         specifier: workspace:*
         version: link:../../packages/ui

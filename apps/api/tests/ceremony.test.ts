@@ -199,9 +199,9 @@ class Seat {
   last: { kind: "message" | "approval"; body: Uint8Array } | undefined;
   readonly #runs = new Map<string, { secrets: SeatSecrets; mus?: readonly Uint8Array[] }>();
 
-  constructor(index: number) {
+  constructor(index: number, url = base) {
     this.index = index;
-    this.coordinator = new HttpCoordinator(base);
+    this.coordinator = new HttpCoordinator(url);
   }
 
   /** Fetches the seat's requests and answers each; returns how many it answered. */
@@ -426,6 +426,57 @@ describe("refusals", () => {
     ).rejects.toThrow(TransportError);
   });
 
+  test("a coordinator configured with another panel keeps nothing, even an approval signed by a key only it names", async () => {
+    const stubHash = await opened();
+    const seats = [new Seat(1), new Seat(2), new Seat(3)];
+    for (let round = 1; round <= 4; round++) for (const s of seats) await s.act();
+    expect((await runRow(stubHash))["round"]).toBe(5);
+    // Seat 3's key replaced by one the stub's panel doesn't name (a stale
+    // or tampered configuration), whose holder signs seat 3's approval.
+    const wrong: Panel = {
+      threshold: 2,
+      keys: [PANEL.keys[0]!, PANEL.keys[1]!, identityKey(secret(4))],
+    };
+    const other = createApiServer({
+      sql: app,
+      log: () => {},
+      ceremony: { deployment: { ...DEPLOYMENT, panel: wrong } },
+    });
+    const url = await listen(other);
+    try {
+      const [run] = await db.admin`
+        SELECT transcript_hash, key_set_hash FROM ceremony_runs WHERE stub_hash = ${stubHash}`;
+      const registration = {
+        l2ChainId: DEPLOYMENT.l2ChainId,
+        trusteeRegistry: DEPLOYMENT.trusteeRegistry,
+        index: 3,
+        stubHash,
+        ceremonyTranscriptHash: Uint8Array.from(run!["transcript_hash"]),
+        keySetHash: Uint8Array.from(run!["key_set_hash"]),
+      };
+      const body = encodeApprovalPost({
+        stub_hash: stubHash,
+        ceremony_transcript_hash: registration.ceremonyTranscriptHash,
+        key_set_hash: registration.keySetHash,
+        signature: signCeremonyRegistration(secret(4), wrong, registration),
+      });
+      const res = await fetch(`${url}/v1/ceremony/seats/3/approvals`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: body as Uint8Array<ArrayBuffer>,
+      });
+      expect(res.status).toBe(403);
+      const [{ count }] =
+        (await db.admin`SELECT count(*)::int AS count FROM ceremony_approvals`) as [
+          { count: number },
+        ];
+      expect(count).toBe(0);
+    } finally {
+      other.closeAllConnections();
+      await closeServer(other);
+    }
+  });
+
   test("bodies with no decoding, of another type or past the bound are refused unread", async () => {
     await opened();
     expect((await post("/v1/ceremony/seats/1/messages", Uint8Array.of(1, 2, 3))).status).toBe(400);
@@ -490,28 +541,47 @@ describe("refusals", () => {
     }
   });
 
-  test("the ceremony's slots are its own: past them a request is refused, and the rest of the API still answers", async () => {
+  test("the ceremony's slots are its own and held only by core's work: past them a request is refused, and the rest of the API still answers", async () => {
+    const stubHash = await opened();
     const limited = createApiServer({
       sql: app,
       log: () => {},
       ceremony: { deployment: DEPLOYMENT, maxInFlight: 1 },
     });
     const url = await listen(limited);
+    const held = request(`${url}/v1/ceremony/seats/1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream", "content-length": "100" },
+    });
+    held.on("error", () => {});
+    let release = () => {};
     try {
-      // A post whose body never finishes holds the one slot.
-      const held = request(`${url}/v1/ceremony/seats/1/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/octet-stream", "content-length": "100" },
-      });
-      held.on("error", () => {});
+      // A post whose body never finishes holds no ceremony slot.
       held.write(new Uint8Array(10));
       await new Promise((r) => setTimeout(r, 100));
+      expect((await fetch(`${url}/v1/ceremony/seats/2/requests`)).status).toBe(200);
+      // Seat 1's post, held at the run's row lock, holds the one slot.
+      const locked = new Promise<void>((resolve) => {
+        void db.admin.begin(async (tx) => {
+          await tx`SELECT 1 FROM ceremony_runs WHERE stub_hash = ${stubHash} FOR UPDATE`;
+          resolve();
+          await new Promise<void>((r) => (release = r));
+        });
+      });
+      await locked;
+      const acting = new Seat(1, url).act();
+      await new Promise((r) => setTimeout(r, 300));
       expect((await fetch(`${url}/v1/ceremony/seats/2/requests`)).status).toBe(503);
-      expect(
-        (await fetch(`${url}/elections/definition?electionId=${"00".repeat(32)}`)).status,
-      ).not.toBe(503);
-      held.destroy();
+      // The server's own slots are free (the test's one database connection
+      // is the post's, so a route that reads none answers).
+      expect((await fetch(`${url}/elections/none`)).status).toBe(404);
+      release();
+      expect(await acting).toBe(1);
+      expect((await fetch(`${url}/v1/ceremony/seats/2/requests`)).status).toBe(200);
     } finally {
+      release();
+      held.destroy();
+      limited.closeAllConnections();
       await closeServer(limited);
     }
   });

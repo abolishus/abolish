@@ -27,9 +27,9 @@ import { readBody } from "./body.ts";
 // is the seat's own, signed over the closed rounds, and an approval only if
 // it verifies under the seat's pinned key, so anyone else's post changes
 // nothing (T-54). What a flood can cost is bounded instead: a body is read
-// up to one record's size, and the ceremony's routes have slots of their
-// own, so posts that each verify up to 48 signatures never take the slots
-// ballots and the board are served from (T-52).
+// up to one record's size, and core's work for it runs under slots of the
+// ceremony's own, so posts that each verify up to 48 signatures never take
+// the slots ballots and the board are served from (T-52).
 //
 // T-10: nothing here names an account or a voter; the seat's index is the
 // only input besides the body, and the request log keeps only the route's
@@ -108,6 +108,12 @@ async function envelope<T>(req: IncomingMessage, decode: (b: Uint8Array) => T) {
  * The ceremony's handler, with its own slots. It answers a request itself
  * and returns `undefined`, or returns the status of a refusal for the
  * server to send; a body it refuses throws the server's `BodyError`.
+ *
+ * A post's body is read and decoded under the server's slot alone, bounded
+ * by its timeouts and `MAX_CEREMONY_POST`; the ceremony's slots are taken
+ * only around core's work (the fit check's signatures and the database), so
+ * clients that stall their uploads can't hold them and keep the seats out
+ * (T-52, T-54).
  */
 export function ceremonyHandler(
   sql: Sql,
@@ -123,61 +129,68 @@ export function ceremonyHandler(
     throw new RangeError("the ceremony's maxInFlight must be at least 1");
   const { deployment } = options;
   let inFlight = 0;
-  const handle = async (req: IncomingMessage, res: ServerResponse, route: CeremonyRoute) => {
+  // Core's work under one of the ceremony's slots, or `undefined` when they are all taken.
+  const slot = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
+    if (inFlight >= maxInFlight) return undefined;
+    inFlight++;
+    try {
+      return await work();
+    } finally {
+      inFlight--;
+    }
+  };
+  const busy = (res: ServerResponse) => {
+    res.setHeader("retry-after", "1");
+    return 503;
+  };
+  return async (req, res, route) => {
     if (route.kind === "requests") {
       // A GET takes no body (T-31).
       if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
         return 400;
-      const requests = await coordinatorRequests(sql, deployment, route.seat);
+      const requests = await slot(() => coordinatorRequests(sql, deployment, route.seat));
+      if (requests === undefined) return busy(res);
       res.statusCode = 200;
       res.setHeader("content-type", "application/octet-stream");
       res.end(encodeRequests(requests));
       return undefined;
     }
-    let outcome: PostOutcome;
+    let outcome: PostOutcome | undefined;
     if (route.kind === "messages") {
       const post = await envelope(req, decodeMessagePost);
       if (post === undefined) return 400;
-      outcome = await postCeremonyMessage(
-        sql,
-        deployment,
-        route.seat,
-        { stubHash: post.stub_hash, transcript: post.transcript },
-        { now: now() },
+      outcome = await slot(() =>
+        postCeremonyMessage(
+          sql,
+          deployment,
+          route.seat,
+          { stubHash: post.stub_hash, transcript: post.transcript },
+          { now: now() },
+        ),
       );
     } else {
       const post = await envelope(req, decodeApprovalPost);
       if (post === undefined) return 400;
-      outcome = await postCeremonyApproval(
-        sql,
-        deployment,
-        route.seat,
-        {
-          stubHash: post.stub_hash,
-          ceremonyTranscriptHash: post.ceremony_transcript_hash,
-          keySetHash: post.key_set_hash,
-          signature: post.signature,
-        },
-        { now: now() },
+      outcome = await slot(() =>
+        postCeremonyApproval(
+          sql,
+          deployment,
+          route.seat,
+          {
+            stubHash: post.stub_hash,
+            ceremonyTranscriptHash: post.ceremony_transcript_hash,
+            keySetHash: post.key_set_hash,
+            signature: post.signature,
+          },
+          { now: now() },
+        ),
       );
     }
+    if (outcome === undefined) return busy(res);
     const status = OUTCOME_STATUS[outcome];
     if (status !== 204) return status;
     res.statusCode = 204;
     res.end();
     return undefined;
-  };
-  return async (req, res, route) => {
-    if (inFlight >= maxInFlight) {
-      res.setHeader("connection", "close");
-      res.setHeader("retry-after", "1");
-      return 503;
-    }
-    inFlight++;
-    try {
-      return await handle(req, res, route);
-    } finally {
-      inFlight--;
-    }
   };
 }

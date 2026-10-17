@@ -6,9 +6,9 @@ import * as z from "zod";
 // all of it or none of it. It is the stub step's default panel and where
 // that panel is pinned, as the worker's `POLL_STUB_` and registry variables
 // give them; the deployment's runbook sets both from one deployment record.
-// Every value is public. A value that differs from the worker's makes every
-// post fail to verify, so a run ends at its deadlines and the worker logs it
-// (T-54); it never makes a forged message fit.
+// Every value is public. Core refuses every post for a stub that doesn't pin
+// them, so a value that differs from the worker's ends runs at their
+// deadlines, and the worker logs it (T-54).
 
 export const CEREMONY_ENV = [
   "API_CEREMONY_PANEL_THRESHOLD",

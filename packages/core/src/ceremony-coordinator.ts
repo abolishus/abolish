@@ -222,6 +222,7 @@ export async function coordinatorRequests(
 interface LockedRun {
   readonly runId: Uint8Array;
   readonly stubHash: Uint8Array;
+  readonly stub: Uint8Array;
   readonly electionId: Uint8Array;
   readonly round: number;
   readonly transcript: Uint8Array;
@@ -242,6 +243,7 @@ async function readRun(
     .select({
       runId: ceremonyRuns.runId,
       stubHash: ceremonyRuns.stubHash,
+      stub: ceremonyStubs.stub,
       electionId: ceremonyStubs.electionId,
       round: ceremonyRuns.round,
       transcript: ceremonyRuns.transcript,
@@ -258,6 +260,28 @@ async function readRun(
 }
 
 const lockRun = (tx: Tx, where: SQL | undefined) => readRun(tx, where, true);
+
+/**
+ * Whether the run's stub pins the deployment's panel, L2 chain and trustee
+ * registry, as `openCeremonyRuns` required when it opened the run. Checked
+ * again at each post, so a coordinator configured with another panel (a
+ * stale or wrong one) keeps nothing for the stub, rather than messages and
+ * approvals under keys the stub doesn't name (T-54).
+ */
+function pinsDeployment(d: CoordinatorDeployment, run: LockedRun): boolean {
+  let stub;
+  try {
+    stub = decodeElectionDefinitionV5(run.stub);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return false;
+  }
+  return (
+    equal(stub.panel_id, panelId(d.panel)) &&
+    stub.l2_chain_id === d.l2ChainId &&
+    equal(stub.trustee_registry, d.trusteeRegistry)
+  );
+}
 
 const params = (d: CoordinatorDeployment, run: LockedRun) => ({
   l2ChainId: d.l2ChainId,
@@ -298,6 +322,7 @@ export async function postCeremonyMessage(
   const db = drizzle({ client });
   const read = await readRun(db, eq(ceremonyRuns.stubHash, post.stubHash), false);
   if (read === undefined || read.round > 4) return "not-open";
+  if (!pinsDeployment(deployment, read)) return "refused";
   const field = FIELDS[read.round - 1] as (typeof FIELDS)[number];
   if (message[field][0]?.index !== seat || !read.eligible.includes(seat)) return "refused";
   const closed = decodeCeremonyTranscript(read.transcript, 1);
@@ -350,29 +375,40 @@ export async function postCeremonyApproval(
 ): Promise<PostOutcome> {
   if (!validSeat(deployment, seat)) return "refused";
   const db = drizzle({ client });
-  return db.transaction(async (tx) => {
-    const run = await lockRun(tx, eq(ceremonyRuns.stubHash, post.stubHash));
-    if (run === undefined || run.round !== 5) return "not-open";
-    // The table holds all three from round 5 on.
-    const qualified = run.qualified as number[];
-    if (
-      !qualified.includes(seat) ||
-      !equal(post.ceremonyTranscriptHash, run.transcriptHash as Uint8Array) ||
-      !equal(post.keySetHash, run.keySetHash as Uint8Array) ||
-      !verifyCeremonyRegistration(
-        deployment.panel,
-        {
-          l2ChainId: deployment.l2ChainId,
-          trusteeRegistry: deployment.trusteeRegistry,
-          index: seat,
-          stubHash: run.stubHash,
-          ceremonyTranscriptHash: post.ceremonyTranscriptHash,
-          keySetHash: post.keySetHash,
-        },
-        post.signature,
-      )
+  // Checked before the run's lock, as messages are, so a flood of refused
+  // approvals never holds the lock honest posts and the worker's close wait
+  // on (T-54); under the lock the approval is kept only if the run is still
+  // taking approvals, whose transcript and key set don't change.
+  const read = await readRun(db, eq(ceremonyRuns.stubHash, post.stubHash), false);
+  if (read === undefined || read.round !== 5) return "not-open";
+  // The table holds all three from round 5 on.
+  const qualified = read.qualified as number[];
+  if (
+    !pinsDeployment(deployment, read) ||
+    !qualified.includes(seat) ||
+    !equal(post.ceremonyTranscriptHash, read.transcriptHash as Uint8Array) ||
+    !equal(post.keySetHash, read.keySetHash as Uint8Array) ||
+    !verifyCeremonyRegistration(
+      deployment.panel,
+      {
+        l2ChainId: deployment.l2ChainId,
+        trusteeRegistry: deployment.trusteeRegistry,
+        index: seat,
+        stubHash: read.stubHash,
+        ceremonyTranscriptHash: post.ceremonyTranscriptHash,
+        keySetHash: post.keySetHash,
+      },
+      post.signature,
     )
-      return "refused";
+  )
+    return "refused";
+  return db.transaction(async (tx) => {
+    const run = await lockRun(
+      tx,
+      and(eq(ceremonyRuns.runId, read.runId), eq(ceremonyRuns.round, 5)),
+    );
+    // The approvals closed meanwhile.
+    if (run === undefined) return "not-open";
     const kept = await tx
       .insert(ceremonyApprovals)
       .values({ runId: run.runId, seat, signature: post.signature, receivedAt: options.now })

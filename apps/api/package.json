@@ -17,6 +17,7 @@
   "dependencies": {
     "@abolishus/api-contract": "workspace:*",
     "@abolishus/core": "workspace:*",
+    "@abolishus/crypto": "workspace:*",
     "@abolishus/trustee-node": "workspace:*",
     "@abolishus/worker": "workspace:*",
     "@orpc/openapi": "catalog:",
@@ -26,7 +27,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@abolishus/crypto": "workspace:*",
     "@abolishus/verifier": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",

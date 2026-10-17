@@ -217,6 +217,7 @@ describe("the questions of a checked election", () => {
   test("carry the definition's limits and the chosen translation's text", () => {
     expect(questionsOf(election, "es")).toEqual([
       {
+        language: "es",
         question: "¿Qué eventos?",
         description: "",
         options: election.translations[1]?.options,

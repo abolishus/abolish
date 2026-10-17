@@ -5,6 +5,7 @@
 // (T-10, T-11, T-34, T-52). Whether the records may be shown is the worker's
 // check, tested in election.test.ts and packages/crypto.
 
+import { PARAMETERS } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
@@ -218,11 +219,85 @@ describe("the API's records", () => {
       ).toEqual({ ok: false, problem: "bad-answer" });
   });
 
-  test("an answer longer than the largest record is refused unread", async () => {
-    const body = JSON.stringify({ displayText: "00".repeat(4_194_304 + 200) });
-    expect(
-      await loadElection(DEPLOYMENT, ID, honest({ text: { status: 200, body } }).fetchFn),
-    ).toEqual({ ok: false, problem: "bad-answer" });
+  test("the largest record of each kind is read, and an answer much longer is refused", async () => {
+    const at = (field: string, bytes: number) =>
+      ({ status: 200, body: JSON.stringify({ [field]: "00".repeat(bytes) }) }) as const;
+    const largest = await loadElection(
+      DEPLOYMENT,
+      ID,
+      honest({
+        definition: at("definition", PARAMETERS.MAX_BOARD_PAYLOAD),
+        text: at("displayText", PARAMETERS.MAX_DISPLAY_TEXT),
+      }).fetchFn,
+    );
+    if (!largest.ok) throw new Error(largest.problem);
+    expect(largest.definition).toHaveLength(PARAMETERS.MAX_BOARD_PAYLOAD);
+    expect(largest.displayText).toHaveLength(PARAMETERS.MAX_DISPLAY_TEXT);
+    for (const override of [
+      { definition: at("definition", PARAMETERS.MAX_BOARD_PAYLOAD + 200) },
+      { text: at("displayText", PARAMETERS.MAX_DISPLAY_TEXT + 200) },
+    ])
+      expect(await loadElection(DEPLOYMENT, ID, honest(override).fetchFn)).toEqual({
+        ok: false,
+        problem: "bad-answer",
+      });
+  });
+
+  test("an answer over the cap is cancelled, not read to its end", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(65_536).fill(0x30);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchFn: Fetch = (url, init) =>
+      url.startsWith(DEPLOYMENT.api) && url.includes("/display-text")
+        ? Promise.resolve(new Response(endless, { status: 200 }))
+        : honest().fetchFn(url, init);
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(cancelled).toBe(true);
+    expect(pulled * chunk.length).toBeLessThan(2 * PARAMETERS.MAX_DISPLAY_TEXT + 4 * chunk.length);
+  });
+
+  test("when both records fail, the same answers always show the same problem", async () => {
+    // However the two requests race, withheld text outranks a missing definition.
+    for (const delay of [0, 5]) {
+      const { fetchFn } = honest({
+        definition: { status: 404, body: "{}" },
+        text: { status: 451, body: "{}" },
+      });
+      const slowFirst: Fetch = (url, init) =>
+        url.includes("/display-text")
+          ? new Promise((r) => setTimeout(r, delay)).then(() => fetchFn(url, init))
+          : fetchFn(url, init);
+      expect(await loadElection(DEPLOYMENT, ID, slowFirst)).toEqual({
+        ok: false,
+        problem: "withheld",
+      });
+    }
+    // Another chain outranks the node's trouble with the call.
+    const { fetchFn } = honest({
+      chainId: { status: 200, body: rpcResult(1, "0x1") },
+      call: "network",
+    });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "wrong-chain",
+    });
+  });
+
+  test("an aborted load is thrown, never shown as a problem", async () => {
+    const abort = new DOMException("aborted", "AbortError");
+    await expect(loadElection(DEPLOYMENT, ID, () => Promise.reject(abort))).rejects.toBe(abort);
   });
 
   test("any bytes the API sends as hex come back exactly", async () => {
@@ -266,12 +341,43 @@ describe("the link", () => {
       `#election= ${ID_HEX}`,
     ])
       expect(parseLink(hash)).toEqual({ kind: "malformed" });
+    // Around the one valid form: an id with characters cut, added or replaced,
+    // or another parameter beside it.
+    const id = fc.stringMatching(/^[0-9a-fA-F]{64}$/);
+    const near = fc.oneof(
+      id.chain((x) => fc.nat({ max: 63 }).map((n) => `election=${x.slice(0, n)}`)),
+      fc.tuple(id, fc.string({ minLength: 1, maxLength: 4 })).map(([x, s]) => `election=${x}${s}`),
+      fc
+        .tuple(id, fc.nat({ max: 63 }), fc.constantFrom("g", "x", " ", "%", "&", "="))
+        .map(([x, i, c]) => `election=${x.slice(0, i)}${c}${x.slice(i + 1)}`),
+      fc.tuple(fc.string({ minLength: 1, maxLength: 8 }), id).map(([p, x]) => `${p}election=${x}`),
+      fc.tuple(id, fc.string({ maxLength: 8 })).map(([x, s]) => `election=${x}&${s}`),
+    );
     fc.assert(
-      fc.property(fc.string(), (s) => {
-        const link = parseLink(`#${s}`);
-        if (link.kind === "election") expect(`election=${link.hex}`).toBe(s.toLowerCase());
+      fc.property(near, (s) => {
+        expect(parseLink(`#${s}`)).toEqual({ kind: "malformed" });
       }),
       { numRuns },
     );
+    fc.assert(
+      fc.property(id, (x) => {
+        const link = parseLink(`#election=${x}`);
+        if (link.kind !== "election") throw new Error(link.kind);
+        expect(link.hex).toBe(x.toLowerCase());
+        expect(hex(link.electionId)).toBe(x.toLowerCase());
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("the deployments", () => {
+  test("staging's origins are the ones the CSP lets the client reach, and its registry is a plain address or none", () => {
+    expect(STAGING.api).toBe("https://api-staging.abolish.us");
+    expect(STAGING.rpc).toBe("https://sepolia.base.org");
+    expect(STAGING.chainId).toBe(84532n);
+    // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
+    if (STAGING.electionRegistry !== undefined)
+      expect(STAGING.electionRegistry).toMatch(/^0x[0-9a-f]{40}$/);
   });
 });

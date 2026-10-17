@@ -23,17 +23,19 @@ const locale = "en-US";
 
 // The worker is spawned only once a link names an election, and a stopped
 // one (crashed, timed out) is replaced on the next check, so "Try again" can
-// recover.
+// recover. A check that fails stops only the worker it ran on, never a newer
+// one a later check spawned.
 let worker: BallotWorker | undefined;
 const source: ElectionSource = {
-  load: (electionId) => loadElection(STAGING, electionId, (url, init) => fetch(url, init)),
+  load: (electionId, signal) =>
+    loadElection(STAGING, electionId, (url, init) => fetch(url, { ...init, signal })),
   async check(electionId, registeredHash, definition, displayText) {
-    worker ??= new BallotWorker();
+    const used = (worker ??= new BallotWorker());
     try {
-      return await worker.checkElection(electionId, registeredHash, definition, displayText);
+      return await used.checkElection(electionId, registeredHash, definition, displayText);
     } catch (error) {
-      worker.terminate();
-      worker = undefined;
+      used.terminate();
+      if (worker === used) worker = undefined;
       throw error;
     }
   },

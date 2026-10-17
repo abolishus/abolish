@@ -11,6 +11,12 @@ import type { CheckedElection, OptionText } from "./election.ts";
 
 /** One question as the voter answers it, in one language. */
 export interface BallotQuestion {
+  /**
+   * The BCP 47 tag of the text's translation, set as `lang` on it, since it
+   * may differ from the screens' own language (WCAG 2.2 SC 3.1.2). Absent: the
+   * screens' language.
+   */
+  readonly language?: string | undefined;
   readonly question: string;
   /** May be empty. */
   readonly description: string;
@@ -35,6 +41,7 @@ export function questionsOf(election: CheckedElection, language: string): Ballot
   if (translation === undefined) throw new RangeError(`no translation "${language}"`);
   return [
     {
+      language: translation.language,
       question: translation.question,
       description: translation.description,
       options: translation.options,

@@ -128,6 +128,8 @@ export const InTheReadersLanguage: Story = {
       await canvas.findByRole("heading", { level: 1, name: "¿Qué mejora le importa más?" }),
     ).toBeVisible();
     await expect(canvas.getByRole("radio", { name: "Doscientos árboles nuevos" })).toBeVisible();
+    // Marked as Spanish for assistive technology, inside the English screens.
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveAttribute("lang", "es");
   },
 };
 

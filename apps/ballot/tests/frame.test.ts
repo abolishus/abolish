@@ -102,6 +102,9 @@ describe("the frame under the client's CSP", () => {
     // A version-1 definition names no one who asked: the frame names the election.
     expect(ballot).toContain("Election 3f8a 0c51");
     expect(ballot).not.toContain("asked");
+    // The poll's own text carries its translation's tag; the screens' chrome doesn't.
+    expect(ballot).toContain('<h1 lang="en"');
+    expect(ballot).toMatch(/<span lang="en"[^>]*><span[^>]*>One<\/span>/);
     for (const html of [
       ballot,
       render(

@@ -16,7 +16,8 @@ import { AnswerQuestions } from "./questions.tsx";
 
 /** Where the records come from and who checks them; injected so stories and tests need no network or worker. */
 export interface ElectionSource {
-  load(electionId: Uint8Array): Promise<Loaded>;
+  /** `signal` aborts the requests of a load nobody waits for any more (another link, a retry). */
+  load(electionId: Uint8Array, signal: AbortSignal): Promise<Loaded>;
   /** The worker's check (`BallotWorker.checkElection`); rejects if the worker fails. */
   check(
     electionId: Uint8Array,
@@ -56,20 +57,19 @@ export function OpenElection({
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    let current = true;
+    const controller = new AbortController();
     setState({ kind: "checking" });
     void (async () => {
-      const next = await open(source, electionId);
-      if (current) setState(next);
+      const next = await open(source, electionId, controller.signal);
+      if (!controller.signal.aborted) setState(next);
     })();
-    return () => {
-      current = false;
-    };
+    return () => controller.abort();
   }, [source, electionId, attempt]);
 
   switch (state.kind) {
     case "checking":
-      return <Checking />;
+      // After "Try again", whose button is gone now, focus moves to the title.
+      return <Checking focus={attempt > 0} />;
     case "unavailable":
       return <Unavailable problem={state.problem} onRetry={() => setAttempt(attempt + 1)} />;
     case "refused":
@@ -85,10 +85,14 @@ export function OpenElection({
   }
 }
 
-async function open(source: ElectionSource, electionId: Uint8Array): Promise<State> {
+async function open(
+  source: ElectionSource,
+  electionId: Uint8Array,
+  signal: AbortSignal,
+): Promise<State> {
   let loaded: Loaded;
   try {
-    loaded = await source.load(electionId);
+    loaded = await source.load(electionId, signal);
   } catch {
     // load.ts turns every network and answer failure into a problem; anything
     // else is a fault of this page, shown the same way rather than as a blank.
@@ -112,11 +116,11 @@ async function open(source: ElectionSource, electionId: Uint8Array): Promise<Sta
 }
 
 /** While the page fetches and the worker checks: no poll text yet, nothing to press. */
-export function Checking() {
+export function Checking({ focus = false }: { focus?: boolean }) {
   const t = useTranslate(catalogs);
   return (
     <EverydayFrame>
-      <ScreenTitle title={t("checkingTitle")}>
+      <ScreenTitle title={t("checkingTitle")} focus={focus}>
         <p className="m-0" role="status">
           {t("checking")}
         </p>

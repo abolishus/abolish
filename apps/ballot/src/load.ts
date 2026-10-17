@@ -88,15 +88,13 @@ export async function loadElection(
     const registeredHash = await registeredHashOf(deployment, registry, electionId, fetchFn);
     if (registeredHash.every((b) => b === 0)) return { ok: false, problem: "not-registered" };
     const id = toHex(electionId);
-    const [definition, displayText] = await Promise.all([
+    const [definition, displayText] = await both(
       apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
       apiRecord(deployment, "display-text", id, "displayText", MAX_DISPLAY_TEXT_ANSWER, fetchFn),
-    ]);
+    );
     return { ok: true, registeredHash, definition, displayText };
   } catch (error) {
     if (error instanceof Stop) return { ok: false, problem: error.problem };
-    // fetch rejects with a TypeError when the network or CORS fails.
-    if (error instanceof TypeError) return { ok: false, problem: "unreachable" };
     throw error;
   }
 }
@@ -107,18 +105,51 @@ async function registeredHashOf(
   electionId: Uint8Array,
   fetchFn: Fetch,
 ): Promise<Uint8Array> {
-  const [chainId, word] = await Promise.all([
-    rpc(deployment, fetchFn, 1, "eth_chainId", []),
+  const [, word] = await both(
+    rpc(deployment, fetchFn, 1, "eth_chainId", []).then((id) => {
+      if (!/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/.test(id)) throw new Stop("bad-answer");
+      if (BigInt(id) !== deployment.chainId) throw new Stop("wrong-chain");
+      return id;
+    }),
     rpc(deployment, fetchFn, 2, "eth_call", [
       { to: registry, data: `0x${DEFINITION_HASH_OF}${toHex(electionId)}` },
       BLOCK,
     ]),
-  ]);
-  if (!/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/.test(chainId)) throw new Stop("bad-answer");
-  if (BigInt(chainId) !== deployment.chainId) throw new Stop("wrong-chain");
+  );
   // A bytes32 return value: exactly one ABI word.
   if (!/^0x[0-9a-f]{64}$/.test(word)) throw new Stop("bad-answer");
   return fromHex(word.slice(2));
+}
+
+// When both of two requests fail, the problem shown is the one first here,
+// whichever failed first: the same answers always give the same screen.
+const PRECEDENCE: readonly LoadProblem[] = [
+  "wrong-chain",
+  "withheld",
+  "not-found",
+  "bad-answer",
+  "unreachable",
+];
+
+/**
+ * Both results, or the failure that takes precedence. `fetch`'s TypeError
+ * (the network or CORS failed) counts as unreachable; any other error (an
+ * abort, a fault of this page) is thrown as it is.
+ */
+async function both<A, B>(a: Promise<A>, b: Promise<B>): Promise<[A, B]> {
+  const [x, y] = await Promise.allSettled([a, b]);
+  if (x.status === "fulfilled" && y.status === "fulfilled") return [x.value, y.value];
+  const errors = [x, y].flatMap((r) =>
+    r.status === "fulfilled"
+      ? []
+      : [r.reason instanceof TypeError ? new Stop("unreachable") : (r.reason as unknown)],
+  );
+  const other = errors.find((e) => !(e instanceof Stop));
+  if (other !== undefined) throw other;
+  const stops = errors as Stop[];
+  throw stops.reduce((p, q) =>
+    PRECEDENCE.indexOf(q.problem) < PRECEDENCE.indexOf(p.problem) ? q : p,
+  );
 }
 
 /** One JSON-RPC call; its `result`, which must be a string. */

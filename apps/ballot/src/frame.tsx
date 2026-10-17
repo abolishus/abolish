@@ -235,10 +235,13 @@ function ActionBar({
  */
 export function ScreenTitle({
   title,
+  lang,
   focus = false,
   children,
 }: {
   title: string;
+  /** The title's language, where it isn't the screen's (a poll's own text). */
+  lang?: string | undefined;
   focus?: boolean;
   children?: ReactNode;
 }) {
@@ -250,6 +253,7 @@ export function ScreenTitle({
     <div className="grid gap-4">
       <h1
         ref={heading}
+        lang={lang}
         tabIndex={focus ? -1 : undefined}
         className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance outline-none sm:text-4xl"
       >

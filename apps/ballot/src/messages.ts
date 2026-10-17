@@ -45,7 +45,7 @@ const enUS = {
     "The network this device read from isn't the one this ballot checks polls on, so it stopped before showing anything.",
   notRegisteredTitle: "This poll isn't registered",
   notRegistered:
-    "The public election registry has no poll with this link's number, or it was registered only moments ago. Check the link, or try again later.",
+    "The public election registry has no poll with this link's number, or it was registered in the last half hour or so. Check the link, or try again later.",
   notFoundTitle: "This poll's questions aren't available",
   notFound:
     "The poll is registered, but the server didn't have its questions. Try again later, or open the ballot from another address.",

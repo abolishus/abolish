@@ -456,10 +456,10 @@ describe("sealing a version-5 poll", () => {
 });
 
 describe("casting a version-5 poll's seal", () => {
-  test("the worker casts a seal through a prover worker into a record the admission checks pass, and never opens it", async () => {
+  test("the worker finds the voter's cell from the board and casts a seal there through a prover worker into a record the admission checks pass, and never opens it", async () => {
     const l1 = { number: "9000000", hash: "ab".repeat(32) };
     const json = await page.evaluate(
-      ([id, h, d, t, entries, panel, secret, leaves, block]) =>
+      ([id, h, d, t, entries, panel, secret, find, block]) =>
         (
           globalThis as unknown as {
             ballotHarness: {
@@ -472,7 +472,13 @@ describe("casting a version-5 poll's seal", () => {
                 panel: { threshold: number; keys: readonly string[] },
                 votes: readonly (0 | 1)[],
                 secret: string,
-                leaves: readonly string[],
+                find: {
+                  tier: number;
+                  group: string;
+                  board: readonly string[];
+                  registrars: readonly string[];
+                  threshold: number;
+                },
                 l1: { number: string; hash: string },
               ): Promise<string>;
             };
@@ -486,7 +492,7 @@ describe("casting a version-5 poll's seal", () => {
           panel,
           [0, 0, 1, 1, 0],
           secret,
-          leaves,
+          find,
           block,
         ),
       [
@@ -497,7 +503,13 @@ describe("casting a version-5 poll's seal", () => {
         [hex(poll.entry)],
         { threshold: poll.panel.threshold, keys: poll.panel.keys.map(hex) },
         hex(poll.members[1] as Uint8Array),
-        poll.cellLeaves.map(String),
+        {
+          tier: 0,
+          group: String(poll.GROUP),
+          board: poll.board.map(hex),
+          registrars: poll.registrars.registrars.map(hex),
+          threshold: poll.registrars.threshold,
+        },
         l1,
       ] as const,
     );

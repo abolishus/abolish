@@ -9,6 +9,8 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type FindCellRequest,
+  type FindCellResult,
   type MembershipProofResult,
   type ProveMembershipRequest,
   PROTOCOL_VERSION,
@@ -24,9 +26,17 @@ import { workerScriptUrl } from "./worker-policy.ts";
 const TIMEOUT_MS = 30_000;
 /** A proof waits on the prover worker, which the ballot worker gives up on first. */
 const PROVE_TIMEOUT_MS = PROVER_TIMEOUT_MS + TIMEOUT_MS;
+/**
+ * Rebuilding a tier recovers a signer per registrar approval (thousands for
+ * a large tier, P2-21 part 3, Known-weak), so it gets as long as a proof.
+ */
+const FIND_CELL_TIMEOUT_MS = PROVE_TIMEOUT_MS;
 
 /** A proof request as the page makes it: everything but the envelope. */
 export type MembershipProofRequest = Omit<ProveMembershipRequest, "v" | "id" | "kind">;
+
+/** A cell search as the page makes it: everything but the envelope. */
+export type FindCellQuery = Omit<FindCellRequest, "v" | "id" | "kind">;
 
 /** A cast as the page makes it: everything but the envelope. */
 export type CastBallotRequest = Omit<CastRequest, "v" | "id" | "kind">;
@@ -96,6 +106,21 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "check-election") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * Finds the voter's cell in the poll the worker last checked, from the
+   * whole board; the worker keeps its leaves for `cast`. The secret is
+   * copied, and the worker zeroes its copy.
+   */
+  async findCell(query: FindCellQuery): Promise<FindCellResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "find-cell", ...query }),
+      [],
+      FIND_CELL_TIMEOUT_MS,
+    );
+    if (response.kind !== "find-cell") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

@@ -427,6 +427,10 @@ export {
   type SealingElection,
   type SealingElectionCode,
   sealingElectionV5,
+  type VoterCell,
+  type VoterCellCode,
+  voterCellV5,
+  type VoterIdentity,
 } from "./seal.ts";
 export {
   type GroupRegistryPins,

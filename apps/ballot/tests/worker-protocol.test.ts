@@ -234,7 +234,6 @@ describe("cast requests", () => {
     kind: "cast",
     seal: 2,
     secret: new Uint8Array(32).fill(2),
-    leaves: [1n, 2n, 3n],
     l1Number: 9_000_000n,
     l1Hash: new Uint8Array(32).fill(5),
     prover: port1,
@@ -247,16 +246,12 @@ describe("cast requests", () => {
     expect(parsed?.kind === "cast" && parsed.prover).toBe(port1);
   });
 
-  test("accepts any leaves and any u64 block number: the leaves' checks are castSealV3's", () => {
+  test("accepts any u64 block number", () => {
     fc.assert(
-      fc.property(
-        fc.array(fc.bigInt()),
-        fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
-        (leaves, l1Number) => {
-          const r = { ...cast(), leaves, l1Number };
-          expect(parseRequest(r)).toEqual(r);
-        },
-      ),
+      fc.property(fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }), (l1Number) => {
+        const r = { ...cast(), l1Number };
+        expect(parseRequest(r)).toEqual(r);
+      }),
       { numRuns },
     );
   });
@@ -267,10 +262,8 @@ describe("cast requests", () => {
     ["a short secret", { secret: new Uint8Array(31) }],
     ["a long secret", { secret: new Uint8Array(33) }],
     ["a secret as hex", { secret: "02".repeat(32) }],
-    ["a leaf that isn't a bigint", { leaves: [1n, 2] }],
-    // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
-    ["leaves with a hole", { leaves: [1n, , 2n] }],
-    ["leaves that aren't a list", { leaves: new BigUint64Array(3) }],
+    // The worker's leaves are the cell find-cell found, never the page's.
+    ["leaves", { leaves: [1n, 2n, 3n] }],
     ["a block number as a number", { l1Number: 9_000_000 }],
     ["a negative block number", { l1Number: -1n }],
     ["a block number past a u64", { l1Number: 2n ** 64n }],
@@ -292,6 +285,70 @@ describe("cast requests", () => {
   });
 });
 
+describe("find-cell requests", () => {
+  const find = () => ({
+    v: PROTOCOL_VERSION,
+    id: 14,
+    kind: "find-cell",
+    definitionHash: new Uint8Array(32).fill(8),
+    secret: new Uint8Array(32).fill(2),
+    tier: 0,
+    group: 1n,
+    entries: [new Uint8Array([6]), new Uint8Array(0)],
+    registrars: [new Uint8Array(20).fill(1)],
+    threshold: 1,
+  });
+
+  test("accepts a well-formed request as it is", () => {
+    expect(parseRequest(find())).toEqual(find());
+  });
+
+  test("accepts any tier, u64 group, entries and pins: their checks are voterCellV5's", () => {
+    fc.assert(
+      fc.property(
+        fc.integer(),
+        fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
+        fc.array(fc.uint8Array()),
+        fc.array(fc.uint8Array()),
+        fc.integer(),
+        (tier, group, entries, registrars, threshold) => {
+          const r = { ...find(), tier, group, entries, registrars, threshold };
+          expect(parseRequest(r)).toEqual(r);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short definition hash", { definitionHash: new Uint8Array(31) }],
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["a fractional tier", { tier: 0.5 }],
+    ["a tier as a string", { tier: "0" }],
+    ["a group as a number", { group: 1 }],
+    ["a negative group", { group: -1n }],
+    ["a group past a u64", { group: 2n ** 64n }],
+    ["an entry as hex", { entries: ["06"] }],
+    // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
+    ["entries with a hole", { entries: [new Uint8Array(1), , new Uint8Array(1)] }],
+    ["a registrar as hex", { registrars: ["01".repeat(20)] }],
+    ["a threshold as a string", { threshold: "1" }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...find(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(find())) {
+      const r: Record<string, unknown> = find();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -302,6 +359,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 6, kind: "seal", result: {} })).toBe(6);
     expect(responseId({ v: PROTOCOL_VERSION, id: 7, kind: "challenge", result: {} })).toBe(7);
     expect(responseId({ v: PROTOCOL_VERSION, id: 8, kind: "cast", result: {} })).toBe(8);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 9, kind: "find-cell", result: {} })).toBe(9);
   });
 
   test("ignores another version's response or kind", () => {

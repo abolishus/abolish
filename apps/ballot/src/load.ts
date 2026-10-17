@@ -63,7 +63,24 @@ const MAX_DEFINITION_ANSWER = 2 * PARAMETERS.MAX_BOARD_PAYLOAD + JSON_ROOM;
 const MAX_DISPLAY_TEXT_ANSWER = 2 * PARAMETERS.MAX_DISPLAY_TEXT + JSON_ROOM;
 // One board entry: its payload and the envelope around it (docs/spec/board.md).
 const BOARD_ENTRY_OVERHEAD = 3 + 32 + 8 + 4 + 4;
-const MAX_ENTRIES_ANSWER = 2 * (PARAMETERS.MAX_BOARD_PAYLOAD + BOARD_ENTRY_OVERHEAD) + JSON_ROOM;
+const MAX_ENTRY = PARAMETERS.MAX_BOARD_PAYLOAD + BOARD_ENTRY_OVERHEAD;
+const MAX_ENTRIES_ANSWER = 2 * MAX_ENTRY + JSON_ROOM;
+// A page of the whole board: the API's page size and byte cap
+// (packages/api-contract, `MAX_PAGE` and `MAX_PAGE_BYTES`), as hex, with a
+// quote pair and a comma per entry. A page may exceed the byte cap only by
+// holding one entry.
+const PAGE_ENTRIES = 256;
+const MAX_PAGE_BYTES = 8 * 1024 * 1024;
+const MAX_PAGE_ANSWER = 2 * Math.max(MAX_PAGE_BYTES, MAX_ENTRY) + 3 * PAGE_ENTRIES + JSON_ROOM;
+// The most of a board the client reads before it gives up: the group
+// registry's records for a large tier run to tens of megabytes (P2-21 part
+// 3, Known-weak), and a server that never ends the board must not exhaust
+// the device (T-52). Each entry is charged its bytes and a fixed cost, and
+// each page a fixed cost, so a server answering with tiny entries, one per
+// page, runs the budget out within a few thousand requests too.
+const MAX_BOARD_BYTES = 256 * 1024 * 1024;
+const ENTRY_COST = 64;
+const PAGE_COST = 64 * 1024;
 const MAX_RPC_ANSWER = 4096;
 
 // No cookie, no referrer, no cache and no redirect to anywhere else: each
@@ -223,12 +240,62 @@ async function firstEntry(
   const response = await fetchFn(url, { ...REQUEST, method: "GET" });
   if (response.status === 404) throw new Stop("not-found");
   if (!response.ok) throw new Stop("unreachable");
-  const answer = await readJson(response, MAX_ENTRIES_ANSWER);
+  return entriesOf(await readJson(response, MAX_ENTRIES_ANSWER), 1);
+}
+
+export type LoadedBoard =
+  | { readonly ok: true; readonly entries: readonly Uint8Array[] }
+  | { readonly ok: false; readonly problem: LoadProblem };
+
+/**
+ * The whole board of `electionId`, page by page from position 0 until an
+ * empty page, for the worker to find the voter's cell in (`find-cell`). The
+ * requests name the election and positions only, never a group, region or
+ * leaf: a board filtered to the voter's group would tell the server their
+ * region (T-10, T-13). A page longer than asked for, an entry that isn't
+ * lowercase hex, or a board that runs out the `maxBytes` budget is
+ * `bad-answer`.
+ */
+export async function loadBoard(
+  deployment: Deployment,
+  electionId: Uint8Array,
+  fetchFn: Fetch,
+  maxBytes = MAX_BOARD_BYTES,
+): Promise<LoadedBoard> {
+  const id = toHex(electionId);
+  const entries: Uint8Array[] = [];
+  let budget = maxBytes;
+  try {
+    for (;;) {
+      const url = `${deployment.api}/board/entries?electionId=${id}&start=${entries.length}&limit=${PAGE_ENTRIES}`;
+      // `fetch` rejects with a TypeError when the network fails.
+      const response = await fetchFn(url, { ...REQUEST, method: "GET" }).catch((e: unknown) => {
+        throw e instanceof TypeError ? new Stop("unreachable") : e;
+      });
+      if (response.status === 404) throw new Stop("not-found");
+      if (!response.ok) throw new Stop("unreachable");
+      const page = entriesOf(await readJson(response, MAX_PAGE_ANSWER), PAGE_ENTRIES);
+      if (page.length === 0) return { ok: true, entries };
+      budget -= PAGE_COST;
+      for (const entry of page) {
+        budget -= entry.length + ENTRY_COST;
+        if (budget < 0) throw new Stop("bad-answer");
+        entries.push(entry);
+      }
+    }
+  } catch (error) {
+    if (error instanceof Stop) return { ok: false, problem: error.problem };
+    throw error;
+  }
+}
+
+/** A `{ entries }` answer of at most `limit` entries, each lowercase hex, as bytes. */
+function entriesOf(answer: unknown, limit: number): Uint8Array[] {
   if (!isRecord(answer) || Object.keys(answer).length !== 1) throw new Stop("bad-answer");
   const entries = answer["entries"];
   if (
     !Array.isArray(entries) ||
-    entries.length > 1 ||
+    entries.length > limit ||
     !entries.every((e) => typeof e === "string" && /^(?:[0-9a-f]{2})+$/.test(e))
   )
     throw new Stop("bad-answer");

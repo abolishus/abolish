@@ -9,11 +9,16 @@
 // nothing in the browser restricts it: only the absence of network APIs from
 // its bytes keeps it off the network (T-43).
 
-import type { BallotV2Code, MembershipProverErrorCode, Panel } from "@abolishus/crypto";
+import type {
+  BallotV2Code,
+  MembershipProverErrorCode,
+  Panel,
+  VoterCellCode,
+} from "@abolishus/crypto";
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -55,6 +60,31 @@ export interface SealRequest {
   readonly votes: readonly (0 | 1)[];
 }
 
+/**
+ * Finds the voter's cell in the version-5 poll the worker last checked,
+ * which `definitionHash` must name, from `entries`, the whole board as the
+ * API serves it (`voterCellV5`; T-10, T-13): the identity commitment of
+ * `secret`, registered in `tier` and `group`, replayed under `registrars`
+ * and `threshold`, which the page takes from its build's deployment, as it
+ * does the panels (the worker trusts the page with them as it does with the
+ * secret; a wrong set only refuses, since the cell's root still binds the
+ * leaves at the cast). The worker keeps the cell's
+ * leaves and the commitment for `cast`; the page gets the cell to seal in.
+ */
+export interface FindCellRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "find-cell";
+  readonly definitionHash: Uint8Array;
+  /** 32 bytes; the worker zeroes its copy once it has the commitment. */
+  readonly secret: Uint8Array;
+  readonly tier: number;
+  readonly group: bigint;
+  readonly entries: readonly Uint8Array[];
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+}
+
 /** The voter challenged seal `seal`: its opening, and the seal is spent (T-42, T-45). */
 export interface ChallengeRequest {
   readonly v: typeof PROTOCOL_VERSION;
@@ -66,10 +96,10 @@ export interface ChallengeRequest {
 /**
  * The voter cast seal `seal` (docs/spec/ballot-validity.md, Casting (version
  * 3), steps 2 to 4): its record under the L1 block the page read
- * (`l1Number`, `l1Hash`), proved for `secret` over its cell's `leaves` (the
- * cell tree's, in order, which the page rebuilt from the board with
- * `tierMembership`; the worker checks them against the cell's root, T-10,
- * T-13) by the prover worker at the other end of `prover`. The witness goes
+ * (`l1Number`, `l1Hash`), proved for `secret`, the identity `find-cell`
+ * found, over the leaves of the cell it found, which must be the seal's
+ * (checked against the cell's root, T-10, T-13), by the prover worker at
+ * the other end of `prover`. The witness goes
  * over that port; the page gets the finished record, never the witness. A
  * cast seal is never opened, and may be cast again with the same secret
  * (revoting Client rule 4).
@@ -81,7 +111,6 @@ export interface CastRequest {
   readonly seal: number;
   /** 32 bytes; the worker zeroes its copy once the witness is built. */
   readonly secret: Uint8Array;
-  readonly leaves: readonly bigint[];
   readonly l1Number: bigint;
   readonly l1Hash: Uint8Array;
   readonly prover: MessagePort;
@@ -114,6 +143,7 @@ export interface ProveMembershipRequest {
 export type WorkerRequest =
   | CheckElectionRequest
   | ProveMembershipRequest
+  | FindCellRequest
   | SealRequest
   | ChallengeRequest
   | CastRequest;
@@ -128,6 +158,17 @@ export type MembershipProofProblem = MembershipProverErrorCode | "prover";
 export type MembershipProofResult =
   | { readonly ok: true; readonly proof: Uint8Array }
   | { readonly ok: false; readonly problem: MembershipProofProblem };
+
+/**
+ * The voter's cell, `sealBallotV3`'s index, or why there is none: no
+ * version-5 poll checked under that definition hash in this worker, a
+ * secret that isn't an identity secret, or `voterCellV5`'s refusal (`cell`,
+ * with its code), which the page shows, never retries.
+ */
+export type FindCellResult =
+  | { readonly ok: true; readonly cell: number }
+  | { readonly ok: false; readonly problem: "no-election" | "secret" }
+  | { readonly ok: false; readonly problem: "cell"; readonly code: VoterCellCode };
 
 /**
  * A seal, or why none was made: no version-5 poll checked under that
@@ -151,7 +192,9 @@ export type ChallengeResult =
  * A finished ballot: the record (`0x0002` version 3) as it is boarded, its
  * hash, and each qualified seat's share ciphertext for its intake. Or why
  * there is none: a seal this worker doesn't hold or the voter challenged
- * (`unknown`), the membership proof's refusal (`MembershipProofProblem`), or
+ * (`unknown`), no cell found for the poll or a seal in another cell than
+ * the one found (`no-cell`), a secret other than the one `find-cell` was
+ * given (`secret`), the membership proof's refusal (`MembershipProofProblem`), or
  * a record that failed the client's own admission checks (`ballot`, with the
  * verifier's code), which is never sent. None is retried by the worker.
  */
@@ -162,7 +205,7 @@ export type CastResult =
       readonly ballotHash: Uint8Array;
       readonly ciphertexts: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
     }
-  | { readonly ok: false; readonly problem: "unknown" | MembershipProofProblem }
+  | { readonly ok: false; readonly problem: "unknown" | "no-cell" | MembershipProofProblem }
   | { readonly ok: false; readonly problem: "ballot"; readonly code: BallotV2Code };
 
 export type WorkerResponse =
@@ -177,6 +220,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "prove-membership";
       readonly result: MembershipProofResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "find-cell";
+      readonly result: FindCellResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -231,9 +280,21 @@ const CHECK_KEYS = [
   "registeredHash",
   "v",
 ];
+const FIND_CELL_KEYS = [
+  "definitionHash",
+  "entries",
+  "group",
+  "id",
+  "kind",
+  "registrars",
+  "secret",
+  "threshold",
+  "tier",
+  "v",
+];
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
-const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "leaves", "prover", "seal", "secret", "v"];
+const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
@@ -286,6 +347,34 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       panels,
     };
   }
+  if (data["kind"] === "find-cell") {
+    if (!hasKeys(data, FIND_CELL_KEYS)) return undefined;
+    const { definitionHash, secret, tier, group, entries, registrars, threshold } = data;
+    if (
+      !isBytes(definitionHash, 32) ||
+      !isBytes(secret, 32) ||
+      !Number.isSafeInteger(tier) ||
+      typeof group !== "bigint" ||
+      group < 0n ||
+      group >> 64n !== 0n ||
+      !isListOf(entries, isAnyBytes) ||
+      !isListOf(registrars, isAnyBytes) ||
+      !Number.isSafeInteger(threshold)
+    )
+      return undefined;
+    return {
+      v,
+      id,
+      kind: "find-cell",
+      definitionHash,
+      secret,
+      tier: tier as number,
+      group,
+      entries,
+      registrars,
+      threshold: threshold as number,
+    };
+  }
   if (data["kind"] === "seal") {
     if (!hasKeys(data, SEAL_KEYS)) return undefined;
     const { definitionHash, cell, votes } = data;
@@ -306,11 +395,10 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
   }
   if (data["kind"] === "cast") {
     if (!hasKeys(data, CAST_KEYS)) return undefined;
-    const { seal, secret, leaves, l1Number, l1Hash, prover } = data;
+    const { seal, secret, l1Number, l1Hash, prover } = data;
     if (
       !isId(seal) ||
       !isBytes(secret, 32) ||
-      !isListOf(leaves, isBigint) ||
       typeof l1Number !== "bigint" ||
       l1Number < 0n ||
       l1Number >> 64n !== 0n ||
@@ -324,7 +412,6 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       kind: "cast",
       seal,
       secret,
-      leaves,
       l1Number,
       l1Hash,
       prover,
@@ -367,6 +454,7 @@ export function requestId(data: unknown): number | undefined {
 const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
   "prove-membership",
+  "find-cell",
   "seal",
   "challenge",
   "cast",

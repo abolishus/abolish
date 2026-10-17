@@ -1,11 +1,15 @@
 // Test only: a version-5 poll as the client opens one, with its ceremony run
 // here by every seat of the panel it names (docs/spec/ceremony.md), the
 // transcript as the board's first entry, and the hash the registry would
-// hold, computed with node:crypto rather than the code under test. Cell 0
-// of the first tier holds four of Semaphore 4.14.3's identities
-// (docs/spec/vectors/membership-prover.json), so a seal there can be cast.
+// hold, computed with node:crypto rather than the code under test. The
+// first tier is one group in one region, a single cell holding four of
+// Semaphore 4.14.3's identities (docs/spec/vectors/membership-prover.json),
+// added in one batch signed by group-registry.json's test registrars and
+// boarded after the transcript as the registry logs it, so the client finds
+// its voters' cell from the board and a seal there can be cast.
 // For tests/session.test.ts, tests/cast.test.ts and tests/worker.e2e.ts.
 
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -17,9 +21,14 @@ import {
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   electionStubV5Hash,
+  type ContractEventRecord,
   encodeBoardEntry,
   encodeCeremonyTranscript,
+  encodeContractEvent,
   encodeElectionDefinitionV5,
+  encodeGroupAddition,
+  groupAdditionDigest,
+  groupRegistryDomainSeparator,
   identityCommitment,
   identityKey,
   keysMessage,
@@ -28,6 +37,7 @@ import {
   panelId,
   RECORD_TYPES,
   revealsMessage,
+  signGroupApproval,
   tierTreeRoot,
 } from "@abolishus/crypto";
 
@@ -79,13 +89,18 @@ export const members = (
 /** Cell 0's leaves, as the client rebuilds them from the board. */
 export const cellLeaves = members.map(identityCommitment);
 
+/** The group cell 0's members registered in. */
+export const GROUP = 1n;
+
 const shape: ElectionDefinitionV5 = {
   ...typical,
   electorate: typical.electorate.map((t, i) =>
     i === 0
       ? {
           ...t,
-          cells: t.cells.map((c, j) => (j === 0 ? { ...c, root: tierTreeRoot(cellLeaves) } : c)),
+          groups: [{ group_id: GROUP, region: 0 }],
+          regions: [BigInt(cellLeaves.length)],
+          cells: [{ root: tierTreeRoot(cellLeaves), members: BigInt(cellLeaves.length) }],
         }
       : t,
   ),
@@ -160,3 +175,72 @@ export const entry = encodeBoardEntry(
   { election_id: definition.election_id, index: 0n, segment: 0, payload: transcript },
   5,
 );
+
+const registryVectors = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/group-registry.json", import.meta.url), "utf8"),
+) as { registrars: { threshold: number; secretKeys: string[]; addresses: string[] } };
+/** The registrars a build pins, as `find-cell` takes them. */
+export const registrars = {
+  registrars: registryVectors.registrars.addresses.map(hex),
+  threshold: registryVectors.registrars.threshold,
+};
+
+const word = (v: bigint) => hex(v.toString(16).padStart(64, "0"));
+const topic0 = (signature: string) => keccak_256(new TextEncoder().encode(signature));
+const log = (n: bigint, topics: Uint8Array[], data: Uint8Array): ContractEventRecord => ({
+  contract: definition.group_registry,
+  n,
+  l2_block: 10n * n,
+  l2_timestamp: 1_760_000_000n + n,
+  topics,
+  data,
+});
+/** `bytes` as an ABI-encoded dynamic argument. */
+const abiBytes = (b: Uint8Array) => {
+  const padded = new Uint8Array(Math.ceil(b.length / 32) * 32);
+  padded.set(b);
+  return Uint8Array.from([...word(32n), ...word(BigInt(b.length)), ...padded]);
+};
+
+/**
+ * The whole board: the transcript, then the first tier's group created and
+ * `commitments` added to it in one batch the test registrars signed, under
+ * the definition's chain and group registry.
+ */
+export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
+  const domain = groupRegistryDomainSeparator(definition.l2_chain_id, definition.group_registry);
+  const digest = groupAdditionDigest(domain, {
+    groupId: GROUP,
+    tier: 0,
+    firstIndex: 0n,
+    commitments,
+  });
+  const approvals = registryVectors.registrars.secretKeys
+    .slice(0, registrars.threshold)
+    .map((k, i) => signGroupApproval(digest, i + 1, hex(k)));
+  const records = [
+    log(1n, [topic0("GroupCreated(uint64,uint8)"), word(GROUP), word(0n)], new Uint8Array(0)),
+    log(
+      2n,
+      [topic0("MembersAdded(uint64,uint64,bytes)"), word(GROUP), word(0n)],
+      abiBytes(encodeGroupAddition({ groupId: GROUP, firstIndex: 0n, commitments, approvals })),
+    ),
+  ];
+  return [
+    entry,
+    ...records.map((r, i) =>
+      encodeBoardEntry(
+        {
+          election_id: definition.election_id,
+          index: BigInt(i + 1),
+          segment: 0,
+          payload: encodeContractEvent(r, 8),
+        },
+        5,
+      ),
+    ),
+  ];
+}
+
+/** The board as the API serves it. */
+export const board = boardWith(cellLeaves);

@@ -5,6 +5,7 @@ import {
   electionDefinitionHash,
   encodeElectionDefinition,
   type EventContracts,
+  RECORD_TYPES,
   replayEventAccumulator,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
@@ -22,7 +23,7 @@ import {
   RegistrySyncError,
   syncRegistrations,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { type TestDb, testDb, typical } from "./db.ts";
 
 // Registrations from the registry's indexed logs (src/registry-sync.ts; P3-5
 // part 3a): only logs the registry's accumulator at the finalized block
@@ -34,15 +35,6 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const vectors = (file: string) =>
   JSON.parse(readFileSync(new URL(`../../../docs/spec/vectors/${file}`, import.meta.url), "utf8"));
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    vectors("election-definition.json").vectors.find(
-      (v: { id: string }) => v.id === "definition-typical",
-    ).encoding,
-    "hex",
-  ),
-);
 
 /** The registry's topics 0, from the published event table rather than the code under test. */
 const topic0 = (signature: string) =>
@@ -269,6 +261,21 @@ describe("records what the accumulator vouches for", () => {
     expect((await recordedSince(logs[0]!.record.l2_block)).map((r) => r.electionId)).toEqual([
       hex(id),
     ]);
+  });
+
+  test("a definition whose profile 2.3 fails is registered but not stored", async () => {
+    const d = deployment();
+    const pins = typical.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 1 } : p,
+    );
+    const failing = definition({ profile: { ...typical.profile, pins } });
+    const id = decodeElectionDefinition(failing).election_id;
+    const logs = logsOf(d, [registered(failing, 1n), registered(definition(), 2n)]);
+    expect(await syncRegistrations(app, d, logs, provenAll(d, logs))).toEqual({
+      recorded: 2,
+      unstored: [{ electionId: id, code: "profile" }],
+    });
+    expect(await readDefinition(app, id)).toBeUndefined();
   });
 
   test("across runs at rising finalized blocks, every registration lands once, in order", async () => {

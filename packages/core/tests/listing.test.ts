@@ -1,4 +1,4 @@
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
@@ -13,25 +13,13 @@ import {
   RESTORE_REASONS,
   storeDefinition,
 } from "../src/index.ts";
-import { addModerators, type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 
 // Discovery (src/listing.ts; docs/moderation-policy.md, Actions; T-68): the
 // listing holds every stored poll whose moderation state is `visible`, in
 // order of election ID, and a cursor visits each once.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

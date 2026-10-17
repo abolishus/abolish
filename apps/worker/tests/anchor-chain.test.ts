@@ -208,7 +208,7 @@ function adapter(
 
 /** An election served by `anchor`, with entries in periods 0 and 1. */
 async function board(anchor: Address): Promise<Uint8Array> {
-  const id = await newElection(app, 1, bytes(anchor));
+  const id = await newElection(app, 5, bytes(anchor));
   await appendEntry(app, id, 0, ballot(0));
   await appendEntry(app, id, 1, ballot(1));
   await appendEntry(app, id, 1, ballot(2));

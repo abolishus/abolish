@@ -111,7 +111,7 @@ test("schedules the anchoring run, which anchors every ended period at start", a
 });
 
 test("logs an election naming another anchor, and fails nothing for it", async () => {
-  const other = await newElection(app, 1, new Uint8Array(20).fill(9));
+  const other = await newElection(app, 5, new Uint8Array(20).fill(9));
   await appendEntry(app, other, 0, ballot(2));
   await anchors.add("boardAnchor", {});
   expect(await outcome()).toEqual([

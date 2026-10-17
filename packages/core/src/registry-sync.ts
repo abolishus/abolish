@@ -81,7 +81,7 @@ export interface RegistrySyncReport {
   readonly recorded: number;
   /**
    * Registrations recorded whose definition isn't stored: `storeDefinition`
-   * refuses it (a later definition version, or one 2.1 fails), though the
+   * refuses it (a later definition version, or one 2.1 or 2.3 fails), though the
    * registry accepted it, so it still owns its codes.
    */
   readonly unstored: readonly {

@@ -1,7 +1,7 @@
 // Storing and reading election definitions (docs/spec/election-definition.md).
 // A definition is decoded and checked by @abolishus/crypto before it is
 // stored, so the server never serves bytes the verifier would reject on
-// decoding or well-formedness. Its registration on L2 is what makes it the
+// decoding, well-formedness or 2.3's profile combination. Its registration on L2 is what makes it the
 // election's definition: the API is never a source of truth, and every caller
 // compares the hash of what it is served with the registry (T-34).
 
@@ -11,6 +11,8 @@ import {
   electionDefinitionHash,
   electionDefinitionRule,
   type ElectionDefinitionRule,
+  profileCombinationRule,
+  type ProfileCombinationRule,
 } from "@abolishus/crypto";
 import { eq, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -23,6 +25,12 @@ export type DefinitionErrorCode =
   | "decode"
   /** The definition decodes but breaks a well-formedness rule (the rule is the cause). */
   | "ill-formed"
+  /**
+   * The definition is well formed but its pins fail 2.3's profile
+   * combination, or name versions this release can't read (the rule is the
+   * cause).
+   */
+  | "profile"
   /** The election already has a different definition: the registry is write-once. */
   | "conflict";
 
@@ -31,7 +39,7 @@ export class DefinitionError extends Error {
   readonly code: DefinitionErrorCode;
   constructor(
     code: DefinitionErrorCode,
-    options?: { cause?: DecodeError | ElectionDefinitionRule },
+    options?: { cause?: DecodeError | ElectionDefinitionRule | ProfileCombinationRule },
   ) {
     super(`election definition refused: ${code}`, options);
     this.code = code;
@@ -48,7 +56,12 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 
 /**
  * Stores an election definition under the `election_id` it carries, after
- * strict decoding and the well-formedness rules. Storing the same bytes again
+ * strict decoding, the well-formedness rules and 2.3's profile combination.
+ * A profile 2.3 fails is refused: no ballot cast under it can be verified,
+ * and the client refuses it, so the server never serves it as an election
+ * (T-34, T-42). So is one that is only unsupported here (a board-entry,
+ * ballot, opening or contract-event version this release doesn't read): the
+ * board store and admission can't read its records either (T-36). Storing the same bytes again
  * is a no-op; different bytes for a stored election are a `conflict`. The
  * caller is responsible for having read the definition from the registry in
  * a finalized L2 block (P3-5 indexes it): the row is permanent, and this
@@ -69,6 +82,8 @@ export async function storeDefinition(
   }
   const rule = electionDefinitionRule(decoded);
   if (rule !== undefined) throw new DefinitionError("ill-formed", { cause: rule });
+  const profile = profileCombinationRule(decoded);
+  if (profile !== undefined) throw new DefinitionError("profile", { cause: profile });
   const electionId = new Uint8Array(decoded.election_id);
   const definitionHash = electionDefinitionHash(decoded);
   const db = drizzle({ client });

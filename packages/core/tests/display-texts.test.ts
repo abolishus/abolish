@@ -1,4 +1,4 @@
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -14,7 +14,7 @@ import {
   storeDefinition,
   storeDisplayText,
 } from "../src/index.ts";
-import { addModerators, type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 
 // Display text (migrations/0011_display_texts.sql, src/display-texts.ts;
 // docs/spec/display-text.md, docs/moderation-policy.md; T-34, T-41, T-68):
@@ -36,13 +36,6 @@ interface TextVector {
 }
 const textVectors = vectors<TextVector>("display-text");
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
-const typical = decodeElectionDefinition(
-  hex(
-    vectors<{ id: string; encoding: string }>("election-definition").find(
-      (v) => v.id === "definition-typical",
-    )!.encoding,
-  ),
-);
 const goodText = textVectors.find((v) => v.id === "display-text-two-languages")!;
 
 const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));

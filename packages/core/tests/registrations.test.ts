@@ -4,7 +4,6 @@ import {
   encodeElectionDefinition,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -24,7 +23,7 @@ import {
   shortCodeOf,
   storeDefinition,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { type TestDb, testDb, typical } from "./db.ts";
 
 // Registrations and short-code lookup in Postgres
 // (migrations/0007_election_registrations.sql and src/registrations.ts;
@@ -34,18 +33,6 @@ import { type TestDb, testDb } from "./db.ts";
 // poll's code (T-49, T-53).
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

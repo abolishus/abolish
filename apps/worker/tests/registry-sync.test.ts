@@ -1,5 +1,5 @@
 import { readDefinition } from "@abolishus/core";
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { type TestDb, testDb, typical } from "@abolishus/core/test-db";
 import {
   contractEventLog,
   type ContractEventRecord,
@@ -10,7 +10,6 @@ import {
 } from "@abolishus/crypto";
 import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
 import { ACCUMULATOR_SLOT, OutputRootError } from "@abolishus/verifier";
 import {
@@ -35,18 +34,6 @@ if (!redisUrl) throw new Error("REDIS_URL is not set");
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const addr = () => bytesToHex(randomBytes(20));
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 const DEFINITION_REGISTERED = keccak256(
   stringToHex("DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)"),

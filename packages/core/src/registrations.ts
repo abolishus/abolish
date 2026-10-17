@@ -55,7 +55,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /**
  * Records a `DefinitionRegistered` event, whether or not its definition is
  * stored here: a definition `storeDefinition` refuses still owns its codes
- * (verifier 2.1 fails it; the registry accepted it), or our codes would differ
+ * (verifier 2.1 or 2.3 fails it; the registry accepted it), or our codes would differ
  * from a mirror's. If the definition is stored, its hash must match. The
  * caller (the indexer, P3-5) takes events from finalized L2 blocks and
  * records them in chain order, outside any REPEATABLE READ or SERIALIZABLE

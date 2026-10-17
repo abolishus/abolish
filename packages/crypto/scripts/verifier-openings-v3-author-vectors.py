@@ -277,7 +277,7 @@ def main(constants, out_dir):
 
     mixed = case(
         "mixed",
-        "Definition version 6 with a 2-of-3 author panel whose seat 3 sent nothing; close falls in period 2, so s_S is at least 3. Both transcripts, the approvals record and the cell-0 ballot in segment 0 (counted whatever s_S is), the tier-2 ballot in segment 4 (counted only if s_S ≥ 4); an honest opening in segment 3 (early); in segment 5 an honest opening, one of three picks in question 1 (outside at question 1), a stray one, one failing each check over the author half (opening-shape twice, for a registered author seat's missing randomness and for no author half at all; opening-unqualified for a share hash at author seat 3; opening-vss at flat option 4 of the author half; opening-ciphertext for author seat 2's ciphertext bound to the default panel), and three that re-use a ballot's commitment under other share hashes: the segment-0 ballot's C_j (cast), its author half's E^A_{j,0} alone (cast), and the segment-4 ballot's author half (undecided); in segment 6 a byte-identical copy of the honest one (a repeat). The honest openings above the floor may still be early or late once s_S is known, so 6.2 is unverifiable.",
+        "Definition version 6 with a 2-of-3 author panel whose seat 3 sent nothing; close falls in period 2, so s_S is at least 3. Both transcripts, the approvals record and the cell-0 ballot in segment 0 (counted whatever s_S is), the tier-2 ballot in segment 4 (rejected as boarded late, 5.5, so never counted); an honest opening in segment 3 (early); in segment 5 an honest opening, one of three picks in question 1 (outside at question 1), a stray one, one failing each check over the author half (opening-shape twice, for a registered author seat's missing randomness and for no author half at all; opening-unqualified for a share hash at author seat 3; opening-vss at flat option 4 of the author half; opening-ciphertext for author seat 2's ciphertext bound to the default panel), and three that re-use a ballot's commitment under other share hashes: the segment-0 ballot's C_j (cast), its author half's E^A_{j,0} alone (cast), and the segment-4 ballot's author half (not cast: that ballot isn't admitted, and the opening is undecided until s_S is known); in segment 6 a byte-identical copy of the honest one (a repeat). The honest openings above the floor may still be early or late once s_S is known, so 6.2 is unverifiable.",
         [
             (0, runs + [approved, rec_a]),
             (3, [enc(early)]),
@@ -334,7 +334,7 @@ def main(constants, out_dir):
     )
     case(
         "author-cast-above-floor",
-        "The same opening with the tier-2 ballot in segment 4, above the floor: whether that ballot is counted needs s_S, so no break is reported and 6.2 is unverifiable.",
+        "The same opening with the tier-2 ballot in segment 4, above the floor: 5.5 rejects that ballot as boarded late, so the opening re-uses no admitted ballot's commitment, and it is undecided until s_S is known, so 6.2 is unverifiable.",
         [(0, runs + [approved, rec_a]), (4, [rec_t2]), (5, [enc(cast_t2_author)])],
         "unverifiable",
     )

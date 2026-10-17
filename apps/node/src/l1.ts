@@ -115,16 +115,26 @@ export function headerRlp(block: unknown): Uint8Array {
   return rlp;
 }
 
-/** The finalized L1 block's header: the one block everything is proven at. */
-export async function finalizedHeader(rpc: Rpc): Promise<L1Header> {
+/**
+ * The finalized L1 block's header, decoded and as RLP: the one block
+ * everything is proven at.
+ */
+export async function finalizedBlock(
+  rpc: Rpc,
+): Promise<{ readonly header: L1Header; readonly rlp: Uint8Array }> {
   const rlp = headerRlp(await rpc.call("eth_getBlockByNumber", ["finalized", false]));
   try {
-    return decodeHeader(rlp);
+    return { header: decodeHeader(rlp), rlp };
   } catch (e) {
     // Fewer fields than every fork has, or a number or time past 8 bytes.
     if (e instanceof RlpError) throw new RpcError("a block that isn't an L1 header");
     throw e;
   }
+}
+
+/** The finalized L1 block's header. */
+export async function finalizedHeader(rpc: Rpc): Promise<L1Header> {
+  return (await finalizedBlock(rpc)).header;
 }
 
 /** `CheckpointAnchored`'s topic (docs/spec/contracts.md, Board anchor, Events). */
@@ -250,47 +260,18 @@ export const PROOF_SLOTS_PER_REQUEST = 256;
 export const MAX_PROOF_BYTES = 256 * 1024 * 1024;
 
 /**
- * The election's checkpoints the anchor holds at the header's block, of
- * those `logged` names: the verifier's reader proves the lowest-segment word
- * and the word of every segment from the lowest anchored one to the highest
- * logged, and each non-zero word takes the logged checkpoint whose hash it
- * is. A word no logged checkpoint matches, below the lowest logged segment
- * as much as between, throws the verifier's `L1Error`
- * (`l1-checkpoint-unknown`): the node withheld its log, so this election's
- * pins wait for a node that doesn't. So does a range of more than
- * `MAX_SEGMENTS_READ` segments (`l1-range-too-long`), checked before any
- * proof is asked for. An answer that can't be read, or proofs past
- * `MAX_PROOF_BYTES`, throw `RpcError`.
+ * The account and storage proof nodes of `slots` of the anchor at the
+ * header's block, `PROOF_SLOTS_PER_REQUEST` slots a request. Nothing here is
+ * trusted: the verifier's reader walks them from the header's state root, so
+ * a changed or missing node is its `l1-proof-missing`. An answer that can't
+ * be read, or proofs past `MAX_PROOF_BYTES`, throw `RpcError`.
  */
-export async function provenCheckpoints(
+export async function proofNodes(
   rpc: Rpc,
   anchor: Uint8Array,
   header: L1Header,
-  logged: readonly Checkpoint[],
-): Promise<Checkpoint[]> {
-  const [first] = logged;
-  if (first === undefined) return [];
-  const electionId = first.election_id;
-  const segments = logged.map((c) => c.segment);
-  const high = Math.max(...segments);
-  // Where the range starts is the node's answer, used only to choose which
-  // slots to ask proofs for: the reader proves the lowest-segment word itself
-  // and starts there, so a node that names a higher one leaves a needed
-  // proof out (`l1-proof-missing`), and one that names a lower one costs
-  // proofs of empty slots.
-  const claimed = await rpc.call("eth_getStorageAt", [
-    hex(anchor),
-    hex(lowestSegmentSlot(electionId)),
-    `0x${header.number.toString(16)}`,
-  ]);
-  if (typeof claimed !== "string" || !/^0x[0-9a-fA-F]{0,64}$/u.test(claimed))
-    throw new RpcError("eth_getStorageAt: not a word");
-  const lowestPlusOne = claimed === "0x" ? 0n : BigInt(claimed);
-  let low = Math.min(...segments);
-  if (lowestPlusOne > 0n && lowestPlusOne - 1n < BigInt(low)) low = Number(lowestPlusOne - 1n);
-  if (high - low + 1 > MAX_SEGMENTS_READ) throw new L1Error("l1-range-too-long");
-  const slots = [lowestSegmentSlot(electionId)];
-  for (let s = low; s <= high; s++) slots.push(checkpointSlot(electionId, s));
+  slots: readonly Uint8Array[],
+): Promise<Uint8Array[]> {
   const nodes: Uint8Array[] = [];
   let held = 0;
   const keep = (n: unknown, what: string) => {
@@ -314,6 +295,60 @@ export async function provenCheckpoints(
       for (const n of list) keep(n, "storageProof");
     }
   }
+  return nodes;
+}
+
+/** An election's proven checkpoints, and the proof nodes they were proven from. */
+export interface Proven {
+  readonly checkpoints: Checkpoint[];
+  readonly nodes: Uint8Array[];
+}
+
+/**
+ * The election's checkpoints the anchor holds at the header's block, of
+ * those `logged` names: the verifier's reader proves the lowest-segment word
+ * and the word of every segment from the lowest anchored one to the highest
+ * logged, and each non-zero word takes the logged checkpoint whose hash it
+ * is. A word no logged checkpoint matches, below the lowest logged segment
+ * as much as between, throws the verifier's `L1Error`
+ * (`l1-checkpoint-unknown`): the node withheld its log, so this election's
+ * pins wait for a node that doesn't. So does a range of more than
+ * `MAX_SEGMENTS_READ` segments (`l1-range-too-long`), checked before any
+ * proof is asked for. An answer that can't be read, or proofs past
+ * `MAX_PROOF_BYTES`, throw `RpcError`. The proofs of `extraSlots` (a
+ * definition's receipt keys) are fetched with the others, unread here.
+ */
+export async function provenCheckpoints(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  header: L1Header,
+  logged: readonly Checkpoint[],
+  extraSlots: readonly Uint8Array[] = [],
+): Promise<Proven> {
+  const [first] = logged;
+  if (first === undefined) return { checkpoints: [], nodes: [] };
+  const electionId = first.election_id;
+  const segments = logged.map((c) => c.segment);
+  const high = Math.max(...segments);
+  // Where the range starts is the node's answer, used only to choose which
+  // slots to ask proofs for: the reader proves the lowest-segment word itself
+  // and starts there, so a node that names a higher one leaves a needed
+  // proof out (`l1-proof-missing`), and one that names a lower one costs
+  // proofs of empty slots.
+  const claimed = await rpc.call("eth_getStorageAt", [
+    hex(anchor),
+    hex(lowestSegmentSlot(electionId)),
+    `0x${header.number.toString(16)}`,
+  ]);
+  if (typeof claimed !== "string" || !/^0x[0-9a-fA-F]{0,64}$/u.test(claimed))
+    throw new RpcError("eth_getStorageAt: not a word");
+  const lowestPlusOne = claimed === "0x" ? 0n : BigInt(claimed);
+  let low = Math.min(...segments);
+  if (lowestPlusOne > 0n && lowestPlusOne - 1n < BigInt(low)) low = Number(lowestPlusOne - 1n);
+  if (high - low + 1 > MAX_SEGMENTS_READ) throw new L1Error("l1-range-too-long");
+  const slots = [lowestSegmentSlot(electionId)];
+  for (let s = low; s <= high; s++) slots.push(checkpointSlot(electionId, s));
+  const nodes = await proofNodes(rpc, anchor, header, [...slots, ...extraSlots]);
   // Pinning judges no timing: a word proven at the header's block is held by
   // the anchor, whenever it was written, and the board checks' windows are
   // the verifier's. A clock of period 1 from time 0 makes every segment up to
@@ -325,5 +360,44 @@ export async function provenCheckpoints(
     [],
     { epoch: 0n, period: 1n, deadline: 0n, lastSegment: high },
   );
-  return anchors.map((a) => a.anchor.checkpoint);
+  return { checkpoints: anchors.map((a) => a.anchor.checkpoint), nodes };
+}
+
+/** The anchoring clock the board anchor's deployment fixed (docs/spec/board.md, Timing). */
+export interface AnchorTiming {
+  readonly epoch: bigint;
+  readonly period: bigint;
+  readonly deadline: bigint;
+}
+
+/**
+ * The anchor's `epoch()`, `period()` and `deadline()` at the header's block.
+ * They are immutables in its code, which no storage proof reaches, so these
+ * are the node's answers: the verifier reports the clock as a local input
+ * until a release pins the deployment's clock ([[verifier]], Bundle).
+ */
+export async function anchorTiming(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  header: L1Header,
+): Promise<AnchorTiming> {
+  const read = async (getter: string) => {
+    const data = keccak_256(new TextEncoder().encode(`${getter}()`)).slice(0, 4);
+    const answer = await rpc.call("eth_call", [
+      { to: hex(anchor), data: hex(data) },
+      `0x${header.number.toString(16)}`,
+    ]);
+    if (typeof answer !== "string" || !/^0x[0-9a-fA-F]{64}$/u.test(answer))
+      throw new RpcError(`${getter}: not a word`);
+    const value = BigInt(answer);
+    if (value >= 2n ** 64n) throw new RpcError(`${getter}: not a u64`);
+    return value;
+  };
+  const timing = {
+    epoch: await read("epoch"),
+    period: await read("period"),
+    deadline: await read("deadline"),
+  };
+  if (timing.period === 0n) throw new RpcError("period: zero");
+  return timing;
 }

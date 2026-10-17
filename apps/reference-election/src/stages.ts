@@ -66,6 +66,6 @@ export const STAGES: readonly Stage[] = Object.freeze([
     id: 9,
     name: "Independent verification by packages/verifier from chain + IPFS alone",
     coverage: "partial",
-    note: "the verifier runs in its own process on the output bundle alone, the board read by CID from a block store or a community node's gateway; its L1 evidence is still a local file and 3.1 isn't implemented, so its verdict is unverifiable; from chain and IPFS alone is P4-6",
+    note: "the verifier runs in its own process on the output bundle alone, the board read by CID from a block store or a community node's gateway; then the community node (abolish-node verify) verifies every election the anchor names with no input from the fixture, the board from its own blocks and the definition, panel and creation from the L2's logs, and each registered election's checks must equal the verifier's on the bundle (rule-7's, never registered, is skipped as l2-definition-missing); the L1 header, the clock and the L2's logs are still unproven inputs and 3.1 isn't implemented, so the verdict is unverifiable; with our servers and domain offline is P4-6",
   },
 ]);

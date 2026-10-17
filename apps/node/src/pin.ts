@@ -131,7 +131,7 @@ export async function pinElections(header: L1Header, options: PinOptions): Promi
   for (const [election, checkpoints] of logged.elections) {
     let proven: Checkpoint[];
     try {
-      proven = await provenCheckpoints(rpc, anchor, header, checkpoints);
+      ({ checkpoints: proven } = await provenCheckpoints(rpc, anchor, header, checkpoints));
     } catch (e) {
       // One election's proofs failing (a proof missing, a rate limit, a
       // timeout) leaves the others to try.

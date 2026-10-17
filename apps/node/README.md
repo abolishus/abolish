@@ -2,15 +2,15 @@
 
 The community node anyone can run with one command: verifier, IPFS and chain reader, with no database or cache (the brief; `docs/status/P4-5.md`). Internal and source-only; AGPL-3.0-only. It checks what it holds with `@abolishus/crypto` and `@abolishus/verifier` and never reimplements a check.
 
-So far it is a mirror and a pinner: it serves every block it holds, by CID, to anyone who asks, and it fetches into that directory every board object the board anchor's checkpoints name on L1. Verifying elections, serving the ballot client and relaying receipt commitments come in later parts (`docs/status/P4-5.md`, Plan).
+So far it is a mirror, a pinner and a verifier: it serves every block it holds, by CID, to anyone who asks, it fetches into that directory every board object the board anchor's checkpoints name on L1, and it runs the verifier over every election those checkpoints name, the board read from that directory and every other input from L1 and L2, and serves the reports. Serving the ballot client and relaying receipt commitments come in later parts (`docs/status/P4-5.md`, Plan).
 
 ## Running it
 
 ```sh
-vp run --filter @abolishus/node start -- serve --blocks <directory> [--port 8080] [--host 127.0.0.1]
+vp run --filter @abolishus/node start -- serve --blocks <directory> [--reports <directory>] [--port 8080] [--host 127.0.0.1]
 ```
 
-`<directory>` holds CARv1 files (`*.car`; for example `ipfs dag export <cid> > <name>.car` from any IPFS node). The node reads every one at start (symlinks followed) and prints a line for each, with the blocks it read or why it read none (`not-a-car` or a filesystem error code; the file is skipped), then the address it listens on. It listens on loopback unless `--host` says otherwise. SIGINT or SIGTERM stops it.
+`<directory>` holds CARv1 files (`*.car`; for example `ipfs dag export <cid> > <name>.car` from any IPFS node). The node reads every one at start (symlinks followed) and prints a line for each, with the blocks it read or why it read none (`not-a-car` or a filesystem error code; the file is skipped), then the address it listens on. It listens on loopback unless `--host` says otherwise. SIGINT or SIGTERM stops it. With `--reports`, it also answers `GET /reports/<election>` (the election identifier in lowercase hex) with the report `verify` last wrote there.
 
 To pin every election's board from L1:
 
@@ -19,6 +19,14 @@ vp run --filter @abolishus/node start -- fetch --blocks <directory> --l1 <url> -
 ```
 
 `--l1` is an Ethereum node's JSON-RPC URL (your own is best: it is trusted for which block is finalized, and nothing else); `--anchor` the board anchor's address the release pins; `--gateway` up to 16 IPFS trustless gateways (`apps/node serve` is one), asked in order; `--from-block` the anchor's deployment block, so logs aren't read from genesis; `--max-bytes` the most one election's objects may take (1 GiB by default). It prints the finalized block it read, then a line for each election (its proven checkpoints, or the L1 error that kept them from being proven) and for each object (`pinned`, `held`, `unavailable`, `inconsistent` or `over-budget`), then the logs it refused and its gateway requests. It exits 0 when done, whatever it couldn't fetch, 1 if L1's block or logs couldn't be read and 2 on bad usage or a directory it can't read or write. A running `serve` reads the directory only at start: restart it to serve what `fetch` added.
+
+To verify every election from the chains and the directory:
+
+```sh
+vp run --filter @abolishus/node start -- verify --blocks <directory> --reports <directory> --l1 <url> --anchor <address> --l2 <url> --registry <address> [--from-block <n>] [--l2-from-block <n>] [--max-bytes <n>]
+```
+
+`--l2` is an L2 node's JSON-RPC URL, trusted for which logs it has up to its finalized block; `--registry` the election registry's address the release pins; `--l2-from-block` the registries' deployment block; `--max-bytes` the most one election's board copy may take (1 GiB by default). It prints the finalized L1 and L2 blocks, then a line for each election: its verdict and where its report is, or why it wasn't verified (an L2 code such as `l2-definition-missing`, `definition-anchor`, `definition-registry`, `creation-outside-clock`, `unanchored`, or an L1 or RPC error). Each verified election gets `<reports>/<election>/bundle.json`, the format-4 bundle it gathered, and `report.json`, the verifier's report on it: `abolish-verify --gateway <this node> <reports>/<election>` gives the same checks. It exits 0 when done, 1 if L1's or L2's block, L1's logs or the anchor's clock couldn't be read, and 2 on bad usage or a directory it can't read or write.
 
 ## The mirror
 
@@ -39,6 +47,15 @@ vp run --filter @abolishus/node start -- fetch --blocks <directory> --l1 <url> -
 | Reads each counted checkpoint's segment object and entry-hash list with `packages/crypto`'s bounded reader, the directory's own blocks first, then each gateway in turn, every block hashed against its CID; an object is bounded by the entries of its checkpoint's run (51 bytes plus `MAX_BOARD_PAYLOAD` each, or 32 bytes each for the list) and by a budget per election | [[board]], A copy from L1's CIDs; [[content-addressing]], Reading within a bound | T-49, T-51, T-52 |
 | Writes each object as its own canonical CARv1, `<cid>.car`, through a temporary file and a rename, and leaves a file that already holds exactly those bytes alone                                                                                                                                                                                                             | [[content-addressing]]                                                           | T-51             |
 
+## The verifier run
+
+| Duty                                                                                                                                                                                                                                                                                                                                                              | Spec                                                                    | Threats          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------- |
+| Gathers each election's inputs into a format-4 bundle the verifier parses as strictly as a file: the board copy read by CID from the directory alone, the anchors and `now` proven at the finalized L1 block (the same reader as the pinner), and every logged checkpoint for the words to match                                                                  | [[verifier]], Bundle and Board by CID                                   | T-24, T-49, T-53 |
+| Takes the definition from the election's one `DefinitionRegistered` and `f` from the period holding its one `ElectionCreated`'s L1 origin, each log passing the contract-event check under the newest version this release reads; a definition naming another anchor or registry than the node reads is skipped, never judged against evidence that isn't its own | [[contracts]], Election registry, Events and Board anchor, Verification | T-53, T-71       |
+| Takes the panel from the trustee registry's one `PanelPinned` for the definition's `panel_id`, and the clock's `epoch`, `period` and `deadline` from the anchor's getters                                                                                                                                                                                         | [[contracts]], Trustee registry; [[board]], Timing                      | T-53             |
+| Writes each bundle and the verifier's report beside each other, through a temporary file and a rename, and serves the report as JSON under `default-src 'none'; sandbox`, so nothing runs at the node's origin                                                                                                                                                    | [[verifier]], Report                                                    | T-43, T-53       |
+
 A reader trusts the node for availability only: every reader in this repository hashes each block against the CID it asked for, and authenticates what it rebuilds against L1.
 
 ## Known-weak
@@ -50,7 +67,10 @@ A reader trusts the node for availability only: every reader in this repository 
 - `fetch` runs once and stops: pinning continuously needs a scheduler, and `serve` a restart, until the one-command packaging (part 5).
 - It reads every log of the anchor from `--from-block` in one `eth_getLogs` request, which hosted nodes may refuse over a long range.
 - Each gateway named sees which CIDs, and so which elections, the node pins (T-11). The objects a node pins are public by design.
+- `verify` trusts its L2 node for the creation, the definition and the panel, and its L1 node for the anchor's clock: none is proven yet, so the verifier reports them as local inputs and the verdict stays unverifiable while they are. A lying node can leave an election unverified or change what its report finds against those inputs, never make it verify (T-53).
+- The seal `verify` gives the verifier is the highest anchored segment, since no seal is derived from a definition yet: a running election's report reads as if its board ended there.
+- The bundle is format 4: without format 5's run of L1 headers, the L1 references (5.8), selection (6.1) and the per-tier results aren't reported.
 
 ## Tests
 
-`vp run --filter @abolishus/node test` (`anvil` and `forge` on `PATH`, from `.github/scripts/install-toolchain.sh`): the pinner against the board anchor on Anvil, through an L1 node that lies (forged, withheld and altered logs, a wrong lowest segment, altered proof nodes, a header that doesn't hash to its block) and gateways that withhold or alter blocks; the log decoder (property tests over every checkpoint and every nibble changed); the JSON-RPC client; the CID parser (property tests over every layout CID and arbitrary text), the gateway over loopback (every block of a multi-block object, rebuilt by `readObjectAsync` over HTTP; random sets of objects across files; a corrupt block never served; every refusal) and the command line.
+`vp run --filter @abolishus/node test` (`anvil` and `forge` on `PATH`, from `.github/scripts/install-toolchain.sh`): the pinner against the board anchor on Anvil, through an L1 node that lies (forged, withheld and altered logs, a wrong lowest segment, altered proof nodes, a header that doesn't hash to its block) and gateways that withhold or alter blocks; the verifier run against the same anchor and a scripted L2 node (every input it gathers checked against values computed in the test from the vectors' event tables, the report equal to the verifier's own on the bundle it wrote, and each election it can't gather inputs for skipped with its code while the others are verified), the L2 reader (property tests over arbitrary node answers), the reports served by `serve --reports`; the log decoder (property tests over every checkpoint and every nibble changed); the JSON-RPC client; the CID parser (property tests over every layout CID and arbitrary text), the gateway over loopback (every block of a multi-block object, rebuilt by `readObjectAsync` over HTTP; random sets of objects across files; a corrupt block never served; every refusal) and the command line.

@@ -24,6 +24,8 @@
 // and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's
 // logs and the board copy fetched by the CIDs they name, from a block store
 // exported from the node or from the node's gateway (stage 8's board, P4-3).
+// The node then verifies every election itself (`abolish-node verify`), from
+// its blocks and the two chains alone, and must find what the verifier found.
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +46,7 @@ import {
   receiptKeysCastCheck,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { type Rpc, startAnvil } from "./anvil.ts";
+import { type Anvil, startAnvil } from "./anvil.ts";
 import {
   castingFor,
   castQuestions,
@@ -89,10 +91,10 @@ import {
   registerCeremony,
   registerDefinition,
 } from "./l2.ts";
-import { startNode } from "./node.ts";
+import { nodeVerify, startNode } from "./node.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import { STAGES } from "./stages.ts";
-import { runVerifier } from "./verify.ts";
+import { runVerifier, type VerifierRun } from "./verify.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const OUT = join(ROOT, "reference-election-output");
@@ -213,7 +215,7 @@ function verify(
   return judge(run);
 }
 
-async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> {
+async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<void> {
   const genesis = await anvil.call<{ timestamp: string }>("eth_getBlockByNumber", [
     "latest",
     false,
@@ -575,6 +577,56 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
   } finally {
     await node.stop();
   }
+
+  // Stage 9 by the community node (P4-5 part 3): `abolish-node verify` over
+  // the blocks it mirrors, every other input read from the two chains, none
+  // from the fixture. Each registered election's checks must be the
+  // verifier's own on the bundle above; rule-7's definition was never
+  // registered, so the node finds none to verify it under.
+  await l2Anvil.call("anvil_mine", ["0x46"]); // so every registration is final
+  const reports = join(OUT, "node", "reports");
+  const verified = await nodeVerify({
+    blocks: mirror,
+    reports,
+    l1: anvil.url,
+    anchor: `0x${hex(anchor.address)}`,
+    l2: l2Anvil.url,
+    registry: `0x${hex(l2.electionRegistry)}`,
+  });
+  writeFileSync(
+    join(OUT, "node", "verify.jsonl"),
+    verified.lines.map((l) => `${JSON.stringify(l)}\n`).join(""),
+  );
+  if (verified.code !== 0) failures.push(`abolish-node verify exited ${verified.code}`);
+  for (const e of elections) {
+    const id = hex(e.definition.value.election_id);
+    const line = verified.lines.find((l) => l["election"] === id);
+    if (e.name === "rule-7") {
+      if (line?.["error"] !== "l2-definition-missing")
+        failures.push(`node (rule-7): expected l2-definition-missing, got ${JSON.stringify(line)}`);
+      continue;
+    }
+    if (line?.["report"] === undefined) {
+      failures.push(`node (${e.name}): no report: ${JSON.stringify(line)}`);
+      continue;
+    }
+    const ours = JSON.parse(
+      readFileSync(join(reports, id, "report.json"), "utf8"),
+    ) as VerifierRun["report"];
+    const theirs = JSON.parse(
+      readFileSync(join(OUT, e.name, "bundle-report.json"), "utf8"),
+    ) as VerifierRun["report"];
+    if (
+      ours.verdict !== theirs.verdict ||
+      JSON.stringify(ours.checks) !== JSON.stringify(theirs.checks)
+    )
+      failures.push(
+        `node (${e.name}): its report's checks differ from the verifier's on the bundle`,
+      );
+  }
+  log(
+    `stage 9 (node): abolish-node verify reported ${verified.lines.filter((l) => "report" in l).length} elections from L1, L2 and its blocks (${reports})`,
+  );
 }
 
 async function main(): Promise<number> {

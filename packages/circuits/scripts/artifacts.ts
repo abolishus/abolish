@@ -25,9 +25,12 @@ export function writeArtifacts(out: string): void {
   try {
     for (const circuit of CIRCUITS) {
       execFileSync("nargo", ["compile", "--package", circuit], { cwd: root, stdio: "pipe" });
-      const compiled = JSON.parse(
-        readFileSync(join(root, "target", `${circuit}.json`), "utf8"),
-      ) as Record<string, unknown>;
+      // nargo has no output option; its file is removed so the build leaves
+      // only artifacts/ behind (repro-build hashes every untracked file, and
+      // this one holds absolute paths).
+      const target = join(root, "target", `${circuit}.json`);
+      const compiled = JSON.parse(readFileSync(target, "utf8")) as Record<string, unknown>;
+      rmSync(target);
       // debug_symbols and file_map carry the sources' absolute paths; proving
       // needs only the bytecode and the ABI.
       const { noir_version, hash, abi, bytecode } = compiled;

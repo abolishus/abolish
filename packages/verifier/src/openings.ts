@@ -80,7 +80,7 @@ export interface OpeningReport {
   readonly votes?: readonly string[];
   /** `opening-vote-outside`: no valid ballot could carry the vote; the client's evidence, no one's on the board. */
   readonly voteOutside?: true;
-  /** Under opening version 2, with `voteOutside`: the first question whose votes are outside its rules. */
+  /** Under opening versions 2 and 3, with `voteOutside`: the first question whose votes are outside its rules. */
   readonly question?: number;
   /** The publication rules it is known to break, in Publication's order. */
   readonly breaks: readonly OpeningBreak[];
@@ -322,6 +322,8 @@ export function openingChecks(
 
 // A version-3 opening is compared with both halves of a version-4 core, and
 // only those: each comparison throws on the other version's (T-14, T-47).
+// Unreachable from a board: 6.2 runs only where the profile pins ballot
+// version 4 beside opening version 3, or another version beside both.
 function opens(opened: OpenedCommitments | OpenedCommitmentsV3, core: AdmittedCore["core"]) {
   if (!("hasHalf" in opened)) return opensBallotCommitment(opened, core);
   if (!("authorVss" in core))

@@ -171,6 +171,13 @@ export const boardAbi = [
   {
     type: "function",
     inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitAvailabilityRecord",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
     name: "submitBallot",
     outputs: [],
     stateMutability: "nonpayable",
@@ -246,6 +253,36 @@ export const boardAbi = [
     name: "trusteeRegistry",
     outputs: [{ name: "", internalType: "contract IBoardTrustees", type: "address" }],
     stateMutability: "view",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "seat", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "AvailabilityAttestationSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "seat", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "AvailabilityComplaintSubmitted",
   },
   {
     type: "event",
@@ -420,6 +457,29 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "ShareReceiptSubmitted",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum ElectionDefinitionLib.DecodeError",
+        type: "uint8",
+      },
+      { name: "offset", internalType: "uint256", type: "uint256" },
+    ],
+    name: "AvailabilityMalformed",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum AvailabilityCheckLib.Code",
+        type: "uint8",
+      },
+    ],
+    name: "AvailabilityRefused",
   },
   {
     type: "error",

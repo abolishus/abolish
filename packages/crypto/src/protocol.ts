@@ -322,9 +322,9 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]
 // batches' and the obligation root's) and the group registry's Tier 1
 // addition, which lands in the sequence every election shares, so 2.3 fails
 // a profile pinning version 1 to 5 ([[close]], Version; [[contracts]],
-// Contract-event record; T-35, T-50, T-25, T-53). The codec reads version 7
-// too, which 2.3 leaves unverifiable until P3-2 part 5b-2 makes it the
-// version every profile pins.
+// Contract-event record; T-35, T-50, T-25, T-53). The codec reads versions 7
+// and 8 too, which 2.3 leaves unverifiable until P3-2 part 5b-2 and P4-3
+// part 2c-3 make each in turn the version every profile pins.
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5, 6]);
 const EVENT_VERSION = 6;
 

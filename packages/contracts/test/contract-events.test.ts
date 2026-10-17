@@ -10,14 +10,16 @@
 // contract-event-v4.json (version 4, with the two batches'),
 // contract-event-v5.json (version 5, with the obligation root's),
 // contract-event-v6.json (version 6, with the group registry's Tier 1
-// addition) and contract-event-v7.json (version 7, with its two self-paid
-// events), written by independent generators. The board declares version
-// 5's nine, so only versions 5 to 7 are compared with it, and the group
-// registry declares version 7's seven, so only version 7 is compared with
-// it: no board with the root call may be deployed beside a registry that
-// serves a profile pinning versions 1 to 4, and no group registry with the
-// self-paid calls beside one that serves a profile pinning versions 1 to 6
-// (contracts.md, Contract-event record, Event tables (versions 5 to 7)).
+// addition), contract-event-v7.json (version 7, with its two self-paid
+// events) and contract-event-v8.json (version 8, with the board's two
+// availability events), written by independent generators. The board
+// declares version 8's eleven, so only version 8 is compared with it, and the
+// group registry declares version 7's seven, so only versions 7 and 8 are
+// compared with it: no board with the availability calls may be deployed
+// beside a registry that serves a profile pinning versions 1 to 7, and no
+// group registry with the self-paid calls beside one that serves a profile
+// pinning versions 1 to 6 (contracts.md, Contract-event record, Event tables
+// (versions 7 and 8)).
 
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -61,17 +63,21 @@ const groupRegistry: readonly [string, readonly AbiItem[]] = ["group-registry", 
 const board: readonly [string, readonly AbiItem[]] = ["board", boardAbi];
 
 // Version 1's tables name no board event; version 2's name four of its
-// nine, version 3's six and version 4's eight. Versions 1 to 5 name four of
-// the group registry's seven events, and version 6 five.
+// eleven, version 3's six, version 4's eight and versions 5 to 7 nine.
+// Versions 1 to 5 name four of the group registry's seven events, and
+// version 6 five.
 const cases = [
   ...registries.map(([role, abi]) => ["contract-event.json", role, abi] as const),
   ...registries.map(([role, abi]) => ["contract-event-v2.json", role, abi] as const),
   ...registries.map(([role, abi]) => ["contract-event-v3.json", role, abi] as const),
   ...registries.map(([role, abi]) => ["contract-event-v4.json", role, abi] as const),
-  ...[...registries, board].map(([role, abi]) => ["contract-event-v5.json", role, abi] as const),
-  ...[...registries, board].map(([role, abi]) => ["contract-event-v6.json", role, abi] as const),
-  ...[...registries, groupRegistry, board].map(
+  ...registries.map(([role, abi]) => ["contract-event-v5.json", role, abi] as const),
+  ...registries.map(([role, abi]) => ["contract-event-v6.json", role, abi] as const),
+  ...[...registries, groupRegistry].map(
     ([role, abi]) => ["contract-event-v7.json", role, abi] as const,
+  ),
+  ...[...registries, groupRegistry, board].map(
+    ([role, abi]) => ["contract-event-v8.json", role, abi] as const,
   ),
 ];
 

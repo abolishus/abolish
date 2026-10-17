@@ -25,9 +25,11 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json (version 1) to contract-event-v7.json
-// (version 6, with its own strict Tier 1 addition decoder, and version 7, with
-// its own checks of the self-paid record) come from independent
+// docs/spec/vectors/contract-event.json (version 1) to contract-event-v8.json
+// (version 6, with its own strict Tier 1 addition decoder, version 7, with
+// its own checks of the self-paid record, and version 8, with
+// scripts/availability-vectors.py's decoding of the availability records)
+// come from independent
 // Python implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
 // SEC 1 decompression and accumulator, scripts/contract-event-v2-vectors.py,
@@ -96,6 +98,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   5: load("contract-event-v5.json"),
   6: load("contract-event-v6.json"),
   7: load("contract-event-v7.json"),
+  8: load("contract-event-v8.json"),
 };
 const vectors = FILES[1];
 
@@ -200,6 +203,8 @@ function project(e: ContractEvent): unknown {
     case "ShareReceiptBatchSubmitted":
     case "ShareComplaintBatchSubmitted":
     case "ObligationRootSubmitted":
+    case "AvailabilityAttestationSubmitted":
+    case "AvailabilityComplaintSubmitted":
       return {
         event: e.event,
         definitionHash: bytesToHex(e.definitionHash),
@@ -345,6 +350,8 @@ function reencode(
     case "ShareReceiptBatchSubmitted":
     case "ShareComplaintBatchSubmitted":
     case "ObligationRootSubmitted":
+    case "AvailabilityAttestationSubmitted":
+    case "AvailabilityComplaintSubmitted":
       return {
         topics: [sig(e.event), e.definitionHash, uintWord(e.seat)],
         data: dyn([], tail(e.record)),
@@ -379,6 +386,8 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ShareReceiptBatchSubmitted: "board",
   ShareComplaintBatchSubmitted: "board",
   ObligationRootSubmitted: "board",
+  AvailabilityAttestationSubmitted: "board",
+  AvailabilityComplaintSubmitted: "board",
   Tier1MemberAdded: "group-registry",
   SelfPaidGroupCreated: "group-registry",
   SelfPaidMemberAdded: "group-registry",
@@ -392,6 +401,7 @@ describe.each([
   [5, "contract-event-v5.json"],
   [6, "contract-event-v6.json"],
   [7, "contract-event-v7.json"],
+  [8, "contract-event-v8.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -548,7 +558,7 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test.each([1, 2, 3, 4, 5, 7] as const)(
+  test.each([1, 2, 3, 4, 5, 7, 8] as const)(
     "version %i: every passing record's topics and data are those rebuilt from its decoded event",
     (version) => {
       const contracts = contractsOf(FILES[version]);
@@ -832,6 +842,58 @@ describe("contract-event version 7 against version 6", () => {
     for (const v of selfPaid) {
       const record = { ...recordOf(v.fields), contract: v6.groupRegistry };
       expect(checkContractEvent(record, v6, 6)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+});
+
+describe("contract-event version 8 against version 7", () => {
+  const v8 = contractsOf(FILES[8]);
+
+  // Version 8 keeps every row of version 7 unchanged, and adds only the
+  // board's two availability events.
+  test("every version-7 vector has the same verdict under version 8", () => {
+    const all = [...FILES[7].records, ...FILES[7].eventFailures];
+    expect(all.length).toBeGreaterThan(30);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 7, 8) };
+      const result = checkContractEvent(record, v8, 8);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  test("version 7 names no availability event, so it refuses each as unknown-event", () => {
+    const v7 = contractsOf(FILES[7]);
+    const added = FILES[8].records.filter((r) =>
+      ["AvailabilityAttestationSubmitted", "AvailabilityComplaintSubmitted"].includes(
+        (r.event as { event?: string }).event ?? "",
+      ),
+    );
+    expect(added.map((r) => r.id)).toEqual(
+      (FILES[8] as Vectors & { unknownUnderVersion7: string[] }).unknownUnderVersion7,
+    );
+    expect(added.length).toBe(13);
+    for (const v of added) {
+      const record = { ...recordOf(v.fields), contract: v7.board };
+      expect(checkContractEvent(record, v7, 7)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+
+  // Each event carries only its own record type, signed or not: the event
+  // check decodes, never verifies (Event tables (version 8)).
+  test("every availability record of availability.json passes in its own event only", () => {
+    const { records } = load("availability.json") as unknown as {
+      readonly records: readonly { readonly id: string; readonly kind: string }[];
+    };
+    for (const { id, kind } of records) {
+      const v = FILES[8].records.find((r) => r.id === `availability-${id}`);
+      if (v === undefined) throw new Error(`no version-8 record of ${id}`);
+      expect((v.event as { event: string }).event).toBe(
+        kind === "attestation"
+          ? "AvailabilityAttestationSubmitted"
+          : "AvailabilityComplaintSubmitted",
+      );
     }
   });
 });

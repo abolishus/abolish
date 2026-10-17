@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
+import {AvailabilityCheckLib} from "./AvailabilityCheck.sol";
 import {BallotCheckLib} from "./BallotCheck.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {CloseStatementLib} from "./CloseStatement.sol";
@@ -23,7 +24,9 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// relay only from the relay's alias, judged by the relay's stamp (ADR 0030;
 /// T-35, T-50). Each seat of the default panel may state the close here, at
 /// most twice per election, the second only with another claim, and commit
-/// one obligation root of each kind per election (T-17).
+/// one obligation root of each kind per election (T-17), and attest that
+/// the board was available to it, or complain that it wasn't, once per point
+/// and election (docs/spec/availability.md, Contract path; T-24, T-53).
 /// There is no admin, proxy, pause or upgrade path.
 contract Board is EventAccumulator {
     /// @notice A ballot record (0x0002) passed the ballot check.
@@ -73,6 +76,18 @@ contract Board is EventAccumulator {
     event CloseStatementSubmitted(
         bytes32 indexed definitionHash, uint8 indexed signer, bytes record
     );
+    /// @notice A seat's availability attestation (0x001b) passed the
+    /// availability check and filled its slot, archived under contract-event
+    /// version 8.
+    event AvailabilityAttestationSubmitted(
+        bytes32 indexed definitionHash, uint8 indexed seat, bytes record
+    );
+    /// @notice A seat's availability complaint (0x001c) passed the
+    /// availability check and filled its slot, archived under contract-event
+    /// version 8.
+    event AvailabilityComplaintSubmitted(
+        bytes32 indexed definitionHash, uint8 indexed seat, bytes record
+    );
 
     error InvalidDeployment();
     error ReceiptBatchLength(uint256 length);
@@ -106,11 +121,23 @@ contract Board is EventAccumulator {
     /// statements, `statement-limit`). Zero is an empty slot.
     mapping(bytes32 definitionHash => mapping(uint8 signer => bytes32[2])) private _claims;
 
-    /// The kinds of obligation root each seat has filled, per definition: bit
-    /// `kind` (1 for receipts, 2 for complaints) set once a root of that kind
-    /// is accepted (docs/spec/delivery.md, Obligation root, One per seat and
-    /// kind).
-    mapping(bytes32 definitionHash => mapping(uint8 seat => uint8 kinds)) private _roots;
+    /// Each seat's obligation-root slots, per definition: at `kind − 1` (1
+    /// for receipts, 2 for complaints) the record hash of the root accepted
+    /// for that kind, zero while the slot is empty (docs/spec/delivery.md,
+    /// Obligation root, One per seat and kind), which an attestation's roots
+    /// are looked up in (docs/spec/contracts.md, Board, Availability records).
+    mapping(bytes32 definitionHash => mapping(uint8 seat => bytes32[2] hashes)) private _roots;
+
+    /// The availability slots each seat has filled, per definition: bit
+    /// `4 · (panel − 1) + 2 · kind + (point − 1)`, `kind` 0 for an
+    /// attestation and 1 for a complaint, set once its record is accepted
+    /// (docs/spec/contracts.md, Board, Availability records, step 6).
+    mapping(bytes32 definitionHash => mapping(uint8 seat => uint8 slots)) private _availability;
+
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/obligation-root` (0x1a = 26),
+    /// under which a root's record hash is taken (docs/spec/delivery.md,
+    /// Leaf availability).
+    bytes internal constant DS_OBLIGATION_ROOT = "\x1aabolish/v1/obligation-root";
 
     constructor(address elections, address trustees, address relay_) {
         if (
@@ -139,8 +166,7 @@ contract Board is EventAccumulator {
         if (block.timestamp < a.opensAt || block.timestamp > a.closesAt) {
             revert BallotWindow(block.timestamp, a.opensAt, a.closesAt);
         }
-        _accepted[key] = true;
-        _log3(BallotSubmitted.selector, a.definitionHash, a.ballotHash, abi.encode(record));
+        _emit(BallotSubmitted.selector, key, a.definitionHash, a.ballotHash, record);
     }
 
     /// @notice A ballot forced through the L1 relay: the deposit the relay
@@ -201,12 +227,12 @@ contract Board is EventAccumulator {
             revert CloseStatementLib.StatementRefused(CloseStatementLib.Code.StatementLimit);
         }
         claims[claims[0] == 0 ? 0 : 1] = a.claim;
-        _accepted[key] = true;
-        _log3(
+        _emit(
             CloseStatementSubmitted.selector,
+            key,
             a.definitionHash,
             bytes32(uint256(a.signer)),
-            abi.encode(record)
+            record
         );
     }
 
@@ -226,8 +252,7 @@ contract Board is EventAccumulator {
             if (_accepted[key]) continue;
             (bytes32 definitionHash, bytes32 ballotHash) =
                 DeliveryCheckLib.checkReceipt(r, i, electionRegistry, trusteeRegistry);
-            _accepted[key] = true;
-            _log3(ShareReceiptSubmitted.selector, definitionHash, ballotHash, abi.encode(r));
+            _emit(ShareReceiptSubmitted.selector, key, definitionHash, ballotHash, r);
         }
     }
 
@@ -242,12 +267,8 @@ contract Board is EventAccumulator {
         if (_accepted[key]) return;
         (bytes32 definitionHash, uint8 seat) =
             DeliveryCheckLib.checkReceiptBatch(record, electionRegistry, trusteeRegistry);
-        _accepted[key] = true;
-        _log3(
-            ShareReceiptBatchSubmitted.selector,
-            definitionHash,
-            bytes32(uint256(seat)),
-            abi.encode(record)
+        _emit(
+            ShareReceiptBatchSubmitted.selector, key, definitionHash, bytes32(uint256(seat)), record
         );
     }
 
@@ -262,12 +283,12 @@ contract Board is EventAccumulator {
         if (_accepted[key]) return;
         (bytes32 definitionHash, uint8 seat) =
             DeliveryCheckLib.checkComplaintBatch(record, electionRegistry, trusteeRegistry);
-        _accepted[key] = true;
-        _log3(
+        _emit(
             ShareComplaintBatchSubmitted.selector,
+            key,
             definitionHash,
             bytes32(uint256(seat)),
-            abi.encode(record)
+            record
         );
     }
 
@@ -286,17 +307,51 @@ contract Board is EventAccumulator {
         if (_accepted[key]) return;
         (bytes32 definitionHash, uint8 seat, uint8 kind) =
             DeliveryCheckLib.checkObligationRoot(record, electionRegistry, trusteeRegistry);
-        uint8 filled = _roots[definitionHash][seat];
-        if (filled & kind != 0) {
+        bytes32[2] storage slots = _roots[definitionHash][seat];
+        if (slots[kind - 1] != 0) {
             revert DeliveryCheckLib.DeliveryRefused(0, DeliveryCheckLib.Code.RootRepeat);
         }
-        _roots[definitionHash][seat] = filled | kind;
-        _accepted[key] = true;
-        _log3(
-            ObligationRootSubmitted.selector,
-            definitionHash,
-            bytes32(uint256(seat)),
-            abi.encode(record)
+        slots[kind - 1] = sha256(bytes.concat(DS_OBLIGATION_ROOT, record));
+        _emit(ObligationRootSubmitted.selector, key, definitionHash, bytes32(uint256(seat)), record);
+    }
+
+    /// @notice Submits a seat's availability attestation or complaint
+    /// (docs/spec/contracts.md, Board, Availability records): its statement
+    /// that it held the ballot extent or the counted extent by its deadline,
+    /// naming, at the counted extent, roots the board accepted for the
+    /// election, or its signed word that it couldn't fetch it. The first of
+    /// each type that passes fills its seat's slot for the point, so only the
+    /// seat's own signature fills it and a seat archives at most four records
+    /// per election (T-17, T-52). A byte-identical repeat is a no-op, so a seat
+    /// resends until its record is recorded (docs/spec/availability.md,
+    /// Windows).
+    function submitAvailabilityRecord(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        bytes32 key = keccak256(record);
+        if (_accepted[key]) return;
+        (AvailabilityCheckLib.Accepted memory a, uint256 kind, uint256 count) =
+            AvailabilityCheckLib.check(record, electionRegistry, trusteeRegistry);
+        if (count != 0) _requireRoots(record, a, count);
+        // `availability-repeat`: one slot per type, panel, seat and point,
+        // `panel` and `point` each 1 or 2, `kind` 0 or 1.
+        uint8 bit;
+        unchecked {
+            bit = uint8(1 << (4 * (a.panel - 1) + 2 * kind + (a.point - 1)));
+        }
+        uint8 filled = _availability[a.definitionHash][a.seat];
+        if (filled & bit != 0) {
+            revert AvailabilityCheckLib.AvailabilityRefused(AvailabilityCheckLib.Code
+                .AvailabilityRepeat);
+        }
+        _availability[a.definitionHash][a.seat] = filled | bit;
+        _emit(
+            kind == 0
+                ? AvailabilityAttestationSubmitted.selector
+                : AvailabilityComplaintSubmitted.selector,
+            key,
+            a.definitionHash,
+            bytes32(uint256(a.seat)),
+            record
         );
     }
 
@@ -311,8 +366,7 @@ contract Board is EventAccumulator {
         (bytes32 definitionHash, bytes32 ballotHash) = DeliveryCheckLib.checkPosting(
             posting, ballot, electionRegistry, trusteeRegistry, _qualified(ballot)
         );
-        _accepted[key] = true;
-        _log3(SharePosted.selector, definitionHash, ballotHash, abi.encode(posting));
+        _emit(SharePosted.selector, key, definitionHash, ballotHash, posting);
     }
 
     /// @notice Submits a share complaint.
@@ -322,8 +376,50 @@ contract Board is EventAccumulator {
         if (_accepted[key]) return;
         (bytes32 definitionHash, bytes32 ballotHash) =
             DeliveryCheckLib.checkComplaint(record, 0, electionRegistry, trusteeRegistry);
+        _emit(ShareComplaintSubmitted.selector, key, definitionHash, ballotHash, record);
+    }
+
+    /// `availability-root`: every root an attestation names is the record
+    /// hash of an obligation root the board accepted for its definition, as
+    /// the root slots of the key set's seats hold them, so the list carries no
+    /// byte the seat chooses beyond which roots it names (T-17).
+    function _requireRoots(
+        bytes calldata record,
+        AvailabilityCheckLib.Accepted memory a,
+        uint256 count
+    ) private view {
+        uint256 seats = a.seats;
+        // The library read every root inside the record, and a seat is a
+        // `uint8`: nothing here overflows.
+        unchecked {
+            for (uint256 i; i < count; i++) {
+                bytes32 root;
+                uint256 at = AvailabilityCheckLib.ROOTS_AT + 32 * i;
+                assembly ("memory-safe") {
+                    root := calldataload(add(record.offset, at))
+                }
+                // An empty slot is zero, which no root's hash is.
+                bool found;
+                for (uint256 seat = 1; root != 0 && !found && seats >> seat != 0; seat++) {
+                    if ((seats >> seat) & 1 == 0) continue;
+                    bytes32[2] storage slots = _roots[a.definitionHash][uint8(seat)];
+                    found = slots[0] == root || slots[1] == root;
+                }
+                if (!found) {
+                    revert AvailabilityCheckLib.AvailabilityRefused(AvailabilityCheckLib.Code
+                        .AvailabilityRoot);
+                }
+            }
+        }
+    }
+
+    /// Remembers an accepted record by `key` and emits it whole, ABI-encoded,
+    /// as the event `selector` with topics `t1` and `t2`.
+    function _emit(bytes32 selector, bytes32 key, bytes32 t1, bytes32 t2, bytes calldata record)
+        private
+    {
         _accepted[key] = true;
-        _log3(ShareComplaintSubmitted.selector, definitionHash, ballotHash, abi.encode(record));
+        _log3(selector, t1, t2, abi.encode(record));
     }
 
     /// The seats of the key set the trustee registry recorded for the

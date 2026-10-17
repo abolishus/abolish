@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 7
+// The contract-event record, record type 0x0008 versions 1 to 8
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -9,7 +9,9 @@
 // T-35), version 4 the board's share-receipt and share-complaint batch events
 // (T-25, P1-12d, P1-12e), version 5 its obligation-root event (T-25,
 // T-52, P1-12f), version 6 the group registry's Tier 1 addition event
-// (T-53, P3-3), and version 7 its two self-paid events (T-25, T-53, P3-2).
+// (T-53, P3-3), version 7 its two self-paid events (T-25, T-53, P3-2), and
+// version 8 the board's availability attestation and complaint events (T-24,
+// T-53, P4-3).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -21,6 +23,11 @@
 // (T-71).
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import {
+  decodeAvailabilityAttestation,
+  decodeAvailabilityComplaint,
+  MAX_ATTESTED_ROOTS,
+} from "./availability.ts";
 import {
   bytesFixed,
   type CodecValue,
@@ -80,7 +87,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 7 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 8 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -91,6 +98,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   5: contractEventV1,
   6: contractEventV1,
   7: contractEventV1,
+  8: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -98,7 +106,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -275,6 +283,13 @@ export type ContractEvent =
       /** The self-paid record, exactly 40 bytes. */
       readonly record: Uint8Array;
       readonly commitment: bigint;
+    }
+  | {
+      readonly event: "AvailabilityAttestationSubmitted" | "AvailabilityComplaintSubmitted";
+      readonly definitionHash: Uint8Array;
+      readonly seat: number;
+      /** The availability attestation or complaint, which decodes strictly as version 1. */
+      readonly record: Uint8Array;
     };
 
 export type ContractEventResult =
@@ -788,6 +803,58 @@ const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
   },
 };
 
+// An availability attestation or complaint through the contract path (Board,
+// Availability records): the record whole, which decodes strictly as version
+// 1, the version contract-event version 8 fixes, with its `definition_hash`
+// and `seat` as the topics. Each event carries only its own type, so the
+// other's record fails as any other decoding does. Its panel, seat,
+// signature, roots, checkpoint and time are the availability check's.
+const ATTESTATION_LENGTH_MAX = 138 + 32 * MAX_ATTESTED_ROOTS;
+const AVAILABILITY_COMPLAINT_LENGTH = 170;
+
+function availabilityEvent(
+  event: "AvailabilityAttestationSubmitted" | "AvailabilityComplaintSubmitted",
+  max: number,
+  decodeRecord: (record: Uint8Array) => {
+    readonly definition_hash: Uint8Array;
+    readonly seat: number;
+  },
+): EventSpec {
+  return {
+    signature: `${event}(bytes32,uint8,bytes)`,
+    decode(topics, data) {
+      const [, definitionHash, seatWord] = topics;
+      const seat = seatWord && uintWord(seatWord, 8);
+      if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
+        return "event-topics";
+      const record = readAbi(data, 1, [{ at: 0, words: false, max }])?.tails[0];
+      if (record === undefined) return "event-data";
+      let decoded;
+      try {
+        decoded = decodeRecord(record);
+      } catch (e) {
+        if (e instanceof DecodeError) return "event-data";
+        throw e;
+      }
+      if (!equalBytes(decoded.definition_hash, definitionHash) || BigInt(decoded.seat) !== seat)
+        return "event-data";
+      return { event, definitionHash: definitionHash.slice(), seat: decoded.seat, record };
+    },
+  };
+}
+
+const AVAILABILITY_ATTESTATION_SUBMITTED = availabilityEvent(
+  "AvailabilityAttestationSubmitted",
+  ATTESTATION_LENGTH_MAX,
+  (r) => decodeAvailabilityAttestation(r, 1),
+);
+
+const AVAILABILITY_COMPLAINT_SUBMITTED = availabilityEvent(
+  "AvailabilityComplaintSubmitted",
+  AVAILABILITY_COMPLAINT_LENGTH,
+  (r) => decodeAvailabilityComplaint(r, 1),
+);
+
 // A Tier 1 addition (Group registry, Tier 1 additions): the record whole,
 // which decodes strictly as docs/spec/vouching.md decodes it, and no topic beyond
 // topic 0, since the group is the record's. The registry refuses every
@@ -941,10 +1008,31 @@ const TABLES: Readonly<
       OBLIGATION_ROOT_SUBMITTED,
     ],
   },
+  // Version 7's rows, with the board's two availability events added.
+  8: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [
+      ...BOARD_EVENTS,
+      RELAYED_BALLOT_SUBMITTED,
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED,
+      SHARE_COMPLAINT_BATCH_SUBMITTED,
+      OBLIGATION_ROOT_SUBMITTED,
+      AVAILABILITY_ATTESTATION_SUBMITTED,
+      AVAILABILITY_COMPLAINT_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -978,6 +1066,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   5: signaturesOf(5),
   6: signaturesOf(6),
   7: signaturesOf(7),
+  8: signaturesOf(8),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

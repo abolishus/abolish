@@ -357,6 +357,20 @@ def assemble(constants, proofs_path, out_dir):
         segments(authors(at={2: late}), defaults(skip=(0,))),
     )
     assert undecided["expected"]["7.2"]["status"] == "unverifiable" and "code" not in undecided["cells"][0]
+    # The floor's edges: an author partial opening at s_A's floor is in time
+    # whatever s_S is, one a period above it may not be.
+    edge = case(
+        "author-at-floor",
+        f"As author-late-undecided, but cell 2's author partial opening is boarded in segment {s_a}, s_A's floor: in time whatever s_S is, so cell 0's missing default partial opening is the default panel's tally-missing (the default panel's or the operator's).",
+        segments(authors(at={2: s_a}), defaults(skip=(0,))),
+    )
+    assert edge["expected"]["7.2"] == outcome("fail", "tally-missing", {"cell": 0, "panel": DEFAULT})
+    past = case(
+        "author-past-floor",
+        f"As author-at-floor, but cell 2's author partial opening is boarded in segment {s_a + 1}, one above s_A's floor: late if s_S is at its floor and in time otherwise, so cell 0 and 7.2 are undecided.",
+        segments(authors(at={2: s_a + 1}), defaults(skip=(0,))),
+    )
+    assert past["expected"]["7.2"] == outcome("unverifiable", "not-implemented", {"cell": 0})
     case(
         "default-missing",
         "Every author partial opening is timely, at or below s_A's floor, and cell 1 has no default partial opening: it fails tally-missing for the default panel (the default panel's or the operator's).",

@@ -286,7 +286,18 @@ export async function moderationStatus(
   electionId: Uint8Array,
 ): Promise<ModerationStatus> {
   checkElectionId(electionId);
-  const [row] = await drizzle({ client })
+  return statusOf(drizzle({ client }), electionId);
+}
+
+/**
+ * `moderationStatus` inside a transaction the caller holds, for an election
+ * ID it has already checked or read from the database.
+ */
+export async function statusOf(
+  db: Pick<ModerationTx, "select">,
+  electionId: Uint8Array,
+): Promise<ModerationStatus> {
+  const [row] = await db
     .select({
       seq: moderationActions.seq,
       action: moderationActions.action,

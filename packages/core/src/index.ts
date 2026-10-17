@@ -21,7 +21,9 @@ export {
   MAX_APPEAL_QUEUE,
   type OpenAppeal,
   type PollAppeal,
+  type PollModeration,
   readAppealQueue,
+  readPollModeration,
   retireModerator,
 } from "./appeals.ts";
 export { type FinalizedL1Source, type L1ReferenceOptions, L1References } from "./l1-references.ts";

@@ -3,7 +3,13 @@
 // account session, and the account system lives here: the API refuses every
 // account credential, so nothing that names an account reaches it (T-10,
 // ADR 0017). This transport parses, asks core and serialises; the rules are
-// packages/core's (src/poll-drafts.ts).
+// packages/core's (src/poll-drafts.ts, src/appeals.ts).
+//
+// A creator also sees their poll's moderation and appeals its newest removal
+// here (docs/moderation-policy.md, Appeals; P2-10 part 3b-2): an appeal names
+// its creator's account, so it is filed where accounts are, never through
+// the API (T-10, T-68). The answer carries the public state and decisions,
+// never a moderator.
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -13,13 +19,18 @@
 
 import {
   type AccountPoll,
+  AppealError,
+  type AppealErrorCode,
   createPollDraft,
   deletePollDraft,
+  fileAppeal,
   listAccountPolls,
   type PollDraft,
   PollDraftError,
   type PollDraftErrorCode,
+  type PollModeration,
   readAccountPoll,
+  readPollModeration,
   submitPollDraft,
   type Turnstile,
   TURNSTILE_HEADER,
@@ -36,6 +47,8 @@ export const DRAFT_ROUTES = [
   "POST /drafts/update",
   "POST /drafts/delete",
   "POST /drafts/submit",
+  "POST /drafts/moderation",
+  "POST /drafts/appeal",
 ] as const;
 
 const ROUTES: ReadonlySet<string> = new Set(DRAFT_ROUTES);
@@ -84,6 +97,8 @@ const Inputs = {
   "POST /drafts/update": z.strictObject({ id: PollId, draft: Draft }),
   "POST /drafts/delete": z.strictObject({ id: PollId }),
   "POST /drafts/submit": z.strictObject({ id: PollId }),
+  "POST /drafts/moderation": z.strictObject({ id: PollId }),
+  "POST /drafts/appeal": z.strictObject({ id: PollId }),
 } as const;
 
 const toDraft = (d: z.infer<typeof Draft>): PollDraft => ({ ...d, closesAt: BigInt(d.closesAt) });
@@ -98,6 +113,28 @@ const summary = (p: AccountPoll) => ({
   createdAt: p.createdAt.toISOString(),
   updatedAt: p.updatedAt.toISOString(),
   ...(p.submittedAt === undefined ? {} : { submittedAt: p.submittedAt.toISOString() }),
+});
+
+// Sequence numbers are Postgres `bigint`s, so decimal strings, as the API's log.
+const moderation = (m: PollModeration) => ({
+  state: m.state,
+  ...(m.latest === undefined
+    ? {}
+    : {
+        latest: {
+          seq: m.latest.seq.toString(),
+          action: m.latest.action,
+          reason: m.latest.reason,
+          decidedAt: m.latest.decidedAt.toISOString(),
+        },
+      }),
+  appealable: m.appealable,
+  appeals: m.appeals.map((a) => ({
+    decisionSeq: a.decisionSeq.toString(),
+    filedAt: a.filedAt.toISOString(),
+    ...(a.outcome === undefined ? {} : { outcome: a.outcome }),
+    ...(a.reviewedAt === undefined ? {} : { reviewedAt: a.reviewedAt.toISOString() }),
+  })),
 });
 
 const answer = (status: number, body: object) =>
@@ -115,6 +152,14 @@ const ERRORS: Record<PollDraftErrorCode, [number, string]> = {
   "too-many-today": [429, "TOO_MANY_TODAY"],
   "challenge-refused": [403, "TURNSTILE_REFUSED"],
   "challenge-unavailable": [503, "TURNSTILE_UNAVAILABLE"],
+};
+
+// `fileAppeal` and `readPollModeration` can refuse only these, given a
+// signed-in account and an ID the schema took.
+const APPEAL_ERRORS: Partial<Record<AppealErrorCode, [number, string]>> = {
+  "not-found": [404, "NOT_FOUND"],
+  "not-appealable": [409, "NOT_APPEALABLE"],
+  "already-appealed": [409, "ALREADY_APPEALED"],
 };
 
 /** The drafts handler: answers every route in `DRAFT_ROUTES` for the signed-in account. */
@@ -183,9 +228,27 @@ export function createDraftsHandler({
           });
           return answer(202, {});
         }
+        case "POST /drafts/moderation": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const m = await readPollModeration(sql, account, input.data.id);
+          if (m === undefined) return refuse(404, "NOT_FOUND");
+          return answer(200, moderation(m));
+        }
+        case "POST /drafts/appeal": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const seq = await fileAppeal(sql, account, input.data.id);
+          return answer(201, { decisionSeq: seq.toString() });
+        }
       }
       return refuse(404, "NOT_FOUND");
     } catch (e) {
+      if (e instanceof AppealError) {
+        const known = APPEAL_ERRORS[e.code];
+        if (known === undefined) throw e;
+        return refuse(known[0], known[1]);
+      }
       if (!(e instanceof PollDraftError)) throw e;
       const [status, code] = ERRORS[e.code];
       return refuse(status, code, e.problem === undefined ? {} : { problem: e.problem });

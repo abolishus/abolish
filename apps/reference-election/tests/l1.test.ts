@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import fc from "fast-check";
+import { checkpointHash } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { expect, test } from "vite-plus/test";
-import { anchorCalldata, headerRlp, word } from "../src/l1.ts";
+import { anchorCalldata, checkpointFromLog, headerRlp, type Log, word } from "../src/l1.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -80,4 +82,80 @@ test("a header that doesn't hash to the reported hash is refused", () => {
   // A field the node returns but the list doesn't know can't be dropped silently.
   const { requestsHash: _, ...pre } = GENESIS;
   expect(() => headerRlp(pre)).toThrow(/doesn't hash/);
+});
+
+// docs/spec/vectors/board.json's checkpoints, with the hash the independent
+// Python implementation published, as BoardAnchor logs them: the event's
+// topics, then `size`, `head`, `root` and both CIDs, ABI-encoded.
+const boardVectors = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
+) as {
+  readonly boards: readonly {
+    readonly checkpoints: readonly Readonly<Record<string, string>>[];
+  }[];
+};
+const topic0 = `0x${hex(
+  keccak_256(
+    new TextEncoder().encode(
+      "CheckpointAnchored(bytes32,uint32,bytes32,uint64,bytes32,bytes32,bytes,bytes)",
+    ),
+  ),
+)}`;
+const w = (n: bigint | number) => BigInt(n).toString(16).padStart(64, "0");
+function logOf(c: Readonly<Record<string, string>>): Log {
+  const bytesArg = (h: string) => `${w(h.length / 2)}${h.padEnd(128, "0")}`;
+  return {
+    topics: [
+      topic0,
+      `0x${c["electionId"]}`,
+      `0x${w(BigInt(c["segment"] as string))}`,
+      `0x${c["hash"]}`,
+    ],
+    data: `0x${w(BigInt(c["size"] as string))}${c["head"]}${c["root"]}${w(0xa0)}${w(0x100)}${bytesArg(
+      c["objectCid"] as string,
+    )}${bytesArg(c["hashesCid"] as string)}`,
+  };
+}
+const checkpoints = boardVectors.boards.flatMap((b) => b.checkpoints);
+
+test("a CheckpointAnchored log gives the checkpoint whose hash it logs", () => {
+  expect(checkpoints.length).toBeGreaterThan(0);
+  for (const c of checkpoints) {
+    const got = checkpointFromLog(logOf(c));
+    expect(hex(checkpointHash(got))).toBe(c["hash"]);
+    expect(got.segment).toBe(Number(c["segment"]));
+    expect(hex(got.object_cid)).toBe(c["objectCid"]);
+    expect(hex(got.hashes_cid)).toBe(c["hashesCid"]);
+  }
+});
+
+test("a log in any other layout, of another event or with another hash is refused", () => {
+  const c = checkpoints[0] as Readonly<Record<string, string>>;
+  const log = logOf(c);
+  fc.assert(
+    fc.property(
+      fc.nat({ max: log.data.length - 3 }),
+      fc.integer({ min: 1, max: 15 }),
+      (at, flip) => {
+        // Any nibble changed in the data changes a field, a padding, an offset or a length.
+        const i = 2 + at;
+        const nibble = (parseInt(log.data[i] as string, 16) ^ flip).toString(16);
+        const data = `${log.data.slice(0, i)}${nibble}${log.data.slice(i + 1)}`;
+        expect(() => checkpointFromLog({ ...log, data })).toThrow();
+      },
+    ),
+    { numRuns },
+  );
+  expect(() => checkpointFromLog({ ...log, data: `${log.data}00` })).toThrow();
+  expect(() => checkpointFromLog({ ...log, data: log.data.slice(0, -64) })).toThrow();
+  expect(() => checkpointFromLog({ ...log, topics: log.topics.slice(0, 3) })).toThrow();
+  expect(() =>
+    checkpointFromLog({ ...log, topics: [`0x${w(1)}`, ...log.topics.slice(1)] }),
+  ).toThrow();
+  expect(() =>
+    checkpointFromLog({
+      ...log,
+      topics: [...log.topics.slice(0, 2), `0x${w(1n << 32n)}`, ...log.topics.slice(3)],
+    }),
+  ).toThrow();
 });

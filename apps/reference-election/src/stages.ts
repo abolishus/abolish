@@ -59,13 +59,13 @@ export const STAGES: readonly Stage[] = Object.freeze([
   {
     id: 8,
     name: "Wipe Postgres and rebuild every result from chain + IPFS",
-    coverage: "not-yet",
-    note: "P2-1 (board storage), P4-3 (IPFS)",
+    coverage: "partial",
+    note: "the board only: each board's segment objects are published as blocks to a community node (apps/node serve), and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's CheckpointAnchored logs and the copy fetched by the CIDs they name, from a blocks.car exported from the node and from the node's gateway; no Postgres is wiped yet, since nothing the fixture runs writes one (P2-1, P2-4), and no result but the board is rebuilt (P1-15)",
   },
   {
     id: 9,
     name: "Independent verification by packages/verifier from chain + IPFS alone",
     coverage: "partial",
-    note: "the verifier runs in its own process on the output bundle alone; its inputs are local files and 3.1 isn't implemented, so its verdict is unverifiable; from chain and IPFS alone is P4-6",
+    note: "the verifier runs in its own process on the output bundle alone, the board read by CID from a block store or a community node's gateway; its L1 evidence is still a local file and 3.1 isn't implemented, so its verdict is unverifiable; from chain and IPFS alone is P4-6",
   },
 ]);

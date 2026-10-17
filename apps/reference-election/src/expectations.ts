@@ -13,10 +13,36 @@ export const REQUIRED_PASSES: readonly string[] = Object.freeze(["3.2", "4.1", "
 // The verifier's exit codes (packages/verifier, EXIT_CODES).
 const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
 
+/**
+ * Where the honest run's board copy must come from: by CID from the bundle's
+ * `blocks.car`, or from a gateway alone. Never `board.bin`: the board is
+ * rebuilt from the CIDs anchored on L1 (stage 8; docs/spec/verifier.md, Board
+ * by CID).
+ */
+export type CopySource = "blocks.car" | "gateway";
+
 /** Why the honest run's report isn't what the reference election requires; empty if it is. */
-export function checkExpectations(run: Pick<VerifierRun, "report" | "exitCode">): string[] {
+export function checkExpectations(
+  run: Pick<VerifierRun, "report" | "exitCode">,
+  source: CopySource,
+): string[] {
   const { report } = run;
   const problems: string[] = [];
+  const byCid = report.board?.byCid;
+  if (byCid === undefined) problems.push("the board copy must be read by CID");
+  else {
+    if (byCid.stopped !== undefined)
+      problems.push(`the copy by CID stopped short: ${JSON.stringify(byCid.stopped)}`);
+    const read =
+      source === "blocks.car"
+        ? byCid.storeBlocks !== undefined && byCid.storeBlocks > 0 && byCid.gateways === undefined
+        : byCid.storeBlocks === undefined &&
+          byCid.gateways !== undefined &&
+          byCid.gateways.blocks > 0 &&
+          byCid.gateways.blocks === byCid.gateways.requests;
+    if (!read)
+      problems.push(`the copy must be read from ${source} alone: ${JSON.stringify(byCid)}`);
+  }
   const rows = new Map(report.checks.map((c) => [c.id, c]));
   for (const id of REQUIRED_PASSES) {
     const row = rows.get(id);

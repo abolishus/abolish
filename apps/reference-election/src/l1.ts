@@ -7,7 +7,7 @@
 // anchor).
 
 import { readFileSync } from "node:fs";
-import { encodeCheckpoint, type Checkpoint } from "@abolishus/crypto";
+import { type Checkpoint, checkpointHash, encodeCheckpoint } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { Rpc } from "./anvil.ts";
@@ -209,4 +209,85 @@ export async function evidence(
   }>("eth_getProof", [hex(anchor), slots.map(hex), block.number]);
   const nodes = [...proof.accountProof, ...proof.storageProof.flatMap((p) => p.proof)];
   return { header: headerRlp(block), timestamp: BigInt(block.timestamp), nodes: nodes.map(unhex) };
+}
+
+export interface Log {
+  readonly topics: readonly string[];
+  readonly data: string;
+}
+
+const CHECKPOINT_ANCHORED = keccak_256(
+  new TextEncoder().encode(
+    "CheckpointAnchored(bytes32,uint32,bytes32,uint64,bytes32,bytes32,bytes,bytes)",
+  ),
+);
+
+/**
+ * The checkpoint a `CheckpointAnchored` log carries (docs/spec/contracts.md,
+ * Board anchor, Events): topics `election_id`, `segment` and
+ * `checkpoint_hash`, data `size`, `head`, `root` and both 36-byte CIDs in the
+ * one ABI layout the contract emits. Throws on any other layout, or if the
+ * checkpoint doesn't hash to its logged hash, so a log can't name a
+ * checkpoint other than the one whose hash the anchor stored.
+ */
+export function checkpointFromLog(log: Log): Checkpoint {
+  const [topic, electionId, segment, hash] = log.topics.map(unhex);
+  if (log.topics.length !== 4 || topic === undefined || electionId === undefined)
+    throw new Error("not a CheckpointAnchored log");
+  if (bytesToHex(topic) !== bytesToHex(CHECKPOINT_ANCHORED))
+    throw new Error("not a CheckpointAnchored log");
+  const data = unhex(log.data);
+  // Five head words, then each CID's length word and two words of bytes.
+  if (data.length !== 5 * 32 + 2 * 96)
+    throw new Error("a CheckpointAnchored log in another layout");
+  const cid = (at: number) => data.slice(at + 32, at + 32 + 36);
+  const size = BigInt(`0x${bytesToHex(data.slice(0, 32))}`);
+  if (size >= 2n ** 64n) throw new Error("a CheckpointAnchored size past a u64");
+  const expected = concatBytes(
+    word(size),
+    data.slice(32, 96),
+    word(0xa0n),
+    word(0x100n),
+    word(36n),
+    padded(cid(0xa0)),
+    word(36n),
+    padded(cid(0x100)),
+  );
+  if (bytesToHex(data) !== bytesToHex(expected))
+    throw new Error("a CheckpointAnchored log in another layout");
+  const s = BigInt(`0x${bytesToHex(segment as Uint8Array)}`);
+  if (s > 0xffffffffn) throw new Error("a CheckpointAnchored segment past a u32");
+  const checkpoint: Checkpoint = {
+    election_id: electionId,
+    segment: Number(s),
+    size,
+    head: data.slice(32, 64),
+    root: data.slice(64, 96),
+    object_cid: cid(0xa0),
+    hashes_cid: cid(0x100),
+  };
+  if (bytesToHex(checkpointHash(checkpoint)) !== bytesToHex(hash as Uint8Array))
+    throw new Error("a CheckpointAnchored log whose checkpoint doesn't hash to its hash");
+  return checkpoint;
+}
+
+/**
+ * Every checkpoint the anchor logged for `electionId`, in log order, read
+ * from L1's logs as anyone rebuilding the board would, never from what the
+ * fixture anchored.
+ */
+export async function loggedCheckpoints(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  electionId: Uint8Array,
+): Promise<Checkpoint[]> {
+  const logs = await rpc.call<Log[]>("eth_getLogs", [
+    {
+      address: hex(anchor),
+      fromBlock: "earliest",
+      toBlock: "finalized",
+      topics: [hex(CHECKPOINT_ANCHORED), hex(electionId)],
+    },
+  ]);
+  return logs.map(checkpointFromLog);
 }

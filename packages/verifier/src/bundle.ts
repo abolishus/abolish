@@ -16,6 +16,7 @@ import {
   panelId,
 } from "@abolishus/crypto";
 import { decodeHeader, type L1Evidence, type L1Header, NodePool, RlpError } from "./l1.ts";
+import type { GatewayStats } from "./gateways.ts";
 
 /**
  * Where an input came from. A local file authenticates nothing; an
@@ -42,16 +43,18 @@ export interface InputSources {
 }
 
 /**
- * How a copy read by CID from blocks.car came out (docs/spec/verifier.md,
- * Board by CID): the store's sections read as blocks and the bytes after
- * them, and where the copy stopped short of the counted checkpoints, if it
- * did. `not-reached`: the read never ran, because the board checks stop
- * before they need a copy (the definition, L1 or steps 1 and 2 of the board
- * checks), and the report says why.
+ * How a copy read by CID came out (docs/spec/verifier.md, Board by CID): for
+ * blocks.car, the store's sections read as blocks and the bytes after them;
+ * for gateways, the requests sent and the blocks they served; and where the
+ * copy stopped short of the counted checkpoints, if it did. `not-reached`:
+ * the read never ran, because the board checks stop before they need a copy
+ * (the definition, L1 or steps 1 and 2 of the board checks), and the report
+ * says why.
  */
 export interface CidRead {
-  readonly storeBlocks: number;
-  readonly storeUnreadableBytes: number;
+  readonly storeBlocks?: number;
+  readonly storeUnreadableBytes?: number;
+  readonly gateways?: GatewayStats;
   readonly stopped?:
     | { readonly checkpoint: number; readonly reason: BoardCopyStop["reason"] }
     | { readonly reason: "not-reached" };

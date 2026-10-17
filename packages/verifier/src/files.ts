@@ -1,11 +1,14 @@
 // Reads a bundle directory (docs/spec/verifier.md, Bundle): bundle.json and
-// the board copy, as board.bin or as blocks.car to read it from by CID. The
-// verifier contacts nothing: every input is a local file here.
+// the board copy, as board.bin or as blocks.car to read it from by CID. Every
+// input is a local file here; the only requests the verifier sends are for
+// blocks, to gateways its caller names, and what they answer is checked
+// against its CID (T-49, T-24).
 
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readBlockStore } from "./blocks.ts";
 import { type Bundle, BundleError, parseBundle } from "./bundle.ts";
+import type { Gateways } from "./gateways.ts";
 import { readBoardByCid } from "./verify.ts";
 
 /**
@@ -74,18 +77,27 @@ export function readBundle(dir: string): Bundle {
 }
 
 /**
- * Reads the bundle in `dir` with its board copy: board.bin as it is, or,
- * where the bundle holds blocks.car instead, a copy read by CID from its
- * blocks within `maxBytes` (docs/spec/verifier.md, Board by CID). Throws
- * `BundleError` if the bundle doesn't follow the spec.
+ * Reads the bundle in `dir` with its board copy: board.bin as it is, or a
+ * copy read by CID within `maxBytes` (docs/spec/verifier.md, Board by CID)
+ * from blocks.car where the bundle holds it instead, from `gateways`, or from
+ * both, blocks.car asked first. A bundle with neither file needs gateways.
+ * Throws `BundleError` if the bundle doesn't follow the spec, or holds
+ * board.bin while gateways are given: that copy would never be read by CID.
  */
 export async function loadBundle(
   dir: string,
   maxBytes: number = DEFAULT_MAX_BOARD_BYTES,
+  gateways?: Gateways,
 ): Promise<Bundle> {
-  if (!present(dir, "blocks.car")) return readBundle(dir);
+  const car = present(dir, "blocks.car");
+  if (!car && gateways === undefined) return readBundle(dir);
   if (present(dir, "board.bin"))
-    throw new BundleError("blocks.car: a bundle holds board.bin or blocks.car, not both");
+    throw new BundleError(
+      car
+        ? "blocks.car: a bundle holds board.bin or blocks.car, not both"
+        : "board.bin: a bundle read from gateways holds no board.bin",
+    );
   const bundle = parseBundle(json(dir), new Uint8Array());
-  return readBoardByCid(bundle, readBlockStore(read(dir, "blocks.car")), maxBytes);
+  const store = car ? readBlockStore(read(dir, "blocks.car")) : undefined;
+  return readBoardByCid(bundle, store, maxBytes, gateways);
 }

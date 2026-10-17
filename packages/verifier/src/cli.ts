@@ -8,6 +8,7 @@
 import { parseArgs } from "node:util";
 import { BundleError } from "./bundle.ts";
 import { DEFAULT_MAX_BOARD_BYTES, loadBundle } from "./files.ts";
+import { type Gateways, gatewaySource, MAX_GATEWAYS, parseGateway } from "./gateways.ts";
 import { authenticated, type Report, type Verdict, verifyBundle } from "./verify.ts";
 
 export interface CliOutput {
@@ -30,14 +31,20 @@ export const EXIT_CODES = Object.freeze({
   usage: 64,
 } as const);
 
-const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--] <bundle-directory>
+const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]... [--] <bundle-directory>
 
-Verifies one election from a bundle (bundle.json, and board.bin or blocks.car;
-see docs/spec/verifier.md, Inputs, procedure and report). Prints the JSON
-report on stdout and a summary on stderr.
+Verifies one election from a bundle (bundle.json, and board.bin, blocks.car,
+or neither with --gateway; see docs/spec/verifier.md, Inputs, procedure and
+report). Prints the JSON report on stdout and a summary on stderr.
 
---max-board-bytes caps what a board copy read by CID from blocks.car may
-hold, in bytes (default ${DEFAULT_MAX_BOARD_BYTES}); a copy past it is unverifiable.
+--max-board-bytes caps what a board copy read by CID may hold, in bytes
+(default ${DEFAULT_MAX_BOARD_BYTES}); a copy past it is unverifiable.
+
+--gateway reads the board copy's blocks by CID from an IPFS trustless
+gateway (http: or https:), after blocks.car if the bundle holds one; give it
+up to ${MAX_GATEWAYS} times, asked in order. Every block is checked against its CID,
+but each gateway sees which blocks, and so which election, you read (and,
+over http:, so does the network); prefer https:.
 
 Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected,
 64 usage (and --help). Any other code is an error of the verifier, not a
@@ -135,15 +142,17 @@ export async function runCli(args: readonly string[], out: CliOutput): Promise<n
   let positionals: string[];
   let help: boolean | undefined;
   let budget: string | undefined;
+  let gatewayArgs: string[] | undefined;
   try {
     ({
       positionals,
-      values: { help, "max-board-bytes": budget },
+      values: { help, "max-board-bytes": budget, gateway: gatewayArgs },
     } = parseArgs({
       args: [...args],
       options: {
         help: { type: "boolean", short: "h" },
         "max-board-bytes": { type: "string" },
+        gateway: { type: "string", multiple: true },
       },
       allowPositionals: true,
       strict: true,
@@ -169,9 +178,23 @@ export async function runCli(args: readonly string[], out: CliOutput): Promise<n
     out.stderr(`--max-board-bytes: expected a positive integer\n${USAGE}`);
     return EXIT_CODES.usage;
   }
+  let gateways: Gateways | undefined;
+  if (gatewayArgs !== undefined) {
+    if (gatewayArgs.length > MAX_GATEWAYS) {
+      out.stderr(`--gateway: at most ${MAX_GATEWAYS}\n${USAGE}`);
+      return EXIT_CODES.usage;
+    }
+    try {
+      gateways = gatewaySource(gatewayArgs.map(parseGateway));
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      out.stderr(`--gateway: ${printable(e.message)}\n${USAGE}`);
+      return EXIT_CODES.usage;
+    }
+  }
   let report: Report;
   try {
-    report = verifyBundle(await loadBundle(dir, maxBytes));
+    report = verifyBundle(await loadBundle(dir, maxBytes, gateways));
   } catch (e) {
     if (!(e instanceof BundleError)) throw e;
     // A rejected bundle has no report: it isn't evidence about any election.

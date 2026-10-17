@@ -251,11 +251,15 @@ describe("reading an object by its CID", () => {
       fc.property(
         objects,
         fc.array(fc.uint8Array({ maxLength: 200 }), { maxLength: 3 }),
-        (bytes, junk) => {
+        (bytes, anyJunk) => {
           const dag = dagOf(bytes);
           const good = source(dag.blocks);
-          const r = read(dag.root, bytes.length, (cid) => [...junk, ...good(cid)]);
+          const r = read(dag.root, bytes.length, (cid) => [...anyJunk, ...good(cid)]);
           expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+          // Junk byte-equal to a real block isn't junk: served for its own CID it hashes
+          // (seed 989343742: the one-byte object [0] with junk [[0]]).
+          const real = new Set(dag.blocks.map((b) => hex(b.bytes)));
+          const junk = anyJunk.filter((j) => !real.has(hex(j)));
           expect(read(dag.root, bytes.length, () => junk)).toEqual(unavailable);
           // A flipped byte in a served block is that block's failed fetch.
           const flipped = dag.blocks.map((b) => {

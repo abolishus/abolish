@@ -193,17 +193,23 @@ describe("the default panel beside an author panel", () => {
 // 2.5's `panel-kind` (docs/spec/verifier.md, Key ceremony, step 1): a poll
 // on the civic record fails under a default panel the release pins as
 // transitional, and is never failed under one it doesn't pin (T-14, T-36).
+type PollClass = (typeof POLL_CLASSES)[keyof typeof POLL_CLASSES];
 describe("panel-kind", () => {
   const id = Buffer.from(d.panel_id).toString("hex");
   const pinnedAs = (kind: PinnedPanel["kind"]): PinnedPanel[] => [{ panelId: id, kind }];
   const civic = [POLL_CLASSES.organisational, POLL_CLASSES.civicReferendum];
-  const classed = (poll_class: number, author: AuthorRun | undefined, pins: PinnedPanel[]) =>
+  const classed = (
+    poll_class: PollClass,
+    author: AuthorRun | undefined,
+    pins: PinnedPanel[],
+    copy = entries,
+  ) =>
     ceremonyChecks(
       { ...d, poll_class },
       hex(election.stubHash),
       defaultPanel,
       author,
-      entries,
+      copy,
       7,
       pins,
     );
@@ -266,6 +272,16 @@ describe("panel-kind", () => {
     expect(
       classed(POLL_CLASSES.civicReferendum, keysOnly([q1]), transitional).rows.get("2.5"),
     ).toEqual(KIND);
+    // Beside an author panel whose run and approvals hold, no key set either.
+    const beside = classed(
+      POLL_CLASSES.civicReferendum,
+      honest,
+      transitional,
+      board(defaultTranscript, honestTranscript, recordOf("all")),
+    );
+    expect(beside.rows.get("2.5")).toEqual(KIND);
+    expect(beside.rows.get("3.2")).toEqual({ status: "pass" });
+    expect(beside.registered).toBeUndefined();
     // Without the pin, the same definition fails on its shared seat.
     expect(classed(POLL_CLASSES.civicReferendum, keysOnly([q1]), []).rows.get("2.5")).toEqual({
       status: "fail",

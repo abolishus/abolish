@@ -7,7 +7,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
 1. Read, in order: this file, [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md) (the owner's brief, kept verbatim, never edited) and [`docs/STATUS.md`](docs/STATUS.md) (the work-queue index; each item's state is in `docs/status/<item-id>.md`).
 2. Check open PRs on `abolishus/abolish`. Work in this order:
    1. Unstick every non-active open `claude/` PR (active: a commit in the last 30 minutes; leave those alone). Rebase it onto `main` if it's behind or conflicting and resolve conflicts, preserving both sides' intent and rerunning the affected tests; fix failing checks and blocking review threads. Conflicts are everyone's job, whichever session opened the PR. Rewrite only `claude/` branches, never a branch a human pushes to, and always with `--force-with-lease` against the head you fetched, so a push by the author or another session in the meantime makes yours fail instead of clobbering it; on that failure, leave the PR to them. A conflict resolution that changes protocol code (Before opening any PR, step 5) gets the in-session `crypto-review` subagent review before you push it.
-   2. Start new work while fewer than **2** PRs are in flight (see Hard rules), taking the next unblocked item that has no branch and no open PR.
+   2. Start new work while fewer than **4** PRs are in flight (see Hard rules), taking the next unblocked item that has no branch and no open PR.
 3. Load the skill for the area you touch (`.claude/skills/`):
    - `dev`: every change
    - `crypto-review`: packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins; apps/ballot; docs/spec

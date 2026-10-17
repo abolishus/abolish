@@ -6,6 +6,8 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
 ## Queue
 
+**Owner priority (2026-10-16):** take [[P2-8]] before any other item, whatever its phase: the ballot client's next part (2b, the election screens and fetching) is the start of the end-to-end path and unblocks the UI. Once it is done or blocked, the queue's order applies again.
+
 Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
 
 ### Phase 0: Bootstrap
@@ -51,6 +53,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 
 ### Phase 2: Open polls end to end at Tier 0
 
+- [[P2-8]] `apps/ballot`
 - [[P2-1]] `packages/core` and Drizzle schema
 - [[P2-2]] `packages/api-contract`
 - [[P2-3]] `apps/api`
@@ -58,7 +61,6 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P2-5]] Accounts
 - [[P2-6]] Voting identity
 - [[P2-7]] `packages/ui`
-- [[P2-8]] `apps/ballot`
 - [[P2-9]] `apps/web`
 - [[P2-19]] The website's UI from the design mockups
 - [[P2-20]] The ballot client's UI from the design mockups

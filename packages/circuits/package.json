@@ -6,7 +6,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "nargo check --workspace && vp node scripts/artifacts.ts",
+    "build": "nargo check --workspace && node scripts/artifacts.ts",
     "check": "nargo fmt --check && nargo check --workspace",
     "test": "nargo test --workspace && vp test run"
   },

@@ -1029,6 +1029,7 @@ export {
   objectCid,
   type AsyncBlockSource,
   type BlockSource,
+  type BoundedRead,
   type ObjectRead,
   readObject,
   readObjectAsync,

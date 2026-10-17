@@ -366,6 +366,7 @@ describe("board checks over a copy read by CID", () => {
           clock,
           dec(v.now),
           mirror(v.entries.map(hex)),
+          1 << 30,
         );
         stopped = copy.stopped;
         got = verdictOf(v, copy.encodedEntries);

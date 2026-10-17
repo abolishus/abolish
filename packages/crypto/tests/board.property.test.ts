@@ -920,12 +920,24 @@ describe("a copy read by L1's CIDs", () => {
       return b === undefined ? [] : [b];
     };
 
+  // Far more than any generated board's segment objects.
+  const BUDGET = 1 << 30;
+
   const copyOf = (
     anchors: readonly Anchor[],
     last: number,
     blocks: ReadonlyMap<string, Uint8Array>,
     asked?: string[],
-  ) => readBoardCopy(ELECTION, anchors, clockFor(last), closedAt(last), sourceOf(blocks, asked));
+    maxBytes = BUDGET,
+  ) =>
+    readBoardCopy(
+      ELECTION,
+      anchors,
+      clockFor(last),
+      closedAt(last),
+      sourceOf(blocks, asked),
+      maxBytes,
+    );
 
   test("an honest board is read back whole, and verifies", async () => {
     await fc.assert(
@@ -1022,6 +1034,7 @@ describe("a copy read by L1's CIDs", () => {
           clock,
           now,
           sourceOf(blocksOf(entries)),
+          BUDGET,
         );
         expect(copy.stopped?.reason).toBe("not-run");
         expect(() => verifyBoard(ELECTION, copy.encodedEntries, 1, anchors, clock, now)).toThrow(
@@ -1068,6 +1081,59 @@ describe("a copy read by L1's CIDs", () => {
     const copy = await copyOf([over.anchor], 0, over.blocks, asked);
     expect(copy.stopped).toEqual({ checkpoint: 0, reason: "inconsistent" });
     expect(asked).toEqual([key(over.root)]);
+  });
+
+  test("the byte budget covers the whole copy: a run past it stops the copy before anything but its root is asked for", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, fc.nat(), async ({ entries, last }, cut) => {
+        const anchors = checkpointsFor(entries, last);
+        const blocks = blocksOf(entries);
+        // The runs' object lengths are the entries' lengths, segment by segment.
+        const total = entries.reduce((n, e) => n + e.length, 0);
+        expect((await copyOf(anchors, last, blocks, undefined, total)).stopped).toBeUndefined();
+        const budget = 1 + (cut % total);
+        fc.pre(budget < total);
+        const copy = await copyOf(anchors, last, blocks, undefined, budget);
+        expect(copy.stopped?.reason).toBe("over-budget");
+        const held = copy.encodedEntries.reduce((n, e) => n + e.length, 0);
+        expect(held).toBeLessThanOrEqual(budget);
+        expect(entries.slice(0, copy.encodedEntries.length)).toEqual(copy.encodedEntries);
+        expect(verdict(copy.encodedEntries, anchors, last)).toBe("checkpoint-missing");
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a root of repeated chunks under a large anchored size reads no more than the budget", async () => {
+    // The anchoring authority anchors a run of 4,096 entries (a bound of about
+    // 4 GiB) whose object is 64 MiB of zeros: four distinct blocks, any of
+    // which a caching source serves again and again.
+    const zeros = contentDag(new Uint8Array(64 * 1024 * 1024));
+    expect(zeros.blocks.length).toBeLessThan(5);
+    const blocks = new Map(zeros.blocks.map((b) => [key(b.cid), b.bytes] as const));
+    const entry = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(allowedTypes[0] as number, Uint8Array.of(1)),
+      },
+      1,
+    );
+    const [honest] = checkpointsFor([entry], 0) as [Anchor];
+    const anchor = {
+      ...honest,
+      checkpoint: { ...honest.checkpoint, size: 4096n, object_cid: zeros.root },
+    };
+    const asked: string[] = [];
+    const copy = await copyOf([anchor], 0, blocks, asked, 16 * 1024 * 1024);
+    expect(copy).toEqual({ encodedEntries: [], stopped: { checkpoint: 0, reason: "over-budget" } });
+    expect(asked).toEqual([key(zeros.root)]);
+  });
+
+  test("refuses a budget that isn't a positive integer", async () => {
+    for (const maxBytes of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      await expect(copyOf([], 0, new Map(), undefined, maxBytes)).rejects.toThrow(RangeError);
   });
 
   test("a failure from L1 alone is thrown before anything is fetched", async () => {

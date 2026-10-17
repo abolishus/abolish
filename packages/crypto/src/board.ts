@@ -663,9 +663,12 @@ export interface BoardCopyStop {
    * (never a verdict: the sources may not hold it). `inconsistent`: its
    * `object_cid` names no canonical object within the run's bound
    * (docs/spec/content-addressing.md, Reading within a bound). `not-run`:
-   * the object doesn't split into exactly the run's entries.
+   * the object doesn't split into exactly the run's entries. `over-budget`:
+   * its object is within the run's bound but more than what is left of the
+   * caller's `maxBytes`, so this reader can't hold it (unverifiable for this
+   * reader, never a verdict on the election).
    */
-  readonly reason: "unavailable" | "inconsistent" | "not-run";
+  readonly reason: "unavailable" | "inconsistent" | "not-run" | "over-budget";
 }
 
 /** A board copy read by CID: its encoded entries, and where it stopped short, if it did. */
@@ -685,6 +688,13 @@ export interface BoardCopy {
  * is the runs in order, up to the first that can't be read or isn't
  * `n_i − n_{i−1}` entries.
  *
+ * The anchoring authority chooses the sizes, so a run's bound alone doesn't
+ * bound the reader: a DAG of identical chunks has one block per level, which
+ * any caching source serves again and again. `maxBytes` caps the objects the
+ * whole copy reads; past it the copy stops with `over-budget`, before any
+ * block but the run's root is asked for. The reader holds a few times
+ * `maxBytes` at most (the leaves, the object, the entries) (T-52).
+ *
  * Nothing is authenticated here: the copy is for `verifyBoard`, which checks
  * every byte against the anchored heads and roots, and its `checkpoint-cid`
  * that each CID names its run (T-53). A copy that stops short fails
@@ -698,8 +708,11 @@ export async function readBoardCopy(
   clock: AnchorClock,
   now: bigint,
   blocks: AsyncBlockSource,
+  maxBytes: number,
 ): Promise<BoardCopy> {
   if (!Array.isArray(anchors)) throw new TypeError("anchors must be an array");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new RangeError("maxBytes must be a positive integer");
   if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
   if (typeof blocks !== "function") throw new TypeError("blocks must be a function");
   const c = checkClock(clock);
@@ -712,18 +725,26 @@ export async function readBoardCopy(
     if (!runs.has(cp.size)) runs.set(cp.size, { checkpoint: j, cid: cp.object_cid });
   const encodedEntries: Uint8Array[] = [];
   let previous = 0n;
+  let spent = 0;
   for (const size of [...runs.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     const { checkpoint, cid } = runs.get(size) as { checkpoint: number; cid: Uint8Array };
     const count = size - previous;
-    // Every entry is at most `PAYLOAD_AT + MAX_BOARD_PAYLOAD` bytes, so no
-    // CID makes the reader fetch or hold more than the run can encode (T-52).
+    // Every entry is at most `PAYLOAD_AT + MAX_BOARD_PAYLOAD` bytes: an
+    // object over that is no run of `count` entries, whatever the budget.
     const bound = count * BigInt(PAYLOAD_AT + MAX_BOARD_PAYLOAD);
-    const read = await readObjectWithinAsync(
-      cid,
-      bound > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(bound),
-      blocks,
-    );
-    if (!read.ok) return { encodedEntries, stopped: { checkpoint, reason: read.reason } };
+    const left = BigInt(maxBytes - spent);
+    if (left === 0n) return { encodedEntries, stopped: { checkpoint, reason: "over-budget" } };
+    const read = await readObjectWithinAsync(cid, Number(bound < left ? bound : left), blocks);
+    if (!read.ok) {
+      const reason =
+        read.reason !== "over-bound"
+          ? read.reason
+          : BigInt(read.length) > bound
+            ? "inconsistent"
+            : "over-budget";
+      return { encodedEntries, stopped: { checkpoint, reason } };
+    }
+    spent += read.bytes.length;
     let run: Uint8Array[];
     try {
       run = splitSegmentObject(read.bytes);

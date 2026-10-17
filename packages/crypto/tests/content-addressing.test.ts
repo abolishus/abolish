@@ -461,7 +461,11 @@ describe("reading an object within a bound (content-addressing.json)", () => {
       expect(own.ok && hex(own.bytes)).toBe(hex(bytes));
       if (v.length > 1) {
         const requests: string[] = [];
-        expect(within(v.length - 1, requests)).toEqual(inconsistent);
+        expect(within(v.length - 1, requests)).toEqual({
+          ok: false,
+          reason: "over-bound",
+          length: v.length,
+        });
         // Only the root is asked for: its claim is refused before any child.
         expect(requests).toEqual([v.cidHex]);
       }
@@ -503,13 +507,17 @@ describe("reading an object within a bound", () => {
     );
   });
 
-  test("under a bound below its length, is inconsistent after asking only for the root", () => {
+  test("under a bound below its length, is over-bound with its length after asking only for the root", () => {
     fc.assert(
       fc.property(fc.uint8Array({ minLength: 2, maxLength: 3000 }), fc.nat(), (bytes, cut) => {
         const dag = dagOf(bytes);
         const asked: string[] = [];
         const max = 1 + (cut % (bytes.length - 1));
-        expect(within(dag.root, max, source(dag.blocks, asked))).toEqual(inconsistent);
+        expect(within(dag.root, max, source(dag.blocks, asked))).toEqual({
+          ok: false,
+          reason: "over-bound",
+          length: bytes.length,
+        });
         expect(asked).toEqual([hex(dag.root)]);
       }),
       { numRuns },

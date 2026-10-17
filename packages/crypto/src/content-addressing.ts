@@ -72,6 +72,15 @@ export type ObjectRead =
   | { readonly ok: false; readonly reason: "unavailable" | "inconsistent" };
 
 /**
+ * What `readObjectWithin` found: `readObject`'s outcomes, or `over-bound`: a
+ * root of canonical form claiming `length` bytes, more than the bound. Like
+ * `inconsistent`, a function of the CID and the bound alone.
+ */
+export type BoundedRead =
+  | ObjectRead
+  | { readonly ok: false; readonly reason: "over-bound"; readonly length: number };
+
+/**
  * What a source served for block `cid`, in the order tried. `limit` is
  * `CHUNK_SIZE`, which no block of the layout exceeds, where a fetcher stops
  * reading; an answer over it is never hashed.
@@ -104,6 +113,13 @@ export function readObject(cid: Uint8Array, length: number, blocks: BlockSource)
   return readWith(cid, length, blocks, CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE);
 }
 
+// A read of a fixed length never reports `over-bound`: only a bounded read
+// learns its length from the root.
+function fixed(r: BoundedRead): ObjectRead {
+  if (!r.ok && r.reason === "over-bound") throw new Error("a fixed-length read has no bound");
+  return r;
+}
+
 /** `readObject` over a source that waits on the network. */
 export async function readObjectAsync(
   cid: Uint8Array,
@@ -111,7 +127,9 @@ export async function readObjectAsync(
   blocks: AsyncBlockSource,
 ): Promise<ObjectRead> {
   checkSource(blocks);
-  return driveAsync(walk(cid, exact(length), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
+  return fixed(
+    await driveAsync(walk(cid, exact(length), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks),
+  );
 }
 
 /**
@@ -121,16 +139,19 @@ export async function readObjectAsync(
  * bound). The length is the root's: a raw root's own length, at most one
  * chunk, or a dag-pb root's `filesize`, over one chunk; then the object is
  * read as `readObject` reads one of that length, the root not asked for
- * again. A length over `maxLength` is `inconsistent`, before any other block
+ * again. A length over `maxLength` is `over-bound`, before any other block
  * is asked for, so no CID makes a reader fetch or keep more than
- * `maxLength` bytes (T-49, T-52). Both outcomes stay a function of `cid` and
- * `maxLength`: a canonical root's `filesize` is the length of its object.
+ * `maxLength` bytes (T-49, T-52). Every outcome but `unavailable` stays a
+ * function of `cid` and `maxLength`: a canonical root's `filesize` is the
+ * length of its object. Served blocks may repeat (a DAG of identical chunks
+ * has one block per level), so `maxLength` is the reader's only bound on what
+ * it fetches and keeps: the caller sets it to what it can spend.
  */
 export function readObjectWithin(
   cid: Uint8Array,
   maxLength: number,
   blocks: BlockSource,
-): ObjectRead {
+): BoundedRead {
   checkSource(blocks);
   return drive(walk(cid, bounded(maxLength), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
 }
@@ -140,7 +161,7 @@ export async function readObjectWithinAsync(
   cid: Uint8Array,
   maxLength: number,
   blocks: AsyncBlockSource,
-): Promise<ObjectRead> {
+): Promise<BoundedRead> {
   checkSource(blocks);
   return driveAsync(walk(cid, bounded(maxLength), CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE), blocks);
 }
@@ -155,7 +176,7 @@ export function readWith(
   blockLimit: number,
 ): ObjectRead {
   checkSource(blocks);
-  return drive(walk(cid, exact(length), chunkSize, maxLinks, blockLimit), blocks);
+  return fixed(drive(walk(cid, exact(length), chunkSize, maxLinks, blockLimit), blocks));
 }
 
 /** Internal: `readObjectWithin` under `dagWith`'s limits, for the deeper layouts' tests. */
@@ -166,7 +187,7 @@ export function readWithinWith(
   chunkSize: number,
   maxLinks: number,
   blockLimit: number,
-): ObjectRead {
+): BoundedRead {
   checkSource(blocks);
   return drive(walk(cid, bounded(maxLength), chunkSize, maxLinks, blockLimit), blocks);
 }
@@ -198,16 +219,16 @@ interface Request {
   readonly limit: number;
 }
 
-type Walk = Generator<Request, ObjectRead, readonly Uint8Array[]>;
+type Walk = Generator<Request, BoundedRead, readonly Uint8Array[]>;
 
-function drive(w: Walk, blocks: BlockSource): ObjectRead {
+function drive(w: Walk, blocks: BlockSource): BoundedRead {
   for (let step = w.next(); ;) {
     if (step.done === true) return step.value;
     step = w.next(blocks(step.value.cid, step.value.limit));
   }
 }
 
-async function driveAsync(w: Walk, blocks: AsyncBlockSource): Promise<ObjectRead> {
+async function driveAsync(w: Walk, blocks: AsyncBlockSource): Promise<BoundedRead> {
   for (let step = w.next(); ;) {
     if (step.done === true) return step.value;
     step = w.next(await blocks(step.value.cid, step.value.limit));
@@ -244,13 +265,9 @@ function* walk(
     // must be over one chunk. Any other claim the canonical walk below
     // refuses, so no root can make the read longer than its object.
     const claimed = raw ? root.length : fileSize(root);
-    if (
-      claimed === undefined ||
-      claimed < 1 ||
-      claimed > len.max ||
-      (raw ? claimed > chunkSize : claimed <= chunkSize)
-    )
+    if (claimed === undefined || claimed < 1 || (raw ? claimed > chunkSize : claimed <= chunkSize))
       return { ok: false, reason: "inconsistent" };
+    if (claimed > len.max) return { ok: false, reason: "over-bound", length: claimed };
     length = claimed;
   }
   const chunks = Math.ceil(length / chunkSize);

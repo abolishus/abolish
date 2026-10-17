@@ -34,11 +34,14 @@ import {
   encodeFunctionData,
   ExecutionRevertedError,
   getAddress,
+  InvalidParamsRpcError,
+  MethodNotSupportedRpcError,
   type Hex,
   hexToBytes,
   keccak256,
   parseEventLogs,
   type PublicClient,
+  type StateOverride,
   type TransactionReceipt,
   TransactionNotFoundError,
   TransactionReceiptNotFoundError,
@@ -52,36 +55,45 @@ export const CREATE_CALLDATA = encodeFunctionData({
 });
 
 /**
- * Headroom over the node's gas estimate, in percent: the counter's slot and
- * the event accumulator cost the same for every creation, so a little covers
- * a node's estimate being slightly low.
+ * Headroom over the node's gas estimate, in percent: a creation's and a
+ * registration's writes are fixed by its calldata and the registry's state
+ * at signing, so a little covers a node's estimate being slightly low.
  */
 const GAS_HEADROOM = 120n;
 
 /**
- * `registerDefinition`'s gas limit, as a base and a cost per byte of its
- * definition. Its gas can't be estimated when it is signed: core signs it
- * beside the ceremony's registration, before either is sent, and until the
- * ceremony lands the registry refuses it (`CeremonyNotRecorded`). Its cost
- * is the definition's decoding, rules and parameters, and the event that
- * carries it whole, all linear in its length; the Anvil test measures a
- * definition's use against this. Only gas used is paid.
+ * `registerDefinition` is signed beside its ceremony's registration, before
+ * either is sent, and until the ceremony lands the registry refuses it
+ * (`CeremonyNotRecorded`), so its gas is estimated with the trustee
+ * registry's code replaced by `RECORDED_STAND_IN`, which answers every call
+ * with `true`, as `ceremonyRecorded` will once the ceremony lands. The real
+ * check reads two storage slots more than the stand-in, which
+ * `CEREMONY_CHECK_GAS` covers before the headroom. Nothing is sent under
+ * the override: it exists only for this estimate.
  */
-export const DEFINITION_GAS_BASE = 1_500_000n;
-export const DEFINITION_GAS_PER_BYTE = 600n;
+export const RECORDED_STAND_IN: Hex = "0x600160005260206000f3"; // mstore(0, 1); return(0, 32)
+export const CEREMONY_CHECK_GAS = 25_000n;
 
 /**
- * `registerCeremony`'s gas limit when the node's estimate reverts. Anyone
- * may register an approved record, so another sender can land it first
- * (`AlreadyRecorded`); the definition still registers against it. Signing
- * the ceremony's anyway, to revert cheaply, keeps that poll from holding
- * back the key's later registrations; a record the registry refuses for
- * another reason reverts its definition too, and the poll fails as
- * `registration-reverted`. Linear in the record, as its seats' keys and
- * approvals are checked one by one.
+ * A fixed gas limit, as a base and a cost per byte of calldata, for a
+ * registration whose estimate reverts or a node that refuses the override:
+ * the transaction is signed anyway, so one poll never holds back the key's
+ * later nonces. A `registerCeremony` whose estimate reverts was most likely
+ * landed first by another sender (`AlreadyRecorded`, which anyone may do),
+ * and its definition still registers against the record already there; any
+ * other refusal reverts its definition too, and the poll fails as
+ * `registration-reverted`.
  */
-export const CEREMONY_GAS_BASE = 1_500_000n;
-export const CEREMONY_GAS_PER_BYTE = 1_000n;
+export const FALLBACK_GAS_BASE = 1_500_000n;
+export const FALLBACK_GAS_PER_BYTE = 1_000n;
+
+/**
+ * The most gas a signed registration asks for, whatever its estimate: the
+ * per-transaction cap of EIP-7825, where nodes enforce it. A limit above
+ * what the node takes would be refused at every send and hold the key's
+ * later nonces; under the cap it at worst reverts and fails its poll.
+ */
+export const MAX_TX_GAS = 1n << 24n;
 
 /** How many of the latest base fee a transaction's fee cap allows, before its tip. */
 export const BASE_FEE_HEADROOM = 3n;
@@ -144,23 +156,8 @@ export class ViemPollCreationChain implements PollCreationChain, PollRegistratio
       functionName: "registerCeremony",
       args: [bytesToHex(record)],
     });
-    let gas;
-    try {
-      gas = await this.#client.estimateGas({
-        account: this.#account.address,
-        to: this.#trusteeRegistry,
-        data,
-      });
-    } catch (e) {
-      if (!(e instanceof BaseError && e.walk((c) => c instanceof ExecutionRevertedError))) throw e;
-      return this.#sign(
-        nonce,
-        this.#trusteeRegistry,
-        data,
-        CEREMONY_GAS_BASE + CEREMONY_GAS_PER_BYTE * BigInt(record.length),
-      );
-    }
-    return this.#sign(nonce, this.#trusteeRegistry, data, (gas * GAS_HEADROOM) / 100n);
+    const gas = await this.#estimate(this.#trusteeRegistry, data, record.length);
+    return this.#sign(nonce, this.#trusteeRegistry, data, gas);
   }
 
   async signDefinition(nonce: bigint, definition: Uint8Array): Promise<SignedCreation> {
@@ -169,8 +166,46 @@ export class ViemPollCreationChain implements PollCreationChain, PollRegistratio
       functionName: "registerDefinition",
       args: [bytesToHex(definition)],
     });
-    const gas = DEFINITION_GAS_BASE + DEFINITION_GAS_PER_BYTE * BigInt(definition.length);
+    const gas = await this.#estimate(this.#registry, data, definition.length, {
+      stateOverride: [{ address: this.#trusteeRegistry, code: RECORDED_STAND_IN }],
+      extra: CEREMONY_CHECK_GAS,
+    });
     return this.#sign(nonce, this.#registry, data, gas);
+  }
+
+  /**
+   * A registration's gas limit: the node's estimate (with `extra`) and
+   * headroom, or the fallback for `length` bytes when the estimate reverts
+   * or the node refuses the override, and never above `MAX_TX_GAS`. Any
+   * other failure of the node throws, and the next run tries again.
+   */
+  async #estimate(
+    to: Address,
+    data: Hex,
+    length: number,
+    options?: { readonly stateOverride: StateOverride; readonly extra: bigint },
+  ): Promise<bigint> {
+    let gas;
+    try {
+      const estimate = await this.#client.estimateGas({
+        account: this.#account.address,
+        to,
+        data,
+        ...(options !== undefined && { stateOverride: options.stateOverride }),
+      });
+      gas = ((estimate + (options?.extra ?? 0n)) * GAS_HEADROOM) / 100n;
+    } catch (e) {
+      const fallback =
+        e instanceof BaseError &&
+        (e.walk((c) => c instanceof ExecutionRevertedError) !== null ||
+          (options !== undefined &&
+            e.walk(
+              (c) => c instanceof InvalidParamsRpcError || c instanceof MethodNotSupportedRpcError,
+            ) !== null));
+      if (!fallback) throw e;
+      gas = FALLBACK_GAS_BASE + FALLBACK_GAS_PER_BYTE * BigInt(length);
+    }
+    return gas < MAX_TX_GAS ? gas : MAX_TX_GAS;
   }
 
   /** Signs a call to `to` at `nonce`, with `gas` or the node's estimate and headroom. */

@@ -22,6 +22,7 @@ import {
   electionDefinitionV5Hash,
   identityKey,
   type Panel,
+  PanelError,
   tierTreeRoot,
 } from "@abolishus/crypto";
 import { createECDH } from "node:crypto";
@@ -44,11 +45,10 @@ import {
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
-  CEREMONY_GAS_BASE,
-  CEREMONY_GAS_PER_BYTE,
   checkPollCreationDeployment,
-  DEFINITION_GAS_BASE,
-  DEFINITION_GAS_PER_BYTE,
+  FALLBACK_GAS_BASE,
+  FALLBACK_GAS_PER_BYTE,
+  MAX_TX_GAS,
   ViemPollCreationChain,
 } from "../src/index.ts";
 
@@ -251,7 +251,20 @@ const adapter = async (key?: Uint8Array) =>
     key: key ?? (await newKey()),
   });
 
-async function submittedPoll(): Promise<string> {
+/** One question with two options, or `count` of them. */
+const questions = (count = 1) =>
+  Array.from({ length: count }, (_, i) => ({
+    question: `Which day, ${i + 1}?`,
+    description: "",
+    options: [
+      { label: "Friday", description: "" },
+      { label: "Monday", description: "" },
+    ],
+    minSelections: 0,
+    maxSelections: 1,
+  }));
+
+async function submittedPoll(count = 1): Promise<string> {
   const author = newAccountId();
   await app`
     INSERT INTO account_users VALUES (${author}, ${`${newAccountId()}@account.invalid`},
@@ -263,18 +276,7 @@ async function submittedPoll(): Promise<string> {
       language: "en",
       title: "Lunch",
       description: "",
-      questions: [
-        {
-          question: "Which day?",
-          description: "",
-          options: [
-            { label: "Friday", description: "" },
-            { label: "Monday", description: "" },
-          ],
-          minSelections: 0,
-          maxSelections: 1,
-        },
-      ],
+      questions: questions(count),
       tiers: [0],
       closesAt: NOW_S + 7n * 24n * 3600n,
     },
@@ -344,13 +346,38 @@ describe("the startup check", () => {
     await expect(
       checkPollCreationDeployment(client, { ...deployment, panel: OFF_QUORUM }),
     ).rejects.toThrow("another quorum");
+    // An election registry whose trustee registry holds no code.
+    const hash = await wallet.deployContract({
+      account: deployer,
+      chain,
+      abi: electionRegistryAbi,
+      bytecode: forge("src/ElectionRegistry.sol:ElectionRegistry", "bytecode"),
+      args: [
+        {
+          board: stand(1),
+          trusteeRegistry: stand(2),
+          groupRegistry: stand(3),
+          l1ChainId: L1_CHAIN_ID,
+          l1Anchor: stand(4),
+          l1Relay: stand(5),
+          epoch: 0n,
+        },
+      ],
+    });
+    const other = (await client.waitForTransactionReceipt({ hash, pollingInterval: 20 }))
+      .contractAddress;
+    if (!other) throw new Error("ElectionRegistry wasn't deployed");
+    await mine(FINALITY_DEPTH);
+    await expect(
+      checkPollCreationDeployment(client, { ...deployment, registry: other }),
+    ).rejects.toThrow("trustee registry isn't one");
     // Not a panel at all: refused before anything is read.
     await expect(
       checkPollCreationDeployment(client, {
         ...deployment,
         panel: { threshold: 4, keys: PANEL.keys },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(PanelError);
   });
 });
 
@@ -488,8 +515,8 @@ describe("the registration, through ViemPollCreationChain", () => {
   });
 
   /** A poll created through `key`, rooted at an early block and stubbed, its ceremony approved. */
-  async function approvedPoll(key: ViemPollCreationChain): Promise<string> {
-    const id = await submittedPoll();
+  async function approvedPoll(key: ViemPollCreationChain, count = 1): Promise<string> {
+    const id = await submittedPoll(count);
     expect(await advancePollCreations(app, key, { now: NOW })).toMatchObject({ sent: 1 });
     // Anvil mines each transaction as it arrives, but after the send returns.
     await until("the creation", 10_000, async () =>
@@ -582,17 +609,47 @@ describe("the registration, through ViemPollCreationChain", () => {
       block: receipt.blockNumber,
     });
 
-    // The definition's fixed gas limit covers what it used: it is signed
-    // before its ceremony lands, so it can't be estimated.
-    const limit = DEFINITION_GAS_BASE + DEFINITION_GAS_PER_BYTE * BigInt(signed.length);
-    expect(definition.gas).toBe(limit);
-    expect(receipt.gasUsed).toBeLessThan(limit);
+    // The definition's limit, estimated before its ceremony landed, covers
+    // what it used, within the headroom.
+    expect(receipt.gasUsed).toBeLessThanOrEqual(definition.gas);
+    expect(definition.gas).toBeLessThan((receipt.gasUsed * 3n) / 2n);
+    expect(definition.gas).toBeLessThan(
+      FALLBACK_GAS_BASE + FALLBACK_GAS_PER_BYTE * BigInt(signed.length),
+    );
+    expect(definition.gas).toBeLessThanOrEqual(MAX_TX_GAS);
 
     // The ceremony's transaction is the trustee registry's, not the
     // election registry's.
     await expect(key.registration(hexToBytes(ceremonyTx))).rejects.toThrow(
       "isn't the transaction's",
     );
+    // The key's own call to the registry with no DefinitionRegistered (its
+    // creation) is never read as a registration.
+    const [created] = await db.admin`SELECT create_tx_hash FROM account_polls WHERE id = ${id}`;
+    await expect(key.registration(Uint8Array.from(created!["create_tx_hash"]))).rejects.toThrow(
+      "no DefinitionRegistered",
+    );
+  }, 120_000);
+
+  test("estimates a definition of the most questions a ballot takes, which registers within it", async () => {
+    // 32 questions: the registry writes a slot per question, which a
+    // per-byte bound would undercount.
+    const key = await adapter();
+    const id = await approvedPoll(key, 32);
+    expect(await advancePollRegistrations(app, key, PANEL, { now: NOW })).toMatchObject({
+      sent: 1,
+    });
+    const [sent] = await db.admin`SELECT register_tx_hash FROM account_polls WHERE id = ${id}`;
+    const hash = bytesToHex(sent!["register_tx_hash"]);
+    const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+    expect(receipt.status).toBe("success");
+    const { gas } = await client.getTransaction({ hash });
+    expect(receipt.gasUsed).toBeLessThanOrEqual(gas);
+    expect(gas).toBeLessThan((receipt.gasUsed * 3n) / 2n);
+    await mine(FINALITY_DEPTH);
+    expect(await advancePollRegistrations(app, key, PANEL, { now: NOW })).toMatchObject({
+      registered: 1,
+    });
   }, 120_000);
 
   test("registers a poll whose ceremony another sender registered first", async () => {
@@ -641,7 +698,7 @@ describe("the registration, through ViemPollCreationChain", () => {
     // registers against the record already there.
     expect(ceremony.status).toBe("reverted");
     const tx = await client.getTransaction({ hash: ceremony.transactionHash });
-    expect(tx.gas).toBe(CEREMONY_GAS_BASE + CEREMONY_GAS_PER_BYTE * BigInt(built.record.length));
+    expect(tx.gas).toBe(FALLBACK_GAS_BASE + FALLBACK_GAS_PER_BYTE * BigInt(built.record.length));
     await mine(FINALITY_DEPTH);
     expect(await advancePollRegistrations(app, key, PANEL, { now: NOW })).toMatchObject({
       registered: 1,

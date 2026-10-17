@@ -218,8 +218,9 @@ async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Pr
  * registers each approved ceremony and its definition and settles those
  * registrations (P2-22 part 5b; one queue, since both spend the key's
  * nonces), then runs the per-slot check on the created polls, and logs what
- * moved, by count. A node that can't be read fails the job; the next tick
- * runs each again from what is recorded.
+ * moved, by count. A node that can't be read fails the job, after the
+ * per-slot check if only the registrations threw; the next tick runs each
+ * again from what is recorded.
  */
 async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promise<void> {
   if (ctx.pollCreation === undefined) throw new JobError("internal");
@@ -231,8 +232,17 @@ async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promis
   let registration: PollRegistrationReport | undefined;
   let anchors: AnchorCheckReport = { checked: 0, waiting: 0, abandoned: 0, overdue: 0, failed: 0 };
   try {
-    registration = await advancePollRegistrations(ctx.sql, chain, panel, { now: ctx.now() });
+    // A registration that throws (a node down, a receipt it won't read)
+    // still lets the per-slot check run, so created polls go on; the job
+    // fails after it.
+    let refused: { readonly error: unknown } | undefined;
+    try {
+      registration = await advancePollRegistrations(ctx.sql, chain, panel, { now: ctx.now() });
+    } catch (error) {
+      refused = { error };
+    }
     anchors = await checkCreationAnchors(ctx.sql, ctx.pollCreation.anchors, { now: ctx.now() });
+    if (refused !== undefined) throw refused.error;
   } finally {
     // Logged even when a later step throws, so this tick's creations are counted.
     const failed = { ...report.failed };

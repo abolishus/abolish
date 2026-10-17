@@ -17,6 +17,7 @@ import type {
   RootFailure,
   StubFailure,
   Tier0GroupOutcome,
+  Tier1BoundaryReport,
 } from "@abolishus/core";
 import type { EventAccumulatorProofError, TierMembershipErrorCode } from "@abolishus/crypto";
 import type { OutputRootErrorCode } from "@abolishus/verifier";
@@ -71,6 +72,14 @@ export interface Tier0BoundaryLine {
   readonly outcome: Tier0GroupOutcome;
   readonly abandoned: boolean;
   readonly submitFailed?: boolean;
+}
+
+/**
+ * What a Tier 1 relay boundary did, in counts and a step: never a record,
+ * commitment, slot, nonce or transaction (T-10, T-13).
+ */
+export interface Tier1BoundaryLine extends Tier1BoundaryReport {
+  readonly queue: "{tier1-boundary}";
 }
 
 /**
@@ -207,6 +216,7 @@ export type ErrorKind =
   | "invalid-job-data"
   | "stale-job"
   | "tier0-chain-unavailable"
+  | "tier1-chain-unavailable"
   | "registry-sync-refused"
   | "poll-root-refused"
   | "poll-open-errors"
@@ -217,6 +227,7 @@ export type LogLine =
   | AuditFindingLine
   | AnchorFindingLine
   | Tier0BoundaryLine
+  | Tier1BoundaryLine
   | BallotL1Line
   | RegistrySyncLine
   | PollCreationLine

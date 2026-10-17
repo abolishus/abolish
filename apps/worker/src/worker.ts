@@ -1,6 +1,7 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
 // schedules that queue the board audit, the identity-backup prune and, when
-// configured, the board anchoring and the Tier 0 index refresh and boundary.
+// configured, the board anchoring and the Tier 0 and Tier 1 relay index
+// refreshes and boundaries.
 // The API's ballots are judged only when panels are pinned. Job data is parsed
 // against its queue's schema before it is handled, and every outcome is
 // logged by kind (T-10).
@@ -14,6 +15,7 @@ import type {
   PollRegistrationChain,
   PollStubDeployment,
   Tier0Batches,
+  Tier1Batches,
 } from "@abolishus/core";
 import type { Panel } from "@abolishus/crypto";
 import { Queue, Worker } from "bullmq";
@@ -21,7 +23,7 @@ import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
 import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
 import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
-import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
+import { HANDLERS, JobError, TIER0_QUEUES, TIER1_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
 import type { PollRoots } from "./poll-roots.ts";
@@ -56,6 +58,14 @@ export interface WorkerOptions {
     /** How often the index is rebuilt; `TIER0_INDEX_EVERY_MS` unless a test says otherwise. */
     readonly indexEveryMs?: number;
     /** How often the boundary is tried; `TIER0_BOUNDARY_EVERY_MS` unless a test says otherwise. */
+    readonly boundaryEveryMs?: number;
+  };
+  /** The Tier 1 relay's job; without it, its queues have no worker and no schedule. */
+  readonly tier1?: {
+    readonly batches: Tier1Batches;
+    /** How often the index is brought up; `TIER1_INDEX_EVERY_MS` unless a test says otherwise. */
+    readonly indexEveryMs?: number;
+    /** How often the boundary is tried; `TIER1_BOUNDARY_EVERY_MS` unless a test says otherwise. */
     readonly boundaryEveryMs?: number;
   };
   /**
@@ -112,7 +122,7 @@ export interface WorkerOptions {
   /**
    * The creation step, with the creation key ([[0032-poll-creation-operations]],
    * rule 2): a worker given it runs the `{poll-create}` queue and nothing
-   * else, no audit, prune, anchoring, Tier 0, ballot, registry, roots or stub work beside the key,
+   * else, no audit, prune, anchoring, Tier 0, Tier 1, ballot, registry, roots or stub work beside the key,
    * and refuses to start with any of those configured. Without it, nothing
    * creates polls.
    */
@@ -148,6 +158,20 @@ export const TIER0_INDEX_EVERY_MS = 20_000;
  * the lock to an index refresh is retried well within the period.
  */
 export const TIER0_BOUNDARY_EVERY_MS = 30_000;
+
+/**
+ * A third of the relay route's `TIER1_INDEX_MAX_LAG` (a minute), so one
+ * missed or slow refresh doesn't turn vouchees away (docs/spec/tier1-relay.md,
+ * Answers, step 5).
+ */
+export const TIER1_INDEX_EVERY_MS = 20_000;
+
+/**
+ * As Tier 0's: tried every 30 seconds and run once per period, so a batch is
+ * sent within about 30 seconds of its boundary, and a tick that lost the lock
+ * to an index refresh is retried well within the period.
+ */
+export const TIER1_BOUNDARY_EVERY_MS = 30_000;
 
 /**
  * A registration is recorded only once its block is finalized, which on an
@@ -207,6 +231,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     creating &&
     (options.anchor !== undefined ||
       options.tier0 !== undefined ||
+      options.tier1 !== undefined ||
       options.ballots !== undefined ||
       options.registry !== undefined ||
       options.pollRoots !== undefined ||
@@ -223,6 +248,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     now,
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
+    ...(options.tier1 === undefined ? {} : { tier1: options.tier1.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
     ...(options.pollRoots === undefined ? {} : { pollRoots: options.pollRoots.roots }),
     ...(options.pollStubs === undefined
@@ -264,8 +290,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
               ? options.pollRoots !== undefined
               : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
                 ? options.pollStubs !== undefined
-                : options.tier0 !== undefined ||
-                  !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+                : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
+                  ? options.tier1 !== undefined
+                  : options.tier0 !== undefined ||
+                    !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -391,6 +419,20 @@ function everyOtherSchedule(options: WorkerOptions) {
             key: "tier0Boundary",
             id: "tier0-boundary",
             every: options.tier0.boundaryEveryMs ?? TIER0_BOUNDARY_EVERY_MS,
+          },
+        ] as const)),
+    ...(options.tier1 === undefined
+      ? []
+      : ([
+          {
+            key: "tier1Index",
+            id: "tier1-index",
+            every: options.tier1.indexEveryMs ?? TIER1_INDEX_EVERY_MS,
+          },
+          {
+            key: "tier1Boundary",
+            id: "tier1-boundary",
+            every: options.tier1.boundaryEveryMs ?? TIER1_BOUNDARY_EVERY_MS,
           },
         ] as const)),
     ...(options.registry === undefined

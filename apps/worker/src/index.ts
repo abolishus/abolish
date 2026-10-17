@@ -55,7 +55,15 @@ export {
   type PollCreationConfig,
   pollCreationFromEnv,
 } from "./poll-create-env.ts";
-export { HANDLERS, type JobContext, JobError, type JobResult, TIER0_QUEUES } from "./jobs.ts";
+export {
+  HANDLERS,
+  type JobContext,
+  JobError,
+  type JobResult,
+  TIER0_QUEUES,
+  TIER1_BOUNDARY_WITHIN,
+  TIER1_QUEUES,
+} from "./jobs.ts";
 export type {
   AnchorFindingLine,
   AuditFindingLine,
@@ -67,6 +75,7 @@ export type {
   RegistrySyncLine,
   PollCreationLine,
   Tier0BoundaryLine,
+  Tier1BoundaryLine,
   WorkerErrorLine,
 } from "./log.ts";
 export {
@@ -114,6 +123,15 @@ export {
 } from "./tier0-chain.ts";
 export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
+  checkTier1Deployment,
+  TIER1_LOG_RANGE,
+  Tier1ChainError,
+  type Tier1ChainOptions,
+  type Tier1Deployment,
+  ViemTier1Chain,
+} from "./tier1-chain.ts";
+export { TIER1_ENV, type Tier1Config, tier1FromEnv } from "./tier1-env.ts";
+export {
   CEREMONY_COORDINATE_EVERY_MS,
   POLL_CREATE_EVERY_MS,
   POLL_ROOT_EVERY_MS,
@@ -124,5 +142,7 @@ export {
   startWorker,
   TIER0_BOUNDARY_EVERY_MS,
   TIER0_INDEX_EVERY_MS,
+  TIER1_BOUNDARY_EVERY_MS,
+  TIER1_INDEX_EVERY_MS,
   type WorkerOptions,
 } from "./worker.ts";

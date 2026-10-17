@@ -629,12 +629,18 @@ export class Tier1Batches {
           // higher fee, kept before it is sent. A refused replacement leaves
           // the transaction it replaces, still a way to land.
           const signed = await chain.sign(fromHex(f.record), f.nonce, last);
-          const next: InFlight = {
-            ...f,
-            txs: [...f.txs, toHex(signed.tx)],
-            hashes: [...f.hashes, toHex(signed.hash)],
-            pending: f.pending + 1,
-          };
+          // An adapter that can't raise the fee (at its cap) signs a
+          // transaction already kept: it isn't kept twice, so a record
+          // pending for a whole window keeps a bounded list.
+          const known = f.hashes.includes(toHex(signed.hash));
+          const next: InFlight = known
+            ? { ...f, pending: f.pending + 1 }
+            : {
+                ...f,
+                txs: [...f.txs, toHex(signed.tx)],
+                hashes: [...f.hashes, toHex(signed.hash)],
+                pending: f.pending + 1,
+              };
           await this.#fenced(INFLIGHT_SET, [k.inflight], token, key, writeInFlight(next));
           if ((await chain.broadcast(signed.tx)) === "refused") await chain.broadcast(last);
           counts.replaced++;

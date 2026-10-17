@@ -69,6 +69,21 @@ export const QUEUES = {
    */
   tier0Boundary: { name: "{tier0-boundary}", side: "operational", data: z.strictObject({}) },
   /**
+   * Brings the Tier 1 relay's counting state and index up to the L2 node,
+   * so the relay route's step 5 stays within a minute of it (core's
+   * Tier1Batches.refreshIndex; docs/spec/tier1-relay.md, Answers). Runs on a
+   * schedule and takes no data: no request or record is ever queued here
+   * (T-10, T-13).
+   */
+  tier1Index: { name: "{tier1-index}", side: "operational", data: z.strictObject({}) },
+  /**
+   * The Tier 1 relay's batch at each period boundary (core's
+   * Tier1Batches.runBoundary; docs/spec/tier1-relay.md, The batch). Ticks
+   * well within each period and takes no data; core runs each period's
+   * boundary once, so a tick after it does nothing (T-13).
+   */
+  tier1Boundary: { name: "{tier1-boundary}", side: "operational", data: z.strictObject({}) },
+  /**
    * Records the election registry's finalized registrations from the index,
    * checked against the registry's event accumulator, and stores their
    * definitions (core's syncRegistrations; T-71, T-49, T-53). Runs on a

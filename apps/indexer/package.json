@@ -2,7 +2,7 @@
   "name": "@abolishus/indexer",
   "version": "0.0.0",
   "private": true,
-  "description": "Indexes the contracts' events into Postgres with Ponder: the group registry's records so far (P3-5). Source-only.",
+  "description": "Indexes the L2 contracts' events into Postgres with Ponder (P3-5). Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {

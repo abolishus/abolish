@@ -1,11 +1,13 @@
-// The group registry's events, stored verbatim (ponder.schema.ts). Handlers
-// only copy what the log says; the registry already refused anything its
-// rules forbid, and consumers recheck every record anyway. Every event, the
-// constructor's `RegistrarsPinned` included, also lands in `contract_log`
-// as emitted, for the accumulator check.
+// Every event of the four L2 contracts lands in `contract_log` as emitted,
+// the constructors' `RegistrarsPinned` and `PanelPinned` included, for the
+// accumulator check (src/events.ts). The group registry's records are also
+// stored verbatim in `group` and `group_record` (ponder.schema.ts). Handlers
+// only copy what the log says; the contracts already refused anything their
+// rules forbid, and consumers recheck every record anyway.
 
 import { ponder } from "ponder:registry";
 import { contractLog, group, groupRecord } from "ponder:schema";
+import { indexedEvents } from "./events.ts";
 
 interface Emitted {
   readonly id: string;
@@ -39,43 +41,48 @@ function logRow(event: Emitted) {
   };
 }
 
-ponder.on("GroupRegistry:RegistrarsPinned", async ({ event, context }) => {
-  await context.db.insert(contractLog).values(logRow(event));
-});
+type Context = Parameters<
+  Parameters<typeof ponder.on<"GroupRegistry:MembersAdded">>[1]
+>[0]["context"];
+type GroupEvent = Emitted & {
+  readonly args: {
+    readonly groupId: bigint;
+    readonly tier?: number;
+    readonly record?: `0x${string}`;
+  };
+};
 
-ponder.on("GroupRegistry:GroupCreated", async ({ event, context }) => {
-  await context.db.insert(contractLog).values(logRow(event));
-  await context.db.insert(group).values({
-    groupId: event.args.groupId,
-    tier: event.args.tier,
-    blockNumber: event.block.number,
-    transactionHash: event.transaction.hash,
-    logIndex: event.log.logIndex,
-  });
-});
-
-ponder.on("GroupRegistry:MembersAdded", async ({ event, context }) => {
-  await context.db.insert(contractLog).values(logRow(event));
+async function recordRow(event: GroupEvent, context: Context, kind: "add" | "remove") {
   await context.db.insert(groupRecord).values({
     id: event.id,
     groupId: event.args.groupId,
-    kind: "add",
-    record: event.args.record,
+    kind,
+    record: event.args.record as `0x${string}`,
     blockNumber: event.block.number,
     transactionHash: event.transaction.hash,
     logIndex: event.log.logIndex,
   });
-});
+}
 
-ponder.on("GroupRegistry:MembersRemoved", async ({ event, context }) => {
-  await context.db.insert(contractLog).values(logRow(event));
-  await context.db.insert(groupRecord).values({
-    id: event.id,
-    groupId: event.args.groupId,
-    kind: "remove",
-    record: event.args.record,
-    blockNumber: event.block.number,
-    transactionHash: event.transaction.hash,
-    logIndex: event.log.logIndex,
+/** What the group registry's records add beside their `contract_log` row. */
+const extra: Partial<Record<string, (event: GroupEvent, context: Context) => Promise<void>>> = {
+  "GroupRegistry:GroupCreated": async (event, context) => {
+    await context.db.insert(group).values({
+      groupId: event.args.groupId,
+      tier: event.args.tier as number,
+      blockNumber: event.block.number,
+      transactionHash: event.transaction.hash,
+      logIndex: event.log.logIndex,
+    });
+  },
+  "GroupRegistry:MembersAdded": (event, context) => recordRow(event, context, "add"),
+  "GroupRegistry:MembersRemoved": (event, context) => recordRow(event, context, "remove"),
+};
+
+for (const name of indexedEvents()) {
+  const more = extra[name];
+  ponder.on(name as "GroupRegistry:MembersAdded", async ({ event, context }) => {
+    await context.db.insert(contractLog).values(logRow(event));
+    if (more !== undefined) await more(event as unknown as GroupEvent, context);
   });
-});
+}

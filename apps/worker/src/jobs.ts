@@ -14,9 +14,11 @@ import {
   GroupRecordsError,
   listBoards,
   type PollCreationChain,
+  type PollStubDeployment,
   pruneIdentityBackups,
   RegistrationError,
   RegistrySyncError,
+  stubPolls,
   type Tier0Batches,
   Tier0LockError,
 } from "@abolishus/core";
@@ -56,6 +58,8 @@ export interface JobContext {
   readonly registry?: RegistrySync;
   /** The roots step, beside the registry sync; its queue runs only then. */
   readonly pollRoots?: PollRoots;
+  /** The deployment every stub pins, beside the registry sync; its queue runs only then. */
+  readonly pollStubs?: PollStubDeployment;
   /**
    * The creation key, its daily ceiling and the L1 anchor its identifiers
    * are checked against, in a creation worker; its queue runs only then.
@@ -263,6 +267,18 @@ async function pollRoot(ctx: JobContext, _data: JobData<"pollRoot">): Promise<vo
 }
 
 /**
+ * One run of the stub step, logging what moved, by count. A stub is built
+ * from what the database holds and the deployment checked at startup, so
+ * nothing here reads a chain; a poll whose stub breaks a rule fails alone.
+ */
+async function pollStub(ctx: JobContext, _data: JobData<"pollStub">): Promise<void> {
+  if (ctx.pollStubs === undefined) throw new JobError("internal");
+  const report = await stubPolls(ctx.sql, ctx.pollStubs, { now: ctx.now() });
+  if (report.stubbed > 0 || Object.keys(report.failed).length > 0)
+    ctx.log({ queue: "{poll-stub}", ...report });
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -290,5 +306,6 @@ export const HANDLERS: {
   registrySync,
   pollCreate,
   pollRoot,
+  pollStub,
   ballotSubmit,
 };

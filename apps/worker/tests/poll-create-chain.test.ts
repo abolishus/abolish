@@ -215,8 +215,13 @@ async function submittedPoll(): Promise<string> {
 }
 
 describe("the startup check", () => {
-  test("passes the configured registry, and refuses another chain or address", async () => {
-    const deployment = { chainId: CHAIN_ID, registry };
+  test("passes the configured registry, and refuses another chain, address, L1 or anchor", async () => {
+    const deployment = {
+      chainId: CHAIN_ID,
+      registry,
+      l1ChainId: 11_155_111n,
+      anchor: getAddress(toHex(0xd0004, { size: 20 })),
+    };
     await expect(checkPollCreationDeployment(client, deployment)).resolves.toBeUndefined();
     await expect(
       checkPollCreationDeployment(client, { ...deployment, chainId: CHAIN_ID + 1n }),
@@ -228,6 +233,17 @@ describe("the startup check", () => {
     await expect(
       checkPollCreationDeployment(client, { ...deployment, registry: getAddress(L1_BLOCK) }),
     ).rejects.toThrow("isn't an election registry");
+    // The per-slot check must read the anchor the registry, and so every
+    // stub, names.
+    await expect(
+      checkPollCreationDeployment(client, { ...deployment, l1ChainId: 1n }),
+    ).rejects.toThrow("names another L1");
+    await expect(
+      checkPollCreationDeployment(client, {
+        ...deployment,
+        anchor: getAddress(toHex(0xd0005, { size: 20 })),
+      }),
+    ).rejects.toThrow("names another board anchor");
   });
 });
 

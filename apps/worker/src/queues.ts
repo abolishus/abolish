@@ -94,6 +94,14 @@ export const QUEUES = {
    */
   pollRoot: { name: "{poll-root}", side: "account", data: z.strictObject({}) },
   /**
+   * The stub step of each rooted poll's setup (core's stubPolls; ADR 0032,
+   * rules 7, 8, 10 and 11): the version-5 stub its ceremony binds. Runs on a
+   * schedule, only beside the registry sync, whose deployment every stub
+   * pins, and never with the creation key, and takes no data: no poll,
+   * author or draft is ever queued (T-10).
+   */
+  pollStub: { name: "{poll-stub}", side: "account", data: z.strictObject({}) },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

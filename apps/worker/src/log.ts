@@ -12,6 +12,7 @@ import type {
   RegistrySyncReason,
   CreationFailure,
   RootFailure,
+  StubFailure,
   Tier0GroupOutcome,
 } from "@abolishus/core";
 import type { EventAccumulatorProofError, TierMembershipErrorCode } from "@abolishus/crypto";
@@ -163,6 +164,16 @@ export type PollRootLine =
       readonly reason: TierMembershipErrorCode;
     };
 
+/**
+ * What a stub-step run did, in counts only (T-10, T-67), written only when a
+ * poll moved.
+ */
+export interface PollStubLine {
+  readonly queue: "{poll-stub}";
+  readonly stubbed: number;
+  readonly failed: Partial<Record<StubFailure, number>>;
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -188,5 +199,6 @@ export type LogLine =
   | RegistrySyncLine
   | PollCreationLine
   | PollRootLine
+  | PollStubLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

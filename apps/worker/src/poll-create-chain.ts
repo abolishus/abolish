@@ -199,6 +199,9 @@ export function creationAccount(key: Uint8Array): PrivateKeyAccount {
 export interface PollCreationDeployment {
   readonly chainId: bigint;
   readonly registry: Address;
+  /** The L1 and the board anchor the per-slot check reads (`CREATE_L1_CHAIN_ID`, `CREATE_ANCHOR`). */
+  readonly l1ChainId: bigint;
+  readonly anchor: Address;
 }
 
 /**
@@ -206,7 +209,9 @@ export interface PollCreationDeployment {
  * holds, in finalized state, a registry that numbers its elections for this
  * chain and address as the release's does (`electionIdAt(0)`), so creations
  * go to the registry our definitions will name and are read back from it
- * (T-34). Throws naming the mismatch, never the URL or a key.
+ * (T-34), and that names the configured L1 and board anchor, so the per-slot
+ * check reads the anchor every stub of these identifiers will pin (P2-22
+ * part 4b). Throws naming the mismatch, never the URL or a key.
  */
 export async function checkPollCreationDeployment(
   client: PublicClient,
@@ -234,4 +239,12 @@ export async function checkPollCreationDeployment(
   const want = electionId(deployment.chainId, hexToBytes(getAddress(deployment.registry)), 0n);
   if (first.toLowerCase() !== bytesToHex(want))
     throw new Error("the registry numbers its elections for another chain or address");
+  const at = { address: deployment.registry, abi: electionRegistryAbi, blockNumber } as const;
+  const [l1ChainId, anchor] = await Promise.all([
+    client.readContract({ ...at, functionName: "l1ChainId" }),
+    client.readContract({ ...at, functionName: "l1Anchor" }),
+  ]);
+  if (l1ChainId !== deployment.l1ChainId) throw new Error("the registry names another L1");
+  if (getAddress(anchor) !== getAddress(deployment.anchor))
+    throw new Error("the registry names another board anchor");
 }

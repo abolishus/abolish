@@ -86,6 +86,8 @@ export {
 } from "./output-roots.ts";
 export { POLL_ROOT_ENV, type PollRootConfig, pollRootFromEnv } from "./poll-root-env.ts";
 export { PollRoots, type PollRootsOptions } from "./poll-roots.ts";
+export { type PollStubPins, pollStubDeployment } from "./poll-stub-chain.ts";
+export { POLL_STUB_ENV, type PollStubConfig, pollStubFromEnv } from "./poll-stub-env.ts";
 export {
   type RegistryAccumulator,
   RegistrySync,
@@ -109,6 +111,7 @@ export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
   POLL_CREATE_EVERY_MS,
   POLL_ROOT_EVERY_MS,
+  POLL_STUB_EVERY_MS,
   PRUNE_EVERY_MS,
   REGISTRY_SYNC_EVERY_MS,
   type RunningWorker,

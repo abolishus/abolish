@@ -125,8 +125,8 @@ const panelSigners = (
   author: signersOf(SEAT_PANELS.author, authorSeats),
 });
 
-// The author panel's registered key set is P2-16 part 3's, so a context with
-// an author panel comes from the internal seam that takes its seats as given.
+// These vectors carry no author run, so a context with an author panel comes
+// from the internal seam that takes its seats as given.
 function electionOf(
   name: string,
   seats: readonly number[],

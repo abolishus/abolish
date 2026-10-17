@@ -89,6 +89,7 @@ export type AuthorApprovalsCheck =
 
 interface Prepared {
   readonly ctx: AuthorApprovalContext;
+  readonly panelId: Uint8Array;
   readonly keySet: Uint8Array;
   readonly n: number;
   readonly quorum: number;
@@ -111,9 +112,10 @@ function prepare(input: AuthorApprovalContext): Prepared {
   const panelCopy = { threshold: panel.threshold, keys: panel.keys.map((k) => Uint8Array.from(k)) };
   // The author panel's rules 1 to 3 (PanelError otherwise), so a threshold
   // of 0 can't make the quorum 0 and approve with no approvals at all.
-  authorPanelId(panelCopy);
+  const panelId = authorPanelId(panelCopy);
   const n = panelCopy.keys.length;
   return {
+    panelId,
     ctx: {
       l2ChainId,
       trusteeRegistry,
@@ -191,8 +193,59 @@ export function checkAuthorApprovals(
     for (const seat of counting(p, record) ?? []) counted.add(seat);
   }
   const seats = [...counted].sort((a, b) => a - b);
-  if (seats.length >= p.quorum) return { ok: true, seats };
+  if (seats.length >= p.quorum) {
+    approve(p);
+    return { ok: true, seats };
+  }
   return { ok: false, code: named ? "author-approvals" : "author-approvals-missing", seats };
+}
+
+/**
+ * What an author key set was approved under: every input of the approvals'
+ * statement but the key set itself, which is the marked set.
+ */
+export interface AuthorApproval {
+  readonly l2ChainId: bigint;
+  readonly trusteeRegistry: Uint8Array;
+  readonly authorPanelId: Uint8Array;
+  readonly authorStubHash: Uint8Array;
+  readonly authorTranscriptHash: Uint8Array;
+}
+
+/**
+ * Every registered key set `checkAuthorApprovals` approved, with each
+ * context it was approved under (a set is frozen by the transcript check
+ * that returned it), so the author panel's key set is taken only for the
+ * definition whose author run it is: never one served from anywhere else,
+ * one whose approvals fell short, or another election's (T-37, T-17).
+ */
+const APPROVED = new WeakMap<readonly RegisteredKeys[], AuthorApproval[]>();
+
+function approve(p: Prepared): void {
+  const { l2ChainId, trusteeRegistry, authorStubHash, authorTranscriptHash, registered } = p.ctx;
+  const under: AuthorApproval = {
+    l2ChainId,
+    trusteeRegistry: Uint8Array.from(trusteeRegistry),
+    authorPanelId: p.panelId,
+    authorStubHash: Uint8Array.from(authorStubHash),
+    authorTranscriptHash: Uint8Array.from(authorTranscriptHash),
+  };
+  APPROVED.set(registered, [...(APPROVED.get(registered) ?? []), under]);
+}
+
+/**
+ * Internal: whether `checkAuthorApprovals` approved this key set under
+ * exactly `under`. The package entry point doesn't export it.
+ */
+export function wasApproved(keys: readonly RegisteredKeys[], under: AuthorApproval): boolean {
+  return (APPROVED.get(keys) ?? []).some(
+    (a) =>
+      a.l2ChainId === under.l2ChainId &&
+      equalBytes(a.trusteeRegistry, under.trusteeRegistry) &&
+      equalBytes(a.authorPanelId, under.authorPanelId) &&
+      equalBytes(a.authorStubHash, under.authorStubHash) &&
+      equalBytes(a.authorTranscriptHash, under.authorTranscriptHash),
+  );
 }
 
 /** Why the operator refuses to board an approvals record (Author panel, Boarding). */

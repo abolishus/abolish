@@ -2,12 +2,12 @@
 // every ballot of this election on the board copy, by @abolishus/crypto's
 // `checkBallot` (under definition versions 3 and 4, `checkBallotV2`, against
 // the ballot's cell; under definition version 5, `checkBallotV3`, against its
-// cell and the questions; under definition version 6 without an author
-// panel, `checkBallotV4`, against its cell, the questions and both halves'
-// shapes from the definition) with
-// the definition and the key set the transcript
-// check registered, never against anything a ballot or the bundle chooses
-// (T-37, T-04). A ballot reaches the board by the board path, as a ballot
+// cell and the questions; under definition version 6, `checkBallotV4`,
+// against its cell, the questions and both halves' shapes from the
+// definition) with the definition and the key sets the transcript checks
+// registered, beside an author panel the author panel's too, approved by its
+// approvals on the board, never against anything a ballot or the bundle
+// chooses (T-37, T-04). A ballot reaches the board by the board path, as a ballot
 // record in a board entry, or by the ordinary contract path, as the board
 // contract's `BallotSubmitted` event in a contract-event record; each copy is
 // judged by its own path's window, the close rule (5.5, docs/spec/close.md,
@@ -230,13 +230,15 @@ type Path =
  * The rows 5.1 to 5.5 and 5.7, and the report's `ballots`. `registered` is
  * the key set the transcript check returned once 3.2 passed, or `undefined`,
  * which leaves every ballot unchecked: shares made to an unregistered panel
- * can't be judged (T-37). `clock` is the anchoring clock, which gives the
+ * can't be judged (T-37). `authorRegistered` is the author panel's, beside
+ * one, as `ceremonyChecks` returned it. `clock` is the anchoring clock, which gives the
  * board path's last segment, `s_A = period(closes_at) + 1`. `blocks`, a
  * format-5 bundle's run of finalized L1 headers, adds 5.8.
  */
 export function ballotChecks(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   clock: AnchorClock,
@@ -250,7 +252,7 @@ export function ballotChecks(
   /** Every entry carrying an ordinary-path ballot, admitted or not, in copy order. */
   readonly ordinary?: readonly number[];
 } {
-  const judge = judgeFor(definition, registered);
+  const judge = judgeFor(definition, registered, authorRegistered);
   if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
   const d = definition.value;
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
@@ -529,15 +531,16 @@ export const UNSUPPORTED: BallotOutcome = {
  * against limits the ballot states (T-28). Version 6 pins ballot version 4,
  * version 3's checks with an author half judged against the definition's
  * author panel, never against the ballot's (T-17, T-37): without an author
- * panel any author half fails `validity-shape`. A definition with one has no
- * ballot judged yet: the author panel's registered key set, which 3.1 and
- * 3.2 now check, isn't passed to admission until P2-16 part 4d-3.
+ * panel any author half fails `validity-shape`, and beside one its seats are
+ * judged against `authorRegistered`, the author panel's key set its
+ * approvals approved, without which no ballot is judged.
  */
 export function judgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered?: readonly RegisteredKeys[],
 ): BallotOutcome | Judge {
-  const stepped = steppedJudgeFor(definition, registered);
+  const stepped = steppedJudgeFor(definition, registered, authorRegistered);
   if (typeof stepped !== "function") return stepped;
   return (payload) => {
     const { core, step, tally } = stepped(payload);
@@ -549,6 +552,7 @@ export function judgeFor(
 export function steppedJudgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered?: readonly RegisteredKeys[],
 ): BallotOutcome | SteppedJudge {
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
@@ -592,11 +596,16 @@ export function steppedJudgeFor(
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
   if (definition.version === 6) {
-    // Beside an author panel `registered` is the default panel's key set
-    // alone, so no share made to the author panel can be judged here: never
-    // against keys no transcript check gave (T-37; P2-16 part 4d-3).
-    if (definition.value.author_keys.length !== 0) return NOT_REACHED;
-    const election = panelBallotElection(definition.value, registered);
+    // Beside an author panel its shares are judged only against its own
+    // run's key set, approved on the board: never against keys no
+    // transcript check gave, or the default panel's (T-37, T-17).
+    const author = definition.value.author_keys.length !== 0;
+    if (author && authorRegistered === undefined) return NOT_REACHED;
+    const election = panelBallotElection(
+      definition.value,
+      registered,
+      author ? authorRegistered : [],
+    );
     return (payload) => {
       const record = decodeBallot(payload, 4);
       const { vss, author_vss: authorVss } = record.committed_vote;

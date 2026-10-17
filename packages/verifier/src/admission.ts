@@ -117,7 +117,7 @@ export function electionAdmission(
   if (!isReadable(boardEntryVersion)) return refuse("unsupported-version");
   const combination = profileCombinationRule(d);
   if (combination !== undefined) return refuse(combination);
-  const { rows, registered } = ceremonyChecks(
+  const { rows, registered, authorRegistered } = ceremonyChecks(
     d,
     stubHash,
     panel,
@@ -140,7 +140,7 @@ export function electionAdmission(
       why === "ceremony-transcript-missing" || why === "unsupported-version" ? why : "not-reached",
     );
   }
-  const judge = steppedJudgeFor(record, registered);
+  const judge = steppedJudgeFor(record, registered, authorRegistered);
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
   // Up to the membership proof: a payload decided before it, or its step.

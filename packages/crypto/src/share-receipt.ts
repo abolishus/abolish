@@ -391,10 +391,9 @@ export interface PanelReceiptSigners {
  * recomputed ballot hash and its own panel's share hash for the seat, never
  * values that came with the receipt. The caller has strictly decoded the
  * ballot. `registered.author` must be empty: an author panel's signing keys
- * come from its own ceremony's transcript check, which P2-16 part 3
- * specifies, and until then none is taken on trust, so an author seat's
- * receipt never checks here (T-37), as `panelBallotElection` refuses an
- * author panel.
+ * come from its own ceremony's transcript check, approved by its approvals,
+ * which this check doesn't take until P2-16 part 4d-3, and until then none is
+ * taken on trust, so an author seat's receipt never checks here (T-37).
  */
 export function checkShareReceiptV4(
   registered: PanelReceiptSigners,
@@ -406,14 +405,14 @@ export function checkShareReceiptV4(
 ): boolean {
   if (registered.author.length !== 0)
     throw new RangeError(
-      "checkShareReceiptV4: an author panel's signing keys come from its own ceremony (P2-16 part 3)",
+      "checkShareReceiptV4: an author panel's signing keys come from its own ceremony (P2-16 part 4d-3)",
     );
   return checkShareReceiptV4With(registered, ctx, vote, panel, seat, signature);
 }
 
 /**
  * Internal: `checkShareReceiptV4` with the author panel's signing keys taken
- * as given, so author seats' receipts can be tested before P2-16 part 3,
+ * as given, so author seats' receipts can be tested before P2-16 part 4d-3,
  * which then replaces this. The package entry point doesn't export it.
  */
 export function checkShareReceiptV4With(

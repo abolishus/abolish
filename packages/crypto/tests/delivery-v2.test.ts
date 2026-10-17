@@ -36,7 +36,7 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // ECDSA, ML-KEM, AEAD and ristretto255), so the expected bytes and verdicts
 // never come from the code under test. Elections with an author panel run
 // through the internal `checkDeliveryV2With`, since the exported check
-// refuses an author key set until P2-16 part 3 gives it a checked source.
+// refuses an author key set until P2-16 part 4d-3 takes its approved key set.
 
 type RecordKind = "share-receipt" | "share-posting" | "share-complaint";
 

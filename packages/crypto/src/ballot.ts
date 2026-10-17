@@ -35,6 +35,7 @@ import {
   type ValidityRulesV3,
   type ValidityRulesV4,
 } from "./ballot-validity.ts";
+import { wasApproved } from "./author-approvals.ts";
 import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
 import {
   bytesFixed,
@@ -67,6 +68,7 @@ import {
   verifyDecodedMembershipProofs,
 } from "./membership-proof.ts";
 import {
+  electionAuthorStubV6Hash,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
@@ -78,6 +80,7 @@ import {
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { KEM_PUBLIC_KEY } from "./share-encryption.ts";
 import { membershipMessage } from "./revoting.ts";
+import { authorPanelId } from "./trustee.ts";
 
 // The fixed-width fields come first, at fixed offsets, so a contract reads
 // them without parsing the committed vote (P1-18).
@@ -398,44 +401,44 @@ export function questionBallotElection(
  * the author panel's threshold and size. The caller has run 2.x for the
  * definition, 2.5's `panel-kind` and `default-seat` included; one that isn't
  * well-formed is refused here too (T-28, T-34), and so is a cell root of 0
- * (T-04). A definition with an author panel is refused: its admission needs
- * the author panel's registered key set, the output of that panel's own
- * ceremony, which P2-16 part 3 specifies, and until then no seat list for
- * it can be checked against `author_transcript_hash`, so none is taken on
- * trust (T-37; docs/spec/ballot-validity.md, Admission and Casting (version
- * 4)).
+ * (T-04). With an author panel, `authorRegistered` must be the key set
+ * `checkCeremonyTranscript` returned for the author transcript and
+ * `checkAuthorApprovals` then approved, under this definition's chain,
+ * trustee registry, author panel identifier, author stub hash and
+ * `author_transcript_hash`: the author panel's registration, which no
+ * contract records, so no seat list is taken on trust (T-37, T-17;
+ * docs/spec/ballot-validity.md, Admission and Casting (version 4)). Without
+ * one it must be empty.
  */
 export function panelBallotElection(
   definition: ElectionDefinitionV6,
   registered: readonly RegisteredKeys[],
+  authorRegistered: readonly RegisteredKeys[] = [],
 ): PanelBallotElection {
-  if (definition.author_keys.length !== 0)
-    throw new RangeError(
-      "panelBallotElection: an author panel's registered key set comes from its own ceremony (P2-16 part 3)",
-    );
-  return panelElection("panelBallotElection", definition, registered, []);
+  return panelElection("panelBallotElection", definition, registered, { keys: authorRegistered });
 }
 
 /**
  * Internal: `panelBallotElection` with the author panel's registered seats
  * given, unchecked against the definition's `author_transcript_hash`, so the
- * admission of author halves can be tested before P2-16 part 3 specifies
- * that panel's ceremony and its transcript check, which then replaces this.
- * The package entry point doesn't export it.
+ * admission of author halves can be tested against vectors that carry no
+ * author run. The package entry point doesn't export it.
  */
 export function panelBallotElectionWith(
   definition: ElectionDefinitionV6,
   registered: readonly RegisteredKeys[],
   authorQualified: readonly number[],
 ): PanelBallotElection {
-  return panelElection("panelBallotElectionWith", definition, registered, authorQualified);
+  return panelElection("panelBallotElectionWith", definition, registered, {
+    seats: authorQualified,
+  });
 }
 
 function panelElection(
   caller: string,
   definition: ElectionDefinitionV6,
   registered: readonly RegisteredKeys[],
-  authorQualified: readonly number[],
+  author: { readonly keys: readonly RegisteredKeys[] } | { readonly seats: readonly number[] },
 ): PanelBallotElection {
   const own = pinnedVersion(definition, RECORD_TYPES.electionDefinition);
   const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
@@ -447,7 +450,13 @@ function panelElection(
   // Well-formed, so `author_threshold` and `author_keys` are both empty or a
   // panel of 1 ≤ k_A ≤ n_A ≤ MAX_TRUSTEES (author-panel).
   const authorPanelSize = definition.author_keys.length;
-  const seats = [...authorQualified];
+  if ("keys" in author && !approvedFor(definition, author.keys))
+    throw new RangeError(
+      authorPanelSize === 0
+        ? `${caller}: the definition has no author panel`
+        : `${caller}: not the author panel's approved key set of this definition`,
+    );
+  const seats = "keys" in author ? author.keys.map((k) => k.index) : [...author.seats];
   if (
     !seats.every((s) => Number.isSafeInteger(s) && s >= 1 && s <= authorPanelSize) ||
     new Set(seats).size !== seats.length
@@ -476,6 +485,22 @@ function panelElection(
   MADE.set(election, { definitionHash, version: 4 });
   KEYS.set(election, copyKeys(registered));
   return election;
+}
+
+// Without an author panel only the empty set; with one, the set
+// `checkAuthorApprovals` approved for this definition's author run.
+function approvedFor(definition: ElectionDefinitionV6, keys: readonly RegisteredKeys[]): boolean {
+  if (definition.author_keys.length === 0) return Array.isArray(keys) && keys.length === 0;
+  return wasApproved(keys, {
+    l2ChainId: definition.l2_chain_id,
+    trusteeRegistry: definition.trustee_registry,
+    authorPanelId: authorPanelId({
+      threshold: definition.author_threshold,
+      keys: definition.author_keys,
+    }),
+    authorStubHash: electionAuthorStubV6Hash(definition),
+    authorTranscriptHash: definition.author_transcript_hash,
+  });
 }
 
 // Cells are numbered across the tiers in order, as the definition lists them

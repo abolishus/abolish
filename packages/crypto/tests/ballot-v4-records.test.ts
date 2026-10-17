@@ -145,8 +145,8 @@ const definitions = new Map<string, ElectionDefinitionV6>(
 
 const definitionOf = (name: string) => definitions.get(name) as ElectionDefinitionV6;
 
-// The author panel's registered key set is P2-16 part 3's, so a context with
-// an author panel comes from the internal seam that takes its seats as given.
+// These vectors carry no author run, so a context with an author panel comes
+// from the internal seam that takes its seats as given.
 function electionOf(
   name: string,
   seats: readonly number[],
@@ -529,16 +529,16 @@ describe("panel ballot context", () => {
   test("the entry point exposes neither the author-seat seam nor version 4's intake admission", async () => {
     // The seam takes author seats nothing has checked against
     // `author_transcript_hash`; exported, it would let any caller pass seats
-    // it controls off as author seats (T-17, T-37). Part 3 replaces it.
+    // it controls off as author seats (T-17, T-37).
     const api: Record<string, unknown> = await import("../src/index.ts");
     expect(api).not.toHaveProperty("panelBallotElectionWith");
     expect(api).not.toHaveProperty("admitForIntakeV4");
     expect(api).toHaveProperty("panelBallotElection");
   });
 
-  test("refuses a definition with an author panel until that panel's key set can be checked (P2-16 part 3)", () => {
+  test("refuses a definition with an author panel without that panel's approved key set (author-key-set.test.ts)", () => {
     expect(() => panelBallotElection(d, keySet([1, 2], d.ceremony_transcript_hash))).toThrow(
-      RangeError,
+      /approved key set/,
     );
     expect(
       panelBallotElection(plain, keySet([1, 2], plain.ceremony_transcript_hash)).authorPanelSize,

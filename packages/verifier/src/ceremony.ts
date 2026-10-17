@@ -292,6 +292,12 @@ export function ceremonyChecks(
    * approve): what ballots are checked against (5.1 to 5.4).
    */
   readonly registered?: readonly RegisteredKeys[];
+  /**
+   * Beside an author panel, with `registered`: the author panel's registered
+   * key set, which its approvals approved (`checkAuthorApprovals`), so its
+   * shares are judged only against its own run (T-37).
+   */
+  readonly authorRegistered?: readonly RegisteredKeys[];
 } {
   const rows = (r25: CeremonyOutcome, r31: CeremonyOutcome, r32: CeremonyOutcome) =>
     new Map([
@@ -448,6 +454,11 @@ export function ceremonyChecks(
       approvals.status === "pass" &&
       r25.status !== "fail" &&
       own.checked &&
-      own.registered !== undefined && { registered: own.registered }),
+      own.registered !== undefined &&
+      theirs.checked &&
+      theirs.registered !== undefined && {
+        registered: own.registered,
+        authorRegistered: theirs.registered,
+      }),
   };
 }

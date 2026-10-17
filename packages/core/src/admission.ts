@@ -189,6 +189,9 @@ export class BallotAdmissions {
     const segment = (now - this.#clock.epoch) / this.#clock.period;
     if (segment > 0xffffffffn) return refuseAll(new SubmitError("not-open"));
     const verdicts = admission.admitAll(own);
+    // One budget for the whole batch: ballots naming many distinct blocks,
+    // or a slow node, delay it by one budget at most, then go unchecked (T-52).
+    const l1Deadline = this.#l1?.deadline();
     const outcomes: SubmitOutcome[] = [];
     for (const [i, verdict] of verdicts.entries()) {
       const ballot = own[i] as Uint8Array;
@@ -196,7 +199,7 @@ export class BallotAdmissions {
         outcomes.push({ ok: false, error: new SubmitError("rejected", verdict.code) });
         continue;
       }
-      const l1 = await this.#l1Check(admission, verdict);
+      const l1 = await this.#l1Check(admission, verdict, l1Deadline);
       if (typeof l1 !== "string") {
         outcomes.push({ ok: false, error: new SubmitError("rejected", l1.rejected) });
         continue;
@@ -227,13 +230,14 @@ export class BallotAdmissions {
   async #l1Check(
     admission: ElectionAdmission,
     ballot: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
+    deadline: number | undefined,
   ): Promise<L1Check | { readonly rejected: L1RefCode }> {
     const l1 = this.#l1;
     if (l1 === undefined) return "off";
     if (admission.l1ChainId !== l1.chainId) return "unchecked";
     let verdict;
     try {
-      verdict = await l1.judge(admission, ballot);
+      verdict = await l1.judge(admission, ballot, deadline);
     } catch {
       // An unreachable or inconsistent node never refuses a ballot: 5.8 is
       // the verifier's to decide, and refusing here would let the node's

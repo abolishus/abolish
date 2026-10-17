@@ -133,6 +133,50 @@ describe("gives the crypto package's verdict over the node's finalized chain", (
   });
 });
 
+test("one instance, its head moving up the chain, gives each judgement the verdict over that prefix", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      chainArb,
+      fc.array(
+        fc.record({
+          grow: fc.nat(60),
+          o: fc.nat(),
+          len: fc.nat(),
+          at: fc.nat(450),
+          honest: fc.boolean(),
+        }),
+        { minLength: 1, maxLength: 12 },
+      ),
+      async (blocks, steps) => {
+        const src = sourceOf(blocks);
+        const last = blocks.at(-1)!.timestamp;
+        // Two windows, so cached starts are shared and kept apart.
+        const opens = [
+          BigInt(steps[0]!.o) % (last + 7_200n),
+          BigInt(steps.at(-1)!.o) % (last + 7_200n),
+        ];
+        const l1 = new L1References({ source: src.s, headTtlMs: 0 });
+        let head = 0;
+        for (const [i, { grow, len, at, honest }] of steps.entries()) {
+          head = Math.min(blocks.length - 1, head + grow);
+          src.setHead(BigInt(head));
+          const opensAt = opens[i % 2]!;
+          const window = { opensAt, closesAt: opensAt + 1n + (BigInt(len) % (last + 1n)) };
+          const named = blocks[at];
+          const ref = {
+            l1RefNumber: BigInt(at),
+            l1RefHash: honest && named !== undefined ? named.hash : new Uint8Array(32).fill(9),
+          };
+          expect(await l1.judge(window, ref)).toBe(
+            expected(blocks.slice(0, head + 1), window, ref),
+          );
+        }
+      },
+    ),
+    { numRuns },
+  );
+});
+
 describe("reads only what it needs, and keeps what can't change", () => {
   const blocks = Array.from({ length: 4_000 }, (_, i) => ({
     hash: new Uint8Array(32).fill(i % 251),
@@ -153,7 +197,7 @@ describe("reads only what it needs, and keeps what can't change", () => {
     expect(src.reads.length - before).toBe(1);
   });
 
-  test("the head is read once per lifetime, and never moves back", async () => {
+  test("the head is read once per lifetime, and only blocks up to it are asked for", async () => {
     let now = 0;
     const src = sourceOf(blocks);
     src.setHead(2_500n);
@@ -165,11 +209,14 @@ describe("reads only what it needs, and keeps what can't change", () => {
     expect(src.heads()).toBe(1);
     now = 12_000;
     expect(await l1.judge(window, ref(2_600))).toBe("admitted");
-    // A node behind the head already seen: the higher one stands.
+    // A node (a load balancer's other one, say) behind the head already
+    // seen: its own head bounds what it is asked for.
     src.setHead(2_500n);
     now = 24_000;
-    expect(await l1.judge(window, ref(2_600))).toBe("admitted");
+    const before = src.reads.length;
+    expect(await l1.judge(window, ref(2_550))).toBe("pending");
     expect(src.heads()).toBe(3);
+    expect(src.reads.slice(before).every((n) => n <= 2_500n)).toBe(true);
   });
 
   test("a window L1 hasn't reached is never kept", async () => {
@@ -233,10 +280,33 @@ describe("reads only what it needs, and keeps what can't change", () => {
     expect(asked).toBe(2);
   });
 
+  test("judgements sharing a deadline wait on the node one budget in all", async () => {
+    let now = 0;
+    const src = sourceOf(blocks);
+    const slow: FinalizedL1Source = {
+      chainId: 1n,
+      finalizedHead: () => src.s.finalizedHead(),
+      block: async (n) => {
+        now += 400;
+        return src.s.block(n);
+      },
+    };
+    const l1 = new L1References({ source: slow, budgetMs: 1_000, now: () => now });
+    const deadline = l1.deadline();
+    // The window's search alone outlasts the budget.
+    await expect(l1.judge(window, ref(2_500), deadline)).rejects.toThrow();
+    now = 100_000;
+    const fresh = new L1References({ source: src.s, now: () => now });
+    const spent = fresh.deadline() - 2_001;
+    const heads = src.heads();
+    await expect(fresh.judge(window, ref(2_500), spent)).rejects.toThrow("spent");
+    expect(src.heads()).toBe(heads);
+  });
+
   test("refuses options out of range", () => {
     const { s } = sourceOf(blocks);
     expect(() => new L1References({ source: s, headTtlMs: -1 })).toThrow(RangeError);
-    expect(() => new L1References({ source: s, cacheSize: 0 })).toThrow(RangeError);
+    expect(() => new L1References({ source: s, cacheSize: 63 })).toThrow(RangeError);
     expect(() => new L1References({ source: s, budgetMs: 0 })).toThrow(RangeError);
   });
 });

@@ -31,12 +31,14 @@ export interface L1ReferenceOptions {
   readonly source: FinalizedL1Source;
   /** How long a finalized head is used before it is read again; one L1 slot by default. */
   readonly headTtlMs?: number;
-  /** Finalized blocks kept in memory (default 4,096). */
+  /** Finalized blocks kept in memory (default 4,096, at least 64 so a search keeps its own probes). */
   readonly cacheSize?: number;
   /**
-   * How long one judgement may wait on the node (2 s by default). A node that
-   * fails or runs out of time is not asked again for a head's lifetime, so a
-   * slow node delays one ballot's batch by this much, never every ballot.
+   * How long the judgements sharing one `deadline()` may wait on the node
+   * together (2 s by default): a batch of ballots shares one, so a slow node,
+   * or ballots naming many distinct blocks, delay a batch by at most this
+   * much. A node that fails or runs out of time is not asked again for a
+   * head's lifetime.
    */
   readonly budgetMs?: number;
   /** Milliseconds, for the head's lifetime and the budget; `Date.now` unless a test moves it. */
@@ -83,8 +85,8 @@ export class L1References {
   }: L1ReferenceOptions) {
     if (!Number.isSafeInteger(headTtlMs) || headTtlMs < 0)
       throw new RangeError("headTtlMs must be ≥ 0");
-    if (!Number.isSafeInteger(cacheSize) || cacheSize < 1)
-      throw new RangeError("cacheSize must be at least 1");
+    if (!Number.isSafeInteger(cacheSize) || cacheSize < 64)
+      throw new RangeError("cacheSize must be at least 64");
     if (!Number.isSafeInteger(budgetMs) || budgetMs < 1)
       throw new RangeError("budgetMs must be at least 1");
     this.chainId = source.chainId;
@@ -95,19 +97,27 @@ export class L1References {
     this.#now = now;
   }
 
+  /** A deadline one budget from now, for judgements that wait on the node together. */
+  deadline(): number {
+    return this.#now() + this.#budgetMs;
+  }
+
   /**
    * 5.8's verdict for `ref` in a poll with this window, as of the node's
-   * finalized head. Throws if the node can't be read; the caller decides
-   * what an unchecked ballot gets.
+   * finalized head, waiting on the node until `deadline` at most (one budget
+   * from now by default). Throws if the node can't be read in time; the
+   * caller decides what an unchecked ballot gets.
    */
   async judge(
     window: { readonly opensAt: bigint; readonly closesAt: bigint },
     ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
+    deadline = this.deadline(),
   ): Promise<L1ReferenceVerdict> {
     const start = this.#now();
     if (start < this.#downUntil) throw new Error("the L1 node failed a moment ago");
+    if (start >= deadline) throw new Error("the L1 budget is spent");
     try {
-      return await this.#judge(window, ref, start + this.#budgetMs);
+      return await this.#judge(window, ref, deadline);
     } catch (e) {
       this.#downUntil = this.#now() + this.#headTtlMs;
       throw e;
@@ -138,15 +148,14 @@ export class L1References {
   async #finalizedHead(deadline: number): Promise<bigint> {
     const now = this.#now();
     if (this.#head !== undefined && now - this.#head.at < this.#headTtlMs) return this.#head.number;
-    const number = await this.#within(deadline, this.#source.finalizedHead());
+    const number = await this.#within(deadline, () => this.#source.finalizedHead());
     if (typeof number !== "bigint" || number < 0n || number > 0xffff_ffff_ffff_ffffn)
       throw new RangeError("the finalized head isn't a u64");
-    // Finalized blocks never revert, so a node (or a load balancer's other
-    // node) reporting a lower head is behind: the higher one stands.
-    const highest =
-      this.#head !== undefined && this.#head.number > number ? this.#head.number : number;
-    this.#head = { number: highest, at: now };
-    return highest;
+    // The head as the node reports it now, even below one seen before:
+    // blocks are asked for only up to it, so a node behind a load balancer
+    // isn't asked for blocks it may not have finalized.
+    this.#head = { number, at: now };
+    return number;
   }
 
   /**
@@ -170,7 +179,7 @@ export class L1References {
         if (!(e instanceof Missing)) throw e;
         if (e.n < 0n || e.n > head)
           throw new RangeError("asked for a block beyond the finalized head");
-        const block = await this.#within(deadline, this.#source.block(e.n));
+        const block = await this.#within(deadline, () => this.#source.block(e.n));
         remember(
           this.#blocks,
           e.n,
@@ -182,8 +191,9 @@ export class L1References {
     throw new Error("an L1 reference needed too many blocks");
   }
 
-  /** `read`, or a rejection once the judgement's deadline passes. */
-  async #within<T>(deadline: number, read: Promise<T>): Promise<T> {
+  /** `read`'s answer, or a rejection once the deadline passes, before or during it. */
+  async #within<T>(deadline: number, read: () => Promise<T>): Promise<T> {
+    if (this.#now() >= deadline) throw new Error("the L1 node took too long");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -192,7 +202,7 @@ export class L1References {
       );
     });
     try {
-      return await Promise.race([read, late]);
+      return await Promise.race([read(), late]);
     } finally {
       clearTimeout(timer);
     }

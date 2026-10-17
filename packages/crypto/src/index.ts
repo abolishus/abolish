@@ -380,6 +380,7 @@ export {
   decodeMembershipProof,
   encodeMembershipProof,
   MEMBERSHIP_PROOF_LENGTH,
+  MEMBERSHIP_WASM_SHA256,
   MEMBERSHIP_ZKEY_SHA256,
   type MembershipProof,
   type MembershipProofCheck,
@@ -393,6 +394,7 @@ export {
 // Not exported: `finishMembershipProofWith`, the test seam that takes its
 // randomness, and `rerandomiseMembershipProof`, which takes its scalars.
 export {
+  checkMembershipWasm,
   checkMembershipZkey,
   finishMembershipProof,
   identityCommitment,

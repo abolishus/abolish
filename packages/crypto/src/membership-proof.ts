@@ -99,6 +99,17 @@ const VK = Object.freeze({
 export const MEMBERSHIP_ZKEY_SHA256 =
   "2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650";
 
+/**
+ * sha256 of the witness calculator that goes with the proving key,
+ * `semaphore-32.wasm` from the same release
+ * (`https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.wasm`).
+ * It computes the witness from the identity secret, so a prover runs no
+ * other: the self-check catches a wrong witness, not a calculator that
+ * keeps the secret (docs/spec/membership.md, Security notes; T-12, T-55).
+ */
+export const MEMBERSHIP_WASM_SHA256 =
+  "528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5";
+
 /** `membership_proof`: A ‖ B ‖ C, 256 bytes. */
 export const MEMBERSHIP_PROOF_LENGTH = 256;
 

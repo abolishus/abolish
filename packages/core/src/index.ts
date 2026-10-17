@@ -43,6 +43,13 @@ export {
   type StoredDefinition,
 } from "./definitions.ts";
 export {
+  DisplayTextError,
+  type DisplayTextErrorCode,
+  readServedDisplayText,
+  type ServedDisplayText,
+  storeDisplayText,
+} from "./display-texts.ts";
+export {
   deleteIdentityBackup,
   IDENTITY_BACKUP_ENVELOPE_LENGTH,
   IDENTITY_BACKUP_LOCATOR_LENGTH,
@@ -64,6 +71,7 @@ export {
   boardCheckpoints,
   boardEntries,
   boardSubtrees,
+  displayTexts,
   electionDefinitions,
   electionRegistrations,
   identityBackups,

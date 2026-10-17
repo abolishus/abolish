@@ -12,6 +12,13 @@ import * as z from "zod/mini";
 export const MAX_BOARD_PAYLOAD = 1_048_576;
 
 /**
+ * `MAX_DISPLAY_TEXT` from docs/spec/parameters.md: the largest display-text
+ * record (`0x0009`), in bytes. Version 1's worst case is under it too. A test
+ * ties this copy to the spec table.
+ */
+export const MAX_DISPLAY_TEXT = 4_194_304;
+
+/**
  * What a board entry (record `0x0007` v1, docs/spec/board.md) adds around its
  * payload: the record header (3), `election_id` (32), `index` (8), `segment`
  * (4) and the payload's `u32` length prefix (4).

@@ -38,6 +38,9 @@ const Env = z.strictObject({
     .optional(),
   TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
   API_CHALLENGE_HOST: z.string().min(1).optional(),
+  // The ballot client's origins, comma-separated, whose pages may read the
+  // API's answers (CORS); the server checks each is an exact origin.
+  API_CORS_ORIGINS: z.string().min(1).optional(),
 });
 
 const Panels = z
@@ -60,6 +63,7 @@ const env = Env.parse({
   API_TIER0_GROUP: process.env["API_TIER0_GROUP"],
   TURNSTILE_SECRET_KEY: process.env["TURNSTILE_SECRET_KEY"],
   API_CHALLENGE_HOST: process.env["API_CHALLENGE_HOST"],
+  API_CORS_ORIGINS: process.env["API_CORS_ORIGINS"],
 });
 
 let admissions: BallotAdmissions | undefined;
@@ -126,6 +130,7 @@ const server = createApiServer({
   sql,
   ...(admissions !== undefined && { admissions }),
   ...(tier0 !== undefined && { tier0 }),
+  ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
 });
 server.listen(env.API_PORT, env.API_HOST);

@@ -15,6 +15,7 @@ export {
   IdentityBackupLocator,
   MAX_BOARD_ENTRY,
   MAX_BOARD_PAYLOAD,
+  MAX_DISPLAY_TEXT,
   MAX_PAGE,
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,

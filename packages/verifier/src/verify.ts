@@ -670,6 +670,7 @@ export function verifyBundle(bundle: Bundle): Report {
       const admission = ballotChecks(
         definition.definition,
         checked.registered,
+        checked.authorRegistered,
         bundle.entries,
         definition.inputs.boardEntryVersion,
         bundle.clock,

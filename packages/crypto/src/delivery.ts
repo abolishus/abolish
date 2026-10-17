@@ -2354,8 +2354,9 @@ export interface DeliveryCheckV2 {
  * never delivers, excludes or contradicts the other's (T-37). Otherwise
  * `checkDelivery`'s. The author panel must be absent (`authorPanelSize` 0,
  * no author keys): its key set comes from its own ceremony's transcript
- * check, which P2-16 part 3 specifies, and until then none is taken on trust,
- * as `panelBallotElection` and `checkShareReceiptV4` refuse one.
+ * check, approved by its approvals, which this check doesn't take until
+ * P2-16 part 4d-3, and until then none is taken on trust, as
+ * `checkShareReceiptV4` refuses one.
  */
 export function checkDeliveryV2(
   election: DeliveryElectionV2,
@@ -2364,16 +2365,16 @@ export function checkDeliveryV2(
 ): DeliveryCheckV2 {
   if (election.authorPanelSize !== 0 || election.registered.author.length !== 0)
     throw new RangeError(
-      "checkDeliveryV2: an author panel's key set comes from its own ceremony (P2-16 part 3)",
+      "checkDeliveryV2: an author panel's key set comes from its own ceremony (P2-16 part 4d-3)",
     );
   return checkDeliveryV2With(election, ballots, entries);
 }
 
 /**
  * Internal: `checkDeliveryV2` with the author panel's key set taken as given,
- * so author seats' delivery can be tested before P2-16 part 3, which then
+ * so author seats' delivery can be tested before P2-16 part 4d-3, which then
  * replaces this. The package entry point doesn't export it. An author seat
- * outside the given key set needs no delivery, as the spec says, so part 3's
+ * outside the given key set needs no delivery, as the spec says, so part 4d-3's
  * replacement must take the author key set from the checked transcript, with
  * its quorum, never from the caller (T-37, T-25).
  */

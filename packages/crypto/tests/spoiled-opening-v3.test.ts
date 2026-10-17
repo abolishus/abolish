@@ -45,9 +45,9 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // (scripts/spoiled-opening-v3-vectors.py), with ML-KEM-768 and
 // ChaCha20-Poly1305 written from FIPS 203 and RFC 8439, so the expected
 // encodings, core hashes, verdicts and opened commitments never come from the
-// code under test. An author panel's key set has no checked source until
-// P2-16 part 3, so polls with one run through the internal `…With` paths,
-// which take it as given; the exported paths refuse them.
+// code under test. The exported paths don't take an author panel's approved
+// key set until P2-16 part 4d-3, so polls with one run through the internal
+// `…With` paths, which take it as given; the exported paths refuse them.
 
 interface Vectors {
   readonly format: string;
@@ -434,9 +434,10 @@ describe("opening version 3", () => {
     expect(() => openChallengeV3(author.election, 0, encrypted)).toThrow(/own ceremony/);
     expect(() => panelBallotCore(author.election, 0, encrypted)).toThrow(/own ceremony/);
     expect(() => panelTrackingCode(author.election, 0, encrypted)).toThrow(/own ceremony/);
-    // And panelBallotElection never makes one.
+    // And panelBallotElection makes one only from an approved author key set
+    // (author-key-set.test.ts).
     const d = decodeElectionDefinitionV6(hex(authorMeta.definition));
-    expect(() => panelBallotElection(d, [])).toThrow(/own ceremony/);
+    expect(() => panelBallotElection(d, [])).toThrow(RangeError);
   });
 
   test("the internal paths take exactly the author panel's registered seats", () => {

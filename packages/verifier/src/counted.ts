@@ -305,9 +305,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       { status: "unverifiable", code: "not-implemented", at: {} },
       inputs.destruction,
     );
-  // Admission judges no ballot beside an author panel yet (P2-16 part 4d-3),
-  // so 6.1 never passes there; a caller that gets here anyway decides
-  // nothing, since the author seats' key set would be taken on trust (T-37).
+  // Beside an author panel delivery (5.9) and the tally read the author
+  // seats' key set, which isn't passed here until P2-16 part 4d-3, so
+  // nothing is decided: never with that key set taken on trust (T-37).
   if (definition.version === 6 && definition.value.author_keys.length !== 0)
     return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
   // Ordinary ballots can't be found under a contract-event version this

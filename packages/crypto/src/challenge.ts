@@ -910,14 +910,14 @@ export function checkChallengeOpeningV2(
   };
 }
 
-// An author panel's registered key set has no checked source until P2-16
-// part 3 specifies its ceremony and transcript check, so the exported
-// version-4 paths refuse a poll with one rather than take its keys on trust
-// (T-37), as `panelBallotElection` and `checkDeliveryV2` do.
+// The exported version-4 opening paths don't take the author panel's
+// approved key set (`checkAuthorApprovals`) until P2-16 part 4d-3 judges
+// openings beside an author panel, so they refuse a poll with one rather
+// than take its keys on trust (T-37), as `checkDeliveryV2` does.
 function refuseAuthorPanel(election: PanelBallotElection, name: string): void {
   if (election.authorPanelSize !== 0)
     throw new RangeError(
-      `${name}: an author panel's key set comes from its own ceremony (P2-16 part 3)`,
+      `${name}: an author panel's key set comes from its own ceremony (P2-16 part 4d-3)`,
     );
 }
 
@@ -1007,7 +1007,7 @@ function panelCoreOf(
  * (docs/spec/challenge.md, Opening version 3). It is what the client shows
  * the tracking code of and, on cast, proves over; `openChallengeV3` opens
  * exactly this core. A poll with an author panel is refused until that
- * panel's key set has a checked source (P2-16 part 3; T-37).
+ * panel's approved key set is taken here (P2-16 part 4d-3; T-37).
  */
 export function panelBallotCore(
   election: PanelBallotElection,
@@ -1020,7 +1020,7 @@ export function panelBallotCore(
 
 /**
  * Internal: `panelBallotCore` with the author panel's registered key set
- * taken as given, so author halves can be tested before P2-16 part 3, which
+ * taken as given, so author halves can be tested before P2-16 part 4d-3, which
  * then replaces this. The package entry point doesn't export it.
  */
 export function panelBallotCoreWith(
@@ -1103,7 +1103,7 @@ export function openChallengeV3(
 
 /**
  * Internal: `openChallengeV3` with the author panel's registered key set
- * taken as given (P2-16 part 3 replaces it). The package entry point doesn't
+ * taken as given (P2-16 part 4d-3 replaces it). The package entry point doesn't
  * export it.
  */
 export function openChallengeV3With(
@@ -1148,7 +1148,7 @@ export type ChallengeOpeningV3Check =
  * tracking code, its votes and their randomness, whatever the votes are;
  * `withinRules` false is `opening-vote-outside`. It takes a record
  * `decodeOpening(…, 3)` returned. A poll with an author panel is refused
- * until that panel's key set has a checked source (P2-16 part 3; T-37).
+ * until that panel's approved key set is taken here (P2-16 part 4d-3; T-37).
  */
 export function checkChallengeOpeningV3(
   election: PanelBallotElection,
@@ -1160,7 +1160,7 @@ export function checkChallengeOpeningV3(
 
 /**
  * Internal: `checkChallengeOpeningV3` with the author panel's registered key
- * set taken as given, so author halves can be tested before P2-16 part 3,
+ * set taken as given, so author halves can be tested before P2-16 part 4d-3,
  * which must take it from the checked transcript, never the caller: an
  * author seat left out would have its ciphertext go unchecked (T-37). The
  * package entry point doesn't export it.

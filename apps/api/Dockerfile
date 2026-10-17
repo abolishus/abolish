@@ -4,11 +4,12 @@
 #
 # No `# syntax=` line: an external frontend would be one more image pulled by
 # tag at build time; the builder's own frontend parses this file.
-# Reproducible: the base is pinned by digest (the ECR Public mirror of the
-# Docker Hub library image, same digest, pulled without credentials; T-65),
+# Reproducible: the base is pinned by digest (Google's mirror of the Docker
+# Hub library image, same digest, pulled without credentials and without the
+# rate limits ECR Public and Docker Hub put on runners' shared addresses; T-65),
 # and the build sets SOURCE_DATE_EPOCH and rewrite-timestamp, so two builds of
 # one commit give one digest (docs/runbooks/railway.md, Building; T-61).
-FROM public.ecr.aws/docker/library/node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+FROM mirror.gcr.io/library/node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 
 # The image runs a bundle and never installs anything: drop the package
 # managers so a compromised process finds no installer to fetch code with (T-55).

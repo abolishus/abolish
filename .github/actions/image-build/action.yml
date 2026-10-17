@@ -42,6 +42,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
       run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
+    # The API's build reaches packages/contracts (through the worker), whose
+    # build runs forge: the same hash-verified toolchain as CI's.
+    - name: Install Noir, Barretenberg and Foundry
+      shell: bash
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
+      run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
     # The runner's default `docker` driver can't export OCI archives, so a
     # BuildKit container does, pinned by digest like the image's base.
     - name: BuildKit builder
@@ -67,9 +73,9 @@ runs:
         case "$SERVICE" in api | web | ballot) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
         vp run --no-cache --filter "@abolishus/$SERVICE..." build
         mkdir -p "$OUT"
-        # The base image comes anonymously from public.ecr.aws, which rate-limits
-        # (toomanyrequests) the runners' shared addresses. It is pinned by digest,
-        # so a retry builds exactly what the first attempt would have.
+        # The base image is pulled anonymously, and a registry can still refuse a
+        # runner's shared address for a while (toomanyrequests). It is pinned by
+        # digest, so a retry builds exactly what the first attempt would have.
         for attempt in 1 2 3 4; do
           docker buildx build --builder abolish --no-cache \
             --platform linux/amd64 --provenance=false --sbom=false \

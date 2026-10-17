@@ -4,8 +4,15 @@
 // Slots are deployment-wide, so every Tier 1 addition of the registry is
 // decided in one replay, in log order, with each vouch's Tier 2 root rebuilt
 // here from the registry's own Tier 2 records (T-06, T-02, T-13, T-22, T-52,
-// T-71). The proofs are checked in batches first, then the order is walked.
+// T-71). The order is walked first and the proofs last, in batches, only for
+// the additions the walk would count.
 
+import {
+  type ContractEventError,
+  type ContractEventRecord,
+  type ContractEventVersion,
+  checkContractEvent,
+} from "./contract-event.ts";
 import {
   applyGroupRecords,
   decodeGroupAddition,
@@ -48,7 +55,19 @@ export type GroupRegistryEvent =
       readonly tier: number;
     }
   | {
-      readonly kind: "members-added" | "members-removed";
+      readonly kind: "members-added";
+      readonly block: bigint;
+      readonly groupId: bigint;
+      readonly record: Uint8Array;
+      /**
+       * The event's `firstIndex` topic, where the event is read from its log
+       * (`groupRegistryEvents`): an addition whose own `first_index` differs
+       * breaks its group's history as `position`.
+       */
+      readonly firstIndex?: bigint;
+    }
+  | {
+      readonly kind: "members-removed";
       readonly block: bigint;
       readonly groupId: bigint;
       readonly record: Uint8Array;
@@ -59,6 +78,105 @@ export type GroupRegistryEvent =
       readonly block: bigint;
       readonly record: Uint8Array;
     };
+
+export type GroupRegistryEventsResult =
+  | {
+      readonly ok: true;
+      readonly events: readonly GroupRegistryEvent[];
+      /**
+       * Each `RegistrarsPinned`, by position: the caller requires it to name
+       * exactly the registrars and threshold its release pins, the ones
+       * counting is judged under (docs/spec/contracts.md, Group registry,
+       * Verification).
+       */
+      readonly pinned: readonly {
+        readonly at: number;
+        readonly threshold: number;
+        readonly registrars: readonly Uint8Array[];
+      }[];
+    }
+  | {
+      readonly ok: false;
+      /** The first record that fails, by its position in the records given. */
+      readonly at: number;
+      readonly error: ContractEventError;
+    };
+
+/**
+ * Reads the group registry's archived sequence as `countTier1Additions`
+ * takes it: each contract-event record, under the pinned contract-event
+ * version, through the event check against the group registry
+ * (docs/spec/contracts.md, Event check), then `GroupCreated`, `MembersAdded`
+ * (with its `firstIndex` topic), `MembersRemoved` and `Tier1MemberAdded` as
+ * events at the record's L2 block, and `RegistrarsPinned` returned apart,
+ * for the caller to compare with its pins. The first record that fails the
+ * check is reported, as 4.4 reports it: the release's registry logs none, so
+ * one is a rewritten chain or other bytecode, never a submitter's (T-53,
+ * T-71). `records` is the registry's own sequence in order of `n`, with L2
+ * blocks never decreasing,
+ * as the event accumulator's replay authenticates it (P4-3), so a record out
+ * of that order throws, as the caller's mistake; whether it is the registry's
+ * whole sequence is that replay's, not this function's.
+ */
+export function groupRegistryEvents(
+  records: readonly ContractEventRecord[],
+  groupRegistry: Uint8Array,
+  version: ContractEventVersion,
+): GroupRegistryEventsResult {
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  const registry = bytesArg(groupRegistry, "groupRegistry");
+  if (registry.length !== 20) throw new RangeError("groupRegistry: expected 20 bytes");
+  // Only the group registry's address is given; the other roles match nothing
+  // a decoded record carries, since its contract is 20 bytes.
+  const none = new Uint8Array(0);
+  const contracts = {
+    electionRegistry: none,
+    trusteeRegistry: none,
+    groupRegistry: registry,
+    board: none,
+  };
+  const events: GroupRegistryEvent[] = [];
+  const pinned: { at: number; threshold: number; registrars: readonly Uint8Array[] }[] = [];
+  let lastN = -1n;
+  let lastBlock = 0n;
+  for (const [at, record] of records.slice().entries()) {
+    if (record === null || typeof record !== "object")
+      throw new TypeError(`records[${at}]: expected an object`);
+    // Log order is the order of `n`, which the accumulator binds; anything
+    // else is the caller's mistake.
+    if (typeof record.n !== "bigint" || record.n <= lastN)
+      throw new RangeError(`records[${at}]: n must increase`);
+    lastN = record.n;
+    if (typeof record.l2_block !== "bigint" || record.l2_block < lastBlock)
+      throw new RangeError(`records[${at}]: l2_block must not decrease`);
+    lastBlock = record.l2_block;
+    const checked = checkContractEvent(record, contracts, version);
+    if (!checked.ok) return { ok: false, at, error: checked.error };
+    // A hand-built record whose contract matches no 20-byte address could
+    // match an empty role: only the group registry's events are read.
+    if (checked.role !== "group-registry") return { ok: false, at, error: "unknown-contract" };
+    const block = record.l2_block;
+    const { event } = checked;
+    if (event.event === "GroupCreated")
+      events.push({ kind: "group-created", block, groupId: event.groupId, tier: event.tier });
+    else if (event.event === "MembersAdded")
+      events.push({
+        kind: "members-added",
+        block,
+        groupId: event.groupId,
+        record: event.record,
+        firstIndex: event.firstIndex,
+      });
+    else if (event.event === "MembersRemoved")
+      events.push({ kind: "members-removed", block, groupId: event.groupId, record: event.record });
+    else if (event.event === "Tier1MemberAdded")
+      events.push({ kind: "tier1-addition", block, record: event.record });
+    else if (event.event === "RegistrarsPinned")
+      pinned.push({ at, threshold: event.threshold, registrars: event.registrars });
+    else throw new Error(`records[${at}]: unread group-registry event ${event.event}`);
+  }
+  return { ok: true, events, pinned };
+}
 
 /** What a replay is judged under: the release's pins for the registry. */
 export interface Tier1CountContext {
@@ -140,6 +258,7 @@ interface Group {
 interface Tier2Record extends GroupLogRecord {
   readonly at: number;
   readonly block: bigint;
+  readonly firstIndex?: bigint;
 }
 
 function u64Arg(v: unknown, what: string): bigint {
@@ -173,7 +292,19 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
         throw new RangeError(`events[${at}].tier: expected an integer from 0 to 255`);
       return { kind, block, groupId: u64Arg(groupId, `events[${at}].groupId`), tier };
     }
-    if (kind === "members-added" || kind === "members-removed") {
+    if (kind === "members-added") {
+      const { groupId, record, firstIndex } = e;
+      return {
+        kind,
+        block,
+        groupId: u64Arg(groupId, `events[${at}].groupId`),
+        record: bytesArg(record, `events[${at}].record`),
+        ...(firstIndex === undefined
+          ? {}
+          : { firstIndex: u64Arg(firstIndex, `events[${at}].firstIndex`) }),
+      };
+    }
+    if (kind === "members-removed") {
       const { groupId, record } = e;
       return {
         kind,
@@ -215,10 +346,13 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
  * nothing, takes no index and fails nothing else (T-25, T-53).
  *
  * Each Tier 2 group a vouch names is replayed once, with its root taken at
- * every block named. Every proof is checked before the walk, in batches with
- * coefficients from the CSPRNG (`verifyDecodedMembershipProofs`), only for
- * additions that pass the checks before `slot-spent`, which need no counting
- * state; each proof's verdict is the one checking it alone gives (T-52).
+ * every block named. The proofs are checked last (docs/spec/vouching.md,
+ * Batched verification, Proofs last): only those of additions a walk of the
+ * order would count, in batches with coefficients from the CSPRNG
+ * (`verifyDecodedMembershipProofs`), each proof at most once, with the walk
+ * redone once when one fails. So copies of counted additions, which anyone can
+ * log, cost no pairing, and each proof's verdict is the one checking it alone
+ * gives (T-52).
  */
 export function countTier1Additions(
   events: readonly GroupRegistryEvent[],
@@ -261,12 +395,17 @@ export function countTier1Additions(
     }
     if (group.tier !== 2) continue;
     const records = tier2.get(e.groupId) ?? [];
-    records.push({
-      at,
-      block: e.block,
-      kind: e.kind === "members-added" ? "add" : "remove",
-      record: e.record,
-    });
+    records.push(
+      e.kind === "members-added"
+        ? {
+            at,
+            block: e.block,
+            kind: "add",
+            record: e.record,
+            ...(e.firstIndex === undefined ? {} : { firstIndex: e.firstIndex }),
+          }
+        : { at, block: e.block, kind: "remove", record: e.record },
+    );
     tier2.set(e.groupId, records);
   }
   for (const [groupId, records] of tier2) {
@@ -277,7 +416,21 @@ export function countTier1Additions(
       registrars,
       threshold,
     });
-    if (!replay.ok) {
+    // The event's `firstIndex` topic is the one an accumulator and an indexer
+    // read; an addition whose own `first_index` differs fails its group
+    // (docs/spec/contracts.md, Group registry, Verification, which checks the
+    // topics before replaying), so only a replay failure at an earlier record
+    // comes first.
+    const end = replay.ok ? records.length : replay.at + 1;
+    const mismatch = records.slice(0, end).findIndex((r) => {
+      if (r.firstIndex === undefined) return false;
+      const d = decodeGroupAddition(r.record);
+      return d.ok && d.value.firstIndex !== r.firstIndex;
+    });
+    if (mismatch >= 0) {
+      const record = records[mismatch] as Tier2Record;
+      breakAt({ at: record.at, block: record.block, groupId, reason: "position" });
+    } else if (!replay.ok) {
       const record = records[replay.at] as Tier2Record;
       breakAt({ at: record.at, block: record.block, groupId, reason: replay.reason });
     }
@@ -286,15 +439,6 @@ export function countTier1Additions(
 
   // The checks that need no counting state, for every addition before b_R:
   // first those up to `tier2-group`, collecting the Tier 2 roots they name.
-  type Pre =
-    | { readonly at: number; readonly block: bigint; readonly verdict: Tier1CountVerdict }
-    | {
-        readonly at: number;
-        readonly block: bigint;
-        readonly verdict: null;
-        readonly value: Tier1Addition;
-        readonly proofs: readonly MembershipProofCheck[];
-      };
   const named = new Map<bigint, Set<bigint>>();
   const opened: Pre[] = [];
   for (const [at, e] of list.entries()) {
@@ -368,23 +512,79 @@ export function countTier1Additions(
         };
   });
 
-  const verdicts = verifyDecodedMembershipProofs(
-    pres.flatMap((p) => (p.verdict === null ? p.proofs : [])),
-  );
+  // Proofs last (docs/spec/vouching.md, Batched verification): walk the order
+  // taking each addition that passes checks 1 to 8 as counted, then batch the
+  // proofs of the additions it counted. If every one passes, the walk stands.
+  // Otherwise the walk is redone once, now checking each addition's proofs
+  // when it reaches them (those already checked from the batch's verdicts): an
+  // addition that fails consumes nothing, so a later one may now pass
+  // `slot-spent` or `member` and need its own proofs. So there are at most two
+  // walks, whatever a rewritten history logs, each proof is checked at most
+  // once, and pairings go only to additions that reach `proof` in some walk,
+  // never to copies of counted ones (T-52). On an honest chain no logged proof
+  // fails, so one walk and one batch decide everything.
+  const proofs = new Map<number, readonly boolean[]>();
+  const first = walkOrder(pres, (i) => proofs.get(i));
+  const verdicts = verifyDecodedMembershipProofs(first.unchecked.flatMap((u) => u.proofs));
+  let next = 0;
+  for (const u of first.unchecked) {
+    proofs.set(u.pre, verdicts.slice(next, next + u.proofs.length));
+    next += u.proofs.length;
+  }
+  if (!verdicts.includes(false)) return { ...first.count, broken };
+  const second = walkOrder(pres, (i, own) => {
+    let known = proofs.get(i);
+    if (known === undefined) {
+      known = verifyDecodedMembershipProofs(own);
+      proofs.set(i, known);
+    }
+    return known;
+  });
+  return { ...second.count, broken };
+}
 
-  // The walk: slots and leaves, in order.
+// An addition after the checks that need no counting state: its verdict, or
+// (`verdict: null`) its decoded value and proofs, still to be walked.
+type Pre =
+  | { readonly at: number; readonly block: bigint; readonly verdict: Tier1CountVerdict }
+  | {
+      readonly at: number;
+      readonly block: bigint;
+      readonly verdict: null;
+      readonly value: Tier1Addition;
+      readonly proofs: readonly MembershipProofCheck[];
+    };
+
+/**
+ * One walk of the order: slots and leaves, with an addition's proof verdicts
+ * asked of `verdictsOf` (by its position in `pres`) only once it passes
+ * checks 1 to 8, and taken as passing where it gives none. `unchecked` lists
+ * the additions the walk counted on proofs it had no verdicts for; when it is
+ * empty, the walk is the count.
+ */
+function walkOrder(
+  pres: readonly Pre[],
+  verdictsOf: (
+    pre: number,
+    proofs: readonly MembershipProofCheck[],
+  ) => readonly boolean[] | undefined,
+): {
+  readonly count: Omit<Tier1Count, "broken">;
+  readonly unchecked: readonly {
+    readonly pre: number;
+    readonly proofs: readonly MembershipProofCheck[];
+  }[];
+} {
   const spent = new Set<bigint>();
   const leaves = new Map<bigint, { commitment: bigint; block: bigint }[]>();
   const members = new Map<bigint, Set<bigint>>();
   const additions: Tier1Count["additions"][number][] = [];
-  let next = 0;
-  for (const p of pres) {
+  const unchecked: { pre: number; proofs: readonly MembershipProofCheck[] }[] = [];
+  for (const [i, p] of pres.entries()) {
     if (p.verdict !== null) {
       additions.push(p);
       continue;
     }
-    const own = verdicts.slice(next, next + p.proofs.length);
-    next += p.proofs.length;
     const { groupId, commitment, vouches } = p.value;
     const decide = (verdict: Tier1CountVerdict) =>
       additions.push({ at: p.at, block: p.block, verdict });
@@ -400,11 +600,13 @@ export function countTier1Additions(
       decide({ ok: false, error: "member" });
       continue;
     }
-    const failure = proofFailure(own);
+    const own = verdictsOf(i, p.proofs);
+    const failure = own === undefined ? null : proofFailure(own);
     if (failure !== null) {
       decide(failure);
       continue;
     }
+    if (own === undefined) unchecked.push({ pre: i, proofs: p.proofs });
     for (const v of vouches) spent.add(v.slotNullifier);
     groupMembers.add(commitment);
     members.set(groupId, groupMembers);
@@ -413,7 +615,7 @@ export function countTier1Additions(
     groupLeaves.push({ commitment, block: p.block });
     leaves.set(groupId, groupLeaves);
   }
-  return { additions, broken, groups: leaves };
+  return { count: { additions, groups: leaves }, unchecked };
 }
 
 export type Tier1LeavesResult =

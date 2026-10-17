@@ -1047,6 +1047,8 @@ export {
 export {
   countTier1Additions,
   type GroupRegistryEvent,
+  groupRegistryEvents,
+  type GroupRegistryEventsResult,
   type Tier1Break,
   type Tier1Count,
   type Tier1CountContext,

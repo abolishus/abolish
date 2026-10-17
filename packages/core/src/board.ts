@@ -64,7 +64,12 @@ export type AppendErrorCode =
    * A ballot with the key of one already boarded, in other bytes: a repeat
    * (verifier 5.7), such as a copy with a re-randomised proof (T-38).
    */
-  | "repeat";
+  | "repeat"
+  /**
+   * The payload is to be the board's first entry, and the board already
+   * starts with another (admission reads only entry 0 for the transcript).
+   */
+  | "not-first";
 
 export class AppendError extends Error {
   override readonly name = "AppendError";
@@ -258,6 +263,14 @@ export async function appendEntry(
      * be rejected by 5.7 (docs/spec/close.md; T-38, T-52, T-17).
      */
     readonly ballot?: BallotKey;
+    /**
+     * The payload must be the board's first entry: the ceremony transcript,
+     * which admission reads only at entry 0 (src/admission.ts). On a board
+     * whose entry 0 carries the same bytes, that entry is returned, so a
+     * rerun after a crash appends nothing; on one that starts with anything
+     * else it is refused as `not-first`, never appended after it.
+     */
+    readonly first?: boolean;
   } = {},
 ): Promise<AppendedEntry> {
   if (!Number.isInteger(segment) || segment < 0 || segment > MAX_SEGMENT)
@@ -327,6 +340,28 @@ export async function appendEntry(
             index: seen.idx,
             entryHash: new Uint8Array(seen.entryHash),
             link: new Uint8Array(seen.link),
+          };
+        }
+      }
+      if (options.first === true) {
+        // Read under the lock, so two callers racing can't both append it.
+        const [start] = await tx
+          .select()
+          .from(boardEntries)
+          .where(and(eq(boardEntries.electionId, id), eq(boardEntries.idx, 0n)));
+        if (start !== undefined) {
+          if (!equalBytes(start.payload, body)) throw new AppendError("not-first");
+          const entry: BoardEntry = {
+            election_id: id,
+            index: 0n,
+            segment: Number(start.segment),
+            payload: body,
+          };
+          return {
+            entry: encodeBoardEntry(entry, version),
+            index: 0n,
+            entryHash: new Uint8Array(start.entryHash),
+            link: new Uint8Array(start.link),
           };
         }
       }

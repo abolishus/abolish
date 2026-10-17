@@ -7,6 +7,7 @@ import type {
   AnchorFindingCode,
   CloseRoundsReport,
   OpenRunsReport,
+  PollOpenReport,
   BoardAuditCode,
   DefinitionErrorCode,
   RegistrationErrorCode,
@@ -184,6 +185,15 @@ export interface CeremonyCoordinateLine extends OpenRunsReport, CloseRoundsRepor
   readonly queue: "{ceremony-coordinate}";
 }
 
+/**
+ * What an opening-step run did, in counts only (T-10, T-67), written only
+ * when a poll opened, failed or was left for its clock or its board. A
+ * failed `open-mismatch` is rule 13's alert.
+ */
+export interface PollOpenLine extends PollOpenReport {
+  readonly queue: "{poll-open}";
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -198,6 +208,7 @@ export type ErrorKind =
   | "tier0-chain-unavailable"
   | "registry-sync-refused"
   | "poll-root-refused"
+  | "poll-open-errors"
   | "internal";
 
 export type LogLine =
@@ -211,5 +222,6 @@ export type LogLine =
   | PollRootLine
   | PollStubLine
   | CeremonyCoordinateLine
+  | PollOpenLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

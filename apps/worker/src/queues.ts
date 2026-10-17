@@ -115,6 +115,15 @@ export const QUEUES = {
     data: z.strictObject({}),
   },
   /**
+   * The opening step of each registered poll's setup (core's openPolls; ADR
+   * 0032, rules 12 to 14): the read-back of what the registry holds against
+   * the draft, the transcript boarded as entry 0 and the display text
+   * stored. Runs on a schedule, only beside the stub step, after the
+   * registry sync has stored the registration, and takes no data: no poll,
+   * author or draft is ever queued (T-10, T-34).
+   */
+  pollOpen: { name: "{poll-open}", side: "account", data: z.strictObject({}) },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

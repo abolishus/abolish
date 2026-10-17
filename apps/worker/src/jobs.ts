@@ -5,6 +5,7 @@ import {
   advancePollCreations,
   advancePollRegistrations,
   type AnchorCheckReport,
+  type BoardClock,
   CEREMONY_ROUND_SECONDS,
   checkCreationAnchors,
   closeCeremonyRounds,
@@ -17,6 +18,7 @@ import {
   GroupRecordsError,
   listBoards,
   openCeremonyRuns,
+  openPolls,
   type PollCreationChain,
   type PollRegistrationChain,
   type PollRegistrationReport,
@@ -66,6 +68,8 @@ export interface JobContext {
   readonly pollRoots?: PollRoots;
   /** The deployment every stub pins, beside the registry sync; its queue runs only then. */
   readonly pollStubs?: PollStubDeployment;
+  /** The anchoring clock of that deployment's anchor, beside the stub step; the opening step's queue runs only then. */
+  readonly pollClock?: BoardClock;
   /**
    * The creation key, its daily ceiling, the L1 anchor its identifiers are
    * checked against and the default panel whose ceremonies it registers, in
@@ -339,6 +343,24 @@ async function ceremonyCoordinate(
 }
 
 /**
+ * One run of the opening step, logging what moved, by count (T-10, T-67). A
+ * poll whose registered definition isn't its draft's fails as
+ * `open-mismatch`, which the line counts: that is the alert of ADR 0032
+ * rule 13. Waiting for the registry sync is the normal case and logs
+ * nothing; anything else left is counted.
+ */
+async function pollOpen(ctx: JobContext, _data: JobData<"pollOpen">): Promise<void> {
+  if (ctx.pollClock === undefined) throw new JobError("internal");
+  const report = await openPolls(ctx.sql, ctx.pollClock, { now: ctx.now() });
+  const left = report.early + report.late + report.otherAnchor + report.unboarded;
+  if (report.opened + left + report.errored > 0 || Object.keys(report.failed).length > 0)
+    ctx.log({ queue: "{poll-open}", ...report });
+  // A poll whose step threw was counted and the rest went on; the job still
+  // fails, so the error is seen.
+  if (report.errored > 0) throw new JobError("poll-open-errors");
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -368,5 +390,6 @@ export const HANDLERS: {
   pollRoot,
   pollStub,
   ceremonyCoordinate,
+  pollOpen,
   ballotSubmit,
 };

@@ -8,6 +8,7 @@
 import type {
   AnchorChain,
   BallotAdmissions,
+  BoardClock,
   CreationAnchors,
   PollCreationChain,
   PollRegistrationChain,
@@ -99,6 +100,14 @@ export interface WorkerOptions {
      * test says otherwise.
      */
     readonly coordinateEveryMs?: number;
+    /**
+     * The anchoring clock of the anchor every stub pins, as
+     * `checkCreationAnchorsDeployment` read it from L1: the opening step
+     * boards each transcript in its current segment.
+     */
+    readonly clock: BoardClock;
+    /** How often the opening step runs; `POLL_OPEN_EVERY_MS` unless a test says otherwise. */
+    readonly openEveryMs?: number;
   };
   /**
    * The creation step, with the creation key ([[0032-poll-creation-operations]],
@@ -171,6 +180,13 @@ export const POLL_STUB_EVERY_MS = 60_000;
  */
 export const CEREMONY_COORDINATE_EVERY_MS = 15_000;
 
+/**
+ * A poll registers at least `REGISTRATION_MARGIN_SECONDS` before it opens,
+ * and the registry sync stores it within a minute or two of finality, so
+ * once a minute opens it before ballots are taken.
+ */
+export const POLL_OPEN_EVERY_MS = 60_000;
+
 export interface RunningWorker {
   close(): Promise<void>;
 }
@@ -209,7 +225,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
     ...(options.pollRoots === undefined ? {} : { pollRoots: options.pollRoots.roots }),
-    ...(options.pollStubs === undefined ? {} : { pollStubs: options.pollStubs.deployment }),
+    ...(options.pollStubs === undefined
+      ? {}
+      : { pollStubs: options.pollStubs.deployment, pollClock: options.pollStubs.clock }),
     ...(options.pollCreation === undefined
       ? {}
       : {
@@ -244,7 +262,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             ? options.registry !== undefined
             : key === "pollRoot"
               ? options.pollRoots !== undefined
-              : key === "pollStub" || key === "ceremonyCoordinate"
+              : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
                 ? options.pollStubs !== undefined
                 : options.tier0 !== undefined ||
                   !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
@@ -405,6 +423,11 @@ function everyOtherSchedule(options: WorkerOptions) {
             key: "ceremonyCoordinate",
             id: "ceremony-coordinate",
             every: options.pollStubs.coordinateEveryMs ?? CEREMONY_COORDINATE_EVERY_MS,
+          },
+          {
+            key: "pollOpen",
+            id: "poll-open",
+            every: options.pollStubs.openEveryMs ?? POLL_OPEN_EVERY_MS,
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];

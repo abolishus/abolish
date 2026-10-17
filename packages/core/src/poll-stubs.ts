@@ -210,7 +210,8 @@ export function pollStubDeploymentRule(deployment: PollStubDeployment): string |
   return undefined;
 }
 
-const tierElectorate = (t: StoredTierElectorate): TierElectorate => ({
+/** The electorate the roots step recorded, as the definition states it. */
+export const tierElectorate = (t: StoredTierElectorate): TierElectorate => ({
   tier: t.tier as TierElectorate["tier"],
   root_l2_block: BigInt(t.rootL2Block),
   groups: t.groups.map((g) => ({ group_id: BigInt(g.groupId), region: g.region })),

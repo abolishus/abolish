@@ -232,12 +232,12 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
   // This worker has no Tier 0 job, pins no panel, has no registry sync,
-  // roots or stub step (nor the coordinator beside it) and holds no
-  // creation key, so those queues have no keys here (tests/tier0.test.ts,
-  // tests/ballots.test.ts, tests/registry-sync.test.ts,
-  // tests/poll-roots.test.ts, tests/poll-stubs.test.ts and
-  // tests/ceremony.test.ts cover the first six; the creation worker's test
-  // below checks its keys).
+  // roots or stub step (nor the coordinator and the opening step beside it)
+  // and holds no creation key, so those queues have no keys here
+  // (tests/tier0.test.ts, tests/ballots.test.ts, tests/registry-sync.test.ts,
+  // tests/poll-roots.test.ts, tests/poll-stubs.test.ts, tests/ceremony.test.ts
+  // and tests/poll-open.test.ts cover the first seven; the creation worker's
+  // test below checks its keys).
   const tags = Object.entries(QUEUES)
     .filter(
       ([key]) =>
@@ -249,6 +249,7 @@ test("every key the worker uses is under its queue's hash tag", async () => {
           "pollRoot",
           "pollStub",
           "ceremonyCoordinate",
+          "pollOpen",
         ].includes(key),
     )
     .map(([, q]) => `${prefix}:${q.name}:`);
@@ -297,6 +298,7 @@ test("a handler's own error message is neither logged nor kept, the events strea
       // Not scheduled: this worker has no stub step.
       pollStub: async () => {},
       ceremonyCoordinate: async () => {},
+      pollOpen: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
         throw new Error(`params: ${MARKER}`);
@@ -432,7 +434,10 @@ test("a worker refuses the creation key beside any other job", async () => {
   const ballots = { admissions: {} as BallotAdmissions };
   const registry = { sync: {} as RegistrySync };
   const pollRoots = { roots: {} as PollRoots };
-  const pollStubs = { deployment: {} as PollStubDeployment };
+  const pollStubs = {
+    deployment: {} as PollStubDeployment,
+    clock: { anchor: new Uint8Array(20), epoch: 0n, period: 3600n },
+  };
   for (const extra of [
     { anchor },
     { tier0 },
@@ -465,7 +470,10 @@ test("a worker refuses the stub step without the registry sync", async () => {
       log: () => {},
       auditEveryMs: 3_600_000,
       prefix: `abolish-test-${hex(randomBytes(6))}`,
-      pollStubs: { deployment: {} as PollStubDeployment },
+      pollStubs: {
+        deployment: {} as PollStubDeployment,
+        clock: { anchor: new Uint8Array(20), epoch: 0n, period: 3600n },
+      },
     }),
   ).rejects.toThrow("only beside the registry sync");
 });

@@ -272,24 +272,36 @@ if (registryConfig !== undefined) {
     throw e;
   }
   if (pollStubConfig !== undefined) {
+    let deployment;
     try {
-      pollStubs = {
-        deployment: await pollStubDeployment(
-          l2,
-          {
-            chainId: c.chainId,
-            l1ChainId: c.l1ChainId,
-            electionRegistry: c.electionRegistry,
-            board: c.board,
-            trusteeRegistry: c.trusteeRegistry,
-            groupRegistry: c.groupRegistry,
-            eventVersion: c.eventVersion,
-          },
-          pollStubConfig,
-        ),
-      };
+      deployment = await pollStubDeployment(
+        l2,
+        {
+          chainId: c.chainId,
+          l1ChainId: c.l1ChainId,
+          electionRegistry: c.electionRegistry,
+          board: c.board,
+          trusteeRegistry: c.trusteeRegistry,
+          groupRegistry: c.groupRegistry,
+          eventVersion: c.eventVersion,
+        },
+        pollStubConfig,
+      );
     } catch (e) {
       if (e instanceof BaseError) throw new Error("the stub step couldn't reach the L2 node");
+      throw e;
+    }
+    // The opening step boards each transcript by the clock of the anchor
+    // every stub pins, read from its finalized code on L1, never configured
+    // (docs/spec/board.md, Timing).
+    try {
+      const clock = await checkCreationAnchorsDeployment(
+        createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
+        { chainId: c.l1ChainId, anchor: `0x${Buffer.from(deployment.l1Anchor).toString("hex")}` },
+      );
+      pollStubs = { deployment, clock: { anchor: deployment.l1Anchor, ...clock } };
+    } catch (e) {
+      if (e instanceof BaseError) throw new Error("the opening step couldn't reach the L1 node");
       throw e;
     }
   }

@@ -237,7 +237,7 @@ describe("records what the accumulator vouches for", () => {
     expect(await recordedSince(first)).toHaveLength(2);
   });
 
-  test("a proof older than the latest recorded registration records nothing and refuses nothing", async () => {
+  test("a proof older than the latest recorded registration is refused, never skipped", async () => {
     const d = deployment();
     const defs = [definition(), definition()];
     const logs = logsOf(d, [registered(defs[0]!, 1n), registered(defs[1]!, 2n)]);
@@ -246,11 +246,13 @@ describe("records what the accumulator vouches for", () => {
       recorded: 2,
       unstored: [],
     });
-    // A newer game can claim an older block: its proof counts only the first.
-    expect(await syncRegistrations(app, d, logs, provenAt(d, logs, 1, first))).toEqual({
-      recorded: 0,
-      unstored: [],
-    });
+    // It can't vouch for the second registration, so the table could be
+    // anyone's past it: a row far above any proven block must not stall the
+    // sync silently.
+    expect(await refusal(syncRegistrations(app, d, logs, provenAt(d, logs, 1, first)))).toEqual([
+      "recorded",
+      "other-registrations",
+    ]);
     expect(await recordedSince(first)).toHaveLength(2);
   });
 

@@ -353,7 +353,7 @@ const game = (type: number, n: number, status = 0): Game => ({
 });
 
 describe("the L1 node's dispute games", () => {
-  test("names the newest game of the portal's type not shown false, read at the finalized head", async () => {
+  test("names the portal's type's game not shown false, read at the finalized head", async () => {
     const { client, calls } = l1Of([
       game(PINNED, 1, 2),
       game(PINNED, 2, 0),
@@ -369,6 +369,15 @@ describe("the L1 node's dispute games", () => {
     });
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(c.block).toBe(toHex(FINALIZED));
+  });
+
+  test("takes the game claiming the highest block, not the newest, so old roots can't move it back", async () => {
+    const { client } = l1Of([game(PINNED, 1), game(PINNED, 5), game(PINNED, 2), game(PINNED, 3)]);
+    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, PORTAL);
+    expect(await roots.latest()).toEqual({
+      outputRoot: hexToBytes(game(PINNED, 5).root),
+      l2Block: 500n,
+    });
   });
 
   test("follows the type the portal respects, never another", async () => {

@@ -95,9 +95,9 @@ export class DisputeGameRoots implements OutputRootSource {
   }
 
   /**
-   * The newest game at the node's finalized head of the type the portal
-   * respects there, from the factory the portal names, that hasn't been
-   * shown false. The type is the portal's, never configured, since a type
+   * Of the newest games at the node's finalized head, the one claiming the
+   * highest L2 block among those of the type the portal respects there,
+   * from the factory the portal names, that haven't been shown false. The type is the portal's, never configured, since a type
    * anyone can create without a proof would let anyone post a root (T-71).
    * Every read is at that block, so a game created or resolved later
    * doesn't move the answer within one run.
@@ -127,6 +127,10 @@ export class DisputeGameRoots implements OutputRootSource {
       blockNumber,
     });
     const last = count > MAX_GAMES_SCANNED ? count - MAX_GAMES_SCANNED : 0n;
+    // The game claiming the highest L2 block among the newest, not the
+    // newest by index: anyone posting honest roots of old blocks could
+    // otherwise move the proof back, below what is already recorded.
+    let best: ClaimedOutputRoot | undefined;
     for (let i = count; i > last; i--) {
       const [gameType, , proxy] = await this.#client.readContract({
         address: factory,
@@ -144,8 +148,10 @@ export class DisputeGameRoots implements OutputRootSource {
         read("status"),
       ]);
       if (status === CHALLENGER_WINS) continue;
-      return { outputRoot: hexToBytes(rootClaim), l2Block };
+      if (best === undefined || l2Block > best.l2Block)
+        best = { outputRoot: hexToBytes(rootClaim), l2Block };
     }
+    if (best !== undefined) return best;
     throw new Error("no output root of the respected game type among the newest games");
   }
 }

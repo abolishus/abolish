@@ -251,6 +251,25 @@ contract SelfPaidAdditionsTest is GroupTestBase {
         _expectSelfPaidRefused(
             forbiddenInUnknown, FEE, abi.encodeWithSelector(GroupRegistry.UnknownGroup.selector, 9)
         );
+        // Canonical calldata before the length: 41 bytes with a dirty pad.
+        bytes memory dirty = abi.encodeCall(
+            GroupRegistry.addSelfPaidMember, (bytes.concat(forbiddenInUnknown, hex"00"))
+        );
+        dirty[dirty.length - 1] = 0x01;
+        (bool ok, bytes memory ret) = address(registry).call(dirty);
+        _assertRefused(
+            ok,
+            ret,
+            abi.encodeWithSelector(CanonicalCalldata.NonCanonicalCalldata.selector),
+            "calldata"
+        );
+        // The kind before the position: a full signed group.
+        GroupFixture.setGroup(registry, SIGNED, 0, true, uint64(GroupRegistryLib.MAX_MEMBERS));
+        _expectSelfPaidRefused(
+            _record(SIGNED, 0),
+            FEE,
+            abi.encodeWithSelector(GroupRegistry.WrongKind.selector, SIGNED)
+        );
         _setSelfPaidCount(SELF_PAID, uint64(GroupRegistryLib.MAX_MEMBERS));
         _expectSelfPaidRefused(
             _record(SELF_PAID, 0),
@@ -316,13 +335,16 @@ contract SelfPaidAdditionsTest is GroupTestBase {
     /// receive or fallback, so nothing but the exact fee ever reaches the
     /// registry and nothing moves it out.
     function test_NoOtherWayInForEther() public {
-        bytes[4] memory calls = [
+        bytes memory removal = new bytes(19);
+        bytes[6] memory calls = [
             abi.encodeCall(GroupRegistry.createGroup, (0)),
             abi.encodeCall(GroupRegistry.createSelfPaidGroup, ()),
             abi.encodeCall(
                 GroupRegistry.addMembers,
                 (_signedAddition(SIGNED, 0, GroupFixture.commitments(1, 1)))
             ),
+            abi.encodeCall(GroupRegistry.removeMembers, (removal)),
+            abi.encodeCall(GroupRegistry.addTier1Member, (new bytes(VouchLib.RECORD_LENGTH))),
             bytes("")
         ];
         for (uint256 i; i < calls.length; i++) {
@@ -576,7 +598,8 @@ contract SelfPaidGasTest is GroupTestBase {
         (bool ok,) = address(registry).call{value: GroupRegistryLib.SELF_PAID_FEE}(data);
         uint256 used = g - gasleft();
         assertTrue(ok, "refused");
-        // About 56,500, 9,000 of it the call's value transfer.
+        // About 56,500: this frame's CALL adds 9,000 for the value, which a
+        // transaction doesn't pay beyond its 21,000, so about 47,500 there.
         assertTrue(used < 60_000, "self-paid addition");
     }
 }

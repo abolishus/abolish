@@ -538,6 +538,7 @@ export {
   ceremonyContext,
   type CeremonyErrorCode,
   ceremonyKeygen,
+  ceremonyMessageFits,
   type CeremonyParams,
   type CeremonyTranscript,
   ceremonyTranscriptHash,

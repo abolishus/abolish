@@ -83,6 +83,21 @@ export {
   putIdentityBackup,
   readIdentityBackup,
 } from "./identity-backups.ts";
+export {
+  type ApprovedCeremony,
+  approvedCeremony,
+  type CloseRoundsReport,
+  closeCeremonyRounds,
+  type CoordinatorDeployment,
+  type CoordinatorRequest,
+  coordinatorRequests,
+  MAX_COORDINATOR_REQUESTS,
+  openCeremonyRuns,
+  type OpenRunsReport,
+  postCeremonyApproval,
+  postCeremonyMessage,
+  type PostOutcome,
+} from "./ceremony-coordinator.ts";
 export { listPolls, MAX_LISTING_PAGE } from "./listing.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
@@ -98,6 +113,9 @@ export {
   boardCheckpoints,
   boardEntries,
   boardSubtrees,
+  ceremonyApprovals,
+  ceremonyMessages,
+  ceremonyRuns,
   ceremonyStubs,
   displayTexts,
   electionDefinitions,

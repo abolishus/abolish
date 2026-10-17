@@ -4,6 +4,8 @@ import { ACCOUNT_COOKIE_PREFIX, type Tier0Registrations } from "@abolishus/core"
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
+import { BodyError, readBody } from "./body.ts";
+import { type CeremonyOptions, ceremonyHandler, ceremonyRoute } from "./ceremony.ts";
 import { hasDuplicateKey } from "./json.ts";
 import { type BallotSubmitter, router } from "./router.ts";
 
@@ -56,6 +58,8 @@ const METHOD_OF: ReadonlyMap<string, string> = new Map(
 );
 
 function routeOf(req: IncomingMessage): string {
+  const ceremony = ceremonyRoute(req);
+  if (ceremony !== undefined) return ceremony.template;
   const path = (req.url ?? "").split("?", 1)[0] ?? "";
   // A preflight is logged under its path, from the same fixed list.
   if (req.method === "OPTIONS") return METHOD_OF.has(path) ? `OPTIONS ${path}` : "unmatched";
@@ -136,40 +140,17 @@ function carriesAccountCredential(req: IncomingMessage): boolean {
   });
 }
 
-class BodyError extends Error {
-  readonly status: number;
-  constructor(status: number) {
-    super(`request body refused: ${status}`);
-    this.status = status;
-  }
-}
-
 /**
  * Reads a JSON body of at most `MAX_REQUEST_BODY` bytes. oRPC's own reader
  * accepts any size and any content type (multipart and files included), so
  * the body is read here and handed over parsed; oRPC then uses it as is.
  */
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const type = req.headers["content-type"] ?? "";
-  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(type)) throw new BodyError(415);
-  const declared = req.headers["content-length"];
-  if (declared !== undefined && !(Number(declared) <= MAX_REQUEST_BODY)) throw new BodyError(413);
-  const body = await new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const onData = (chunk: Buffer) => {
-      size += chunk.length;
-      if (size <= MAX_REQUEST_BODY) return void chunks.push(chunk);
-      // Stop reading without destroying the socket, so the 413 still reaches
-      // the client; the connection closes once it is sent.
-      req.off("data", onData);
-      req.pause();
-      reject(new BodyError(413));
-    };
-    req.on("data", onData);
-    req.once("end", () => resolve(Buffer.concat(chunks)));
-    req.once("error", reject);
-  });
+  const body = await readBody(
+    req,
+    /^application\/json(?:\s*;\s*charset=utf-8)?$/i,
+    MAX_REQUEST_BODY,
+  );
   let text: string;
   let parsed: unknown;
   try {
@@ -187,6 +168,7 @@ const REFUSALS: Record<number, string> = {
   400: "BAD_REQUEST",
   403: "FORBIDDEN",
   404: "NOT_FOUND",
+  409: "CONFLICT",
   413: "PAYLOAD_TOO_LARGE",
   415: "UNSUPPORTED_MEDIA_TYPE",
   500: "INTERNAL_SERVER_ERROR",
@@ -238,6 +220,12 @@ export interface ApiOptions {
    * pages from using their visitors' browsers as clients (T-52).
    */
   readonly corsOrigins?: readonly string[];
+  /**
+   * The key ceremony's coordinator, serving the default panel's seats
+   * (`HttpCoordinator`'s routes; ADR 0032, rule 5); without it those routes
+   * answer 503.
+   */
+  readonly ceremony?: CeremonyOptions;
 }
 
 /** A whole request (headers and body) must arrive within this. */
@@ -255,10 +243,15 @@ export function createApiServer({
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
   corsOrigins = [],
+  ceremony,
 }: ApiOptions): Server {
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
   const allowedOrigins = corsOriginSet(corsOrigins);
+  const coordinator =
+    ceremony === undefined
+      ? undefined
+      : ceremonyHandler(sql, ceremony, () => new Date(Number(now()) * 1000));
   let inFlight = 0;
   const handler = new OpenAPIHandler(router, {
     // Procedures' own errors (ELECTION_NOT_FOUND, …) are answers, not
@@ -310,6 +303,13 @@ export function createApiServer({
       try {
         if (carriesAccountCredential(req)) return refuse(res, 400);
         if (route === "unmatched") return refuse(res, 404);
+        const seatRoute = ceremonyRoute(req);
+        if (seatRoute !== undefined) {
+          if (coordinator === undefined) return refuse(res, 503);
+          const status = await coordinator(req, res, seatRoute);
+          if (status !== undefined) refuse(res, status);
+          return;
+        }
         if (req.method === "OPTIONS") {
           // A preflight carries no input, so no body either (T-31).
           if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])

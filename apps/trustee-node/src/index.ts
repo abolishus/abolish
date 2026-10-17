@@ -36,4 +36,5 @@ export {
   encodeApprovalPost,
   encodeMessagePost,
   encodeRequests,
+  MAX_RECORD,
 } from "./wire.ts";

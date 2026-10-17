@@ -4,7 +4,9 @@
 import {
   advancePollCreations,
   type AnchorCheckReport,
+  CEREMONY_ROUND_SECONDS,
   checkCreationAnchors,
+  closeCeremonyRounds,
   type CreationAnchors,
   type AnchorChain,
   anchorBoards,
@@ -13,6 +15,7 @@ import {
   DefinitionError,
   GroupRecordsError,
   listBoards,
+  openCeremonyRuns,
   type PollCreationChain,
   type PollStubDeployment,
   pruneIdentityBackups,
@@ -279,6 +282,31 @@ async function pollStub(ctx: JobContext, _data: JobData<"pollStub">): Promise<vo
 }
 
 /**
+ * One run of the coordinator's half that no seat drives: opens a run for
+ * each stubbed poll, then closes whatever round or approvals reached their
+ * deadline, logging what moved, by count (T-10). Both are idempotent and
+ * race the API's posts under each run's row lock, so a rerun or a second
+ * worker changes nothing twice.
+ */
+async function ceremonyCoordinate(
+  ctx: JobContext,
+  _data: JobData<"ceremonyCoordinate">,
+): Promise<void> {
+  if (ctx.pollStubs === undefined) throw new JobError("internal");
+  const now = ctx.now();
+  const opened = await openCeremonyRuns(ctx.sql, ctx.pollStubs, { now });
+  const closed = await closeCeremonyRounds(ctx.sql, ctx.pollStubs, {
+    now,
+    roundSeconds: CEREMONY_ROUND_SECONDS,
+  });
+  if (
+    opened.opened + opened.mismatched + opened.expired + closed.closed > 0 ||
+    Object.keys(closed.ended).length > 0
+  )
+    ctx.log({ queue: "{ceremony-coordinate}", ...opened, ...closed });
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -307,5 +335,6 @@ export const HANDLERS: {
   pollCreate,
   pollRoot,
   pollStub,
+  ceremonyCoordinate,
   ballotSubmit,
 };

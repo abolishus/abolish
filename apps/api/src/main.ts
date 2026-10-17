@@ -3,6 +3,7 @@ import { BallotQueue } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import * as z from "zod";
+import { CEREMONY_ENV, ceremonyFromEnv } from "./ceremony-env.ts";
 import { createApiServer } from "./server.ts";
 
 // Entry point: reads the environment, connects as a user granted abolish_app
@@ -84,12 +85,20 @@ if (tier0Env.some((v) => v !== undefined)) {
   });
 }
 
+// The key ceremony's coordinator (P2-22 part 4c-2): the default panel's
+// seats poll it here, beside the worker that opens runs and closes rounds.
+// Without its variables the routes answer 503.
+const ceremony = ceremonyFromEnv(
+  Object.fromEntries(CEREMONY_ENV.map((name) => [name, process.env[name]])),
+);
+
 const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
 const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
   ...(tier0 !== undefined && { tier0 }),
   ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
+  ...(ceremony !== undefined && { ceremony: { deployment: ceremony } }),
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
 });
 server.listen(env.API_PORT, env.API_HOST);

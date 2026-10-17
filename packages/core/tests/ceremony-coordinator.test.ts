@@ -26,6 +26,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
   approvedCeremony,
+  CEREMONY_ROUND_SECONDS,
   ceremonyApprovals,
   ceremonyMessages,
   ceremonyRuns,
@@ -311,6 +312,10 @@ async function expectApproved(stubHash: Uint8Array, qualified: number[]) {
       ),
     ).toBe(true);
 }
+
+test("a run's five deadlines fit in half the setup time, leaving the rest for registration", () => {
+  expect(5 * CEREMONY_ROUND_SECONDS).toBeLessThanOrEqual(SETUP_SECONDS / 2);
+});
 
 describe("a whole ceremony", () => {
   test("relays every round between the seats and ends approved by all three", async () => {

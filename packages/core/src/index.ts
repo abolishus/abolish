@@ -86,6 +86,7 @@ export {
 export {
   type ApprovedCeremony,
   approvedCeremony,
+  CEREMONY_ROUND_SECONDS,
   type CloseRoundsReport,
   closeCeremonyRounds,
   type CoordinatorDeployment,

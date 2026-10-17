@@ -109,6 +109,7 @@ export {
 } from "./tier0-chain.ts";
 export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
+  CEREMONY_COORDINATE_EVERY_MS,
   POLL_CREATE_EVERY_MS,
   POLL_ROOT_EVERY_MS,
   POLL_STUB_EVERY_MS,

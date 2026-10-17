@@ -85,12 +85,18 @@ export interface WorkerOptions {
   /**
    * The stub step (P2-22 part 4b), only beside the registry sync, whose
    * deployment its stubs pin, as `pollStubDeployment` checked it; without
-   * it, no rooted poll gets a stub.
+   * it, no rooted poll gets a stub and no ceremony runs.
    */
   readonly pollStubs?: {
     readonly deployment: PollStubDeployment;
     /** How often it runs; `POLL_STUB_EVERY_MS` unless a test says otherwise. */
     readonly everyMs?: number;
+    /**
+     * How often the ceremony's coordinator, which relays the same panel,
+     * opens runs and closes rounds; `CEREMONY_COORDINATE_EVERY_MS` unless a
+     * test says otherwise.
+     */
+    readonly coordinateEveryMs?: number;
   };
   /**
    * The creation step, with the creation key ([[0032-poll-creation-operations]],
@@ -151,6 +157,12 @@ export const POLL_ROOT_EVERY_MS = 60_000;
  * so once a minute adds little.
  */
 export const POLL_STUB_EVERY_MS = 60_000;
+
+/**
+ * A round's deadline is `CEREMONY_ROUND_SECONDS`, and a run opens within a
+ * tick of its stub, so every 15 seconds keeps both close to their times.
+ */
+export const CEREMONY_COORDINATE_EVERY_MS = 15_000;
 
 export interface RunningWorker {
   close(): Promise<void>;
@@ -224,7 +236,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             ? options.registry !== undefined
             : key === "pollRoot"
               ? options.pollRoots !== undefined
-              : key === "pollStub"
+              : key === "pollStub" || key === "ceremonyCoordinate"
                 ? options.pollStubs !== undefined
                 : options.tier0 !== undefined ||
                   !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
@@ -380,6 +392,11 @@ function everyOtherSchedule(options: WorkerOptions) {
             key: "pollStub",
             id: "poll-stub",
             every: options.pollStubs.everyMs ?? POLL_STUB_EVERY_MS,
+          },
+          {
+            key: "ceremonyCoordinate",
+            id: "ceremony-coordinate",
+            every: options.pollStubs.coordinateEveryMs ?? CEREMONY_COORDINATE_EVERY_MS,
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];

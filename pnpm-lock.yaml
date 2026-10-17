@@ -442,6 +442,12 @@ importers:
       '@abolishus/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@abolishus/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
+      '@abolishus/trustee-node':
+        specifier: workspace:*
+        version: link:../trustee-node
       '@abolishus/worker':
         specifier: workspace:*
         version: link:../worker
@@ -461,9 +467,6 @@ importers:
         specifier: 'catalog:'
         version: 4.6.5
     devDependencies:
-      '@abolishus/crypto':
-        specifier: workspace:*
-        version: link:../../packages/crypto
       '@abolishus/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier

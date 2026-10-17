@@ -1,3 +1,9 @@
+export {
+  type AnchorChainOptions,
+  type AnchorDeployment,
+  checkAnchorDeployment,
+  ViemAnchorChain,
+} from "./anchor-chain.ts";
 export { HANDLERS, type JobContext, JobError, TIER0_QUEUES } from "./jobs.ts";
 export type {
   AnchorFindingLine,

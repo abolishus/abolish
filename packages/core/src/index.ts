@@ -107,6 +107,7 @@ export {
   accountAppeals,
   accountModerators,
   accountPolls,
+  accountPollSubmissions,
   accountSessions,
   accountUsers,
   accountVerifications,
@@ -248,6 +249,7 @@ export {
   deletePollDraft,
   type DraftOption,
   type DraftQuestion,
+  discardFailedPoll,
   draftDisplayText,
   draftQuestions,
   listAccountPolls,
@@ -267,11 +269,18 @@ export {
   POLL_STATES,
   type PollState,
   readAccountPoll,
+  retryFailedPoll,
   SETUP_SECONDS,
   type SubmitPollOptions,
   submitPollDraft,
   updatePollDraft,
 } from "./poll-drafts.ts";
+export {
+  POLL_FAILURES,
+  type PollFailure,
+  REGISTERED_FAILURES,
+  retryableFailure,
+} from "./poll-failures.ts";
 export {
   advancePollCreations,
   CREATE_DAILY_CEILING,

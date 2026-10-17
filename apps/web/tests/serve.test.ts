@@ -399,6 +399,93 @@ describe("poll drafts under /drafts", () => {
     expect(await (await author.call("GET", "/drafts")).json()).toEqual({ polls: [] });
   });
 
+  test("an author reads a failed poll's failure, retries it, and discards it", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const { id } = (await (await author.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    const fail = async (failure: string) => {
+      expect((await author.call("POST", "/drafts/submit", { id })).status).toBe(202);
+      await db.admin`UPDATE account_polls SET state = 'failed', failure = ${failure},
+        creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)}
+        WHERE id = ${id}`;
+    };
+    // Only a failed poll can be retried or discarded.
+    for (const path of ["/drafts/retry", "/drafts/discard"])
+      expect(await (await author.call("POST", path, { id })).json()).toEqual({
+        code: "NOT_FAILED",
+        status: 409,
+      });
+    await fail("ceremony-timeout");
+    expect(await (await author.call("GET", "/drafts")).json()).toEqual({
+      polls: [
+        {
+          id,
+          state: "failed",
+          title: "Lunch",
+          closesAt,
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          submittedAt: NOW.toISOString(),
+          failure: "ceremony-timeout",
+          retryable: true,
+        },
+      ],
+    });
+    const other = new Browser();
+    await register(other, new SoftAuthenticator(RP_ID), true);
+    for (const path of ["/drafts/retry", "/drafts/discard"]) {
+      expect((await other.call("POST", path, { id })).status).toBe(404);
+      for (const bad of [{}, { id, extra: 1 }, { id: id.toUpperCase() }])
+        expect((await author.call("POST", path, bad)).status).toBe(400);
+      expect((await new Browser().call("POST", path, { id })).status).toBe(401);
+    }
+
+    const retried = await author.call("POST", "/drafts/retry", { id });
+    expect(retried.status).toBe(200);
+    expect(retried.headers.get("cache-control")).toBe("no-store");
+    const read = await (await author.call("POST", "/drafts/read", { id })).json();
+    expect(read).toMatchObject({ id, state: "drafted", draft });
+    expect(read).not.toHaveProperty("failure");
+    expect(read).not.toHaveProperty("submittedAt");
+
+    await fail("creation-reverted");
+    expect((await author.call("POST", "/drafts/discard", { id })).status).toBe(200);
+    expect((await author.call("POST", "/drafts/read", { id })).status).toBe(404);
+    expect(logged.at(-1)).toMatchObject({ route: "drafts" });
+  });
+
+  test("a poll whose election was registered stays, neither retried nor discarded", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const { id } = (await (await author.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    expect((await author.call("POST", "/drafts/submit", { id })).status).toBe(202);
+    await db.admin`
+      UPDATE account_polls SET state = 'failed', failure = 'open-mismatch',
+        creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)},
+        election_id = ${randomBytes(32)}, created_block = 1, l1_origin_timestamp = 1,
+        anchors_checked_block = 1, electorate = '[]', stub_hash = ${randomBytes(32)},
+        ceremony_tx_hash = ${randomBytes(32)}, register_tx_hash = ${randomBytes(32)},
+        registered_block = 2
+      WHERE id = ${id}`;
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      state: "failed",
+      failure: "open-mismatch",
+      retryable: false,
+    });
+    for (const path of ["/drafts/retry", "/drafts/discard"])
+      expect(await (await author.call("POST", path, { id })).json()).toEqual({
+        code: "REGISTERED",
+        status: 409,
+      });
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      state: "failed",
+    });
+  });
+
   test("needs a session, our origin and JSON, and serves only its routes", async () => {
     const signedOut = new Browser();
     expect((await signedOut.call("GET", "/drafts")).status).toBe(401);

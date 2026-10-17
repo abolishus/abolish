@@ -4,10 +4,12 @@ import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql,
 // 0015_poll_anchor_check.sql, 0016_poll_roots.sql, 0017_poll_stubs.sql,
-// 0018_ceremony_runs.sql, 0019_poll_registration.sql, 0020_poll_opening.sql
-// and 0021_poll_retries.sql; a test checks the two agree. `account_polls` is in
-// the account class: whose poll it is, never who answered it (ADR 0032, rule
-// 15; T-10). `poll_creation_txs` is operational: the creation key's public
+// 0018_ceremony_runs.sql, 0019_poll_registration.sql, 0020_poll_opening.sql,
+// 0021_poll_retries.sql and 0022_poll_submissions.sql; a test checks the two
+// agree. `account_polls` is in the account class: whose poll it is, never who
+// answered it (ADR 0032, rule 15; T-10); so is `account_poll_submissions`,
+// when each of an account's submissions was made, for the daily limit (rule
+// 18). `poll_creation_txs` is operational: the creation key's public
 // transactions, creations and registrations, naming no account, poll or
 // election. `ceremony_stubs` is operational: the coordinator's stubs, public
 // once registered, naming no account or poll; so are `ceremony_runs`,
@@ -39,6 +41,14 @@ export const accountPolls = pgTable("account_polls", {
   ceremonyTxHash: bytea("ceremony_tx_hash"),
   registerTxHash: bytea("register_tx_hash"),
   registeredBlock: bigint("registered_block", { mode: "bigint" }),
+});
+
+export const accountPollSubmissions = pgTable("account_poll_submissions", {
+  id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => accountUsers.id, { onDelete: "cascade" }),
+  submittedAt: at("submitted_at").notNull(),
 });
 
 export const pollCreationTxs = pgTable(

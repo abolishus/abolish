@@ -12,6 +12,7 @@ import {
   type PollCreationChain,
   pollCreationTxs,
   type PollDraft,
+  retryFailedPoll,
   SETUP_SECONDS,
   type SignedCreation,
   submitPollDraft,
@@ -276,6 +277,53 @@ describe("advancePollCreations", () => {
     chain.finalize();
     expect(await run(chain)).toMatchObject({ failed: { "creation-reverted": 1 } });
     expect(await row(id!)).toMatchObject({ state: "failed", failure: "creation-reverted" });
+  });
+
+  test("a verdict on a creation never lands on the poll's next submission", async () => {
+    // Another run fails the poll while this one waits on the node, and its
+    // author retries and submits it again (part 5d-2): this run's verdict on
+    // the old creation, created or reverted, is no longer the poll's.
+    for (const reverts of [false, true]) {
+      await db.admin`DELETE FROM account_polls`;
+      await db.admin`DELETE FROM poll_creation_txs`;
+      const chain = new (class extends FakeChain {
+        resubmit: (() => Promise<void>) | undefined;
+        override async creation(hash: Uint8Array) {
+          await this.resubmit?.();
+          this.resubmit = undefined;
+          return super.creation(hash);
+        }
+      })();
+      const [id] = await submitted();
+      await run(chain);
+      const old = (await row(id!))["hash"];
+      if (reverts) chain.reverting.add(old);
+      chain.mine();
+      chain.finalize();
+      const [{ author }] = (await db.admin`
+        SELECT user_id AS author FROM account_polls WHERE id = ${id!}`) as unknown as [
+        { author: string },
+      ];
+      const later = new Date(NOW.getTime() + HOUR);
+      chain.resubmit = async () => {
+        await db.admin`UPDATE account_polls SET state = 'failed', failure = 'creation-timeout'
+          WHERE id = ${id!}`;
+        await retryFailedPoll(app2, author, id!, later);
+        await submitPollDraft(app2, author, id!, {
+          turnstile: { verify: async () => "passed" },
+          token: "t",
+          now: later,
+        });
+      };
+      // Checked by mutation: keyed by the state alone, the created verdict
+      // breaks the table's checks and the reverted one fails the new
+      // submission.
+      expect(await run(chain, later)).toMatchObject({ created: 0, failed: {}, sent: 1 });
+      const r = await row(id!);
+      expect(r).toMatchObject({ state: "submitted", failure: null, election: null });
+      expect(r["hash"]).not.toBe(old);
+      expect(chain.signed).toEqual([0n, 1n]);
+    }
   });
 
   test("fails a poll whose nonce another transaction of the key took, once that is final", async () => {

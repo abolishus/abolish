@@ -175,6 +175,8 @@ describe("schema", () => {
       ["account_credentials", "DELETE,SELECT"],
       ["account_moderators", "INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
+      // Append-only: a submission counts for its 24 hours (poll-failures.test.ts).
+      ["account_poll_submissions", "INSERT,SELECT"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_sessions", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_users", "DELETE,INSERT,SELECT,UPDATE"],

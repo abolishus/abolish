@@ -11,6 +11,11 @@
 // the API (T-10, T-68). The answer carries the public state and decisions,
 // never a moderator.
 //
+// A poll that failed in setup carries its failure's code, which the page
+// words (`pollFailure_<code>`, src/messages.ts), and whether the author can
+// retry it (back to a draft, to edit and submit again) or discard it
+// (ADR 0032, rule 14; P2-22 part 5d-2).
+//
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
 // route class. CSRF: the session cookie is SameSite=Strict, and every POST
@@ -23,6 +28,7 @@ import {
   type AppealErrorCode,
   createPollDraft,
   deletePollDraft,
+  discardFailedPoll,
   fileAppeal,
   listAccountPolls,
   type PollDraft,
@@ -31,6 +37,8 @@ import {
   type PollModeration,
   readAccountPoll,
   readPollModeration,
+  retryableFailure,
+  retryFailedPoll,
   submitPollDraft,
   type Turnstile,
   TURNSTILE_HEADER,
@@ -47,6 +55,8 @@ export const DRAFT_ROUTES = [
   "POST /drafts/update",
   "POST /drafts/delete",
   "POST /drafts/submit",
+  "POST /drafts/retry",
+  "POST /drafts/discard",
   "POST /drafts/moderation",
   "POST /drafts/appeal",
 ] as const;
@@ -97,6 +107,8 @@ const Inputs = {
   "POST /drafts/update": z.strictObject({ id: PollId, draft: Draft }),
   "POST /drafts/delete": z.strictObject({ id: PollId }),
   "POST /drafts/submit": z.strictObject({ id: PollId }),
+  "POST /drafts/retry": z.strictObject({ id: PollId }),
+  "POST /drafts/discard": z.strictObject({ id: PollId }),
   "POST /drafts/moderation": z.strictObject({ id: PollId }),
   "POST /drafts/appeal": z.strictObject({ id: PollId }),
 } as const;
@@ -113,6 +125,9 @@ const summary = (p: AccountPoll) => ({
   createdAt: p.createdAt.toISOString(),
   updatedAt: p.updatedAt.toISOString(),
   ...(p.submittedAt === undefined ? {} : { submittedAt: p.submittedAt.toISOString() }),
+  ...(p.failure === undefined
+    ? {}
+    : { failure: p.failure, retryable: retryableFailure(p.failure) }),
 });
 
 // Sequence numbers are Postgres `bigint`s, so decimal strings, as the API's log.
@@ -146,6 +161,8 @@ const refuse = (status: number, code: string, extra: object = {}) =>
 const ERRORS: Record<PollDraftErrorCode, [number, string]> = {
   "not-found": [404, "NOT_FOUND"],
   "not-editable": [409, "NOT_EDITABLE"],
+  "not-failed": [409, "NOT_FAILED"],
+  registered: [409, "REGISTERED"],
   refused: [422, "DRAFT_REFUSED"],
   "too-many-drafts": [429, "TOO_MANY_DRAFTS"],
   "too-many-in-setup": [429, "TOO_MANY_IN_SETUP"],
@@ -227,6 +244,18 @@ export function createDraftsHandler({
             now: now(),
           });
           return answer(202, {});
+        }
+        case "POST /drafts/retry": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          await retryFailedPoll(sql, account, input.data.id, now());
+          return answer(200, {});
+        }
+        case "POST /drafts/discard": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          await discardFailedPoll(sql, account, input.data.id);
+          return answer(200, {});
         }
         case "POST /drafts/moderation": {
           const input = Inputs[route].safeParse(body);

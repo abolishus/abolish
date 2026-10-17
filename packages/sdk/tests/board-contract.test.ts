@@ -39,6 +39,7 @@ import { intakeInThread } from "../src/simulation/intake.ts";
 import { SimulatedL1 } from "../src/simulation/l1.ts";
 import { l2BlockAt } from "../src/simulation/l2.ts";
 import { SIMULATED_CLOSES_AT, SIMULATED_OPENS_AT } from "../src/simulation/plan.ts";
+import { oneQuestion } from "./one-question.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const timeout = 120_000;
@@ -83,7 +84,8 @@ const election = simulateElection(
   planElection(scenario),
   identityKey(crypto.getRandomValues(new Uint8Array(32))),
 );
-const { definition, definitionHash, seats, registered, deployment } = election;
+const { definitionHash, seats, registered, deployment } = election;
+const definition = oneQuestion(election.definition);
 const contracts: EventContracts = {
   electionRegistry: deployment.electionRegistry,
   trusteeRegistry: deployment.trusteeRegistry,
@@ -443,6 +445,7 @@ describe("readCountedExtent over the board contract's events", { timeout }, () =
   const closesAt = SIMULATED_CLOSES_AT;
   const finalized = l1.finalized(l1.firstAfter(closesAt));
   const ctx = {
+    ballotVersion: 2,
     definitionHash,
     panelSize: 3,
     registered,

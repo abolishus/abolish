@@ -23,6 +23,7 @@ import {
   SimulatedElectionRegistry,
   SimulatedTrusteeRegistry,
 } from "../src/simulation/l2.ts";
+import { oneQuestion } from "./one-question.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const timeout = 240_000;
@@ -49,7 +50,7 @@ const receiptKey = () => identityKey(crypto.getRandomValues(new Uint8Array(32)))
 
 // One ceremony shared by every case: it costs n² ML-KEM challenges.
 const e = simulateElection(base, planElection(base), receiptKey());
-const d = e.definition;
+const d = oneQuestion(e.definition);
 const stubHash = electionStubV4Hash(d);
 const quorum = rule7Quorum(e.panel);
 

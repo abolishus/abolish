@@ -11,7 +11,6 @@
 
 import {
   type BallotCore,
-  type CellBallotElection,
   type ChallengeOpeningV2Code,
   checkChallengeOpeningV2,
   DecodeError,
@@ -20,6 +19,7 @@ import {
   opensBallotCommitment,
   type SpoiledBallotOpeningV2,
 } from "@abolishus/crypto";
+import type { SimulatedBallotElection } from "./versions.ts";
 
 /** Why the operator refuses an opening: a check of challenge.md, or a publication rule. */
 export type OpeningRefusal =
@@ -46,7 +46,7 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 /** What the operator holds when openings arrive: the counted extent is fixed by then. */
 export interface OpeningDesk {
   /** The registered definition and key set the openings are checked against. */
-  readonly election: CellBallotElection;
+  readonly election: SimulatedBallotElection;
   /** Every ballot admitted in the counted extent, superseded ones included. */
   readonly counted: readonly Pick<BallotCore, "definitionHash" | "vss">[];
   /** `s_S`: an opening is boarded only in a later segment. */

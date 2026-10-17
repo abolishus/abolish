@@ -12,17 +12,11 @@
 // trie, placeholder code, and a header whose other fields are zero
 // (SIMULATION_STUBS).
 
-import {
-  type Anchor,
-  type AnchorClock,
-  checkpointHash,
-  type ElectionDefinitionV4,
-  encodeElectionDefinitionV4,
-  type Panel,
-} from "@abolishus/crypto";
+import { type Anchor, type AnchorClock, checkpointHash, type Panel } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { buildTrie, encodeRlp, uintBytes } from "./trie.ts";
+import { encodeDefinition, type SimulatedDefinition } from "./versions.ts";
 
 export const BUNDLE_FORMAT_CEREMONY = "abolish-verifier-bundle/4";
 
@@ -108,7 +102,7 @@ export function simulatedHeader(block: BundleBlock, stateRoot: Uint8Array): Uint
 }
 
 export interface BundleInputs {
-  readonly definition: ElectionDefinitionV4;
+  readonly definition: SimulatedDefinition;
   readonly panel: Panel;
   readonly clock: AnchorClock;
   /** The board copy: every entry, encoded, in index order. */
@@ -161,7 +155,7 @@ export function verifierBundle(inputs: BundleInputs): VerifierBundle {
   const decimal = (n: bigint | number) => n.toString();
   const json = JSON.stringify({
     format: BUNDLE_FORMAT_CEREMONY,
-    definition: bytesToHex(encodeElectionDefinitionV4(definition)),
+    definition: bytesToHex(encodeDefinition(definition)),
     clock: {
       epoch: decimal(clock.epoch),
       period: decimal(clock.period),

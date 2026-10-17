@@ -18,7 +18,7 @@ export const secondsAt = (at: number): bigint =>
 
 /** One ballot a voter casts. */
 export interface PlannedBallot {
-  /** One 0 or 1 per option. */
+  /** One 0 or 1 per option, every question's options in flat order. */
   readonly votes: readonly (0 | 1)[];
   /** When the voter casts, as a share of the voting period, in `[0, 1)`. */
   readonly at: number;
@@ -110,8 +110,13 @@ function generator(seed: number): () => number {
   };
 }
 
-/** The selection range each election type's ballots are proved against. */
+/**
+ * The selection range a one-question election's ballots are proved against.
+ * Throws for a questions scenario, whose limits are each question's own.
+ */
 export function selectionRange(scenario: Scenario): { min: number; max: number } {
+  if (scenario.election === "questions")
+    throw new TypeError("selectionRange: a questions scenario has a range per question");
   // ADR 0003: a blank plurality ballot is valid, so plurality is [0, 1].
   return scenario.election === "plurality" ? { min: 0, max: 1 } : { min: 0, max: scenario.options };
 }
@@ -126,6 +131,20 @@ const POSTING_STREAM = 0x27d4_eb2f;
 const REORG_STREAM = 0x1656_67b1;
 
 function drawVotes(scenario: Scenario, next: () => number): (0 | 1)[] {
+  // Each question: how many it picks, uniform over its limits, then which,
+  // the first that many of a Fisher–Yates shuffle. A fixed number of draws
+  // per question, so one voter's answers never shift another's.
+  if (scenario.questions !== undefined)
+    return scenario.questions.flatMap(({ options, min, max }) => {
+      const picks = min + Math.floor(next() * (max - min + 1));
+      const order = Array.from({ length: options }, (_, j) => j);
+      for (let j = options - 1; j > 0; j--) {
+        const i = Math.floor(next() * (j + 1));
+        [order[i], order[j]] = [order[j] as number, order[i] as number];
+      }
+      const picked = new Set(order.slice(0, picks));
+      return Array.from({ length: options }, (_, j): 0 | 1 => (picked.has(j) ? 1 : 0));
+    });
   if (scenario.election === "plurality") {
     const choice = Math.floor(next() * scenario.options);
     return Array.from({ length: scenario.options }, (_, j) => (j === choice ? 1 : 0));

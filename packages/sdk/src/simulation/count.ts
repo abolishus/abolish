@@ -13,16 +13,15 @@
 import {
   type AdmittedBallot,
   ballotWindow,
-  type BallotRecordV2,
   type BallotSelection,
-  ballotHash,
   checkContractEvent,
   checkDelivery,
   checkL1Reference,
   type ContractEventRecord,
+  type CommittedVote,
+  type CommittedVoteV3,
   type ContractEventVersion,
   decodeContractEvent,
-  decodeBallot,
   DecodeError,
   type DeliveryBallot,
   type DeliveryCheck,
@@ -38,6 +37,12 @@ import {
   selectBallots,
 } from "@abolishus/crypto";
 import { SIMULATED_ANCHOR_PERIOD } from "./board.ts";
+import {
+  ballotHashOf,
+  decodeSimulatedBallot,
+  type SimulatedBallotRecord,
+  type SimulatedBallotVersion,
+} from "./versions.ts";
 
 // A record's type, the u16 at the head of its encoding (docs/spec/notation.md):
 // which records on the board each check reads.
@@ -57,6 +62,8 @@ const DELIVERY_RECORD_TYPES: ReadonlySet<number> = new Set([
 /** What a reader of the counted extent holds besides the board. */
 export interface CountingContext {
   readonly definitionHash: Uint8Array;
+  /** The ballot version the profile pins. */
+  readonly ballotVersion: SimulatedBallotVersion;
   readonly panelSize: number;
   /** The key set the ceremony check registered. */
   readonly registered: readonly RegisteredKeys[];
@@ -86,9 +93,9 @@ export interface BoardEvent {
 
 export interface CountedExtent {
   /** Each ballot record, by board index. */
-  readonly ballots: ReadonlyMap<number, BallotRecordV2>;
+  readonly ballots: ReadonlyMap<number, SimulatedBallotRecord>;
   /**
-   * Board indices of ballots that don't decode under ballot version 2, name
+   * Board indices of ballots that don't decode under the pinned version, name
    * another definition or a cell the partition lacks, or fall outside the
    * window by their path,
    * of relayed ballots, whose stamp only L1 shows (4.5), and of
@@ -111,7 +118,7 @@ export interface CountedExtent {
 
 /**
  * Reads the counted extent's entries, each with its segment: ballots under
- * ballot version 2, on the board path or in the board contract's events,
+ * the pinned ballot version, on the board path or in the board contract's events,
  * M from each record and the definition, under its cell's tier (5.7), and
  * every delivery record of the extent, on either path, so crypto, not this
  * file, decides what each says.
@@ -120,7 +127,7 @@ export function readCountedExtent(
   ctx: CountingContext,
   entries: readonly { readonly segment: number; readonly payload: Uint8Array }[],
 ): CountedExtent {
-  const ballots = new Map<number, BallotRecordV2>();
+  const ballots = new Map<number, SimulatedBallotRecord>();
   const verdicts = new Map<number, L1ReferenceVerdict>();
   const rejected: number[] = [];
   const admitted: AdmittedBallot[] = [];
@@ -185,9 +192,9 @@ export function readCountedExtent(
     } else if (type === RECORD_TYPES.ballot)
       inWindow = ballotWindow("board", BigInt(entry.segment), window);
     else return;
-    let b: BallotRecordV2;
+    let b: SimulatedBallotRecord;
     try {
-      b = decodeBallot(payload, 2);
+      b = decodeSimulatedBallot(payload, ctx.ballotVersion);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push(index);
@@ -210,12 +217,7 @@ export function readCountedExtent(
     const verdict = checkL1Reference(ref, ctx.finalized, ctx.window);
     verdicts.set(index, verdict);
     if (verdict !== "admitted") return;
-    const context = {
-      definitionHash: ctx.definitionHash,
-      ballotVersion: 2,
-      cell: b.cell,
-      nullifier: b.nullifier,
-    } as const;
+    const name = { definitionHash: ctx.definitionHash, cell: b.cell, nullifier: b.nullifier };
     admitted.push({
       tier,
       nullifier: b.nullifier,
@@ -223,14 +225,14 @@ export function readCountedExtent(
         ...ref,
         definitionHash: ctx.definitionHash,
         tier,
-        ballotHash: ballotHash(context, b.committed_vote),
+        ballotHash: ballotHashOf(ctx.ballotVersion, name, b.committed_vote),
       }),
       l1RefNumber: b.l1_ref_number,
       index: BigInt(index),
     });
   });
   const selection = selectBallots(admitted);
-  const ballotOf = (index: bigint): BallotRecordV2 => {
+  const ballotOf = (index: bigint): SimulatedBallotRecord => {
     const b = ballots.get(Number(index));
     if (b === undefined) throw new Error("simulation: a selected entry isn't a boarded ballot");
     return b;
@@ -250,7 +252,10 @@ export function readCountedExtent(
     },
     selection.selected.map((s): DeliveryBallot => {
       const b = ballotOf(s.index);
-      return { ballotVersion: 2, cell: b.cell, nullifier: b.nullifier, vote: b.committed_vote };
+      const named = { cell: b.cell, nullifier: b.nullifier };
+      return ctx.ballotVersion === 3
+        ? { ...named, ballotVersion: 3, vote: b.committed_vote as CommittedVoteV3 }
+        : { ...named, ballotVersion: 2, vote: b.committed_vote as CommittedVote };
     }),
     [
       ...entries

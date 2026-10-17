@@ -2,19 +2,20 @@
 // spread over worker threads (./intake-worker.ts), since intake (each seat
 // checking every ballot's proofs) is most of a run's cost and each ballot's
 // is independent of every other's. Either way each result is
-// @abolishus/crypto's intakeShares, unchanged; ./run.ts orders and checks
-// them as before.
+// @abolishus/crypto's intakeShares (intakeSharesV3 for ballot version 3),
+// unchanged; ./run.ts orders and checks them as before.
 
 import { Worker } from "node:worker_threads";
+import type { CommittedVote, CommittedVoteV3, IntakeKeys } from "@abolishus/crypto";
 import {
-  COMMITTED_VOTE,
-  type CommittedVote,
-  encode,
-  type IntakeKeys,
-  intakeShares,
-  type ValidityContext,
-} from "@abolishus/crypto";
-import type { IntakeJob, IntakeReply, IntakeWorkerData, SeatIntake } from "./intake-worker.ts";
+  encodeIntakeVote,
+  type IntakeContext,
+  type IntakeJob,
+  type IntakeReply,
+  type IntakeWorkerData,
+  intakeSeat,
+  type SeatIntake,
+} from "./intake-worker.ts";
 
 export type { SeatIntake } from "./intake-worker.ts";
 
@@ -29,8 +30,8 @@ export interface SeatCiphertext {
 export interface Intake {
   /** Each listed seat's intake of one ballot, in the order given. */
   run(
-    ctx: ValidityContext,
-    vote: CommittedVote,
+    ctx: IntakeContext,
+    vote: CommittedVote | CommittedVoteV3,
     ciphertexts: readonly SeatCiphertext[],
   ): Promise<readonly SeatIntake[]>;
   /** How many ballots may wait for intake ahead of the one the run needs next. */
@@ -51,7 +52,7 @@ export function intakeInThread(seats: readonly IntakeKeys[]): Intake {
     ahead: 0,
     run: async (ctx, vote, ciphertexts) =>
       ciphertexts.map(({ seat, ciphertext }) =>
-        intakeShares(ctx, keysOf(seats, seat), vote, ciphertext),
+        intakeSeat(ctx, keysOf(seats, seat), vote, ciphertext),
       ),
     close: async () => {},
   };
@@ -123,7 +124,7 @@ export function intakeInWorkers(seats: readonly IntakeKeys[], count: number): In
       if (failure !== undefined) return Promise.reject(failure);
       const id = next++;
       const i = load.indexOf(Math.min(...load));
-      const job: IntakeJob = { id, ctx, vote: encode(COMMITTED_VOTE, vote), ciphertexts };
+      const job: IntakeJob = { id, ctx, vote: encodeIntakeVote(ctx, vote), ciphertexts };
       return new Promise((resolve, reject) => {
         waiting.set(id, { resolve, reject });
         load[i] = (load[i] ?? 0) + 1;

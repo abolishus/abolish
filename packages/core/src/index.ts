@@ -203,6 +203,22 @@ export {
   TURNSTILE_ACTION_TIER0,
 } from "./tier0-registration.ts";
 export {
+  TIER1_BATCH_LOCK_MS,
+  TIER1_RELAY_GAS_LIMIT,
+  TIER1_RELAY_MAX_BATCH,
+  TIER1_RELAY_PERIOD,
+  TIER1_RELAY_SEND_MARGIN,
+  type Tier1BatchOptions,
+  Tier1Batches,
+  type Tier1BoundaryOutcome,
+  type Tier1BoundaryReport,
+  type Tier1Chain,
+  type Tier1Head,
+  type Tier1Heads,
+  Tier1LockError,
+  type Tier1SignedSend,
+} from "./tier1-batch.ts";
+export {
   parseTier1Index,
   parseTier1Request,
   recordKey,

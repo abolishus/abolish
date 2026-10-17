@@ -94,10 +94,10 @@ const same = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 const typeOf = (b: Uint8Array) => ((b[0] ?? 0) << 8) | (b[1] ?? 0);
 
-// Topic 0 of each board event, from contract-event version 5's table, the
-// version the profile pins (docs/spec/contracts.md, Event tables (version 5)).
+// Topic 0 of each board event, from contract-event version 6's table, the
+// version the profile pins (docs/spec/contracts.md, Event tables (version 6)).
 const topic0 = (name: string): Uint8Array => {
-  const signature = CONTRACT_EVENT_SIGNATURES[5].board.find((s) => s.startsWith(`${name}(`));
+  const signature = CONTRACT_EVENT_SIGNATURES[6].board.find((s) => s.startsWith(`${name}(`));
   if (signature === undefined) throw new Error(`simulation: the board has no event ${name}`);
   return keccak_256(utf8(signature));
 };

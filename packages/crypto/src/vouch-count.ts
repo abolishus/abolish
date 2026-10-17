@@ -54,7 +54,7 @@ export type GroupRegistryEvent =
       readonly record: Uint8Array;
     }
   | {
-      /** A Tier 1 addition record; the event that logs it is P3-3 part 3's. */
+      /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event version 6). */
       readonly kind: "tier1-addition";
       readonly block: bigint;
       readonly record: Uint8Array;
@@ -393,7 +393,8 @@ export function countTier1Additions(
       decide({ ok: false, error: "slot-spent", vouch: reused });
       continue;
     }
-    // No Tier 1 removal exists yet (P3-2), so every counted leaf is unremoved.
+    // The registry has no Tier 1 removals ([[contracts]], Group registry, Tier
+    // 1 additions), so every counted leaf is unremoved.
     const groupMembers = members.get(groupId) ?? new Set<bigint>();
     if (groupMembers.has(commitment)) {
       decide({ ok: false, error: "member" });

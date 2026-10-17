@@ -25,12 +25,20 @@ export {
   type Side,
 } from "./queues.ts";
 export {
+  type BundlerRequest,
+  connectTier0Bundler,
+  TIER0_PAYMASTER_VERIFICATION_GAS,
+  Tier0BundlerError,
+  type Tier0BundlerOptions,
+} from "./tier0-bundler.ts";
+export {
   checkTier0Deployment,
   TIER0_LOG_RANGE,
   type Tier0ChainOptions,
   type Tier0Deployment,
   ViemTier0Chain,
 } from "./tier0-chain.ts";
+export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
   PRUNE_EVERY_MS,
   type RunningWorker,

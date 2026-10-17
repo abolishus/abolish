@@ -17,6 +17,8 @@ import {
   electionDefinitionV3Rule,
   electionDefinitionV4Rule,
   electionDefinitionV5Rule,
+  type ElectionDefinitionV6,
+  electionDefinitionV6Rule,
 } from "./election-definition.ts";
 import { type Element, G, GENERATOR_H, GROUP_ORDER, IDENTITY } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
@@ -39,6 +41,12 @@ export interface TallyRules {
    * 3 and 4, which ask one question and have no `tally-question-range`.
    */
   readonly questions?: readonly QuestionRules[];
+  /**
+   * Under tally-opening version 3, the panel whose half these rules tally:
+   * 1 the default panel, 2 the author panel (`panelTallyRules`). Absent
+   * under version 1, which tallies the whole opening.
+   */
+  readonly panel?: 1 | 2;
 }
 
 /** For each option, the cell's `k` aggregate VSS commitments `Ê_{j,0}, …, Ê_{j,k−1}`; `Ê_{j,0}` is `Ĉ_j`. */
@@ -90,11 +98,16 @@ function mul(p: Element, s: bigint): Element {
 }
 
 function checkRules(rules: TallyRules): void {
-  const { optionCount: m, threshold: k, panelSize: n, questions } = rules;
+  const { optionCount: m, threshold: k, panelSize: n, questions, panel } = rules;
   if (![m, k, n].every((x) => Number.isSafeInteger(x)))
     throw new TypeError("rules: expected integers");
   if (m < 1 || m > MAX_OPTIONS) throw new RangeError("rules: optionCount out of range");
-  if (k < 2 || k > n || n > MAX_TRUSTEES) throw new RangeError("rules: panel out of range");
+  if (panel !== undefined && panel !== 1 && panel !== 2)
+    throw new RangeError("rules: panel is 1 or 2");
+  // Only an author panel may have k = 1 (trustee-identity, Author panel
+  // identifier, rule 2); a default panel's threshold is at least 2.
+  if (k < (panel === 2 ? 1 : 2) || k > n || n > MAX_TRUSTEES)
+    throw new RangeError("rules: panel out of range");
   if (questions === undefined) return;
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_QUESTIONS)
     throw new RangeError("rules: from 1 to MAX_QUESTIONS questions");
@@ -116,9 +129,9 @@ function checkRules(rules: TallyRules): void {
  * The rules a cell of a registered definition is tallied under
  * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under version 5 each
  * question's option count and limits. Versions 1, 3, 4 and 5 only: a
- * version-6 definition's ballots are version 4, whose tally (its default
- * half, and with an author panel the sum of both panels' openings) is
- * P2-16's, so it is `UnsupportedVersionError` here until then (T-36). A definition that isn't well-formed is refused: its questions could
+ * version-6 definition's ballots are version 4, whose halves are tallied per
+ * panel (`panelTallyRules`), so it is `UnsupportedVersionError` here (T-36).
+ * A definition that isn't well-formed is refused: its questions could
  * hold limits no ballot proves, which would make `tally-question-range`
  * judge an honest cell (T-28, T-34).
  */
@@ -163,6 +176,46 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
     default:
       throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
   }
+}
+
+/**
+ * The rules panel `panel` tallies its half of a cell under, for a version-6
+ * definition with an author panel, which pins tally-opening version 3
+ * (docs/spec/tally.md, Author panel, Panels and counted set): the default
+ * panel's `threshold` and `panel_size`, or the author panel's
+ * `author_threshold` and number of `author_keys`, with the definition's
+ * questions either way. A definition without an author panel tallies its one
+ * half under version 1 or 2, never here, and one that isn't well-formed is
+ * refused (T-28, T-36, T-37).
+ */
+export function panelTallyRules(
+  definition: { readonly version: 6; readonly value: ElectionDefinitionV6 },
+  panel: 1 | 2,
+): TallyRules {
+  if (definition.version !== 6)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+  const d = definition.value;
+  if (electionDefinitionV6Rule(d) !== undefined)
+    throw new RangeError("panelTallyRules: the definition isn't well-formed");
+  if (d.author_keys.length === 0)
+    throw new RangeError("panelTallyRules: the definition has no author panel");
+  if (panel !== 1 && panel !== 2) throw new RangeError("panelTallyRules: panel is 1 or 2");
+  const questions = Object.freeze(
+    d.questions.map((q) =>
+      Object.freeze({
+        optionCount: q.option_count,
+        minSelections: q.min_selections,
+        maxSelections: q.max_selections,
+      }),
+    ),
+  );
+  return Object.freeze({
+    optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
+    threshold: panel === 1 ? d.threshold : d.author_threshold,
+    panelSize: panel === 1 ? d.panel_size : d.author_keys.length,
+    questions,
+    panel,
+  });
 }
 
 /**
@@ -336,19 +389,19 @@ export function checkOpening(
   return checkAgainst(rules, aggregate, ballots.length, opening);
 }
 
-/**
- * A trustee's combination of one cell (docs/spec/tally.md, Combination):
- * aggregates the counted ballots, checks every summed share it received,
- * combines the `k` lowest passing seats, and runs the opening checks on the
- * result before it is published. `summed` maps each sending seat to its
- * summed shares, which come from other trustees and may be anything.
- */
-export function openCell(
+/** The `k` lowest seats whose summed shares pass, and the opening they combine to. */
+function combineSummed(
   rules: TallyRules,
-  ballots: readonly CommittedVote["vss"][],
+  aggregate: CellAggregate,
   summed: ReadonlyMap<number, readonly Share[]>,
-): CellOpening {
-  const aggregate = aggregateCell(rules, ballots);
+):
+  | {
+      readonly ok: true;
+      readonly opening: Share[];
+      readonly combined: number[];
+      readonly excluded: number[];
+    }
+  | { readonly ok: false; readonly excluded: number[] } {
   const { threshold: k, panelSize: n } = rules;
   const seats = [...summed.keys()].sort((a, b) => a - b);
   for (const seat of seats)
@@ -361,7 +414,7 @@ export function openCell(
       ? passing
       : excluded
     ).push(seat);
-  if (passing.length < k) return { ok: false, code: "tally-quorum", excluded };
+  if (passing.length < k) return { ok: false, excluded };
   const combined = passing.slice(0, k);
   const lambda = lagrangeAtZero(combined);
   const opening = aggregate.map((_, j) =>
@@ -374,15 +427,84 @@ export function openCell(
       { v: 0n, r: 0n },
     ),
   );
-  const checked = checkAgainst(rules, aggregate, ballots.length, opening);
-  if (!checked.ok) return { ...checked, excluded };
+  return { ok: true, opening, combined, excluded };
+}
+
+/**
+ * A trustee's combination of one cell (docs/spec/tally.md, Combination):
+ * aggregates the counted ballots, checks every summed share it received,
+ * combines the `k` lowest passing seats, and runs the opening checks on the
+ * result before it is published. `summed` maps each sending seat to its
+ * summed shares, which come from other trustees and may be anything.
+ */
+export function openCell(
+  rules: TallyRules,
+  ballots: readonly CommittedVote["vss"][],
+  summed: ReadonlyMap<number, readonly Share[]>,
+): CellOpening {
+  // A panel's half is opened by openPartialCell: its V is uniform, so the
+  // range checks here would refuse an honest partial opening.
+  if (rules.panel !== undefined)
+    throw new RangeError("openCell: a panel's half is opened with openPartialCell");
+  const aggregate = aggregateCell(rules, ballots);
+  const c = combineSummed(rules, aggregate, summed);
+  if (!c.ok) return { ok: false, code: "tally-quorum", excluded: c.excluded };
+  const checked = checkAgainst(rules, aggregate, ballots.length, c.opening);
+  if (!checked.ok) return { ...checked, excluded: c.excluded };
   return {
     ok: true,
-    counts: opening.map((s) => s.v),
-    randomness: opening.map((s) => s.r),
-    combined,
-    excluded,
+    counts: c.opening.map((s) => s.v),
+    randomness: c.opening.map((s) => s.r),
+    combined: c.combined,
+    excluded: c.excluded,
   };
+}
+
+export type PartialCellOpening =
+  | {
+      readonly ok: true;
+      /** `(V^P_j, R^P_j)` for each option: the panel's partial opening, which opens `Ĉ^P_j`. */
+      readonly opening: readonly Share[];
+      /** `Q`: the `k_P` lowest seats of the panel whose summed shares pass. */
+      readonly combined: readonly number[];
+      readonly excluded: readonly number[];
+    }
+  | {
+      readonly ok: false;
+      readonly code: "tally-quorum" | "tally-opening";
+      readonly option?: number;
+      readonly excluded: readonly number[];
+    };
+
+/**
+ * A seat's combination of its own panel's half of one cell under
+ * tally-opening version 3 (docs/spec/tally.md, Author panel, Partial
+ * openings): `rules` from `panelTallyRules`, `halves` each counted ballot's
+ * commitments of that panel (`vss` for the default panel, `author_vss` for
+ * the author panel), `summed` the panel's own seats' summed shares. The
+ * result opens the panel's aggregate commitments and is checked against them
+ * before it is published; its `V^P_j` is uniform on its own, so it is never
+ * range-checked: the range checks run on the sum of both panels' openings
+ * (`checkPartialTally`).
+ */
+export function openPartialCell(
+  rules: TallyRules,
+  halves: readonly CommittedVote["vss"][],
+  summed: ReadonlyMap<number, readonly Share[]>,
+): PartialCellOpening {
+  if (rules.panel === undefined)
+    throw new RangeError("openPartialCell: the rules must name a panel (panelTallyRules)");
+  const aggregate = aggregateCell(rules, halves);
+  const c = combineSummed(rules, aggregate, summed);
+  if (!c.ok) return { ok: false, code: "tally-quorum", excluded: c.excluded };
+  for (let j = 0; j < aggregate.length; j++) {
+    const { v, r } = c.opening[j] as Share;
+    const opens = mul(G, v)
+      .add(mul(GENERATOR_H, r))
+      .equals((aggregate[j] as readonly Element[])[0] as Element);
+    if (!opens) return { ok: false, code: "tally-opening", option: j, excluded: c.excluded };
+  }
+  return { ok: true, opening: c.opening, combined: c.combined, excluded: c.excluded };
 }
 
 /**

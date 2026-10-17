@@ -5,7 +5,11 @@
 // board, IPFS or the archive (ADR 0015; T-15). The recipient checks context
 // and signature before it decapsulates, so only a registered seat can make it
 // run ML-KEM decapsulation on a chosen ciphertext (T-39), then the summed
-// shares themselves against the cell's aggregate (T-29).
+// shares themselves against the cell's aggregate (T-29). Version 2, which
+// tally-opening version 3 fixes, names the panel whose half the sums are of:
+// sender and recipient are seats of that panel, so summed shares never cross
+// between panels (docs/spec/tally.md, Summed-share message (version 2); T-14,
+// T-15, T-37).
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { randomBytes } from "@noble/hashes/utils.js";
@@ -17,6 +21,7 @@ import {
   type CodecValue,
   decode,
   encode,
+  enum8,
   struct,
   u16,
   u8,
@@ -36,14 +41,21 @@ import {
   MLKEM_MSG_LEN,
   nonZeroRandom,
 } from "./share-encryption.ts";
-import { type CellAggregate, checkSummedShares, type TallyRules, tallyRules } from "./tally.ts";
-import type { ElectionDefinition } from "./election-definition.ts";
+import {
+  type CellAggregate,
+  checkSummedShares,
+  panelTallyRules,
+  type TallyRules,
+  tallyRules,
+} from "./tally.ts";
+import type { ElectionDefinition, ElectionDefinitionV6 } from "./election-definition.ts";
 import {
   type AnyElectionDefinitionRecord,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
+  electionDefinitionV6Hash,
 } from "./protocol.ts";
 import { aggregateHash } from "./tally-opening.ts";
 import { identityKey, p256Sig, signStatement, verifyStatement } from "./trustee.ts";
@@ -51,7 +63,6 @@ import { identityKey, p256Sig, signStatement, verifyStatement } from "./trustee.
 const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
 
 const TAG = "abolish/v1/sig/summed-share";
-const VERSION = 1;
 
 /** The longest sealed summed shares: `SHARES` at `MAX_OPTIONS` and the tag. */
 const MAX_SEALED = 4 + 64 * MAX_OPTIONS + AEAD_TAG_LEN;
@@ -71,14 +82,38 @@ const statementV1 = struct(statementFields);
 
 const summedShareV1 = struct([...statementFields, ["signature", p256Sig]] as const);
 
+// Version 1's fields with `panel` after `cell`.
+const statementFieldsV2 = [
+  ["definition_hash", bytesFixed(32)],
+  ["cell", u8],
+  ["panel", enum8([1, 2])],
+  ["aggregate_hash", bytesFixed(32)],
+  ["sender", u8],
+  ["recipient", u8],
+  ["ct_mlkem", bytesFixed(MLKEM_CT_LEN)],
+  ["ct_dh", element],
+  ["sealed", bytesVar(MAX_SEALED)],
+] as const;
+
+const statementV2 = struct(statementFieldsV2);
+
+const summedShareV2 = struct([...statementFieldsV2, ["signature", p256Sig]] as const);
+
 /** Summed-share message, version 1 (docs/spec/tally.md, Summed-share message). */
 export type SummedShareMessage = CodecValue<typeof summedShareV1>;
 
+/** Summed-share message, version 2 (docs/spec/tally.md, Summed-share message (version 2)). */
+export type PanelSummedShareMessage = CodecValue<typeof summedShareV2>;
+
 /**
- * Record type `0x000b`. No profile pins it: version 1 of the tally opening,
- * the version a profile pins, uses version 1 of this message.
+ * Record type `0x000b`. No profile pins it: the pinned tally-opening version
+ * fixes it, version 1 under tally-opening version 1 and version 2 under
+ * version 3.
  */
-export const SUMMED_SHARE = recordType(RECORD_TYPES.summedShareMessage, { 1: summedShareV1 });
+export const SUMMED_SHARE = recordType(RECORD_TYPES.summedShareMessage, {
+  1: summedShareV1,
+  2: summedShareV2,
+});
 
 const SCHEMA = new RecordSchema([SUMMED_SHARE]);
 
@@ -88,16 +123,41 @@ export function encodeSummedShareMessage(message: SummedShareMessage): Uint8Arra
 
 /** Strictly decodes a summed-share message under version 1, the version tally opening 1 fixes. */
 export function decodeSummedShareMessage(bytes: Uint8Array, pinned: 1): SummedShareMessage {
-  return SCHEMA.decode(SUMMED_SHARE, bytes, pinned).value;
+  const r = SCHEMA.decode(SUMMED_SHARE, bytes, pinned);
+  // Unreachable: the pin refused every other version.
+  if (r.version !== 1) throw new RangeError("summed share: not version 1");
+  return r.value;
 }
 
-/** What the sender signs: the record's encoding without its signature, header included. */
-function signedBytes(m: CodecValue<typeof statementV1>): Uint8Array {
+export function encodePanelSummedShareMessage(message: PanelSummedShareMessage): Uint8Array {
+  return SCHEMA.encode(SUMMED_SHARE, 2, message);
+}
+
+/** Strictly decodes a summed-share message under version 2, the version tally opening 3 fixes. */
+export function decodePanelSummedShareMessage(
+  bytes: Uint8Array,
+  pinned: 2,
+): PanelSummedShareMessage {
+  const r = SCHEMA.decode(SUMMED_SHARE, bytes, pinned);
+  // Unreachable: the pin refused every other version.
+  if (r.version !== 2) throw new RangeError("summed share: not version 2");
+  return r.value;
+}
+
+type AnyStatement =
+  | CodecValue<typeof statementV1>
+  | (CodecValue<typeof statementV1> & { readonly panel: 1 | 2 });
+
+/**
+ * What the sender signs: the record's encoding without its signature, header
+ * included, version 2 when the message names a panel. Both versions' bytes
+ * start with the record type and version, so neither's signature serves for
+ * the other (T-31).
+ */
+function signedBytes(m: AnyStatement): Uint8Array {
   const w = new Writer();
   u16.write(w, RECORD_TYPES.summedShareMessage);
-  u8.write(w, VERSION);
-  // Through the struct, so only these fields are read even from a whole record.
-  statementV1.write(w, {
+  const common = {
     definition_hash: m.definition_hash,
     cell: m.cell,
     aggregate_hash: m.aggregate_hash,
@@ -106,7 +166,15 @@ function signedBytes(m: CodecValue<typeof statementV1>): Uint8Array {
     ct_mlkem: m.ct_mlkem,
     ct_dh: m.ct_dh,
     sealed: m.sealed,
-  });
+  };
+  // Through the struct, so only these fields are read even from a whole record.
+  if ("panel" in m) {
+    u8.write(w, 2);
+    statementV2.write(w, { ...common, panel: m.panel });
+  } else {
+    u8.write(w, 1);
+    statementV1.write(w, common);
+  }
   return w.finish();
 }
 
@@ -116,6 +184,12 @@ function signedBytes(m: CodecValue<typeof statementV1>): Uint8Array {
  * refused until P2-16 tallies ballot version 4).
  */
 export type SummedShareDefinition = ElectionDefinition | AnyElectionDefinitionRecord;
+
+/** A version-6 definition with an author panel: its tally is per panel, under summed-share version 2. */
+export type PanelSummedShareDefinition = {
+  readonly version: 6;
+  readonly value: ElectionDefinitionV6;
+};
 
 /**
  * The cell a message is about: the registered definition, the cell's
@@ -135,6 +209,16 @@ export interface SummedShareCell {
  */
 interface DefinitionContext {
   readonly definitionHash: Uint8Array;
+  /**
+   * Under version 2, the panel whose half is summed (`rules.panel`); absent
+   * under version 1. It decides the message version.
+   */
+  readonly panel?: 1 | 2;
+  /**
+   * The transcript whose checked key set the message's seats are from: the
+   * definition's `ceremony_transcript_hash`, or for the author panel its
+   * `author_transcript_hash` (docs/spec/tally.md, Panels and counted set).
+   */
   readonly ceremonyTranscriptHash: Uint8Array;
   readonly rules: TallyRules;
   /**
@@ -183,6 +267,27 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
   }
 }
 
+/**
+ * Panel `panel`'s values from a version-6 definition with an author panel:
+ * its hash, the transcript its seats' key set comes from, its half's rules
+ * and the partition's cells (T-37).
+ */
+function panelContextOf(definition: PanelSummedShareDefinition, panel: 1 | 2): DefinitionContext {
+  // Refuses another version, a definition that isn't well-formed and one
+  // without an author panel (T-28, T-36).
+  const rules = panelTallyRules(definition, panel);
+  const d = definition.value;
+  return {
+    definitionHash: electionDefinitionV6Hash(d),
+    panel,
+    ceremonyTranscriptHash: Uint8Array.from(
+      panel === 1 ? d.ceremony_transcript_hash : d.author_transcript_hash,
+    ),
+    rules,
+    cells: d.electorate.reduce((n, t) => n + t.cells.length, 0),
+  };
+}
+
 /** Internal: a cell with its definition's values already derived (tests and vectors). */
 export interface SummedShareCellContext extends DefinitionContext {
   readonly cell: number;
@@ -202,15 +307,19 @@ function combine(ssM: Uint8Array, ssDh: Element, ctDh: Element, dh: Element): Ui
 function associatedData(
   definitionHash: Uint8Array,
   cell: number,
+  panel: 1 | 2 | undefined,
   aggregate: Uint8Array,
   sender: number,
   recipient: number,
 ): Uint8Array {
   const w = new Writer();
   u16.write(w, RECORD_TYPES.summedShareMessage);
-  u8.write(w, VERSION);
+  u8.write(w, panel === undefined ? 1 : 2);
   w.bytes(definitionHash);
   u8.write(w, cell);
+  // Version 2 binds the panel, so a message sealed for one panel's seat
+  // never opens as the other's (T-37).
+  if (panel !== undefined) u8.write(w, panel);
   w.bytes(aggregate);
   u8.write(w, sender);
   u8.write(w, recipient);
@@ -253,9 +362,17 @@ function checkSeat(seat: number, n: number, what: string): void {
     throw new RangeError(`${what} must be a seat from 1 to n`);
 }
 
+function checkPanel(c: DefinitionContext): void {
+  if (c.panel !== undefined && c.panel !== 1 && c.panel !== 2)
+    throw new RangeError("summed share: panel is 1 or 2");
+  if (c.panel !== c.rules.panel)
+    throw new RangeError("summed share: the rules are another panel's");
+}
+
 function checkCell(c: SummedShareCellContext): void {
   if (!(c.definitionHash instanceof Uint8Array) || c.definitionHash.length !== 32)
     throw new RangeError("summed share: definitionHash must be 32 bytes");
+  checkPanel(c);
   if (!Number.isSafeInteger(c.cell) || c.cell < 0 || c.cell >= c.cells)
     throw new RangeError("summed share: cell must be a cell of the registered partition");
   const { optionCount: m, threshold: k } = c.rules;
@@ -318,6 +435,7 @@ export function sealSummedSharesWith(
   const aad = associatedData(
     cell.definitionHash,
     cell.cell,
+    cell.panel,
     aggregate,
     sender.index,
     recipientIndex,
@@ -336,9 +454,15 @@ export function sealSummedSharesWith(
     ct_dh: ctDh,
     sealed,
   };
-  return encodeSummedShareMessage({
-    ...statement,
-    signature: signStatement(sender.signingSecret, TAG, signedBytes(statement)),
+  if (cell.panel === undefined)
+    return encodeSummedShareMessage({
+      ...statement,
+      signature: signStatement(sender.signingSecret, TAG, signedBytes(statement)),
+    });
+  const v2 = { ...statement, panel: cell.panel };
+  return encodePanelSummedShareMessage({
+    ...v2,
+    signature: signStatement(sender.signingSecret, TAG, signedBytes(v2)),
   });
 }
 
@@ -357,6 +481,42 @@ export function sealSummedShares(
 ): Uint8Array {
   return sealSummedSharesWith(
     { ...contextOf(cell.definition), cell: cell.cell, aggregate: cell.aggregate },
+    registered,
+    sender,
+    recipientIndex,
+    summed,
+    randomBytes(MLKEM_MSG_LEN),
+    nonZeroRandom(),
+  );
+}
+
+/** The cell a version-2 message is about: one panel's half of it. */
+export interface PanelSummedShareCell {
+  readonly definition: PanelSummedShareDefinition;
+  readonly cell: number;
+  /** The sender's panel: 1 the default panel, 2 the author panel. */
+  readonly panel: 1 | 2;
+  /** Panel `panel`'s aggregate for the cell over the anchored counted set. */
+  readonly aggregate: CellAggregate;
+}
+
+/**
+ * Seals seat `(panel, sender)`'s summed shares of its panel's half of one
+ * cell to seat `(panel, recipientIndex)`'s KEM key and signs the message
+ * (docs/spec/tally.md, Summed-share message (version 2)). `registered` is the
+ * key set `checkCeremonyTranscript` returned for the panel's transcript, the
+ * author transcript once the author approvals approve it; the recipient is
+ * looked up there, so no seat of the other panel can be named (T-14, T-37).
+ */
+export function sealPanelSummedShares(
+  cell: PanelSummedShareCell,
+  registered: readonly RegisteredKeys[],
+  sender: SummedShareSender,
+  recipientIndex: number,
+  summed: readonly Share[],
+): Uint8Array {
+  return sealSummedSharesWith(
+    { ...panelContextOf(cell.definition, cell.panel), cell: cell.cell, aggregate: cell.aggregate },
     registered,
     sender,
     recipientIndex,
@@ -393,6 +553,40 @@ export interface SummedShareElection {
    * definition names: each qualified seat and its per-election keys.
    */
   readonly registered: readonly RegisteredKeys[];
+}
+
+/** What a seat of panel `panel` checks a version-2 message against. */
+export interface PanelSummedShareElection {
+  readonly definition: PanelSummedShareDefinition;
+  /** The recipient's panel. */
+  readonly panel: 1 | 2;
+  /** The panel's aggregate of each cell over the anchored counted set, in partition order. */
+  readonly aggregates: readonly CellAggregate[];
+  /** The key set `checkCeremonyTranscript` returned for the panel's transcript. */
+  readonly registered: readonly RegisteredKeys[];
+}
+
+/**
+ * Seat `(panel, recipient)`'s check of a version-2 summed-share message:
+ * version 1's checks in its order (`openSummedShares`), with the message's
+ * `panel` the recipient's own, its sender a seat of that panel and its sums
+ * checked against that panel's aggregate (docs/spec/tally.md, Summed-share
+ * message (version 2)).
+ */
+export function openPanelSummedShares(
+  election: PanelSummedShareElection,
+  recipient: { readonly index: number; readonly secretKey: KemSecretKey },
+  bytes: Uint8Array,
+): SummedShareResult {
+  return openSummedSharesWith(
+    {
+      ...panelContextOf(election.definition, election.panel),
+      aggregates: election.aggregates,
+      registered: election.registered,
+    },
+    recipient,
+    bytes,
+  );
 }
 
 /** Internal: an election with its definition's values already derived (tests and vectors). */
@@ -437,6 +631,7 @@ export function openSummedSharesWith(
 ): SummedShareResult {
   if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
     throw new RangeError("summed share: definitionHash must be 32 bytes");
+  checkPanel(election);
   const n = election.rules.panelSize;
   checkSeat(recipient.index, n, "recipient");
   // Only the definition's checked key set decides whose signature lets a
@@ -454,9 +649,15 @@ export function openSummedSharesWith(
     throw new RangeError("summed share: an aggregate doesn't match the rules");
   // Round-trips the secret key: a 64-byte seed and x in 1 to ℓ − 1.
   const secret = decode(KEM_SECRET_KEY, encode(KEM_SECRET_KEY, recipient.secretKey));
-  let msg: SummedShareMessage;
+  let msg: SummedShareMessage | PanelSummedShareMessage;
+  let panel: 1 | 2 | undefined;
   try {
-    msg = decodeSummedShareMessage(bytes, 1);
+    if (election.panel === undefined) msg = decodeSummedShareMessage(bytes, 1);
+    else {
+      const v2 = decodePanelSummedShareMessage(bytes, 2);
+      panel = v2.panel;
+      msg = v2;
+    }
   } catch {
     return { ok: false, code: "summed-malformed" };
   }
@@ -464,6 +665,7 @@ export function openSummedSharesWith(
   const signer = election.registered.find((k) => k.index === msg.sender);
   if (
     !sameBytes(msg.definition_hash, election.definitionHash) ||
+    panel !== election.panel ||
     aggregate === undefined ||
     msg.recipient !== recipient.index ||
     msg.sender === recipient.index ||
@@ -484,6 +686,7 @@ export function openSummedSharesWith(
   const aad = associatedData(
     msg.definition_hash,
     msg.cell,
+    panel,
     msg.aggregate_hash,
     msg.sender,
     msg.recipient,

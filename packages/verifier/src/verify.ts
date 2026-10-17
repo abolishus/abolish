@@ -57,7 +57,7 @@ import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import {
-  authorKeysOf,
+  authorRunOf,
   decodeDefinition,
   isReadable,
   readDefinition,
@@ -120,7 +120,10 @@ export type CheckCode =
  * anchors, a segment, the definition's decode error, or the board.
  */
 export type CheckAt =
-  | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
+  /** `panel` is set on 3.1 and 3.2 when the author panel's run is the one that failed. */
+  | { readonly entry: number; readonly decodeError?: DecodeErrorCode; readonly panel?: "author" }
+  /** 3.1's author panel transcript or approvals, where no entry is named. */
+  | { readonly panel: "author" }
   | { readonly decodeError: DecodeErrorCode }
   /** 2.1's first failing question under definition versions 5 and 6. */
   | { readonly question: number }
@@ -655,7 +658,7 @@ export function verifyBundle(bundle: Bundle): Report {
         definition.definition.value,
         definition.stubHash,
         bundle.panel,
-        authorKeysOf(definition.definition),
+        authorRunOf(definition.definition),
         bundle.entries,
         definition.inputs.boardEntryVersion,
       );

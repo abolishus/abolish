@@ -25,7 +25,7 @@ import {
 } from "@abolishus/crypto";
 import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
-import { authorKeysOf, decodeDefinition, isReadable, readDefinition } from "./definition.ts";
+import { authorRunOf, decodeDefinition, isReadable, readDefinition } from "./definition.ts";
 
 /** Why no ballot of an election can be admitted: the first check that stops them all. */
 export type ElectionAdmissionCode =
@@ -121,7 +121,7 @@ export function electionAdmission(
     d,
     stubHash,
     panel,
-    authorKeysOf(record),
+    authorRunOf(record),
     entries,
     boardEntryVersion,
   );

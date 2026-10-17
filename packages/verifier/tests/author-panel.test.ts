@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  ceremonyTranscriptHash,
   decodeElectionDefinition,
   decodeElectionDefinitionV6,
   encodeBoardEntry,
@@ -8,7 +9,7 @@ import {
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
-import { ceremonyChecks } from "../src/ceremony.ts";
+import { type AuthorRun, ceremonyChecks } from "../src/ceremony.ts";
 import {
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
@@ -17,15 +18,17 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 
-// The default panel's side of an election with an author panel
-// (docs/spec/verifier.md, 2.5 and Key ceremony; docs/spec/ceremony.md,
-// Author panel): 2.5's `default-seat`, the default run's `duplicate-key`
-// over the author keys, and 3.2, which holds per panel, so it never passes
-// while the author run isn't checked (T-14, T-54). Fixtures: the default run
-// of docs/spec/vectors/author-ceremony.json (packages/crypto/scripts/
-// author-ceremony-vectors.py, an independent implementation), whose seat 3
-// registers author seat 1's identity key as its signing key.
-
+// The ceremony of an election with an author panel (docs/spec/verifier.md,
+// 2.5, 3.1, 3.2 and Key ceremony; docs/spec/ceremony.md, Author panel):
+// 2.5's `default-seat`, the default run's `duplicate-key` over the author
+// keys, and 3.1 and 3.2 per panel: the author panel's transcript, found by
+// `author_transcript_hash` and checked under its own context, quorum and
+// participation, and its approvals records on the board (T-14, T-37, T-54,
+// T-17). Fixtures: docs/spec/vectors/author-ceremony.json (packages/crypto/
+// scripts/author-ceremony-vectors.py, an independent implementation), whose
+// default run's seat 3 registers author seat 1's identity key as its
+// signing key, and whose author runs and approvals records are of the same
+// election.
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
@@ -43,6 +46,15 @@ const file = read("author-ceremony.json") as {
     readonly transcript: string;
     readonly result: { readonly hash: string };
   }[];
+  readonly records: readonly { readonly id: string; readonly record: string }[];
+  readonly approvals: readonly {
+    readonly id: string;
+    readonly transcript: string;
+    readonly records: readonly string[];
+    readonly result:
+      | { readonly ok: true; readonly seats: readonly number[] }
+      | { readonly ok: false; readonly code: string; readonly seats?: readonly number[] };
+  }[];
 };
 const definitions = read("election-definition.json") as {
   readonly vectors: readonly { readonly id: string; readonly encoding: string }[];
@@ -53,14 +65,32 @@ const panelOf = (name: string) => {
   if (p === undefined) throw new Error(`no panel ${name}`);
   return { threshold: p.threshold, keys: p.keys.map(hex) };
 };
-const run = file.transcripts.find((t) => t.id === "default-duplicate-author");
-if (run === undefined) throw new Error("no default-duplicate-author transcript");
+const transcriptOf = (id: string) => {
+  const t = file.transcripts.find((x) => x.id === id);
+  if (t === undefined) throw new Error(`no transcript ${id}`);
+  return t;
+};
+const recordOf = (id: string) => {
+  const r = file.records.find((x) => x.id === id);
+  if (r === undefined) throw new Error(`no record ${id}`);
+  return hex(r.record);
+};
+const run = transcriptOf("default-duplicate-author");
 const defaultPanel = panelOf(run.panel);
 const authorKeys = panelOf("author-3").keys;
 const election = file.election as Record<
-  "l2ChainId" | "trusteeRegistry" | "electionId" | "stubHash",
+  "l2ChainId" | "trusteeRegistry" | "electionId" | "stubHash" | "authorStubHash",
   string
 >;
+/** The definition's author panel as its run binds it, for one of the vectors' author runs. */
+const authorRun = (id: string): AuthorRun => {
+  const t = transcriptOf(id);
+  return {
+    panel: panelOf(t.panel),
+    stubHash: hex(election.authorStubHash),
+    transcriptHash: hex(t.result.hash),
+  };
+};
 
 // The fields the ceremony checks read, the same in every definition version:
 // the typical version-1 profile (transcript version 1) and the vector's
@@ -77,21 +107,31 @@ const d = {
   panel_size: defaultPanel.keys.length,
   ceremony_transcript_hash: hex(run.result.hash),
 };
-const entries = [
-  encodeBoardEntry(
-    { election_id: d.election_id, index: 0n, segment: 0, payload: hex(run.transcript) },
-    7,
-  ),
-];
-const check = (author: readonly Uint8Array[]) =>
-  ceremonyChecks(d, hex(election.stubHash), defaultPanel, author, entries, 7);
+/** A version-7 board copy of this election carrying `payloads` in order. */
+const board = (...payloads: readonly Uint8Array[]) =>
+  payloads.map((payload, i) =>
+    encodeBoardEntry({ election_id: d.election_id, index: BigInt(i), segment: 0, payload }, 7),
+  );
+const defaultTranscript = hex(run.transcript);
+const entries = board(defaultTranscript);
+const check = (author: AuthorRun | undefined, copy = entries) =>
+  ceremonyChecks(d, hex(election.stubHash), defaultPanel, author, copy, 7);
+/** An author run whose keys are `keys`, for the checks that precede its transcript. */
+const keysOnly = (keys: readonly Uint8Array[]): AuthorRun => ({
+  ...authorRun("author-honest-3"),
+  panel: { threshold: 1, keys },
+});
+const honest = authorRun("author-honest-3");
+const honestTranscript = hex(transcriptOf("author-honest-3").transcript);
 
 describe("the default panel beside an author panel", () => {
   test("the default run's duplicate-key reads the author keys", () => {
     // Seat 3's signing key is author seat 1's identity key: it qualifies
     // only when the run doesn't know the author panel.
-    expect(check([]).report?.seats).toEqual([1, 2, 3, 4].map((index) => ({ index, reasons: [] })));
-    expect(check(authorKeys).report?.seats).toEqual([
+    expect(check(undefined).report?.seats).toEqual(
+      [1, 2, 3, 4].map((index) => ({ index, reasons: [] })),
+    );
+    expect(check(honest).report?.seats).toEqual([
       { index: 1, reasons: [] },
       { index: 2, reasons: [] },
       { index: 3, reasons: ["duplicate-key"] },
@@ -99,20 +139,22 @@ describe("the default panel beside an author panel", () => {
     ]);
   });
 
-  test("3.2 passes without an author panel, and never with one", () => {
-    const alone = check([]);
+  test("3.2 passes without an author panel, and beside one only once its run is checked", () => {
+    const alone = check(undefined);
     expect(alone.rows.get("3.2")).toEqual({ status: "pass" });
     expect(alone.registered).toHaveLength(4);
     // Three of four seats meet k = 3 and rule 7's n − 1 = 3, but that is the
-    // default panel's half of 3.2: no key set is returned for one half.
-    const beside = check(authorKeys);
-    expect(beside.rows.get("3.2")).toEqual({ status: "unverifiable", code: "not-implemented" });
+    // default panel's half of 3.2: with no author transcript on the copy,
+    // no key set is returned for one half.
+    const beside = check(honest);
+    expect(beside.rows.get("3.2")).toEqual({ status: "unverifiable", code: "not-reached" });
     expect(beside.registered).toBeUndefined();
     expect(beside.report?.registered).toHaveLength(3);
+    expect(beside.report?.author).toBeUndefined();
   });
 
   test("2.5 fails `default-seat` at the first author seat holding a default seat's key", () => {
-    expect(check(authorKeys).rows.get("2.5")).toEqual({
+    expect(check(honest).rows.get("2.5")).toEqual({
       status: "unverifiable",
       code: "not-implemented",
     });
@@ -125,7 +167,7 @@ describe("the default panel beside an author panel", () => {
       [[a1, q2, q1], 2],
       [[a1, Uint8Array.from(q1)], 2],
     ] as const) {
-      const r = check(author);
+      const r = check(keysOnly(author));
       expect(r.rows.get("2.5")).toEqual({ status: "fail", code: "default-seat", at: { seat } });
       // The transcript is still checked: 3.1 and 3.2 report what it holds.
       expect(r.report).toBeDefined();
@@ -137,11 +179,151 @@ describe("the default panel beside an author panel", () => {
       { ...d, threshold: d.threshold - 1 },
       hex(election.stubHash),
       defaultPanel,
-      defaultPanel.keys,
+      keysOnly(defaultPanel.keys),
       entries,
       7,
     );
     expect(r.rows.get("2.5")).toEqual({ status: "fail", code: "panel-unpinned", at: {} });
+  });
+});
+
+describe("the author panel's run", () => {
+  test("3.1 and 3.2 hold for both panels with the author transcript and its approvals on the board", () => {
+    const r = check(honest, board(defaultTranscript, honestTranscript, recordOf("all")));
+    expect(r.rows.get("3.2")).toEqual({ status: "pass" });
+    // The default panel's registration on L2 isn't read: 3.1 never passes.
+    expect(r.rows.get("3.1")).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(r.registered).toHaveLength(3);
+    expect(r.report?.author).toMatchObject({
+      entry: 1,
+      seats: [1, 2, 3].map((index) => ({ index, reasons: [] })),
+      approvals: [1, 2, 3],
+    });
+    expect(r.report?.author?.registered).toHaveLength(3);
+  });
+
+  test("every approvals vector decides 3.1's author part as the spec's check does", () => {
+    for (const a of file.approvals) {
+      const t = transcriptOf(a.transcript);
+      const r = check(
+        authorRun(a.transcript),
+        board(defaultTranscript, hex(t.transcript), ...a.records.map(hex)),
+      );
+      const r31 = r.rows.get("3.1");
+      const r32 = r.rows.get("3.2");
+      if (a.result.ok) {
+        expect(r31, a.id).toEqual({ status: "unverifiable", code: "not-implemented" });
+        expect(r32, a.id).toEqual({ status: "pass" });
+      } else if (a.result.code === "ceremony-participation") {
+        expect(r32, a.id).toEqual({
+          status: "fail",
+          code: "ceremony-participation",
+          at: { entry: 1, panel: "author" },
+        });
+        expect(r31, a.id).toEqual({ status: "unverifiable", code: "not-reached" });
+        expect(r.registered, a.id).toBeUndefined();
+        continue;
+      } else if (a.result.code === "author-approvals") {
+        expect(r31, a.id).toEqual({
+          status: "fail",
+          code: "author-approvals",
+          at: { panel: "author" },
+        });
+      } else {
+        expect(r31, a.id).toEqual({
+          status: "unverifiable",
+          code: "author-approvals-missing",
+          at: { panel: "author" },
+        });
+      }
+      expect(r.report?.author?.approvals, a.id).toEqual(a.result.seats ?? []);
+    }
+  });
+
+  test("approvals count wherever they sit, and another election's don't count", () => {
+    const quorum = recordOf("quorum");
+    // Before the transcript, and split across records.
+    expect(
+      check(
+        honest,
+        board(recordOf("seat-1"), defaultTranscript, recordOf("seat-3"), honestTranscript),
+      ).report?.author?.approvals,
+    ).toEqual([1, 3]);
+    const elsewhere = [
+      ...board(defaultTranscript, honestTranscript),
+      encodeBoardEntry(
+        { election_id: new Uint8Array(32).fill(9), index: 2n, segment: 0, payload: quorum },
+        7,
+      ),
+    ];
+    expect(check(honest, elsewhere).rows.get("3.1")).toEqual({
+      status: "unverifiable",
+      code: "author-approvals-missing",
+      at: { panel: "author" },
+    });
+  });
+
+  test("a copy without the author transcript leaves 3.1 unverifiable and 3.2 not reached", () => {
+    const r = check(honest, board(defaultTranscript, recordOf("all")));
+    expect(r.rows.get("3.1")).toEqual({
+      status: "unverifiable",
+      code: "ceremony-transcript-missing",
+      at: { panel: "author" },
+    });
+    expect(r.rows.get("3.2")).toEqual({ status: "unverifiable", code: "not-reached" });
+  });
+
+  test("bytes the author transcript hash binds that aren't its transcript fail 3.1, naming the panel", () => {
+    // The default transcript's bytes are a transcript, but not the author
+    // panel's: its four seats aren't the author panel's three.
+    const bad = { ...honest, transcriptHash: hex(run.result.hash) };
+    expect(check(bad).rows.get("3.1")).toEqual({
+      status: "fail",
+      code: "ceremony-order",
+      at: { entry: 0, panel: "author" },
+    });
+    const junk = new Uint8Array([0x00, 0x05, 0x01, 0xff]);
+    const r = check(
+      { ...honest, transcriptHash: ceremonyTranscriptHash(junk) },
+      board(defaultTranscript, junk),
+    );
+    expect(r.rows.get("3.1")).toMatchObject({
+      status: "fail",
+      code: "decode",
+      at: { entry: 1, panel: "author" },
+    });
+    expect(r.rows.get("3.2")).toEqual({ status: "unverifiable", code: "not-reached" });
+  });
+
+  test("the author run's duplicate-key reads the default panel's keys", () => {
+    const r = check(
+      authorRun("author-duplicate-default"),
+      board(defaultTranscript, hex(transcriptOf("author-duplicate-default").transcript)),
+    );
+    expect(r.report?.author?.seats.filter((s) => s.reasons.length > 0)).toEqual([
+      expect.objectContaining({ reasons: ["duplicate-key"] }),
+    ]);
+  });
+
+  test("the default panel's failure is reported before the author panel's", () => {
+    const r = check(honest, board(honestTranscript));
+    expect(r.rows.get("3.1")).toEqual({
+      status: "unverifiable",
+      code: "ceremony-transcript-missing",
+      at: {},
+    });
+    expect(r.rows.get("3.2")).toEqual({ status: "unverifiable", code: "not-reached" });
+    // The author run is still checked, but nothing is reported without the default run's.
+    expect(r.report).toBeUndefined();
+    const short = check(
+      authorRun("author-short"),
+      board(hex(transcriptOf("author-short").transcript)),
+    );
+    expect(short.rows.get("3.2")).toEqual({
+      status: "fail",
+      code: "ceremony-participation",
+      at: { entry: 0, panel: "author" },
+    });
   });
 });
 

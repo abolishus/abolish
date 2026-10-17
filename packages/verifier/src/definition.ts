@@ -11,6 +11,7 @@ import {
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
   decodeElectionDefinitionV6,
+  electionAuthorStubV6Hash,
   type ElectionDefinitionRecord,
   electionDefinitionHash,
   electionDefinitionRule,
@@ -30,6 +31,7 @@ import {
   electionStubV6Hash,
   RECORD_TYPES,
 } from "@abolishus/crypto";
+import type { AuthorRun } from "./ceremony.ts";
 
 /** A decoded definition of a version this verifier reads. */
 export type VerifiedDefinition =
@@ -54,12 +56,21 @@ export function decodeDefinition(bytes: Uint8Array): VerifiedDefinition {
 }
 
 /**
- * The definition's author panel keys: version 6's `author_keys`, empty when
- * it has no author panel, and empty under every earlier version, which has
- * none (docs/spec/election-definition.md, Author panel).
+ * The definition's author panel and what its run binds: version 6's
+ * `author_threshold`, `author_keys`, `author_transcript_hash` and its
+ * `author_stub_hash`, recomputed here; undefined when it has no author
+ * panel, as under every earlier version, which has none
+ * (docs/spec/election-definition.md, Author panel; T-37).
  */
-export const authorKeysOf = (record: VerifiedDefinition): readonly Uint8Array[] =>
-  record.version === 6 ? record.value.author_keys : [];
+export function authorRunOf(record: VerifiedDefinition): AuthorRun | undefined {
+  if (record.version !== 6 || record.value.author_keys.length === 0) return undefined;
+  const d = record.value;
+  return {
+    panel: { threshold: d.author_threshold, keys: d.author_keys },
+    stubHash: electionAuthorStubV6Hash(d),
+    transcriptHash: d.author_transcript_hash,
+  };
+}
 
 /**
  * What the checks take from a decoded definition, by its version: its hash,

@@ -18,8 +18,8 @@ import {
 // (docs/spec/verifier.md, Ballot admission). These boards carry no spoiled-ballot
 // opening, so 6.2 passes wherever it runs (openings-v3.test.ts checks them),
 // and no tally opening, so 7.4 does too (counted-v4.test.ts judges them);
-// no ballot is judged beside an author panel, whose key set 3.2 doesn't register (P2-16
-// part 4d). Fixtures: docs/spec/vectors/verifier-ballots-v4.json
+// no ballot is judged beside an author panel, whose transcript these boards don't
+// carry, so 3.2 registers no key set (P2-16 part 4d-1; author-panel.test.ts). Fixtures: docs/spec/vectors/verifier-ballots-v4.json
 // (packages/crypto/scripts/verifier-ballots-v4-vectors.py, an independent
 // implementation of the version-4 record, both halves' shapes, its range
 // proofs and its admission order, with snarkjs's verdict on every membership

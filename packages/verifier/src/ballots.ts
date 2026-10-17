@@ -530,8 +530,8 @@ export const UNSUPPORTED: BallotOutcome = {
  * version 3's checks with an author half judged against the definition's
  * author panel, never against the ballot's (T-17, T-37): without an author
  * panel any author half fails `validity-shape`. A definition with one has no
- * registered author key set until that panel's own ceremony is read (P2-16
- * part 4d; 3.2 registers none beside it), so no ballot is judged under it.
+ * ballot judged yet: the author panel's registered key set, which 3.1 and
+ * 3.2 now check, isn't passed to admission until P2-16 part 4d-3.
  */
 export function judgeFor(
   definition: VerifiedDefinition,
@@ -592,9 +592,9 @@ export function steppedJudgeFor(
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
   if (definition.version === 6) {
-    // 3.2 registers no key set beside an author panel, so this is a guard:
-    // shares made to an author panel whose keys no transcript check gave
-    // can't be judged (T-37).
+    // Beside an author panel `registered` is the default panel's key set
+    // alone, so no share made to the author panel can be judged here: never
+    // against keys no transcript check gave (T-37; P2-16 part 4d-3).
     if (definition.value.author_keys.length !== 0) return NOT_REACHED;
     const election = panelBallotElection(definition.value, registered);
     return (payload) => {

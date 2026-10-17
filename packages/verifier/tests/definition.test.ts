@@ -914,9 +914,10 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
   });
 
   test("beside an author panel neither a ballot nor a tally opening is judged", () => {
-    // Even with a registered key set (none is returned beside an author
-    // panel): an author panel's key set and its per-panel tally come with
-    // P2-16 part 4d. Without one, 7.4 runs (here over an empty copy), and
+    // Even with a registered key set (the default panel's, which 3.2 returns
+    // once both panels' runs hold): judging against the author panel's key
+    // set and its per-panel tally come with P2-16 part 4d-3. Without one, 7.4
+    // runs (here over an empty copy), and
     // ballot version 4's admission is verifier-ballots-v4.json's
     // (ballots-v4.test.ts).
     // Under the membership key this release pins, which 1.3 checks first,

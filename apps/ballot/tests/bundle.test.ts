@@ -17,6 +17,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { BALLOT_CSP, parseCsp } from "./csp.ts";
 
+const CONNECT_ORIGINS = BALLOT_CSP["connect-src"] ?? [];
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(root, "..", "..");
 
@@ -221,11 +223,15 @@ describe("bundle contents", () => {
     expect(found).toEqual([]);
   });
 
-  test("names no URL but the inert ones", () => {
+  test("names no URL but the inert ones and the origins connect-src allows", () => {
     const urls = textFiles().flatMap(([name, text]) =>
       [...text.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)<>]*/g)]
         .map(([url]) => url.replace(/[.,;]+$/, ""))
-        .filter((url) => !INERT_URLS.has(url))
+        .filter(
+          (url) =>
+            !INERT_URLS.has(url) &&
+            !CONNECT_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`)),
+        )
         .map((url) => `${name}: ${url}`),
     );
     expect(urls).toEqual([]);

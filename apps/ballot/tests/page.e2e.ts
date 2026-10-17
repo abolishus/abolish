@@ -183,7 +183,7 @@ describe("the served ballot client", () => {
       .toBe(5);
   });
 
-  test("refuses a request to any origin, its own included", async () => {
+  test("refuses a request to any origin the policy doesn't name, its own included", async () => {
     const outcome = await page.evaluate(async (self) => {
       const results: string[] = [];
       for (const url of ["https://example.com/", `${self}/index.html`])

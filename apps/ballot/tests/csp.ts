@@ -5,8 +5,10 @@
 //
 // - Scripts, styles, fonts and images come only from the client's own origin:
 //   no inline code, no eval, no other site.
-// - connect-src 'none': this part of the client makes no request at all. The
-//   API's origin is added with the screens that fetch an election (P2-8).
+// - connect-src: the API's origin and one L2 JSON-RPC origin, both untrusted
+//   (the client checks every answer against the registry, T-34), and nothing
+//   else, the client's own origin included. Staging's values; a release names
+//   its own.
 // - worker-src 'self': the Web Worker that encrypts and proves (part 2) loads
 //   only from the client's own origin.
 // - Trusted Types: any write of a string into a DOM sink that parses HTML or
@@ -27,7 +29,7 @@ export const BALLOT_CSP: Csp = {
   "style-src": ["'self'"],
   "font-src": ["'self'"],
   "img-src": ["'self'"],
-  "connect-src": ["'none'"],
+  "connect-src": ["https://api-staging.abolish.us", "https://sepolia.base.org"],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],

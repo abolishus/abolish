@@ -157,7 +157,10 @@ describe("htmlViolations", () => {
   test("rejects any change to the pinned policy", () => {
     for (const csp of [
       policy.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"),
-      policy.replace("connect-src 'none'", "connect-src https:"),
+      policy.replace("connect-src ", "connect-src https: "),
+      policy.replace("connect-src ", "connect-src 'self' "),
+      policy.replace("https://sepolia.base.org", "https://sepolia.base.org.example.com"),
+      policy.replace(" https://sepolia.base.org", ""),
       policy.replace("; trusted-types ballot-worker", ""),
       policy.replace(
         "trusted-types ballot-worker",
@@ -288,6 +291,25 @@ describe("distViolations", () => {
       'import("./x.js")',
     ])
       expect(distViolations(dist({ [worker]: code })).length, code).toBeGreaterThan(0);
+  });
+
+  test("lets the scripts name the allowed origins, but no lookalike of them", () => {
+    const page = "assets/index-BuPP35rj.js";
+    for (const url of [
+      "https://api-staging.abolish.us",
+      "https://api-staging.abolish.us/elections",
+      "https://sepolia.base.org/",
+    ])
+      expect(distViolations(dist({ [page]: `fetch("${url}")` })), url).toEqual([]);
+    for (const url of [
+      "https://api-staging.abolish.us.example.com/",
+      "https://api-staging.abolish.us@example.com/",
+      "https://abolish.us/",
+      "https://api.abolish.us/",
+      "http://api-staging.abolish.us/",
+      "https://sepolia.base.org.example.com",
+    ])
+      expect(distViolations(dist({ [page]: `fetch("${url}")` })).length, url).toBeGreaterThan(0);
   });
 
   test("rejects WebRTC anywhere, which no CSP directive governs", () => {

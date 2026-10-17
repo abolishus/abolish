@@ -65,6 +65,10 @@ const byId = (id: string) => {
   if (c === undefined) throw new Error(`no case ${id}`);
   return c;
 };
+// An opening entry's cell byte: the 51-byte envelope, the record's 3-byte
+// header and the 32-byte definition hash precede it.
+const CELL_AT = 86;
+
 const runs = (cap: number) => Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), cap);
 
 const json = (c: Case, definition = c.definition) =>
@@ -163,9 +167,10 @@ describe("each opening is judged from its own entry", () => {
     expect(whole.get(at)?.code).toBeUndefined();
     fc.assert(
       // From the record's first field on: the 51-byte envelope and the
-      // record's 3-byte header precede it.
+      // record's 3-byte header precede it. The cell byte has its own test
+      // below: another cell the partition has opens another core.
       fc.property(
-        fc.integer({ min: 54, max: opening.length - 1 }),
+        fc.integer({ min: 54, max: opening.length - 1 }).filter((i) => i !== CELL_AT),
         fc.integer({ min: 1, max: 255 }),
         (i, x) => {
           const changed = Uint8Array.from(opening);
@@ -177,6 +182,32 @@ describe("each opening is judged from its own entry", () => {
       ),
       { numRuns: runs(40) },
     );
+  }, 120_000);
+
+  test("another cell makes the opening one of another core, or fails opening-cell", () => {
+    const at = 7;
+    const opening = entries[at] as Uint8Array;
+    const own = whole.get(at)?.coreHash;
+    expect(own).toBeDefined();
+    let otherCells = 0;
+    // A few cells past the partition's size are enough: decoding takes any
+    // u8, and each run verifies a bundle.
+    for (const cell of [0, 1, 2, 3, 4, 5, 6, 7, 255]) {
+      if (cell === opening[CELL_AT]) continue;
+      const changed = Uint8Array.from(opening);
+      changed[CELL_AT] = cell;
+      const o = run(mixed, join([entries[0] as Uint8Array, changed])).openings?.[0];
+      // The core hash binds the cell (docs/spec/challenge.md, Opening version
+      // 2), so an opening re-labelled to a cell the partition has is a valid
+      // opening of a core with another tracking code, never of this ballot's.
+      if (o?.code === undefined) {
+        otherCells++;
+        expect(o?.coreHash).toBeDefined();
+        expect(o?.coreHash).not.toBe(own);
+      } else expect(o.code).toBe("opening-cell");
+    }
+    // The mixed case's partition has more than one cell, so both branches run.
+    expect(otherCells).toBeGreaterThan(0);
   }, 120_000);
 });
 

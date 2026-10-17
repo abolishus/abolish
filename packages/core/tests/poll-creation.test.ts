@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { getTableConfig } from "drizzle-orm/pg-core";
+import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
@@ -23,6 +24,8 @@ import { type TestDb, testDb } from "./db.ts";
 // crashes; a poll moves to `created` only once its creation is final; a
 // reverted, replaced or stuck creation fails its poll; and the daily ceiling
 // holds (T-25, T-52, T-72).
+
+const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const NOW = new Date("2026-10-17T12:00:00Z");
 const NOW_S = BigInt(NOW.getTime() / 1000);
@@ -374,6 +377,76 @@ describe("advancePollCreations", () => {
       creator: new Uint8Array(19),
     });
     await expect(advancePollCreations(app, chain, { now: NOW })).rejects.toThrow(RangeError);
+  });
+});
+
+describe("advancePollCreations, over any interleaving", () => {
+  type Op =
+    | { readonly kind: "submit" | "run" | "mine" | "finalize" | "drop" | "refuse" }
+    | { readonly kind: "tick"; readonly hours: number };
+  const op: fc.Arbitrary<Op> = fc.oneof(
+    fc.constantFrom<Op>(
+      { kind: "submit" },
+      { kind: "submit" },
+      { kind: "run" },
+      { kind: "run" },
+      { kind: "mine" },
+      { kind: "finalize" },
+      { kind: "drop" },
+      { kind: "refuse" },
+    ),
+    fc.integer({ min: 1, max: 12 }).map((hours): Op => ({ kind: "tick", hours })),
+  );
+  const CEILING = 2;
+
+  test("never signs twice for a poll or at one nonce, keeps to the ceiling, and settles every creation", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.array(op, { maxLength: 25 }), async (ops) => {
+        await db.admin`DELETE FROM account_polls`;
+        await db.admin`DELETE FROM poll_creation_txs`;
+        const chain = new FakeChain();
+        let now = NOW;
+        const step = () => run(chain, now, app, CEILING);
+        for (const o of ops) {
+          if (o.kind === "submit")
+            await submitted(1, BigInt(Math.floor(now.getTime() / 1000)) + 7n * 86_400n, now);
+          else if (o.kind === "run") await step();
+          else if (o.kind === "mine") chain.mine();
+          else if (o.kind === "finalize") chain.finalize();
+          else if (o.kind === "drop") chain.mempool.clear();
+          else if (o.kind === "refuse") chain.refuse++;
+          else if (o.kind === "tick") now = new Date(now.getTime() + o.hours * HOUR);
+        }
+        // Then a quiet node, with no time passing: everything recorded settles.
+        chain.refuse = 0;
+        for (let i = 0; i < 2; i++) {
+          await step();
+          chain.mine();
+          chain.finalize();
+        }
+        await step();
+        // One signing per recorded transaction, never two at a nonce.
+        const ledger =
+          await db.admin`SELECT nonce, sent_at FROM poll_creation_txs ORDER BY sent_at`;
+        expect(ledger).toHaveLength(chain.signed.length);
+        expect(new Set(chain.signed).size).toBe(chain.signed.length);
+        // Each poll's transaction is one of the ledger's, and no two polls share one.
+        const polls = await db.admin`
+          SELECT p.state, p.create_tx_hash IS NOT NULL AS recorded, t.nonce IS NOT NULL AS ledgered
+          FROM account_polls p LEFT JOIN poll_creation_txs t ON t.tx_hash = p.create_tx_hash`;
+        expect(polls.filter((p) => p["recorded"] && !p["ledgered"])).toEqual([]);
+        expect(polls.filter((p) => p["recorded"])).toHaveLength(chain.signed.length);
+        // At most the ceiling in any 24 hours.
+        const times = ledger.map((r) => (r["sent_at"] as Date).getTime());
+        for (const t of times)
+          expect(times.filter((u) => u >= t && u < t + 24 * HOUR).length).toBeLessThanOrEqual(
+            CEILING,
+          );
+        // Nothing recorded is left in setup: created, or failed with a reason.
+        expect(polls.filter((p) => p["state"] === "submitted" && p["recorded"])).toEqual([]);
+      }),
+      { numRuns: Math.min(numRuns, 30) },
+    );
   });
 });
 

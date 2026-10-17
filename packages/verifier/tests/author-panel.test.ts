@@ -174,7 +174,7 @@ describe("a version-6 definition beside the default panel", () => {
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 6,
+    [RECORD_TYPES.contractEvent]: 7,
     [RECORD_TYPES.displayText]: 2,
   };
   const definition = (author: readonly Uint8Array[]) =>

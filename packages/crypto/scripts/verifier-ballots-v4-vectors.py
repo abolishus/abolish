@@ -106,19 +106,19 @@ def det(label):
 
 
 def pins_for(ballot=4, opening=3):
-    """A version-6 profile: board-entry version 5, contract-event version 6 (close.md, Version), display-text version 2, tally-opening version 1, and the given ballot and spoiled-opening pins."""
-    own = {1: 6, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 6, DISPLAY_TEXT_TYPE: 2}
+    """A version-6 profile: board-entry version 5, contract-event version 7 (close.md, Version), display-text version 2, tally-opening version 1, and the given ballot and spoiled-opening pins."""
+    own = {1: 6, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 7, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
 def combination(d):
-    """2.3 under definition version 6 (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 6 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails; any other pin fails."""
+    """2.3 under definition version 6 (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 7 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails; any other pin fails."""
     pins = dict(d["profile"]["pins"])
     if d["results_mode"] != d6.SEALED or d["author_keys"]:
         return COMBINATION_FAILS
     if pins[BALLOT_TYPE] not in (1, 2, 3, 4):
         return UNSUPPORTED
-    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 6}
+    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 7}
     if any(pins[t] != v for t, v in wanted.items()):
         return COMBINATION_FAILS
     return NOT_IMPLEMENTED
@@ -292,7 +292,7 @@ def build(constants):
     # Definition version 6, a sealed everyday poll without an author panel,
     # pinning ballot version 4, spoiled-ballot opening version 3,
     # tally-opening version 1, display-text version 2, board-entry version 5
-    # and contract-event version 6, so 2.3's combination passes. Seat 4 sends
+    # and contract-event version 7, so 2.3's combination passes. Seat 4 sends
     # nothing, so the registered key set is seats 1 to 3 and seat 4's share
     # hash must be zero.
     d, t, e = election_for("v6", [1, 2, 3], profile=pins_for())
@@ -568,7 +568,7 @@ def assemble(constants, proofs_path, out_dir):
                 assert sig is not None or verdict is None, (bnd["id"], i)
                 # Every ballot here is a board-path one in segment 0, and no
                 # contract-event record carries one.
-                assert pins[vb.CONTRACT_EVENT_TYPE] == 6
+                assert pins[vb.CONTRACT_EVENT_TYPE] == 7
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})

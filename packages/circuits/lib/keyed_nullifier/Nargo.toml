@@ -1,0 +1,7 @@
+[package]
+name = "keyed_nullifier"
+type = "lib"
+authors = ["Abolish"]
+
+[dependencies]
+babyjubjub = { path = "../../vendor/oprf-nr/babyjubjub" }

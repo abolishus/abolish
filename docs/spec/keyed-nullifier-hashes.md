@@ -2,7 +2,7 @@
 
 [[keyed-nullifier]]'s nullifier is `N = H2(x, sk · H1(x))`. This page fixes `H1` and `H2`: the Poseidon2 instance both use, the Tier 2 scope as a field element `σ`, `H1` as RFC 9380's `hash_to_curve` structure over Baby Jubjub, and `H2`. It also records the review of the TACEO gadgets our circuits will compute `H1` with, against the code Least Authority audited ([[0022-tier2-keyed-nullifier]], Amendment). Both hashes are computed only inside the query and output circuits; off-circuit code computes only `σ` and the tags' field elements. Notation is from [[notation]], the group and its encodings from [[keyed-nullifier]]. Threats: T-03, T-13, T-21, T-30, T-31, T-36, T-39.
 
-What this page doesn't yet specify (P3-4 part 2b-3b): the query and output records, `query_hash`, the statements of the query and output circuits, and the vendored gadgets with the Noir tests that run this page's vectors through them.
+What this page doesn't yet specify (P3-4 part 2b-3b-2): the query and output records, `query_hash` and the statements of the query and output circuits. The hashes themselves are in `packages/circuits/lib/keyed_nullifier`, over the vendored gadgets, and its tests run this page's vectors through them (part 2b-3b-1).
 
 ## Sources
 

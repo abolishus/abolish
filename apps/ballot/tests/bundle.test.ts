@@ -100,8 +100,8 @@ const WORKER_BANNED = [
 
 /**
  * URLs that appear in the bundle as inert strings, never fetched: XML namespace
- * names React DOM sets on elements, React's error-decoder link in its error
- * messages, and Tailwind's licence comment. The CSP is the network barrier;
+ * names React DOM sets on elements, React's and Base UI's error-decoder links
+ * in their error messages, and Tailwind's licence comment. The CSP is the network barrier;
  * this list keeps a new origin from slipping in unnoticed.
  */
 const INERT_URLS = new Set([
@@ -109,6 +109,7 @@ const INERT_URLS = new Set([
   "http://www.w3.org/1999/xlink",
   "http://www.w3.org/2000/svg",
   "http://www.w3.org/XML/1998/namespace",
+  "https://base-ui.com/production-error",
   "https://react.dev/errors/",
   "https://tailwindcss.com",
 ]);

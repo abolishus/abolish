@@ -1,10 +1,47 @@
 import { useTranslate } from "@abolishus/ui";
 
 import { EverydayFrame, Note, Part, ScreenTitle } from "./frame.tsx";
+import type { Link } from "./link.ts";
 import { catalogs } from "./messages.ts";
+import { BrokenLink, type ElectionSource, OpenElection } from "./open.tsx";
+
+/**
+ * The client on an origin of its own (main.tsx): the election the link
+ * names, or what the client is when it names none. `origin` is the page's
+ * own; `languages` the reader's preferred ones, most preferred first.
+ */
+export function App({
+  link,
+  source,
+  origin,
+  languages,
+}: {
+  link: Link;
+  source: ElectionSource;
+  origin: string;
+  languages: readonly string[];
+}) {
+  switch (link.kind) {
+    case "none":
+      return <Home />;
+    case "malformed":
+      return <BrokenLink />;
+    case "election":
+      return (
+        <OpenElection
+          // Another election starts from nothing: no state of this one carries over.
+          key={link.hex}
+          electionId={link.electionId}
+          source={source}
+          origin={origin}
+          languages={languages}
+        />
+      );
+  }
+}
 
 /** What this client is, before any poll is open: in the everyday register, the default. */
-export function App() {
+export function Home() {
   const t = useTranslate(catalogs);
   return (
     <EverydayFrame>

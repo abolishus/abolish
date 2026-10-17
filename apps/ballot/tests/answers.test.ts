@@ -6,6 +6,7 @@ import {
   firstUnfit,
   fits,
   instructionOf,
+  pickLanguage,
   questionsOf,
   skippable,
   stillNeeded,
@@ -216,6 +217,7 @@ describe("the questions of a checked election", () => {
   test("carry the definition's limits and the chosen translation's text", () => {
     expect(questionsOf(election, "es")).toEqual([
       {
+        language: "es",
         question: "¿Qué eventos?",
         description: "",
         options: election.translations[1]?.options,
@@ -227,5 +229,31 @@ describe("the questions of a checked election", () => {
 
   test("come only from a translation the election checked", () => {
     expect(() => questionsOf(election, "fr")).toThrow(RangeError);
+  });
+});
+
+describe("the translation shown is the reader's where the election has it", () => {
+  const of = (...tags: string[]) => tags.map((language) => ({ language }));
+
+  test("an exact tag first, then the primary language, then the election's first", () => {
+    expect(pickLanguage(of("en", "es-419"), ["es-419", "en"])).toBe("es-419");
+    expect(pickLanguage(of("en", "es"), ["es-MX", "en-US"])).toBe("es");
+    expect(pickLanguage(of("en", "es"), ["fr-FR", "es"])).toBe("es");
+    expect(pickLanguage(of("en", "es"), ["fr-FR"])).toBe("en");
+    expect(pickLanguage(of("de"), [])).toBe("de");
+  });
+
+  test("only one of the election's own tags is ever chosen", () => {
+    const tag = fc.stringMatching(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/);
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(tag, { minLength: 1, maxLength: 6 }),
+        fc.array(fc.oneof(tag, fc.string()), { maxLength: 6 }),
+        (tags, preferred) => {
+          expect(tags).toContain(pickLanguage(of(...tags), preferred));
+        },
+      ),
+      { numRuns },
+    );
   });
 });

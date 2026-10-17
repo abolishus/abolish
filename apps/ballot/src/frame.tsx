@@ -16,8 +16,12 @@ export const ACTION = "w-full sm:w-auto sm:min-w-48";
 /** The poll a frame names: its definition hash (64 lowercase hex digits) and how the frame shows it. */
 export interface FramePoll {
   readonly definitionHash: string;
-  /** Everyday: who asked. Civic: the election's short name. */
-  readonly name: string;
+  /**
+   * Everyday: who asked. Civic: the election's short name. Absent when the
+   * definition names neither (version 1): the frame then names the election
+   * by its hash, rather than by anything the client made up.
+   */
+  readonly name?: string | undefined;
   /** When voting closes, already formatted for the reader. */
   readonly closes: string;
 }
@@ -78,9 +82,15 @@ export function EverydayFrame({ poll, progress, primary, secondary, children }: 
               />
               {/* The whole name, never cut short: a look-alike poll could
                   hide what tells it apart past an ellipsis (T-53). */}
-              <p className="m-0 min-w-0 flex-1 text-sm break-words">
-                {t("askedBy", { name: poll.name })}
-              </p>
+              {poll.name === undefined ? (
+                <p translate="no" className="m-0 min-w-0 flex-1 font-mono text-sm">
+                  {t("election", { hash: shortHex(poll.definitionHash) })}
+                </p>
+              ) : (
+                <p className="m-0 min-w-0 flex-1 text-sm break-words">
+                  {t("askedBy", { name: poll.name })}
+                </p>
+              )}
               <p className="m-0 shrink-0 text-sm text-muted-foreground">
                 {t("closes", { when: poll.closes })}
               </p>
@@ -123,9 +133,11 @@ export function CivicFrame({ poll, progress, stepName, primary, secondary, child
                 size={36}
               />
               <div className="min-w-0 flex-1">
-                <p className="m-0 font-heading text-base leading-tight font-semibold break-words">
-                  {poll.name}
-                </p>
+                {poll.name === undefined ? null : (
+                  <p className="m-0 font-heading text-base leading-tight font-semibold break-words">
+                    {poll.name}
+                  </p>
+                )}
                 <p
                   translate="no"
                   className="m-0 font-mono text-xs tracking-wide whitespace-nowrap text-muted-foreground"
@@ -223,10 +235,13 @@ function ActionBar({
  */
 export function ScreenTitle({
   title,
+  lang,
   focus = false,
   children,
 }: {
   title: string;
+  /** The title's language, where it isn't the screen's (a poll's own text). */
+  lang?: string | undefined;
   focus?: boolean;
   children?: ReactNode;
 }) {
@@ -238,6 +253,7 @@ export function ScreenTitle({
     <div className="grid gap-4">
       <h1
         ref={heading}
+        lang={lang}
         tabIndex={focus ? -1 : undefined}
         className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance outline-none sm:text-4xl"
       >

@@ -1,10 +1,13 @@
 // Test only: drives the real ballot worker from a page under the client's own
-// CSP, for tests/worker.e2e.ts. The production page has no such hook; part 2b
-// wires the worker to the election screens.
+// CSP, for tests/worker.e2e.ts, and opens an election the way the page does
+// (src/open.tsx), against a deployment that names a registry. The production
+// page has no such hook.
 
 // First, as in main.tsx.
 import "../../src/worker-policy.ts";
 
+import { STAGING } from "../../src/deployment.ts";
+import { loadElection } from "../../src/load.ts";
 import { BallotWorker } from "../../src/worker-client.ts";
 
 const worker = new BallotWorker();
@@ -25,6 +28,21 @@ const harness = {
       fromHex(registeredHash),
       fromHex(definition),
       fromHex(displayText),
+    );
+    return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
+  },
+  /** Fetches an election from staging's origins with `registry` pinned, then checks it in the worker. */
+  async open(electionId: string, registry: string): Promise<string> {
+    const deployment = { ...STAGING, electionRegistry: registry };
+    const loaded = await loadElection(deployment, fromHex(electionId), (url, init) =>
+      fetch(url, init),
+    );
+    if (!loaded.ok) return JSON.stringify(loaded);
+    const result = await worker.checkElection(
+      fromHex(electionId),
+      loaded.registeredHash,
+      loaded.definition,
+      loaded.displayText,
     );
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
   },

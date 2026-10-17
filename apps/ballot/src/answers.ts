@@ -11,6 +11,12 @@ import type { CheckedElection, OptionText } from "./election.ts";
 
 /** One question as the voter answers it, in one language. */
 export interface BallotQuestion {
+  /**
+   * The BCP 47 tag of the text's translation, set as `lang` on it, since it
+   * may differ from the screens' own language (WCAG 2.2 SC 3.1.2). Absent: the
+   * screens' language.
+   */
+  readonly language?: string | undefined;
   readonly question: string;
   /** May be empty. */
   readonly description: string;
@@ -35,6 +41,7 @@ export function questionsOf(election: CheckedElection, language: string): Ballot
   if (translation === undefined) throw new RangeError(`no translation "${language}"`);
   return [
     {
+      language: translation.language,
       question: translation.question,
       description: translation.description,
       options: translation.options,
@@ -42,6 +49,30 @@ export function questionsOf(election: CheckedElection, language: string): Ballot
       maxSelections: election.maxSelections,
     },
   ];
+}
+
+/**
+ * Which of an election's translations to show, for a reader whose browser
+ * prefers `preferred` (`navigator.languages`, most preferred first): the first
+ * preference a translation's tag matches exactly, else the first whose
+ * primary language matches, else the election's first translation. Only an
+ * election's own tags are returned, so `questionsOf` always finds one.
+ */
+export function pickLanguage(
+  translations: readonly { readonly language: string }[],
+  preferred: readonly string[],
+): string {
+  const tags = translations.map((t) => t.language);
+  const wanted = preferred.map((p) => p.toLowerCase());
+  const primary = (tag: string) => tag.split("-")[0];
+  const choice =
+    wanted.map((w) => tags.find((tag) => tag === w)).find((tag) => tag !== undefined) ??
+    wanted
+      .map((w) => tags.find((tag) => primary(tag) === primary(w)))
+      .find((tag) => tag !== undefined) ??
+    tags[0];
+  if (choice === undefined) throw new RangeError("an election has at least one translation");
+  return choice;
 }
 
 /**

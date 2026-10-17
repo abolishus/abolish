@@ -1,0 +1,383 @@
+// Fetching what the worker checks (src/load.ts): the registry is read at the
+// pinned address on the pinned chain, at the finalized head, and every answer
+// that isn't shaped like one ends in a problem, never in bytes handed on;
+// requests carry no credentials or referrer and name only the election
+// (T-10, T-11, T-34, T-52). Whether the records may be shown is the worker's
+// check, tested in election.test.ts and packages/crypto.
+
+import { PARAMETERS } from "@abolishus/crypto";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import fc from "fast-check";
+import { describe, expect, test } from "vite-plus/test";
+
+import type { Deployment } from "../src/deployment.ts";
+import { STAGING } from "../src/deployment.ts";
+import { parseLink } from "../src/link.ts";
+import { DEFINITION_HASH_OF, type Fetch, loadElection } from "../src/load.ts";
+
+const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
+
+const REGISTRY = "0x00000000000000000000000000000000000000aa";
+const DEPLOYMENT: Deployment = { ...STAGING, electionRegistry: REGISTRY };
+const ID = new Uint8Array(32).fill(0x5d);
+const ID_HEX = "5d".repeat(32);
+const HASH = "3f".repeat(32);
+const DEFINITION = "0001abcd";
+const TEXT = "0009ef";
+
+interface Call {
+  readonly url: string;
+  readonly init: RequestInit;
+  readonly body: unknown;
+}
+
+type Answer = { status: number; body: string } | "network";
+
+/** A fake network: `answer` decides each request's response from its URL and JSON-RPC method. */
+function network(answer: (url: string, method: string | undefined) => Answer) {
+  const calls: Call[] = [];
+  const fetchFn: Fetch = (url, init) => {
+    const body = typeof init.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+    calls.push({ url, init, body });
+    const method =
+      typeof body === "object" && body !== null ? (body as { method?: string }).method : undefined;
+    const a = answer(url, method);
+    if (a === "network") return Promise.reject(new TypeError("Failed to fetch"));
+    return Promise.resolve(new Response(a.body, { status: a.status }));
+  };
+  return { calls, fetchFn };
+}
+
+const rpcResult = (id: number, result: unknown) => JSON.stringify({ jsonrpc: "2.0", id, result });
+
+/** An honest deployment, with any one answer replaced. */
+function honest(
+  override: Partial<Record<"chainId" | "call" | "definition" | "text", Answer>> = {},
+) {
+  return network((url, method) => {
+    if (url === DEPLOYMENT.rpc) {
+      if (method === "eth_chainId")
+        return override.chainId ?? { status: 200, body: rpcResult(1, "0x14a34") };
+      return override.call ?? { status: 200, body: rpcResult(2, `0x${HASH}`) };
+    }
+    if (url === `${DEPLOYMENT.api}/elections/definition?electionId=${ID_HEX}`)
+      return (
+        override.definition ?? { status: 200, body: JSON.stringify({ definition: DEFINITION }) }
+      );
+    if (url === `${DEPLOYMENT.api}/elections/display-text?electionId=${ID_HEX}`)
+      return override.text ?? { status: 200, body: JSON.stringify({ displayText: TEXT }) };
+    return { status: 500, body: "" };
+  });
+}
+
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+
+describe("the registry read", () => {
+  test("the selector is definitionHashOf(bytes32)'s", () => {
+    const digest = keccak_256(new TextEncoder().encode("definitionHashOf(bytes32)"));
+    expect(DEFINITION_HASH_OF).toBe(hex(digest.slice(0, 4)));
+  });
+
+  test("an honest deployment's records come back with the registry's hash", async () => {
+    const { calls, fetchFn } = honest();
+    const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(hex(loaded.registeredHash)).toBe(HASH);
+    expect(hex(loaded.definition)).toBe(DEFINITION);
+    expect(hex(loaded.displayText)).toBe(TEXT);
+    const call = calls.find((c) => (c.body as { method?: string })?.method === "eth_call");
+    // The pinned registry, the election's word after the selector, the finalized head.
+    expect(call?.body).toEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "eth_call",
+      params: [{ to: REGISTRY, data: `0x${DEFINITION_HASH_OF}${ID_HEX}` }, "finalized"],
+    });
+  });
+
+  test("no request carries credentials or a referrer, or follows a redirect", async () => {
+    const { calls, fetchFn } = honest();
+    await loadElection(DEPLOYMENT, ID, fetchFn);
+    expect(calls).toHaveLength(4);
+    for (const { init } of calls) {
+      expect(init.credentials).toBe("omit");
+      expect(init.referrerPolicy).toBe("no-referrer");
+      expect(init.redirect).toBe("error");
+      expect(init.cache).toBe("no-store");
+    }
+  });
+
+  test("a build that pins no registry asks nothing of anyone", async () => {
+    const { calls, fetchFn } = honest();
+    expect(await loadElection(STAGING, ID, fetchFn)).toEqual({ ok: false, problem: "no-registry" });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("an election the registry holds no hash for is not registered, and the API isn't asked", async () => {
+    const { calls, fetchFn } = honest({
+      call: { status: 200, body: rpcResult(2, `0x${"00".repeat(32)}`) },
+    });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "not-registered",
+    });
+    expect(calls.every((c) => c.url === DEPLOYMENT.rpc)).toBe(true);
+  });
+
+  test("an RPC on another chain isn't believed", async () => {
+    const { fetchFn } = honest({ chainId: { status: 200, body: rpcResult(1, "0x1") } });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "wrong-chain",
+    });
+  });
+
+  test("a node's error is the node's trouble, not a claim about the registry", async () => {
+    const { fetchFn } = honest({
+      call: {
+        status: 200,
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, error: { code: -32005, message: "limit" } }),
+      },
+    });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "unreachable",
+    });
+  });
+
+  test("any return value but one word is refused", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.oneof(
+          fc.string(),
+          fc.integer(),
+          fc.constant(null),
+          fc.stringMatching(/^0x[0-9a-fA-F]{0,130}$/),
+        ),
+        async (result) => {
+          fc.pre(!(typeof result === "string" && /^0x[0-9a-f]{64}$/.test(result)));
+          const { fetchFn } = honest({ call: { status: 200, body: rpcResult(2, result) } });
+          expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+            ok: false,
+            problem: "bad-answer",
+          });
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("an answer to another request id is refused", async () => {
+    const { fetchFn } = honest({ call: { status: 200, body: rpcResult(7, `0x${HASH}`) } });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+  });
+});
+
+describe("the API's records", () => {
+  test("withheld text is withheld, and a missing record is not found", async () => {
+    const withheld = honest({ text: { status: 451, body: "{}" } });
+    expect(await loadElection(DEPLOYMENT, ID, withheld.fetchFn)).toEqual({
+      ok: false,
+      problem: "withheld",
+    });
+    const missing = honest({ definition: { status: 404, body: "{}" } });
+    expect(await loadElection(DEPLOYMENT, ID, missing.fetchFn)).toEqual({
+      ok: false,
+      problem: "not-found",
+    });
+  });
+
+  test("a failed network or a server error is unreachable", async () => {
+    for (const fetchFn of [
+      honest({ definition: "network" }).fetchFn,
+      honest({ call: "network" }).fetchFn,
+      honest({ text: { status: 503, body: "" } }).fetchFn,
+      honest({ chainId: { status: 429, body: "" } }).fetchFn,
+    ])
+      expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+        ok: false,
+        problem: "unreachable",
+      });
+  });
+
+  test("an answer with extra fields, other spellings or no JSON is refused", async () => {
+    for (const body of [
+      JSON.stringify({ definition: DEFINITION, extra: 1 }),
+      JSON.stringify({ definition: DEFINITION.toUpperCase() }),
+      JSON.stringify({ definition: "abc" }),
+      JSON.stringify({ definition: `0x${DEFINITION}` }),
+      JSON.stringify({ displayText: DEFINITION }),
+      JSON.stringify([DEFINITION]),
+      "not json",
+      "",
+    ])
+      expect(
+        await loadElection(DEPLOYMENT, ID, honest({ definition: { status: 200, body } }).fetchFn),
+      ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("the largest record of each kind is read, and an answer much longer is refused", async () => {
+    const at = (field: string, bytes: number) =>
+      ({ status: 200, body: JSON.stringify({ [field]: "00".repeat(bytes) }) }) as const;
+    const largest = await loadElection(
+      DEPLOYMENT,
+      ID,
+      honest({
+        definition: at("definition", PARAMETERS.MAX_BOARD_PAYLOAD),
+        text: at("displayText", PARAMETERS.MAX_DISPLAY_TEXT),
+      }).fetchFn,
+    );
+    if (!largest.ok) throw new Error(largest.problem);
+    expect(largest.definition).toHaveLength(PARAMETERS.MAX_BOARD_PAYLOAD);
+    expect(largest.displayText).toHaveLength(PARAMETERS.MAX_DISPLAY_TEXT);
+    for (const override of [
+      { definition: at("definition", PARAMETERS.MAX_BOARD_PAYLOAD + 200) },
+      { text: at("displayText", PARAMETERS.MAX_DISPLAY_TEXT + 200) },
+    ])
+      expect(await loadElection(DEPLOYMENT, ID, honest(override).fetchFn)).toEqual({
+        ok: false,
+        problem: "bad-answer",
+      });
+  });
+
+  test("an answer over the cap is cancelled, not read to its end", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(65_536).fill(0x30);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchFn: Fetch = (url, init) =>
+      url.startsWith(DEPLOYMENT.api) && url.includes("/display-text")
+        ? Promise.resolve(new Response(endless, { status: 200 }))
+        : honest().fetchFn(url, init);
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(cancelled).toBe(true);
+    expect(pulled * chunk.length).toBeLessThan(2 * PARAMETERS.MAX_DISPLAY_TEXT + 4 * chunk.length);
+  });
+
+  test("when both records fail, the same answers always show the same problem", async () => {
+    // However the two requests race, withheld text outranks a missing definition.
+    for (const delay of [0, 5]) {
+      const { fetchFn } = honest({
+        definition: { status: 404, body: "{}" },
+        text: { status: 451, body: "{}" },
+      });
+      const slowFirst: Fetch = (url, init) =>
+        url.includes("/display-text")
+          ? new Promise((r) => setTimeout(r, delay)).then(() => fetchFn(url, init))
+          : fetchFn(url, init);
+      expect(await loadElection(DEPLOYMENT, ID, slowFirst)).toEqual({
+        ok: false,
+        problem: "withheld",
+      });
+    }
+    // Another chain outranks the node's trouble with the call.
+    const { fetchFn } = honest({
+      chainId: { status: 200, body: rpcResult(1, "0x1") },
+      call: "network",
+    });
+    expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+      ok: false,
+      problem: "wrong-chain",
+    });
+  });
+
+  test("an aborted load is thrown, never shown as a problem", async () => {
+    const abort = new DOMException("aborted", "AbortError");
+    await expect(loadElection(DEPLOYMENT, ID, () => Promise.reject(abort))).rejects.toBe(abort);
+  });
+
+  test("any bytes the API sends as hex come back exactly", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.uint8Array({ maxLength: 512 }), async (bytes) => {
+        const { fetchFn } = honest({
+          text: { status: 200, body: JSON.stringify({ displayText: hex(bytes) }) },
+        });
+        const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+        if (!loaded.ok) throw new Error(loaded.problem);
+        expect(hex(loaded.displayText)).toBe(hex(bytes));
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("the link", () => {
+  test("an election id in the fragment, in either case, is read as its bytes", () => {
+    for (const spelling of [ID_HEX, ID_HEX.toUpperCase()]) {
+      const link = parseLink(`#election=${spelling}`);
+      if (link.kind !== "election") throw new Error(link.kind);
+      expect(hex(link.electionId)).toBe(ID_HEX);
+      expect(link.hex).toBe(ID_HEX);
+    }
+  });
+
+  test("no fragment is the client's own page", () => {
+    expect(parseLink("")).toEqual({ kind: "none" });
+    expect(parseLink("#")).toEqual({ kind: "none" });
+  });
+
+  test("anything but exactly one 32-byte election id is malformed", () => {
+    for (const hash of [
+      `#election=${ID_HEX.slice(2)}`,
+      `#election=${ID_HEX}00`,
+      `#election=0x${ID_HEX}`,
+      `#election=${ID_HEX}&pick=1`,
+      `#poll=${ID_HEX}`,
+      `#election=${ID_HEX.slice(1)}g`,
+      `#election= ${ID_HEX}`,
+    ])
+      expect(parseLink(hash)).toEqual({ kind: "malformed" });
+    // Around the one valid form: an id with characters cut, added or replaced,
+    // or another parameter beside it.
+    const id = fc.stringMatching(/^[0-9a-fA-F]{64}$/);
+    const near = fc.oneof(
+      id.chain((x) => fc.nat({ max: 63 }).map((n) => `election=${x.slice(0, n)}`)),
+      fc.tuple(id, fc.string({ minLength: 1, maxLength: 4 })).map(([x, s]) => `election=${x}${s}`),
+      fc
+        .tuple(id, fc.nat({ max: 63 }), fc.constantFrom("g", "x", " ", "%", "&", "="))
+        .map(([x, i, c]) => `election=${x.slice(0, i)}${c}${x.slice(i + 1)}`),
+      fc.tuple(fc.string({ minLength: 1, maxLength: 8 }), id).map(([p, x]) => `${p}election=${x}`),
+      fc.tuple(id, fc.string({ maxLength: 8 })).map(([x, s]) => `election=${x}&${s}`),
+    );
+    fc.assert(
+      fc.property(near, (s) => {
+        expect(parseLink(`#${s}`)).toEqual({ kind: "malformed" });
+      }),
+      { numRuns },
+    );
+    fc.assert(
+      fc.property(id, (x) => {
+        const link = parseLink(`#election=${x}`);
+        if (link.kind !== "election") throw new Error(link.kind);
+        expect(link.hex).toBe(x.toLowerCase());
+        expect(hex(link.electionId)).toBe(x.toLowerCase());
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("the deployments", () => {
+  test("staging's origins are the ones the CSP lets the client reach, and its registry is a plain address or none", () => {
+    expect(STAGING.api).toBe("https://api-staging.abolish.us");
+    expect(STAGING.rpc).toBe("https://sepolia.base.org");
+    expect(STAGING.chainId).toBe(84532n);
+    // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
+    if (STAGING.electionRegistry !== undefined)
+      expect(STAGING.electionRegistry).toMatch(/^0x[0-9a-f]{40}$/);
+  });
+});

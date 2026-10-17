@@ -273,3 +273,118 @@ describe("the ballot worker", () => {
     });
   });
 });
+
+describe("opening an election from staging's origins", () => {
+  const REGISTRY = "0x00000000000000000000000000000000000000aa";
+  const RPC = "https://sepolia.base.org";
+  const API = "https://api-staging.abolish.us";
+
+  /**
+   * Stands in for the RPC and the API at their real origins, answering with
+   * the CORS headers a browser needs to let the page read them, and records
+   * every JSON-RPC call.
+   */
+  async function serve({
+    registeredHash = registered(definitionHex),
+    textStatus = 200,
+  }: { registeredHash?: string; textStatus?: number } = {}) {
+    const calls: unknown[] = [];
+    const cors = {
+      "access-control-allow-origin": origin,
+      "access-control-allow-methods": "GET, POST",
+      "access-control-allow-headers": "content-type",
+      vary: "origin",
+    };
+    await page.route(
+      (url) => url.origin === RPC,
+      async (route) => {
+        if (route.request().method() === "OPTIONS")
+          return route.fulfill({ status: 204, headers: cors });
+        const call = JSON.parse(route.request().postData() ?? "null") as {
+          id: number;
+          method: string;
+        };
+        calls.push(call);
+        const result = call.method === "eth_chainId" ? "0x14a34" : `0x${registeredHash}`;
+        return route.fulfill({
+          status: 200,
+          headers: cors,
+          contentType: "application/json",
+          body: JSON.stringify({ jsonrpc: "2.0", id: call.id, result }),
+        });
+      },
+    );
+    await page.route(
+      (url) => url.origin === API,
+      (route) => {
+        const url = new URL(route.request().url());
+        const wanted = url.searchParams.get("electionId") === hex(definition.election_id);
+        if (url.pathname === "/elections/definition" && wanted)
+          return route.fulfill({
+            status: 200,
+            headers: cors,
+            contentType: "application/json",
+            body: JSON.stringify({ definition: definitionHex }),
+          });
+        if (url.pathname === "/elections/display-text" && wanted)
+          return route.fulfill({
+            status: textStatus,
+            headers: cors,
+            contentType: "application/json",
+            body: JSON.stringify(textStatus === 200 ? { displayText: textHex } : {}),
+          });
+        return route.fulfill({ status: 404, headers: cors, body: "{}" });
+      },
+    );
+    return calls;
+  }
+
+  const open = (registry = REGISTRY) =>
+    page
+      .evaluate(
+        ([id, r]) =>
+          (
+            globalThis as unknown as {
+              ballotHarness: { open(id: string, registry: string): Promise<string> };
+            }
+          ).ballotHarness.open(id, r),
+        [hex(definition.election_id), registry] as const,
+      )
+      .then((json) => JSON.parse(json) as Record<string, unknown>);
+
+  test("reads the pinned registry at the finalized head, fetches the records and checks them", async () => {
+    const calls = await serve();
+    await expect(open()).resolves.toMatchObject({
+      ok: true,
+      election: {
+        electionId: hex(definition.election_id),
+        definitionHash: registered(definitionHex),
+        translations: [{ language: "en" }, { language: "es-419" }],
+      },
+    });
+    expect(calls).toContainEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "eth_call",
+      params: [{ to: REGISTRY, data: `0xd325433f${hex(definition.election_id)}` }, "finalized"],
+    });
+    // Under the client's own CSP, nothing but its own files and the two origins it names.
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    for (const url of requests) expect([origin, RPC, API]).toContain(new URL(url).origin);
+  });
+
+  test("refuses records the registry doesn't hold, fetched through the real network path", async () => {
+    await serve({ registeredHash: "11".repeat(32) });
+    await expect(open()).resolves.toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+      servedHash: registered(definitionHex),
+    });
+  });
+
+  test("says so when the API withholds the text", async () => {
+    await serve({ textStatus: 451 });
+    await expect(open()).resolves.toEqual({ ok: false, problem: "withheld" });
+  });
+});

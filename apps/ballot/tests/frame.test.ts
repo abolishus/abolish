@@ -3,10 +3,11 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vite-plus/test";
 
-import { App, SharedOrigin } from "../src/app.tsx";
+import { Home, SharedOrigin } from "../src/app.tsx";
 import { ArrivalCheck, ArrivalChecklist, ElectionRefused } from "../src/check.tsx";
-import type { ElectionRefusal } from "../src/election.ts";
+import type { CheckedElection, ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
+import { Ballot, BrokenLink, Checking, NotSent, Unavailable } from "../src/open.tsx";
 import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
@@ -56,8 +57,63 @@ describe("the frame under the client's CSP", () => {
 
   test("the screens without a poll render no inline style either", () => {
     for (const html of [
-      render(createElement(App)),
+      render(createElement(Home)),
       render(createElement(SharedOrigin, { address: "https://gateway.example/ipfs/x/" })),
+      render(createElement(Checking)),
+      render(createElement(BrokenLink)),
+      ...(
+        [
+          "no-registry",
+          "wrong-chain",
+          "not-registered",
+          "not-found",
+          "withheld",
+          "unreachable",
+          "bad-answer",
+          "worker-failed",
+        ] as const
+      ).map((problem) => render(createElement(Unavailable, { problem, onRetry: () => {} }))),
+    ])
+      expect(html).not.toMatch(/\sstyle=/i);
+  });
+
+  test("a checked election's ballot, and the screen after it, render no inline style", () => {
+    const election: CheckedElection = {
+      electionId: "5d".repeat(32),
+      definitionHash: POLL.definitionHash,
+      electionType: "plurality",
+      minSelections: 0,
+      maxSelections: 1,
+      opensAt: 1_790_000_000n,
+      closesAt: 1_792_000_000n,
+      translations: [
+        {
+          language: "en",
+          question: "A question",
+          description: "",
+          options: [
+            { label: "One", description: "" },
+            { label: "Two", description: "" },
+          ],
+        },
+      ],
+    };
+    const ballot = render(createElement(Ballot, { election, languages: ["en-US"] }));
+    // A version-1 definition names no one who asked: the frame names the election.
+    expect(ballot).toContain("Election 3f8a 0c51");
+    expect(ballot).not.toContain("asked");
+    // The poll's own text carries its translation's tag; the screens' chrome doesn't.
+    expect(ballot).toContain('<h1 lang="en"');
+    expect(ballot).toMatch(/<span lang="en"[^>]*><span[^>]*>One<\/span>/);
+    for (const html of [
+      ballot,
+      render(
+        createElement(NotSent, {
+          definitionHash: POLL.definitionHash,
+          closes: "Fri 17 Oct",
+          onAgain: () => {},
+        }),
+      ),
     ])
       expect(html).not.toMatch(/\sstyle=/i);
   });

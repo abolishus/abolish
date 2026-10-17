@@ -61,6 +61,7 @@ function progressOf(pollClass: PollClass | undefined, step: number, questions: n
 function OptionRow({
   type,
   name,
+  lang,
   label,
   description,
   checked,
@@ -68,6 +69,7 @@ function OptionRow({
 }: {
   type: "radio" | "checkbox";
   name: string;
+  lang: string | undefined;
   label: string;
   description: string;
   checked: boolean;
@@ -105,7 +107,7 @@ function OptionRow({
       >
         {checked ? <Check className="size-4" strokeWidth={3} /> : null}
       </span>
-      <span className="grid min-w-0 flex-1 gap-1">
+      <span lang={lang} className="grid min-w-0 flex-1 gap-1">
         <span id={labelId} className="text-lg leading-snug font-medium break-words">
           {label}
         </span>
@@ -213,8 +215,12 @@ export function QuestionStep({
       }
     >
       {index === 0 && arrival !== undefined ? <div className="mb-8">{arrival}</div> : null}
-      <ScreenTitle title={question.question} focus={focus}>
-        {question.description === "" ? undefined : <p className="m-0">{question.description}</p>}
+      <ScreenTitle title={question.question} lang={question.language} focus={focus}>
+        {question.description === "" ? undefined : (
+          <p lang={question.language} className="m-0">
+            {question.description}
+          </p>
+        )}
       </ScreenTitle>
       <div className="mt-6 grid gap-1 border-y border-border py-3">
         <p className="m-0 text-lg font-semibold">{instruction}</p>
@@ -230,6 +236,7 @@ export function QuestionStep({
             key={i}
             type={single ? "radio" : "checkbox"}
             name={name}
+            lang={question.language}
             label={option.label}
             description={option.description}
             checked={selection.includes(i)}
@@ -399,7 +406,10 @@ export function CheckAnswers({
               <p className="m-0 text-sm text-muted-foreground">
                 {t("questionNumber", { number: i + 1 })}
               </p>
-              <h2 className="m-0 text-base font-normal break-words text-pretty">
+              <h2
+                lang={question.language}
+                className="m-0 text-base font-normal break-words text-pretty"
+              >
                 {question.question}
               </h2>
               {needed > 0 ? (
@@ -419,7 +429,9 @@ export function CheckAnswers({
                       className="flex items-start gap-2 text-xl font-semibold break-words"
                     >
                       <Check aria-hidden="true" className="mt-1 size-5 shrink-0 text-primary" />
-                      <span className="min-w-0">{question.options[option]?.label}</span>
+                      <span lang={question.language} className="min-w-0">
+                        {question.options[option]?.label}
+                      </span>
                     </li>
                   ))}
                 </ul>

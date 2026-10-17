@@ -315,6 +315,15 @@ describe("advancePollCreations", () => {
     expect(await row(id!)).toMatchObject({ state: "failed", failure: "creation-timeout" });
   });
 
+  test("fails a poll whose transaction is missing from the ledger, rather than leave it in setup", async () => {
+    const chain = new FakeChain();
+    const [id] = await submitted();
+    await run(chain);
+    await db.admin`DELETE FROM poll_creation_txs`;
+    expect(await run(chain)).toMatchObject({ failed: { "creation-timeout": 1 } });
+    expect(await row(id!)).toMatchObject({ state: "failed", failure: "creation-timeout" });
+  });
+
   test("sends at most the daily ceiling in any 24 hours", async () => {
     const chain = new FakeChain();
     const ids = await submitted(3);

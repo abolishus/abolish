@@ -76,3 +76,7 @@ What would change it: a credential with residence (mDL) at Tier 2 changes how a 
 ## Decision
 
 Option A with `MIN_CELL_ELECTORATE` = 1,000, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. A veto before part 4b merges costs only this ADR; after it, a new definition and ballot version.
+
+## Amended
+
+- 2026-10-17 ([[0024-tier0-registration]], Amendment 1; P3-2 part 5a): with self-paid Tier 0 groups, the first-occurrence walk no longer runs in (`group_id`, index) order alone. Every signed group comes first, by `group_id`, then the self-paid groups' additions in chain order ([[membership]], Cell tree), so a self-paid copy can't move a registrant the way the rule above describes.

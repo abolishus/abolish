@@ -109,13 +109,16 @@ Under rule A (`AGENTS.md`): option B, with D as the direct path, status `Accepte
 
 ## Amendment 1 (2026-10-17, P3-2 part 5a)
 
-[[contracts]] (Group registry, Self-paid additions) specifies option D's call and settles the three questions this ADR left to part 5. Each is `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+[[contracts]] (Group registry, Self-paid additions) specifies option D's call and settles the questions this ADR left to part 5: the record, a fee, duplicates and removals. Each is `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
 
 **The record.** Options weighed:
 
 - **A. A batch with a signed-style position**, `group_id ‖ first_index ‖ count ‖ commitments`, like `addMembers` without approvals. Rejected: with no signature to bind the position, anyone can land one addition to the group first and kill every pending one, at the price of gas (T-25).
 - **B. A batch with no position.** Cheaper per member for bulk additions, which only a Sybil makes; a registrant adds one commitment.
 - **C. One commitment, no position** (chosen): `group_id ‖ commitment`, exactly 40 bytes. The registry assigns the index and logs it as a topic, and the verifier replays the indices against its own count, so no addition reverts because another landed first.
+- **D. C plus a proof of knowledge of the identity secret**, bound to the chain, the registry and `group_id` (a Semaphore proof against the one-leaf tier tree of the commitment, say). It would stop anyone copying someone else's commitment into a self-paid group, closing the front-running move and every junk copy of a real commitment. Rejected for this version: the registry would rebuild a depth-32 tree on chain and check a Groth16 proof, more than a million gas per addition and about thirty times C, paid by every direct registrant, while signed copies by the registrars, the larger move, would still stand. The region is the voter's unverified word in any case (T-16). If moves by front-running are seen, D is the fix, in a new registry.
+
+**The fee.** Every self-paid addition is a counted leaf, which each election listing the group boards and each of its clients reads, so on gas alone a state actor could flood the published groups by the million before an election's root block (T-52, T-53). Options weighed: no fee (rejected for that reason); a cap per group and period (rejected: whoever fills the cap shuts the path, T-25); a fixed fee locked in the registry for good (chosen, `SELF_PAID_FEE` = 0.0002 ETH, so a million additions cost 200 ETH, while a registrant pays it once). The fee goes to no one, us included. A flood that is paid anyway is answered by replacing the region's published self-paid group in later definitions ([[contracts]], Group registry, Known-weak).
 
 **Duplicates.** Options weighed:
 

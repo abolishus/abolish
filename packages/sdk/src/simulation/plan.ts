@@ -4,7 +4,6 @@
 // the plan only; every secret of the run comes from the CSPRNG inside
 // @abolishus/crypto.
 
-import type { QuestionRules } from "@abolishus/crypto";
 import { finalizedAt, nameBlock } from "./l1.ts";
 import { type Scenario, SIMULATED_TIERS, type SimulatedTier } from "./scenario.ts";
 
@@ -111,23 +110,15 @@ function generator(seed: number): () => number {
   };
 }
 
-/** The selection range a one-question election's ballots are proved against. */
+/**
+ * The selection range a one-question election's ballots are proved against.
+ * Throws for a questions scenario, whose limits are each question's own.
+ */
 export function selectionRange(scenario: Scenario): { min: number; max: number } {
+  if (scenario.election === "questions")
+    throw new TypeError("selectionRange: a questions scenario has a range per question");
   // ADR 0003: a blank plurality ballot is valid, so plurality is [0, 1].
   return scenario.election === "plurality" ? { min: 0, max: 1 } : { min: 0, max: scenario.options };
-}
-
-/** Each question's option count and limits, in ballot order: one question unless `questions`. */
-export function questionRules(scenario: Scenario): QuestionRules[] {
-  if (scenario.questions === undefined) {
-    const { min, max } = selectionRange(scenario);
-    return [{ optionCount: scenario.options, minSelections: min, maxSelections: max }];
-  }
-  return scenario.questions.map((q) => ({
-    optionCount: q.options,
-    minSelections: q.min,
-    maxSelections: q.max,
-  }));
 }
 
 // Seed the challenge, re-vote, publication and posting draws apart from the rest of the plan and

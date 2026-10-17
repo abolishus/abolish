@@ -198,6 +198,17 @@ describe("simulateElection with questions", { timeout }, () => {
   const e = simulateElection(base, planElection(base), receiptKey());
   const d = e.definition;
 
+  it("refuses a scenario whose questions don't go with its type or options, before the ceremony", () => {
+    const key = receiptKey();
+    const { questions: _, ...plain } = base;
+    const approval = { ...base, election: "approval" as const };
+    expect(() => simulateElection(plain, planElection(approval), key)).toThrow(TypeError);
+    expect(() => simulateElection({ ...base, options: 11 }, planElection(base), key)).toThrow(
+      TypeError,
+    );
+    expect(() => simulateElection(approval, planElection(base), key)).toThrow(TypeError);
+  });
+
   it("registers a well-formed definition version 5 pinning ballot version 3", () => {
     if (!("questions" in d)) throw new Error("expected version 5");
     expect(electionDefinitionV5Rule(d)).toBeUndefined();
@@ -273,6 +284,9 @@ describe("simulateElection with questions", { timeout }, () => {
       throw new Error("three questions");
     const short = { ...vote, sum_proofs: [q0, q1, q2.slice(1)] };
     const missing = { ...vote, sum_proofs: [q0, q2] };
+    // Questions 1 (4 branches) and 2 (1 branch) swapped: the same count and total.
+    const swapped = { ...vote, sum_proofs: [q0, q2, q1] };
+    expect(submit({ ...record, committed_vote: swapped })).toBe("validity-shape");
     expect(submit({ ...record, committed_vote: short })).toBe("validity-shape");
     expect(submit({ ...record, committed_vote: missing })).toBe("validity-shape");
     // A version-2 record under a definition pinning version 3.

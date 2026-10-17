@@ -302,6 +302,13 @@ export function simulateElection(
     receipt_keys: [Uint8Array.from(receiptKey)],
   };
   const { questions, election } = scenario;
+  // A scenario built without parseScenario must still be one shape or the
+  // other: `options` drives the plan and the tally's sums.
+  if (
+    (election === "questions") !== (questions !== undefined) ||
+    (questions !== undefined && questions.reduce((n, q) => n + q.options, 0) !== scenario.options)
+  )
+    throw new TypeError("simulation: questions go with election questions and sum to options");
   let stub: SimulatedDefinition;
   if (questions !== undefined) {
     const v5: ElectionDefinitionV5 = {

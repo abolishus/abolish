@@ -67,6 +67,7 @@ export {
 export {
   anchorsFromState,
   checkpointSlot,
+  checkpointWords,
   decodeHeader,
   decodeRlp,
   L1Error,

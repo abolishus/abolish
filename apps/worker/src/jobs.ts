@@ -3,6 +3,9 @@
 
 import {
   advancePollCreations,
+  type AnchorCheckReport,
+  checkCreationAnchors,
+  type CreationAnchors,
   type AnchorChain,
   anchorBoards,
   auditBoard,
@@ -48,8 +51,15 @@ export interface JobContext {
   readonly ballots?: BallotBatches;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
   readonly registry?: RegistrySync;
-  /** The creation key and its daily ceiling, in a creation worker; its queue runs only then. */
-  readonly pollCreation?: { readonly chain: PollCreationChain; readonly dailyCeiling: number };
+  /**
+   * The creation key, its daily ceiling and the L1 anchor its identifiers
+   * are checked against, in a creation worker; its queue runs only then.
+   */
+  readonly pollCreation?: {
+    readonly chain: PollCreationChain;
+    readonly dailyCeiling: number;
+    readonly anchors: CreationAnchors;
+  };
 }
 
 /** The Tier 0 queues, which run only with `JobContext.tier0`. */
@@ -187,9 +197,10 @@ async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Pr
 }
 
 /**
- * One run of the creation step: sends, resends and settles creations, and
- * logs what moved, by count. A node that can't be read fails the job; the
- * next tick runs the step again from what is recorded.
+ * One run of the creation step: sends, resends and settles creations, then
+ * runs the per-slot check on the created ones, and logs what moved, by
+ * count. A node that can't be read fails the job; the next tick runs both
+ * again from what is recorded.
  */
 async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promise<void> {
   if (ctx.pollCreation === undefined) throw new JobError("internal");
@@ -197,11 +208,27 @@ async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promis
     now: ctx.now(),
     dailyCeiling: ctx.pollCreation.dailyCeiling,
   });
-  const moved =
-    report.sent + report.resent + report.sendFailed + report.created > 0 ||
-    Object.keys(report.failed).length > 0 ||
-    report.ceilingReached;
-  if (moved) ctx.log({ queue: "{poll-create}", ...report });
+  let anchors: AnchorCheckReport = { checked: 0, waiting: 0, abandoned: 0, overdue: 0, failed: 0 };
+  try {
+    anchors = await checkCreationAnchors(ctx.sql, ctx.pollCreation.anchors, { now: ctx.now() });
+  } finally {
+    // Logged even when the check throws, so this tick's creations are counted.
+    const failed = { ...report.failed };
+    if (anchors.failed > 0) failed["creation-anchored"] = anchors.failed;
+    const moved =
+      report.sent + report.resent + report.sendFailed + report.created > 0 ||
+      anchors.checked + anchors.abandoned > 0 ||
+      Object.keys(failed).length > 0 ||
+      report.ceilingReached;
+    if (moved)
+      ctx.log({
+        queue: "{poll-create}",
+        ...report,
+        checked: anchors.checked,
+        abandoned: anchors.abandoned,
+        failed,
+      });
+  }
 }
 
 /**

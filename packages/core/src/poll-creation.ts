@@ -44,7 +44,13 @@ export type CreationStatus =
   /** Final, and reverted. */
   | { readonly state: "reverted" }
   /** Final, with the creation key's `ElectionCreated` event. */
-  | { readonly state: "created"; readonly electionId: Uint8Array; readonly block: bigint };
+  | {
+      readonly state: "created";
+      readonly electionId: Uint8Array;
+      readonly block: bigint;
+      /** The event's `l1OriginTimestamp`, which fixes the election's first segment. */
+      readonly l1OriginTimestamp: bigint;
+    };
 
 /** The creation key on L2, as the creation step uses it (the worker's `ViemPollCreationChain`). */
 export interface PollCreationChain {
@@ -89,7 +95,12 @@ export type CreationFailure =
   /** Another transaction of the key took the creation's nonce in finalized history. */
   | "creation-replaced"
   /** Not created within `CREATION_DEADLINE_MS` of its recording. */
-  | "creation-timeout";
+  | "creation-timeout"
+  /**
+   * The per-slot check found an anchor ahead of the ceremony for the poll's
+   * `MAX_ABANDONED_IDS`th identifier (poll-anchor-check.ts).
+   */
+  | "creation-anchored";
 
 /** One run's outcome, in counts only (T-10, T-67). */
 export interface PollCreationReport {
@@ -207,12 +218,14 @@ export async function advancePollCreations(
     const status = await chain.creation(r.hash);
     if (status.state === "created") {
       if (status.electionId.length !== 32) throw new Error("the chain gave a malformed identifier");
+      if (status.l1OriginTimestamp < 0n) throw new Error("the chain gave a malformed L1 origin");
       const moved = await db
         .update(accountPolls)
         .set({
           state: "created",
           electionId: status.electionId.slice(),
           createdBlock: status.block,
+          l1OriginTimestamp: status.l1OriginTimestamp,
           updatedAt: now,
         })
         .where(and(eq(accountPolls.id, r.id), eq(accountPolls.state, "submitted")))

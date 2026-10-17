@@ -113,6 +113,7 @@ class FakeChain implements PollCreationChain {
       state: "created",
       electionId: sha256(new TextEncoder().encode(m.hash)),
       block: m.block,
+      l1OriginTimestamp: 1_000n + m.block,
     };
   }
 

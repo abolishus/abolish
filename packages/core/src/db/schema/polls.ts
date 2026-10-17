@@ -1,9 +1,9 @@
-import { bigint, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, jsonb, pgTable, primaryKey, smallint, text, timestamp } from "drizzle-orm/pg-core";
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0012_account_polls.sql and
-// 0013_poll_creation.sql; a test checks the two agree. `account_polls` is in
+// Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql
+// and 0015_poll_anchor_check.sql; a test checks the two agree. `account_polls` is in
 // the account class: whose poll it is, never who answered it (ADR 0032, rule
 // 15; T-10). `poll_creation_txs` is operational: the creation key's public
 // transactions, naming no account, poll or election.
@@ -25,6 +25,9 @@ export const accountPolls = pgTable("account_polls", {
   electionId: bytea("election_id"),
   createdBlock: bigint("created_block", { mode: "bigint" }),
   failure: text("failure"),
+  l1OriginTimestamp: bigint("l1_origin_timestamp", { mode: "bigint" }),
+  anchorsCheckedBlock: bigint("anchors_checked_block", { mode: "bigint" }),
+  abandonedIds: smallint("abandoned_ids").notNull().default(0),
 });
 
 export const pollCreationTxs = pgTable(

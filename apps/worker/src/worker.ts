@@ -8,6 +8,7 @@
 import type {
   AnchorChain,
   BallotAdmissions,
+  CreationAnchors,
   PollCreationChain,
   Tier0Batches,
 } from "@abolishus/core";
@@ -81,6 +82,8 @@ export interface WorkerOptions {
     readonly chain: PollCreationChain;
     /** Creations sent in any 24 hours (rule 18). */
     readonly dailyCeiling: number;
+    /** The L1 anchor each created identifier is checked against (P2-22 part 3b-1). */
+    readonly anchors: CreationAnchors;
     /** How often the step runs; `POLL_CREATE_EVERY_MS` unless a test says otherwise. */
     readonly everyMs?: number;
   };
@@ -153,6 +156,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           pollCreation: {
             chain: options.pollCreation.chain,
             dailyCeiling: options.pollCreation.dailyCeiling,
+            anchors: options.pollCreation.anchors,
           },
         }),
     ...(options.ballots === undefined

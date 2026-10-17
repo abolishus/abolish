@@ -761,6 +761,9 @@ importers:
       '@abolishus/indexer':
         specifier: workspace:*
         version: link:../indexer
+      '@abolishus/verifier':
+        specifier: workspace:*
+        version: link:../../packages/verifier
       bullmq:
         specifier: 'catalog:'
         version: 6.3.11(ioredis@5.11.1)(pg@8.23.1)
@@ -777,9 +780,6 @@ importers:
         specifier: 'catalog:'
         version: 4.6.5
     devDependencies:
-      '@abolishus/verifier':
-        specifier: workspace:*
-        version: link:../../packages/verifier
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1

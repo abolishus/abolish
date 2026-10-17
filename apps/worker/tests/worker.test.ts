@@ -2,6 +2,7 @@ import {
   type AnchorChain,
   appendEntry,
   type BallotAdmissions,
+  type CreationAnchors,
   type PollCreationChain,
   type Tier0Batches,
 } from "@abolishus/core";
@@ -327,6 +328,17 @@ const idleChain: PollCreationChain = {
   creation: async () => ({ state: "unknown" }),
 };
 
+/** An L1 anchor the per-slot check never needs: nothing is created. */
+const idleAnchors: CreationAnchors = {
+  clock: { epoch: 0n, period: 3600n },
+  finalized: async () => {
+    throw new Error("nothing is created");
+  },
+  words: async () => {
+    throw new Error("nothing is created");
+  },
+};
+
 test("a worker holding the creation key runs the creation step and nothing else", async () => {
   // ADR 0032, rule 2: no audit, prune, anchoring, Tier 0 or ballot work
   // beside the key.
@@ -338,7 +350,7 @@ test("a worker holding the creation key runs the creation step and nothing else"
     log: (l) => lines.push(l),
     auditEveryMs: 3_600_000,
     prefix: own,
-    pollCreation: { chain: idleChain, dailyCeiling: 1, everyMs: 3_600_000 },
+    pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors, everyMs: 3_600_000 },
   });
   try {
     for (let i = 0; i < 200 && !lines.some((l) => "outcome" in l); i++)
@@ -375,7 +387,7 @@ test("a worker refuses the creation key beside any other job", async () => {
     log: () => {},
     auditEveryMs: 3_600_000,
     prefix: `abolish-test-${hex(randomBytes(6))}`,
-    pollCreation: { chain: idleChain, dailyCeiling: 1 },
+    pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors },
   };
   const anchor = { chain: {} as AnchorChain, everyMs: 3_600_000 };
   const tier0 = { batches: {} as Tier0Batches };

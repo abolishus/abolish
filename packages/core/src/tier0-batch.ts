@@ -42,6 +42,9 @@ export const MAX_REGISTRATION_HOLD = 6;
 export const TIER0_BATCH_LOCK_MS = 5 * 60_000;
 
 const U64_MAX = (1n << 64n) - 1n;
+// A group's leaves: `first_index + count ≤ 2³²` (docs/spec/contracts.md,
+// Group registry, Additions, rule 5), so a record past it would revert.
+const MAX_MEMBERS = 1n << 32n;
 // SADD's arguments per script call while the index is rebuilt.
 const INDEX_CHUNK = 1_000;
 
@@ -129,6 +132,8 @@ export type Tier0GroupOutcome =
   | "empty"
   /** Step 3: a short queue held for another boundary. */
   | "held"
+  /** Steps 3 and 4: the group has all `2³²` members it can hold, so nothing is signed into it. */
+  | "full"
   /** Step 6: a batch signed, kept and sent. */
   | "signed";
 
@@ -531,6 +536,11 @@ export class Tier0Batches {
     const [heldText, kept] = rechecked as [string, string[]];
     const held = Number(heldText);
 
+    // A full group takes no record, so nothing is signed, held or dropped:
+    // the queue waits for its operator to publish another group.
+    const room = MAX_MEMBERS - state.finalizedSize;
+    if (room <= 0n && kept.length > 0) return report("full");
+
     // Step 3: hold a short queue.
     if (kept.length === 0) {
       await this.#fenced(HOLD, [k.held], token, g, "0");
@@ -541,11 +551,10 @@ export class Tier0Batches {
       return report("held");
     }
 
-    // Steps 4 and 5: select, then order by value.
-    const chosen =
-      kept.length > GROUP_REGISTRY_MAX_BATCH
-        ? selectUniformly(kept, GROUP_REGISTRY_MAX_BATCH)
-        : kept;
+    // Steps 4 and 5: select, then order by value. Near the end of the
+    // group, the batch is cut to the leaves left, chosen the same way.
+    const most = room < BigInt(GROUP_REGISTRY_MAX_BATCH) ? Number(room) : GROUP_REGISTRY_MAX_BATCH;
+    const chosen = kept.length > most ? selectUniformly(kept, most) : kept;
     const values = chosen.map((c) => BigInt(`0x${c}`)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
     // Step 6: sign at the next position, check, keep, then send.

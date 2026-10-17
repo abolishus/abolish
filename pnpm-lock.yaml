@@ -721,9 +721,15 @@ importers:
 
   apps/worker:
     dependencies:
+      '@abolishus/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@abolishus/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@abolishus/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       bullmq:
         specifier: 'catalog:'
         version: 6.3.11(ioredis@5.11.1)(pg@8.23.1)
@@ -733,6 +739,9 @@ importers:
       postgres:
         specifier: 'catalog:'
         version: 3.4.9
+      viem:
+        specifier: 'catalog:'
+        version: 2.57.3(typescript@7.0.2)(zod@4.6.5)
       zod:
         specifier: 'catalog:'
         version: 4.6.5

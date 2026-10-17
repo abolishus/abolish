@@ -13,11 +13,14 @@ import {
   identityCommitment,
   membershipProverInput,
   signGroupApproval,
+  statedTierElectorate,
+  type TierChoice,
   type TierElectorate,
   tierMembership,
   TierMembershipError,
   type TierMembershipErrorCode,
   tierTreeMemberPath,
+  tierTreeRoot,
 } from "../src/index.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -972,5 +975,191 @@ describe("tierMembership in a Tier 1 tier", () => {
     expect(input.witness.merkleProofIndex).toBe(c.input["merkleProofIndex"]);
     expect(input.witness.merkleProofSiblings).toEqual(c.input["merkleProofSiblings"]);
     expect(input.witness.scope).not.toBe(c.input["scope"]);
+  });
+});
+
+// The creator's side (P2-22 part 3b-2): the electorate a definition states,
+// from the registry's sequence. Every expected region count, cell root and
+// member count is regional-cells.json's, from the independent implementation.
+describe("statedTierElectorate", () => {
+  const choiceOf = (t: (typeof tiers)[number]): TierChoice => ({
+    tier: 0,
+    root_l2_block: ROOT_BLOCK,
+    groups: t.electorate.groups,
+  });
+
+  test("states every strict tier of regional-cells.json as the vectors do", () => {
+    for (const t of tiers)
+      expect(statedTierElectorate(t.records, choiceOf(t), pins), t.vector.id).toEqual(t.electorate);
+  });
+
+  test("reads only the listed groups up to root_l2_block, ignoring other contracts", () => {
+    const t = tierOf("split");
+    const later = logs(
+      [
+        { ...added(22n, 700n, [1n << 100n]), block: ROOT_BLOCK + 1n },
+        { kind: "created", groupId: 99n, tier: 0, block: ROOT_BLOCK + 1n },
+      ],
+      t.records.length + 100,
+    );
+    const otherGroup = logs(
+      [{ kind: "created", groupId: 98n, tier: 0 }, ...additions(98n, [1_000_001_000n, 5n])],
+      t.records.length + 10,
+    );
+    const other = {
+      ...(t.records[1] as ContractEventRecord),
+      contract: new Uint8Array(20).fill(7),
+    };
+    expect(
+      statedTierElectorate([...t.records, ...otherGroup, ...later, other], choiceOf(t), pins),
+    ).toEqual(t.electorate);
+  });
+
+  test(
+    "states what the ballot client's recount accepts, for any regions the creator draws",
+    { timeout: 300_000 },
+    () => {
+      const t = tierOf("split");
+      const ids = t.electorate.groups.map((g) => g.group_id);
+      fc.assert(
+        fc.property(
+          fc.array(fc.nat({ max: ids.length - 1 }), {
+            minLength: ids.length,
+            maxLength: ids.length,
+          }),
+          (draw) => {
+            // Renumber so every region is named, in first-use order.
+            const order = [...new Set(draw)];
+            const groups = ids.map((group_id, i) => ({
+              group_id,
+              region: order.indexOf(draw[i] as number),
+            }));
+            const stated = statedTierElectorate(
+              t.records,
+              { tier: 0, root_l2_block: ROOT_BLOCK, groups },
+              pins,
+            );
+            expect(stated.regions.reduce((a, b) => a + b, 0n)).toBe(
+              t.electorate.regions.reduce((a, b) => a + b, 0n),
+            );
+            for (const g of t.groups) {
+              const leaf = g.leaves.find((l) => homeOf(t, l) === g.id);
+              if (leaf === undefined) continue;
+              const m = tierMembership(t.records, stated, leaf, g.id, pins);
+              expect(tierTreeRoot([...m.leaves])).toBe(m.root);
+            }
+          },
+        ),
+        { numRuns: Math.min(numRuns, 25) },
+      );
+    },
+  );
+
+  test("refuses a region with no counted member", () => {
+    const t = tierOf("one-group");
+    const board = [...t.records, ...logs([{ kind: "created", groupId: 500n, tier: 0 }], 900)];
+    const gid = t.electorate.groups[0]?.group_id as bigint;
+    const groups = [
+      { group_id: gid, region: 0 },
+      { group_id: 500n, region: 1 },
+    ];
+    expect(
+      refusal(() =>
+        statedTierElectorate(board, { tier: 0, root_l2_block: ROOT_BLOCK, groups }, pins),
+      ),
+    ).toBe("empty");
+    // The empty group shares a region with a counted one: stated, holding no leaf.
+    const shared = groups.map((g) => ({ ...g, region: 0 }));
+    expect(
+      statedTierElectorate(board, { tier: 0, root_l2_block: ROOT_BLOCK, groups: shared }, pins)
+        .regions,
+    ).toEqual(t.electorate.regions);
+    // A region no group names.
+    expect(
+      refusal(() =>
+        statedTierElectorate(
+          t.records,
+          { tier: 0, root_l2_block: ROOT_BLOCK, groups: [{ group_id: gid, region: 1 }] },
+          pins,
+        ),
+      ),
+    ).toBe("empty");
+    // Read before the group was created.
+    expect(
+      refusal(() => statedTierElectorate(t.records, { ...choiceOf(t), root_l2_block: 9n }, pins)),
+    ).toBe("group-created");
+  });
+
+  test("refuses Tier 1 and Tier 2 choices, whose additions it doesn't count", () => {
+    const board = logs([{ kind: "created", groupId: 7n, tier: 1 }]);
+    for (const tier of [1, 2])
+      expect(
+        refusal(() =>
+          statedTierElectorate(
+            board,
+            { tier, root_l2_block: ROOT_BLOCK, groups: [{ group_id: 7n, region: 0 }] },
+            pins,
+          ),
+        ),
+      ).toBe("tier-unsupported");
+    expect(
+      refusal(() =>
+        statedTierElectorate(
+          board,
+          { tier: 0, root_l2_block: ROOT_BLOCK, groups: [{ group_id: 7n, region: 0 }] },
+          pins,
+        ),
+      ),
+    ).toBe("group-tier");
+  });
+
+  test("refuses a history the release's registry can't log, as tierMembership does", () => {
+    const t = tierOf("split");
+    const choice = choiceOf(t);
+    const at = t.records.findIndex((r) => r.topics.length === 3 && r.data.length === 0);
+    expect(
+      refusal(() =>
+        statedTierElectorate(
+          t.records.filter((_, i) => i !== at),
+          choice,
+          pins,
+        ),
+      ),
+    ).toBe("group-created");
+    const g = t.groups.find((x) => x.id === 23n);
+    if (g === undefined) throw new Error("no group 23");
+    const add = t.records.findIndex(
+      (r) => r.topics.length === 3 && r.data.length > 0 && r.topics[1]?.[31] === 23,
+    );
+    const unsigned = logs(
+      [added(23n, 0n, g.leaves, 1)],
+      Number(t.records[add]?.n),
+    )[0] as ContractEventRecord;
+    expect(refusal(() => statedTierElectorate(t.records.with(add, unsigned), choice, pins))).toBe(
+      "group-history",
+    );
+    const other = logs([
+      { kind: "pinned", threshold: 3, registrars: pins.registrars },
+    ])[0] as ContractEventRecord;
+    expect(refusal(() => statedTierElectorate(t.records.with(0, other), choice, pins))).toBe(
+      "registrars",
+    );
+  });
+
+  test("refuses malformed choices before reading anything", () => {
+    const t = tierOf("split");
+    const choice = choiceOf(t);
+    expect(() => statedTierElectorate(t.records, { ...choice, groups: [] }, pins)).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      statedTierElectorate(t.records, { ...choice, groups: [...choice.groups].reverse() }, pins),
+    ).toThrow(RangeError);
+    expect(() =>
+      statedTierElectorate(t.records, { ...choice, root_l2_block: 1n << 64n }, pins),
+    ).toThrow(RangeError);
+    expect(() =>
+      statedTierElectorate(t.records, { ...choice, groups: [{ group_id: 21n, region: -1 }] }, pins),
+    ).toThrow(RangeError);
   });
 });

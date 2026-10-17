@@ -27,7 +27,7 @@ import {
   groupRegistryDomainSeparator,
   isForbiddenCommitment,
 } from "./group-registry.ts";
-import { firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
+import { deriveTierCells, firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
 import { type GroupRegistryEvent, groupRegistryEvents } from "./vouch-count.ts";
 
 /** What the board's group-registry events are read and replayed under. */
@@ -64,6 +64,12 @@ export type TierMembershipErrorCode =
   | "tier-unsupported"
   /** The recounted regions or cells differ from the definition's. */
   | "electorate"
+  /**
+   * A region of the tier a creator states has no counted member at
+   * `root_l2_block`, so no definition can state it (every `regions` entry is
+   * at least 1, docs/spec/election-definition.md, Well-formedness).
+   */
+  | "empty"
   /** The voter's commitment isn't a live leaf of the group it registered in by `root_l2_block`. */
   | "not-a-member"
   /**
@@ -187,55 +193,39 @@ function registryRecords(
 }
 
 /**
- * The voter's cell in a fixed Tier 0 or Tier 1 tier, from the election board's
- * contract-event records (`records`, any order, other contracts' included),
- * the tier's electorate from a definition the client checked (`tier`,
- * definition version 3 to 6), the voter's identity commitment
- * (`identityCommitment`) and the group it registered in (`group`).
- *
- * Every listed Tier 0 group is replayed strictly from its `GroupCreated`,
- * `MembersAdded` and `MembersRemoved` records in blocks up to the tier's
- * `root_l2_block`, under the release's registrars, as the verifier's 2.4
- * does; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
- * records in those blocks, with no vouch checked; the regions and cells are
- * recounted under the first-occurrence rule and must equal the definition's; the voter's commitment must be a live
- * leaf of `group` and be counted in `group`'s region. The cell's root isn't
- * recomputed here: `membershipProverInput` checks it over the returned
- * leaves in the same pass that builds the path. Throws
- * `TierMembershipError`; malformed arguments throw `TypeError` or
- * `RangeError`.
+ * A tier's `groups` as both directions read them: at least one, in strictly
+ * ascending `group_id`, each naming one of `regionCount` regions.
  */
-export function tierMembership(
-  records: readonly ContractEventRecord[],
-  tier: TierElectorate,
-  commitment: bigint,
-  group: bigint,
-  pins: GroupRegistryPins,
-): TierMembership {
-  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
-  if (tier === null || typeof tier !== "object") throw new TypeError("tier: expected an object");
-  if (pins === null || typeof pins !== "object") throw new TypeError("pins: expected an object");
-  if (typeof commitment !== "bigint" || isForbiddenCommitment(commitment))
-    throw new RangeError("commitment: expected one that isn't forbidden");
-  if (typeof group !== "bigint" || group < 0n || group > MAX_U64)
-    throw new RangeError("group: expected a u64");
-  // Each field read once, so a getter can't show one check a value and the next another.
-  const { version, chainId, registry, registrars, threshold } = pins;
-  if (!(registry instanceof Uint8Array) || registry.length !== 20)
-    throw new RangeError("pins.registry: expected 20 bytes");
-  const pinned = { version, chainId, registry: new Uint8Array(registry), registrars, threshold };
-  const { tier: tierId, root_l2_block: rootBlock, groups, regions, cells } = tier;
+function checkGroups(groups: TierElectorate["groups"], regionCount: number): void {
   if (!Array.isArray(groups) || groups.length === 0)
     throw new RangeError("tier.groups: expected at least one group");
   for (let i = 1; i < groups.length; i++)
     if ((groups[i - 1]?.group_id as bigint) >= (groups[i]?.group_id as bigint))
       throw new RangeError("tier.groups: expected strictly ascending group_id");
   if (
-    groups.some(
-      (g) => !Number.isSafeInteger(g.region) || g.region < 0 || g.region >= regions.length,
-    )
+    groups.some((g) => !Number.isSafeInteger(g.region) || g.region < 0 || g.region >= regionCount)
   )
     throw new RangeError("tier.groups: a group names a region the tier doesn't have");
+}
+
+/**
+ * Each of `groups`' leaves at `rootBlock`, in the order listed, before the
+ * first-occurrence rule: a Tier 0 group replayed strictly from its records
+ * under the release's registrars, a Tier 1 group's boarded additions
+ * (`tier1GroupLeaves`). Throws `TierMembershipError`.
+ */
+function listedGroupLeaves(
+  records: readonly ContractEventRecord[],
+  tierId: number,
+  rootBlock: bigint,
+  groups: TierElectorate["groups"],
+  pins: GroupRegistryPins,
+): (readonly bigint[])[] {
+  // Each field read once, so a getter can't show one check a value and the next another.
+  const { version, chainId, registry, registrars, threshold } = pins;
+  if (!(registry instanceof Uint8Array) || registry.length !== 20)
+    throw new RangeError("pins.registry: expected 20 bytes");
+  const pinned = { version, chainId, registry: new Uint8Array(registry), registrars, threshold };
 
   const read = groupRegistryEvents(registryRecords(records, pinned), pinned.registry, version);
   if (!read.ok) throw new TierMembershipError("board-event");
@@ -251,7 +241,7 @@ export function tierMembership(
       throw new TierMembershipError("registrars");
 
   const domainSeparator = groupRegistryDomainSeparator(chainId, pinned.registry);
-  const raw = groups.map(({ group_id: id }) => {
+  return groups.map(({ group_id: id }) => {
     const created = read.events.filter(
       (e) => e.kind === "group-created" && e.groupId === id && e.block <= rootBlock,
     );
@@ -284,6 +274,44 @@ export function tierMembership(
     if (!replay.ok) throw new TierMembershipError("group-history", id);
     return replay.leaves;
   });
+}
+
+/**
+ * The voter's cell in a fixed Tier 0 or Tier 1 tier, from the election board's
+ * contract-event records (`records`, any order, other contracts' included),
+ * the tier's electorate from a definition the client checked (`tier`,
+ * definition version 3 to 6), the voter's identity commitment
+ * (`identityCommitment`) and the group it registered in (`group`).
+ *
+ * Every listed Tier 0 group is replayed strictly from its `GroupCreated`,
+ * `MembersAdded` and `MembersRemoved` records in blocks up to the tier's
+ * `root_l2_block`, under the release's registrars, as the verifier's 2.4
+ * does; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
+ * records in those blocks, with no vouch checked; the regions and cells are
+ * recounted under the first-occurrence rule and must equal the definition's; the voter's commitment must be a live
+ * leaf of `group` and be counted in `group`'s region. The cell's root isn't
+ * recomputed here: `membershipProverInput` checks it over the returned
+ * leaves in the same pass that builds the path. Throws
+ * `TierMembershipError`; malformed arguments throw `TypeError` or
+ * `RangeError`.
+ */
+export function tierMembership(
+  records: readonly ContractEventRecord[],
+  tier: TierElectorate,
+  commitment: bigint,
+  group: bigint,
+  pins: GroupRegistryPins,
+): TierMembership {
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  if (tier === null || typeof tier !== "object") throw new TypeError("tier: expected an object");
+  if (pins === null || typeof pins !== "object") throw new TypeError("pins: expected an object");
+  if (typeof commitment !== "bigint" || isForbiddenCommitment(commitment))
+    throw new RangeError("commitment: expected one that isn't forbidden");
+  if (typeof group !== "bigint" || group < 0n || group > MAX_U64)
+    throw new RangeError("group: expected a u64");
+  const { tier: tierId, root_l2_block: rootBlock, groups, regions, cells } = tier;
+  checkGroups(groups, regions.length);
+  const raw = listedGroupLeaves(records, tierId, rootBlock, groups, pins);
 
   const at = groups.findIndex((g) => g.group_id === group);
   if (at < 0 || !(raw[at] as readonly bigint[]).includes(commitment))
@@ -318,4 +346,72 @@ export function tierMembership(
       },
     }),
   });
+}
+
+/** A fixed tier as its creator chooses it: which groups, in which regions, read at which block. */
+export interface TierChoice {
+  readonly tier: number;
+  readonly root_l2_block: bigint;
+  /**
+   * The tier's groups in strictly ascending `group_id`, each naming its
+   * region; the regions are numbered from 0 and every one is named.
+   */
+  readonly groups: TierElectorate["groups"];
+}
+
+/**
+ * The electorate a creator states for a fixed Tier 0 tier
+ * (docs/spec/election-definition.md, Layout (version 3), Regional cells;
+ * P2-22 part 3b-2), from the group registry's own event sequence up to the
+ * tier's `root_l2_block` (`records`: the registry's records in order of
+ * `n`, as its event accumulator authenticates them; other contracts'
+ * records are ignored). Each listed group is replayed strictly, exactly as
+ * `tierMembership` and the verifier's 2.4 replay it; the regions are counted
+ * and the cells folded and rooted by `deriveTierCells`, the code the ballot
+ * client's recount and `tierElectorateMismatch` share. So a definition
+ * stating what this returns passes 2.4's recount over the same history, and
+ * the creator never states a count or root of its own (T-13, T-16, T-34).
+ *
+ * Only Tier 0: a Tier 1 group's leaves are the additions the deployment's
+ * count takes (docs/spec/vouching.md, Counting across the deployment), which
+ * this doesn't decide, so a Tier 1 or Tier 2 choice is refused
+ * (`tier-unsupported`) rather than stated from additions that may not count.
+ * Throws `TierMembershipError`: `empty` when a region has no counted member,
+ * and the replay's codes for a history that isn't the release's; malformed
+ * arguments throw `TypeError` or `RangeError`.
+ */
+export function statedTierElectorate(
+  records: readonly ContractEventRecord[],
+  choice: TierChoice,
+  pins: GroupRegistryPins,
+): TierElectorate {
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  if (choice === null || typeof choice !== "object")
+    throw new TypeError("choice: expected an object");
+  if (pins === null || typeof pins !== "object") throw new TypeError("pins: expected an object");
+  // Each field read once, so a getter can't show one check a value and the next another.
+  const { tier: tierId, root_l2_block: rootBlock } = choice;
+  const groups = Array.isArray(choice.groups)
+    ? choice.groups.map((g) => ({ group_id: g.group_id, region: g.region }))
+    : choice.groups;
+  if (typeof rootBlock !== "bigint" || rootBlock < 0n || rootBlock > MAX_U64)
+    throw new RangeError("choice.root_l2_block: expected a u64");
+  if (!Array.isArray(groups)) throw new RangeError("tier.groups: expected at least one group");
+  // Regions are numbered from 0; one no group names is counted 0 and refused as `empty`.
+  const regionCount = groups.reduce((n, g) => Math.max(n, Number(g.region) + 1), 0);
+  checkGroups(groups, regionCount);
+  if (tierId !== 0) throw new TierMembershipError("tier-unsupported");
+  const raw = listedGroupLeaves(records, tierId, rootBlock, groups, pins);
+  const derived = deriveTierCells(
+    { groups, regions: Array.from({ length: regionCount }, () => 0n) },
+    new Map(groups.map((g, i) => [g.group_id, raw[i] as readonly bigint[]])),
+  );
+  if (derived.regions.some((n) => n === 0n)) throw new TierMembershipError("empty");
+  return {
+    tier: tierId,
+    root_l2_block: rootBlock,
+    groups,
+    regions: [...derived.regions],
+    cells: derived.cells.map((c) => ({ root: c.root, members: c.members })),
+  };
 }

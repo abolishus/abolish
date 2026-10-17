@@ -4,6 +4,10 @@
 // @abolishus/crypto's transcript check (part of 3.1, and 3.2). The context is
 // rebuilt from the definition and the pinned panel, never read from the
 // transcript, so one election's ceremony can't pass for another's (T-37).
+// Under definition version 6 with an author panel, 2.5 also fails an author
+// key that is a default seat's (`default-seat`), and the default run's
+// `duplicate-key` reads the author keys (T-14); the author panel's own run
+// (3.1 and 3.2 per panel) isn't checked yet, so 3.2 never passes there.
 // The L2 side (the trustee registry's registration and its approvals) isn't
 // read yet, so 3.1 and 2.5 never pass here.
 
@@ -29,6 +33,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 export type CeremonyCode =
   | Exclude<CeremonyErrorCode, DecodeErrorCode>
   | "panel-unpinned"
+  | "default-seat"
   | "ceremony-transcript-missing"
   | "ceremony-participation";
 
@@ -53,6 +58,8 @@ export interface CeremonyOutcome {
     | "not-implemented";
   readonly at?:
     | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
+    /** `default-seat`'s first author seat, from 1, whose key is a default seat's. */
+    | { readonly seat: number }
     | Record<string, never>;
 }
 
@@ -117,12 +124,14 @@ function findTranscript(
  * pins a board-entry version this verifier reads, and the report's
  * `ceremony` once the transcript check reached the seats. `stubHash` is the
  * definition's stub hash under its own version, which the transcript's
- * context binds (T-37).
+ * context binds (T-37). `authorKeys` is the definition's author panel, empty
+ * when it has none (definition.ts, `authorKeysOf`).
  */
 export function ceremonyChecks(
   d: CeremonyDefinition,
   stubHash: Uint8Array,
   panel: Panel,
+  authorKeys: readonly Uint8Array[],
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
 ): {
@@ -148,6 +157,17 @@ export function ceremonyChecks(
     return {
       rows: rows({ status: "fail", code: "panel-unpinned", at: {} }, NOT_REACHED, NOT_REACHED),
     };
+  // 2.5's `panel-kind` needs the pinned panel's kind, which the bundle
+  // doesn't carry yet, so it can't be decided: 2.5 never passes here, but
+  // fails on `default-seat`, so no trustee holds shares of both halves
+  // (trustee-identity.md, Author panel identifier, rule 4; T-14). The keys
+  // are compared as bytes: both are strictly decoded compressed points,
+  // whose encoding is unique.
+  const shared = authorKeys.findIndex((k) => panel.keys.some((q) => equal(k, q)));
+  const r25: CeremonyOutcome =
+    shared === -1
+      ? NOT_IMPLEMENTED
+      : { status: "fail", code: "default-seat", at: { seat: shared + 1 } };
   // A transcript version this verifier can't read may be one a later release
   // reads: unverifiable, never failed, so releases agree (2.3; T-36).
   if (pinnedVersion(d, RECORD_TYPES.ceremonyTranscript) !== 1) {
@@ -156,7 +176,7 @@ export function ceremonyChecks(
       code: "unsupported-version",
       at: {},
     };
-    return { rows: rows(NOT_IMPLEMENTED, unsupported, unsupported) };
+    return { rows: rows(r25, unsupported, unsupported) };
   }
   const found = findTranscript(d, entries, boardEntryVersion);
   // A copy without the transcript is that copy's problem, like a short copy
@@ -164,7 +184,7 @@ export function ceremonyChecks(
   if (found === undefined)
     return {
       rows: rows(
-        NOT_IMPLEMENTED,
+        r25,
         { status: "unverifiable", code: "ceremony-transcript-missing", at: {} },
         NOT_REACHED,
       ),
@@ -176,6 +196,9 @@ export function ceremonyChecks(
       electionId: d.election_id,
       stubHash,
       panel,
+      // The default run's `duplicate-key` reads the author panel's identity
+      // keys beside its own (ceremony.md, Author panel; T-14).
+      ...(authorKeys.length > 0 && { otherPanelKeys: authorKeys }),
     },
     found.bytes,
     1,
@@ -192,7 +215,7 @@ export function ceremonyChecks(
           code: "decode",
           at: { ...at, decodeError: checked.code as DecodeErrorCode },
         };
-    return { rows: rows(NOT_IMPLEMENTED, failed, NOT_REACHED) };
+    return { rows: rows(r25, failed, NOT_REACHED) };
   }
   const report: CeremonyReport = {
     entry: found.entry,
@@ -209,11 +232,16 @@ export function ceremonyChecks(
     ? { status: "fail", code: "ceremony-quorum", at }
     : checked.registered.length < participation
       ? { status: "fail", code: "ceremony-participation", at }
-      : { status: "pass" };
+      : // 3.2 holds per panel: with an author panel, whose run isn't
+        // checked yet, the default panel's pass is only half of it, and
+        // nothing is checked against a key set for one half (T-14, T-54).
+        authorKeys.length > 0
+        ? NOT_IMPLEMENTED
+        : { status: "pass" };
   // 3.1 also needs the trustee registry's record of this transcript and its
   // approvals on L2, which this verifier doesn't read yet: never a pass here.
   return {
-    rows: rows(NOT_IMPLEMENTED, NOT_IMPLEMENTED, ceremony),
+    rows: rows(r25, NOT_IMPLEMENTED, ceremony),
     report,
     ...(checked.ok && ceremony.status === "pass" && { registered: checked.registered }),
   };

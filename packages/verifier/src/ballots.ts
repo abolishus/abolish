@@ -193,6 +193,7 @@ const L1_REF_CODES: ReadonlySet<string> = new Set<L1RefCode>([
 const all = (o: BallotOutcome, blocks: boolean) =>
   new Map((blocks ? ALL_ROWS : ALL_ROWS.slice(0, -1)).map((id) => [id, o]));
 const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached" };
+const NOT_IMPLEMENTED: BallotOutcome = { status: "unverifiable", code: "not-implemented" };
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -507,7 +508,9 @@ export const UNSUPPORTED: BallotOutcome = {
  * scope come from that cell, never from the ballot (2.8, T-16); version 5
  * pins ballot version 3, which names its cell too and carries one range
  * proof per question, judged against the definition's questions, never
- * against limits the ballot states (T-28).
+ * against limits the ballot states (T-28). Version 6 pins ballot version 4,
+ * whose admission over both halves this release doesn't check yet: its
+ * rows stay unverifiable, never passed (P2-16 part 4).
  */
 export function judgeFor(
   definition: VerifiedDefinition,
@@ -528,7 +531,8 @@ export function steppedJudgeFor(
 ): BallotOutcome | SteppedJudge {
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
-  const own = definition.version === 1 ? 1 : definition.version === 5 ? 3 : 2;
+  const own =
+    definition.version === 1 ? 1 : definition.version === 5 ? 3 : definition.version === 6 ? 4 : 2;
   // A ballot version this verifier doesn't read under this definition
   // version may be one a later release reads: unverifiable, never failed, so
   // releases agree (2.3; T-36).
@@ -543,6 +547,7 @@ export function steppedJudgeFor(
     !equal(d.membership_vk_hash, membershipVkHash())
   )
     return NOT_REACHED;
+  if (definition.version === 6) return NOT_IMPLEMENTED;
   if (definition.version === 1) {
     const electorate = definition.value.electorate;
     if (electorate.some((g) => g.root === 0n)) return NOT_REACHED;

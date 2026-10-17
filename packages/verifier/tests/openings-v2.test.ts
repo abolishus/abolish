@@ -213,7 +213,11 @@ describe("when 6.2 runs (step 1)", () => {
 
   test("an opening version this release doesn't read is unsupported, before anything else is asked (T-36)", () => {
     for (const c of [byId("none"), byId("regional"), opening1]) {
-      const d = repinned(decodeDefinition(hex(c.definition)), RECORD_TYPES.spoiledBallotOpening, 3);
+      const d = repinned(
+        decodeDefinition(hex(c.definition)),
+        RECORD_TYPES.spoiledBallotOpening,
+        255,
+      );
       expect(openingChecks(d, undefined, undefined, [], 4, clock)).toEqual({
         row: { status: "unverifiable", code: "unsupported-version", at: {} },
       });
@@ -225,6 +229,10 @@ describe("when 6.2 runs (step 1)", () => {
       [byId("none"), 1],
       [byId("regional"), 1],
       [opening1, 2],
+      // Opening version 3 opens version-4 cores, definition version 6's.
+      [byId("none"), 3],
+      [byId("regional"), 3],
+      [opening1, 3],
     ] as const) {
       const d = repinned(
         decodeDefinition(hex(c.definition)),

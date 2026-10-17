@@ -507,6 +507,10 @@ describe("2.3's profile combination", () => {
     // Board-entry version 7 is only for a definition with an author panel.
     if (board === 7) return "profile-combination";
     if (![1, 3, 4, 5].includes(board)) return "unsupported-version";
+    // Tally-opening version 2 needs board-entry version 6 (a live poll's) and
+    // version 3 needs version 7 (an author panel's), neither of which these
+    // definitions may pin.
+    if (opening === 2 || opening === 3) return "profile-combination";
     if (ballot !== 1) return "profile-combination";
     const carriesDelivery = board === 3 || board === 4 || board === 5;
     const carriesDestruction = board === 4 || board === 5;
@@ -717,7 +721,7 @@ describe("2.3's profile combination", () => {
     // electionDefinitionRule refuses these too; a caller that skipped it
     // must still refuse to cast (T-34).
     for (const type of [RECORD_TYPES.ballot, RECORD_TYPES.tallyOpening]) {
-      const fitting = pinning(5, 1, 2);
+      const fitting = pinning(5, 1, 1);
       const without = {
         ...fitting,
         profile: {

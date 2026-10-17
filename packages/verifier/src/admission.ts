@@ -25,7 +25,7 @@ import {
 } from "@abolishus/crypto";
 import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
-import { decodeDefinition, isReadable, readDefinition } from "./definition.ts";
+import { authorKeysOf, decodeDefinition, isReadable, readDefinition } from "./definition.ts";
 
 /** Why no ballot of an election can be admitted: the first check that stops them all. */
 export type ElectionAdmissionCode =
@@ -113,7 +113,14 @@ export function electionAdmission(
   if (!isReadable(boardEntryVersion)) return refuse("unsupported-version");
   const combination = profileCombinationRule(d);
   if (combination !== undefined) return refuse(combination);
-  const { rows, registered } = ceremonyChecks(d, stubHash, panel, entries, boardEntryVersion);
+  const { rows, registered } = ceremonyChecks(
+    d,
+    stubHash,
+    panel,
+    authorKeysOf(record),
+    entries,
+    boardEntryVersion,
+  );
   if (registered === undefined) {
     // The first failing row decides: 2.5 (another panel), 3.1 (a transcript
     // that doesn't decode or fails a transcript-level check), then 3.2

@@ -86,9 +86,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /**
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
- * versions 3 to 5's cells of every tier, as the definition states them.
+ * versions 3 to 6's cells of every tier, as the definition states them.
  * 2.1's rules keep it from 1 to 256, as `sortTallyOpenings` requires: a
- * non-empty electorate, and under versions 3 to 5 the `cells` rule, which
+ * non-empty electorate, and under versions 3 to 6 the `cells` rule, which
  * caps the total and gives every tier at least one cell.
  */
 export function partitionSize(definition: VerifiedDefinition): number {
@@ -98,6 +98,7 @@ export function partitionSize(definition: VerifiedDefinition): number {
     case 3:
     case 4:
     case 5:
+    case 6:
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     default: {
       const unread: never = definition;
@@ -134,6 +135,10 @@ export function tallyChecks(
   // unverifiable, never failed, so releases agree (2.3; T-36).
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
+  // Under definition version 6 tally-opening version 1 counts ballot version
+  // 4's default half, whose tally rules this release doesn't read yet
+  // (P2-16 part 4): never passed.
+  if (definition.version === 6) return { row: { status: "unverifiable", code: "not-implemented" } };
   if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
   const positions: number[] = [];
   const payloads: Uint8Array[] = [];

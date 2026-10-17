@@ -3,7 +3,7 @@ import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql
-// and 0014_poll_anchor_check.sql; a test checks the two agree. `account_polls` is in
+// and 0015_poll_anchor_check.sql; a test checks the two agree. `account_polls` is in
 // the account class: whose poll it is, never who answered it (ADR 0032, rule
 // 15; T-10). `poll_creation_txs` is operational: the creation key's public
 // transactions, naming no account, poll or election.

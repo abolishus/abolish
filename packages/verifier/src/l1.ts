@@ -430,8 +430,7 @@ export function checkpointWords(
   if (electionId.length !== 32) throw new RangeError("an election identifier is 32 bytes");
   const root = storageRoot(l1);
   return segments.map((s) => {
-    if (!Number.isInteger(s) || s < 0 || s > 0xffffffff)
-      throw new RangeError("a segment is a u32");
+    if (!Number.isInteger(s) || s < 0 || s > 0xffffffff) throw new RangeError("a segment is a u32");
     return storageWord(l1.nodes.get(root, keccak_256(checkpointSlot(electionId, s))));
   });
 }

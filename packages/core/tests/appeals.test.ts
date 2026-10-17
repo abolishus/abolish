@@ -68,9 +68,10 @@ async function poll(author?: string) {
   const id = newAccountId();
   await app`
     INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at, submitted_at,
-      creator_address, create_tx_hash, election_id, created_block)
+      creator_address, create_tx_hash, election_id, created_block, l1_origin_timestamp,
+      anchors_checked_block)
     VALUES (${id}, ${user}, 'open', '{}', now(), now(), now(), ${randomBytes(20)},
-      ${randomBytes(32)}, ${electionId}, 1)`;
+      ${randomBytes(32)}, ${electionId}, 1, 1, 1)`;
   return { id, user, electionId };
 }
 

@@ -917,8 +917,15 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
     // Even with a registered key set (none is returned beside an author
     // panel): ballot version 4's admission and version 6's tally rules come
     // with P2-16 part 4's later parts.
-    // Under the membership key this release pins, which 1.3 checks first.
-    const pinnedKey = { membership_vk_hash: membershipVkHash() };
+    // Under the membership key this release pins, which 1.3 checks first,
+    // and with no cell of root 0, which anyone proves membership of.
+    const pinnedKey = {
+      membership_vk_hash: membershipVkHash(),
+      electorate: minimal.electorate.map((t) => ({
+        ...t,
+        cells: t.cells.map((c) => ({ ...c, root: 1n })),
+      })),
+    };
     const record = decodeDefinition(hex(v6For(closed.anchor, {}, pinnedKey)));
     const notImplemented = { status: "unverifiable", code: "not-implemented" };
     expect(judgeFor(record, [])).toEqual(notImplemented);

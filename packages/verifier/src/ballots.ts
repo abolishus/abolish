@@ -547,7 +547,6 @@ export function steppedJudgeFor(
     !equal(d.membership_vk_hash, membershipVkHash())
   )
     return NOT_REACHED;
-  if (definition.version === 6) return NOT_IMPLEMENTED;
   if (definition.version === 1) {
     const electorate = definition.value.electorate;
     if (electorate.some((g) => g.root === 0n)) return NOT_REACHED;
@@ -571,6 +570,7 @@ export function steppedJudgeFor(
   }
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
+  if (definition.version === 6) return NOT_IMPLEMENTED;
   if (definition.version === 5) {
     const election = questionBallotElection(definition.value, registered);
     return (payload) => {

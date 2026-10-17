@@ -390,8 +390,11 @@ export function profileCombinationRule(
   // neither does a version-6 pin on a value without version 6's fields.
   if (definition === undefined || ![1, 3, 4, 5, 6].includes(definition))
     return "profile-combination";
-  if (definition === 6) {
-    if (!("results_mode" in d)) return "profile-combination";
+  // The value's own fields and its pin must agree, either way round: a
+  // version-6 value judged by another version's rules would skip its
+  // results mode and author panel.
+  if ((definition === 6) !== "results_mode" in d) return "profile-combination";
+  if (definition === 6 && "results_mode" in d) {
     // A live poll fails until the verifier checks its running totals (7.5,
     // 7.6) and the live restrictions (P2-15 part 3), and an author panel
     // until the author transcript's chosen-byte channel is closed or

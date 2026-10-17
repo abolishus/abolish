@@ -135,11 +135,11 @@ export function tallyChecks(
   // unverifiable, never failed, so releases agree (2.3; T-36).
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
+  if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
   // Under definition version 6 tally-opening version 1 counts ballot version
   // 4's default half, whose tally rules this release doesn't read yet
   // (P2-16 part 4): never passed.
   if (definition.version === 6) return { row: { status: "unverifiable", code: "not-implemented" } };
-  if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
   const positions: number[] = [];
   const payloads: Uint8Array[] = [];
   for (const [at, encoded] of entries.entries()) {

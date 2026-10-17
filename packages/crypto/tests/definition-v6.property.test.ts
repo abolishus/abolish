@@ -479,9 +479,30 @@ describe("2.3's profile combination under version 6", () => {
         );
   });
 
-  test("a version-6 pin on a value without version 6's fields fails", () => {
+  test("a version-6 pin on a value without version 6's fields fails, and the reverse", () => {
     expect(profileCombinationRule({ ...typicalV5, profile: v6().profile })).toBe(
       "profile-combination",
     );
+    // A live version-6 value pinned as version 5 is never judged by version
+    // 5's rules, which would skip its results mode.
+    const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+    for (const definition of [1, 3, 4, 5])
+      expect(
+        profileCombinationRule(
+          v6({ [RECORD_TYPES.electionDefinition]: definition, [RECORD_TYPES.ballot]: 3 }, live),
+        ),
+      ).toBe("profile-combination");
+    expect(
+      profileCombinationRule(
+        v6(
+          {
+            [RECORD_TYPES.electionDefinition]: 5,
+            [RECORD_TYPES.ballot]: 3,
+            [RECORD_TYPES.spoiledBallotOpening]: 2,
+          },
+          { results_mode: RESULTS_MODES.sealed },
+        ),
+      ),
+    ).toBe("profile-combination");
   });
 });

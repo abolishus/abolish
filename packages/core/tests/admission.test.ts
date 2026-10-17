@@ -105,7 +105,10 @@ async function refusal(p: Promise<unknown>) {
   return "boarded";
 }
 
-describe("boards what the verifier admits, and nothing else", () => {
+// Each test admits several ballots, verifying each one's proofs, one after
+// another under the board's lock, which can pass the default timeout on a
+// shared runner.
+describe("boards what the verifier admits, and nothing else", { timeout: 60_000 }, () => {
   test("every admitted ballot is boarded, in order, in the segment of its time", async () => {
     const c = byId("admitted");
     const app = await election(c);

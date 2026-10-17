@@ -5,5 +5,11 @@
     "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["src", "tests", ".storybook", "vite.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    ".storybook",
+    "vite.config.ts",
+    "../../packages/membership-prover/src/snarkjs.d.ts"
+  ]
 }

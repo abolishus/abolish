@@ -8,6 +8,8 @@ import "../../src/worker-policy.ts";
 
 import { STAGING } from "../../src/deployment.ts";
 import { loadElection } from "../../src/load.ts";
+import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
+import { proveMembership } from "../../src/prover-client.ts";
 import { BallotWorker } from "../../src/worker-client.ts";
 
 const worker = new BallotWorker();
@@ -45,6 +47,49 @@ const harness = {
       loaded.displayText,
     );
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
+  },
+  /**
+   * Loads the artifacts from the client's own origin (through its cache) and
+   * proves membership through a prover worker, with every step it reported.
+   */
+  async prove(
+    secret: string,
+    leaves: readonly string[],
+    definitionHash: string,
+    tier: number,
+    root: string,
+    message: string,
+  ): Promise<string> {
+    const progress: [number, number][] = [];
+    let result: unknown;
+    try {
+      const artifacts = await loadProverArtifacts({
+        base: import.meta.url,
+        fetch: (url, init) => fetch(url, init),
+        caches: globalThis.caches,
+      });
+      result = await proveMembership(
+        worker,
+        {
+          secret: fromHex(secret),
+          leaves: leaves.map(BigInt),
+          definitionHash: fromHex(definitionHash),
+          tier,
+          root: BigInt(root),
+          message: fromHex(message),
+        },
+        artifacts,
+        (done, of) => progress.push([done, of]),
+      );
+    } catch (e) {
+      result = {
+        thrown: e instanceof Error ? e.name : "?",
+        problem: (e as { problem?: string }).problem,
+      };
+    }
+    return JSON.stringify({ result, progress }, (_, v: unknown) =>
+      v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
+    );
   },
   /** Stops the worker, then reports how a request fares: at once, or at its timeout. */
   async stopThenCheck(): Promise<string> {

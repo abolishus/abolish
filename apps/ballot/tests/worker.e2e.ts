@@ -18,10 +18,14 @@ import {
   type ElectionDefinition,
   encodeDisplayText,
   encodeElectionDefinition,
+  membershipProverInput,
+  verifyMembershipProof,
 } from "@abolishus/crypto";
 import { type Browser, chromium, type Page } from "playwright";
 import { build, preview, type PreviewServer } from "vite-plus";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
+
+import { PROVER_ARTIFACT_NAMES, PROVER_CACHE } from "../src/prover-artifacts.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vectors = (name: string) =>
@@ -387,4 +391,139 @@ describe("opening an election from staging's origins", () => {
     await serve({ textStatus: 451 });
     await expect(open()).resolves.toEqual({ ok: false, problem: "withheld" });
   });
+});
+
+describe("proving membership", () => {
+  // docs/spec/vectors/membership-prover.json: Semaphore 4.14.3's identities
+  // over Abolish tier trees (P2-21 part 2).
+  interface ProverVectors {
+    readonly definitionHash: string;
+    readonly members: readonly { readonly secret: string }[];
+    readonly trees: readonly {
+      readonly id: string;
+      readonly tier: number;
+      readonly leaves: readonly string[];
+      readonly root: string;
+    }[];
+    readonly cases: readonly {
+      readonly member: number;
+      readonly tree: string;
+      readonly message: string;
+      readonly input: { readonly merkleProofIndex: string };
+    }[];
+  }
+  const loadCase = async () => {
+    const v = JSON.parse(
+      await readFile(
+        new URL("../../../docs/spec/vectors/membership-prover.json", import.meta.url),
+        "utf8",
+      ),
+    ) as ProverVectors;
+    const c = v.cases[0];
+    const tree = v.trees.find((t) => t.id === c?.tree);
+    const secret = v.members[c?.member ?? -1]?.secret;
+    if (c === undefined || tree === undefined || secret === undefined) throw new Error("no case");
+    return { ...c, tree, secret, definitionHash: v.definitionHash };
+  };
+  type Case = Awaited<ReturnType<typeof loadCase>>;
+  let proving: Case;
+  beforeAll(async () => {
+    proving = await loadCase();
+  });
+
+  const prove = (c: Case, leaves = c.tree.leaves) =>
+    page
+      .evaluate(
+        ([secret, l, h, tier, root, message]) =>
+          (
+            globalThis as unknown as {
+              ballotHarness: {
+                prove(
+                  ...args: [string, readonly string[], string, number, string, string]
+                ): Promise<string>;
+              };
+            }
+          ).ballotHarness.prove(secret, l, h, tier, root, message),
+        [c.secret, leaves, c.definitionHash, c.tree.tier, c.tree.root, c.message] as const,
+      )
+      .then(
+        (json) =>
+          JSON.parse(json) as {
+            result: { ok?: boolean; proof?: string; problem?: string; thrown?: string };
+            progress: [number, number][];
+          },
+      );
+
+  const signals = (c: Case) =>
+    membershipProverInput(fromHex(c.secret), c.tree.leaves.map(BigInt), {
+      definitionHash: fromHex(c.definitionHash),
+      tier: c.tree.tier,
+      root: BigInt(c.tree.root),
+      message: fromHex(c.message),
+    }).signals;
+
+  const artifactRequests = () =>
+    requests.filter((url) => /\/assets\/semaphore-32-[0-9a-f]{16}\.(zkey|wasm)$/.test(url));
+
+  test("proves in a prover worker of its own, under the client's CSP, with nothing requested but its own files", async () => {
+    const { result, progress } = await prove(proving);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(verifyMembershipProof(fromHex(result.proof ?? ""), signals(proving))).toBe(true);
+    // Real progress, every step once and in order, from none to all.
+    expect(progress).toEqual(Array.from({ length: 11 }, (_, i) => [i, 10]));
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    for (const url of requests) {
+      expect(new URL(url).origin).toBe(origin);
+      expect(new URL(url).pathname).toMatch(
+        /^\/(tests\/harness\/index\.html|assets\/[\w-]+\.js|assets\/semaphore-32-[0-9a-f]{16}\.(zkey|wasm))$/,
+      );
+    }
+    expect(requests.filter((url) => /\/assets\/prover-[\w-]+\.js$/.test(url))).toHaveLength(1);
+    expect(
+      artifactRequests()
+        .map((url) => new URL(url).pathname)
+        .sort(),
+    ).toEqual(
+      [`/assets/${PROVER_ARTIFACT_NAMES.wasm}`, `/assets/${PROVER_ARTIFACT_NAMES.zkey}`].sort(),
+    );
+  }, 120_000);
+
+  test("fetches the artifacts once and proves again from the cache, into another proof", async () => {
+    const first = await prove(proving);
+    const fetched = artifactRequests().length;
+    const second = await prove(proving);
+    expect(fetched).toBe(2);
+    expect(artifactRequests()).toHaveLength(2);
+    expect(second.result.ok).toBe(true);
+    expect(verifyMembershipProof(fromHex(second.result.proof ?? ""), signals(proving))).toBe(true);
+    // Re-randomised each time from the ballot worker's CSPRNG.
+    expect(second.result.proof).not.toBe(first.result.proof);
+  }, 180_000);
+
+  test("drops a cached key that isn't the pinned one, and proves with the key fetched again", async () => {
+    await prove(proving);
+    const zkeyUrl = `${origin}/assets/${PROVER_ARTIFACT_NAMES.zkey}`;
+    await page.evaluate(
+      async ([name, url]) => {
+        const cache = await caches.open(name);
+        await cache.put(url, new Response(new Uint8Array(1024)));
+      },
+      [PROVER_CACHE, zkeyUrl] as const,
+    );
+    const before = artifactRequests().length;
+    const { result } = await prove(proving);
+    expect(result.ok).toBe(true);
+    expect(artifactRequests().slice(before)).toEqual([zkeyUrl]);
+  }, 180_000);
+
+  test("refuses a secret whose commitment isn't a leaf, without a proof", async () => {
+    const without = proving.tree.leaves.filter(
+      (_, i) => i !== Number(proving.input.merkleProofIndex),
+    );
+    const { result, progress } = await prove(proving, without);
+    expect(result).toEqual({ ok: false, problem: "not-a-member" });
+    // The prover never got a witness to make a step of.
+    expect(progress.filter(([done]) => done > 0)).toEqual([]);
+  }, 120_000);
 });

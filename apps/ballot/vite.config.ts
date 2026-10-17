@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
@@ -24,6 +25,95 @@ const fontLicenses: Plugin = {
   },
 };
 
+// The prover's proving key and witness calculator, from
+// packages/membership-prover's vendored copies (which vectors-provenance
+// re-fetches), beside the scripts under names carrying their own sha256, the
+// names src/prover-artifacts.ts derives from the pins. The bundle check
+// refuses any other .zkey or .wasm bytes (T-07, T-12).
+const ARTIFACTS = new URL(
+  "../../packages/membership-prover/artifacts/snark-artifacts/",
+  import.meta.url,
+);
+const proverArtifacts: Plugin = {
+  name: "prover-artifacts",
+  apply: "build",
+  generateBundle() {
+    for (const ext of ["zkey", "wasm"]) {
+      const source = readFileSync(new URL(`semaphore-32.${ext}`, ARTIFACTS));
+      const sha256 = createHash("sha256").update(source).digest("hex");
+      this.emitFile({
+        type: "asset",
+        fileName: `assets/semaphore-32-${sha256.slice(0, 16)}.${ext}`,
+        source,
+      });
+    }
+  },
+};
+
+// The prover worker bundles snarkjs's and ffjavascript's prebuilt browser
+// builds, and each holds one path to an API the worker may not have (T-43):
+// fastfile's read of a URL through `fetch`, and ffjavascript's thread pool of
+// `blob:` Workers, which the CSP refuses and the client never uses (it
+// proves single-threaded and hands snarkjs bytes, never URLs). Each is cut
+// out at its exact text in the pinned version; a version whose text differs
+// fails the build rather than ship the API. js-sha3's licence comment, which
+// the minifier keeps, names its repository as a link the bundle check would
+// read as a request; it keeps its text, without the scheme.
+const PROVER_STUBS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
+  "/snarkjs@0.7.5/node_modules/snarkjs/build/browser.esm.js": [
+    [
+      `const buff = await fetch(o).then( function(res) {
+                return res.arrayBuffer();
+            }).then(function (ab) {
+                return new Uint8Array(ab);
+            });
+            o = {
+                type: "mem",
+                data: buff
+            };`,
+      `throw new Error("fastfile: the ballot client reads no URLs");`,
+    ],
+    ["[js-sha3]{@link https://github.com/emn178/js-sha3}", "js-sha3 (github.com/emn178/js-sha3)"],
+  ],
+  "/ffjavascript@0.3.1/node_modules/ffjavascript/build/browser.esm.js": [
+    [
+      `{
+    if(globalThis?.Blob) {
+        const threadBytes= new TextEncoder().encode(threadStr);
+        const workerBlob = new Blob([threadBytes], { type: "application/javascript" }) ;
+        workerSource = URL.createObjectURL(workerBlob);
+    } else {
+        workerSource = "data:application/javascript;base64," + globalThis.btoa(threadStr);
+    }
+}`,
+      "",
+    ],
+    [
+      `if(!globalThis?.Worker) {
+        singleThread = true;
+    }`,
+      "singleThread = true;",
+    ],
+    [
+      "tm.workers[i] = new Worker(workerSource);",
+      `throw new Error("ffjavascript: the ballot client runs no threads");`,
+    ],
+  ],
+};
+const proverStubs: Plugin = {
+  name: "prover-stubs",
+  transform(code, id) {
+    const file = Object.keys(PROVER_STUBS).find((suffix) => id.endsWith(suffix));
+    if (file === undefined) return undefined;
+    let out = code;
+    for (const [from, to] of PROVER_STUBS[file] ?? []) {
+      if (out.split(from).length !== 2) throw new Error(`prover-stubs: ${file} has changed`);
+      out = out.replace(from, () => to);
+    }
+    return { code: out, map: null };
+  },
+};
+
 // Every story in a real browser: its play function, then axe (`test:storybook`).
 // `viewport` names one of the preview's viewports (none: the default).
 function storybook(name: string, viewport?: string) {
@@ -46,7 +136,8 @@ function storybook(name: string, viewport?: string) {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), fontLicenses],
+  plugins: [tailwindcss(), fontLicenses, proverArtifacts],
+  worker: { plugins: () => [proverStubs] },
   // Relative URLs, so the same bytes work at any path: abolishus.eth, a
   // subdomain IPFS gateway and our domains serve one hash (T-41, T-49). Path
   // gateways share one origin across every CID, so the client refuses to run

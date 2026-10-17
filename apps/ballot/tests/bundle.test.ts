@@ -17,6 +17,7 @@ import { build, type Plugin } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { BALLOT_CSP, parseCsp } from "./csp.ts";
+import { PROVER_ARTIFACT_NAMES } from "../src/prover-artifacts.ts";
 
 const CONNECT_ORIGINS = (BALLOT_CSP["connect-src"] ?? []).filter((s) => s.startsWith("https://"));
 
@@ -293,6 +294,12 @@ describe("bundle contents", () => {
     expect(unpinned.map(([name]) => name)).toEqual([]);
   });
 
+  test("emits the prover's key and witness calculator under the names the page fetches", () => {
+    expect([...files.keys()].filter((name) => /\.(zkey|wasm)$/.test(name)).sort()).toEqual(
+      [`assets/${PROVER_ARTIFACT_NAMES.zkey}`, `assets/${PROVER_ARTIFACT_NAMES.wasm}`].sort(),
+    );
+  });
+
   test("ships the licences of the code and fonts it redistributes", () => {
     expect(files.get("third-party-licenses.md")).toMatch(/## react-dom - [\d.]+ \(MIT\)/);
     const fonts = files.get("font-licenses.txt") ?? "";
@@ -367,12 +374,12 @@ describe("the Web Worker", () => {
     expect(html()).not.toMatch(/modulepreload/i);
   });
 
-  // The ballot worker, and the prover worker once the client has one: the
-  // only two scripts ballot-worker may mint a URL for.
-  test("is one script of its own, beside at most the prover worker, which the page doesn't load", () => {
+  // The ballot worker and the prover worker: the only two scripts
+  // ballot-worker may mint a URL for.
+  test("is one script of its own, beside the prover worker, which the page doesn't load", () => {
     const names = unloaded().map(([name]) => name);
     expect(names.filter((name) => BALLOT_WORKER.test(name))).toHaveLength(1);
-    expect(names.filter((name) => PROVER_WORKER.test(name)).length).toBeLessThanOrEqual(1);
+    expect(names.filter((name) => PROVER_WORKER.test(name))).toHaveLength(1);
     expect(names.filter((name) => !BALLOT_WORKER.test(name) && !PROVER_WORKER.test(name))).toEqual(
       [],
     );

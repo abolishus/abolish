@@ -6,7 +6,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { allowWorkerUrl, WORKER_URL } from "../src/worker-policy.ts";
+import { allowWorkerUrl, PROVER_URL, WORKER_URL } from "../src/worker-policy.ts";
 import { parseRequest, PROTOCOL_VERSION, requestId, responseId } from "../src/worker/protocol.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -87,10 +87,79 @@ describe("requests", () => {
   });
 });
 
+describe("membership proof requests", () => {
+  const { port1 } = new MessageChannel();
+  const prove = () => ({
+    v: PROTOCOL_VERSION,
+    id: 9,
+    kind: "prove-membership",
+    secret: new Uint8Array(32).fill(2),
+    leaves: [1n, 2n, 3n],
+    definitionHash: new Uint8Array(32).fill(3),
+    tier: 0,
+    root: 5n,
+    message: new Uint8Array(32).fill(4),
+    prover: port1,
+  });
+  port1.close();
+
+  test("accepts a well-formed request as it is, its port included", () => {
+    const parsed = parseRequest(prove());
+    expect(parsed).toEqual(prove());
+    expect(parsed?.kind === "prove-membership" && parsed.prover).toBe(port1);
+  });
+
+  test("accepts any leaves and statement values: their checks are membershipProverInput's", () => {
+    fc.assert(
+      fc.property(fc.array(fc.bigInt()), fc.bigInt(), fc.integer(), (leaves, root, tier) => {
+        const r = { ...prove(), leaves, root, tier };
+        expect(parseRequest(r)).toEqual(r);
+      }),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a long secret", { secret: new Uint8Array(33) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["leaves that aren't a list", { leaves: new BigUint64Array(3) }],
+    ["a leaf that isn't a bigint", { leaves: [1n, 2, 3n] }],
+    ["a leaf as a decimal string", { leaves: ["1"] }],
+    ["a short definition hash", { definitionHash: new Uint8Array(31) }],
+    ["a fractional tier", { tier: 0.5 }],
+    ["a tier as a bigint", { tier: 0n }],
+    ["a root that isn't a bigint", { root: 5 }],
+    ["a short message", { message: new Uint8Array(31) }],
+    ["a prover that isn't a port", { prover: {} }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: 2 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...prove(), ...change })).toBeUndefined();
+  });
+
+  test.each(["secret", "leaves", "definitionHash", "tier", "root", "message", "prover"])(
+    "refuses a request without %s",
+    (key) => {
+      const r: Record<string, unknown> = prove();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    },
+  );
+
+  test("refuses a check-election request's keys under the proof's kind, and the reverse", () => {
+    expect(parseRequest({ ...request(), kind: "prove-membership" })).toBeUndefined();
+    expect(parseRequest({ ...prove(), kind: "check-election" })).toBeUndefined();
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "error" })).toBe(4);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 5, kind: "prove-membership", result: {} })).toBe(
+      5,
+    );
   });
 
   test("ignores another version's response or kind", () => {
@@ -101,9 +170,11 @@ describe("responses", () => {
 });
 
 describe("the ballot-worker policy", () => {
-  test("mints the worker's own script URL", () => {
+  test("mints the two workers' own script URLs", () => {
     expect(WORKER_URL).toMatch(/worker/);
     expect(allowWorkerUrl(WORKER_URL)).toBe(WORKER_URL);
+    expect(PROVER_URL).toMatch(/prover/);
+    expect(allowWorkerUrl(PROVER_URL)).toBe(PROVER_URL);
   });
 
   test("refuses every other URL", () => {
@@ -113,13 +184,15 @@ describe("the ballot-worker policy", () => {
       `${WORKER_URL}#x`,
       ` ${WORKER_URL}`,
       WORKER_URL.toUpperCase(),
+      `${PROVER_URL}?x`,
+      ` ${PROVER_URL}`,
       "data:text/javascript,postMessage(1)",
       "blob:null/0",
     ])
       expect(() => allowWorkerUrl(url)).toThrow(TypeError);
     fc.assert(
       fc.property(fc.string(), (url) => {
-        fc.pre(url !== WORKER_URL);
+        fc.pre(url !== WORKER_URL && url !== PROVER_URL);
         expect(() => allowWorkerUrl(url)).toThrow(TypeError);
       }),
       { numRuns },

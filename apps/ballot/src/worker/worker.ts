@@ -5,7 +5,14 @@
 // message or stack, which could carry a secret.
 
 import { checkElection } from "../election.ts";
-import { parseRequest, PROTOCOL_VERSION, requestId, type WorkerResponse } from "./protocol.ts";
+import { proveMembership } from "./prove.ts";
+import {
+  parseRequest,
+  PROTOCOL_VERSION,
+  requestId,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./protocol.ts";
 
 // DedicatedWorkerGlobalScope isn't in the DOM library this package compiles with.
 const scope = globalThis as unknown as {
@@ -13,17 +20,9 @@ const scope = globalThis as unknown as {
   postMessage(message: WorkerResponse): void;
 };
 
-scope.onmessage = ({ data }) => {
-  const request = parseRequest(data);
-  if (request === undefined) {
-    // Without an id there is no request to answer; the page's timeout ends it.
-    const id = requestId(data);
-    if (id !== undefined) scope.postMessage({ v: PROTOCOL_VERSION, id, kind: "error" });
-    return;
-  }
-  let response: WorkerResponse;
-  try {
-    response = {
+async function answer(request: WorkerRequest): Promise<WorkerResponse> {
+  if (request.kind === "check-election")
+    return {
       v: PROTOCOL_VERSION,
       id: request.id,
       kind: "check-election",
@@ -34,8 +33,24 @@ scope.onmessage = ({ data }) => {
         request.displayText,
       ),
     };
-  } catch {
-    response = { v: PROTOCOL_VERSION, id: request.id, kind: "error" };
+  return {
+    v: PROTOCOL_VERSION,
+    id: request.id,
+    kind: "prove-membership",
+    result: await proveMembership(request),
+  };
+}
+
+scope.onmessage = ({ data }) => {
+  const request = parseRequest(data);
+  if (request === undefined) {
+    // Without an id there is no request to answer; the page's timeout ends it.
+    const id = requestId(data);
+    if (id !== undefined) scope.postMessage({ v: PROTOCOL_VERSION, id, kind: "error" });
+    return;
   }
-  scope.postMessage(response);
+  answer(request).then(
+    (response) => scope.postMessage(response),
+    () => scope.postMessage({ v: PROTOCOL_VERSION, id: request.id, kind: "error" }),
+  );
 };

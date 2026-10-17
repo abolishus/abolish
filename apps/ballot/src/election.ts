@@ -1,20 +1,24 @@
 // What the ballot client shows of an election, once @abolishus/crypto's
-// `checkElectionToShow` has passed it: the definition decodes, names the
-// election in the ballot link, hashes to the hash the L2 registry holds for it
-// and is well formed, and the display text matches
-// the definition's commitment and the spec's rules (docs/spec/display-text.md,
-// Checks). Otherwise whoever serves the text could swap option labels for one
-// voter, who would then honestly encrypt the index they picked under a false
-// label (T-34, T-41, G-6). The checks live in the crypto-review gate; this
-// file only turns a passed election into what the screens show. It runs in
-// the Web Worker, beside the code that will encrypt the ballot.
+// `checkElectionRecordToShow` has passed it: the definition (version 1, or
+// version 5, which every poll P2-22 creates) decodes, names the election in
+// the ballot link, hashes to the hash the L2 registry holds for it and is well
+// formed, and the display text matches the definition's commitment and the
+// spec's rules, every question with exactly its options
+// (docs/spec/display-text.md, Checks). Otherwise whoever serves the text could
+// swap option labels, or two questions, for one voter, who would then
+// honestly encrypt the index they picked under a false label (T-34, T-41,
+// G-6). The checks live in the crypto-review gate; this file only turns a
+// passed election into what the screens show. It runs in the Web Worker,
+// beside the code that will encrypt the ballot.
 
 import {
-  checkElectionToShow,
+  checkElectionRecordToShow,
+  DecodeError,
   decodeElectionDefinition,
-  ELECTION_TYPES,
+  decodeElectionDefinitionV5,
   electionDefinitionHash,
-  type ShowRefusal,
+  electionDefinitionV5Hash,
+  type ShowRecordRefusal,
 } from "@abolishus/crypto";
 
 export interface OptionText {
@@ -22,14 +26,32 @@ export interface OptionText {
   readonly description: string;
 }
 
+/** One question's text in one language. */
+export interface QuestionText {
+  readonly question: string;
+  /** May be empty. */
+  readonly description: string;
+  /** In option order: the index here is the index a ballot encrypts. */
+  readonly options: readonly OptionText[];
+}
+
 /** One language's text, as the display-text record holds it. */
 export interface Translation {
   /** A lowercase BCP 47 tag, as the record holds it (`en`, `es-419`). */
   readonly language: string;
-  readonly question: string;
+  /** The poll's title and description; both empty for a version-1 election, whose text has neither. */
+  readonly title: string;
   readonly description: string;
-  /** In option order: the index here is the index a ballot encrypts. */
-  readonly options: readonly OptionText[];
+  /** In question order, each with exactly its question's option count. */
+  readonly questions: readonly QuestionText[];
+}
+
+/** A question's limits, as the definition sets them and its validity proof enforces them. */
+export interface QuestionRules {
+  /** The fewest options a counted ballot selects: 0 lets the question be left blank. */
+  readonly minSelections: number;
+  /** The most; at least 1 and at most the option count. */
+  readonly maxSelections: number;
 }
 
 /** An election that passed every check, in the form the screens show it. */
@@ -38,13 +60,14 @@ export interface CheckedElection {
   readonly electionId: string;
   /** Lowercase hex: what a voter compares with the election registry (T-34). */
   readonly definitionHash: string;
-  readonly electionType: "plurality" | "approval";
-  readonly minSelections: number;
-  readonly maxSelections: number;
+  /** The definition's record version: 1, or 5 for a poll of questions. */
+  readonly version: 1 | 5;
+  /** In question order: one for a version-1 election. */
+  readonly questions: readonly QuestionRules[];
   /** Seconds since the Unix epoch. */
   readonly opensAt: bigint;
   readonly closesAt: bigint;
-  /** At least one, sorted by language tag, each with exactly the definition's option count. */
+  /** At least one, sorted by language tag, each with exactly the definition's questions and option counts. */
   readonly translations: readonly Translation[];
 }
 
@@ -54,7 +77,7 @@ export interface CheckedElection {
  * refusal can show both fingerprints side by side (T-34).
  */
 export type ElectionRefusal =
-  | Exclude<ShowRefusal, { readonly problem: "unregistered-definition" }>
+  | Exclude<ShowRecordRefusal, { readonly problem: "unregistered-definition" }>
   | {
       readonly problem: "unregistered-definition";
       /** Lowercase hex: the hash of the definition that was served. */
@@ -74,6 +97,9 @@ const toHex = (bytes: Uint8Array) =>
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const text = (bytes: Uint8Array) => utf8.decode(bytes);
 
+const optionsOf = (options: readonly { label: Uint8Array; description: Uint8Array }[]) =>
+  options.map((o) => ({ label: text(o.label), description: text(o.description) }));
+
 /**
  * Checks the election the client was asked to show: `electionId` is the one
  * in the ballot link, `registeredHash` the definition hash the L2 election
@@ -87,7 +113,7 @@ export function checkElection(
   definitionBytes: Uint8Array,
   displayTextBytes: Uint8Array,
 ): ElectionCheck {
-  const checked = checkElectionToShow(
+  const checked = checkElectionRecordToShow(
     electionId,
     registeredHash,
     definitionBytes,
@@ -95,35 +121,72 @@ export function checkElection(
   );
   if (!checked.ok) {
     if (checked.problem !== "unregistered-definition") return checked;
-    // The check decoded this definition before comparing its hash, so it decodes again here.
-    const served = electionDefinitionHash(decodeElectionDefinition(definitionBytes));
-    return { ok: false, problem: checked.problem, servedHash: toHex(served) };
+    return { ok: false, problem: checked.problem, servedHash: toHex(servedHash(definitionBytes)) };
+  }
+  if (checked.version === 1) {
+    const { definition, displayText } = checked;
+    return {
+      ok: true,
+      election: {
+        electionId: toHex(definition.election_id),
+        definitionHash: toHex(electionDefinitionHash(definition)),
+        version: 1,
+        questions: [
+          { minSelections: definition.min_selections, maxSelections: definition.max_selections },
+        ],
+        opensAt: definition.opens_at,
+        closesAt: definition.closes_at,
+        translations: displayText.translations.map((t) => ({
+          language: text(t.language),
+          title: "",
+          description: "",
+          questions: [
+            {
+              question: text(t.question),
+              description: text(t.description),
+              options: optionsOf(t.options),
+            },
+          ],
+        })),
+      },
+    };
   }
   const { definition, displayText } = checked;
   return {
     ok: true,
     election: {
       electionId: toHex(definition.election_id),
-      definitionHash: toHex(electionDefinitionHash(definition)),
-      electionType: electionType(definition.election_type),
-      minSelections: definition.min_selections,
-      maxSelections: definition.max_selections,
+      definitionHash: toHex(electionDefinitionV5Hash(definition)),
+      version: 5,
+      questions: definition.questions.map((q) => ({
+        minSelections: q.min_selections,
+        maxSelections: q.max_selections,
+      })),
       opensAt: definition.opens_at,
       closesAt: definition.closes_at,
       translations: displayText.translations.map((t) => ({
         language: text(t.language),
-        question: text(t.question),
+        title: text(t.title),
         description: text(t.description),
-        options: t.options.map((o) => ({ label: text(o.label), description: text(o.description) })),
+        questions: t.questions.map((q) => ({
+          question: text(q.question),
+          description: text(q.description),
+          options: optionsOf(q.options),
+        })),
       })),
     },
   };
 }
 
-// Named one by one, so a counting rule a later version adds is an error here
-// rather than shown as another.
-function electionType(value: number): CheckedElection["electionType"] {
-  if (value === ELECTION_TYPES.plurality) return "plurality";
-  if (value === ELECTION_TYPES.approval) return "approval";
-  throw new RangeError(`unknown election type ${value}`);
+/**
+ * The hash of a definition the check decoded, under its own version, before
+ * finding the registry holds another: only versions 1 and 5 get that far.
+ */
+function servedHash(bytes: Uint8Array): Uint8Array {
+  try {
+    return electionDefinitionHash(decodeElectionDefinition(bytes));
+  } catch (error) {
+    if (!(error instanceof DecodeError)) throw error;
+    return electionDefinitionV5Hash(decodeElectionDefinitionV5(bytes));
+  }
 }

@@ -190,12 +190,15 @@ describe("the ballot worker", () => {
       ok: true,
       election: {
         electionId: hex(definition.election_id),
-        electionType: "plurality",
+        version: 1,
         translations: [
-          { language: "en", options: [{ label: "Yes" }, { label: "No" }, { label: "Abstain" }] },
+          {
+            language: "en",
+            questions: [{ options: [{ label: "Yes" }, { label: "No" }, { label: "Abstain" }] }],
+          },
           {
             language: "es-419",
-            options: [{ label: "Sí" }, { label: "No" }, { label: "Abstención" }],
+            questions: [{ options: [{ label: "Sí" }, { label: "No" }, { label: "Abstención" }] }],
           },
         ],
       },

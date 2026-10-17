@@ -81,19 +81,24 @@ describe("the frame under the client's CSP", () => {
     const election: CheckedElection = {
       electionId: "5d".repeat(32),
       definitionHash: POLL.definitionHash,
-      electionType: "plurality",
-      minSelections: 0,
-      maxSelections: 1,
+      version: 1,
+      questions: [{ minSelections: 0, maxSelections: 1 }],
       opensAt: 1_790_000_000n,
       closesAt: 1_792_000_000n,
       translations: [
         {
           language: "en",
-          question: "A question",
+          title: "",
           description: "",
-          options: [
-            { label: "One", description: "" },
-            { label: "Two", description: "" },
+          questions: [
+            {
+              question: "A question",
+              description: "",
+              options: [
+                { label: "One", description: "" },
+                { label: "Two", description: "" },
+              ],
+            },
           ],
         },
       ],

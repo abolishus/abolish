@@ -295,10 +295,10 @@ type BoardInputs =
       readonly l1: L1Evidence;
     };
 
-/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 to 3). */
+/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 to 4). */
 function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
-  return pinned === 1 || pinned === 2 || pinned === 3;
+  return pinned === 1 || pinned === 2 || pinned === 3 || pinned === 4;
 }
 
 /**
@@ -611,7 +611,7 @@ export function verifyBundle(bundle: Bundle): Report {
         : [["8.5", NOT_APPLICABLE] as const]),
       // 1.3 also covers the keys inside the verifier contracts the election
       // uses, which aren't read yet: it can fail here, never pass. Only
-      // ballot versions 1 to 3's key (one key: a version-2 or version-3
+      // ballot versions 1 to 4's key (one key: a version-2 to version-4
       // ballot proves membership of its cell's tree under it) is pinned here; a version
       // this verifier doesn't read may have a key a later release pins, so
       // releases agree (T-36).

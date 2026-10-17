@@ -363,9 +363,9 @@ describe("the sweep command", () => {
     const address = privateKeyToAddress(toKey(key));
     // A creation recorded at the key's next nonce that the node dropped.
     await db.admin`
-      INSERT INTO poll_creation_txs (creator_address, nonce, tx, tx_hash, sent_at)
+      INSERT INTO poll_creation_txs (creator_address, nonce, tx, tx_hash, sent_at, kind)
       VALUES (${Buffer.from(hexToBytes(address))}, 0, ${Buffer.from([1])},
-        ${Buffer.alloc(32, 7)}, now())`;
+        ${Buffer.alloc(32, 7)}, now(), 'create')`;
     await expect(
       sweepCreationKey({ client, sql: app, chainId: CHAIN_ID, key, to: fundingAccount() }),
     ).rejects.toThrow("1 creation(s) the node hasn't included");

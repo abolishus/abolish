@@ -308,6 +308,19 @@ export {
   STUBS_PER_RUN,
 } from "./poll-stubs.ts";
 export {
+  advancePollRegistrations,
+  type PollRegistration,
+  pollRegistration,
+  type PollRegistrationChain,
+  type PollRegistrationOptions,
+  type PollRegistrationReport,
+  REGISTRATION_DEADLINE_MS,
+  REGISTRATION_MARGIN_SECONDS,
+  type RegistrationFailure,
+  REGISTRATIONS_PER_RUN,
+  type RegistrationStatus,
+} from "./poll-registration.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

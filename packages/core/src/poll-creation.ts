@@ -179,18 +179,11 @@ export async function advancePollCreations(
   };
   const late = (sentAt: Date) => now.getTime() - sentAt.getTime() > deadline;
 
-  // 1. Every recorded transaction of this key whose nonce the node hasn't
-  // seen included, whatever became of its poll or its author: a later nonce
-  // can't land before it, so it is sent until it lands or is replaced.
+  // 1. Every recorded transaction of this key the node hasn't included,
+  // creations and registrations alike.
   const nonces = await chain.nonces();
-  const open = await db
-    .select({ tx: pollCreationTxs.tx })
-    .from(pollCreationTxs)
-    .where(
-      and(eq(pollCreationTxs.creatorAddress, creator), gte(pollCreationTxs.nonce, nonces.latest)),
-    )
-    .orderBy(asc(pollCreationTxs.nonce));
-  for (const r of open) if (await send(r.tx)) report.resent++;
+  for (const tx of await unincluded(client, creator, nonces.latest))
+    if (await send(tx)) report.resent++;
 
   // 2. Each submitted poll with a creation: whether it finalized, and as what.
   const recorded = await db
@@ -258,11 +251,16 @@ export async function advancePollCreations(
     const signed = await db.transaction(async (tx) => {
       // One signer at a time, across runs, processes and keys, so the
       // ceiling, which is global, is never passed by two at once.
-      await tx.execute(q`SELECT pg_advisory_xact_lock(hashtextextended('poll-creation', 0))`);
+      await lockSigning(tx);
       const [sentToday] = await tx
         .select({ n: count() })
         .from(pollCreationTxs)
-        .where(gt(pollCreationTxs.sentAt, new Date(now.getTime() - DAY_MS)));
+        .where(
+          and(
+            eq(pollCreationTxs.kind, "create"),
+            gt(pollCreationTxs.sentAt, new Date(now.getTime() - DAY_MS)),
+          ),
+        );
       if (sentToday!.n >= ceiling) {
         report.ceilingReached = true;
         return "ceiling";
@@ -273,15 +271,7 @@ export async function advancePollCreations(
         .where(eq(accountPolls.id, w.id))
         .for("update");
       if (row === undefined || row.state !== "submitted" || row.recorded !== null) return undefined;
-      const [last] = await tx
-        .select({ nonce: max(pollCreationTxs.nonce) })
-        .from(pollCreationTxs)
-        .where(eq(pollCreationTxs.creatorAddress, creator));
-      // The record covers a transaction the node dropped (step 1 sends it
-      // again); the node's pending count, one sent by the key elsewhere.
-      const { pending } = await chain.nonces();
-      const recordedNext = last?.nonce == null ? 0n : last.nonce + 1n;
-      const nonce = pending > recordedNext ? pending : recordedNext;
+      const nonce = await nextNonce(tx, chain);
       const creation = await chain.signCreation(nonce);
       if (creation.hash.length !== 32 || creation.tx.length === 0)
         throw new Error("the chain signed a malformed creation");
@@ -291,6 +281,7 @@ export async function advancePollCreations(
         tx: creation.tx.slice(),
         txHash: creation.hash.slice(),
         sentAt: now,
+        kind: "create",
       });
       await tx
         .update(accountPolls)
@@ -304,4 +295,55 @@ export async function advancePollCreations(
     if (await send(signed.tx)) report.sent++;
   }
   return report;
+}
+
+type Tx = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0];
+
+/**
+ * Takes the lock every signer of the creation key holds while it picks a
+ * nonce and records what it signed, until its transaction commits: the
+ * creation and registration steps share the key's nonces (rule 12).
+ */
+export async function lockSigning(tx: Tx): Promise<void> {
+  await tx.execute(q`SELECT pg_advisory_xact_lock(hashtextextended('poll-creation', 0))`);
+}
+
+/**
+ * The next nonce of `chain`'s key, under `lockSigning`: after every recorded
+ * transaction, whichever step recorded it (a dropped one is sent again, not
+ * replaced), and after the node's pending count (one sent by the key
+ * elsewhere).
+ */
+export async function nextNonce(
+  tx: Tx,
+  chain: Pick<PollCreationChain, "creator" | "nonces">,
+): Promise<bigint> {
+  const [last] = await tx
+    .select({ nonce: max(pollCreationTxs.nonce) })
+    .from(pollCreationTxs)
+    .where(eq(pollCreationTxs.creatorAddress, chain.creator.slice()));
+  const { pending } = await chain.nonces();
+  const recordedNext = last?.nonce == null ? 0n : last.nonce + 1n;
+  return pending > recordedNext ? pending : recordedNext;
+}
+
+/**
+ * Every recorded transaction of `creator` at or above the node's latest
+ * nonce, in nonce order, whatever step recorded it and whatever became of
+ * its poll or author: a later nonce can't land before it, so it is sent
+ * until it lands or is replaced.
+ */
+export async function unincluded(
+  client: Sql,
+  creator: Uint8Array,
+  latest: bigint,
+): Promise<Uint8Array[]> {
+  const rows = await drizzle({ client })
+    .select({ tx: pollCreationTxs.tx })
+    .from(pollCreationTxs)
+    .where(
+      and(eq(pollCreationTxs.creatorAddress, creator.slice()), gte(pollCreationTxs.nonce, latest)),
+    )
+    .orderBy(asc(pollCreationTxs.nonce));
+  return rows.map((r) => r.tx);
 }

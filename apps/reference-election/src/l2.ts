@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import {
   checkCeremonyTranscript,
+  encodeCeremonyRegistration,
   keySetEntry,
   keySetHash,
   type Panel,
@@ -247,10 +248,14 @@ export function ceremonyRegistration(
   const entries = check.registered.map(keySetEntry);
   const setHash = keySetHash(entries);
   const signers = c.seats.filter((t) => check.registered.some((k) => k.index === t.index));
-  const approvals = signers.map((t) =>
-    concatBytes(
-      Uint8Array.of(t.index),
-      signCeremonyRegistration(t.identitySecret, trustees.panel, {
+  return encodeCeremonyRegistration({
+    panelId: d.panel_id,
+    stubHash: stub,
+    ceremonyTranscriptHash: d.ceremony_transcript_hash,
+    keySet: entries,
+    approvals: signers.map((t) => ({
+      index: t.index,
+      signature: signCeremonyRegistration(t.identitySecret, trustees.panel, {
         l2ChainId: d.l2_chain_id,
         trusteeRegistry: l2.trusteeRegistry,
         index: t.index,
@@ -258,19 +263,8 @@ export function ceremonyRegistration(
         ceremonyTranscriptHash: d.ceremony_transcript_hash,
         keySetHash: setHash,
       }),
-    ),
-  );
-  return concatBytes(
-    d.panel_id,
-    stub,
-    d.ceremony_transcript_hash,
-    Uint8Array.of(entries.length),
-    ...entries.map((e) =>
-      concatBytes(Uint8Array.of(e.index), e.kemKeyHash, ...point(e.signingKey).map(word)),
-    ),
-    Uint8Array.of(approvals.length),
-    ...approvals,
-  );
+    })),
+  });
 }
 
 /** The 4-byte selector of the custom error a call reverted with, or `undefined` if it didn't. */

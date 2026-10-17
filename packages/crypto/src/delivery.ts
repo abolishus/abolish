@@ -17,7 +17,7 @@ import {
   type CommittedVoteV4,
   labelOf,
 } from "./ballot-validity.ts";
-import { SEAT_PANELS, type SeatPanel } from "./ballot.ts";
+import { approvedFor, SEAT_PANELS, type SeatPanel } from "./ballot.ts";
 import {
   BN254_R,
   bytesFixed,
@@ -33,12 +33,18 @@ import {
   u8,
   u32,
 } from "./codec.ts";
-import type { RegisteredKeys } from "./ceremony.ts";
+import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
 import { objectCid, readObject } from "./content-addressing.ts";
 import { ds } from "./domain-separation.ts";
+import { type ElectionDefinitionV6, electionDefinitionV6Rule } from "./election-definition.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
+import {
+  decodeElectionDefinitionV6,
+  electionDefinitionV6Hash,
+  encodeElectionDefinitionV6,
+} from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import { type BallotPath, ballotWindow } from "./close-statement.ts";
@@ -2352,31 +2358,69 @@ export interface DeliveryCheckV2 {
  * every seat of both panels: each record checked against its own panel's
  * share hashes and registered key set, so a record for one panel's seat `i`
  * never delivers, excludes or contradicts the other's (T-37). Otherwise
- * `checkDelivery`'s. The author panel must be absent (`authorPanelSize` 0,
- * no author keys): its key set comes from its own ceremony's transcript
- * check, approved by its approvals, which this check doesn't take until
- * P2-16 part 4d-3, and until then none is taken on trust, as
- * `checkShareReceiptV4` refuses one.
+ * `checkDelivery`'s. Given `definition`, a well-formed definition whose hash
+ * is `definitionHash`, `registered.default` must be the key set
+ * `checkCeremonyTranscript` returned for its default transcript, and
+ * `registered.author` the one it returned for the author transcript and
+ * `checkAuthorApprovals` then approved under it (empty without an author
+ * panel): a seat outside its panel's set needs no delivery, so a set taken
+ * on trust could drop a seat that withheld its share, or add one no seat
+ * holds (T-37, T-17, T-25). Beside an author panel `definition` is required;
+ * without one it may be omitted, the author key set must then be empty, and
+ * the default set is the caller's.
  */
 export function checkDeliveryV2(
   election: DeliveryElectionV2,
   ballots: readonly DeliveryBallotV4[],
   entries: readonly DeliveryEntry[],
+  definition?: ElectionDefinitionV6,
 ): DeliveryCheckV2 {
-  if (election.authorPanelSize !== 0 || election.registered.author.length !== 0)
+  const name = "checkDeliveryV2";
+  // Read and copied once, so the election checked is the one the check runs
+  // over, whatever a record's getters change while it reads them.
+  const { definitionHash } = election;
+  const e: DeliveryElectionV2 = {
+    ...election,
+    definitionHash:
+      definitionHash instanceof Uint8Array ? Uint8Array.from(definitionHash) : definitionHash,
+    registered: { default: election.registered.default, author: election.registered.author },
+  };
+  if (definition === undefined) {
+    if (e.authorPanelSize !== 0 || e.registered.author.length !== 0)
+      throw new RangeError(`${name}: an author panel's key set needs its definition`);
+    return checkDeliveryV2With(e, ballots, entries);
+  }
+  // One decoded copy of its bytes, so every check below reads the same
+  // definition, whatever the caller's object returns on a later read.
+  const d = decodeElectionDefinitionV6(encodeElectionDefinitionV6(definition));
+  const transcript = checkedTranscriptHash(e.registered.default);
+  if (
+    !(e.definitionHash instanceof Uint8Array) ||
+    hex(electionDefinitionV6Hash(d)) !== hex(e.definitionHash) ||
+    d.panel_size !== e.panelSize ||
+    d.author_keys.length !== e.authorPanelSize
+  )
+    throw new RangeError(`${name}: not the definition of this election`);
+  if (electionDefinitionV6Rule(d) !== undefined)
+    throw new RangeError(`${name}: the definition isn't well-formed`);
+  // The default seats too are the key set its own run registered, so no
+  // caller can drop a default seat from, or add one to, those a ballot must
+  // be delivered to (T-25, T-37).
+  if (transcript === undefined || hex(transcript) !== hex(d.ceremony_transcript_hash))
+    throw new RangeError(`${name}: not the key set of this definition's ceremony`);
+  if (!approvedFor(d, e.registered.author))
     throw new RangeError(
-      "checkDeliveryV2: an author panel's key set comes from its own ceremony (P2-16 part 4d-3)",
+      e.authorPanelSize === 0
+        ? `${name}: the definition has no author panel`
+        : `${name}: not the author panel's approved key set of this definition`,
     );
-  return checkDeliveryV2With(election, ballots, entries);
+  return checkDeliveryV2With(e, ballots, entries);
 }
 
 /**
  * Internal: `checkDeliveryV2` with the author panel's key set taken as given,
- * so author seats' delivery can be tested before P2-16 part 4d-3, which then
- * replaces this. The package entry point doesn't export it. An author seat
- * outside the given key set needs no delivery, as the spec says, so part 4d-3's
- * replacement must take the author key set from the checked transcript, with
- * its quorum, never from the caller (T-37, T-25).
+ * so author seats' delivery can be tested against vectors that carry no
+ * author run. The package entry point doesn't export it.
  */
 export function checkDeliveryV2With(
   election: DeliveryElectionV2,

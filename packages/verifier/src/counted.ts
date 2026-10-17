@@ -77,6 +77,12 @@ export interface CountedInputs {
   readonly definitionHash: Uint8Array;
   /** The registered key set the transcript check returned (3.2 passed). */
   readonly registered: readonly RegisteredKeys[];
+  /**
+   * Beside an author panel, its registered key set, once 3.2 passed for its
+   * run, 2.5 didn't fail and its approvals approved it; `undefined` leaves
+   * every row here not reached.
+   */
+  readonly authorRegistered?: readonly RegisteredKeys[];
   /** 6.1's selected ballots, in copy order. */
   readonly selected: readonly CountedBallot[];
   readonly entries: readonly Uint8Array[];
@@ -305,10 +311,11 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       { status: "unverifiable", code: "not-implemented", at: {} },
       inputs.destruction,
     );
-  // Beside an author panel delivery (5.9) and the tally read the author
-  // seats' key set, which isn't passed here until P2-16 part 4d-3, so
-  // nothing is decided: never with that key set taken on trust (T-37).
-  if (definition.version === 6 && definition.value.author_keys.length !== 0)
+  // Beside an author panel delivery (5.9) reads the author seats' key set,
+  // their own run's, approved on the board: without it nothing is decided,
+  // never with a key set taken on trust or the default panel's alone (T-37).
+  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  if (author && inputs.authorRegistered === undefined)
     return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
   // Ordinary ballots can't be found under a contract-event version this
   // release doesn't read, so 5.5 is unsupported, admission never settles and
@@ -427,6 +434,15 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // An exclusion is the rule's outcome, never a breach, and a failing record
   // is ignored: 5.9 has no failure of its own.
   const rows = new Map<string, CountedOutcome>([["5.9", { status: "pass" }]]);
+  // The close check and the per-panel tally beside an author panel are P2-16
+  // part 4d-3d's: until then neither is decided over the default panel's
+  // seats alone (T-37, T-54).
+  if (author) {
+    const unreached: CountedOutcome = { status: "unverifiable", code: "not-reached", at: {} };
+    for (const id of ["6.3", ...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])])
+      rows.set(id, unreached);
+    return { rows, delivery };
+  }
 
   // The close check recomputes the counted sets with the same delivery,
   // which is by ballot hash (close.md, Close check, step 3).
@@ -697,8 +713,9 @@ function deliveryV1(
  * 5.9 under ballot version 4: delivery records version 2, over every
  * qualified seat of both panels, each record against its own panel's share
  * hashes and key set (docs/spec/delivery.md, Delivery check (version 2);
- * T-37). Without an author panel its key set is empty, so a record naming
- * an author seat is `delivery-seat` and delivers nothing.
+ * T-37). Beside an author panel its seats are the key set its own run
+ * registered and its approvals approved; without one that set is empty, so a
+ * record naming an author seat is `delivery-seat` and delivers nothing.
  */
 function deliveryV2(
   inputs: CountedInputs,
@@ -706,17 +723,23 @@ function deliveryV2(
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],
 ): { readonly ballots: DeliveryCheckV2["ballots"]; readonly delivery: DeliveryReportV2 } {
+  const d = inputs.definition.value as Extract<VerifiedDefinition, { version: 6 }>["value"];
   const delivered = checkDeliveryV2(
     {
       definitionHash: window.definitionHash,
-      panelSize: inputs.definition.value.panel_size,
-      authorPanelSize: 0,
-      registered: { default: window.registered, author: [] },
+      panelSize: d.panel_size,
+      authorPanelSize: d.author_keys.length,
+      registered: { default: window.registered, author: inputs.authorRegistered ?? [] },
       segments: window.segments,
       deadlines: window.deadlines,
     },
     deliveryFields(inputs.selected, "deliveryV4"),
     records,
+    // Beside an author panel crypto takes both key sets only as this
+    // definition's runs registered them, the author set approved, so neither
+    // a copy nor another run's passes (T-37). Without one the default set is
+    // the transcript check's, as it is for ballot versions 1 and 2.
+    ...(d.author_keys.length !== 0 ? [d] : []),
   );
   const entryOf = (i: number) => recordAt[i] as number;
   return {

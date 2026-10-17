@@ -719,6 +719,9 @@ export function verifyBundle(bundle: Bundle): Report {
           definition: definition.definition,
           definitionHash: definition.hash,
           registered: checked.registered,
+          ...(checked.authorRegistered !== undefined && {
+            authorRegistered: checked.authorRegistered,
+          }),
           selected: chosen.report.selected.map(({ entry }) => {
             const tally = byEntry.get(entry)?.tally;
             if (tally === undefined)

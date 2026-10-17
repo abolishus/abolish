@@ -5,11 +5,17 @@ import {
   checkBallotV4,
   checkCeremonyTranscript,
   checkChallengeOpeningV3,
+  checkDeliveryV2,
   decodeBallot,
   decodeBoardEntry,
   decodeElectionDefinitionV6,
+  type DeliveryElectionV2,
+  type DeliveryEntry,
+  deliveryDeadlines,
+  deliverySegments,
   type ElectionDefinitionV6,
   electionAuthorStubV6Hash,
+  electionDefinitionV6Hash,
   electionStubV6Hash,
   encryptSharesV4,
   type KemPublicKey,
@@ -23,6 +29,7 @@ import {
 } from "../src/index.ts";
 import { panelBallotElectionWith } from "../src/ballot.ts";
 import { checkChallengeOpeningV3With, coreHashV4 } from "../src/challenge.ts";
+import { checkDeliveryV2With } from "../src/delivery.ts";
 
 // `panelBallotElection` beside an author panel (docs/spec/ballot-validity.md,
 // Admission (version 4): the author panel's registered key set is its own
@@ -33,7 +40,10 @@ import { checkChallengeOpeningV3With, coreHashV4 } from "../src/challenge.ts";
 // T-17). Fixtures: docs/spec/vectors/verifier-ballots-v4-author.json
 // (packages/crypto/scripts/verifier-ballots-v4-author-vectors.py, an
 // independent implementation), whose boards carry the author transcript, the
-// default transcript and the approvals record, in that order, then ballots.
+// default transcript and the approvals record, in that order, then ballots;
+// docs/spec/vectors/verifier-delivery-v2-author.json (packages/crypto/
+// scripts/verifier-delivery-v2-author-vectors.py, likewise independent)
+// adds share receipts from both panels' registered seats.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const file = JSON.parse(
@@ -50,18 +60,30 @@ const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
 const defaultPanel = { threshold: Number(file.panel.threshold), keys: file.panel.keys.map(hex) };
 
 // Board-entry version 7: a 51-byte envelope and its payload.
-function payloads(board: Uint8Array): Uint8Array[] {
-  const out: Uint8Array[] = [];
+function boardEntries(
+  board: Uint8Array,
+): { readonly segment: number; readonly payload: Uint8Array }[] {
+  const out: { readonly segment: number; readonly payload: Uint8Array }[] = [];
   for (let at = 0; at < board.length;) {
     const n = new DataView(board.buffer, board.byteOffset + at + 47, 4).getUint32(0);
-    out.push(decodeBoardEntry(board.subarray(at, at + 51 + n), 7).payload);
+    const { segment, payload } = decodeBoardEntry(board.subarray(at, at + 51 + n), 7);
+    out.push({ segment, payload });
     at += 51 + n;
   }
   return out;
 }
 
-function election(id: string) {
-  const c = file.cases.find((x) => x.id === id);
+const payloads = (board: Uint8Array) => boardEntries(board).map((e) => e.payload);
+
+function election(
+  id: string,
+  cases: readonly {
+    readonly id: string;
+    readonly definition: string;
+    readonly board: string;
+  }[] = file.cases,
+) {
+  const c = cases.find((x) => x.id === id);
   if (c === undefined) throw new Error(`no case ${id}`);
   const d = decodeElectionDefinitionV6(hex(c.definition));
   const [authorTranscript, defaultTranscript, ...rest] = payloads(hex(c.board)) as [
@@ -312,5 +334,232 @@ describe("openings beside an author panel take its approved key set", () => {
     const { context } = approvedPoll();
     const { opening } = openChallengeV3(context, 0, encrypt());
     expect(() => checkChallengeOpeningV3(unchecked, opening)).toThrow(/approved one/);
+  });
+});
+
+const deliveryFile = JSON.parse(
+  readFileSync(new URL("verifier-delivery-v2-author.json", VECTORS), "utf8"),
+) as {
+  readonly cases: readonly {
+    readonly id: string;
+    readonly definition: string;
+    readonly board: string;
+    readonly clock: Readonly<Record<string, string>>;
+    readonly delivery?: {
+      readonly excluded: readonly {
+        readonly entry: number;
+        readonly missing: readonly { readonly panel: number; readonly seat: number }[];
+      }[];
+      readonly records: readonly {
+        readonly entry: number;
+        readonly code: string;
+        readonly panel: number;
+        readonly seat: number;
+        readonly signer?: number | null;
+      }[];
+    };
+    readonly counted?: readonly number[];
+  }[];
+};
+
+const typeOf = (p: Uint8Array) => ((p[0] as number) << 8) + (p[1] as number);
+
+describe("checkDeliveryV2 beside an author panel takes its approved key set", () => {
+  /** A case's election, its ballots and receipts as the delivery check takes them, with their board entries. */
+  function poll(id: string) {
+    const c = deliveryFile.cases.find((x) => x.id === id);
+    if (c === undefined) throw new Error(`no case ${id}`);
+    const e = election(id, deliveryFile.cases);
+    const clock = {
+      epoch: BigInt(c.clock["epoch"] ?? ""),
+      period: BigInt(c.clock["period"] ?? ""),
+    };
+    const bound = BigInt(e.d.l1_inclusion_bound);
+    const against: DeliveryElectionV2 = {
+      definitionHash: electionDefinitionV6Hash(e.d),
+      panelSize: e.d.panel_size,
+      authorPanelSize: e.d.author_keys.length,
+      registered: { default: e.registered, author: e.authorRegistered },
+      segments: deliverySegments(clock, e.d.closes_at, bound),
+      deadlines: deliveryDeadlines(e.d.closes_at, bound),
+    };
+    const all = boardEntries(hex(c.board));
+    const ballotAt = all.flatMap((x, at) =>
+      typeOf(x.payload) === RECORD_TYPES.ballot ? [at] : [],
+    );
+    const ballots = ballotAt.map((at) => {
+      const b = decodeBallot((all[at] as (typeof all)[number]).payload, 4);
+      return { cell: b.cell, nullifier: b.nullifier, vote: b.committed_vote };
+    });
+    const recordAt = all.flatMap((x, at) =>
+      typeOf(x.payload) === RECORD_TYPES.shareReceipt ? [at] : [],
+    );
+    const entries: DeliveryEntry[] = recordAt.map((at) => {
+      const { segment, payload } = all[at] as (typeof all)[number];
+      return { path: "board", segment, payload };
+    });
+    return { c, e, against, ballots, ballotAt, entries, recordAt };
+  }
+
+  for (const id of ["delivered", "author-seats-missing", "default-seat-missing", "default-only"])
+    test(`${id}: each ballot is delivered only by every registered seat of both panels, as the independent check gives`, () => {
+      const { c, e, against, ballots, ballotAt, entries, recordAt } = poll(id);
+      expect(e.approve()).toEqual({ ok: true, seats: [1, 2] });
+      const r = checkDeliveryV2(against, ballots, entries, e.d);
+      expect(r.ballots.flatMap((b, i) => (b.counted ? [ballotAt[i]] : []))).toEqual(c.counted);
+      expect(
+        r.ballots.flatMap((b, i) =>
+          b.counted
+            ? []
+            : [
+                {
+                  entry: ballotAt[i],
+                  missing: b.missing.map(({ panel, seat }) => ({ panel, seat })),
+                },
+              ],
+        ),
+      ).toEqual(c.delivery?.excluded.map(({ entry, missing }) => ({ entry, missing })));
+      expect(
+        r.records.map((x) => ({
+          entry: recordAt[x.at],
+          code: x.code,
+          panel: x.panel,
+          seat: x.seat,
+          ...(x.signer !== undefined && { signer: x.signer }),
+        })),
+      ).toEqual(c.delivery?.records);
+      expect(r.rejected).toEqual([]);
+      // The same verdicts as the internal path given the same seats.
+      expect(checkDeliveryV2With(against, ballots, entries)).toEqual(r);
+    });
+
+  test("never before its approvals approve, or without the definition they approved it under", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    expect(() => checkDeliveryV2(against, ballots, entries, e.d)).toThrow(/approved key set/);
+    e.approve();
+    expect(() => checkDeliveryV2(against, ballots, entries)).toThrow(/needs its definition/);
+  });
+
+  test("never with no author key set, a copy of it, the default panel's or another run's", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    const other = election("author-every-seat");
+    expect(other.approve().ok).toBe(true);
+    for (const author of [[], [...e.authorRegistered], e.registered, other.authorRegistered])
+      expect(() =>
+        checkDeliveryV2(
+          { ...against, registered: { default: e.registered, author } },
+          ballots,
+          entries,
+          e.d,
+        ),
+      ).toThrow(/approved key set/);
+  });
+
+  test("never under a definition other than the one it checks delivery for", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    // The approved author set is still this definition's, but the election
+    // the check runs over is another's, by hash or by either panel's size.
+    for (const change of [
+      { definitionHash: new Uint8Array(32).fill(7) },
+      { panelSize: against.panelSize - 1 },
+      { authorPanelSize: against.authorPanelSize - 1 },
+    ])
+      expect(() => checkDeliveryV2({ ...against, ...change }, ballots, entries, e.d)).toThrow(
+        /not the definition of this election/,
+      );
+    expect(() =>
+      checkDeliveryV2(against, ballots, entries, { ...e.d, opens_at: e.d.opens_at - 1n }),
+    ).toThrow(/not the definition of this election/);
+  });
+
+  test("never with a default key set other than its own run's", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    // A seat dropped would need no delivery; the author set swapped in, or
+    // a copy, isn't the default run's output (T-25, T-37).
+    for (const keys of [e.registered.slice(0, 2), [...e.registered], e.authorRegistered])
+      expect(() =>
+        checkDeliveryV2(
+          { ...against, registered: { default: keys, author: e.authorRegistered } },
+          ballots,
+          entries,
+          e.d,
+        ),
+      ).toThrow(/key set of this definition's ceremony/);
+  });
+
+  test("reads the definition once, so one that answers differently on a later read can't pair this election with another's approved set", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    const other = election("author-every-seat");
+    expect(other.approve().ok).toBe(true);
+    // This election's fields for the first read of each, then the other
+    // run's definition's: checks reading the caller's object again would
+    // hash this one and approve the other's set.
+    const seen = new Set<PropertyKey>();
+    const swapping = new Proxy(e.d, {
+      get(target, key, receiver) {
+        if (seen.has(key)) return Reflect.get(other.d, key, receiver);
+        seen.add(key);
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    expect(() =>
+      checkDeliveryV2(
+        { ...against, registered: { default: e.registered, author: other.authorRegistered } },
+        ballots,
+        entries,
+        swapping,
+      ),
+    ).toThrow(/approved key set/);
+  });
+
+  test("and refuses any author key set beside a definition without an author panel", () => {
+    const { e, against, ballots } = poll("delivered");
+    e.approve();
+    const plain: ElectionDefinitionV6 = {
+      ...e.d,
+      author_threshold: 0,
+      author_keys: [],
+      author_transcript_hash: new Uint8Array(32),
+    };
+    const plainAgainst = {
+      ...against,
+      definitionHash: electionDefinitionV6Hash(plain),
+      authorPanelSize: 0,
+    };
+    expect(() => checkDeliveryV2(plainAgainst, [], [], plain)).toThrow(/no author panel/);
+    expect(
+      checkDeliveryV2(
+        { ...plainAgainst, registered: { default: e.registered, author: [] } },
+        [],
+        [],
+        plain,
+      ).ballots,
+    ).toEqual([]);
+    expect(ballots).toHaveLength(3);
+  });
+
+  test("checks delivery against the election it checked, whatever a record changes while it is read", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    const expected = checkDeliveryV2(against, ballots, entries, e.d);
+    // The caller's definition hash is overwritten once the check reads the
+    // first record: the check runs over its own copy, so no record turns
+    // stray and no ballot's hash changes (T-37).
+    const definitionHash = Uint8Array.from(against.definitionHash);
+    const [first, ...rest] = entries as [DeliveryEntry, ...DeliveryEntry[]];
+    const overwriting = {
+      ...first,
+      get segment() {
+        definitionHash.fill(0);
+        return (first as Extract<DeliveryEntry, { path: "board" }>).segment;
+      },
+    } as DeliveryEntry;
+    expect(
+      checkDeliveryV2({ ...against, definitionHash }, ballots, [overwriting, ...rest], e.d),
+    ).toEqual(expected);
   });
 });

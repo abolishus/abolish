@@ -22,8 +22,9 @@ import { tallyChecks } from "../src/tallies.ts";
 // the board, never against the ballot's or the default panel's (docs/spec/
 // verifier.md, Key ceremony, step 5, and Ballot admission; T-37, T-17).
 // These copies carry no opening, so 6.2 passes wherever admission runs
-// (openings-v3-author.test.ts judges some); delivery and the tally beside an
-// author panel are P2-16 part 4d-3's later parts, so 7.4 stays not reached.
+// (openings-v3-author.test.ts judges some, delivery-v2-author.test.ts
+// delivers some); the tally beside an author panel is P2-16 part 4d-3d's, so
+// 7.4 stays not reached.
 // Fixtures:
 // docs/spec/vectors/verifier-ballots-v4-author.json (packages/crypto/scripts/
 // verifier-ballots-v4-author-vectors.py, an independent implementation of
@@ -189,10 +190,10 @@ test("an operator still boards no ballot beside an author panel: 2.3 refuses eve
   ).toEqual({ ok: false, code: "profile-combination" });
 });
 
-test("delivery, the counted set and 7.4 decide nothing beside an author panel, whatever admission admitted", () => {
-  // Admission now registers ballots there, so 6.1 can pass; until they take
-  // the author panel's key set too (P2-16 part 4d-3c on), every counted row is
-  // not reached, never decided over the default panel's alone (T-37).
+test("delivery, the counted set and 7.4 decide nothing beside an author panel without its approved key set, whatever admission admitted", () => {
+  // Admission registers ballots there, so 6.1 can pass; without the author
+  // panel's key set every counted row is not reached, never decided over the
+  // default panel's alone (T-37).
   const c = byId("author-mixed");
   const bundle = parseBundle(json(c), hex(c.board));
   const definition = decodeDefinition(hex(c.definition));

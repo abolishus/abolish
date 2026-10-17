@@ -9,6 +9,7 @@ import type { AnchorChain, BallotAdmissions, Tier0Batches } from "@abolishus/cor
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
+import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
 import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
@@ -124,6 +125,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         // must be the queue's key, never something a producer chose.
         const data = spec.data.safeParse(job.data);
         if (!data.success || job.name !== key) throw new JobError("invalid-job-data");
+        // By the system clock, as the API stamped it: a ballot whose API gave
+        // up on it is never judged late (T-10, T-25).
+        if (key === "ballotSubmit" && Date.now() - job.timestamp > BALLOT_MAX_AGE_MS)
+          throw new JobError("stale-job");
         try {
           // The data was parsed by this key's schema, so it is this key's.
           return await (handlers[key] as (c: typeof ctx, d: unknown) => Promise<unknown>)(

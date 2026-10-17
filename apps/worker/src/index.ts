@@ -5,6 +5,8 @@ export {
   ViemAnchorChain,
 } from "./anchor-chain.ts";
 export {
+  BALLOT_EVENTS_MAX_LEN,
+  BALLOT_MAX_AGE_MS,
   BALLOT_OUTCOME,
   type BallotOutcome,
   BallotQueue,

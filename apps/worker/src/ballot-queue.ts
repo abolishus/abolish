@@ -40,6 +40,17 @@ export interface BallotUnavailable {
 
 const UNAVAILABLE: BallotUnavailable = { ok: false, code: "unavailable" };
 
+/** About four events per job (added, waiting, active, completed). */
+export const BALLOT_EVENTS_MAX_LEN = 1024;
+
+/**
+ * A job older than this is refused unjudged by the worker: its API has
+ * answered it `unavailable` long ago (20 s by default), or was gone before it
+ * could remove it, and a ballot shouldn't sit in Redis to be boarded much
+ * later (T-10).
+ */
+export const BALLOT_MAX_AGE_MS = 60_000;
+
 export interface BallotQueueOptions {
   /**
    * The queue's connection, which can fail fast; its events are read on a
@@ -48,7 +59,7 @@ export interface BallotQueueOptions {
   readonly connection: Redis;
   /** The first segment of every key, as the worker's; tests give each run its own. */
   readonly prefix?: string;
-  /** How long a ballot waits for its outcome; 20 s unless a test says otherwise. */
+  /** How long a ballot waits for its outcome; 20 s unless a test says otherwise, and below `BALLOT_MAX_AGE_MS`. */
   readonly timeoutMs?: number;
   /**
    * Ballots waiting for a worker past which a new one is answered
@@ -88,12 +99,19 @@ export class BallotQueue {
   /** Connects, and resolves once outcomes can be heard. */
   static async open(options: BallotQueueOptions): Promise<BallotQueue> {
     const { connection, prefix = KEY_PREFIX, timeoutMs = 20_000, maxWaiting = 4096 } = options;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
-      throw new RangeError("timeoutMs must be at least 1");
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs >= BALLOT_MAX_AGE_MS)
+      throw new RangeError("timeoutMs must be at least 1 and below BALLOT_MAX_AGE_MS");
     if (!Number.isSafeInteger(maxWaiting) || maxWaiting < 1)
       throw new RangeError("maxWaiting must be at least 1");
     const name = QUEUES.ballotSubmit.name;
-    const queue = new Queue(name, { connection, prefix });
+    // T-10: the events stream keeps each outcome's board index with a
+    // millisecond time; kept short, it holds only the last few hundred jobs,
+    // still far more than the outcomes this process hasn't read yet.
+    const queue = new Queue(name, {
+      connection,
+      prefix,
+      streams: { events: { maxLen: BALLOT_EVENTS_MAX_LEN } },
+    });
     // Its reads block for seconds and must wait out a reconnect rather than
     // fail, whatever fail-fast options the queue's connection has.
     const { commandTimeout: _, ...base } = connection.options;

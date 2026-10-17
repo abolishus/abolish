@@ -105,6 +105,7 @@ export class BallotBatches {
     if (this.#running) return;
     this.#running = true;
     const batch = this.#waiting.splice(0, this.#batch);
+    const settled = new Set<Waiting>();
     try {
       const elections = new Map<string, Waiting[]>();
       for (const w of batch) {
@@ -125,11 +126,17 @@ export class BallotBatches {
             const o = outcomes[i];
             if (o === undefined) w.reject(new Error("submitAll answered fewer ballots"));
             else w.resolve(outcomeOf(o));
+            settled.add(w);
           }
         } catch (e) {
-          for (const w of ballots) w.reject(e);
+          for (const w of ballots) if (!settled.has(w)) w.reject(e);
+          for (const w of ballots) settled.add(w);
         }
       }
+    } catch (e) {
+      // Whatever failed outside an election's call, no job of the batch is
+      // left holding a slot of the queue's concurrency.
+      for (const w of batch) if (!settled.has(w)) w.reject(e);
     } finally {
       this.#running = false;
       // Whatever arrived meanwhile has waited a whole batch already.

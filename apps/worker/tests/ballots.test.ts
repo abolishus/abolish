@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  BALLOT_MAX_AGE_MS,
   BALLOT_OUTCOME,
   type BallotOutcome,
   BallotBatches,
@@ -260,8 +261,8 @@ describe("a ballot without an outcome in time is unavailable", () => {
   });
 
   test("past the waiting bound, without being queued (T-52)", async () => {
-    const { ballots } = await setUp("admitted", { pins: false, timeoutMs: 60_000 });
-    const full = await BallotQueue.open({ connection, prefix, maxWaiting: 1, timeoutMs: 60_000 });
+    const { ballots } = await setUp("admitted", { pins: false, timeoutMs: 30_000 });
+    const full = await BallotQueue.open({ connection, prefix, maxWaiting: 1, timeoutMs: 30_000 });
     try {
       const queue = new Queue(QUEUES.ballotSubmit.name, { connection, prefix });
       const first = ballots.submit(electionId, entriesOf("admitted")[1]!.payload);
@@ -293,6 +294,43 @@ describe("a ballot without an outcome in time is unavailable", () => {
       ms: expect.any(Number),
     });
   });
+});
+
+test("a job older than BALLOT_MAX_AGE_MS is refused unjudged, and boards nothing", async () => {
+  const { app } = await setUp("admitted");
+  const queue = new Queue(QUEUES.ballotSubmit.name, { connection, prefix });
+  await queue.add(
+    "ballotSubmit",
+    { electionId: hex(electionId), ballot: hex(entriesOf("admitted")[1]!.payload) },
+    {
+      removeOnComplete: true,
+      removeOnFail: true,
+      attempts: 1,
+      timestamp: Date.now() - BALLOT_MAX_AGE_MS - 1,
+    },
+  );
+  await queue.close();
+  for (let i = 0; i < 200 && !logs.some((l) => l.queue === "{ballot-submit}"); i++)
+    await new Promise((r) => setTimeout(r, 25));
+  expect(logs.filter((l) => l.queue === "{ballot-submit}")).toEqual([
+    { queue: "{ballot-submit}", outcome: "failed", error: "stale-job", ms: expect.any(Number) },
+  ]);
+  expect(await readBoard(app, electionId)).toHaveLength(1);
+});
+
+test("a batch that fails outside an election's call still settles every ballot", async () => {
+  const batches = new BallotBatches({
+    sql: undefined as unknown as Sql,
+    admissions: undefined as unknown as BallotAdmissions,
+    now: () => {
+      throw new Error("clock");
+    },
+    waitMs: 0,
+  });
+  const ballots = [1, 2, 3].map((i) =>
+    batches.submit(hex(electionId), hex(Uint8Array.of(0, 2, i))),
+  );
+  for (const b of ballots) await expect(b).rejects.toThrow("clock");
 });
 
 test("an outcome is parsed strictly: a ballot or an unknown field never passes", () => {

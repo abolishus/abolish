@@ -21,7 +21,7 @@
 // identifier the ceremony will name to someone else. T-52, T-72: at most
 // `dailyCeiling` creations are sent in any 24 hours, whoever submitted them.
 
-import { and, asc, count, eq, gt, gte, isNull, max, sql as q } from "drizzle-orm";
+import { and, asc, count, eq, gt, gte, isNull, max, type SQL, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { accountPolls, pollCreationTxs } from "./db/schema/index.ts";
@@ -157,12 +157,16 @@ export async function advancePollCreations(
     failed: {},
     ceilingReached: false,
   };
-  const fail = async (id: string, failure: CreationFailure) => {
+  // Every write is keyed by the submission it judged as well as the state:
+  // a poll another run failed can be retried and submitted again by its
+  // author (part 5d-2) while this run waits on the node, and that new
+  // submission is no business of this run's verdict.
+  const fail = async (id: string, failure: CreationFailure, submission: SQL | undefined) => {
     // Only from `submitted`: a poll another run already moved keeps its state.
     const moved = await db
       .update(accountPolls)
       .set({ state: "failed", failure, updatedAt: now })
-      .where(and(eq(accountPolls.id, id), eq(accountPolls.state, "submitted")))
+      .where(and(eq(accountPolls.id, id), eq(accountPolls.state, "submitted"), submission))
       .returning({ id: accountPolls.id });
     if (moved.length > 0) report.failed[failure] = (report.failed[failure] ?? 0) + 1;
   };
@@ -189,6 +193,7 @@ export async function advancePollCreations(
   const recorded = await db
     .select({
       id: accountPolls.id,
+      recorded: accountPolls.createTxHash,
       hash: pollCreationTxs.txHash,
       nonce: pollCreationTxs.nonce,
       sentAt: pollCreationTxs.sentAt,
@@ -198,14 +203,16 @@ export async function advancePollCreations(
     .where(and(eq(accountPolls.state, "submitted"), eq(accountPolls.creatorAddress, creator)))
     .orderBy(asc(pollCreationTxs.nonce));
   for (const r of recorded) {
+    // The query's condition gives every one of these a creation.
+    const ofCreation = eq(accountPolls.createTxHash, r.recorded!);
     // A poll whose transaction isn't in the ledger (a partial wipe by hand)
     // can't be followed: failed, so it doesn't sit in setup for good.
     if (r.hash === null || r.nonce === null || r.sentAt === null) {
-      await fail(r.id, "creation-timeout");
+      await fail(r.id, "creation-timeout", ofCreation);
       continue;
     }
     if (r.nonce >= nonces.latest) {
-      if (late(r.sentAt)) await fail(r.id, "creation-timeout");
+      if (late(r.sentAt)) await fail(r.id, "creation-timeout", ofCreation);
       continue;
     }
     const status = await chain.creation(r.hash);
@@ -221,21 +228,25 @@ export async function advancePollCreations(
           l1OriginTimestamp: status.l1OriginTimestamp,
           updatedAt: now,
         })
-        .where(and(eq(accountPolls.id, r.id), eq(accountPolls.state, "submitted")))
+        .where(and(eq(accountPolls.id, r.id), eq(accountPolls.state, "submitted"), ofCreation))
         .returning({ id: accountPolls.id });
       report.created += moved.length;
-    } else if (status.state === "reverted") await fail(r.id, "creation-reverted");
+    } else if (status.state === "reverted") await fail(r.id, "creation-reverted", ofCreation);
     // The node knows nothing of the transaction, and its nonce is spent in
     // finalized history: another transaction of the key took it, which only
     // a key used elsewhere does (the runbook's sign of compromise).
     else if (status.state === "unknown" && r.nonce < nonces.finalized)
-      await fail(r.id, "creation-replaced");
-    else if (late(r.sentAt)) await fail(r.id, "creation-timeout");
+      await fail(r.id, "creation-replaced", ofCreation);
+    else if (late(r.sentAt)) await fail(r.id, "creation-timeout", ofCreation);
   }
 
   // 3. New creations, oldest submission first.
   const waiting = await db
-    .select({ id: accountPolls.id, draft: accountPolls.draft })
+    .select({
+      id: accountPolls.id,
+      draft: accountPolls.draft,
+      submittedAt: accountPolls.submittedAt,
+    })
     .from(accountPolls)
     .where(and(eq(accountPolls.state, "submitted"), isNull(accountPolls.createTxHash)))
     .orderBy(asc(accountPolls.submittedAt), asc(accountPolls.id))
@@ -245,7 +256,13 @@ export async function advancePollCreations(
     // Submission allowed for setup from then; this is now, before any gas.
     const { closesAt } = w.draft as { closesAt: string } & Omit<PollDraft, "closesAt">;
     if (BigInt(closesAt) < seconds + BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS)) {
-      await fail(w.id, "closes-too-soon");
+      // A submitted poll has a submission time (the table's check), and the
+      // poll's next submission, after a retry, has another.
+      await fail(
+        w.id,
+        "closes-too-soon",
+        and(isNull(accountPolls.createTxHash), eq(accountPolls.submittedAt, w.submittedAt!)),
+      );
       continue;
     }
     const signed = await db.transaction(async (tx) => {

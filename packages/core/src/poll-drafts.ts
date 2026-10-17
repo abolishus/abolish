@@ -1,8 +1,9 @@
 // An author's polls before setup ([[0032-poll-creation-operations]]; P2-22
 // part 2): drafts an account writes, edits and submits, and the creator
 // record each becomes. The worker (part 3 on) takes a submitted poll through
-// creation, roots, the ceremony and registration; this module only writes
-// drafts and moves them to `submitted`.
+// creation, roots, the ceremony and registration; this module writes drafts,
+// moves them to `submitted`, and lets the author retry or discard a poll that
+// failed in setup (part 5d-2).
 //
 // A draft is checked by the definition's own rules from @abolishus/crypto
 // (display text version 2's shape rules and version 5's question rules), so a
@@ -15,7 +16,9 @@
 // `MAX_POLLS_IN_SETUP` polls in setup and submits at most
 // `MAX_SUBMISSIONS_PER_DAY` in any 24 hours, each submission paid for with a
 // Turnstile solve for `poll-create`. These are starting values (ADR 0032,
-// rule 18).
+// rule 18). Every submission is counted in `account_poll_submissions`, kept
+// whatever becomes of its poll, so a retried or discarded poll's submission
+// still counts for its 24 hours, and each retry is a submission of its own.
 
 import {
   definitionQuestionsRule,
@@ -34,7 +37,8 @@ import { and, asc, desc, eq, gt, inArray, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { newAccountId } from "./accounts.ts";
-import { accountPolls } from "./db/schema/index.ts";
+import { accountPolls, accountPollSubmissions, electionRegistrations } from "./db/schema/index.ts";
+import { type PollFailure, retryableFailure } from "./poll-failures.ts";
 import type { Turnstile } from "./turnstile.ts";
 
 /** One option of a question, in the author's words. */
@@ -250,6 +254,14 @@ export type PollDraftErrorCode =
   | "not-found"
   /** The poll was submitted: only a draft can be edited, deleted or submitted. */
   | "not-editable"
+  /** The poll isn't `failed`: only a failed poll can be retried or discarded. */
+  | "not-failed"
+  /**
+   * The poll failed with its election registered on chain
+   * (`REGISTERED_FAILURES`, or the registry sync has its registration): its
+   * row stays as the election's creator record, never retried or discarded.
+   */
+  | "registered"
   /** The draft breaks a rule: `problem` says which. */
   | "refused"
   | "too-many-drafts"
@@ -388,7 +400,10 @@ export interface AccountPoll {
   readonly draft: PollDraft;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  /** The current submission's time; none for a draft. */
   readonly submittedAt: Date | undefined;
+  /** Why setup failed, for a `failed` poll: apps/web words it. */
+  readonly failure: PollFailure | undefined;
 }
 
 const poll = (r: typeof accountPolls.$inferSelect): AccountPoll => ({
@@ -399,6 +414,8 @@ const poll = (r: typeof accountPolls.$inferSelect): AccountPoll => ({
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
   submittedAt: r.submittedAt ?? undefined,
+  // The migrations' check admits only these, and only on a failed poll.
+  failure: (r.failure as PollFailure | null) ?? undefined,
 });
 
 /** `accountId`'s poll `id`, or `undefined` if it has none by that ID. */
@@ -436,17 +453,22 @@ async function limitReached(
   now: Date,
 ): Promise<PollDraftErrorCode | undefined> {
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const [row] = await db
-    .select({
-      setup: q`count(*) FILTER (WHERE ${inArray(accountPolls.state, [...IN_SETUP])})`.mapWith(
-        Number,
-      ),
-      today: q`count(*) FILTER (WHERE ${gt(accountPolls.submittedAt, dayAgo)})`.mapWith(Number),
-    })
-    .from(accountPolls)
-    .where(eq(accountPolls.userId, accountId));
-  if (row!.setup >= MAX_POLLS_IN_SETUP) return "too-many-in-setup";
-  if (row!.today >= MAX_SUBMISSIONS_PER_DAY) return "too-many-today";
+  const setup = await db.$count(
+    accountPolls,
+    and(eq(accountPolls.userId, accountId), inArray(accountPolls.state, [...IN_SETUP])),
+  );
+  if (setup >= MAX_POLLS_IN_SETUP) return "too-many-in-setup";
+  // T-72: counted from the submissions, not the polls, so neither a retry
+  // (which clears the poll's `submitted_at`) nor a discard (which deletes
+  // the poll) gives a submission back before its 24 hours are up.
+  const today = await db.$count(
+    accountPollSubmissions,
+    and(
+      eq(accountPollSubmissions.userId, accountId),
+      gt(accountPollSubmissions.submittedAt, dayAgo),
+    ),
+  );
+  if (today >= MAX_SUBMISSIONS_PER_DAY) return "too-many-today";
   return undefined;
 }
 
@@ -484,5 +506,110 @@ export async function submitPollDraft(
       .update(accountPolls)
       .set({ state: "submitted", submittedAt: now, updatedAt: now })
       .where(eq(accountPolls.id, id));
+    await tx.insert(accountPollSubmissions).values({ userId: accountId, submittedAt: now });
+  });
+}
+
+/**
+ * `accountId`'s failed poll `id`, its row locked for this transaction:
+ * `not-found` if the account has no such poll, `not-failed` unless it
+ * failed, and `registered` if its election is registered on chain, by its
+ * failure or by the registry sync's record of a registration under its
+ * identifier (a step's verdict and the chain could disagree only through a
+ * bug or a stolen key; either way the creator record stays, T-68).
+ */
+async function lockFailed(tx: Tx, accountId: string, id: string): Promise<void> {
+  const [row] = await tx
+    .select({
+      state: accountPolls.state,
+      failure: accountPolls.failure,
+      electionId: accountPolls.electionId,
+    })
+    .from(accountPolls)
+    .where(owned(accountId, id))
+    .for("update");
+  if (row === undefined) throw new PollDraftError("not-found");
+  // The migrations' check gives every failed poll a failure.
+  if (row.state !== "failed" || row.failure === null) throw new PollDraftError("not-failed");
+  if (!retryableFailure(row.failure as PollFailure)) throw new PollDraftError("registered");
+  if (row.electionId === null) return;
+  const registered = await tx.$count(
+    electionRegistrations,
+    eq(electionRegistrations.electionId, row.electionId),
+  );
+  if (registered > 0) throw new PollDraftError("registered");
+}
+
+/**
+ * Everything setup wrote on a poll, as a draft has it. A retried poll is a
+ * draft again: its next submission is created afresh, under a new election
+ * identifier, so nothing of the old one may carry over (the migrations'
+ * checks refuse most of it on a draft anyway): the old creation, which could
+ * otherwise become the new draft's (0013), the identifier's L1 origin and
+ * per-slot check (0015), the electorate (0016), the stub (0017) and the
+ * registration transactions (0019). `abandoned_ids` restarts: it bounds the
+ * identifiers one submission abandons, and the next submission is counted
+ * and paid for again (T-69, T-72).
+ */
+const DRAFTED = {
+  state: "drafted",
+  failure: null,
+  submittedAt: null,
+  creatorAddress: null,
+  createTxHash: null,
+  electionId: null,
+  createdBlock: null,
+  l1OriginTimestamp: null,
+  anchorsCheckedBlock: null,
+  abandonedIds: 0,
+  electorate: null,
+  stubHash: null,
+  ceremonyTxHash: null,
+  registerTxHash: null,
+  registeredBlock: null,
+} as const satisfies Partial<typeof accountPolls.$inferInsert>;
+
+/**
+ * Returns `accountId`'s failed poll `id` to its draft (ADR 0032, rule 14),
+ * for the author to edit and submit again: setup starts over, from a new
+ * creation, only through `submitPollDraft`, so a retry passes every check a
+ * first submission does (the draft and its closing time against the setup
+ * still ahead, the limits and a Turnstile solve) and counts as a submission
+ * of its own (T-72). Refused, with nothing written: `not-found`,
+ * `not-failed`, `registered`, and `too-many-drafts` for an account already
+ * holding `MAX_DRAFTS` drafts. The old election identifier is left unused,
+ * as an abandoned one is (rule 16).
+ */
+export async function retryFailedPoll(
+  client: Sql,
+  accountId: string,
+  id: string,
+  now: Date,
+): Promise<void> {
+  await drizzle({ client }).transaction(async (tx) => {
+    await lock(tx, accountId);
+    await lockFailed(tx, accountId, id);
+    const drafts = await tx.$count(
+      accountPolls,
+      and(eq(accountPolls.userId, accountId), eq(accountPolls.state, "drafted")),
+    );
+    if (drafts >= MAX_DRAFTS) throw new PollDraftError("too-many-drafts");
+    await tx
+      .update(accountPolls)
+      .set({ ...DRAFTED, updatedAt: now })
+      .where(eq(accountPolls.id, id));
+  });
+}
+
+/**
+ * Deletes `accountId`'s failed poll `id` (ADR 0032, rule 14). Its
+ * submission stays counted for its 24 hours, in `account_poll_submissions`
+ * (T-72). Refused, with nothing written: `not-found`, `not-failed` and
+ * `registered`.
+ */
+export async function discardFailedPoll(client: Sql, accountId: string, id: string): Promise<void> {
+  await drizzle({ client }).transaction(async (tx) => {
+    await lockFailed(tx, accountId, id);
+    await tx.delete(accountPolls).where(eq(accountPolls.id, id));
   });
 }

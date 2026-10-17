@@ -1,6 +1,7 @@
 // apps/web's own strings. Every locale's catalog has `en-US`'s type, so a
 // missing key fails type-checking (@abolishus/ui, i18n).
 
+import type { PollFailure } from "@abolishus/core/poll-failures";
 import type { Message } from "@abolishus/ui";
 
 const enUS = {
@@ -286,6 +287,41 @@ const enUS = {
   pollAnswer:
     "Answers are cast only in the ballot app, never on this website, and each is sealed on the voter's own device before anything is sent. The ballot app can't open a poll from this page yet.",
   pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
+  // Why a poll couldn't be set up, one per failure code core writes
+  // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
+  // retried comes back as a draft; one whose election was registered stays.
+  pollFailure_closesTooSoon:
+    "Setting up took longer than expected, and your poll would have closed too soon after opening. Choose a later closing time and submit it again.",
+  pollFailure_creationReverted:
+    "Your poll couldn't be created on the public record. Your question wasn't published. You can try again or discard it.",
+  pollFailure_creationReplaced:
+    "Something went wrong on our side while your poll was being created, so we stopped. Your question wasn't published. You can try again or discard it.",
+  pollFailure_creationTimeout:
+    "Creating your poll on the public record took too long. Your question wasn't published. You can try again or discard it.",
+  pollFailure_creationAnchored:
+    "Your poll couldn't get a clean start on the public record after three tries, so its answers couldn't be protected. Your question wasn't published. You can try again or discard it.",
+  pollFailure_tierUnavailable:
+    "Polls can't be set up yet for the voters you chose. Your question wasn't published. Change who can answer and submit it again.",
+  pollFailure_electorateEmpty:
+    "Nobody could have answered: no one was yet in the group of voters you chose when your poll was set up. Your question wasn't published. You can try again later or discard it.",
+  pollFailure_stubRefused:
+    "Something went wrong on our side while your poll was being prepared. Your question wasn't published. You can try again or discard it.",
+  pollFailure_registrationRefused:
+    "The trustees' work on your poll didn't pass our checks, so we didn't register it. Your question wasn't published. You can try again or discard it.",
+  pollFailure_registrationReverted:
+    "The public record refused to register your poll. Your question wasn't published. You can try again or discard it.",
+  pollFailure_registrationReplaced:
+    "Something went wrong on our side while your poll was being registered, so we stopped. Your question wasn't published. You can try again or discard it.",
+  pollFailure_registrationTimeout:
+    "Registering your poll took too long. Your question wasn't published. You can try again or discard it.",
+  pollFailure_registrationMismatch:
+    "Something other than your poll was registered under its place on the public record, so we stopped before it opened. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
+  pollFailure_openMismatch:
+    "What the public record holds for your poll isn't exactly what you wrote, so we didn't open it. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
+  pollFailure_ceremonyTimeout:
+    "The poll's trustees couldn't finish preparing its keys after four tries. Your question wasn't published. You can try again or discard it.",
+  pollFailure_openTimeout:
+    "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
   evidenceSummary: "How do we know this is real?",
   evidenceFingerprintTitle: "This poll's fingerprint",
   evidenceFingerprint:
@@ -503,6 +539,30 @@ const enUS = {
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;
+
+/**
+ * The words for each code a failed poll carries (`failure` on `/drafts`),
+ * so the page never shows the code itself (ADR 0032, rule 14). A code core
+ * adds without a message here fails type-checking.
+ */
+export const POLL_FAILURE_MESSAGES: Readonly<Record<PollFailure, keyof Messages>> = {
+  "closes-too-soon": "pollFailure_closesTooSoon",
+  "creation-reverted": "pollFailure_creationReverted",
+  "creation-replaced": "pollFailure_creationReplaced",
+  "creation-timeout": "pollFailure_creationTimeout",
+  "creation-anchored": "pollFailure_creationAnchored",
+  "tier-unavailable": "pollFailure_tierUnavailable",
+  "electorate-empty": "pollFailure_electorateEmpty",
+  "stub-refused": "pollFailure_stubRefused",
+  "registration-refused": "pollFailure_registrationRefused",
+  "registration-reverted": "pollFailure_registrationReverted",
+  "registration-replaced": "pollFailure_registrationReplaced",
+  "registration-timeout": "pollFailure_registrationTimeout",
+  "registration-mismatch": "pollFailure_registrationMismatch",
+  "open-mismatch": "pollFailure_openMismatch",
+  "ceremony-timeout": "pollFailure_ceremonyTimeout",
+  "open-timeout": "pollFailure_openTimeout",
+};
 
 export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };
 

@@ -227,7 +227,8 @@ export async function checkCreationAnchors(
       report.checked += moved.length;
     } else if (p.abandoned + 1 >= MAX_ABANDONED_IDS) {
       // The identifier stays on the failed record, so the runbook can find
-      // the anchor that took it (T-69).
+      // the anchor that took it (T-69); retry and discard delete it, so the
+      // operator records it before the author does either.
       const moved = await db
         .update(accountPolls)
         .set({

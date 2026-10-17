@@ -13,6 +13,7 @@ import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 import {
   accountPolls,
+  accountPollSubmissions,
   ceremonyApprovals,
   ceremonyMessages,
   ceremonyRuns,
@@ -25,6 +26,7 @@ export {
   accountCredentials,
   accountModerators,
   accountPolls,
+  accountPollSubmissions,
   accountPasskeys,
   accountSessions,
   accountUsers,
@@ -74,6 +76,7 @@ export const TABLE_CLASSES = {
     "account_credentials",
     "account_moderators",
     "account_passkeys",
+    "account_poll_submissions",
     "account_polls",
     "account_sessions",
     "account_users",

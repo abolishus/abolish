@@ -158,29 +158,63 @@ describe("a block store", () => {
     });
   });
 
-  test("serves a repeated CID's blocks in file order, and none over the limit", async () => {
-    const cid = contentDag(object("r", 10)).root;
+  test("serves only the first block that hashes to its CID, once, and none over the limit", async () => {
+    const block = object("r", 10);
+    const cid = contentDag(block).root;
     const store = readBlockStore(
       car([
         { cid, bytes: Uint8Array.of(1) },
-        { cid, bytes: Uint8Array.of(2, 2) },
+        { cid, bytes: block },
         { cid, bytes: Uint8Array.of(3) },
+        { cid, bytes: block },
       ]),
     );
-    expect(store.blocks).toBe(3);
-    expect(await store.source(cid, 2)).toEqual([
-      Uint8Array.of(1),
-      Uint8Array.of(2, 2),
-      Uint8Array.of(3),
-    ]);
-    expect(await store.source(cid, 1)).toEqual([Uint8Array.of(1), Uint8Array.of(3)]);
+    expect(store.blocks).toBe(4);
+    expect(await store.source(cid, CHUNK)).toEqual([block]);
+    expect(await store.source(cid, 9)).toEqual([]);
   });
 
-  test("reads a CIDv0 section past its 34 bytes", async () => {
-    const v0 = concatBytes(Uint8Array.of(0x12, 0x20), new Uint8Array(32).fill(7));
-    const store = readBlockStore(car([{ cid: v0, bytes: Uint8Array.of(9) }]));
-    expect(store).toMatchObject({ blocks: 1, unreadableBytes: 0 });
-    expect(await store.source(v0, CHUNK)).toEqual([Uint8Array.of(9)]);
+  test("serves at most one answer per CID however many bogus sections precede it (T-52)", async () => {
+    const block = object("amp", 10);
+    const cid = contentDag(block).root;
+    const bogus = Array.from({ length: 2000 }, (_, i) => ({ cid, bytes: Uint8Array.of(i & 0xff) }));
+    const store = readBlockStore(car([...bogus, { cid, bytes: block }]));
+    expect(store.blocks).toBe(2001);
+    expect(await store.source(cid, CHUNK)).toEqual([block]);
+    expect(await store.source(contentDag(object("other", 10)).root, CHUNK)).toEqual([]);
+  });
+
+  test("keeps no block a read can't use: another CID form, a wrong hash, over a chunk", async () => {
+    const block = object("forms", 10);
+    const cid = contentDag(block).root;
+    const v0 = concatBytes(Uint8Array.of(0x12, 0x20), cid.subarray(4));
+    // dag-cbor over the same digest: not a codec of the layout.
+    const cbor = concatBytes(Uint8Array.of(0x01, 0x71), cid.subarray(2));
+    const big = new Uint8Array(CHUNK + 1);
+    const bigCid = concatBytes(Uint8Array.of(0x01, 0x55, 0x12, 0x20), sha256(big));
+    const store = readBlockStore(
+      car([
+        { cid: v0, bytes: block },
+        { cid: cbor, bytes: block },
+        { cid: bigCid, bytes: big },
+      ]),
+    );
+    expect(store).toMatchObject({ blocks: 3, unreadableBytes: 0 });
+    for (const c of [v0, cbor, cid]) expect(await store.source(c, CHUNK)).toEqual([]);
+    expect(await store.source(bigCid, 2 * CHUNK)).toEqual([]);
+  });
+
+  test("stops at a CID whose varints aren't minimal", () => {
+    const block = object("v", 10);
+    const cid = contentDag(block).root;
+    const good = section(cid, block);
+    // The codec 0x55 written in two bytes.
+    const padded = concatBytes(Uint8Array.of(0x01, 0xd5, 0x00), cid.subarray(2));
+    const bad = section(padded, block);
+    expect(readBlockStore(concatBytes(header(cid), good, bad, good))).toMatchObject({
+      blocks: 1,
+      unreadableBytes: bad.length + good.length,
+    });
   });
 
   test("rejects a file that doesn't start with a CARv1 header, a CARv2 included", () => {
@@ -193,6 +227,8 @@ describe("a block store", () => {
       new Uint8Array(),
       Uint8Array.of(0x00),
       concatBytes(v2, body),
+      // The header's length written in two bytes.
+      concatBytes(Uint8Array.of((h[0] as number) | 0x80, 0x00), h.subarray(1), body),
       // A header whose length runs past the file.
       h.subarray(0, h.length - 1),
       // A version other than 1 at the header's end.

@@ -5,14 +5,14 @@
 // store can only leave the copy short (T-49, T-53). The roots in the header
 // are never read: the CIDs come from L1.
 
-import type { AsyncBlockSource } from "@abolishus/crypto";
-import { bytesToHex } from "@noble/hashes/utils.js";
+import { type AsyncBlockSource, CHUNK_SIZE } from "@abolishus/crypto";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { BundleError } from "./bundle.ts";
 
 /** The blocks of a CAR, by CID, and how much of it couldn't be read as blocks. */
 export interface BlockStore {
   readonly source: AsyncBlockSource;
-  /** Sections read as blocks, repeats included. */
+  /** Sections read as blocks, repeats and blocks no read can use included. */
   readonly blocks: number;
   /** Bytes from the first section that couldn't be read, to the end of the file. */
   readonly unreadableBytes: number;
@@ -59,18 +59,37 @@ const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
 const HEADER_START = Uint8Array.from([0xa2, 0x65, ...ascii("roots")]);
 const HEADER_END = Uint8Array.from([0x67, ...ascii("version"), 0x01]);
 
+// Whether the `n` bytes at `a` in `x` and at `b` in `y` are equal, and if
+// not, which sorts first.
+function compare(x: Uint8Array, a: number, y: Uint8Array, b: number, n = 36): number {
+  for (let i = 0; i < n; i++) {
+    const d = (x[a + i] as number) - (y[b + i] as number);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 /**
  * Reads a CARv1 file as a block store. Throws `BundleError` if it doesn't
  * start with a CARv1 header: it is then no store at all. After the header,
  * sections are read in order until the first that isn't a whole
  * varint-length section starting with a CID, and the bytes from there on are
  * counted, never read: a store cut short still serves the blocks before the
- * cut. A block is served whatever it holds, and repeats are all served, in
- * file order: the reader takes the first answer that hashes to its CID.
+ * cut.
+ *
+ * Only a block a read can use is kept: one under a CID of the layout's form
+ * (`0x01 ‖ raw or dag-pb ‖ sha2-256`, 36 bytes), at most `CHUNK_SIZE`
+ * bytes, whose SHA-256 is the CID's digest, and of those only the first per
+ * CID, which is then its only answer. The reader takes the first answer that
+ * hashes to its CID and asks for no other form, so what it reads is the
+ * same as from every section, while hashing the file once and holding a few
+ * numbers per block kept, never an object per section: a store of tiny or
+ * repeated sections can't exhaust the reader's memory or make it hash an
+ * answer again and again (T-52). `car` is held, not copied.
  */
 export function readBlockStore(car: Uint8Array): BlockStore {
   if (!(car instanceof Uint8Array)) throw new TypeError("car must be a Uint8Array");
-  const bytes = new Uint8Array(car);
+  const bytes = car;
   const header = varint(bytes, 0);
   const startsAt = (at: number, expected: Uint8Array) =>
     expected.every((x, i) => bytes[at + i] === x);
@@ -82,7 +101,9 @@ export function readBlockStore(car: Uint8Array): BlockStore {
     !startsAt(header[1] + header[0] - HEADER_END.length, HEADER_END)
   )
     throw new BundleError("blocks.car: not a CARv1 file");
-  const index = new Map<string, Uint8Array[]>();
+  // Where each kept block's CID starts; its block follows it, up to `ends`.
+  const starts: number[] = [];
+  const ends: number[] = [];
   let at = header[1] + header[0];
   let blocks = 0;
   while (at < bytes.length) {
@@ -91,18 +112,43 @@ export function readBlockStore(car: Uint8Array): BlockStore {
     const [length, start] = section;
     const cid = cidLength(bytes, start, length);
     if (cid === undefined) break;
-    const key = bytesToHex(bytes.subarray(start, start + cid));
-    const block = bytes.subarray(start + cid, start + length);
-    const served = index.get(key);
-    if (served === undefined) index.set(key, [block]);
-    else served.push(block);
     blocks++;
     at = start + length;
+    if (
+      cid === 36 &&
+      bytes[start] === 0x01 &&
+      (bytes[start + 1] === 0x55 || bytes[start + 1] === 0x70) &&
+      bytes[start + 2] === 0x12 &&
+      bytes[start + 3] === 0x20 &&
+      length - cid <= CHUNK_SIZE &&
+      compare(sha256(bytes.subarray(start + cid, at)), 0, bytes, start + 4, 32) === 0
+    ) {
+      starts.push(start);
+      ends.push(at);
+    }
   }
+  // Sorted by CID, then file order, so the first of a CID is its first in the file.
+  const order = Uint32Array.from(starts.keys()).sort(
+    (i, j) => compare(bytes, starts[i] as number, bytes, starts[j] as number) || i - j,
+  );
+  const find = (cid: Uint8Array): Uint8Array | undefined => {
+    if (cid.length !== 36) return undefined;
+    let lo = 0;
+    let hi = order.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (compare(bytes, starts[order[mid] as number] as number, cid, 0) < 0) lo = mid + 1;
+      else hi = mid;
+    }
+    const k = order[lo];
+    if (k === undefined || compare(bytes, starts[k] as number, cid, 0) !== 0) return undefined;
+    return bytes.subarray((starts[k] as number) + 36, ends[k]);
+  };
   return {
-    // Answers over `limit` are left out: the reader would never hash them.
-    source: (cid, limit) =>
-      Promise.resolve((index.get(bytesToHex(cid)) ?? []).filter((b) => b.length <= limit)),
+    source: (cid, limit) => {
+      const b = find(cid);
+      return Promise.resolve(b === undefined || b.length > limit ? [] : [b]);
+    },
     blocks,
     unreadableBytes: bytes.length - at,
   };

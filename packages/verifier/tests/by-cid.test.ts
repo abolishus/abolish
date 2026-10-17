@@ -323,6 +323,30 @@ describe("a format-2 bundle read by CID (l1-anchor.json)", () => {
     expect(r.l1?.anchors?.map((a) => a.hash)).toEqual(whole.l1?.anchors?.map((a) => a.hash));
   });
 
+  test("a format-3 bundle whose definition doesn't decode never runs the read", async () => {
+    const r = verifyBundle(
+      await loadBundle(
+        dir({
+          "bundle.json": JSON.stringify({
+            format: "abolish-verifier-bundle/3",
+            definition: "00",
+            clock: l1File.clock,
+            l1: {
+              firstSegment: closed?.firstSegment,
+              header: closed?.block.header,
+              nodes: closed?.nodes,
+              checkpoints: logged,
+            },
+          }),
+          "blocks.car": car,
+        }),
+      ),
+    );
+    expect(r.board.byCid?.stopped).toEqual({ reason: "not-reached" });
+    expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });
+    expect(row(r, "4.1")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+  });
+
   test("without the logged checkpoints stops before the read, l1-checkpoint-unknown", async () => {
     const r = verifyBundle(await loadBundle(dir({ "bundle.json": json([]), "blocks.car": car })));
     expect(r.board.byCid?.stopped).toEqual({ reason: "not-reached" });

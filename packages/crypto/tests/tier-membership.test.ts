@@ -748,7 +748,10 @@ describe("tierMembership in a Tier 1 tier", () => {
     );
   });
 
-  test("gives each group's leaves at every block the vectors list", () => {
+  // Each tierMembership call replays the Tier 1 groups' counted additions,
+  // Groth16 checks included, which can pass the default timeout on a shared
+  // runner.
+  test("gives each group's leaves at every block the vectors list", { timeout: 60_000 }, () => {
     let checked = 0;
     for (const l of deployment.leaves) {
       const groupId = decimal(l.groupId);
@@ -807,46 +810,55 @@ describe("tierMembership in a Tier 1 tier", () => {
     expect((e as TierMembershipError).group).toBe(9n);
   });
 
-  test("a board carrying more or fewer than the counted additions is refused", () => {
-    const leaves = finalLeaves(9n);
-    const electorate = oneGroup(9n, leaves);
-    const voter = leaves[0] as bigint;
-    expect([...tierMembership(board, electorate, voter, 9n, tier1Pins).leaves]).toEqual(leaves);
-    // Uncounted additions of the group: copies of a counted commitment...
-    for (const at of [14, 15]) {
-      expect(counted.has(at)).toBe(false);
+  // Each tierMembership call replays the Tier 1 groups' counted additions,
+  // Groth16 checks included, which can pass the default timeout on a shared
+  // runner.
+  test(
+    "a board carrying more or fewer than the counted additions is refused",
+    { timeout: 60_000 },
+    () => {
+      const leaves = finalLeaves(9n);
+      const electorate = oneGroup(9n, leaves);
+      const voter = leaves[0] as bigint;
+      expect([...tierMembership(board, electorate, voter, 9n, tier1Pins).leaves]).toEqual(leaves);
+      // Uncounted additions of the group: copies of a counted commitment...
+      for (const at of [14, 15]) {
+        expect(counted.has(at)).toBe(false);
+        expect(
+          refusal(() => tierMembership([...board, logOf(at)], electorate, voter, 9n, tier1Pins)),
+          `event ${at}`,
+        ).toBe("group-history");
+      }
+      // ...and a fresh commitment (event 36, its vouch's proof broken, given a
+      // commitment no addition has): a leaf the definition doesn't count.
+      expect(counted.has(36)).toBe(false);
+      expect(groupOf(36)).toBe(9n);
+      const fresh = hex(deployment.events[36]?.record);
+      fresh.set(word(12_345n), 8);
       expect(
-        refusal(() => tierMembership([...board, logOf(at)], electorate, voter, 9n, tier1Pins)),
-        `event ${at}`,
-      ).toBe("group-history");
-    }
-    // ...and a fresh commitment (event 36, its vouch's proof broken, given a
-    // commitment no addition has): a leaf the definition doesn't count.
-    expect(counted.has(36)).toBe(false);
-    expect(groupOf(36)).toBe(9n);
-    const fresh = hex(deployment.events[36]?.record);
-    fresh.set(word(12_345n), 8);
-    expect(
-      refusal(() => tierMembership([...board, logOf(36, fresh)], electorate, voter, 9n, tier1Pins)),
-    ).toBe("electorate");
-    // A counted addition left off.
-    const last = board.findLast((r) => r.topics.length === 1 && groupOf(Number(r.n) - 1) === 9n);
-    expect(
-      refusal(() =>
-        tierMembership(
-          board.filter((r) => r !== last),
-          electorate,
-          voter,
-          9n,
-          tier1Pins,
+        refusal(() =>
+          tierMembership([...board, logOf(36, fresh)], electorate, voter, 9n, tier1Pins),
         ),
-      ),
-    ).toBe("electorate");
-    // A boarded addition that doesn't decode fails the event check.
-    expect(
-      refusal(() => tierMembership([...board, logOf(38)], electorate, voter, 9n, tier1Pins)),
-    ).toBe("board-event");
-  });
+      ).toBe("electorate");
+      // A counted addition left off.
+      const last = board.findLast((r) => r.topics.length === 1 && groupOf(Number(r.n) - 1) === 9n);
+      expect(
+        refusal(() =>
+          tierMembership(
+            board.filter((r) => r !== last),
+            electorate,
+            voter,
+            9n,
+            tier1Pins,
+          ),
+        ),
+      ).toBe("electorate");
+      // A boarded addition that doesn't decode fails the event check.
+      expect(
+        refusal(() => tierMembership([...board, logOf(38)], electorate, voter, 9n, tier1Pins)),
+      ).toBe("board-event");
+    },
+  );
 
   test("refuses a boarded addition logged before its group's creation", () => {
     // Event 22 names group 12 before event 23 creates it; vouch-count's `group` check refuses it.

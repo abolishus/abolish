@@ -2,7 +2,9 @@
 // every ballot of this election on the board copy, by @abolishus/crypto's
 // `checkBallot` (under definition versions 3 and 4, `checkBallotV2`, against
 // the ballot's cell; under definition version 5, `checkBallotV3`, against its
-// cell and the questions) with the definition and the key set the transcript
+// cell and the questions; under definition version 6, `checkBallotV4`, which
+// also judges the author half against the definition's author panel) with
+// the definition and the key set the transcript
 // check registered, never against anything a ballot or the bundle chooses
 // (T-37, T-04). A ballot reaches the board by the board path, as a ballot
 // record in a board entry, or by the ordinary contract path, as the board
@@ -48,6 +50,7 @@ import {
   type DeliveryBallot,
   finishBallotStep,
   membershipVkHash,
+  panelBallotElection,
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
@@ -56,6 +59,8 @@ import {
   stepBallot,
   stepBallotV2,
   stepBallotV3,
+  stepBallotV4,
+  type SeatPanel,
 } from "@abolishus/crypto";
 import type { VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
@@ -70,6 +75,10 @@ export interface RejectedBallot {
   readonly option?: number;
   /** Ballot version 3's `sum-proof`: the first failing question. */
   readonly question?: number;
+  /** Ballot version 4's `share-hash-unqualified`: the first such seat's panel (1 default, 2 author). */
+  readonly panel?: SeatPanel;
+  /** Ballot version 4's `share-hash-unqualified`: the first such seat, from 1. */
+  readonly seat?: number;
   /** `decode`'s strict-decoding code (docs/spec/notation.md). */
   readonly decodeError?: DecodeErrorCode;
 }
@@ -137,7 +146,7 @@ export interface BallotTally {
   readonly delivery?: DeliveryBallot;
 }
 
-/** Every admission code: versions 2 and 3 have `ballot-cell` where version 1 has `ballot-tier`. */
+/** Every admission code: versions 2 to 4 have `ballot-cell` where version 1 has `ballot-tier`. */
 export type AdmissionCode = BallotCode | BallotV2Code;
 
 /** The close rule's codes (docs/spec/close.md, Window), checked after 5.1 to 5.4. */
@@ -193,7 +202,6 @@ const L1_REF_CODES: ReadonlySet<string> = new Set<L1RefCode>([
 const all = (o: BallotOutcome, blocks: boolean) =>
   new Map((blocks ? ALL_ROWS : ALL_ROWS.slice(0, -1)).map((id) => [id, o]));
 const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached" };
-const NOT_IMPLEMENTED: BallotOutcome = { status: "unverifiable", code: "not-implemented" };
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -313,6 +321,8 @@ export function ballotChecks(
         code: checked.code,
         ...(checked.option !== undefined && { option: checked.option }),
         ...(checked.question !== undefined && { question: checked.question }),
+        ...(checked.panel !== undefined && { panel: checked.panel }),
+        ...(checked.seat !== undefined && { seat: checked.seat }),
       });
       continue;
     }
@@ -481,7 +491,7 @@ function windowCode(
 /** One ballot payload's strict decoding and admission checks, with its core. */
 export type Judge = (payload: Uint8Array) => {
   readonly core: AdmittedCore["core"];
-  /** Versions 2 and 3 share `BallotCheckV2`. */
+  /** Versions 2 to 4 share `BallotCheckV2`. */
   readonly checked: BallotCheck | BallotCheckV2;
   /** Read only once the ballot is admitted, whose tier or cell the partition then has. */
   readonly tally: BallotTally;
@@ -509,8 +519,11 @@ export const UNSUPPORTED: BallotOutcome = {
  * pins ballot version 3, which names its cell too and carries one range
  * proof per question, judged against the definition's questions, never
  * against limits the ballot states (T-28). Version 6 pins ballot version 4,
- * whose admission over both halves this release doesn't check yet: its
- * rows stay unverifiable, never passed (P2-16 part 4).
+ * version 3's checks with an author half judged against the definition's
+ * author panel, never against the ballot's (T-17, T-37): without an author
+ * panel any author half fails `validity-shape`. A definition with one has no
+ * registered author key set until that panel's own ceremony is read (P2-16
+ * part 4d; 3.2 registers none beside it), so no ballot is judged under it.
  */
 export function judgeFor(
   definition: VerifiedDefinition,
@@ -570,7 +583,26 @@ export function steppedJudgeFor(
   }
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
-  if (definition.version === 6) return NOT_IMPLEMENTED;
+  if (definition.version === 6) {
+    // 3.2 registers no key set beside an author panel, so this is a guard:
+    // shares made to an author panel whose keys no transcript check gave
+    // can't be judged (T-37).
+    if (definition.value.author_keys.length !== 0) return NOT_REACHED;
+    const election = panelBallotElection(definition.value, registered);
+    return (payload) => {
+      const record = decodeBallot(payload, 4);
+      const vss = record.committed_vote.vss;
+      return {
+        core: { definitionHash: record.definition_hash, vss },
+        step: stepBallotV4(election, record),
+        // The tally (7.1 to 7.3) and the delivery check (5.9) don't read
+        // ballot version 4 yet (counted.ts); 6.2 under opening version 3
+        // isn't reached (openings.ts), so `core` stands only for the default
+        // half until P2-16 part 4b-2 compares openings with both halves.
+        tally: { cell: record.cell, vss },
+      };
+    };
+  }
   if (definition.version === 5) {
     const election = questionBallotElection(definition.value, registered);
     return (payload) => {

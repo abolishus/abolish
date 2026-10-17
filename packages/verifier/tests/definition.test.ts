@@ -913,10 +913,11 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
     });
   });
 
-  test("ballot admission and the tally aren't checked under version 6 yet, never passed", () => {
+  test("the tally isn't checked under version 6 yet, and no ballot is judged beside an author panel", () => {
     // Even with a registered key set (none is returned beside an author
-    // panel): ballot version 4's admission and version 6's tally rules come
-    // with P2-16 part 4's later parts.
+    // panel): version 6's tally rules come with P2-16 part 4c, and an author
+    // panel's key set with part 4d. Ballot version 4's admission without an
+    // author panel is verifier-ballots-v4.json's (ballots-v4.test.ts).
     // Under the membership key this release pins, which 1.3 checks first,
     // and with no cell of root 0, which anyone proves membership of.
     const pinnedKey = {
@@ -927,9 +928,13 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
       })),
     };
     const record = decodeDefinition(hex(v6For(closed.anchor, {}, pinnedKey)));
-    const notImplemented = { status: "unverifiable", code: "not-implemented" };
-    expect(judgeFor(record, [])).toEqual(notImplemented);
-    expect(tallyChecks(record, new Uint8Array(32), [], [], 5)).toEqual({ row: notImplemented });
+    const withAuthor = decodeDefinition(
+      hex(v6For(closed.anchor, {}, { ...pinnedKey, ...authorPanel })),
+    );
+    expect(judgeFor(withAuthor, [])).toEqual({ status: "unverifiable", code: "not-reached" });
+    expect(tallyChecks(record, new Uint8Array(32), [], [], 5)).toEqual({
+      row: { status: "unverifiable", code: "not-implemented" },
+    });
     // A ballot version a later release may read stays unsupported.
     const later = decodeDefinition(
       hex(v6For(closed.anchor, { [RECORD_TYPES.ballot]: 255 }, pinnedKey)),

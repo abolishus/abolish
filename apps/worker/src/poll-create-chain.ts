@@ -34,7 +34,7 @@ import {
 import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
 
 /** `createElection()`'s calldata: its selector alone, as the registry requires. */
-const CREATE_CALLDATA = encodeFunctionData({
+export const CREATE_CALLDATA = encodeFunctionData({
   abi: electionRegistryAbi,
   functionName: "createElection",
 });
@@ -47,7 +47,7 @@ const CREATE_CALLDATA = encodeFunctionData({
 const GAS_HEADROOM = 120n;
 
 /** How many of the latest base fee a creation's fee cap allows, before its tip. */
-const BASE_FEE_HEADROOM = 3n;
+export const BASE_FEE_HEADROOM = 3n;
 
 /** A node's answer to a transaction it already holds, which is a send that took. */
 const ALREADY_KNOWN = /already known|known transaction|already imported/i;
@@ -186,7 +186,7 @@ export class ViemPollCreationChain implements PollCreationChain {
 }
 
 /** The key as an account; a malformed key is refused without quoting it. */
-function creationAccount(key: Uint8Array): PrivateKeyAccount {
+export function creationAccount(key: Uint8Array): PrivateKeyAccount {
   if (key.length !== 32) throw new Error("the creation key must be 32 bytes");
   try {
     return privateKeyToAccount(bytesToHex(key) as Hex);

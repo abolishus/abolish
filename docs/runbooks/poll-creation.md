@@ -4,6 +4,11 @@ How the operator runs the creation key and the `worker-create` deployment that s
 
 Status: not deployable yet. The worker's creation jobs are [[P2-22]] parts 3 to 5; until they merge, nothing reads the variables below.
 
+The worker's two commands, run in the `worker-create` service with its variables (`apps/worker/README.md`, The creation key's commands):
+
+- `vp run --filter @abolishus/worker creation-key status`: the key's balance and whether it is below a day's ceiling of creations, its nonce counts against the worker's ledger (`unrecorded` counts the key's included transactions the worker didn't send), and the polls the key still has to finish.
+- `vp run --filter @abolishus/worker creation-key sweep <funding address>`: sends the key's whole balance, less the transfer's fees, to the funding account. It refuses while the key has a pending transaction, or while the worker's ledger holds a creation the node hasn't included (sweeping would take its nonce), so let the creation queue finish sending, then stop it.
+
 ## The key
 
 - One externally owned account, used for nothing but `createElection()` and `registerDefinition()` on the deployment's election registry. Never the testnet deployer, a registrar, the registration account's owner or a trustee seat's key, so losing one never costs another.
@@ -13,7 +18,7 @@ Status: not deployable yet. The worker's creation jobs are [[P2-22]] parts 3 to 
 ## Funding
 
 - The key holds a float of a few days' creations: about `CREATE_DAILY_CEILING` × (gas of one creation and one registration) × the current fee × 3. Measure the gas from the worker's own logs of landed transactions, not from estimates.
-- Top it up by hand from a funding account when the worker's balance alert fires (below a day's ceiling). Testnet: the chain's faucet or a transfer from the deployer, sent from GitHub Actions, never from a session. Mainnet: owner-only, since it spends real funds; nothing here applies until the owner signs off on mainnet.
+- Top it up by hand from a funding account when the status command says `belowDailyCeiling` (below a day's ceiling of creations; it doesn't count registrations yet, so top up before it says so). Nothing alerts on it yet; check it daily while polls are being created. Testnet: the chain's faucet or a transfer from the deployer, sent from GitHub Actions, never from a session. Mainnet: owner-only, since it spends real funds; nothing here applies until the owner signs off on mainnet.
 - Never fund it above the float. A thief takes at most the balance.
 
 ## Rotation
@@ -21,16 +26,16 @@ Status: not deployable yet. The worker's creation jobs are [[P2-22]] parts 3 to 
 The creator of an election is fixed when it is created, so a poll created by one key can only be registered by that key ([[0032-poll-creation-operations]], rule 4).
 
 1. Generate the new key as above and add it as `CREATE_KEY_NEXT`. The worker then creates new polls with the new key and keeps the old one only to register polls it already created.
-2. Wait until no poll whose `creator_address` is the old key is in `created`, `rooted` or `ceremony` (the worker's status command lists them; a poll stuck there past its deadline moves to `failed` by itself).
-3. Move `CREATE_KEY_NEXT` to `CREATE_KEY`, sweep the old key's balance to the funding account with the worker's sweep command, and delete the old value.
+2. Wait until no poll whose `creator_address` is the old key is in `submitted` with a creation, `created`, `rooted` or `ceremony` (the status command, run with the old key, lists them; a poll stuck there past its deadline moves to `failed` by itself).
+3. Stop `worker-create` and sweep the old key's balance to the funding account with the sweep command while `CREATE_KEY` still holds the old key (the command sweeps `CREATE_KEY`). Then move `CREATE_KEY_NEXT` to `CREATE_KEY`, delete the old value and restart.
 
 Rotate yearly, whenever someone who could read the variable leaves, and on any suspicion of compromise (next section).
 
 ## Compromise
 
-Signs: transactions from the key the worker didn't record, a balance drop the logs don't explain, or an `ElectionCreated` from its address with no poll row.
+Signs: transactions from the key the worker didn't record (the status command's `unrecorded` above the number of sweeps run, or a poll failed as `creation-replaced`), a balance drop the logs don't explain, or an `ElectionCreated` from its address with no poll row.
 
-1. Stop the creation queues, run the worker's sweep command once (it sends the key's whole balance to the funding account, [[P2-22]] part 3), then stop `worker-create` and remove `CREATE_KEY` from Railway. The thief can race the sweep; losing it costs only the float. Polls in setup stop where they are; their state is kept.
+1. Stop the creation queues, run the sweep command once (it sends the key's whole balance to the funding account), then stop `worker-create` and remove `CREATE_KEY` from Railway. The thief can race the sweep; losing it costs only the float. If the sweep refuses for a pending transaction (a creation, or the thief's), wait for it to land or drop and run it again; if it refuses for a creation the node hasn't included, restart the creation queue until it lands. Polls in setup stop where they are; their state is kept.
 2. Review who could read the variable (Railway project members, the project token's holders) and rotate those credentials too (T-65).
 3. Generate a new key, set it, and restart. Polls the old key created and hadn't registered can't be finished by the new key: mark them `failed` with the reason "set up again", and the authors can retry, which creates a new election.
 4. What the thief could do with the key: create elections (gas and shared event-sequence space only, [[contracts]], Events), and register, for an election it created, a definition a quorum of the pinned panel approved. Our seats approve only stubs our coordinator handed them, and the coordinator hands out only stubs the worker built from a submitted draft, so check the registry's `DefinitionRegistered` events for the old address: any registration that isn't one of our poll rows is reported in the public moderation log and the environment's incident notes. It could not change any registered definition or register under anyone else's identifier.

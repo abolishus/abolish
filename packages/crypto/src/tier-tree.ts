@@ -90,6 +90,96 @@ export function tierTreePath(leaves: readonly bigint[], index: number): bigint[]
   return path;
 }
 
+/** A member's place in a tier tree, found in one pass over its leaves. */
+export interface TierTreeMemberPath {
+  /** The first leaf holding the member's commitment. */
+  readonly index: number;
+  /** Its 32 siblings, bottom up, as `tierTreePath` gives them. */
+  readonly siblings: readonly bigint[];
+  /** The root over every leaf, as `tierTreeRoot` gives it. */
+  readonly root: bigint;
+}
+
+/**
+ * The path of the first leaf equal to `member` and the tree's root, in one
+ * pass over `leaves` holding 32 nodes, never the leaves: the ballot client
+ * builds its path from a whole tier (or cell) on a phone, so a large tier is
+ * streamed rather than held again, with its levels, as `tierTreePath` holds
+ * it (P2-21 part 3; T-10, T-13). Each leaf is read once, so an iterable
+ * can't show the path one list and the root another. `undefined` if no leaf
+ * is `member`. Leaves are checked as `tierTreeRoot` checks them.
+ */
+export function tierTreeMemberPath(
+  leaves: Iterable<bigint>,
+  member: bigint,
+): TierTreeMemberPath | undefined {
+  if (leaves === null || typeof leaves !== "object" || !(Symbol.iterator in leaves))
+    throw new TypeError("leaves: expected an iterable");
+  if (typeof member !== "bigint" || isForbiddenCommitment(member))
+    throw new RangeError("member: expected a commitment that isn't forbidden");
+  const z = tierTreeZeros();
+  // frontier[h]: the newest complete node of even index at level h, waiting for its right sibling.
+  const frontier: bigint[] = [];
+  const siblings: (bigint | undefined)[] = Array.from(
+    { length: MEMBERSHIP_DEPTH },
+    () => undefined,
+  );
+  // Arithmetic, not `>>` or `^ 1`: bitwise operators wrap above 2^31.
+  const siblingAt = (index: number, h: number) => {
+    const n = Math.floor(index / 2 ** h);
+    return n % 2 === 0 ? n + 1 : n - 1;
+  };
+  let count = 0;
+  let index = -1;
+  let full: bigint | undefined;
+  for (const leaf of leaves) {
+    if (typeof leaf !== "bigint" || (leaf !== 0n && isForbiddenCommitment(leaf)))
+      throw new RangeError("leaves: expected 0 or a commitment that isn't forbidden");
+    if (count >= TIER_TREE_MAX_LEAVES)
+      throw new RangeError("leaves: a group with more than 2^32 additions has no tier tree");
+    if (index < 0 && leaf === member) {
+      index = count;
+      // Its left siblings are complete already, each waiting in the frontier.
+      for (let h = 0; h < MEMBERSHIP_DEPTH; h++)
+        if (Math.floor(index / 2 ** h) % 2 === 1) siblings[h] = frontier[h];
+    }
+    let node = leaf;
+    let at = count;
+    let h = 0;
+    for (; h < MEMBERSHIP_DEPTH; h++) {
+      // A right sibling of the member's path is complete when it is formed.
+      if (index >= 0 && at === siblingAt(index, h)) siblings[h] = node;
+      if (at % 2 === 0) {
+        frontier[h] = node;
+        break;
+      }
+      node = poseidon2(frontier[h] as bigint, node); // `at` is odd, so its left sibling waits.
+      at = Math.floor(at / 2);
+    }
+    if (h === MEMBERSHIP_DEPTH) full = node; // the 2^32nd leaf completes the root
+    count++;
+  }
+  if (index < 0) return undefined;
+  // Close the tree over empty leaves: at each level the node of index
+  // floor(count / 2^h) is partial (`node`, or empty if undefined) and every
+  // later one is empty.
+  let node: bigint | undefined;
+  for (let h = 0; h < MEMBERSHIP_DEPTH; h++) {
+    const empty = z[h] as bigint;
+    const partial = Math.floor(count / 2 ** h);
+    const sibling = siblingAt(index, h);
+    if (sibling === partial) siblings[h] = node ?? empty;
+    else if (sibling > partial) siblings[h] = empty;
+    if (partial % 2 === 1) node = poseidon2(frontier[h] as bigint, node ?? empty);
+    else if (node !== undefined) node = poseidon2(node, empty);
+  }
+  return {
+    index,
+    siblings: siblings.map((s) => s as bigint), // every level is set above
+    root: full ?? node ?? (z[MEMBERSHIP_DEPTH] as bigint),
+  };
+}
+
 /** One logged event of a group contract that records no signed sequence. */
 export type TierGroupEvent =
   | { readonly kind: "add"; readonly commitment: bigint }

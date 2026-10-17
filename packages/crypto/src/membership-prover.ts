@@ -24,7 +24,7 @@ import {
   verifyMembershipProof,
 } from "./membership-proof.ts";
 import { poseidon2 } from "./poseidon.ts";
-import { tierTreePath } from "./tier-tree.ts";
+import { tierTreeMemberPath } from "./tier-tree.ts";
 
 /** Which check refused: each is a reason the client shows, never a retry. */
 export type MembershipProverErrorCode =
@@ -106,6 +106,15 @@ function commitmentOf(s: bigint): bigint {
   return poseidon2(x, y);
 }
 
+/**
+ * The identity commitment of `secret` (32 bytes, big-endian,
+ * docs/spec/identity-backup.md): the leaf the client looks for in its tier
+ * (`tierMembership`). Throws `MembershipProverError` with `secret`.
+ */
+export function identityCommitment(secret: Uint8Array): bigint {
+  return commitmentOf(secretScalar(secret));
+}
+
 /** The root a path of 32 siblings climbs to from `leaf` at `index`, as the circuit computes it. */
 function climb(leaf: bigint, index: number, siblings: readonly bigint[]): bigint {
   let node = leaf;
@@ -119,9 +128,10 @@ function climb(leaf: bigint, index: number, siblings: readonly bigint[]): bigint
 /**
  * The prover's request for a voter with identity secret `secret` (32 bytes,
  * big-endian, docs/spec/identity-backup.md) in the tier whose leaves are
- * `leaves`, in tier-tree order (a cell's: its cell tree's), for `statement`.
- * The path is built here from every leaf, never fetched (T-10, T-13), at the
- * first leaf holding the voter's commitment; it must climb to the
+ * `leaves`, in tier-tree order (a cell's: its cell tree's, as
+ * `tierMembership` gives them), for `statement`. The path is built here from
+ * every leaf, never fetched (T-10, T-13), at the first leaf holding the
+ * voter's commitment, in one pass that holds no copy of the leaves; it must climb to the
  * definition's root, so leaves that aren't the tier's are refused before any
  * proving. The scope is derived from the definition hash, the tier and the
  * root (`membershipScope`), the message mapped by `F`, and the nullifier
@@ -132,7 +142,7 @@ function climb(leaf: bigint, index: number, siblings: readonly bigint[]): bigint
  */
 export function membershipProverInput(
   secret: Uint8Array,
-  leaves: readonly bigint[],
+  leaves: Iterable<bigint>,
   statement: MembershipStatement,
 ): MembershipProverInput {
   if (statement === null || typeof statement !== "object")
@@ -143,12 +153,13 @@ export function membershipProverInput(
   const messageField = semaphoreField(message);
   const s = secretScalar(secret);
   const commitment = commitmentOf(s);
-  if (!Array.isArray(leaves)) throw new TypeError("leaves: expected an array");
-  const copy = leaves.slice();
-  const index = copy.indexOf(commitment);
-  if (index < 0) throw new MembershipProverError("not-a-member");
-  const siblings = tierTreePath(copy, index);
-  if (climb(commitment, index, siblings) !== root) throw new MembershipProverError("root");
+  const found = tierTreeMemberPath(leaves, commitment);
+  if (found === undefined) throw new MembershipProverError("not-a-member");
+  const { index, siblings } = found;
+  // The circuit's own climb as well as the tree's root: a fault in either
+  // refuses here rather than in a proof that fails verification later.
+  if (found.root !== root || climb(commitment, index, siblings) !== root)
+    throw new MembershipProverError("root");
   const input: MembershipProverInput = Object.freeze({
     witness: Object.freeze({
       secret: s.toString(),

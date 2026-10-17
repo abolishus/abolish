@@ -228,6 +228,24 @@ describe("the L2 node's proven adapter", () => {
     await expect(node.proven(REGISTRY)).rejects.toMatchObject({ code: "l2-proof-malformed" });
   });
 
+  test("refuses a block field that isn't hex as a header the root can't commit to", async () => {
+    const garbled = createPublicClient({
+      transport: custom({
+        async request({ method, params }: { method: string; params?: unknown[] }) {
+          const answer = (await rpc(method, params ?? [])) as unknown;
+          if (method !== "eth_getBlockByNumber") return answer;
+          return { ...(answer as object), timestamp: "0x" };
+        },
+      }),
+    }) as PublicClient;
+    const node = await ProvenRegistryAccumulator.connect(
+      garbled,
+      CHAIN,
+      source(async () => ({ outputRoot: await rootOf(b1), l2Block: b1 })),
+    );
+    await expect(node.proven(REGISTRY)).rejects.toMatchObject({ code: "l2-header" });
+  });
+
   test("refuses an address without code", async () => {
     const node = await ProvenRegistryAccumulator.connect(
       l2,

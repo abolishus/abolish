@@ -210,10 +210,9 @@ export function encodeHeader(block: RawBlock): Uint8Array {
   for (const [name, kind] of HEADER_FIELDS) {
     const v = block[name];
     if (v === undefined || v === null) break;
-    if (!isHex(v)) throw new Error("the L2 node answered a block with a malformed field");
+    if (!isHex(v) || (kind === "data" ? v.length % 2 !== 0 : v === "0x"))
+      throw new MalformedAnswer("l2-header");
     if (kind === "data") {
-      if (v.length % 2 !== 0)
-        throw new Error("the L2 node answered a block with a malformed field");
       fields.push(v);
     } else {
       const n = BigInt(v);

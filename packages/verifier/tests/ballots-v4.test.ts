@@ -16,9 +16,9 @@ import {
 // questions and both panels in the definition and the key set its transcript
 // check registered, and 1.3 under the one pinned membership key
 // (docs/spec/verifier.md, Ballot admission). These boards carry no spoiled-ballot
-// opening, so 6.2 passes wherever it runs (openings-v3.test.ts checks them);
-// 7.4 under version 6 isn't checked yet (P2-16 part 4c), and no ballot is
-// judged beside an author panel, whose key set 3.2 doesn't register (P2-16
+// opening, so 6.2 passes wherever it runs (openings-v3.test.ts checks them),
+// and no tally opening, so 7.4 does too (counted-v4.test.ts judges them);
+// no ballot is judged beside an author panel, whose key set 3.2 doesn't register (P2-16
 // part 4d). Fixtures: docs/spec/vectors/verifier-ballots-v4.json
 // (packages/crypto/scripts/verifier-ballots-v4-vectors.py, an independent
 // implementation of the version-4 record, both halves' shapes, its range

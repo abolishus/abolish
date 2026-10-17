@@ -368,7 +368,7 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 6 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.5 and 5.7 pass, and so does 6.2, with no opening on the board; 7.4, whose check of the default half's tally comes later, is not implemented.",
+        "Definition version 6 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.5 and 5.7 pass, and so do 6.2 and 7.4, with no spoiled-ballot or tally opening on the board.",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
@@ -465,10 +465,10 @@ def opening_row(d, admitted):
 
 
 def tally_row(d, registered):
-    """7.4 (docs/spec/verifier.md, Tally openings, step 1): under tally-opening version 1 with a key set registered, not implemented under definition version 6, whose default half's tally this release doesn't read yet."""
+    """7.4 (docs/spec/verifier.md, Tally openings, steps 1 and 4): unsupported under a tally-opening version other than 1; not reached unless 3.2 registered a key set (never beside an author panel); otherwise it runs over the copy's openings, and these boards carry none, so it passes (packages/verifier's counted-v4.test.ts judges openings under version 6)."""
     if dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] != 1:
         return UNSUPPORTED
-    return NOT_REACHED if registered is None else NOT_IMPLEMENTED
+    return NOT_REACHED if registered is None else outcome("pass")
 
 
 def rows_for(kind, rejected=()):
@@ -633,7 +633,7 @@ def assemble(constants, proofs_path, out_dir):
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
     assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-2"]["expected"]["6.2"] == NOT_REACHED
     assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
-    assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == NOT_IMPLEMENTED
+    assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == outcome("pass")
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",

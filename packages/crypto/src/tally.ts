@@ -127,13 +127,16 @@ function checkRules(rules: TallyRules): void {
 
 /**
  * The rules a cell of a registered definition is tallied under
- * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under version 5 each
- * question's option count and limits. Versions 1, 3, 4 and 5 only: a
- * version-6 definition's ballots are version 4, whose halves are tallied per
- * panel (`panelTallyRules`), so it is `UnsupportedVersionError` here (T-36).
- * A definition that isn't well-formed is refused: its questions could
- * hold limits no ballot proves, which would make `tally-question-range`
- * judge an honest cell (T-28, T-34).
+ * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under versions 5 and 6
+ * each question's option count and limits. A version-6 definition's ballots
+ * are version 4: without an author panel their default half is the whole
+ * sharing, tallied by the default panel exactly as version 5's ballots are,
+ * so the rules are version 5's; with one, its halves are tallied per panel
+ * (`panelTallyRules`) and it is refused here, so no caller sums a half under
+ * one panel's rules as the whole vote (T-28, T-37). Any later version is
+ * `UnsupportedVersionError` (T-36). A definition that isn't well-formed is
+ * refused: its questions could hold limits no ballot proves, which would
+ * make `tally-question-range` judge an honest cell (T-28, T-34).
  */
 export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules {
   const rules = (d: { readonly threshold: number; readonly panel_size: number }) => ({
@@ -155,9 +158,16 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
         throw new RangeError("tallyRules: the definition isn't well-formed");
       return { optionCount: definition.value.option_count, ...rules(definition.value) };
     }
-    case 5: {
-      if (electionDefinitionV5Rule(definition.value) !== undefined)
+    case 5:
+    case 6: {
+      const failure =
+        definition.version === 5
+          ? electionDefinitionV5Rule(definition.value)
+          : electionDefinitionV6Rule(definition.value);
+      if (failure !== undefined)
         throw new RangeError("tallyRules: the definition isn't well-formed");
+      if (definition.version === 6 && definition.value.author_keys.length !== 0)
+        throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
       const questions = Object.freeze(
         definition.value.questions.map((q) =>
           Object.freeze({

@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import {
+  aggregateCell,
+  aggregateHash,
   type AnchorClock,
   ballotHashV4,
-  CONTRACT_EVENT_SIGNATURES,
-  type CommittedVoteV4,
   checkContractEvent,
+  type CommittedVoteV4,
+  CONTRACT_EVENT_SIGNATURES,
   decode,
   decodeBallot,
   decodeBoardEntry,
@@ -14,22 +16,34 @@ import {
   encodeBoardEntry,
   encodeCloseStatement,
   encodeContractEvent,
+  encodeDestructionStatement,
   encodeShareComplaintV2,
   encodeShareReceipt,
   encodeShareReceiptV2,
+  encodeTallyOpening,
   identityKey,
   KEM_PUBLIC_KEY,
+  openCell,
   PARAMETERS,
+  proveValidityV4,
+  type QuestionRules,
   RECORD_TYPES,
   type RegisteredKeys,
   type SeatPanel,
+  type Share,
   shareReceiptRecord,
   shareReceiptRecordV2,
   shareReceiptStatement,
   shareReceiptStatementV4,
+  shareVoteV4,
   signCloseStatement,
+  signDestructionStatement,
   signShareComplaintV2,
   signStatement,
+  signTallyOpening,
+  sumShares,
+  tallyRules,
+  type VoteSharingV4,
 } from "@abolishus/crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -48,12 +62,18 @@ import { run, type TestHeader } from "./headers.ts";
 // panel's share hashes and key set, so a record naming the author panel of a
 // poll without one delivers nothing (docs/spec/verifier.md, Counted set and
 // tally, step 3; docs/spec/delivery.md, Delivery check (version 2); T-37).
-// 6.3 rides on the same delivery; the tally (7.1 to 7.3) and 8.5 under
-// version 6 are P2-16 part 4c's. The ballots are verifier-ballots-v4.json's
-// `admitted` case (packages/crypto/scripts/verifier-ballots-v4-vectors.py,
-// an independent implementation); the seats' signing keys are this test's
-// own, and the receipts and complaints are made with @abolishus/crypto's
-// trustee paths, never with the checks under test. delivery-v2.json gives a
+// 6.3 rides on the same delivery, and the tally (7.1 to 7.4's counted-set
+// breaks, 8.5) opens each cell's default halves under tally-opening version
+// 1, which without an author panel are the whole sharing (docs/spec/tally.md,
+// Context). The delivery ballots are verifier-ballots-v4.json's `admitted`
+// case (packages/crypto/scripts/verifier-ballots-v4-vectors.py, an
+// independent implementation); the tally's are cast here under its
+// definition with @abolishus/crypto's client path (`shareVoteV4`,
+// `proveValidityV4`), since the vectors' sharings aren't published, and the
+// expected counts are the votes cast. The seats' signing keys are this
+// test's own, and the receipts, complaints, openings and destruction
+// statements are made with @abolishus/crypto's trustee paths (`sumShares`,
+// `openCell`), never with the checks under test. delivery-v2.json gives a
 // complaint proof, which only has to decode here.
 
 const numRuns = Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 200);
@@ -131,6 +151,8 @@ interface Cast {
   readonly nullifier: bigint;
   readonly vote: CommittedVoteV4;
   readonly hash: Uint8Array;
+  /** The sharing, for a ballot cast here: the trustees' summed shares come from it. */
+  readonly sharing?: VoteSharingV4;
 }
 
 /** The `admitted` case's ballots, in copy order, with their entries on that board. */
@@ -153,6 +175,40 @@ const CAST: readonly Cast[] = (() => {
   });
 })();
 const [ALICE, BOB, CAROL] = CAST as [Cast, Cast, Cast, ...Cast[]];
+
+// The definition's questions: pick one of three or none, up to two of four,
+// exactly one of two, so nine flat options; tier 0 has cells 0 and 1, tier 2
+// cell 2.
+const RULES = tallyRules(definition);
+let nextNullifier = 1_000n;
+let nextEntry = 10_000;
+
+/** A version-4 ballot in `cell` with these flat votes, admitted and selected elsewhere in the copy (its `entry` is a stand-in). */
+function cast(cell: number, votes: readonly (0 | 1)[]): Cast {
+  const nullifier = nextNullifier++;
+  const rules = {
+    questions: RULES.questions as readonly QuestionRules[],
+    threshold: RULES.threshold,
+    panelSize: RULES.panelSize,
+    authorThreshold: 0,
+    authorPanelSize: 0,
+  };
+  const sharing = shareVoteV4(rules, votes);
+  // A seat outside the registered key set gets 32 zero bytes (delivery.md, Notes).
+  const shareHashes = Array.from({ length: RULES.panelSize }, (_, i) =>
+    SEATS.includes(i + 1) ? sha256(text(`share ${nullifier} ${i + 1}`)) : new Uint8Array(32),
+  );
+  const ctx = { ...rules, definitionHash: hash, cell, nullifier };
+  const vote = proveValidityV4(ctx, sharing, shareHashes, []);
+  return {
+    entry: nextEntry++,
+    cell,
+    nullifier,
+    vote,
+    hash: ballotHashV4({ definitionHash: hash, cell, nullifier }, vote),
+    sharing,
+  };
+}
 
 /** One copy of the election: the board the test fills, and what `countedChecks` takes. */
 function election() {
@@ -190,6 +246,43 @@ function election() {
   const deliver = (ballots: readonly Cast[], segment: number) => {
     for (const b of ballots) for (const seat of SEATS) board(segment, receipt(b, seat));
   };
+  /** Cell `cell`'s honest opening over `counted`'s default halves, combined by seats 1 to k and signed by `signer`. */
+  const opening = (
+    cell: number,
+    counted: readonly Cast[],
+    signer: number,
+    tamper?: (o: Share[]) => Share[],
+  ) => {
+    const vss = counted.map((b) => b.vote.vss);
+    const summed = new Map(
+      SEATS.slice(0, RULES.threshold).map((seat) => [
+        seat,
+        sumShares(
+          RULES,
+          counted.map((b) => {
+            if (b.sharing === undefined) throw new Error("fixture: a ballot not cast here");
+            return b.sharing.shares[seat - 1] as readonly Share[];
+          }),
+        ),
+      ]),
+    );
+    const opened = openCell(RULES, vss, summed);
+    if (!opened.ok) throw new Error(`fixture: cell ${cell} doesn't open (${opened.code})`);
+    const shares = opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint }));
+    return encodeTallyOpening(
+      signTallyOpening(secret(signer), {
+        definition_hash: hash,
+        cell,
+        aggregate_hash: aggregateHash(aggregateCell(RULES, vss)),
+        signer,
+        opening: tamper === undefined ? shares : tamper(shares),
+      }),
+    );
+  };
+  const destruction = (signer: number) =>
+    encodeDestructionStatement(
+      signDestructionStatement(secret(signer), { definition_hash: hash, signer }),
+    );
   const tallyOf = (b: Cast): BallotTally => ({
     cell: b.cell,
     vss: b.vote.vss,
@@ -226,7 +319,7 @@ function election() {
       },
       tally: tallyOf(b),
     }));
-  return { entries, board, receipt, deliver, inputs, admitted };
+  return { entries, board, receipt, deliver, opening, destruction, inputs, admitted };
 }
 
 const rows = (r: ReturnType<typeof countedChecks>) => Object.fromEntries(r.rows);
@@ -234,7 +327,7 @@ const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const LATER = { status: "unverifiable", code: "not-implemented", at: {} };
 
 describe("an honest election", () => {
-  test("every default seat's receipt delivers each ballot: 5.9 passes, and the tally waits on part 4c", () => {
+  test("every default seat's receipt delivers each ballot: 5.9 passes, and with nothing opened every cell is tally-missing", () => {
     const e = election();
     e.deliver([ALICE, BOB, CAROL], 200);
     const r = countedChecks(e.inputs([ALICE, BOB, CAROL]));
@@ -242,15 +335,27 @@ describe("an honest election", () => {
       "5.9": { status: "pass" },
       // No run of L1 headers, so L_δ isn't found (format 4).
       "6.3": { status: "unverifiable", code: "not-reached", at: {} },
-      "7.1": LATER,
-      "7.2": LATER,
-      "7.3": LATER,
-      "8.5": LATER,
+      "7.1": { status: "pass" },
+      "7.2": { status: "fail", code: "tally-missing", at: { cell: 0 } },
+      "7.3": { status: "pass" },
+      // Report-only (8.5): no seat stated destruction.
+      "8.5": { status: "fail", code: "destruction-missing", at: { seat: 1 } },
     });
     expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
-    expect(r.cells).toBeUndefined();
-    expect(r.destruction).toBeUndefined();
-    expect(r.tallyBreaks).toBeUndefined();
+    // The vectors' ballots, by cell, each in the tier its cell is in.
+    const inCell = (c: number) =>
+      CAST.filter((b) => [ALICE, BOB, CAROL].includes(b) && b.cell === c);
+    expect(
+      r.cells?.map(({ cell, tier, counted, code }) => ({ cell, tier, counted, code })),
+    ).toEqual(
+      [0, 1, 2].map((cell) => ({
+        cell,
+        tier: cell < 2 ? 0 : 2,
+        counted: inCell(cell).length,
+        code: "tally-missing",
+      })),
+    );
+    expect(r.tallyBreaks).toEqual(new Map());
   });
 
   test("under a board-entry version without destruction statements, 8.5 is left to the caller", () => {
@@ -575,6 +680,120 @@ describe("6.3 under definition version 6", () => {
       "close-counted",
       "close-counted",
     ]);
+  });
+});
+
+describe("the tally of the default halves (7.1 to 7.4, 8.5)", () => {
+  // Flat options: question 0 is 0 to 2, question 1 is 3 to 6, question 2 is 7 and 8.
+  const e = election();
+  const a = cast(0, [1, 0, 0, 1, 1, 0, 0, 1, 0]);
+  const b = cast(0, [0, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const c = cast(1, [0, 1, 0, 0, 0, 0, 1, 1, 0]);
+  const g = cast(2, [0, 0, 1, 1, 0, 1, 0, 0, 1]);
+  e.deliver([a, b, c, g], 200);
+  e.board(300, e.opening(0, [a, b], 1));
+  e.board(300, e.opening(1, [c], 2));
+  e.board(300, e.opening(2, [g], 3));
+  const statements = SEATS.map((seat) => e.board(301, e.destruction(seat)));
+  const r = countedChecks(e.inputs([a, b, c, g]));
+
+  test("every row passes, and each cell's counts are the votes cast in it", () => {
+    expect(rows(r)).toEqual({
+      "5.9": { status: "pass" },
+      "6.3": { status: "unverifiable", code: "not-reached", at: {} },
+      "7.1": { status: "pass" },
+      "7.2": { status: "pass" },
+      "7.3": { status: "pass" },
+      "8.5": { status: "pass" },
+    });
+    expect(r.cells).toEqual([
+      {
+        cell: 0,
+        tier: 0,
+        counted: 2,
+        counts: ["1", "0", "0", "1", "2", "0", "0", "1", "1"],
+        signers: [1],
+      },
+      {
+        cell: 1,
+        tier: 0,
+        counted: 1,
+        counts: ["0", "1", "0", "0", "0", "0", "1", "1", "0"],
+        signers: [2],
+      },
+      {
+        cell: 2,
+        tier: 2,
+        counted: 1,
+        counts: ["0", "0", "1", "1", "0", "1", "0", "0", "1"],
+        signers: [3],
+      },
+    ]);
+    // Tier 0's result is its two cells' sum, derived, never opened.
+    expect(r.tiers).toEqual([
+      { tier: 0, counted: 3, counts: ["1", "1", "0", "1", "2", "0", "1", "2", "1"] },
+      { tier: 2, counted: 1, counts: ["0", "0", "1", "1", "0", "1", "0", "0", "1"] },
+    ]);
+    expect(r.tallyBreaks).toEqual(new Map());
+    expect(r.destruction).toEqual({
+      earliest: 301,
+      latest: 301,
+      seats: statements.map((entry, i) => ({ seat: i + 1, code: "destroyed", entry })),
+      duplicates: [],
+      unattributed: [],
+      stray: [],
+      rejected: [],
+    });
+  });
+
+  test("an opening over a ballot delivery excluded is over another set", () => {
+    const f = election();
+    f.deliver([a, c, g], 200);
+    // Seat 3 never receipted `b`.
+    for (const seat of [1, 2]) f.board(200, f.receipt(b, seat));
+    const wrong = f.board(300, f.opening(0, [a, b], 1));
+    f.board(300, f.opening(1, [c], 2));
+    f.board(300, f.opening(2, [g], 3));
+    const got = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
+    expect(got.delivery?.excluded).toEqual([
+      { entry: b.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] },
+    ]);
+    expect(got.rows.get("7.2")).toEqual({ status: "fail", code: "tally-opening", at: { cell: 0 } });
+    expect(got.cells?.[0]).toEqual({
+      cell: 0,
+      tier: 0,
+      counted: 1,
+      code: "tally-opening",
+      signers: [],
+    });
+    // A tier with a failing cell has no derived result.
+    expect(got.tiers?.[0]).toEqual({ tier: 0, counted: 2 });
+    expect(got.tallyBreaks).toEqual(new Map([[wrong, { code: "tally-aggregate" }]]));
+    // The opening over the counted set passes.
+    f.board(301, f.opening(0, [a], 2));
+    const fixed = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
+    expect(fixed.rows.get("7.2")).toEqual({ status: "pass" });
+    expect(fixed.cells?.[0]).toMatchObject({
+      counts: ["1", "0", "0", "1", "1", "0", "0", "1", "0"],
+    });
+  });
+
+  test("an opening that doesn't open an option fails 7.2 at that option", () => {
+    const f = election();
+    f.deliver([a, c, g], 200);
+    const bad = f.board(
+      300,
+      f.opening(0, [a], 1, (o) => o.map((x, j) => (j === 4 ? { ...x, v: x.v + 1n } : x))),
+    );
+    f.board(300, f.opening(1, [c], 2));
+    f.board(300, f.opening(2, [g], 3));
+    const got = countedChecks(f.inputs([a, c, g], { destruction: false }));
+    expect(got.rows.get("7.2")).toEqual({
+      status: "fail",
+      code: "tally-opening",
+      at: { cell: 0, option: 4 },
+    });
+    expect(got.tallyBreaks).toEqual(new Map([[bad, { code: "tally-opening", option: 4 }]]));
   });
 });
 

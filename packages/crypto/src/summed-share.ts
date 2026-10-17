@@ -56,6 +56,7 @@ import {
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
   electionDefinitionV6Hash,
+  UnsupportedVersionError,
 } from "./protocol.ts";
 import { aggregateHash } from "./tally-opening.ts";
 import { identityKey, p256Sig, signStatement, verifyStatement } from "./trustee.ts";
@@ -236,7 +237,12 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
     "version" in definition && "value" in definition
       ? definition
       : { version: 1, value: definition };
-  // Refuses a version-6 definition and one that isn't well-formed (T-28, T-36).
+  // Summed-share message version 1 under definition version 6 is the
+  // trustee node's tally of a poll without an author panel, which isn't
+  // built yet: refused, as before tallyRules read version 6 (T-36).
+  if (record.version === 6)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, record.version);
+  // Refuses a definition that isn't well-formed (T-28).
   const rules = tallyRules(record);
   switch (record.version) {
     case 1:

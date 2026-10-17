@@ -7,7 +7,7 @@
 // or fails anything: 7.4 reports and attributes (T-29, T-15, T-17).
 //
 // The partition is the definition's (2.8): under version 1 its tiers, under
-// versions 3 to 5 every tier's stated cells, numbered across the tiers, so
+// versions 3 to 6 every tier's stated cells, numbered across the tiers, so
 // an opening's `cell` is a position among those, never a tier (T-16).
 //
 // What is decided without the counted set: a stray opening, an opening of a
@@ -136,10 +136,13 @@ export function tallyChecks(
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
   if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
-  // Under definition version 6 tally-opening version 1 counts ballot version
-  // 4's default half, whose tally rules this release doesn't read yet
-  // (P2-16 part 4): never passed.
-  if (definition.version === 6) return { row: { status: "unverifiable", code: "not-implemented" } };
+  // Under definition version 6 tally-opening version 1 opens ballot version
+  // 4's default half, which without an author panel is the whole sharing
+  // (tally.md, Context). Beside an author panel 3.2 registers no key set, so
+  // this is a guard: its halves are tallied per panel (P2-16 part 4d), and
+  // nothing is judged against the default panel's rules alone (T-37).
+  if (definition.version === 6 && definition.value.author_keys.length !== 0)
+    return { row: { status: "unverifiable", code: "not-reached" } };
   const positions: number[] = [];
   const payloads: Uint8Array[] = [];
   for (const [at, encoded] of entries.entries()) {
@@ -168,8 +171,8 @@ export function tallyChecks(
     payloads,
     1,
   );
-  // `m`, the options an opening of a cell opens: under definition version 5
-  // the total over the questions (tally.md, Context). 2.1 passed, so the
+  // `m`, the options an opening of a cell opens: under definition versions 5
+  // and 6 the total over the questions (tally.md, Context). 2.1 passed, so the
   // definition is well formed.
   const m = tallyRules(definition).optionCount;
   const report: TallyReport[] = [];

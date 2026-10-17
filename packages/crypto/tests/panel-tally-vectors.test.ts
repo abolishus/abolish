@@ -421,8 +421,8 @@ describe("panel-tally.json: destruction statements, version 2", () => {
 });
 
 describe("the per-panel tally's guards", () => {
-  test("tallyRules still refuses version 6: its halves are tallied per panel", () => {
-    expect(() => tallyRules(definition)).toThrow();
+  test("tallyRules refuses version 6 with an author panel: its halves are tallied per panel", () => {
+    expect(() => tallyRules(definition)).toThrow(RangeError);
   });
 
   test("panelTallyRules refuses a definition without an author panel", () => {

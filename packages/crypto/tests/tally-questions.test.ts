@@ -29,7 +29,6 @@ import {
   type TallyElection,
   type TallyRules,
   tallyRules,
-  UnsupportedVersionError,
 } from "../src/index.ts";
 import { firstQuestionOutside } from "../src/tally.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
@@ -210,11 +209,64 @@ describe("tallyRules", () => {
     }
   });
 
-  test("a version-6 definition is unsupported until P2-16 tallies ballot version 4", () => {
-    const value = decodeElectionDefinitionV6(
-      first("election-definition-v6.json", (v) => v.id === "definition-v6-typical"),
-    );
-    expect(() => tallyRules({ version: 6, value })).toThrow(UnsupportedVersionError);
+  // election-definition-v6.json's own values, not the decoder's, give the
+  // expected rules; its ill-formed vectors are refused whatever their panels.
+  interface V6Vector {
+    readonly id: string;
+    readonly encoding: string;
+    readonly illFormed?: string;
+    readonly value?: {
+      readonly questions: readonly {
+        readonly option_count: string;
+        readonly min_selections: string;
+        readonly max_selections: string;
+      }[];
+      readonly threshold: string;
+      readonly panel_size: string;
+      readonly author_keys: readonly string[];
+    };
+  }
+  const v6 = read<{ vectors: readonly V6Vector[] }>("election-definition-v6.json").vectors.filter(
+    (v) => v.value !== undefined,
+  );
+
+  test("a version-6 definition without an author panel takes its questions, k and n, as version 5's does", () => {
+    const sole = v6.filter((v) => v.illFormed === undefined && v.value?.author_keys.length === 0);
+    expect(sole.length).toBeGreaterThanOrEqual(3);
+    for (const v of sole) {
+      const value = v.value as NonNullable<V6Vector["value"]>;
+      const questions = value.questions.map((q) => ({
+        optionCount: Number(q.option_count),
+        minSelections: Number(q.min_selections),
+        maxSelections: Number(q.max_selections),
+      }));
+      expect(
+        tallyRules({ version: 6, value: decodeElectionDefinitionV6(hex(v.encoding)) }),
+      ).toEqual({
+        optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
+        threshold: Number(value.threshold),
+        panelSize: Number(value.panel_size),
+        questions,
+      });
+    }
+  });
+
+  test("a version-6 definition with an author panel is refused: its halves are tallied per panel", () => {
+    const paired = v6.filter((v) => v.illFormed === undefined && v.value?.author_keys.length !== 0);
+    expect(paired.length).toBeGreaterThanOrEqual(3);
+    for (const v of paired)
+      expect(() =>
+        tallyRules({ version: 6, value: decodeElectionDefinitionV6(hex(v.encoding)) }),
+      ).toThrow(/tallied per panel/);
+  });
+
+  test("a version-6 definition that isn't well-formed is refused, with or without an author panel", () => {
+    const bad = v6.filter((v) => v.illFormed !== undefined);
+    expect(bad.some((v) => v.value?.author_keys.length === 0)).toBe(true);
+    for (const v of bad)
+      expect(() =>
+        tallyRules({ version: 6, value: decodeElectionDefinitionV6(hex(v.encoding)) }),
+      ).toThrow(/isn't well-formed/);
   });
 
   test("a version-5 definition that isn't well-formed is refused", () => {

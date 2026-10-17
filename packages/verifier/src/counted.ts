@@ -448,14 +448,6 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   rows.set("6.3", closed.row);
   const close = closed.report === undefined ? {} : { close: closed.report };
 
-  // Version 6's tally (7.1 to 7.3, 8.5) reads its counted set's default
-  // halves under tally-opening version 1, which P2-16 part 4c brings.
-  if (definition.version === 6) {
-    const later: CountedOutcome = { status: "unverifiable", code: "not-implemented", at: {} };
-    for (const id of [...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])]) rows.set(id, later);
-    return { rows, delivery, ...close };
-  }
-
   // The destruction statement's version is the tally opening's (tally.md,
   // Destruction), so neither is read under another tally-opening pin (T-36).
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1) {
@@ -764,7 +756,7 @@ type CommittedVss = BallotTally["vss"];
 
 /**
  * Each cell's tier, in partition order: under definition version 1 the
- * cells are the tiers, under versions 3 and 4 every tier's cells in
+ * cells are the tiers, under versions 3 to 6 every tier's cells in
  * `electorate` order (election-definition.md, Notes, Tally partition).
  */
 function cellTiers(definition: VerifiedDefinition): readonly number[] {

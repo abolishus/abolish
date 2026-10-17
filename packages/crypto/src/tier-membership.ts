@@ -2,9 +2,13 @@
 // and Cell tree; docs/spec/contracts.md, Group registry, Verification;
 // P2-21 part 3): the leaves of the voter's cell, rebuilt on the device from
 // the group-registry events the election's board carries, never a path or a
-// leaf index asked of a server (T-10, T-13). Each listed group is replayed
-// strictly, as the verifier replays it (2.4), so a rewritten history is
-// refused here too (T-71); the regions and cells are recounted under the
+// leaf index asked of a server (T-10, T-13). Each listed Tier 0 group is
+// replayed strictly, as the verifier replays it (2.4), so a rewritten history
+// is refused here too (T-71). A Tier 1 group's leaves are its boarded
+// additions, which the board carries exactly as counted (verifier 4.4, Tier 1
+// boarding): whether each counts rests on the archive, which the client
+// doesn't read, so the definition's root, checked over these leaves, is what
+// binds them (T-06, T-53). The regions and cells are recounted under the
 // first-occurrence rule and compared with the definition the client checked;
 // and the voter's own commitment must be counted in the region it registered
 // in, or the client alarms instead of voting in a cell it didn't choose (G-2,
@@ -24,7 +28,7 @@ import {
   isForbiddenCommitment,
 } from "./group-registry.ts";
 import { firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
-import { groupRegistryEvents } from "./vouch-count.ts";
+import { type GroupRegistryEvent, groupRegistryEvents } from "./vouch-count.ts";
 
 /** What the board's group-registry events are read and replayed under. */
 export interface GroupRegistryPins {
@@ -49,9 +53,13 @@ export type TierMembershipErrorCode =
   | "group-created"
   /** A listed group was created for another tier. */
   | "group-tier"
-  /** A listed group's records break its replayed history (`applyGroupRecords`). */
+  /**
+   * A listed Tier 0 group's records break its replayed history
+   * (`applyGroupRecords`), or a listed Tier 1 group's boarded additions hold
+   * one no count takes: a forbidden commitment, or one already its leaf.
+   */
   | "group-history"
-  /** A Tier 1 or Tier 2 group: their leaves aren't the registrars' signed sequence (part 3b). */
+  /** A Tier 2 group: the registry has no Tier 2 addition path yet (P3-4). */
   | "tier-unsupported"
   /** The recounted regions or cells differ from the definition's. */
   | "electorate"
@@ -99,6 +107,43 @@ function u64At(b: Uint8Array, at: number): bigint {
   return new DataView(b.buffer, b.byteOffset, b.byteLength).getBigUint64(at, false);
 }
 
+function fieldAt(b: Uint8Array, at: number): bigint {
+  let v = 0n;
+  for (const x of b.subarray(at, at + 32)) v = (v << 8n) | BigInt(x);
+  return v;
+}
+
+/**
+ * A listed Tier 1 group's leaves: its `Tier1MemberAdded` records in blocks up
+ * to `rootBlock`, each one leaf, in log order (docs/spec/vouching.md, Counted
+ * additions). The event check has already decoded each record strictly, so
+ * `group_id` and `C_V` are read at their offsets. Whether an addition counts
+ * needs the registry's whole Tier 1 and Tier 2 history from the archive, so
+ * no vouch is checked here; the board must carry exactly the counted ones
+ * (verifier 4.4, Tier 1 boarding), and a board that doesn't fails the
+ * definition's root or counts. One a count never takes, a forbidden or
+ * repeated commitment, is refused at once. `MembersAdded` and
+ * `MembersRemoved` naming the group change nothing in it.
+ */
+function tier1GroupLeaves(
+  events: readonly GroupRegistryEvent[],
+  id: bigint,
+  rootBlock: bigint,
+): bigint[] {
+  const leaves: bigint[] = [];
+  const seen = new Set<bigint>();
+  for (const e of events) {
+    if (e.block > rootBlock) break; // blocks never decrease along the sequence
+    if (e.kind !== "tier1-addition" || u64At(e.record, 0) !== id) continue;
+    const commitment = fieldAt(e.record, 8);
+    if (isForbiddenCommitment(commitment) || seen.has(commitment))
+      throw new TierMembershipError("group-history", id);
+    seen.add(commitment);
+    leaves.push(commitment);
+  }
+  return leaves;
+}
+
 /**
  * The registry's records among the board's, in log order (`n`): the board
  * carries a subset of a shared sequence in an order no spec fixes yet
@@ -139,16 +184,17 @@ function registryRecords(
 }
 
 /**
- * The voter's cell in a fixed Tier 0 tier, from the election board's
+ * The voter's cell in a fixed Tier 0 or Tier 1 tier, from the election board's
  * contract-event records (`records`, any order, other contracts' included),
  * the tier's electorate from a definition the client checked (`tier`,
  * definition version 3 to 6), the voter's identity commitment
  * (`identityCommitment`) and the group it registered in (`group`).
  *
- * Every listed group is replayed strictly from its `GroupCreated`,
+ * Every listed Tier 0 group is replayed strictly from its `GroupCreated`,
  * `MembersAdded` and `MembersRemoved` records in blocks up to the tier's
  * `root_l2_block`, under the release's registrars, as the verifier's 2.4
- * does; the regions and cells are recounted under the first-occurrence rule
+ * does; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
+ * records in those blocks, with no vouch checked; the regions and cells are recounted under the first-occurrence rule
  * and must equal the definition's; the voter's commitment must be a live
  * leaf of `group` and be counted in `group`'s region. The cell's root isn't
  * recomputed here: `membershipProverInput` checks it over the returned
@@ -210,6 +256,7 @@ export function tierMembership(
     if (only === undefined || created.length !== 1 || only.kind !== "group-created")
       throw new TierMembershipError("group-created", id);
     if (only.tier !== tierId) throw new TierMembershipError("group-tier", id);
+    if (only.tier === 1) return tier1GroupLeaves(read.events, id, rootBlock);
     if (only.tier !== 0) throw new TierMembershipError("tier-unsupported", id);
     const log: GroupLogRecord[] = [];
     for (const e of read.events) {

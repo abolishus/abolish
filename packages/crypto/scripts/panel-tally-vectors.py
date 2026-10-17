@@ -228,7 +228,7 @@ def panel_openings(m, agg, openings):
 
 def report(p):
     passing, failing = p
-    return {"passing": [{"at": at, "signer": s} for at, _, s, _ in passing], "failing": failing}
+    return {"passing": [{"at": at, "signer": s, "segment": seg} for at, seg, s, _ in passing], "failing": failing}
 
 
 def verdict(e, n_ballots, author, default, author_late):

@@ -505,9 +505,13 @@ export interface PartialTallyEntry {
 /** A counted ballot's two halves: the default panel's commitments and the author panel's. */
 export type BallotHalves = Pick<CommittedVoteV4, "vss" | "author_vss">;
 
-/** One panel's openings of a cell: those that open its aggregate, and the rest. */
+/**
+ * One panel's openings of a cell: those that open its aggregate, with each
+ * one's segment (the first gives the destruction timing's `firstPassing`),
+ * and the rest.
+ */
 export interface PanelOpenings {
-  readonly passing: readonly OpeningReport[];
+  readonly passing: readonly (OpeningReport & { readonly segment: number })[];
   readonly failing: readonly FailingOpening[];
 }
 
@@ -600,7 +604,18 @@ function checkPartialElection(election: PartialTallyElection, what: string): voi
   const { defaultRules: d, authorRules: a } = election;
   if (d.panel !== 1 || a.panel !== 2)
     throw new RangeError(`${what}: the rules must be panelTallyRules' for panels 1 and 2`);
-  if (d.optionCount !== a.optionCount)
+  const sameQuestions =
+    d.questions?.length === a.questions?.length &&
+    (d.questions ?? []).every((q, i) => {
+      const o = a.questions?.[i];
+      return (
+        o !== undefined &&
+        q.optionCount === o.optionCount &&
+        q.minSelections === o.minSelections &&
+        q.maxSelections === o.maxSelections
+      );
+    });
+  if (d.optionCount !== a.optionCount || !sameQuestions)
     throw new RangeError(`${what}: both panels' rules must be one definition's`);
 }
 
@@ -675,7 +690,7 @@ function panelOpenings(
 type Evaluated = ReturnType<typeof panelOpenings>;
 
 const reportOf = (e: Evaluated): PanelOpenings => ({
-  passing: e.passing.map(({ at, signer }) => ({ at, signer })),
+  passing: e.passing.map(({ at, signer, segment }) => ({ at, signer, segment })),
   failing: e.failing,
 });
 

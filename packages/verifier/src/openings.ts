@@ -4,7 +4,9 @@
 // the definition and the registered key set, never against a board entry
 // (`checkChallengeOpening` for version 1 under definition version 1;
 // `checkChallengeOpeningV2` for version 2, which opens the cores of ballot
-// versions 2 and 3, under definition versions 3 to 5), then judged against
+// versions 2 and 3, under definition versions 3 to 5;
+// `checkChallengeOpeningV3` for version 3, which opens both halves of ballot
+// version 4's cores, under definition version 6), then judged against
 // challenge.md's Publication rules. None of it ever counts, displaces or
 // fails anything: an opening is a report, attributed to the board operator
 // (T-42, T-47, T-53).
@@ -26,19 +28,26 @@ import {
   type ChallengeOpeningV2Code,
   checkChallengeOpening,
   checkChallengeOpeningV2,
+  checkChallengeOpeningV3,
   DecodeError,
   type DecodeErrorCode,
   decodeBoardEntry,
   decodeOpening,
   openedCommitments,
   type OpenedCommitments,
+  openedCommitmentsV3,
+  type OpenedCommitmentsV3,
   openingCoreHash,
   openingV2CoreHash,
+  openingV3CoreHash,
   opensBallotCommitment,
+  opensBallotCommitmentV4,
+  panelBallotElection,
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
   type RegisteredKeys,
+  type SeatPanel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { AdmittedCore } from "./ballots.ts";
@@ -63,6 +72,8 @@ export interface OpeningReport {
   readonly option?: number;
   /** `opening-ciphertext`'s first failing seat. */
   readonly seat?: number;
+  /** Under opening version 3, with `option` or `seat`: its half's panel (1 default, 2 author). */
+  readonly panel?: SeatPanel;
   /** A passing opening's tracking code, as hex. */
   readonly coreHash?: string;
   /** A passing opening's vote, `v_j` for each option, as decimal strings. */
@@ -121,13 +132,14 @@ type Judge = (payload: Uint8Array) => {
         readonly votes: readonly bigint[];
         readonly withinRules: boolean;
         readonly question?: number;
-        readonly opened: () => OpenedCommitments;
+        readonly opened: () => OpenedCommitments | OpenedCommitmentsV3;
       }
     | {
         readonly ok: false;
         readonly code: ChallengeOpeningCode | ChallengeOpeningV2Code;
         readonly option?: number;
         readonly seat?: number;
+        readonly panel?: SeatPanel;
       };
 };
 
@@ -135,10 +147,10 @@ const UNSUPPORTED: OpeningOutcome = { status: "unverifiable", code: "unsupported
 
 // The ballot and spoiled-ballot opening versions each definition version
 // pins (2.3): definition version 1's ballots (version 1) are opened by
-// opening version 1, and ballot versions 2 (definition versions 3 and 4)
-// and 3 (version 5) by opening version 2, which names a cell.
+// opening version 1, ballot versions 2 (definition versions 3 and 4) and 3
+// (version 5) by opening version 2, which names a cell, and ballot version 4
+// (version 6) by opening version 3, which opens both halves.
 const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
-const NOT_IMPLEMENTED: OpeningOutcome = { status: "unverifiable", code: "not-implemented" };
 
 /**
  * How this definition's openings are judged, or the outcome 6.2 takes when
@@ -174,9 +186,22 @@ function judgeFor(
     admitted === undefined
   )
     return NOT_REACHED;
-  // Opening version 3 opens both halves of a version-4 core, which this
-  // release doesn't check yet (P2-16 part 4): never passed.
-  if (definition.version === 6) return NOT_IMPLEMENTED;
+  if (definition.version === 6) {
+    // Admission judges no ballot beside an author panel, so this is a guard:
+    // an author half's seats have no registered key set until that panel's
+    // own ceremony is read (P2-16 part 4d), and an unchecked ciphertext must
+    // never let an opening pass (T-37).
+    if (definition.value.author_keys.length !== 0) return NOT_REACHED;
+    const election = panelBallotElection(definition.value, registered);
+    return (payload) => {
+      const o = decodeOpening(payload, 3);
+      const checked = checkChallengeOpeningV3(election, o);
+      return {
+        hash: bytesToHex(openingV3CoreHash(o)),
+        checked: checked.ok ? { ...checked, opened: () => openedCommitmentsV3(o) } : checked,
+      };
+    };
+  }
   if (definition.version === 1) {
     const election = ballotElection(definition.value, registered);
     return (payload) => {
@@ -270,6 +295,7 @@ export function openingChecks(
         code: checked.code,
         ...(checked.option !== undefined && { option: checked.option }),
         ...(checked.seat !== undefined && { seat: checked.seat }),
+        ...(checked.panel !== undefined && { panel: checked.panel }),
         breaks: [...early, ...repeat],
       });
       continue;
@@ -277,7 +303,7 @@ export function openingChecks(
     // Only a passing opening opens anything; `openedCommitments` needs one
     // (T-45, T-47). A ballot above the floor may or may not be counted.
     const opened = checked.opened();
-    const cast = counted.find((b) => opensBallotCommitment(opened, b.core));
+    const cast = counted.find((b) => opens(opened, b.core));
     report.push({
       entry: at,
       coreHash: bytesToHex(checked.coreHash),
@@ -292,6 +318,15 @@ export function openingChecks(
     });
   }
   return { row: rowOf(report), report };
+}
+
+// A version-3 opening is compared with both halves of a version-4 core, and
+// only those: each comparison throws on the other version's (T-14, T-47).
+function opens(opened: OpenedCommitments | OpenedCommitmentsV3, core: AdmittedCore["core"]) {
+  if (!("hasHalf" in opened)) return opensBallotCommitment(opened, core);
+  if (!("authorVss" in core))
+    throw new TypeError("opens: a version-3 opening is compared with version-4 cores only");
+  return opensBallotCommitmentV4(opened, core);
 }
 
 // An opening is settled when it failed a check or broke a decided rule; one

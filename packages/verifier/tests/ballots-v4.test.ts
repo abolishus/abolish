@@ -15,10 +15,11 @@ import {
 // admission, 5.1 to 5.5 and 5.7, against the cell's root and scope, the
 // questions and both panels in the definition and the key set its transcript
 // check registered, and 1.3 under the one pinned membership key
-// (docs/spec/verifier.md, Ballot admission). 6.2 under opening version 3 and
-// 7.4 under version 6 aren't checked yet (P2-16 parts 4b-2 and 4c), and no
-// ballot is judged beside an author panel, whose key set 3.2 doesn't register
-// (P2-16 part 4d). Fixtures: docs/spec/vectors/verifier-ballots-v4.json
+// (docs/spec/verifier.md, Ballot admission). These boards carry no spoiled-ballot
+// opening, so 6.2 passes wherever it runs (openings-v3.test.ts checks them);
+// 7.4 under version 6 isn't checked yet (P2-16 part 4c), and no ballot is
+// judged beside an author panel, whose key set 3.2 doesn't register (P2-16
+// part 4d). Fixtures: docs/spec/vectors/verifier-ballots-v4.json
 // (packages/crypto/scripts/verifier-ballots-v4-vectors.py, an independent
 // implementation of the version-4 record, both halves' shapes, its range
 // proofs and its admission order, with snarkjs's verdict on every membership
@@ -149,8 +150,9 @@ describe("1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 against the independent im
         const r = format4(c);
         expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
         expect(r.ballots).toEqual(c.ballots);
-        // 6.2 is never past its step 1 here, so no opening is reported.
-        expect(r.openings).toBeUndefined();
+        // No opening is on these boards: where 6.2 runs past its step 1 it
+        // reports none.
+        expect(r.openings).toEqual(c.expected["6.2"]?.["status"] === "pass" ? [] : undefined);
         expect(r.verdict).toBe("unverifiable");
         // A rejected ballot rejects its entry only, never the election (T-52):
         // only an election check (here 1.3, 2.3 or 3.2) can make it fail.

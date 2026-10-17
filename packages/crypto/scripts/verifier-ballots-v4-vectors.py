@@ -368,7 +368,7 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 6 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.5 and 5.7 pass; 6.2 and 7.4, whose checks of version 4's openings and default half come later, are not implemented.",
+        "Definition version 6 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.5 and 5.7 pass, and so does 6.2, with no opening on the board; 7.4, whose check of the default half's tally comes later, is not implemented.",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
@@ -455,13 +455,13 @@ def build(constants):
 
 
 def opening_row(d, admitted):
-    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under an opening version this verifier doesn't read (it reads 1 to 3) or a ballot version other than the definition's own (4) and version 1, as admission is; not reached under any other pins but ballot version 4 beside opening version 3, the one that opens version-4 cores (a profile 2.3 fails), or where admission doesn't run; otherwise not implemented: this release doesn't check opening version 3 yet."""
+    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under an opening version this verifier doesn't read (it reads 1 to 3) or a ballot version other than the definition's own (4) and version 1, as admission is; not reached under any other pins but ballot version 4 beside opening version 3, the one that opens version-4 cores (a profile 2.3 fails), or where admission doesn't run; otherwise it passes, since these boards carry no opening (verifier-openings-v3.json has them)."""
     pins = dict(d["profile"]["pins"])
     if pins[SPOILED_OPENING_TYPE] not in (1, 2, 3) or pins[BALLOT_TYPE] not in (4, 1):
         return UNSUPPORTED
     if pins[BALLOT_TYPE] != 4 or pins[SPOILED_OPENING_TYPE] != 3 or not admitted:
         return NOT_REACHED
-    return NOT_IMPLEMENTED
+    return outcome("pass")
 
 
 def tally_row(d, registered):
@@ -631,7 +631,7 @@ def assemble(constants, proofs_path, out_dir):
     assert by["ballot-v3"]["expected"]["2.3"] == COMBINATION_FAILS
     assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
-    assert by["admitted"]["expected"]["6.2"] == NOT_IMPLEMENTED and by["opening-2"]["expected"]["6.2"] == NOT_REACHED
+    assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-2"]["expected"]["6.2"] == NOT_REACHED
     assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
     assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == NOT_IMPLEMENTED
 

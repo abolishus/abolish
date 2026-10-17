@@ -2,7 +2,7 @@
   "name": "@abolishus/node",
   "version": "0.0.0",
   "private": true,
-  "description": "The community node anyone can run with one command: a mirror of every block it holds, served by CID, so far (docs/STATUS.md P4-5). Source-only.",
+  "description": "The community node anyone can run with one command: a mirror of every block it holds, served by CID, and the fetch that pins every board object L1's checkpoints name, so far (docs/STATUS.md P4-5). Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
-    "@abolishus/verifier": "workspace:*"
+    "@abolishus/verifier": "workspace:*",
+    "@noble/hashes": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

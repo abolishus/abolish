@@ -21,15 +21,26 @@
 // the decided rules stays unsettled and 7.4 can't pass while one is on the
 // copy. Once it is, the board is sealed and authenticated, so only the
 // anchored extent is read, every opening is settled, and 7.4 passes or fails.
+//
+// Beside an author panel the profile pins tally-opening version 3, whose
+// openings are partial openings of a cell for a panel: each is sorted by its
+// panel byte as well and attributed only by that panel's registered key set,
+// a second or a repeat is by the same seat of the same panel, and a default
+// partial opening boarded before every cell had a passing author one breaks
+// `tally-early`, which needs the counted set too (tally.md, Boarding
+// (version 3); T-29, T-37, T-54).
 
 import {
   DecodeError,
   type DecodeErrorCode,
   decodeBoardEntry,
   type BoardEntryVersion,
+  panelTallyRules,
+  partialOpeningMessage,
   pinnedVersion,
   RECORD_TYPES,
   type RegisteredKeys,
+  sortPartialOpenings,
   sortTallyOpenings,
   tallyOpeningStatement,
   tallyRules,
@@ -55,7 +66,14 @@ export type TallyBreak =
    * `of`: the same, over the same signed message. Anyone can replay a signed
    * record, so it is the operator's breach alone, never its signer's (T-29).
    */
-  | { readonly code: "tally-repeat"; readonly of: number };
+  | { readonly code: "tally-repeat"; readonly of: number }
+  /**
+   * Under tally-opening version 3, a default partial opening boarded before
+   * the board held a passing author partial opening of every cell: the
+   * operator's breach, which still counts if it passes. Decided once the
+   * counted set is (counted.ts).
+   */
+  | { readonly code: "tally-early" };
 
 /** One tally-opening entry of the copy, by its position from 0. */
 export interface TallyReport {
@@ -65,6 +83,8 @@ export interface TallyReport {
   readonly decodeError?: DecodeErrorCode;
   /** The cell it is an opening of; absent for a stray opening or one that doesn't decode. */
   readonly cell?: number;
+  /** Under tally-opening version 3, the panel byte it names (1 default, 2 author, any other stray). */
+  readonly panel?: number;
   /** The seat its signature attributes it to, or `null`; absent when it doesn't decode. */
   readonly signer?: number | null;
   readonly breaks: readonly TallyBreak[];
@@ -113,39 +133,45 @@ export interface CountedOpenings {
   readonly extent: number;
   /** `tally-aggregate` or `tally-opening`, by entry, for each opening of a cell with `m` entries that breaks one. */
   readonly breaks: ReadonlyMap<number, TallyBreak>;
+  /** Under tally-opening version 3, the entries of the default partial openings that break `tally-early`. */
+  readonly early?: ReadonlySet<number>;
 }
 
 /**
  * The row 7.4 and the report's `tallies`. `registered` is the key set the
  * transcript check registered, or `undefined` when 3.2 didn't pass: with no
  * registered key set no opening can be attributed, so nothing is judged.
- * `counted`, once the counted set is known, settles every opening of a cell.
+ * Beside an author panel `authorRegistered` is its registered key set, once
+ * 3.2 passed for its run, 2.5 didn't fail and its approvals approved it, and
+ * `undefined` leaves 7.4 not reached as well. `counted`, once the counted set
+ * is known, settles every opening of a cell.
  */
 export function tallyChecks(
   definition: VerifiedDefinition,
   definitionHash: Uint8Array,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
-  // A tally-opening version this verifier doesn't read, or none pinned (a
-  // later tally scheme's record), may be one a later release reads:
-  // unverifiable, never failed, so releases agree (2.3; T-36).
-  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
-    return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
-  if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
   // Under definition version 6 tally-opening version 1 opens ballot version
   // 4's default half, which without an author panel is the whole sharing
-  // (tally.md, Context). Beside an author panel the profile pins version 3,
-  // whose partial openings counted.ts tallies per panel and the pin check
-  // above leaves unread here (P2-16 part 4d-3d-2); under any other pin
-  // nothing is judged against the default panel's rules alone (T-37).
-  if (definition.version === 6 && definition.value.author_keys.length !== 0)
+  // (tally.md, Context); beside one the profile pins version 3, whose
+  // partial openings are per panel, and a version-1 opening there would be
+  // judged against the default panel's rules alone (T-37).
+  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  // A tally-opening version this verifier doesn't read here, or none pinned
+  // (a later tally scheme's record), may be one a later release reads:
+  // unverifiable, never failed, so releases agree (2.3; T-36).
+  const version = author ? 3 : 1;
+  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== version)
+    return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
+  if (registered === undefined || (author && authorRegistered === undefined))
     return { row: { status: "unverifiable", code: "not-reached" } };
   const positions: number[] = [];
-  const payloads: Uint8Array[] = [];
+  const found: { readonly segment: number; readonly payload: Uint8Array }[] = [];
   for (const [at, encoded] of entries.entries()) {
     // Only the sealed board counts once it is known; before that, every
     // opening on the copy is read, and one past the extent stays unsettled.
@@ -160,24 +186,60 @@ export function tallyChecks(
       )
         continue;
       positions.push(at);
-      payloads.push(e.payload);
+      found.push({ segment: e.segment, payload: e.payload });
     } catch (e) {
       if (e instanceof DecodeError) continue;
       throw e;
     }
   }
-  const sorted = sortTallyOpenings(
-    { definitionHash, registered },
-    partitionSize(definition),
-    payloads,
-    1,
-  );
+  const cells = partitionSize(definition);
+  // Each sorted opening as one shape: its cell, the panel it names under
+  // version 3, its signer, its entries and the message its signature is over.
+  const sorted = author
+    ? sortPartialOpenings(
+        { definitionHash, registered: { default: registered, author: authorRegistered ?? [] } },
+        cells,
+        found,
+      ).map((o) =>
+        "error" in o
+          ? o
+          : {
+              at: o.at,
+              cell: o.cell,
+              panel: o.opening.panel as number | undefined,
+              signer: o.signer,
+              length: o.opening.opening.length,
+              signed: partialOpeningMessage(o.opening),
+            },
+      )
+    : sortTallyOpenings(
+        { definitionHash, registered },
+        cells,
+        found.map((f) => f.payload),
+        1,
+      ).map((o) =>
+        "error" in o
+          ? o
+          : {
+              at: o.at,
+              cell: o.cell,
+              panel: undefined,
+              signer: o.signer,
+              length: o.opening.opening.length,
+              signed: tallyOpeningStatement(o.opening),
+            },
+      );
   // `m`, the options an opening of a cell opens: under definition versions 5
-  // and 6 the total over the questions (tally.md, Context). 2.1 passed, so the
-  // definition is well formed.
-  const m = tallyRules(definition).optionCount;
+  // and 6 the total over the questions, for each panel's partial opening as
+  // for a whole one (tally.md, Context). 2.1 passed, so the definition is
+  // well formed.
+  const m = (
+    author
+      ? panelTallyRules(definition as Extract<VerifiedDefinition, { version: 6 }>, 1)
+      : tallyRules(definition)
+  ).optionCount;
   const report: TallyReport[] = [];
-  // Each (cell, seat)'s first attributed opening: its entry and signed message.
+  // Each (cell, panel, seat)'s first attributed opening: its entry and signed message.
   const first = new Map<string, { readonly entry: number; readonly signed: Uint8Array }>();
   for (const o of sorted) {
     const entry = positions[o.at] as number;
@@ -185,9 +247,11 @@ export function tallyChecks(
       report.push({ entry, code: "decode", decodeError: o.error, breaks: [] });
       continue;
     }
+    const panel = o.panel === undefined ? {} : { panel: o.panel };
     if (o.cell === null) {
       report.push({
         entry,
+        ...panel,
         signer: o.signer,
         breaks: [
           { code: "tally-stray" },
@@ -197,7 +261,7 @@ export function tallyChecks(
       continue;
     }
     const breaks: TallyBreak[] = [];
-    if (o.opening.opening.length !== m) breaks.push({ code: "tally-missing" });
+    if (o.length !== m) breaks.push({ code: "tally-missing" });
     // Tally.md's Opening checks order: after `tally-missing`, which an
     // opening of another number of entries breaks instead, and before
     // `tally-unattributed`.
@@ -207,22 +271,25 @@ export function tallyChecks(
     }
     if (o.signer === null) breaks.push({ code: "tally-unattributed" });
     else {
-      // Any earlier opening of this cell by this seat, whatever its checks
-      // find: the operator boards at most one per seat and cell. Only a
-      // different signed message shows the seat signed two openings; the
-      // same message again, under any signature, opens nothing new, and a
-      // byte-identical copy is anyone's replay.
-      const key = `${o.cell}/${o.signer}`;
-      const signed = tallyOpeningStatement(o.opening);
+      // Any earlier opening of this cell by this seat of this panel, whatever
+      // its checks find: the operator boards at most one per seat and cell.
+      // Only a different signed message shows the seat signed two openings;
+      // the same message again, under any signature, opens nothing new, and
+      // a byte-identical copy is anyone's replay. A version-3 message binds
+      // its panel, so an author seat's opening is never a default seat's
+      // second (T-37).
+      const key = `${o.cell}/${o.panel ?? 1}/${o.signer}`;
       const earlier = first.get(key);
-      if (earlier === undefined) first.set(key, { entry, signed });
+      if (earlier === undefined) first.set(key, { entry, signed: o.signed });
       else
         breaks.push({
-          code: equal(earlier.signed, signed) ? "tally-repeat" : "tally-second",
+          code: equal(earlier.signed, o.signed) ? "tally-repeat" : "tally-second",
           of: earlier.entry,
         });
     }
-    report.push({ entry, cell: o.cell, signer: o.signer, breaks });
+    // Boarding (version 3)'s last condition, after the others.
+    if (counted?.early?.has(entry) === true) breaks.push({ code: "tally-early" });
+    report.push({ entry, cell: o.cell, ...panel, signer: o.signer, breaks });
   }
   return { row: rowOf(report, counted !== undefined), report };
 }

@@ -421,11 +421,13 @@ def assemble(constants, proofs_path, out_dir):
         else:
             rows.update({r: NOT_REACHED for r in vb4.ADMISSION_ROWS + ("5.5", "5.7")})
         # 6.2 is reached exactly where admission is, and these copies carry
-        # no opening (verifier-openings-v3-author-vectors.py judges some);
-        # 7.4 judges nothing against the author panel's key set yet (P2-16
-        # part 4d-3c on), so it stays not reached beside one.
+        # no opening (verifier-openings-v3-author-vectors.py judges some).
+        # Beside an author panel 7.4 reads tally-opening version 3 only: this
+        # profile pins version 1, which opens one sharing, never two halves,
+        # so 7.4 is unsupported whatever the ceremony found
+        # (verifier-tally-v3-author-vectors.py judges version 3's).
         rows["6.2"] = outcome("pass") if part == "pass" else NOT_REACHED
-        rows["7.4"] = NOT_REACHED
+        rows["7.4"] = outcome("unverifiable", "unsupported-version", {})
         case = {
             "id": bnd["id"],
             "description": bnd["description"],

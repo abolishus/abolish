@@ -2,14 +2,15 @@
 // and Cell tree; docs/spec/contracts.md, Group registry, Verification;
 // P2-21 part 3): the leaves of the voter's cell, rebuilt on the device from
 // the group-registry events the election's board carries, never a path or a
-// leaf index asked of a server (T-10, T-13). Each listed Tier 0 group is
-// replayed strictly, as the verifier replays it (2.4), so a rewritten history
-// is refused here too (T-71). A Tier 1 group's leaves are its boarded
+// leaf index asked of a server (T-10, T-13). Each listed Tier 0 group, signed
+// or self-paid, is replayed strictly, as the verifier replays it (2.4), so a
+// rewritten history is refused here too (T-71). A Tier 1 group's leaves are its boarded
 // additions, which the board carries exactly as counted (verifier 4.4, Tier 1
 // boarding): whether each counts rests on the archive, which the client
 // doesn't read, so the definition's root, checked over these leaves, is what
 // binds them (T-06, T-53). The regions and cells are recounted under the
-// first-occurrence rule and compared with the definition the client checked;
+// first-occurrence rule (signed groups first, then self-paid additions in
+// chain order) and compared with the definition the client checked;
 // and the voter's own commitment must be counted in the region it registered
 // in, or the client alarms instead of voting in a cell it didn't choose (G-2,
 // T-06, T-16; 0019-regional-cells, Consequences). The cell's root is checked
@@ -23,9 +24,11 @@ import {
 import type { TierElectorate } from "./election-definition.ts";
 import {
   applyGroupRecords,
+  applySelfPaidRecords,
   type GroupLogRecord,
   groupRegistryDomainSeparator,
   isForbiddenCommitment,
+  type SelfPaidLogRecord,
 } from "./group-registry.ts";
 import { deriveTierCells, firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
 import { type GroupRegistryEvent, groupRegistryEvents } from "./vouch-count.ts";
@@ -211,11 +214,26 @@ function checkGroups(groups: TierElectorate["groups"], regionCount: number): voi
     throw new RangeError("tier.groups: a group names a region the tier doesn't have");
 }
 
+/** A listed group's leaves before the first-occurrence rule, with a self-paid group's chain positions. */
+interface ListedGroup {
+  readonly leaves: readonly bigint[];
+  /** Each leaf's position in the registry's log order, for a self-paid group only (`firstOccurrence`). */
+  readonly chainOrder?: readonly bigint[];
+}
+
 /**
  * Each of `groups`' leaves at `rootBlock`, in the order listed, before the
- * first-occurrence rule: a Tier 0 group replayed strictly from its records
- * under the release's registrars, a Tier 1 group's boarded additions
- * (`tier1GroupLeaves`). Throws `TierMembershipError`.
+ * first-occurrence rule: a signed Tier 0 group replayed strictly from its
+ * records under the release's registrars, a self-paid group replayed
+ * strictly from its `SelfPaidMemberAdded` records (`applySelfPaidRecords`),
+ * with each leaf's position in log order for the ranking, and a Tier 1
+ * group's boarded additions (`tier1GroupLeaves`). A group's kind is the
+ * event that created it, exactly one of either kind by `rootBlock`; a record
+ * naming the group before that creation, or one of the other kind (a
+ * `MembersAdded` or `MembersRemoved` naming a self-paid group, a
+ * `SelfPaidMemberAdded` naming a signed Tier 0 group), is a history the
+ * registry can't log and fails the group (docs/spec/contracts.md, Group
+ * registry, Verification; T-71). Throws `TierMembershipError`.
  */
 function listedGroupLeaves(
   records: readonly ContractEventRecord[],
@@ -223,7 +241,7 @@ function listedGroupLeaves(
   rootBlock: bigint,
   groups: TierElectorate["groups"],
   pins: GroupRegistryPins,
-): (readonly bigint[])[] {
+): ListedGroup[] {
   // Each field read once, so a getter can't show one check a value and the next another.
   const { version, chainId, registry, registrars, threshold } = pins;
   if (!(registry instanceof Uint8Array) || registry.length !== 20)
@@ -244,28 +262,61 @@ function listedGroupLeaves(
       throw new TierMembershipError("registrars");
 
   const domainSeparator = groupRegistryDomainSeparator(chainId, pinned.registry);
-  return groups.map(({ group_id: id }) => {
-    const created = read.events.filter(
-      (e) => e.kind === "group-created" && e.groupId === id && e.block <= rootBlock,
+  // Events up to the tier's block, at their positions in the registry's log order.
+  const upTo: GroupRegistryEvent[] = [];
+  for (const e of read.events) {
+    if (e.block > rootBlock) break; // blocks never decrease along the sequence
+    upTo.push(e);
+  }
+  return groups.map(({ group_id: id }): ListedGroup => {
+    const created = upTo.flatMap((e, at) =>
+      (e.kind === "group-created" || e.kind === "self-paid-group-created") && e.groupId === id
+        ? [
+            {
+              at,
+              tier: e.kind === "group-created" ? e.tier : 0,
+              selfPaid: e.kind !== "group-created",
+            },
+          ]
+        : [],
     );
     const only = created[0];
-    if (only === undefined || created.length !== 1 || only.kind !== "group-created")
+    if (only === undefined || created.length !== 1)
       throw new TierMembershipError("group-created", id);
     if (only.tier !== tierId) throw new TierMembershipError("group-tier", id);
-    if (only.tier === 1)
-      return tier1GroupLeaves(read.events, read.events.indexOf(only), id, rootBlock);
+    if (only.tier === 1) return { leaves: tier1GroupLeaves(upTo, only.at, id, rootBlock) };
     if (only.tier !== 0) throw new TierMembershipError("tier-unsupported", id);
+    const naming = upTo.flatMap((e, at) =>
+      (e.kind === "members-added" ||
+        e.kind === "members-removed" ||
+        e.kind === "self-paid-addition") &&
+      e.groupId === id
+        ? [{ at, e }]
+        : [],
+    );
+    if (naming.some((r) => r.at < only.at)) throw new TierMembershipError("group-history", id);
+    if (only.selfPaid) {
+      const log: SelfPaidLogRecord[] = [];
+      const chainOrder: bigint[] = [];
+      for (const { at, e } of naming) {
+        if (e.kind !== "self-paid-addition") throw new TierMembershipError("group-history", id);
+        log.push({ index: e.index, record: e.record });
+        chainOrder.push(BigInt(at));
+      }
+      const replay = applySelfPaidRecords(log, { groupId: id });
+      if (!replay.ok) throw new TierMembershipError("group-history", id);
+      return { leaves: replay.leaves, chainOrder };
+    }
     const log: GroupLogRecord[] = [];
-    for (const e of read.events) {
-      if (e.block > rootBlock) break; // blocks never decrease along the sequence
-      if (e.kind === "members-added" && e.groupId === id) {
+    for (const { e } of naming) {
+      if (e.kind === "members-added") {
         // The event's `firstIndex` topic must be the record's own, checked
         // before the replay, as the verifier does (`position`).
         if (e.record.length >= 16 && e.firstIndex !== u64At(e.record, 8))
           throw new TierMembershipError("group-history", id);
         log.push({ kind: "add", record: e.record });
-      } else if (e.kind === "members-removed" && e.groupId === id)
-        log.push({ kind: "remove", record: e.record });
+      } else if (e.kind === "members-removed") log.push({ kind: "remove", record: e.record });
+      else throw new TierMembershipError("group-history", id);
     }
     const replay = applyGroupRecords(log, {
       groupId: id,
@@ -275,7 +326,7 @@ function listedGroupLeaves(
       threshold,
     });
     if (!replay.ok) throw new TierMembershipError("group-history", id);
-    return replay.leaves;
+    return { leaves: replay.leaves };
   });
 }
 
@@ -286,10 +337,11 @@ function listedGroupLeaves(
  * definition version 3 to 6), the voter's identity commitment
  * (`identityCommitment`) and the group it registered in (`group`).
  *
- * Every listed Tier 0 group is replayed strictly from its `GroupCreated`,
- * `MembersAdded` and `MembersRemoved` records in blocks up to the tier's
- * `root_l2_block`, under the release's registrars, as the verifier's 2.4
- * does; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
+ * Every listed Tier 0 group is replayed strictly from its records in blocks
+ * up to the tier's `root_l2_block`, as the verifier's 2.4 does: a signed
+ * group's `MembersAdded` and `MembersRemoved` under the release's
+ * registrars, a self-paid group's `SelfPaidMemberAdded` against its logged
+ * indices; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
  * records in those blocks, with no vouch checked; the regions and cells are
  * recounted under the first-occurrence rule and must equal the definition's; the voter's commitment must be a live
  * leaf of `group` and be counted in `group`'s region. The cell's root isn't
@@ -317,10 +369,13 @@ export function tierMembership(
   const raw = listedGroupLeaves(records, tierId, rootBlock, groups, pins);
 
   const at = groups.findIndex((g) => g.group_id === group);
-  if (at < 0 || !(raw[at] as readonly bigint[]).includes(commitment))
+  if (at < 0 || !(raw[at] as ListedGroup).leaves.includes(commitment))
     throw new TierMembershipError("not-a-member", group);
 
-  const counted = firstOccurrence(raw);
+  const counted = firstOccurrence(
+    raw.map((g) => g.leaves),
+    raw.map((g) => g.chainOrder),
+  );
   const members = regionCounts({ groups, regions }, counted);
   if (members.some((n, r) => n !== regions[r])) throw new TierMembershipError("electorate");
   const fold = foldRegions(members);
@@ -330,7 +385,7 @@ export function tierMembership(
   )
     throw new TierMembershipError("electorate");
 
-  // Earlier groups win a repeat, so the counted occurrence is the first group holding it.
+  // One occurrence of the commitment survives the ranking: the group holding it is its home.
   const home = counted.findIndex((leaves) => leaves.includes(commitment));
   const region = (groups[home] as (typeof groups)[number]).region;
   if (region !== (groups[at] as (typeof groups)[number]).region)
@@ -413,7 +468,13 @@ export function statedTierElectorate(
   const raw = listedGroupLeaves(records, tierId, rootBlock, groups, pins);
   const derived = deriveTierCells(
     { groups, regions: Array.from({ length: regionCount }, () => 0n) },
-    new Map(groups.map((g, i) => [g.group_id, raw[i] as readonly bigint[]])),
+    new Map(groups.map((g, i) => [g.group_id, (raw[i] as ListedGroup).leaves])),
+    new Map(
+      groups.flatMap((g, i) => {
+        const order = (raw[i] as ListedGroup).chainOrder;
+        return order === undefined ? [] : [[g.group_id, order] as const];
+      }),
+    ),
   );
   if (derived.regions.some((n) => n === 0n)) throw new TierMembershipError("empty");
   return {

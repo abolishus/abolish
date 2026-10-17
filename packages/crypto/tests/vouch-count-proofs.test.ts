@@ -292,6 +292,8 @@ function logOf(e: GroupRegistryEvent, n: number): ContractEventRecord {
       topics: [topic0("MembersRemoved(uint64,bytes)"), word(e.groupId)],
       data: abiBytes(e.record),
     };
+  // Version 6 has no self-paid events, and no case here logs one.
+  if (e.kind !== "tier1-addition") throw new Error(`no version-6 log for ${e.kind}`);
   return { ...base, topics: [topic0("Tier1MemberAdded(bytes)")], data: abiBytes(e.record) };
 }
 

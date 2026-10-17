@@ -8,6 +8,8 @@ Background jobs on BullMQ, over Redis in development and CI and Dragonfly in dep
 | ------------------------- | ----------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `{board-audit}`           | board       | `{}` | Every `AUDIT_EVERY_MS` (10 minutes by default, and once at start): core's `auditBoard` over every stored board. Each bad board, and each board whose audit failed for another reason (`audit-error`), is a finding line; the job then fails with `board-audit-findings`. |
 | `{identity-backup-prune}` | operational | `{}` | Every day (`PRUNE_EVERY_MS`, and once at start): core's `pruneIdentityBackups`, with the worker's clock, deleting identity backups not rewritten for 24 whole UTC months (T-52, T-66). Only its outcome is logged.                                                       |
+| `{tier0-index}`           | operational | `{}` | Only with the Tier 0 job (`startWorker`'s `tier0`): every 20 s (`TIER0_INDEX_EVERY_MS`), core's `Tier0Batches.refreshIndex` over `ViemTier0Chain`, keeping the registration route's step 6 current. An unreadable chain fails as `tier0-chain-unavailable`.              |
+| `{tier0-boundary}`        | operational | `{}` | Only with the Tier 0 job: every 30 s (`TIER0_BOUNDARY_EVERY_MS`), core's `Tier0Batches.runBoundary`, which runs once per registration period; one line per group with its ID, outcome and flags, never a commitment or record (T-13).                                    |
 
 Proof batch verification, IPFS pinning and tally coordination come with the parts that build what they run: ballot admission (P2-3 part 2), the archive (P4-3) and the tally (P1-15).
 
@@ -22,6 +24,10 @@ Proof batch verification, IPFS pinning and tally coordination come with the part
 ## Keys (Dragonfly)
 
 Every key is `abolish:{<queue>}:…`. The braces are a hash tag: BullMQ's Lua scripts touch several keys of one queue, which Dragonfly (with `--cluster_mode=emulated --lock_on_hashtags`) and Redis Cluster need in one slot, while separate queues can live on separate threads or shards. A test checks every key the worker creates.
+
+## Tier 0 batch job
+
+`src/tier0-chain.ts` is the batch job's chain adapter (docs/spec/registration.md, The batch): `ViemTier0Chain` reads the group registry from one L2 node at a pinned pair of finalized and latest blocks, and `checkTier0Deployment` refuses to start a job whose chain, registrars, threshold or keys aren't the registry's. Submission is passed in; through the paymaster's bundler it is P3-2 part 4d-2b-2's, and until then `main.ts` doesn't run the job. `tests/tier0.test.ts` runs it against the group registry on Anvil, so the tests need the toolchain (`.github/scripts/install-toolchain.sh`).
 
 ## Running
 

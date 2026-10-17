@@ -1,15 +1,22 @@
 import { once } from "node:events";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/** A fresh directory holding `files`. */
+const dirs: string[] = [];
+
+/** A fresh directory holding `files`, removed by `removeDirs`. */
 export async function blocksDir(files: Record<string, Uint8Array>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "abolish-node-"));
+  dirs.push(dir);
   for (const [name, bytes] of Object.entries(files)) await writeFile(join(dir, name), bytes);
   return dir;
+}
+
+export async function removeDirs(): Promise<void> {
+  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 }
 
 /** Listens on a loopback port and returns the server's base URL. */

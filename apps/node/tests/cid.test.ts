@@ -25,22 +25,35 @@ describe("parseCid", () => {
   });
 
   test("anything it reads is the canonical spelling of a layout CID", () => {
+    // Any 36 bytes' text, unchanged or with one digit changed, each half the
+    // time, so both outcomes are common.
+    const near = fc
+      .tuple(
+        fc.uint8Array({ minLength: 36, maxLength: 36 }),
+        fc.boolean(),
+        fc.nat(117),
+        fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz234567B=Q".split("")),
+      )
+      .map(([bytes, layout, at, digit]) => {
+        if (layout) bytes.set([0x01, bytes[1] === 0x55 ? 0x55 : 0x70, 0x12, 0x20]);
+        const text = cidText(bytes);
+        return at > 58 ? text : text.slice(0, at) + digit + text.slice(at + 1);
+      });
+    let accepted = 0;
     fc.assert(
-      fc.property(
-        fc.string({
-          unit: fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz234567B=Q".split("")),
-          maxLength: 70,
-        }),
-        (s) => {
-          const cid = parseCid(s);
-          if (cid !== undefined) {
-            expect(cidText(cid)).toBe(s);
-            expect([cid[0], cid[2], cid[3], cid.length]).toEqual([0x01, 0x12, 0x20, 36]);
-          }
-        },
-      ),
+      fc.property(near, (s) => {
+        const cid = parseCid(s);
+        if (cid !== undefined) {
+          accepted++;
+          expect(cidText(cid)).toBe(s);
+          expect([cid[0], cid[2], cid[3], cid.length]).toEqual([0x01, 0x12, 0x20, 36]);
+          expect([0x55, 0x70]).toContain(cid[1]);
+        }
+      }),
       { numRuns },
     );
+    expect(accepted).toBeGreaterThan(0);
+    expect(accepted).toBeLessThan(numRuns);
   });
 
   test("refuses other spellings of a layout CID", () => {

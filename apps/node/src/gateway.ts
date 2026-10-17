@@ -22,11 +22,11 @@ const RAW = "application/vnd.ipld.raw";
 const MAX_TARGET = 128;
 
 export interface GatewayLimits {
-  /** A connection idle this long is destroyed (T-52). Default 15 s. */
-  readonly idleTimeoutMs?: number;
+  /** Most connections open at once; past it, new ones are closed on accept (T-52). Default 1,024. */
+  readonly maxConnections?: number;
   /** A request whose headers take longer is refused (T-52). Default 10 s. */
   readonly headersTimeoutMs?: number;
-  /** A request still open after this long is destroyed (T-52). Default 30 s. */
+  /** A request still open after this long is refused (T-52). Default 30 s. */
   readonly requestTimeoutMs?: number;
 }
 
@@ -38,6 +38,8 @@ export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
       requestTimeout: limits.requestTimeoutMs ?? 30_000,
       connectionsCheckingInterval: 1_000,
       maxHeaderSize: 8_192,
+      // Node's default: an idle keep-alive connection is closed after 5 s.
+      keepAliveTimeout: 5_000,
     },
     (req, res) => {
       res.setHeader("x-content-type-options", "nosniff");
@@ -47,16 +49,20 @@ export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
       });
     },
   );
-  server.setTimeout(limits.idleTimeoutMs ?? 15_000);
+  // T-52: past this, Node closes each new socket on accept instead of serving it.
+  server.maxConnections = limits.maxConnections ?? 1_024;
   return server;
 }
 
 async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // A request with a body is refused and its connection closed, so Node
+  // doesn't read the body to reuse the connection.
+  const body =
+    (req.headers["content-length"] !== undefined && req.headers["content-length"] !== "0") ||
+    req.headers["transfer-encoding"] !== undefined;
   if (req.method !== "GET" && req.method !== "HEAD")
-    return refuse(res, 405, { allow: "GET, HEAD" });
-  // A GET or HEAD carries no body; one that says it does is refused unread.
-  if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"] !== undefined)
-    return refuse(res, 400);
+    return refuse(res, 405, { allow: "GET, HEAD", ...(body ? { connection: "close" } : {}) });
+  if (body) return refuse(res, 400, { connection: "close" });
   const target = req.url ?? "";
   if (target.length > MAX_TARGET || !target.startsWith("/ipfs/")) return refuse(res, 404);
   const query = target.indexOf("?");
@@ -64,25 +70,35 @@ async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse)
   const cid = parseCid(path);
   if (cid === undefined) return refuse(res, 400);
   const format = new URLSearchParams(query === -1 ? "" : target.slice(query + 1)).getAll("format");
-  const raw =
-    format.length > 0
-      ? format.every((f) => f === "raw")
-      : (req.headers.accept ?? "").split(",").some((t) => t.split(";")[0]?.trim() === RAW);
-  if (!raw) return refuse(res, 406);
+  const raw = format.length > 0 ? format.every((f) => f === "raw") : accepts(req.headers.accept);
+  if (!raw) return refuse(res, 406, { vary: "accept" });
   const block = await mirror.block(cid);
   if (block === undefined) return refuse(res, 404);
   const name = cidText(cid);
   res.writeHead(200, {
     "content-type": RAW,
     "content-length": block.length,
-    // A CID names its bytes for good.
+    // A CID names its bytes for good; the same URL without `format` is a 406
+    // to another Accept.
     "cache-control": "public, max-age=29030400, immutable",
+    vary: "accept",
     etag: `"${name}.raw"`,
     "content-disposition": `attachment; filename="${name}.bin"`,
     // Blocks are public and checked by whoever reads them, from any origin.
     "access-control-allow-origin": "*",
   });
   res.end(req.method === "HEAD" ? undefined : block);
+}
+
+// Whether an Accept header lists the raw-block type (case-insensitively, as
+// media types are) with a weight above zero.
+function accepts(accept: string | undefined): boolean {
+  return (accept ?? "").split(",").some((entry) => {
+    const [type, ...params] = entry.split(";").map((p) => p.trim().toLowerCase());
+    if (type !== RAW) return false;
+    const q = params.find((p) => p.startsWith("q="));
+    return q === undefined || Number(q.slice(2)) > 0;
+  });
 }
 
 function refuse(res: ServerResponse, status: number, headers: Record<string, string> = {}): void {

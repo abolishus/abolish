@@ -66,6 +66,11 @@ async function serve(args: readonly string[], io: CliIo): Promise<number> {
     io.err({ error: `listen: ${(e as NodeJS.ErrnoException).code ?? "failed"}` });
     return 2;
   }
+  // T-52: an error after listening (an accept that fails because descriptors
+  // ran out) is reported, never fatal: the node keeps serving.
+  server.on("error", (e: NodeJS.ErrnoException) =>
+    io.err({ error: `server: ${e.code ?? "failed"}` }),
+  );
   const address = server.address();
   io.out({ listening: typeof address === "object" && address !== null ? address : values.host });
   if (!io.signal.aborted) await once(io.signal, "abort");

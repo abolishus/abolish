@@ -25,7 +25,8 @@ export function parseCid(text: string): Uint8Array | undefined {
       cid[at++] = (value >>> bits) & 0xff;
     }
   }
-  // Two digits' spare bits must be zero: re-encoding finds any that aren't.
+  // 58 digits carry 290 bits for 288: the last digit's 2 spare bits must be
+  // zero, and re-encoding finds any that aren't.
   if (cidText(cid) !== text) return undefined;
   const [version, codec, hash, length] = cid;
   if (version !== 0x01 || (codec !== 0x55 && codec !== 0x70) || hash !== 0x12 || length !== 0x20)

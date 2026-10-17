@@ -1,19 +1,22 @@
+import { once } from "node:events";
 import { request } from "node:http";
+import { connect } from "node:net";
 import { cidText, contentDag, objectCar, readObjectAsync } from "@abolishus/crypto";
 import fc from "fast-check";
 import { afterEach, describe, expect, test } from "vite-plus/test";
-import { gateway } from "../src/gateway.ts";
+import { type GatewayLimits, gateway } from "../src/gateway.ts";
 import { openMirror } from "../src/store.ts";
-import { blocksDir, close, listen } from "./fixture.ts";
+import { blocksDir, close, listen, removeDirs } from "./fixture.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const servers: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const stop of servers.splice(0)) await stop();
+  await removeDirs();
 });
 
-async function serve(files: Record<string, Uint8Array>): Promise<string> {
-  const server = gateway(await openMirror(await blocksDir(files)));
+async function serve(files: Record<string, Uint8Array>, limits?: GatewayLimits): Promise<string> {
+  const server = gateway(await openMirror(await blocksDir(files)), limits);
   const base = await listen(server);
   servers.push(() => close(server));
   return base;
@@ -40,6 +43,12 @@ describe("the gateway", () => {
       expect(res.headers.get("cache-control")).toBe("public, max-age=29030400, immutable");
       expect(res.headers.get("access-control-allow-origin")).toBe("*");
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("vary")).toBe("accept");
+      expect(res.headers.get("content-length")).toBe(String(block.bytes.length));
+      expect(res.headers.get("etag")).toBe(`"${cidText(block.cid)}.raw"`);
+      expect(res.headers.get("content-disposition")).toBe(
+        `attachment; filename="${cidText(block.cid)}.bin"`,
+      );
       expect(same(new Uint8Array(await res.arrayBuffer()), block.bytes)).toBe(true);
     }
     const read = await readObjectAsync(dag.root, large.length, async (cid) => {
@@ -91,6 +100,8 @@ describe("the gateway", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-length")).toBe("3");
     expect((await res.arrayBuffer()).byteLength).toBe(0);
+    const missing = await raw(base, contentDag(new Uint8Array([1])).root, { method: "HEAD" });
+    expect(missing.status).toBe(404);
   });
 
   test("serves raw blocks by the Accept header too, and nothing else", async () => {
@@ -100,7 +111,10 @@ describe("the gateway", () => {
     const accept = (value: string) => fetch(`${base}/ipfs/${cid}`, { headers: { accept: value } });
     expect((await accept("application/vnd.ipld.raw")).status).toBe(200);
     expect((await accept("text/html, application/vnd.ipld.raw;q=0.9")).status).toBe(200);
+    expect((await accept("Application/VND.ipld.RAW")).status).toBe(200);
     expect((await accept("text/html")).status).toBe(406);
+    expect((await accept("application/vnd.ipld.raw;q=0")).status).toBe(406);
+    expect((await accept("application/vnd.ipld.raw; q=0.0, text/html")).status).toBe(406);
     expect((await fetch(`${base}/ipfs/${cid}`)).status).toBe(406);
     expect((await fetch(`${base}/ipfs/${cid}?format=car`)).status).toBe(406);
     expect((await fetch(`${base}/ipfs/${cid}?format=raw&format=car`)).status).toBe(406);
@@ -120,21 +134,58 @@ describe("the gateway", () => {
     expect(post.headers.get("allow")).toBe("GET, HEAD");
   });
 
-  test("refuses a GET that carries a body, unread", async () => {
+  test("refuses a request that carries a body, and closes its connection", async () => {
     const object = new Uint8Array([4, 5, 6]);
     const base = await serve({ "a.car": objectCar(object) });
-    const status = await new Promise<number | undefined>((resolve, reject) => {
-      const req = request(`${base}/ipfs/${cidText(contentDag(object).root)}?format=raw`, {
-        method: "GET",
-        headers: { "content-length": "1" },
-      });
-      req.on("response", (res) => {
-        res.resume();
-        resolve(res.statusCode);
-      });
-      req.on("error", reject);
-      req.end("x");
+    const send = (method: string, headers: Record<string, string>, body?: string) =>
+      new Promise<{ status: number | undefined; connection: string | undefined }>(
+        (resolve, reject) => {
+          const req = request(`${base}/ipfs/${cidText(contentDag(object).root)}?format=raw`, {
+            method,
+            headers,
+          });
+          req.on("response", (res) => {
+            res.resume();
+            resolve({ status: res.statusCode, connection: res.headers.connection });
+          });
+          req.on("error", reject);
+          req.end(body);
+        },
+      );
+    // Declares far more than it sends: the answer doesn't wait for it.
+    expect(await send("GET", { "content-length": "100000000" }, "x")).toEqual({
+      status: 400,
+      connection: "close",
     });
-    expect(status).toBe(400);
+    expect(await send("POST", { "content-length": "1" }, "x")).toEqual({
+      status: 405,
+      connection: "close",
+    });
+    // An empty body declared as such is no body.
+    expect((await send("GET", { "content-length": "0" })).status).toBe(200);
+  });
+
+  test("closes connections past its limit, and keeps serving", async () => {
+    const object = new Uint8Array([4, 5, 6]);
+    const base = await serve({ "a.car": objectCar(object) }, { maxConnections: 1 });
+    const { port } = new URL(base);
+    const held = connect(Number(port), "127.0.0.1");
+    await once(held, "connect");
+    const extra = connect(Number(port), "127.0.0.1");
+    await once(extra, "close");
+    held.destroy();
+    await once(held, "close");
+    await expect.poll(async () => (await raw(base, contentDag(object).root)).status).toBe(200);
+  });
+
+  test("closes a connection whose headers don't arrive in time", async () => {
+    const base = await serve({}, { headersTimeoutMs: 200 });
+    const socket = connect(Number(new URL(base).port), "127.0.0.1");
+    await once(socket, "connect");
+    let answer = "";
+    socket.on("data", (d: Buffer) => (answer += d.toString("latin1")));
+    socket.write("GET /ipfs/ HTTP/1.1\r\nhost: x\r\n");
+    await once(socket, "close");
+    expect(answer.startsWith("HTTP/1.1 408 ")).toBe(true);
   });
 });

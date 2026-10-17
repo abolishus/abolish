@@ -1,7 +1,11 @@
+import { mkdir, symlink } from "node:fs/promises";
+import { join } from "node:path";
 import { cidText, contentDag, objectCar } from "@abolishus/crypto";
-import { describe, expect, test } from "vite-plus/test";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { cli } from "../src/cli.ts";
-import { blocksDir } from "./fixture.ts";
+import { blocksDir, removeDirs } from "./fixture.ts";
+
+afterEach(removeDirs);
 
 function io() {
   const out: unknown[] = [];
@@ -32,21 +36,25 @@ describe("abolish-node", () => {
     expect(run.err).toEqual([{ error: "blocks: ENOENT" }]);
   });
 
-  test("reports each file, serves its blocks until stopped, then exits 0", async () => {
+  test("reports each file, symlinks followed, serves its blocks until stopped, then exits 0", async () => {
     const object = new TextEncoder().encode("a board segment");
     const dir = await blocksDir({
       "a.car": objectCar(object),
       "notes.car": new TextEncoder().encode("not a car"),
       "ignored.txt": new Uint8Array([1]),
     });
+    await symlink(join(dir, "a.car"), join(dir, "link.car"));
+    await mkdir(join(dir, "dir.car"));
     const run = io();
     const exit = cli(["serve", "--blocks", dir, "--port", "0"], run.io);
-    await expect.poll(() => run.out.length).toBe(3);
-    expect(run.out.slice(0, 2)).toEqual([
+    await expect.poll(() => run.out.length).toBe(5);
+    expect(run.out.slice(0, 4)).toEqual([
       { file: "a.car", blocks: 1, unreadableBytes: 0 },
+      { file: "dir.car", error: "EISDIR" },
+      { file: "link.car", blocks: 1, unreadableBytes: 0 },
       { file: "notes.car", error: "not-a-car" },
     ]);
-    const { listening } = run.out[2] as { listening: { address: string; port: number } };
+    const { listening } = run.out[4] as { listening: { address: string; port: number } };
     expect(listening.address).toBe("127.0.0.1");
     const res = await fetch(
       `http://127.0.0.1:${listening.port}/ipfs/${cidText(contentDag(object).root)}?format=raw`,

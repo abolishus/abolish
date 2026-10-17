@@ -7,6 +7,8 @@
 // could point at a registry of its own (T-34). The origins are the CSP's
 // `connect-src`, which the bundle check pins (T-43).
 
+import type { Panel } from "@abolishus/crypto";
+
 export interface Deployment {
   /** The API's origin: definitions and display text (`packages/api-contract`). */
   readonly api: string;
@@ -20,6 +22,13 @@ export interface Deployment {
    * and shows none (T-34).
    */
   readonly electionRegistry: string | undefined;
+  /**
+   * The trustee panels this build pins. A poll's ceremony is checked under
+   * the one its definition names, and a poll naming none of them is refused:
+   * whoever serves the records never chooses the keys a ballot is sealed to
+   * (T-37, T-54).
+   */
+  readonly panels: readonly Panel[];
 }
 
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
@@ -30,4 +39,7 @@ export const STAGING: Deployment = {
   // No election registry is deployed yet (P1-12c's and P1-18's gates come
   // first), so a staging build refuses every election link.
   electionRegistry: undefined,
+  // No release pins a panel yet: the transitional panel comes with the
+  // release that deploys it (P2-16 part 6).
+  panels: [],
 };

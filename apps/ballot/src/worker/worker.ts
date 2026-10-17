@@ -4,7 +4,6 @@
 // e2e watches it run; T-43). Errors become a bare "error" response, never a
 // message or stack, which could carry a secret.
 
-import { checkElection } from "../election.ts";
 import { proveMembership } from "./prove.ts";
 import {
   parseRequest,
@@ -13,6 +12,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from "./protocol.ts";
+import { BallotSession } from "./session.ts";
 
 // DedicatedWorkerGlobalScope isn't in the DOM library this package compiles with.
 const scope = globalThis as unknown as {
@@ -20,25 +20,21 @@ const scope = globalThis as unknown as {
   postMessage(message: WorkerResponse): void;
 };
 
+const session = new BallotSession();
+
 async function answer(request: WorkerRequest): Promise<WorkerResponse> {
-  if (request.kind === "check-election")
-    return {
-      v: PROTOCOL_VERSION,
-      id: request.id,
-      kind: "check-election",
-      result: checkElection(
-        request.electionId,
-        request.registeredHash,
-        request.definition,
-        request.displayText,
-      ),
-    };
-  return {
-    v: PROTOCOL_VERSION,
-    id: request.id,
-    kind: "prove-membership",
-    result: await proveMembership(request),
-  };
+  const { id } = request;
+  const v = PROTOCOL_VERSION;
+  switch (request.kind) {
+    case "check-election":
+      return { v, id, kind: "check-election", result: session.checkElection(request) };
+    case "seal":
+      return { v, id, kind: "seal", result: session.seal(request) };
+    case "challenge":
+      return { v, id, kind: "challenge", result: session.challenge(request) };
+    case "prove-membership":
+      return { v, id, kind: "prove-membership", result: await proveMembership(request) };
+  }
 }
 
 scope.onmessage = ({ data }) => {

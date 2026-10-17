@@ -29,10 +29,17 @@ let worker: BallotWorker | undefined;
 const source: ElectionSource = {
   load: (electionId, signal) =>
     loadElection(STAGING, electionId, (url, init) => fetch(url, { ...init, signal })),
-  async check(electionId, registeredHash, definition, displayText) {
+  async check(electionId, registeredHash, definition, displayText, entries) {
     const used = (worker ??= new BallotWorker());
     try {
-      return await used.checkElection(electionId, registeredHash, definition, displayText);
+      return await used.checkElection(
+        electionId,
+        registeredHash,
+        definition,
+        displayText,
+        entries,
+        STAGING.panels,
+      );
     } catch (error) {
       used.terminate();
       if (worker === used) worker = undefined;

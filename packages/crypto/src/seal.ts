@@ -7,8 +7,11 @@
 // cast) or cast (its validity proofs, then the membership proof's witness for
 // the prover, then the finished record, checked by the admission checks
 // before it may leave the device). Nothing here sends anything (T-42, T-45,
-// T-47, T-55).
+// T-47, T-55). What a seal is made under comes first: the poll's registered
+// key set, from its ceremony transcript checked as the verifier checks it
+// (T-37, T-54).
 
+import { type BoardEntryVersion, decodeBoardEntry } from "./board.ts";
 import {
   ballotHashV3,
   type CommittedVoteV3,
@@ -23,7 +26,13 @@ import {
   checkBallotV3,
   encodeBallotV3,
   type QuestionBallotElection,
+  questionBallotElection,
 } from "./ballot.ts";
+import {
+  type CeremonyErrorCode,
+  ceremonyTranscriptHash,
+  checkCeremonyTranscript,
+} from "./ceremony.ts";
 import {
   cellBallotCore,
   type CellBallotCore,
@@ -31,8 +40,10 @@ import {
   encodeOpeningV2,
   openChallengeV2,
 } from "./challenge.ts";
+import { DecodeError, type DecodeErrorCode } from "./codec.ts";
+import type { ElectionDefinitionV5 } from "./election-definition.ts";
 import { equalBytes } from "./nullifier-key.ts";
-import { decodeMembershipProof } from "./membership-proof.ts";
+import { decodeMembershipProof, membershipVkHash } from "./membership-proof.ts";
 import {
   finishMembershipProof,
   type MembershipProverInput,
@@ -42,6 +53,8 @@ import {
   secretScalar,
 } from "./membership-prover.ts";
 import { poseidon2 } from "./poseidon.ts";
+import { electionStubV5Hash, pinnedVersion, profileCombinationRule } from "./protocol.ts";
+import { RECORD_TYPES } from "./record.ts";
 import { membershipMessage } from "./revoting.ts";
 import {
   type EncryptedShares,
@@ -49,6 +62,140 @@ import {
   kemKeygen,
   type KemPublicKey,
 } from "./share-encryption.ts";
+import { type Panel, panelId } from "./trustee.ts";
+
+/**
+ * Why no ballot of a version-5 poll can be sealed on this device: the first
+ * check of `sealingElectionV5` that failed, under the verifier's names for
+ * the same checks ([[verifier]] 1.3, 2.3, 2.5, 3.2).
+ */
+export type SealingElectionCode =
+  /** It pins a profile 2.3 refuses. */
+  | "profile-combination"
+  /** It pins a board-entry or transcript version this release doesn't read. */
+  | "unsupported-version"
+  /** It names another membership key than the one this release proves under (1.3). */
+  | "membership-key"
+  /** A cell's root is 0, which anyone can prove membership of (T-04). */
+  | "cell-root"
+  /** The panel it names isn't one this release pins, with its threshold and size (2.5). */
+  | "panel-unpinned"
+  /** No entry given is the transcript the definition names. */
+  | "ceremony-transcript-missing"
+  /** The transcript the definition names doesn't decode. */
+  | "ceremony-decode"
+  /** It fails a transcript-level check, or too few seats qualified (3.1, 3.2). */
+  | Exclude<CeremonyErrorCode, DecodeErrorCode>
+  /** Fewer than `max(k, n − 1)` seats qualified (3.2; ADR 0006 rule 7). */
+  | "ceremony-participation";
+
+export type SealingElection =
+  | { readonly ok: true; readonly election: QuestionBallotElection }
+  | {
+      readonly ok: false;
+      readonly code: SealingElectionCode;
+      /** The decoding error, for `ceremony-decode`. */
+      readonly decodeError?: DecodeErrorCode;
+    };
+
+/**
+ * The context ballots of a version-5 poll are sealed under
+ * (`questionBallotElection`), from its definition, the panels this release
+ * pins and board entries that may carry its ceremony transcript (each an
+ * encoded entry, as `GET /board/entries` serves it; only an entry of this
+ * election, under the pinned board-entry version, whose payload hashes to
+ * `ceremony_transcript_hash` counts, wherever it sits). The checks are the
+ * verifier's for an election whose ballots it admits, in its order: the
+ * profile (2.3), the membership key (1.3), the pinned panel the definition
+ * names with its threshold and size (2.5), and the transcript, checked under
+ * a context rebuilt from the definition and that panel, never from the
+ * transcript (3.1's transcript part), with quorum and participation
+ * `max(k, n − 1)` (3.2). So a client seals only to the keys a ceremony of
+ * this poll's pinned panel registered, and never to keys whoever served the
+ * records chose (T-37, T-54, T-40). The caller has checked the definition
+ * against the registry and run 2.1 (`checkElectionRecordToShow`); the L2
+ * side of 3.1, the trustee registry's record of the ceremony, isn't read.
+ */
+export function sealingElectionV5(
+  definition: ElectionDefinitionV5,
+  panels: readonly Panel[],
+  entries: readonly Uint8Array[],
+): SealingElection {
+  const refuse = (code: SealingElectionCode, decodeError?: DecodeErrorCode): SealingElection =>
+    decodeError === undefined ? { ok: false, code } : { ok: false, code, decodeError };
+  const combination = profileCombinationRule(definition);
+  if (combination !== undefined) return refuse(combination);
+  if (!equalBytes(definition.membership_vk_hash, membershipVkHash()))
+    return refuse("membership-key");
+  if (definition.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
+    return refuse("cell-root");
+  // The transcript's context binds the panel's identifier, so any other
+  // panel would only fail its signatures; the threshold and size must be
+  // the definition's too, or its sharing wouldn't be the panel's (2.5).
+  const panel = panels.find(
+    (p) =>
+      equalBytes(panelId(p), definition.panel_id) &&
+      p.threshold === definition.threshold &&
+      p.keys.length === definition.panel_size,
+  );
+  if (panel === undefined) return refuse("panel-unpinned");
+  if (pinnedVersion(definition, RECORD_TYPES.ceremonyTranscript) !== 1)
+    return refuse("unsupported-version");
+  // profileCombinationRule refused a board-entry version this release
+  // doesn't have.
+  const boardEntryVersion = pinnedVersion(definition, RECORD_TYPES.boardEntry) as BoardEntryVersion;
+  const transcript = entries
+    .map((encoded) => payloadOf(encoded, boardEntryVersion, definition.election_id))
+    .find(
+      (payload) =>
+        payload !== undefined &&
+        equalBytes(ceremonyTranscriptHash(payload), definition.ceremony_transcript_hash),
+    );
+  if (transcript === undefined) return refuse("ceremony-transcript-missing");
+  const checked = checkCeremonyTranscript(
+    {
+      l2ChainId: definition.l2_chain_id,
+      trusteeRegistry: definition.trustee_registry,
+      electionId: definition.election_id,
+      stubHash: electionStubV5Hash(definition),
+      panel,
+    },
+    transcript,
+    1,
+  );
+  if (!checked.ok)
+    return TRANSCRIPT_CODES.has(checked.code)
+      ? refuse(checked.code as Exclude<CeremonyErrorCode, DecodeErrorCode>)
+      : refuse("ceremony-decode", checked.code as DecodeErrorCode);
+  // ADR 0006 rule 7: a coordinator can't shrink the qualified set to `k`,
+  // and the tally's failure margin with it (T-54, T-40).
+  if (checked.registered.length < Math.max(panel.threshold, panel.keys.length - 1))
+    return refuse("ceremony-participation");
+  return { ok: true, election: questionBallotElection(definition, checked.registered) };
+}
+
+const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
+  "ceremony-order",
+  "ceremony-shape",
+  "ceremony-signature",
+  "ceremony-quorum",
+]);
+
+/** An entry's payload if it is an entry of `electionId` under `version`; `undefined` otherwise. */
+function payloadOf(
+  encoded: Uint8Array,
+  version: BoardEntryVersion,
+  electionId: Uint8Array,
+): Uint8Array | undefined {
+  try {
+    const entry = decodeBoardEntry(encoded, version);
+    return equalBytes(entry.election_id, electionId) ? entry.payload : undefined;
+  } catch (e) {
+    // An entry that doesn't decode carries no transcript.
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+}
 
 /** A sealed core: what the client shows before the voter chooses to cast or to challenge. */
 export interface SealedBallotV3 {

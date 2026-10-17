@@ -107,6 +107,15 @@ const enUS = {
   displayTextIllFormed: "The wording of the questions breaks the rules",
   displayTextIllFormedDetail:
     "The questions and options this link served break a rule every election's wording must follow, so this device won't show them.",
+  panelUnpinned: "The poll's trustees aren't ones this ballot knows",
+  panelUnpinnedDetail:
+    "The poll names a panel of trustees this version of the ballot doesn't list, so this device can't tell whose keys it would encrypt your answers to.",
+  ceremonyMissing: "The record of the trustees' keys isn't available",
+  ceremonyMissingDetail:
+    "This link didn't serve the public record of how the poll's trustees made their keys, so this device can't tell whose keys it would encrypt your answers to. The poll may be too new: try again later.",
+  ceremonyFailed: "The trustees' key ceremony doesn't check",
+  ceremonyFailedDetail:
+    "The public record of how the poll's trustees made their keys is missing or fails a check, so this device won't encrypt your answers to those keys.",
   whatToDoTitle: "What you can do",
   whatToDoNoteTitle: "Try another address",
   whatToDo:

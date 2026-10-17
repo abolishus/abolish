@@ -2,13 +2,17 @@
 // ballot-worker policy mints (worker-policy.ts) and matches its answers to
 // requests by id.
 
+import type { Panel } from "@abolishus/crypto";
+
 import type { ElectionCheck } from "./election.ts";
 import {
+  type ChallengeResult,
   type MembershipProofResult,
   type ProveMembershipRequest,
   PROTOCOL_VERSION,
   PROVER_TIMEOUT_MS,
   responseId,
+  type SealResult,
   type WorkerRequest,
   type WorkerResponse,
 } from "./worker/protocol.ts";
@@ -58,12 +62,18 @@ export class BallotWorker {
     this.#worker.onmessageerror = () => this.terminate();
   }
 
-  /** Checks an election in the worker (election.ts). */
+  /**
+   * Checks an election in the worker (election.ts), and a version-5 poll's
+   * ceremony transcript among `entries` under the one of `panels` it names
+   * (worker/session.ts); the worker then holds the poll for `seal`.
+   */
   async checkElection(
     electionId: Uint8Array,
     registeredHash: Uint8Array,
     definition: Uint8Array,
     displayText: Uint8Array,
+    entries: readonly Uint8Array[],
+    panels: readonly Panel[],
   ): Promise<ElectionCheck> {
     const response = await this.#request(
       (id) => ({
@@ -74,11 +84,39 @@ export class BallotWorker {
         registeredHash,
         definition,
         displayText,
+        entries,
+        panels,
       }),
       [],
       TIMEOUT_MS,
     );
     if (response.kind !== "check-election") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /** Seals `votes` in `cell` of the poll the worker last checked; the worker keeps the seal. */
+  async seal(
+    definitionHash: Uint8Array,
+    cell: number,
+    votes: readonly (0 | 1)[],
+  ): Promise<SealResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "seal", definitionHash, cell, votes }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "seal") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /** Opens the seal the voter challenged, which is then spent. */
+  async challenge(seal: number): Promise<ChallengeResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "challenge", seal }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "challenge") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

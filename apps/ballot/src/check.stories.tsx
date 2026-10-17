@@ -121,6 +121,35 @@ export const TextIllFormed: Story = {
   },
 };
 
+export const PanelUnpinned: Story = {
+  name: "Trustees this ballot doesn't list",
+  args: { refusal: { problem: "ceremony-failed", code: "panel-unpinned" } },
+  play: async ({ canvasElement }) => {
+    const canvas = await refusedFor(
+      canvasElement,
+      "The poll's trustees aren't ones this ballot knows",
+    );
+    await expect(canvas.getByText("panel-unpinned", { selector: "code" })).toBeVisible();
+  },
+};
+
+export const CeremonyMissing: Story = {
+  name: "Key ceremony not served",
+  args: { refusal: { problem: "ceremony-failed", code: "ceremony-transcript-missing" } },
+  play: async ({ canvasElement }) => {
+    await refusedFor(canvasElement, "The record of the trustees' keys isn't available");
+  },
+};
+
+export const CeremonyFailed: Story = {
+  name: "Key ceremony fails",
+  args: { refusal: { problem: "ceremony-failed", code: "ceremony-signature" } },
+  play: async ({ canvasElement }) => {
+    const canvas = await refusedFor(canvasElement, "The trustees' key ceremony doesn't check");
+    await expect(canvas.getByText("ceremony-signature", { selector: "code" })).toBeVisible();
+  },
+};
+
 // The arrival check, in each register, over a poll that passed.
 
 const arrival: Story["play"] = async ({ canvasElement }) => {

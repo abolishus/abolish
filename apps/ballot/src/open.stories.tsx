@@ -71,6 +71,7 @@ const LOADED: Loaded = {
   registeredHash: fromHex(REGISTERED),
   definition: new Uint8Array(8),
   displayText: new Uint8Array(8),
+  entries: [],
 };
 
 /** A source whose loads answer from `loads` in turn (the last one repeats) and whose check answers `check`. */

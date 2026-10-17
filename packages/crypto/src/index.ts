@@ -423,6 +423,9 @@ export {
   type L1Reference,
   sealBallotV3,
   type SealedBallotV3,
+  type SealingElection,
+  type SealingElectionCode,
+  sealingElectionV5,
 } from "./seal.ts";
 export {
   type GroupRegistryPins,

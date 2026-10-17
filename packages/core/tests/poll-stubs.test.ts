@@ -203,7 +203,7 @@ describe("stubPolls", () => {
           [5, 1],
           [6, 1],
           [7, 5],
-          [8, 7],
+          [8, 8],
           [9, 2],
         ].map(([record_type, version]) => ({ record_type, version })),
       },

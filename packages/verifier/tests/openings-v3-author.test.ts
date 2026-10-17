@@ -201,8 +201,12 @@ describe("each opening is judged from its own entry", () => {
   }, 60_000);
 
   test("any change to a passing opening's record but its cell makes it fail, both halves alike", () => {
-    // Entry 10 is the honest opening in segment 5.
-    const at = 10;
+    // The first honest opening: openings are sorted by their bytes within a
+    // segment (board.md, Spoiled-ballot openings), so its entry moves with
+    // the definition hash.
+    const at = [...whole.values()].find(
+      (o) => o.code === undefined && o.breaks.length === 0 && o.voteOutside === undefined,
+    )?.entry as number;
     const opening = entries[at] as Uint8Array;
     expect(whole.get(at)).toMatchObject({ breaks: [] });
     expect(whole.get(at)?.code).toBeUndefined();

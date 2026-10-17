@@ -496,18 +496,18 @@ describe("SimulatedElectionRegistry's profile rule", { timeout }, () => {
   });
 
   // Ballot 0x0002, opening 0x0003, board entry 0x0007, contract event
-  // 0x0008 and display text 0x0009, each at any other version from 1 to 8
+  // 0x0008 and display text 0x0009, each at any other version from 1 to 9
   // ([[contracts]], Election registry, Registration, rule 9).
   it("refuses every other version of a served pin", () => {
     const served: readonly (readonly [number, number])[] = [
       [0x0002, 2],
       [0x0003, 2],
       [0x0007, 5],
-      [0x0008, 7],
+      [0x0008, 8],
       [0x0009, 1],
     ];
     for (const [type, version] of served)
-      for (let v = 1; v <= 8; v++)
+      for (let v = 1; v <= 9; v++)
         if (v !== version) expect(withPins(new Map([[type, v]]))).toBe("ProfileNotServed");
   });
 

@@ -155,16 +155,16 @@ def combination(defn):
         return unsupported
     definition = pins[0x0001]
     # Every profile pins board-entry version 5, the one that allows the close
-    # statement, and contract-event version 7, whose tables name every board
-    # event, the close rule's, the batches' and the obligation root's, and
-    # the group registry's Tier 1 and self-paid additions; versions 1 to 6
-    # don't, and a later one may (close.md, Version; contracts.md, Event
-    # tables (version 7)).
+    # statement, and contract-event version 8, whose tables name every board
+    # event, the close rule's, the batches', the obligation root's and the
+    # availability records', and the group registry's Tier 1 and self-paid
+    # additions; versions 1 to 7 don't, and a later one may (close.md,
+    # Version; contracts.md, Event tables (version 8)).
     # Judged with the other
     # failures; an unknown contract-event version is unsupported only once
     # nothing fails.
     events = pins.get(CONTRACT_EVENT_TYPE)
-    if board != 5 or events in (1, 2, 3, 4, 5, 6, None):
+    if board != 5 or events in (1, 2, 3, 4, 5, 6, 7, None):
         return failed
     # Definition versions 1, 3 and 4 pin display-text version 1, version 5
     # display-text version 2; an unknown one fails.
@@ -193,7 +193,7 @@ def combination(defn):
         # Opening version 1 opens version 1's cores only; version 2 opens
         # theirs, and any other is one a later release may read.
         return failed if spoiled == 1 else unsupported
-    if events != 7:
+    if events != 8:
         return unsupported
     return NOT_IMPLEMENTED
 
@@ -399,25 +399,26 @@ def main(out):
     assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass")
     r = add("board-v1-pinned", "The profile pins board-entry version 1 beside ballot version 1: 2.3 fails profile-combination; the transcript check still runs.", honest, [honest], board_version=1)
     assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass")
-    # Board-entry version 5 and contract-event version 7 (P1-19 part 4p,
-    # P1-12d, P1-12f, P3-3, P3-2): the close statement and every board and
-    # registry event, which every profile needs; contract-event versions 1
-    # and 2 name none of the close rule's events, version 3 not the batches',
-    # version 4 not the obligation root's, version 5 not the Tier 1 addition
-    # and version 6 not the self-paid addition, and one this verifier doesn't
-    # read may be a later release's.
-    v5, v5_stray = for_board(5, 7)
-    r = add("board-v5", "The profile pins board-entry version 5, which carries the close statement, and contract-event version 7, which archives every board and registry event: the pins fit, and the transcript is found in a version-5 entry after an abandoned run's.", v5, [v5_stray, v5], board_version=5, events=7)
+    # Board-entry version 5 and contract-event version 8 (P1-19 part 4p,
+    # P1-12d, P1-12f, P3-3, P3-2, P4-3): the close statement and every board
+    # and registry event, which every profile needs; contract-event versions
+    # 1 and 2 name none of the close rule's events, version 3 not the
+    # batches', version 4 not the obligation root's, version 5 not the Tier 1
+    # addition, version 6 not the self-paid addition and version 7 not the
+    # availability records, and one this verifier doesn't read may be a later
+    # release's.
+    v5, v5_stray = for_board(5, 8)
+    r = add("board-v5", "The profile pins board-entry version 5, which carries the close statement, and contract-event version 8, which archives every board and registry event: the pins fit, and the transcript is found in a version-5 entry after an abandoned run's.", v5, [v5_stray, v5], board_version=5, events=8)
     assert r["2.3"] == NOT_IMPLEMENTED and r["3.2"] == outcome("pass"), r
-    for ev in (1, 2, 3, 4, 5, 6):
+    for ev in (1, 2, 3, 4, 5, 6, 7):
         t_ev, _ = for_board(5, ev, f"verifier/board-v5-events-v{ev}")
         r = add(f"board-v5-events-v{ev}", f"The profile pins board-entry version 5 beside contract-event version {ev}, whose tables don't name every board and registry event: 2.3 fails profile-combination; the transcript check still runs.", t_ev, [t_ev], board_version=5, events=ev)
         assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass"), r
-    t_ev, _ = for_board(5, 8, "verifier/board-v5-events-v8")
-    r = add("board-v5-events-v8", "The profile pins board-entry version 5 beside contract-event version 8, which this verifier doesn't read: 2.3 is unverifiable (unsupported-version), since a later release may read it; the transcript check still runs.", t_ev, [t_ev], board_version=5, events=8)
+    t_ev, _ = for_board(5, 9, "verifier/board-v5-events-v9")
+    r = add("board-v5-events-v9", "The profile pins board-entry version 5 beside contract-event version 9, which this verifier doesn't read: 2.3 is unverifiable (unsupported-version), since a later release may read it; the transcript check still runs.", t_ev, [t_ev], board_version=5, events=9)
     assert r["2.3"] == outcome("unverifiable", "unsupported-version", {}) and r["3.2"] == outcome("pass"), r
-    t_ev, _ = for_board(4, 7, "verifier/board-v4-events-v7")
-    r = add("board-v4-events-v7", "The profile pins contract-event version 7 beside board-entry version 4, which doesn't allow the close statement: 2.3 fails profile-combination.", t_ev, [t_ev], board_version=4, events=7)
+    t_ev, _ = for_board(4, 8, "verifier/board-v4-events-v8")
+    r = add("board-v4-events-v8", "The profile pins contract-event version 8 beside board-entry version 4, which doesn't allow the close statement: 2.3 fails profile-combination.", t_ev, [t_ev], board_version=4, events=8)
     assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass"), r
     assert add("board-v4-entry-v1", "The profile pins board-entry version 4, but the transcript was boarded in a version-1 entry, which doesn't decode under the pinned version: missing.", v4, [v4], board_version=4, entry_version=1)["3.1"]["code"] == "ceremony-transcript-missing"
 
@@ -447,11 +448,11 @@ def main(out):
     _, v3_o2_t = regional(v3_o2_base, "verifier/definition-v3-opening-2")
     r = add("definition-v3-opening-2", "A version-3 definition pinning spoiled-ballot opening version 2, which opens version-2 cores, beside board-entry version 4: the ballot and opening pins fit, but 2.3 fails profile-combination for want of the close statement (close.md, Version); every seat qualifies.", v3_o2_t, [v3_o2_t], board_version=4, base=v3_o2_base)
     assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass"), r
-    closing = [(ty, {BOARD_ENTRY_TYPE: 5, CONTRACT_EVENT_TYPE: 7}.get(ty, v)) for ty, v in v3_o2_base["profile"]["pins"]]
+    closing = [(ty, {BOARD_ENTRY_TYPE: 5, CONTRACT_EVENT_TYPE: 8}.get(ty, v)) for ty, v in v3_o2_base["profile"]["pins"]]
     v3_c_base = dict(v3_o2_base, profile={"protocol_major": 1, "pins": closing})
     # Not through regional(), which pins board-entry version 4.
     v3_c_t = transcript("verifier/definition-v3-board-v5", panel, seats, election_of(definition_for(panel, bytes(32), v3_c_base)))
-    r = add("definition-v3-board-v5", "A version-3 definition pinning spoiled-ballot opening version 2, board-entry version 5 and contract-event version 7: 2.3's combination passes, and every seat qualifies.", v3_c_t, [v3_c_t], board_version=5, events=7, base=v3_c_base)
+    r = add("definition-v3-board-v5", "A version-3 definition pinning spoiled-ballot opening version 2, board-entry version 5 and contract-event version 8: 2.3's combination passes, and every seat qualifies.", v3_c_t, [v3_c_t], board_version=5, events=8, base=v3_c_base)
     assert r["2.3"] == NOT_IMPLEMENTED and r["3.2"] == outcome("pass"), r
 
     doc = {

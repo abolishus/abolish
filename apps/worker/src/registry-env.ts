@@ -72,7 +72,7 @@ const Env = z.strictObject({
   REGISTRY_SYNC_TRUSTEE_REGISTRY: AddressValue,
   REGISTRY_SYNC_GROUP_REGISTRY: AddressValue,
   REGISTRY_SYNC_BOARD: AddressValue,
-  REGISTRY_SYNC_EVENT_VERSION: z.enum(["1", "2", "3", "4", "5", "6", "7"]),
+  REGISTRY_SYNC_EVENT_VERSION: z.enum(["1", "2", "3", "4", "5", "6", "7", "8"]),
 });
 
 /**

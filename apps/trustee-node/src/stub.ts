@@ -90,10 +90,10 @@ const READ_VERSIONS: ReadonlyMap<number, ReadonlySet<number>> = new Map([
   [RECORD_TYPES.receipt, new Set([1])],
   [RECORD_TYPES.ceremonyTranscript, new Set([1])],
   [RECORD_TYPES.tallyOpening, new Set([1])],
-  // Version 7 only: the election registry registers no other (docs/spec/
+  // Version 8 only: the election registry registers no other (docs/spec/
   // contracts.md, Registration, rule 9), so a ceremony for another would
   // lend keys to an election that can't be registered.
-  [RECORD_TYPES.contractEvent, new Set([7])],
+  [RECORD_TYPES.contractEvent, new Set([8])],
 ]);
 
 const equal = (a: Uint8Array, b: Uint8Array) =>

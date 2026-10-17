@@ -350,7 +350,7 @@ describe("2.3: the profile's versions fit together", () => {
           [RECORD_TYPES.boardEntry]: board,
           [RECORD_TYPES.ballot]: ballot,
           [RECORD_TYPES.tallyOpening]: opening,
-          [RECORD_TYPES.contractEvent]: 7,
+          [RECORD_TYPES.contractEvent]: 8,
         }),
         closed,
       );
@@ -371,11 +371,12 @@ describe("2.3: the profile's versions fit together", () => {
       expect(r.verdict).toBe("unverifiable");
     });
 
-  test("every profile pins contract-event version 7, every board and registry event", () => {
+  test("every profile pins contract-event version 8, every board and registry event", () => {
     // Versions 1 and 2 name none of the close rule's board events, version 3
     // not the batches', version 4 not the obligation root's, version 5 not
-    // the group registry's Tier 1 addition and version 6 not its self-paid
-    // group and addition, so 2.3 fails them; one this verifier doesn't read is a later release's,
+    // the group registry's Tier 1 addition, version 6 not its self-paid
+    // group and addition and version 7 not the board's availability records,
+    // so 2.3 fails them; one this verifier doesn't read is a later release's,
     // unverifiable unless the profile fails on another ground ([[close]],
     // Version; T-36).
     const at = (board: number, events: number) =>
@@ -386,8 +387,8 @@ describe("2.3: the profile's versions fit together", () => {
         ),
         "2.3",
       );
-    expect(at(5, 7)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
-    for (const events of [1, 2, 3, 4, 5, 6]) {
+    expect(at(5, 8)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    for (const events of [1, 2, 3, 4, 5, 6, 7]) {
       const r = format3(
         pinning({ [RECORD_TYPES.boardEntry]: 5, [RECORD_TYPES.contractEvent]: events }),
         closed,
@@ -395,7 +396,7 @@ describe("2.3: the profile's versions fit together", () => {
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r.verdictAgainstInputs).toBe("failed");
     }
-    for (const events of [8, 255])
+    for (const events of [9, 255])
       expect(at(5, events)).toEqual({
         id: "2.3",
         kind: "election",
@@ -662,7 +663,7 @@ describe("definition versions 3 and 4 (regional cells)", () => {
             // (version 2 needs a live poll's board, version 3 an author
             // panel's).
             [RECORD_TYPES.tallyOpening]: 255,
-            [RECORD_TYPES.contractEvent]: 7,
+            [RECORD_TYPES.contractEvent]: 8,
           }),
           closed,
         );
@@ -735,7 +736,7 @@ describe("definition version 5 (questions)", () => {
   // display-text version 2, which carries the questions' text, and, for
   // ballot version 3's delivery, tally-opening version 1's destruction
   // statements and the close statement every profile needs, board-entry
-  // version 5, beside contract-event version 7. A ballot or opening version
+  // version 5, beside contract-event version 8. A ballot or opening version
   // this verifier doesn't know is unsupported, never failed; an unknown
   // display-text version fails (docs/spec/verifier.md, 2.3; T-36, T-41, T-42).
   const table: readonly (readonly [number, number, number, number, string])[] = [
@@ -764,7 +765,7 @@ describe("definition version 5 (questions)", () => {
           [RECORD_TYPES.spoiledBallotOpening]: spoiled,
           [RECORD_TYPES.displayText]: text,
           [RECORD_TYPES.tallyOpening]: 1,
-          [RECORD_TYPES.contractEvent]: 7,
+          [RECORD_TYPES.contractEvent]: 8,
         }),
         closed,
       );
@@ -805,13 +806,13 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
   const minimal = decodeElectionDefinitionV6(hex(vector("definition-v6-minimal").encoding));
   // A sealed version-6 poll without an author panel: ballot version 4,
   // spoiled-ballot opening version 3, tally-opening version 1, display-text
-  // version 2, board-entry version 5 and contract-event version 7 (2.3).
+  // version 2, board-entry version 5 and contract-event version 8 (2.3).
   const FITTING: Readonly<Record<number, number>> = {
     [RECORD_TYPES.ballot]: 4,
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 7,
+    [RECORD_TYPES.contractEvent]: 8,
     [RECORD_TYPES.displayText]: 2,
   };
   const v6For = (

@@ -577,8 +577,9 @@ contract BoardAvailabilityTest is TestBase {
         uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
         uint256 maxData = vm.parseJsonUint(fj, ".portal.maxDepositData");
         bytes memory complaintCall = _call(_complaint(ah, 4, 2, countedCheckpoint, DAG_PB_PREFIX));
+        // Another seat, so neither call finds its slot's word already written.
         bytes memory attestationCall =
-            _call(_attestation(ah, 4, 4, 2, countedCheckpoint, new bytes32[](0)));
+            _call(_attestation(ah, 3, 3, 2, countedCheckpoint, new bytes32[](0)));
         assertTrue(complaintCall.length <= maxData, "a complaint call fits a deposit");
         if (!_p256Precompile()) {
             if (vm.envOr("EXPECT_P256VERIFY", false)) assertTrue(false, "no P256VERIFY");

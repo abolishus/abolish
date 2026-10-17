@@ -401,7 +401,7 @@ describe("checkDeliveryV2 beside an author panel takes its approved key set", ()
     return { c, e, against, ballots, ballotAt, entries, recordAt };
   }
 
-  for (const id of ["delivered", "author-seats-missing", "default-only"])
+  for (const id of ["delivered", "author-seats-missing", "default-seat-missing", "default-only"])
     test(`${id}: each ballot is delivered only by every registered seat of both panels, as the independent check gives`, () => {
       const { c, e, against, ballots, ballotAt, entries, recordAt } = poll(id);
       expect(e.approve()).toEqual({ ok: true, seats: [1, 2] });
@@ -472,6 +472,48 @@ describe("checkDeliveryV2 beside an author panel takes its approved key set", ()
     expect(() =>
       checkDeliveryV2(against, ballots, entries, { ...e.d, opens_at: e.d.opens_at - 1n }),
     ).toThrow(/not the definition of this election/);
+  });
+
+  test("never with a default key set other than its own run's", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    // A seat dropped would need no delivery; the author set swapped in, or
+    // a copy, isn't the default run's output (T-25, T-37).
+    for (const keys of [e.registered.slice(0, 2), [...e.registered], e.authorRegistered])
+      expect(() =>
+        checkDeliveryV2(
+          { ...against, registered: { default: keys, author: e.authorRegistered } },
+          ballots,
+          entries,
+          e.d,
+        ),
+      ).toThrow(/key set of this definition's ceremony/);
+  });
+
+  test("reads the definition once, so one that answers differently on a later read can't pair this election with another's approved set", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    const other = election("author-every-seat");
+    expect(other.approve().ok).toBe(true);
+    // This election's fields for the first read of each, then the other
+    // run's definition's: checks reading the caller's object again would
+    // hash this one and approve the other's set.
+    const seen = new Set<PropertyKey>();
+    const swapping = new Proxy(e.d, {
+      get(target, key, receiver) {
+        if (seen.has(key)) return Reflect.get(other.d, key, receiver);
+        seen.add(key);
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    expect(() =>
+      checkDeliveryV2(
+        { ...against, registered: { default: e.registered, author: other.authorRegistered } },
+        ballots,
+        entries,
+        swapping,
+      ),
+    ).toThrow(/approved key set/);
   });
 
   test("and refuses any author key set beside a definition without an author panel", () => {

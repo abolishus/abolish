@@ -244,6 +244,19 @@ def main(constants, out_dir):
     )
     assert default_only["counted"] == [] and all(x["missing"] == [{"panel": AUTHOR, "seat": 1}, {"panel": AUTHOR, "seat": 2}] for x in default_only["delivery"]["excluded"])
 
+    lost = case(
+        "default-seat-missing",
+        "Every author seat receipts each ballot in segment 3, but default seat 3 never receipts the cell-0 ballot: that ballot misses it and isn't counted, as without an author panel, while the others are.",
+        [head, (3, every(b0, skip=[(DEFAULT, 3)]) + every(b1) + every(b2))],
+    )
+    assert [(x["entry"], x["missing"]) for x in lost["delivery"]["excluded"]] == [(3, [{"panel": DEFAULT, "seat": 3}])]
+    short = vba.ac.enc_record(run["hash"], [vba.approval(d, author, 1, run["hash"], run["keySetHash"])])
+    case(
+        "approvals-short",
+        "The delivered case's receipts with only author seat 1's approval, short of q_A = 2: the author panel's key set isn't approved, so nothing is decided; 5.9 and every row after it are not reached.",
+        [(0, runs + [short] + recs), (3, every(b0) + every(b1) + every(b2))],
+        approvals=False,
+    )
     case(
         "approvals-missing",
         "The delivered case's receipts with no approvals record on the copy: the author panel's key set isn't approved, so no ballot is admitted and nothing is decided; 5.9 and every row after it are not reached.",

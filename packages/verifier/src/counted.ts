@@ -735,9 +735,11 @@ function deliveryV2(
     },
     deliveryFields(inputs.selected, "deliveryV4"),
     records,
-    // Crypto takes the author key set only as the one this definition's
-    // author run approved, so neither a copy nor another run's passes (T-37).
-    d,
+    // Beside an author panel crypto takes both key sets only as this
+    // definition's runs registered them, the author set approved, so neither
+    // a copy nor another run's passes (T-37). Without one the default set is
+    // the transcript check's, as it is for ballot versions 1 and 2.
+    ...(d.author_keys.length !== 0 ? [d] : []),
   );
   const entryOf = (i: number) => recordAt[i] as number;
   return {

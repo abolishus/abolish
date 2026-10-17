@@ -6,6 +6,7 @@ import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { parseLink } from "./link.ts";
 import type { Loaded } from "./load.ts";
 import { BrokenLink, Checking, type ElectionSource, Unavailable } from "./open.tsx";
+import type { ChallengeResult, SealResult } from "./worker/protocol.ts";
 
 // Opening a poll from its link (open.tsx), with the network and the worker
 // replaced by a source that answers at once: what each end of the fetch and
@@ -14,6 +15,7 @@ import { BrokenLink, Checking, type ElectionSource, Unavailable } from "./open.t
 const ELECTION_ID = "5d2c9a40b7e31f6688c0a1d2e3f405162738495a6b7c8d9eaf01b2c3d4e5f607";
 const REGISTERED = "3f8a0c51d2e4b69788a1c0d3e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718";
 const SERVED = "9c1e77a04b2d3f60e8a5c1d27b9043fe6a18c5d2e7f04b3a96c8d1e2f3a4b5c6";
+const CODE = "c0de5eed0123456789abcdef0123456789abcdef0123456789abcdef01234567";
 const ORIGIN = "https://ballot.example";
 
 const fromHex = (hex: string) =>
@@ -28,6 +30,7 @@ const ELECTION: CheckedElection = {
   definitionHash: REGISTERED,
   version: 1,
   questions: [{ minSelections: 0, maxSelections: 1 }],
+  cells: 0,
   opensAt: 1_790_000_000n,
   closesAt: 1_792_000_000n,
   translations: [
@@ -74,14 +77,49 @@ const LOADED: Loaded = {
   entries: [],
 };
 
-/** A source whose loads answer from `loads` in turn (the last one repeats) and whose check answers `check`. */
-function source(loads: readonly Loaded[], check: ElectionCheck | "fail"): ElectionSource {
+const SEALED: SealResult = { ok: true, seal: 7, trackingCode: fromHex(CODE) };
+const OPENING = Uint8Array.from({ length: 96 }, (_, i) => i);
+const OPENED: ChallengeResult = { ok: true, opening: OPENING, trackingCode: fromHex(CODE) };
+
+type Mock<F extends (...args: never[]) => unknown> = F & ReturnType<typeof fn<F>>;
+
+/** The mocks behind a story's source, to assert on. */
+const MOCKS = new WeakMap<
+  ElectionSource,
+  {
+    readonly load: Mock<ElectionSource["load"]>;
+    readonly seal: Mock<ElectionSource["seal"]>;
+    readonly challenge: Mock<ElectionSource["challenge"]>;
+  }
+>();
+const mocks = (of: ElectionSource) => {
+  const found = MOCKS.get(of);
+  if (found === undefined) throw new Error("not a story's source");
+  return found;
+};
+
+/**
+ * A source whose loads answer from `loads` in turn (the last one repeats),
+ * whose check answers `check`, and whose seal and challenge answer `sealed`
+ * and `opened`.
+ */
+function source(
+  loads: readonly Loaded[],
+  check: ElectionCheck | "fail",
+  sealed: SealResult | "fail" = SEALED,
+  opened: ChallengeResult | "fail" = OPENED,
+): ElectionSource {
   let call = 0;
-  return {
-    load: () => Promise.resolve(loads[Math.min(call++, loads.length - 1)] as Loaded),
-    check: () =>
-      check === "fail" ? Promise.reject(new Error("worker stopped")) : Promise.resolve(check),
-  };
+  const answer = <T,>(result: T | "fail") =>
+    result === "fail" ? Promise.reject(new Error("worker stopped")) : Promise.resolve(result);
+  const load = fn<ElectionSource["load"]>(() =>
+    Promise.resolve(loads[Math.min(call++, loads.length - 1)] as Loaded),
+  );
+  const seal = fn<ElectionSource["seal"]>(() => answer(sealed));
+  const challenge = fn<ElectionSource["challenge"]>(() => answer(opened));
+  const made: ElectionSource = { load, check: () => answer(check), seal, challenge };
+  MOCKS.set(made, { load, seal, challenge });
+  return made;
 }
 
 const meta = {
@@ -112,15 +150,14 @@ const opens: Story["play"] = async ({ canvasElement }) => {
   for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
   await userEvent.click(canvas.getByText("Two hundred new street trees"));
   await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
-  await userEvent.click(canvas.getByRole("button", { name: "Send my answers" }));
-  // Nothing is sealed or sent yet, and the client says so.
+  await userEvent.click(canvas.getByRole("button", { name: "Seal my answers" }));
+  // No poll creates version-1 definitions, and this client never seals one.
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
-    "Your answers weren't sent",
+    "This ballot can't seal answers for this poll yet",
   );
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
-  await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
-  // A fresh start: nothing chosen carries over.
-  for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+  await expect(canvas.getByText(/an older kind/)).toBeVisible();
+  await expect(canvas.queryByRole("button")).toBeNull();
 };
 
 export const Opens: Story = { name: "A checked poll opens", play: opens };
@@ -136,6 +173,7 @@ const POLL_OF_QUESTIONS: CheckedElection = {
     { minSelections: 0, maxSelections: 1 },
     { minSelections: 1, maxSelections: 1 },
   ],
+  cells: 1,
   translations: [
     {
       language: "en",
@@ -165,6 +203,176 @@ export const OpensQuestions: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
     await expect(canvas.getByText(FIRST)).toBeVisible();
     await expect(canvas.getByText(SECOND)).toBeVisible();
+  },
+};
+
+/** Answers both questions of POLL_OF_QUESTIONS (yes, then no) and seals them. */
+async function answerAndSeal(canvas: ReturnType<typeof within>) {
+  await userEvent.click(await canvas.findByText("Yes"));
+  await userEvent.click(canvas.getByRole("button", { name: "Next question" }));
+  await userEvent.click(canvas.getByText("No"));
+  await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
+  await userEvent.click(canvas.getByRole("button", { name: "Seal my answers" }));
+}
+
+export const SealedThenCast: Story = {
+  name: "Sealed: the tracking code before the choice, then cast",
+  args: { source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your answers are sealed" }),
+    ).toHaveFocus();
+    // The poll's one cell, and one vote per option, every question's in order.
+    await expect(mocks(args.source).seal).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).seal).toHaveBeenCalledWith(
+      fromHex(REGISTERED),
+      0,
+      [1, 0, 0, 1],
+    );
+    // The full code, as a QR code, a fingerprint and hex, before either choice.
+    await expect(
+      canvas.getByRole("img", { name: "QR code of the tracking code c0de 5eed" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "Fingerprint of the tracking code c0de 5eed" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+    ).toHaveTextContent(CODE);
+    await expect(canvas.getByRole("button", { name: "Check the encryption first" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Cast this ballot" }));
+    // Sending is part 3c: nothing leaves, the client says so, and the seal is never opened.
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your answers weren't sent",
+    );
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    // A fresh start: nothing chosen carries over.
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(FIRST);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+  },
+};
+
+export const SealedThenChallenged: Story = {
+  name: "Sealed, then challenged: the opening for the other device",
+  args: { source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    // A double tap asks once.
+    await userEvent.dblClick(
+      await canvas.findByRole("button", { name: "Check the encryption first" }),
+    );
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your sealed ballot is opened" }),
+    ).toHaveFocus();
+    await expect(mocks(args.source).challenge).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).challenge).toHaveBeenCalledWith(7);
+    await expect(
+      canvas.getByRole("figure", { name: "The tracking code it opened" }),
+    ).toHaveTextContent(CODE);
+    // The opening's bytes as a file; this device never says what it holds.
+    const save = await canvas.findByRole("link", { name: "Save the opening" });
+    await expect(save).toHaveAttribute("download", "abolish-opening-c0de5eed01234567.bin");
+    const href = save.getAttribute("href") ?? "";
+    await expect(href).toMatch(/^blob:/);
+    const saved = new Uint8Array(await (await fetch(href)).arrayBuffer());
+    await expect(saved).toEqual(OPENING);
+    await expect(canvas.queryByText("Yes")).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Cast this ballot" })).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(FIRST);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+  },
+};
+
+export const OpenedAnotherCode: Story = {
+  name: "Challenged, and the opening is of another code",
+  args: {
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, {
+      ...OPENED,
+      trackingCode: fromHex(SERVED),
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Check the encryption first" }),
+    );
+    // Never handed over: the worker opened a core other than the one shown.
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device couldn't open the sealed ballot",
+      }),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "Save the opening" })).toBeNull();
+  },
+};
+
+export const SealRefused: Story = {
+  name: "The worker refused to seal, then the poll is checked again",
+  args: {
+    source: source(
+      [LOADED],
+      { ok: true, election: POLL_OF_QUESTIONS },
+      {
+        ok: false,
+        problem: "no-election",
+      },
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device couldn't seal your answers",
+      }),
+    ).toHaveFocus();
+    await expect(mocks(args.source).load).toHaveBeenCalledOnce();
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    // The worker holds the poll it seals for, so it is checked anew.
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(mocks(args.source).load).toHaveBeenCalledTimes(2);
+  },
+};
+
+export const SealWorkerFailed: Story = {
+  name: "The worker failed while sealing",
+  args: {
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, "fail"),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device couldn't seal your answers",
+      }),
+    ).toBeVisible();
+  },
+};
+
+export const SplitIntoCells: Story = {
+  name: "A poll of several cells isn't sealed yet",
+  args: {
+    source: source([LOADED], { ok: true, election: { ...POLL_OF_QUESTIONS, cells: 2 } }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "This ballot can't seal answers for this poll yet",
+    );
+    await expect(canvas.getByText(/split by region/)).toBeVisible();
+    await expect(mocks(args.source).seal).not.toHaveBeenCalled();
   },
 };
 

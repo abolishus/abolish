@@ -325,9 +325,11 @@ export interface CheckAnswersProps {
   focus?: boolean;
   /** Back to question `index`, with its answer kept. */
   onChange: (index: number) => void;
-  onSend: () => void;
-  /** Open a sealed copy first (Benaloh's challenge); the copy is never counted. */
-  onChallenge: () => void;
+  /**
+   * Seal the answers. Casting or challenging comes after, once the tracking
+   * code is shown ([[challenge]], Client rule 1; T-42).
+   */
+  onSeal: () => void;
 }
 
 /** Every question with what the voter chose, before anything is sealed or sent. */
@@ -338,8 +340,7 @@ export function CheckAnswers({
   answers,
   focus = false,
   onChange,
-  onSend,
-  onChallenge,
+  onSeal,
 }: CheckAnswersProps) {
   const t = useTranslate(catalogs);
   // A question left blank where its limits allow it is skipped; one whose
@@ -356,13 +357,8 @@ export function CheckAnswers({
       progress={progressOf(pollClass, questions.length, questions.length)}
       stepName={t("checkStep")}
       primary={
-        <Button size="lg" className={ACTION} onClick={onSend}>
-          {t("send")}
-        </Button>
-      }
-      secondary={
-        <Button size="lg" variant="ghost" className={ACTION} onClick={onChallenge}>
-          {t("challenge")}
+        <Button size="lg" className={ACTION} onClick={onSeal}>
+          {t("seal")}
         </Button>
       }
     >
@@ -449,7 +445,7 @@ export function CheckAnswers({
           );
         })}
       </ol>
-      <p className="m-0 mt-8 text-pretty text-muted-foreground">{t("challengeExplained")}</p>
+      <p className="m-0 mt-8 text-pretty text-muted-foreground">{t("sealExplained")}</p>
     </Frame>
   );
 }
@@ -461,10 +457,8 @@ export interface AnswerQuestionsProps {
   questions: readonly BallotQuestion[];
   /** Shown above the first question: the arrival check. */
   arrival?: ReactNode;
-  /** The voter's answers, each fitting its question; sealing and sending are the caller's. */
-  onSend: (answers: Answers) => void;
-  /** The same answers, to seal and open as a challenge; the voter then answers again or sends. */
-  onChallenge: (answers: Answers) => void;
+  /** The voter's answers, each fitting its question, to seal; casting or challenging the seal is the caller's. */
+  onSeal: (answers: Answers) => void;
 }
 
 /** A question, opened with the short-answer message if sending found it short, or the check. */
@@ -473,7 +467,7 @@ type Screen = { readonly index: number; readonly short?: boolean } | "check";
 /**
  * The questions one at a time, then "Check your answers", starting from
  * nothing chosen. Hands the caller the voter's answers, every one checked
- * against its question's limits, only when the voter sends or challenges.
+ * against its question's limits, only when the voter seals them.
  *
  * Key it by the election's definition hash: the answers are kept by
  * question number, so another election's questions passed to the same
@@ -484,8 +478,7 @@ export function AnswerQuestions({
   poll,
   questions,
   arrival,
-  onSend,
-  onChallenge,
+  onSeal,
 }: AnswerQuestionsProps) {
   const [screen, setScreen] = useState<Screen>({ index: 0 });
   const [answers, setAnswers] = useState<readonly (readonly number[])[]>(() =>
@@ -510,9 +503,9 @@ export function AnswerQuestions({
 
   // Every answer fits by construction; checked again before it leaves, and a
   // misfit goes back to its question rather than out.
-  function release(send: (answers: Answers) => void) {
+  function release() {
     const unfit = firstUnfit(questions, answers);
-    if (unfit === undefined) send(answers);
+    if (unfit === undefined) onSeal(answers);
     else go({ index: unfit, short: true });
   }
 
@@ -528,8 +521,7 @@ export function AnswerQuestions({
           setReturnToCheck(true);
           go({ index });
         }}
-        onSend={() => release(onSend)}
-        onChallenge={() => release(onChallenge)}
+        onSeal={release}
       />
     );
 

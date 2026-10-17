@@ -323,7 +323,7 @@ describe("input checks", () => {
   });
 
   test("refuses a ballot that didn't pass validity-shape and a seat outside the panel", () => {
-    const [b] = ballotsOf(v) as [DeliveryBallot];
+    const [b] = ballotsOf(v) as [Extract<DeliveryBallot, { tier: number }>];
     const short = { ...b, vote: { ...b.vote, share_hashes: b.vote.share_hashes.slice(1) } };
     expect(() => checkDelivery(electionOf(v), [short], [], 1)).toThrow(RangeError);
     const e = electionOf(v);

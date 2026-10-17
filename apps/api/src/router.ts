@@ -296,8 +296,8 @@ export const router = os.router({
     }),
     // The Tier 1 relay (docs/spec/tier1-relay.md, Answers): core checks
     // steps 2 to 8 in order, and no answer depends on the commitment's
-    // state (T-13, T-22). A server without the relay publishes no group, so
-    // after the record's own checks it answers unavailable.
+    // state (T-13, T-22). A server without the relay is unavailable once the
+    // record's own checks pass, whatever its group, as Tier 0's route is.
     tier1: os.registrations.tier1.handler(async ({ input, context, errors }) => {
       try {
         if (context.tier1 === undefined) {

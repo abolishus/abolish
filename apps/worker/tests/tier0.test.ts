@@ -1,0 +1,469 @@
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
+import { groupRegistryAbi } from "@abolishus/contracts/abi";
+import {
+  decodeGroupAddition,
+  encodeGroupAddition,
+  groupAdditionDigest,
+  groupRegistryDomainSeparator,
+  POSEIDON2_ZERO_ONE,
+  signGroupApproval,
+} from "@abolishus/crypto";
+import {
+  commitmentKey,
+  MIN_REGISTRATION_BATCH,
+  REGISTRATION_PERIOD,
+  Tier0Batches,
+  tier0Keys,
+} from "@abolishus/core";
+import { testDb, type TestDb } from "@abolishus/core/test-db";
+import { Redis } from "ioredis";
+import type { Sql } from "postgres";
+import {
+  type Address,
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  getAddress,
+  type Hex,
+  http,
+  type PublicClient,
+  toHex,
+} from "viem";
+import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import {
+  checkTier0Deployment,
+  type LogLine,
+  QUEUES,
+  type RunningWorker,
+  startWorker,
+  TIER0_QUEUES,
+  ViemTier0Chain,
+} from "../src/index.ts";
+
+// The Tier 0 batch job against a real chain (P3-2 part 4d-2b): Anvil runs the
+// group registry pinned to the vectors' registrars, the adapter reads it at
+// pinned finalized and latest blocks, the startup check refuses every
+// mismatch, and the worker's scheduled jobs keep the index and sign, submit
+// and finish a batch that the registry accepts (T-06, T-13). Records reach
+// `addMembers` from one of Anvil's unlocked development accounts, standing in
+// for the paymaster's bundler, which is part 4d-2b-2's (no key of ours is
+// held here, AGENTS.md; the registrar keys are the published vectors').
+
+const redisUrl = process.env["REDIS_URL"];
+if (!redisUrl) throw new Error("REDIS_URL is not set");
+
+interface RegistrarVectors {
+  readonly threshold: number;
+  readonly secretKeys: readonly string[];
+  readonly addresses: readonly string[];
+  readonly outsiderSecretKey: string;
+}
+const vectors = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/group-registry.json", import.meta.url), "utf8"),
+) as { registrars: RegistrarVectors };
+const bytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
+const REGISTRARS = vectors.registrars.addresses.map((a) => getAddress(`0x${a}`));
+const SECRETS = vectors.registrars.secretKeys.map(bytes);
+const THRESHOLD = vectors.registrars.threshold;
+const SIGNERS = [
+  { seat: 1, secretKey: SECRETS[0] as Uint8Array },
+  { seat: 3, secretKey: SECRETS[2] as Uint8Array },
+];
+
+const contractsRoot = fileURLToPath(new URL("../../../packages/contracts", import.meta.url));
+const chainId = 1_000_000 + Math.floor(Math.random() * 1_000_000_000);
+// One slot per epoch: Anvil's finalized block is then the latest but two.
+const FINALITY_DEPTH = 2;
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() =>
+        typeof address === "object" && address !== null
+          ? resolve(address.port)
+          : reject(new Error("no port")),
+      );
+    });
+  });
+}
+
+async function until<T>(what: string, ms: number, probe: () => Promise<T | undefined>): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    let last: unknown;
+    try {
+      const value = await probe();
+      if (value !== undefined) return value;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`, { cause: last });
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+let anvil: ChildProcess;
+let rpcUrl: string;
+let chain: ReturnType<typeof defineChain>;
+let client: PublicClient;
+let wallet: ReturnType<typeof createWalletClient>;
+let accounts: Address[];
+let bytecode: Hex;
+let redis: Redis;
+let db: TestDb;
+let app: Sql;
+
+beforeAll(async () => {
+  const port = await freePort();
+  rpcUrl = `http://127.0.0.1:${port}`;
+  anvil = spawn(
+    "anvil",
+    [
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--chain-id",
+      String(chainId),
+      "--slots-in-an-epoch",
+      "1",
+      "--silent",
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
+  );
+  chain = defineChain({
+    id: chainId,
+    name: "anvil",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+  });
+  client = createPublicClient({ chain, transport: http(rpcUrl) }) as PublicClient;
+  wallet = createWalletClient({ chain, transport: http(rpcUrl) });
+  accounts = await until("anvil", 20_000, async () => {
+    if (anvil.exitCode !== null) throw new Error("anvil exited (is the toolchain installed?)");
+    return wallet.getAddresses();
+  });
+  bytecode = execFileSync(
+    "forge",
+    ["inspect", "--root", contractsRoot, "src/GroupRegistry.sol:GroupRegistry", "bytecode"],
+    { encoding: "utf8" },
+  ).trim() as Hex;
+  redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
+  db = await testDb();
+  app = await db.as("abolish_app");
+}, 120_000);
+
+afterAll(async () => {
+  redis?.disconnect();
+  await db?.close();
+  if (anvil !== undefined && anvil.exitCode === null) {
+    const exited = new Promise((r) => anvil.once("exit", r));
+    anvil.kill("SIGTERM");
+    await exited;
+  }
+});
+
+async function mine(blocks: number) {
+  await client.request({ method: "anvil_mine", params: [toHex(blocks)] } as never);
+}
+
+async function deployRegistry(): Promise<{ registry: Address; fromBlock: bigint }> {
+  const hash = await wallet.deployContract({
+    account: accounts[0] as Address,
+    chain,
+    abi: groupRegistryAbi,
+    bytecode,
+    args: [THRESHOLD, REGISTRARS],
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  if (!receipt.contractAddress) throw new Error("GroupRegistry wasn't deployed");
+  return { registry: receipt.contractAddress, fromBlock: receipt.blockNumber };
+}
+
+async function send(registry: Address, functionName: "createGroup" | "addMembers", arg: unknown) {
+  const hash = await wallet.writeContract({
+    account: accounts[5] as Address,
+    chain,
+    address: registry,
+    abi: groupRegistryAbi,
+    functionName,
+    args: [arg],
+  } as Parameters<typeof wallet.writeContract>[0]);
+  const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  if (receipt.status !== "success") throw new Error(`${functionName} reverted`);
+}
+
+/** Distinct allowed commitments, fresh for each call. */
+let nextCommitment = BigInt(`0x${randomBytes(8).toString("hex")}`) << 64n;
+const cmp = (x: bigint, y: bigint) => (x < y ? -1 : x > y ? 1 : 0);
+const commitments = (n: number) => Array.from({ length: n }, () => (nextCommitment += 7919n));
+
+/** A record signed by the vectors' registrars, as the job would sign it. */
+function signedRecord(
+  registry: Address,
+  groupId: bigint,
+  firstIndex: bigint,
+  values: bigint[],
+): Hex {
+  const digest = groupAdditionDigest(
+    groupRegistryDomainSeparator(BigInt(chainId), bytes(registry.slice(2))),
+    { groupId, tier: 0, firstIndex, commitments: values },
+  );
+  const approvals = SIGNERS.map((s) => signGroupApproval(digest, s.seat, s.secretKey));
+  return toHex(encodeGroupAddition({ groupId, firstIndex, commitments: values, approvals }));
+}
+
+function adapter(registry: Address, fromBlock: bigint, logRange?: bigint) {
+  const submitted: Uint8Array[] = [];
+  const chainReader = new ViemTier0Chain({
+    client,
+    registry,
+    fromBlock,
+    ...(logRange === undefined ? {} : { logRange }),
+    submit: async (record) => {
+      submitted.push(record);
+      await send(registry, "addMembers", toHex(record));
+    },
+  });
+  return { chain: chainReader, submitted };
+}
+
+describe("the startup check", () => {
+  test("passes the registry's own registrars, threshold and keys, and refuses each mismatch", async () => {
+    const { registry } = await deployRegistry();
+    await mine(FINALITY_DEPTH);
+    const deployment = {
+      chainId: BigInt(chainId),
+      registry,
+      registrars: REGISTRARS,
+      threshold: THRESHOLD,
+      signers: SIGNERS,
+    };
+    await expect(checkTier0Deployment(client, deployment)).resolves.toBeUndefined();
+    await expect(
+      checkTier0Deployment(client, { ...deployment, chainId: BigInt(chainId) + 1n }),
+    ).rejects.toThrow("another chain");
+    await expect(
+      checkTier0Deployment(client, { ...deployment, registrars: REGISTRARS.slice(0, 2) }),
+    ).rejects.toThrow("other registrars");
+    await expect(
+      checkTier0Deployment(client, { ...deployment, threshold: THRESHOLD + 1 }),
+    ).rejects.toThrow("another threshold");
+    // Seat 2's key put at seat 3, and the vectors' outsider at seat 1.
+    await expect(
+      checkTier0Deployment(client, {
+        ...deployment,
+        signers: [SIGNERS[0], { seat: 3, secretKey: SECRETS[1] as Uint8Array }] as never,
+      }),
+    ).rejects.toThrow("seat 3");
+    await expect(
+      checkTier0Deployment(client, {
+        ...deployment,
+        signers: [{ seat: 1, secretKey: bytes(vectors.registrars.outsiderSecretKey) }],
+      }),
+    ).rejects.toThrow("seat 1");
+    const error = await checkTier0Deployment(client, {
+      ...deployment,
+      signers: [{ seat: 4, secretKey: SECRETS[0] as Uint8Array }],
+    }).catch((e: unknown) => e);
+    // No key in the message.
+    expect(String(error)).not.toContain(Buffer.from(SECRETS[0] as Uint8Array).toString("hex"));
+  });
+
+  test("judges the registry's finalized state, not a deployment still unfinalized", async () => {
+    const { registry } = await deployRegistry();
+    await expect(
+      checkTier0Deployment(client, {
+        chainId: BigInt(chainId),
+        registry,
+        registrars: REGISTRARS,
+        threshold: THRESHOLD,
+        signers: SIGNERS,
+      }),
+    ).rejects.toThrow();
+    await mine(FINALITY_DEPTH);
+  });
+});
+
+describe("the adapter", () => {
+  test("reads a group's tier and counts, final and latest, at one pinned block pair", async () => {
+    const { registry, fromBlock } = await deployRegistry();
+    await send(registry, "createGroup", 0);
+    const { chain: reader } = adapter(registry, fromBlock);
+    // Created but not final: no tier to sign under yet.
+    await expect(reader.group(0n)).rejects.toThrow("isn't final");
+    await mine(FINALITY_DEPTH);
+    expect(await reader.group(0n)).toEqual({ tier: 0, finalizedSize: 0n, latestSize: 0n });
+
+    const first = commitments(3);
+    await send(registry, "addMembers", signedRecord(registry, 0n, 0n, first));
+    const unfinal = await reader.group(0n);
+    expect(unfinal).toEqual({ tier: 0, finalizedSize: 0n, latestSize: 3n });
+    expect(await reader.additionAt(0n, 0n)).toMatchObject({ final: false });
+
+    // Pinned: blocks mined after group() don't change what additionAt judges.
+    await mine(FINALITY_DEPTH);
+    expect(await reader.additionAt(0n, 0n)).toMatchObject({ final: false });
+    expect(await reader.group(0n)).toEqual({ tier: 0, finalizedSize: 3n, latestSize: 3n });
+    const logged = await reader.additionAt(0n, 0n);
+    expect(logged?.final).toBe(true);
+    expect(toHex(logged?.record as Uint8Array)).toBe(signedRecord(registry, 0n, 0n, first));
+    expect(await reader.additionAt(0n, 3n)).toBeNull();
+    // A group that was never created has no final creation.
+    await expect(reader.group(9n)).rejects.toThrow("isn't final");
+  });
+
+  test("lists every Tier 0 commitment up to the latest block, the same at any log range", async () => {
+    const { registry, fromBlock } = await deployRegistry();
+    await send(registry, "createGroup", 0);
+    await send(registry, "createGroup", 0);
+    const a = commitments(4);
+    const b = commitments(2);
+    const c = commitments(5);
+    await send(registry, "addMembers", signedRecord(registry, 0n, 0n, a));
+    await send(registry, "addMembers", signedRecord(registry, 1n, 0n, b));
+    await send(registry, "addMembers", signedRecord(registry, 0n, 4n, c));
+    const expected = [...a, ...b, ...c].sort(cmp);
+    for (const range of [undefined, 1n, 2n, 3n]) {
+      const { chain: reader } = adapter(registry, fromBlock, range);
+      expect([...(await reader.tier0Commitments())].sort(cmp)).toEqual(expected);
+    }
+  });
+
+  test("refuses an empty log range", () => {
+    expect(
+      () =>
+        new ViemTier0Chain({
+          client,
+          registry: REGISTRARS[0] as Address,
+          fromBlock: 0n,
+          logRange: 0n,
+          submit: async () => {},
+        }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("the worker's Tier 0 jobs", () => {
+  test("keep the index and sign, submit and finish a batch the registry accepts", async () => {
+    const { registry, fromBlock } = await deployRegistry();
+    await send(registry, "createGroup", 0);
+    await mine(FINALITY_DEPTH);
+    const already = commitments(2);
+    await send(registry, "addMembers", signedRecord(registry, 0n, 0n, already));
+    await mine(FINALITY_DEPTH);
+
+    const prefix = `abolish-test-${randomBytes(6).toString("hex")}`;
+    const keys = tier0Keys(prefix);
+    let clock = 1_800_000_000;
+    const { chain: reader, submitted } = adapter(registry, fromBlock);
+    const batches = new Tier0Batches({
+      redis,
+      chain: reader,
+      groups: new Map([[0, 0n]]),
+      chainId: BigInt(chainId),
+      registry: bytes(registry.slice(2)),
+      registrars: REGISTRARS.map((r) => bytes(r.slice(2))),
+      threshold: THRESHOLD,
+      signers: SIGNERS,
+      now: () => clock,
+      prefix,
+    });
+    const lines: LogLine[] = [];
+    const worker: RunningWorker = await startWorker({
+      connection: redis,
+      sql: app,
+      log: (l) => lines.push(l),
+      auditEveryMs: 3_600_000,
+      prefix,
+      tier0: { batches, indexEveryMs: 100, boundaryEveryMs: 100 },
+    });
+    try {
+      // The index catches up with what is already on chain.
+      await until("the index", 20_000, async () =>
+        (await redis.sismember(keys.live, commitmentKey(already[0] as bigint))) === 1
+          ? true
+          : undefined,
+      );
+
+      // Queued as the route queues (core's script), plus one already live.
+      const queued = [...commitments(MIN_REGISTRATION_BATCH), already[0] as bigint];
+      for (const v of queued) {
+        await redis.hset(keys.queue, commitmentKey(v), "0");
+        await redis.hincrby(keys.sizes, "0", 1);
+      }
+      clock += REGISTRATION_PERIOD;
+      const signed = await until("a signed batch", 20_000, async () =>
+        lines.find(
+          (l) => "outcome" in l && l.queue === "{tier0-boundary}" && l.outcome === "signed",
+        ),
+      );
+      expect(signed).toEqual({
+        queue: "{tier0-boundary}",
+        group: "0",
+        outcome: "signed",
+        abandoned: false,
+        submitFailed: false,
+      });
+      expect(submitted).toHaveLength(1);
+      const record = decodeGroupAddition(submitted[0] as Uint8Array);
+      if (!record.ok) throw new Error("undecodable");
+      // At the group's count, sorted, without the live one.
+      expect(record.value.firstIndex).toBe(2n);
+      expect(record.value.commitments).toEqual(queued.slice(0, MIN_REGISTRATION_BATCH).sort(cmp));
+      const [, , count] = await client.readContract({
+        address: registry,
+        abi: groupRegistryAbi,
+        functionName: "groupOf",
+        args: [0n],
+      });
+      expect(count).toBe(2n + BigInt(MIN_REGISTRATION_BATCH));
+
+      // Not final: the next boundary waits; once final, it finishes the batch.
+      clock += REGISTRATION_PERIOD;
+      await until("a waiting boundary", 20_000, async () =>
+        lines.find((l) => "outcome" in l && l.outcome === "waiting"),
+      );
+      expect(await redis.hexists(keys.batches, "0")).toBe(1);
+      await mine(FINALITY_DEPTH);
+      clock += REGISTRATION_PERIOD;
+      await until("the batch finished", 20_000, async () =>
+        (await redis.hexists(keys.batches, "0")) === 0 ? true : undefined,
+      );
+      expect(await redis.smembers(keys.inflight)).toEqual([]);
+      expect(await redis.hgetall(keys.queue)).toEqual({});
+      for (const v of record.value.commitments)
+        expect(await redis.sismember(keys.live, commitmentKey(v))).toBe(1);
+      expect(submitted).toHaveLength(1);
+
+      // T-10, T-13: no log line names a commitment or a record.
+      const text = JSON.stringify(lines);
+      for (const v of queued) expect(text).not.toContain(commitmentKey(v));
+      expect(text).not.toContain(Buffer.from(submitted[0] as Uint8Array).toString("hex"));
+      expect(text).not.toContain(commitmentKey(POSEIDON2_ZERO_ONE));
+      // Every key under a queue's hash tag or the registration's.
+      const tags = [
+        ...Object.values(QUEUES).map((q) => `${prefix}:${q.name}:`),
+        `${prefix}:{tier0-registration}:`,
+      ];
+      for (const k of TIER0_QUEUES)
+        expect((await redis.keys(`${prefix}:${QUEUES[k].name}:*`)).length).toBeGreaterThan(0);
+      for (const key of await redis.keys(`${prefix}:*`))
+        expect(
+          tags.some((t) => key.startsWith(t)),
+          key,
+        ).toBe(true);
+    } finally {
+      await worker.close();
+      const left = await redis.keys(`${prefix}:*`);
+      if (left.length > 0) await redis.del(...left);
+    }
+  }, 90_000);
+});

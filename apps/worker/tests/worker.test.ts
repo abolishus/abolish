@@ -13,6 +13,7 @@ import {
   type QueueSpec,
   type RunningWorker,
   startWorker,
+  TIER0_QUEUES,
 } from "../src/index.ts";
 
 // The worker end to end, against a live Redis and Postgres: the scheduled
@@ -210,7 +211,11 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await prunes.add("identityBackupPrune", {});
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
-  const tags = Object.values(QUEUES).map((q) => `${prefix}:${q.name}:`);
+  // This worker has no Tier 0 job, so those queues have no keys here
+  // (tests/tier0.test.ts covers them).
+  const tags = Object.entries(QUEUES)
+    .filter(([key]) => !(TIER0_QUEUES as readonly string[]).includes(key))
+    .map(([, q]) => `${prefix}:${q.name}:`);
   for (const tag of tags)
     expect(
       keys.some((k) => k.startsWith(tag)),
@@ -240,6 +245,9 @@ test("a handler's own error message is neither logged nor kept, the events strea
       identityBackupPrune: async () => {
         throw new Error(`params: ${MARKER}`);
       },
+      // Not scheduled: this worker has no Tier 0 job.
+      tier0Index: async () => {},
+      tier0Boundary: async () => {},
     },
   });
   try {

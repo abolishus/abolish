@@ -3,7 +3,7 @@
 // an error message (messages can quote data). Findings are their own lines
 // and carry only public board values.
 
-import type { BoardAuditCode } from "@abolishus/core";
+import type { BoardAuditCode, Tier0GroupOutcome } from "@abolishus/core";
 import type { QueueSpec } from "./queues.ts";
 
 export interface JobLogLine {
@@ -32,13 +32,30 @@ export type AuditFindingLine =
       readonly election: string;
     };
 
+/**
+ * What a Tier 0 boundary did to one published group. The group ID is public
+ * (the deployment record lists it), and the line names a step, never a
+ * commitment or a record (T-10, T-13).
+ */
+export interface Tier0BoundaryLine {
+  readonly queue: "{tier0-boundary}";
+  readonly group: string;
+  readonly outcome: Tier0GroupOutcome;
+  readonly abandoned: boolean;
+  readonly submitFailed?: boolean;
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
   readonly error: "worker";
 }
 
-export type ErrorKind = "board-audit-findings" | "invalid-job-data" | "internal";
+export type ErrorKind =
+  | "board-audit-findings"
+  | "invalid-job-data"
+  | "tier0-chain-unavailable"
+  | "internal";
 
-export type LogLine = JobLogLine | AuditFindingLine | WorkerErrorLine;
+export type LogLine = JobLogLine | AuditFindingLine | Tier0BoundaryLine | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

@@ -15,10 +15,13 @@
     "test": "vp run test:services"
   },
   "dependencies": {
+    "@abolishus/contracts": "workspace:*",
     "@abolishus/core": "workspace:*",
+    "@abolishus/crypto": "workspace:*",
     "bullmq": "catalog:",
     "ioredis": "catalog:",
     "postgres": "catalog:",
+    "viem": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

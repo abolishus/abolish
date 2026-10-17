@@ -528,6 +528,30 @@ describe("the batch", () => {
     expect(await queued()).toEqual(values.slice(1).sort(cmp));
   });
 
+  test("near 2³² members, the batch is cut to the leaves left; a full group signs nothing", async () => {
+    const chain = new FakeChain();
+    const values = commitments(MIN_REGISTRATION_BATCH + 2);
+    await enqueue(values);
+    const last = 1n << 32n;
+    chain.staleGroup = { tier: 0, finalizedSize: last - 3n, latestSize: last - 3n };
+    expect((await batches(chain).runBoundary())[0]?.outcome).toBe("signed");
+    const signed = lastRecord(chain);
+    expect(signed.firstIndex).toBe(last - 3n);
+    expect(signed.commitments).toHaveLength(3);
+    expect(await queued()).toHaveLength(values.length - 3);
+
+    // The record is final at the group's last leaves; the group is now full.
+    await redis.hdel(keys().batches, GROUP.toString());
+    await redis.del(keys().inflight);
+    const job = batches(chain);
+    chain.staleGroup = { tier: 0, finalizedSize: last, latestSize: last };
+    expect((await job.runBoundary())[0]?.outcome).toBe("full");
+    expect(chain.submitted).toHaveLength(1);
+    expect(await queued()).toHaveLength(values.length - 3);
+    expect(await redis.hgetall(keys().held)).toEqual({});
+    await expectConsistent();
+  });
+
   test("an unreadable index or chain changes nothing", async () => {
     const chain = new FakeChain();
     const values = commitments(MIN_REGISTRATION_BATCH);

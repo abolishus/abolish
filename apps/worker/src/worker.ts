@@ -1,12 +1,14 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
-// schedules that queue the board audit and the identity-backup prune. Job
+// schedules that queue the board audit, the identity-backup prune and, when
+// configured, the Tier 0 index refresh and boundary. Job
 // data is parsed against its queue's schema before it is handled, and every
 // outcome is logged by kind (T-10).
 
+import type { Tier0Batches } from "@abolishus/core";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
-import { HANDLERS, JobError } from "./jobs.ts";
+import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
 
@@ -26,10 +28,32 @@ export interface WorkerOptions {
   readonly prefix?: string;
   /** The handlers, `HANDLERS` unless a test replaces them to make one fail. */
   readonly handlers?: typeof HANDLERS;
+  /** The Tier 0 batch job; without it, its queues have no worker and no schedule. */
+  readonly tier0?: {
+    readonly batches: Tier0Batches;
+    /** How often the index is rebuilt; `TIER0_INDEX_EVERY_MS` unless a test says otherwise. */
+    readonly indexEveryMs?: number;
+    /** How often the boundary is tried; `TIER0_BOUNDARY_EVERY_MS` unless a test says otherwise. */
+    readonly boundaryEveryMs?: number;
+  };
 }
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
+
+/**
+ * A third of the route's `TIER0_INDEX_MAX_LAG` (a minute), so one missed or
+ * slow refresh doesn't turn registrations away (docs/spec/registration.md,
+ * Answers, step 6).
+ */
+export const TIER0_INDEX_EVERY_MS = 20_000;
+
+/**
+ * A boundary is tried every 30 seconds and runs once per period, so a batch
+ * is formed within about 30 seconds of its boundary, and a tick that lost
+ * the lock to an index refresh is retried well within the period.
+ */
+export const TIER0_BOUNDARY_EVERY_MS = 30_000;
 
 export interface RunningWorker {
   close(): Promise<void>;
@@ -44,8 +68,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const { connection, sql, log } = options;
   const prefix = options.prefix ?? KEY_PREFIX;
   const handlers = options.handlers ?? HANDLERS;
-  const ctx = { sql, log, now: options.now ?? (() => new Date()) };
-  const workers = (Object.keys(QUEUES) as QueueKey[]).map((key) => {
+  const ctx = {
+    sql,
+    log,
+    now: options.now ?? (() => new Date()),
+    ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
+  };
+  const running = (key: QueueKey) =>
+    options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+  const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
       spec.name,
@@ -100,6 +131,20 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
       id: "identity-backup-prune",
       every: options.pruneEveryMs ?? PRUNE_EVERY_MS,
     },
+    ...(options.tier0 === undefined
+      ? []
+      : ([
+          {
+            key: "tier0Index",
+            id: "tier0-index",
+            every: options.tier0.indexEveryMs ?? TIER0_INDEX_EVERY_MS,
+          },
+          {
+            key: "tier0Boundary",
+            id: "tier0-boundary",
+            every: options.tier0.boundaryEveryMs ?? TIER0_BOUNDARY_EVERY_MS,
+          },
+        ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];
   const queues = schedules.map((schedule) => {
     const name = QUEUES[schedule.key].name;

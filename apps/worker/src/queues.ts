@@ -44,6 +44,21 @@ export const QUEUES = {
     side: "operational",
     data: z.strictObject({}),
   },
+  /**
+   * Rebuilds the Tier 0 index from the group registry, so the registration
+   * route's step 6 stays within a minute of the L2 node (core's
+   * Tier0Batches.refreshIndex; docs/spec/registration.md, Answers). Runs on
+   * a schedule and takes no data: no request, commitment or record is ever
+   * queued (T-10, T-13).
+   */
+  tier0Index: { name: "{tier0-index}", side: "operational", data: z.strictObject({}) },
+  /**
+   * The Tier 0 batch at each period boundary (core's Tier0Batches.runBoundary;
+   * docs/spec/registration.md, The batch). Ticks well within each period and
+   * takes no data; core runs each period's boundary once, so a tick after it
+   * does nothing (T-13).
+   */
+  tier0Boundary: { name: "{tier0-boundary}", side: "operational", data: z.strictObject({}) },
 } as const satisfies Record<string, QueueSpec>;
 
 export type QueueKey = keyof typeof QUEUES;

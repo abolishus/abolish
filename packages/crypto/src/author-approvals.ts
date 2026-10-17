@@ -95,13 +95,25 @@ interface Prepared {
   readonly quorum: number;
 }
 
-// Each field read once; the key set must be one the transcript check
-// returned for the definition's author transcript (T-37).
+// Each field read once, and every byte array copied before any signature is
+// verified, so a caller can't verify approvals under one context and have
+// the key set approved under another (T-37); the key set must be one the
+// transcript check returned for the definition's author transcript.
 function prepare(input: AuthorApprovalContext): Prepared {
   if (input === null || typeof input !== "object")
     throw new TypeError("author approvals: expected a context");
-  const { l2ChainId, trusteeRegistry, authorStubHash, panel, authorTranscriptHash, registered } =
-    input;
+  const { l2ChainId, panel, authorTranscriptHash, registered } = input;
+  if (typeof l2ChainId !== "bigint")
+    throw new TypeError("author approvals: expected l2ChainId as a bigint");
+  if (
+    !(input.trusteeRegistry instanceof Uint8Array) ||
+    !(input.authorStubHash instanceof Uint8Array)
+  )
+    throw new TypeError(
+      "author approvals: expected the trustee registry and author stub hash as bytes",
+    );
+  const trusteeRegistry = Uint8Array.from(input.trusteeRegistry);
+  const authorStubHash = Uint8Array.from(input.authorStubHash);
   if (panel === null || typeof panel !== "object" || !Array.isArray(panel.keys))
     throw new TypeError("author approvals: expected the author panel");
   const transcript = Array.isArray(registered) ? checkedTranscriptHash(registered) : undefined;
@@ -221,16 +233,18 @@ export interface AuthorApproval {
  */
 const APPROVED = new WeakMap<readonly RegisteredKeys[], AuthorApproval[]>();
 
+// `prepare` copied every array in `p.ctx`, and nothing writes them after.
 function approve(p: Prepared): void {
   const { l2ChainId, trusteeRegistry, authorStubHash, authorTranscriptHash, registered } = p.ctx;
   const under: AuthorApproval = {
     l2ChainId,
-    trusteeRegistry: Uint8Array.from(trusteeRegistry),
+    trusteeRegistry,
     authorPanelId: p.panelId,
-    authorStubHash: Uint8Array.from(authorStubHash),
-    authorTranscriptHash: Uint8Array.from(authorTranscriptHash),
+    authorStubHash,
+    authorTranscriptHash,
   };
-  APPROVED.set(registered, [...(APPROVED.get(registered) ?? []), under]);
+  if (!wasApproved(registered, under))
+    APPROVED.set(registered, [...(APPROVED.get(registered) ?? []), under]);
 }
 
 /**

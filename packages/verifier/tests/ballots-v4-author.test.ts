@@ -9,6 +9,11 @@ import {
   type Report,
   verifyBundle,
 } from "../src/index.ts";
+import { ballotChecks } from "../src/ballots.ts";
+import { ceremonyChecks } from "../src/ceremony.ts";
+import { countedChecks } from "../src/counted.ts";
+import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
+import { tallyChecks } from "../src/tallies.ts";
 
 // Format-4 bundles under definition version 6 beside an author panel: ballot
 // admission, 5.1 to 5.5 and 5.7, with each ballot's author half judged
@@ -180,4 +185,56 @@ test("an operator still boards no ballot beside an author panel: 2.3 refuses eve
       entriesOf(c),
     ),
   ).toEqual({ ok: false, code: "profile-combination" });
+});
+
+test("delivery, the counted set and 7.4 decide nothing beside an author panel, whatever admission admitted", () => {
+  // Admission now registers ballots there, so 6.1 can pass; until they take
+  // the author panel's key set too (P2-16 part 4d-3), every counted row is
+  // not reached, never decided over the default panel's alone (T-37).
+  const c = byId("author-mixed");
+  const bundle = parseBundle(json(c), hex(c.board));
+  const definition = decodeDefinition(hex(c.definition));
+  const { stubHash } = readDefinition(definition);
+  const panel = { threshold: Number(file.panel.threshold), keys: file.panel.keys.map(hex) };
+  const ceremony = ceremonyChecks(
+    definition.value,
+    stubHash,
+    panel,
+    authorRunOf(definition),
+    bundle.entries,
+    7,
+  );
+  const admission = ballotChecks(
+    definition,
+    ceremony.registered,
+    ceremony.authorRegistered,
+    bundle.entries,
+    7,
+    bundle.clock,
+  );
+  const candidates = admission.candidates ?? [];
+  expect(candidates).toHaveLength(4);
+  const counted = countedChecks({
+    definition,
+    definitionHash: new Uint8Array(32),
+    registered: ceremony.registered ?? [],
+    selected: candidates.map(({ entry, tally }) => ({
+      entry,
+      tally: tally as NonNullable<typeof tally>,
+    })),
+    entries: bundle.entries,
+    boardEntryVersion: 7,
+    extent: bundle.entries.length,
+    eventsPass: true,
+    clock: bundle.clock,
+    destruction: true,
+    admitted: candidates,
+    blocks: undefined,
+  });
+  expect(counted.rows.size).toBeGreaterThan(0);
+  for (const o of counted.rows.values())
+    expect(o).toMatchObject({ status: "unverifiable", code: "not-reached" });
+  expect(
+    tallyChecks(definition, new Uint8Array(32), ceremony.registered, bundle.entries, 7).row,
+  ).toMatchObject({ status: "unverifiable", code: "not-reached" });
 });

@@ -99,7 +99,15 @@ function election(id: string) {
       records,
     );
   const ballots = rest.filter((p) => !records.includes(p));
-  return { d, registered: own.registered, authorRegistered: theirs.registered, approve, ballots };
+  return {
+    d,
+    author,
+    records,
+    registered: own.registered,
+    authorRegistered: theirs.registered,
+    approve,
+    ballots,
+  };
 }
 
 describe("panelBallotElection takes the author panel's approved key set", () => {
@@ -159,13 +167,51 @@ describe("panelBallotElection takes the author panel's approved key set", () => 
       { l2_chain_id: e.d.l2_chain_id + 1n },
       { trustee_registry: new Uint8Array(20).fill(7) },
       { author_threshold: 1 },
+      // Another author key at the same threshold.
+      { author_keys: [...e.d.author_keys.slice(0, 2), defaultPanel.keys[0] as Uint8Array] },
       { election_id: new Uint8Array(32).fill(7) },
+      // A field only the stubs bind.
+      { opens_at: e.d.opens_at - 1n },
       { author_transcript_hash: new Uint8Array(32).fill(7) },
     ];
     for (const change of changes)
       expect(() =>
         panelBallotElection({ ...e.d, ...change }, e.registered, e.authorRegistered),
       ).toThrow(/approved key set/);
+  });
+
+  test("never under a context changed while its records are read", () => {
+    // The registry and stub bytes the approvals verify under are the ones
+    // marked: overwriting the caller's buffers after the last record can't
+    // move the approval to another definition (T-37).
+    const e = election("author-mixed");
+    const alt = { ...e.d, trustee_registry: new Uint8Array(20).fill(7) };
+    const trusteeRegistry = Uint8Array.from(e.d.trustee_registry);
+    const authorStubHash = electionAuthorStubV6Hash(e.d);
+    const records = e.records;
+    function* thenOverwrite() {
+      yield* records;
+      trusteeRegistry.set(alt.trustee_registry);
+      authorStubHash.set(electionAuthorStubV6Hash(alt));
+    }
+    const approved = checkAuthorApprovals(
+      {
+        l2ChainId: e.d.l2_chain_id,
+        trusteeRegistry,
+        authorStubHash,
+        panel: e.author,
+        authorTranscriptHash: e.d.author_transcript_hash,
+        registered: e.authorRegistered,
+      },
+      thenOverwrite() as unknown as readonly Uint8Array[],
+    );
+    expect(approved.ok).toBe(true);
+    expect(() => panelBallotElection(alt, e.registered, e.authorRegistered)).toThrow(
+      /approved key set/,
+    );
+    expect(panelBallotElection(e.d, e.registered, e.authorRegistered).authorQualified).toEqual([
+      1, 2,
+    ]);
   });
 
   test("and refuses any author key set beside a definition without an author panel", () => {

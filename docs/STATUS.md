@@ -105,7 +105,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
-- [[P2-8]] part 2b (the owner's priority since 2026-10-16) waits on the owner: fetching an election needs the ballot client's `connect-src` widened in `.github/tools/ci/src/ballot.ts`, an owner-only loosening of its pinned policy, with the API's host and the L2 RPC origin it names (the second domain isn't registered yet, [[0020-entry-points]]). The proposal is in the item's file. Until then the queue's order applies.
+- On 2026-10-17 the owner chose staging's origins for [[P2-8]] part 2b (`https://api-staging.abolish.us`, `https://sepolia.base.org`), and the `connect-src` change landed in #332.
 - On 2026-10-12 the owner answered [[0010-tier2-identity-provider]]'s two questions (Owner decision), unblocking [[P3-4]]'s verifier side and real-document registration through trustee attestation.
 - On 2026-10-12 the owner answered [[0006-trustees]]'s small-cell question (regions below the floor fold into a per-tier remainder cell; tiers are never merged or withheld), unblocking [[P1-15]] part 4.
 - On 2026-10-12 the owner decided the open finding that blocked [[P1-12]] part 3b (#101) a second time: the unbounded trustee-node receipt obligation is accepted as a residual until [[P1-12c]] (membership-checked intake, after P1-17b and the ballot record, with P1-18's batched receipts) closes it, which MUST happen before any election registry is deployed ([[0002-everlasting-privacy]], Decision). #101 resumes.

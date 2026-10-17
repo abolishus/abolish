@@ -1346,10 +1346,24 @@ export const groupRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [],
+    name: "SELF_PAID_FEE",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
     name: "addMembers",
     outputs: [],
     stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "addSelfPaidMember",
+    outputs: [],
+    stateMutability: "payable",
   },
   {
     type: "function",
@@ -1362,6 +1376,13 @@ export const groupRegistryAbi = [
     type: "function",
     inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
     name: "createGroup",
+    outputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "createSelfPaidGroup",
     outputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
     stateMutability: "nonpayable",
   },
@@ -1414,6 +1435,13 @@ export const groupRegistryAbi = [
       { name: "index", internalType: "uint64", type: "uint64" },
     ],
     name: "isRemoved",
+    outputs: [{ name: "", internalType: "bool", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
+    name: "isSelfPaid",
     outputs: [{ name: "", internalType: "bool", type: "bool" }],
     stateMutability: "view",
   },
@@ -1504,6 +1532,34 @@ export const groupRegistryAbi = [
       },
     ],
     name: "RegistrarsPinned",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "groupId",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: true,
+      },
+    ],
+    name: "SelfPaidGroupCreated",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "groupId",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: true,
+      },
+      { name: "index", internalType: "uint64", type: "uint64", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "SelfPaidMemberAdded",
   },
   {
     type: "event",
@@ -1668,6 +1724,16 @@ export const groupRegistryAbi = [
     type: "error",
     inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
     name: "VouchSlot",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "value", internalType: "uint256", type: "uint256" }],
+    name: "WrongFee",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
+    name: "WrongKind",
   },
   {
     type: "error",

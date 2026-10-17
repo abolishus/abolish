@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
-import {GroupRegistry} from "../../src/GroupRegistry.sol";
+import {GroupRegistry, GroupRegistryLib} from "../../src/GroupRegistry.sol";
 import {GroupFixture} from "../utils/GroupFixture.sol";
 import {TestBase} from "../utils/Vm.sol";
 
-/// Creates groups and submits additions and removals from any account: any
-/// subset of registrar seats, some signatures forged, some positions off by
-/// one, some indices stray, repeated or out of order. Keeps a shadow of what
-/// the registry should hold.
+/// Creates signed and self-paid groups and submits additions and removals
+/// from any account: any subset of registrar seats, some signatures forged,
+/// some positions off by one, some indices stray, repeated or out of order,
+/// signed records naming self-paid groups and self-paid ones naming signed
+/// groups, some fees wrong and some commitments forbidden. Keeps a shadow of
+/// what the registry should hold.
 contract GroupHandler is TestBase {
     uint256 internal constant MAX_GROUPS = 4;
 
@@ -21,6 +23,9 @@ contract GroupHandler is TestBase {
     /// registry's state moved in a way the rules don't allow.
     bool public unexpected;
     mapping(uint64 groupId => uint64) public shadowCount;
+    mapping(uint64 groupId => bool) public shadowSelfPaid;
+    /// Self-paid additions accepted, each of which locked one fee.
+    uint256 public selfPaidAdded;
     mapping(uint64 groupId => mapping(uint64 index => bool)) public shadowRemoved;
     /// Every removal that succeeded, as (group, index), to recheck for good.
     uint64[2][] internal removedPairs;
@@ -52,6 +57,56 @@ contract GroupHandler is TestBase {
         }
     }
 
+    function createSelfPaidGroup(uint8 actorSeed) external {
+        if (groups >= MAX_GROUPS) return;
+        vm.prank(address(uint160(0xA000 + actorSeed % 3)));
+        try registry.createSelfPaidGroup() returns (uint64 id) {
+            if (id != groups) unexpected = true;
+            shadowSelfPaid[id] = true;
+            groups++;
+            events++;
+        } catch {
+            unexpected = true;
+        }
+    }
+
+    /// Adds one commitment to a group (or to the next, which doesn't exist
+    /// yet) from any account, with the fee off by one wei when `feeSkew`
+    /// says so and a forbidden commitment when `commitmentSeed < 16`.
+    function addSelfPaid(uint8 groupSeed, uint256 commitmentSeed, uint8 feeSkew, uint8 actorSeed)
+        external
+    {
+        uint64 groupId = uint64(groupSeed % (groups + 1));
+        uint64 count = shadowCount[groupId];
+        uint256 fee = GroupRegistryLib.SELF_PAID_FEE;
+        if (feeSkew % 8 == 0) fee++;
+        else if (feeSkew % 8 == 1) fee--;
+        uint256 c = commitmentSeed < 16
+            ? [
+                uint256(0), 1, GroupRegistryLib.POSEIDON2_0_1, GroupRegistryLib.R
+            ][commitmentSeed % 4]
+            : 2 + commitmentSeed % (GroupRegistryLib.R - 2);
+        bool allowed = groupId < groups && shadowSelfPaid[groupId]
+            && fee == GroupRegistryLib.SELF_PAID_FEE && !GroupRegistryLib.forbidden(c);
+        address actor = address(uint160(0xA000 + actorSeed % 3));
+        vm.deal(actor, fee);
+        uint256 before = address(registry).balance;
+        vm.prank(actor);
+        try registry.addSelfPaidMember{value: fee}(abi.encodePacked(groupId, c)) {
+            if (!allowed) unexpected = true;
+            // The registry assigned the next index and kept the fee.
+            (,, uint64 after_) = registry.groupOf(groupId);
+            if (after_ != count + 1) unexpected = true;
+            if (address(registry).balance != before + fee) unexpected = true;
+            shadowCount[groupId] = after_;
+            selfPaidAdded++;
+            events++;
+        } catch {
+            if (allowed) unexpected = true;
+            if (address(registry).balance != before) unexpected = true;
+        }
+    }
+
     /// Adds `size % 16 + 1` members to a group (or to the next, which doesn't
     /// exist yet) at its count, or one off when `skew` says so, signed by the seats
     /// in `seatMask`, with one of them forged when `forgeSeed < 64`.
@@ -72,7 +127,8 @@ contract GroupHandler is TestBase {
         bytes32 d = GroupFixture.addDigest(registry, groupId, 0, first, c);
         (GroupFixture.Approval[] memory a, bool forged) = _approvals(seatMask, forgeSeed, d);
 
-        bool allowed = groupId < groups && first == count && a.length >= 2 && !forged;
+        bool allowed = groupId < groups && !shadowSelfPaid[groupId] && first == count
+            && a.length >= 2 && !forged;
         vm.prank(address(uint160(0xA000 + actorSeed % 3)));
         try registry.addMembers(GroupFixture.encodeAdd(groupId, first, c, a)) {
             if (!allowed) unexpected = true;
@@ -103,7 +159,7 @@ contract GroupHandler is TestBase {
         uint64 count = shadowCount[groupId];
         uint64 size = sizeSkew % 8 == 0 ? count + 1 : (sizeSkew % 8 == 1 ? count / 2 : count);
         uint64[] memory idx = new uint64[](howMany % 3 + 1);
-        bool allowed = groupId < groups && size <= count;
+        bool allowed = groupId < groups && !shadowSelfPaid[groupId] && size <= count;
         for (uint256 i; i < idx.length; i++) {
             idx[i] = draws[i] % (count + 1);
             if (howMany >= 128 && i > 0) idx[i] = idx[i - 1] + 1 + draws[i] % 2;
@@ -154,17 +210,22 @@ contract GroupHandler is TestBase {
 }
 
 /// Invariants, over any sequence of handler calls:
-/// 1. A record is accepted exactly when its group exists, its position is the
-///    group's count (additions), its indices are strictly increasing, below
-///    the signed size (itself at most the group's count) and not yet removed
-///    (removals), and at least the threshold of distinct
-///    registrars signed it with every signature valid (T-06, T-62, T-71).
+/// 1. A signed record is accepted exactly when its group exists and is a
+///    signed group, its position is the group's count (additions), its
+///    indices are strictly increasing, below the signed size (itself at most
+///    the group's count) and not yet removed (removals), and at least the
+///    threshold of distinct registrars signed it with every signature valid
+///    (T-06, T-62, T-71). A self-paid addition is accepted exactly when its
+///    group exists and is self-paid, its fee is exact and its commitment
+///    isn't forbidden, whoever sends it (T-25).
 /// 2. Member counts never decrease, and equal the sum of the accepted
 ///    additions' sizes: every accepted addition's first index was the count
 ///    before it, so leaves are numbered once and in order (T-06, T-13).
 /// 3. A removed flag, once set, is never reset, and removals change no count.
 /// 4. The event accumulator counts one event for the registrars and one per
 ///    group created and per record accepted.
+/// 5. A group's kind never changes, and the registry holds exactly one fee
+///    per accepted self-paid addition: nothing moves a fee out (T-52).
 contract GroupRegistryInvariantTest is TestBase {
     GroupRegistry internal registry;
     GroupHandler internal handler;
@@ -192,7 +253,16 @@ contract GroupRegistryInvariantTest is TestBase {
             (, bool exists, uint64 count) = registry.groupOf(g);
             assertTrue(exists == (g < handler.groups()), "exists");
             assertEq(count, handler.shadowCount(g), "member count");
+            assertTrue(registry.isSelfPaid(g) == handler.shadowSelfPaid(g), "kind");
         }
+    }
+
+    function invariant_FeesAreLocked() public view {
+        assertEq(
+            address(registry).balance,
+            handler.selfPaidAdded() * GroupRegistryLib.SELF_PAID_FEE,
+            "locked fees"
+        );
     }
 
     function invariant_RemovalsAreForGood() public view {

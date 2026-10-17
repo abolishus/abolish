@@ -563,9 +563,11 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(5, 2, 1, 7))).toBe("profile-combination");
   });
 
-  test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
+  // Version 7's codec comes before 2.3 reads it (P3-2 part 5b-2), so a
+  // profile pinning it stays unverifiable rather than failed meanwhile.
+  test("the contract-event versions 2.3 knows are the ones its codec reads, but version 7", () => {
     const ascending = (a: number, b: number) => a - b;
-    expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
+    expect([...CONTRACT_EVENT_VERSIONS, 7].sort(ascending)).toEqual(
       Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
     );
   });

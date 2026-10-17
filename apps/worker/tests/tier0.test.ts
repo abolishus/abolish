@@ -50,8 +50,9 @@ import {
 // pinned finalized and latest blocks, the startup check refuses every
 // mismatch, and the worker's scheduled jobs keep the index and sign, submit
 // and finish a batch that the registry accepts (T-06, T-13). Records reach
-// `addMembers` from one of Anvil's unlocked development accounts, standing in
-// for the paymaster's bundler, which is part 4d-2b-2's (no key of ours is
+// `addMembers` from one of Anvil's unlocked development accounts here, so
+// these tests judge the job's reads and timing alone; the paymaster's path
+// through EntryPoint v0.8 is tests/tier0-bundler.test.ts's (no key of ours is
 // held here, AGENTS.md; the registrar keys are the published vectors').
 
 const redisUrl = process.env["REDIS_URL"];

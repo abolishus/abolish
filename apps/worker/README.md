@@ -28,13 +28,33 @@ Every key is `abolish:{<queue>}:…`. The braces are a hash tag: BullMQ's Lua sc
 
 ## Tier 0 batch job
 
-`src/tier0-chain.ts` is the batch job's chain adapter (docs/spec/registration.md, The batch): `ViemTier0Chain` reads the group registry from one L2 node at a pinned pair of finalized and latest blocks, and `checkTier0Deployment` refuses to start a job whose chain, registrars, threshold or keys aren't the registry's. Submission is passed in; through the paymaster's bundler it is P3-2 part 4d-2b-2's, and until then `main.ts` doesn't run the job. `tests/tier0.test.ts` runs it against the group registry on Anvil, so the tests need the toolchain (`.github/scripts/install-toolchain.sh`).
+`src/tier0-chain.ts` is the batch job's chain adapter (docs/spec/registration.md, The batch): `ViemTier0Chain` reads the group registry from one L2 node at a pinned pair of finalized and latest blocks, and `checkTier0Deployment` refuses to start a job whose chain, registrars, threshold or keys aren't the registry's. Submission is passed in: `src/tier0-bundler.ts`'s `connectTier0Bundler` checks the registration account and paymaster against the configured EntryPoint, registry and owner key, and the bundler against the chain and EntryPoint, then returns the submitter, which sends each record as an ERC-4337 operation from the account, paid by the paymaster (docs/spec/contracts.md, Registration paymaster and Registration account): it builds exactly the call the paymaster sponsors, lowers the fee so the operation's most-it-can-cost stays within the paymaster's cap whatever gas the bundler's estimate asks for, signs EntryPoint v0.8's hash with the account's key and requires the bundler to answer that hash. Every failure is a fixed message, never the record or the bundler's error (T-10, T-13). `tests/tier0.test.ts` runs the job against the group registry on Anvil, and `tests/tier0-bundler.test.ts` the submitter against EntryPoint v0.8 itself with the account and paymaster, through a stand-in bundler that lands each operation with `handleOps` (no bundler's ERC-7562 simulation runs; Known-weak in P3-2's status). Both need the toolchain (`.github/scripts/install-toolchain.sh`).
 
 `src/anchor-chain.ts` is the anchoring job's chain adapter (docs/spec/contracts.md, Board anchor): `ViemAnchorChain` reads the board anchor from one L1 node at the block its `now()` pinned, refusing a node behind a block or time already read; it simulates each `anchor` call from the authority before sending it, and fails a call whose sender resolved while the anchor doesn't hold its checkpoints. `checkAnchorDeployment` refuses to start a job whose chain, clock or authority aren't the anchor's finalized ones, or whose authority is a single key. Sending is passed in; through the Safe it is P4-1 part 2b-2's. `tests/anchor-chain.test.ts` runs core's `anchorBoards` through it against the anchor on Anvil.
 
 ## Running
 
 `vp run --filter @abolishus/worker start` (plain Node, as `apps/api`; `erasableSyntaxOnly` keeps it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), `REDIS_URL` and optionally `AUDIT_EVERY_MS` (at least 60000).
+
+The Tier 0 batch job runs only when every one of these is set, and the worker refuses to start with some of them (`src/tier0-env.ts`), or when `checkTier0Deployment` or `connectTier0Bundler` find the chain other than configured:
+
+| Variable               | Value                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `TIER0_L2_RPC_URL`     | The L2 node the job reads (HTTP).                                                           |
+| `TIER0_BUNDLER_URL`    | The ERC-4337 bundler it submits through (HTTP).                                             |
+| `TIER0_CHAIN_ID`       | The L2's chain ID.                                                                          |
+| `TIER0_GROUP`          | Region 0's published group, the API's `API_TIER0_GROUP`.                                    |
+| `TIER0_REGISTRY`       | The group registry's address.                                                               |
+| `TIER0_REGISTRY_BLOCK` | Its deployment block.                                                                       |
+| `TIER0_REGISTRARS`     | The registry's pinned registrars, comma-separated, in seat order.                           |
+| `TIER0_THRESHOLD`      | Its threshold.                                                                              |
+| `TIER0_SIGNER_KEYS`    | Secret: `seat:key` pairs, comma-separated, exactly `TIER0_THRESHOLD` of them, seats rising. |
+| `TIER0_ENTRY_POINT`    | EntryPoint v0.8's address.                                                                  |
+| `TIER0_ACCOUNT`        | The registration account's address.                                                         |
+| `TIER0_ACCOUNT_KEY`    | Secret: the account's owner key.                                                            |
+| `TIER0_PAYMASTER`      | The registration paymaster's address.                                                       |
+
+Keys are 64 hex digits, `0x` optional, and are never quoted in an error. The registrars' keys and the account's key are online in the job (T-69).
 
 ## Tests
 

@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const TRANSCRIPT =
   "https://aztec-ignition.s3.amazonaws.com/MAIN%20IGNITION/monomial/transcript00.dat";
-/** Points bb asks for: both circuits' dyadic size (gates.json), 2^15. */
+/** Points bb asks for: the output circuit's dyadic size (gates.json), 2^15. */
 const POINTS = 32768;
 const HEADER = 28;
 const G1_TOTAL = 5_040_001;

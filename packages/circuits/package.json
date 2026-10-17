@@ -13,6 +13,7 @@
   "devDependencies": {
     "@noble/curves": "catalog:",
     "@types/node": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },

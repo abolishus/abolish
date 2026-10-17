@@ -7,6 +7,7 @@
 // statement (T-21, T-55); that the setup's x is unknown is Ignition's claim,
 // which no test can check.
 
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { pippenger } from "@noble/curves/abstract/curve.js";
@@ -48,6 +49,14 @@ describe("crs/", () => {
     for (const { circuit_size } of Object.values(gates)) {
       expect(2 ** Math.ceil(Math.log2(circuit_size))).toBeLessThanOrEqual(POINTS);
     }
+  });
+
+  test("[x]_2 is the one compiled into the pinned bb", () => {
+    // bb's verifier uses its own copy of [x]_2, not bn254_g2.dat. That copy
+    // equalling the file ties the vendored powers to bb's x, a second source
+    // beside the S3 read: install-toolchain.sh pins bb's binary by sha256.
+    const bb = execFileSync("sh", ["-c", "command -v bb"], { encoding: "utf8" }).trim();
+    expect(readFileSync(bb).includes(g2Bytes)).toBe(true);
   });
 
   test("is [x^i]_1 from the generator, for the x of [x]_2", () => {

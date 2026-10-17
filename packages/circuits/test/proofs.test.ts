@@ -7,7 +7,8 @@
 // one witness differ (T-03, T-13). Also checks that the committed artifacts
 // are what scripts/artifacts.ts builds from the sources (T-55).
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -20,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { CIRCUITS, TARGET, writeArtifacts } from "../scripts/artifacts.ts";
 
@@ -50,8 +52,15 @@ const vectors = JSON.parse(
   readFileSync(at("../../docs/spec/vectors/nullifier-query.json"), "utf8"),
 ) as Vectors;
 
+const spec = readFileSync(at("../../docs/spec/nullifier-query.md"), "utf8");
 /** A proof's length in bytes: 458 field elements, the same for both circuits. */
 const PROOF_LENGTH = 14_656;
+/** Each key's sha256, as [[nullifier-query]] (Keys and proofs) pins it. */
+const VK_SHA256: Record<(typeof CIRCUITS)[number], string> = {
+  nullifier_query: "7acd95ec349d94b384baad47d08a1d7e050f307e997544d5d3fe309d5f1ab1dc",
+  nullifier_output: "b953a354fbc14d9c325ef03f311874c82f6b5ee178c16612dd516075de41d8cb",
+};
+const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 interface Statement {
   readonly id: string;
@@ -97,6 +106,14 @@ const PUBLIC_VALUES: Record<Circuit, readonly string[]> = {
 
 const dir = mkdtempSync(join(tmpdir(), "abolish-circuit-proofs-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(() => {
+  // bb fetches points over the network when crs/ holds too few; after every
+  // proof here, crs/ must still hold only the vendored files (and bb's lock).
+  expect(readdirSync(at("crs")).filter((f) => f !== "crs.lock")).toEqual([
+    "bn254_g1.dat",
+    "bn254_g2.dat",
+  ]);
+});
 
 const toml = (v: string | readonly string[]) =>
   typeof v === "string" ? JSON.stringify(v) : `[${v.map((e) => JSON.stringify(e)).join(", ")}]`;
@@ -149,17 +166,39 @@ function prove(s: Statement, name: string): { proof: string; publicInputs: strin
   return { proof: join(out, "proof"), publicInputs: join(out, "public_inputs") };
 }
 
-/** Whether `bb verify` accepts the proof under these public inputs and circuit's key. */
-function verifies(proof: string, publicInputs: readonly string[], circuit: Circuit): boolean {
-  const file = join(dir, `inputs-${Math.random().toString(36).slice(2)}`);
-  writeFileSync(file, Buffer.concat(publicInputs.map((v) => field(v))));
-  try {
-    execFileSync("bb", ["verify", "-p", proof, "-i", file, ...bbArgs(circuit)], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
+let files = 0;
+/**
+ * `bb verify` of the proof under these public inputs and the circuit's key:
+ * `accepted`, `rejected` (the verifier ran and refused it) or `error` (bb
+ * stopped before verifying), with bb's output. Telling the last two apart
+ * keeps a test that expects a refusal from passing on a bad path or input.
+ */
+function verify(
+  proof: string | Uint8Array,
+  publicInputs: readonly string[],
+  circuit: Circuit,
+): { verdict: "accepted" | "rejected" | "error"; output: string } {
+  const n = files++;
+  const inputs = join(dir, `inputs-${n}`);
+  writeFileSync(inputs, Buffer.concat(publicInputs.map((v) => field(v))));
+  let path = proof;
+  if (typeof proof !== "string") {
+    path = join(dir, `proof-${n}`);
+    writeFileSync(path, proof);
   }
+  const run = spawnSync("bb", ["verify", "-p", path as string, "-i", inputs, ...bbArgs(circuit)], {
+    encoding: "utf8",
+  });
+  const output = `${run.stdout}${run.stderr}`;
+  if (run.status === 0 && output.includes("Proof verified successfully")) {
+    return { verdict: "accepted", output };
+  }
+  if (run.status !== 0 && output.includes("Proof verification failed")) {
+    return { verdict: "rejected", output };
+  }
+  return { verdict: "error", output };
 }
+const verdict = (...args: Parameters<typeof verify>) => verify(...args).verdict;
 
 /** BN254's scalar field, the circuits' field. */
 const R = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001n;
@@ -174,6 +213,18 @@ const fields = (file: string) => {
 };
 
 describe("the committed artifacts", () => {
+  test.each(CIRCUITS)("%s.vk has the spec's sha256", (circuit) => {
+    const hash = createHash("sha256")
+      .update(readFileSync(at(`artifacts/${circuit}.vk`)))
+      .digest("hex");
+    expect(hash).toBe(VK_SHA256[circuit]);
+    expect(spec).toContain(`${circuit}.vk\` (sha256 \`${hash}\`)`);
+  });
+
+  test("the proof length is the spec's", () => {
+    expect(spec).toContain(`exactly ${PROOF_LENGTH.toLocaleString("en-US")} bytes`);
+  });
+
   test("are what scripts/artifacts.ts builds", () => {
     const out = join(dir, "artifacts");
     writeArtifacts(out);
@@ -196,7 +247,7 @@ describe.each(statements)("$id: a proof of $circuit", (s) => {
   });
 
   test("verifies under its own public inputs", () => {
-    expect(verifies(first.proof, s.publicInputs, s.circuit)).toBe(true);
+    expect(verdict(first.proof, s.publicInputs, s.circuit)).toBe("accepted");
   });
 
   // `ctx` and `q` among them, though they enter no constraint: only the
@@ -205,13 +256,34 @@ describe.each(statements)("$id: a proof of $circuit", (s) => {
     "fails with $name changed",
     ({ i }) => {
       const changed = s.publicInputs.map((v, j) => (j === i ? other(v) : v));
-      expect(verifies(first.proof, changed, s.circuit)).toBe(false);
+      expect(verdict(first.proof, changed, s.circuit)).toBe("rejected");
     },
   );
 
+  test("fails with any one proof field changed", () => {
+    const proof = new Uint8Array(readFileSync(first.proof));
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: PROOF_LENGTH / 32 - 1 }),
+        fc.bigInt({ min: 1n, max: R - 1n }),
+        (index, delta) => {
+          const tampered = proof.slice();
+          const slot = tampered.subarray(32 * index, 32 * index + 32);
+          slot.set(field(hex((BigInt(`0x${Buffer.from(slot).toString("hex")}`) + delta) % R)));
+          expect(verdict(tampered, s.publicInputs, s.circuit)).not.toBe("accepted");
+        },
+      ),
+      { numRuns },
+    );
+  }, 600_000);
+
   test("fails under the other circuit's key", () => {
+    // The keys differ in their count of public inputs, so bb refuses before
+    // verifying; under a key of the same count it would be a rejection.
     const another = CIRCUITS.find((c) => c !== s.circuit) ?? s.circuit;
-    expect(verifies(first.proof, s.publicInputs, another)).toBe(false);
+    const { verdict, output } = verify(first.proof, s.publicInputs, another);
+    expect(verdict).toBe("error");
+    expect(output).toContain("num_public_inputs mismatch");
   });
 
   test("differs from a second proof of the same witness, which also verifies", () => {
@@ -220,7 +292,7 @@ describe.each(statements)("$id: a proof of $circuit", (s) => {
     // the witness (circuits skill, Rules; T-13).
     const second = prove(s, "b");
     expect(readFileSync(second.proof).equals(readFileSync(first.proof))).toBe(false);
-    expect(verifies(second.proof, s.publicInputs, s.circuit)).toBe(true);
+    expect(verdict(second.proof, s.publicInputs, s.circuit)).toBe("accepted");
   });
 });
 
@@ -228,6 +300,6 @@ test("the other vector's public inputs fail each proof", () => {
   for (const circuit of CIRCUITS) {
     const [a, b] = statements.filter((s) => s.circuit === circuit);
     if (a === undefined || b === undefined) throw new Error(`${circuit}: two vectors expected`);
-    expect(verifies(prove(a, "x").proof, b.publicInputs, circuit)).toBe(false);
+    expect(verdict(prove(a, "x").proof, b.publicInputs, circuit)).toBe("rejected");
   }
 }, 600_000);

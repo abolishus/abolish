@@ -319,7 +319,9 @@ describe("advancePollCreations", () => {
       // Checked by mutation: keyed by the state alone, the created verdict
       // breaks the table's checks and the reverted one fails the new
       // submission.
-      expect(await run(chain, later)).toMatchObject({ created: 0, failed: {}, sent: 1 });
+      const report = await run(chain, later);
+      expect(report).toMatchObject({ created: 0, sent: 1 });
+      expect(report.failed).toEqual({});
       const r = await row(id!);
       expect(r).toMatchObject({ state: "submitted", failure: null, election: null });
       expect(r["hash"]).not.toBe(old);

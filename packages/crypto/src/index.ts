@@ -387,6 +387,18 @@ export {
   verifyDecodedMembershipProofs,
   verifyMembershipProof,
 } from "./membership-proof.ts";
+// Not exported: `finishMembershipProofWith`, the test seam that takes its
+// randomness, and `rerandomiseMembershipProof`, which takes its scalars.
+export {
+  checkMembershipZkey,
+  finishMembershipProof,
+  membershipProverInput,
+  MembershipProverError,
+  type MembershipProverErrorCode,
+  type MembershipProverInput,
+  type MembershipStatement,
+  type MembershipWitness,
+} from "./membership-prover.ts";
 export { poseidon2 } from "./poseidon.ts";
 export {
   replayTierGroup,

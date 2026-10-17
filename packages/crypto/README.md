@@ -135,6 +135,12 @@ The proofs themselves (`docs/spec/membership.md`, Verification key, Proof encodi
 - `poseidon2(a, b)`: circomlib's two-input Poseidon over BN254, on `@noble/curves`' permutation with constants from its Grain generator.
 - `tierTreeRoot(leaves)`, `tierTreePath(leaves, index)`, `tierTreeZeros()`: the depth-32 tier tree verifiers rebuild from a group's additions. `replayTierGroup(events)` is the lenient replay for group contracts without a signed sequence; the group registry's groups replay strictly through `applyGroupRecords`.
 
+The ballot client's side of a proof (`docs/spec/membership.md`, Security notes; ADR 0009, Amendment of 2026-10-17; T-05, T-07, T-12):
+
+- `membershipProverInput(secret, leaves, statement)`: the circuit's inputs for snarkjs (`MembershipWitness`, a path of exactly 32 siblings at the voter's first leaf, rebuilt from every leaf of the tier) and the public signals, each derived here: the scope from the definition hash, tier and root, `F(M)`, and `ν = Poseidon2(ŝ, s)`. Refuses (`MembershipProverError`) a secret that isn't an identity secret (`secret`), a voter who isn't a leaf (`not-a-member`) and leaves that don't climb to the definition's root (`root`), before any proving.
+- `checkMembershipZkey(zkey)`: refuses (`zkey`) a proving key that isn't `semaphore-32.zkey` by its sha256.
+- `finishMembershipProof(input, proof)`: the prover's proof verified under the pinned key against `input`'s signals (only inputs `membershipProverInput` built are accepted), re-randomised as `(t⁻¹·A, t·B + t·u·δ₂, C + u·A)` with CSPRNG scalars and verified again; refuses with `proof` or `rerandomised`. Only its output leaves the device. Run it in a realm the prover's code can't reach.
+
 The proving key's reference string was checked well formed, once and publicly, by `scripts/membership-crs-check.ts` (`docs/spec/membership.md`, Reference-string check; T-07, T-12). Its tests run on a toy key; set `MEMBERSHIP_CRS_DIR` to a directory with `semaphore-32.zkey`, `ppot_0080_14.ptau` and `semaphore-32.r1cs` to rerun it on the real one.
 
 ## Circuit-facing values

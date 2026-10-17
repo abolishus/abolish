@@ -18,7 +18,7 @@ type G1 = InstanceType<typeof bn254.G1.Point>;
 type G2 = InstanceType<typeof bn254.G2.Point>;
 type Fp2 = { readonly c0: bigint; readonly c1: bigint };
 
-const { Fp, Fp2, Fp12 } = bn254.fields;
+const { Fp, Fp2, Fp12, Fr } = bn254.fields;
 /** The BN254 base field's order, `p`. */
 const P = Fp.ORDER;
 
@@ -498,4 +498,29 @@ export function verifyDecodedMembershipProofs(checks: readonly MembershipProofCh
   for (let i = 0; i < pending.length; i += BATCH_MAX)
     resolve(pending.slice(i, i + BATCH_MAX), verdicts);
   return verdicts;
+}
+
+/**
+ * Internal: Baghery, Kohlweiss, Siim and Volkhov's re-randomisation of a
+ * Groth16 proof ("Another Look at Extraction and Randomization of Groth's
+ * zk-SNARK", FC 2021), `(A, B, C) → (t⁻¹·A, t·B + t·u·δ₂, C + u·A)` with `δ₂`
+ * the pinned key's (docs/spec/membership.md, Security notes). A valid proof
+ * stays valid for the same signals, and for `t` uniform in `[1, r)` and `u`
+ * in `[0, r)` the output is distributed as a fresh honest proof whatever
+ * randomisers made the input. The scalars are the caller's; `membership-
+ * prover.ts` draws them, so this isn't exported from the package.
+ */
+export function rerandomiseMembershipProof(proof: Uint8Array, t: bigint, u: bigint): Uint8Array {
+  if (typeof t !== "bigint" || t < 1n || t >= BN254_R)
+    throw new RangeError("rerandomiseMembershipProof: t must be in [1, r)");
+  if (typeof u !== "bigint" || u < 0n || u >= BN254_R)
+    throw new RangeError("rerandomiseMembershipProof: u must be in [0, r)");
+  const { a, b, c } = decodeMembershipProof(proof);
+  // u is 0 with probability 2^-254; noble's constant-time multiply refuses 0.
+  const shifted = u === 0n ? b : b.add(verificationKey().delta.multiply(u));
+  return encodeMembershipProof({
+    a: a.multiply(Fr.inv(t)),
+    b: shifted.multiply(t),
+    c: u === 0n ? c : c.add(a.multiply(u)),
+  });
 }

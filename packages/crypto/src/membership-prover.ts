@@ -1,0 +1,229 @@
+// The ballot client's side of a membership proof (docs/spec/membership.md,
+// Statement, Tier tree and Security notes; ADR 0009, Amendment of
+// 2026-10-17): everything around the Groth16 prover except the prover itself.
+// The client builds the circuit's inputs here from its own secret, the tier's
+// leaves and a definition it verified; hands them to snarkjs in a realm of its
+// own (packages/membership-prover, P2-21 part 4); and finishes the returned
+// proof here: verified under the pinned key against the public inputs computed
+// here, never the prover's, then re-randomised with this realm's CSPRNG and
+// verified again. Zero knowledge then rests on @noble/* and the platform
+// CSPRNG, whatever randomness or code made the prover's proof (T-05, T-07,
+// T-12, T-55).
+
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
+import { BN254_R } from "./codec.ts";
+import { isIdentitySecret } from "./identity-backup.ts";
+import { BJJ_G } from "./keyed-nullifier.ts";
+import { MEMBERSHIP_DEPTH, membershipScope, semaphoreField } from "./membership.ts";
+import {
+  MEMBERSHIP_PROOF_LENGTH,
+  MEMBERSHIP_ZKEY_SHA256,
+  type MembershipSignals,
+  rerandomiseMembershipProof,
+  verifyMembershipProof,
+} from "./membership-proof.ts";
+import { poseidon2 } from "./poseidon.ts";
+import { tierTreePath } from "./tier-tree.ts";
+
+/** Which check refused: each is a reason the client shows, never a retry. */
+export type MembershipProverErrorCode =
+  /** Not an identity secret's encoding: 32 bytes, `1 ≤ s < l`. */
+  | "secret"
+  /** The leaves don't climb to the definition's root for this tier. */
+  | "root"
+  /**
+   * The secret's commitment isn't a leaf of the tier. A forbidden commitment
+   * (docs/spec/membership.md, Commitments and removals) never is: the tier
+   * tree refuses one as a leaf, so it is refused here too.
+   */
+  | "not-a-member"
+  /** The proving key isn't `semaphore-32.zkey` by its sha256. */
+  | "zkey"
+  /** The prover's proof doesn't verify under the pinned key for the inputs computed here. */
+  | "proof"
+  /** The re-randomised proof doesn't verify: a fault here, never sent. */
+  | "rerandomised";
+
+export class MembershipProverError extends Error {
+  override readonly name = "MembershipProverError";
+  constructor(readonly code: MembershipProverErrorCode) {
+    super(code);
+  }
+}
+
+/** What the proof is for, each value from a definition and ballot the client verified. */
+export interface MembershipStatement {
+  /** The election definition's hash. */
+  readonly definitionHash: Uint8Array;
+  /** The tier (0, 1 or 2) of the tier group, or of the cell, the voter proves membership of. */
+  readonly tier: number;
+  /** That tier's root (or cell-tree root) as the definition gives it. */
+  readonly root: bigint;
+  /** `M`, the 32-byte membership message of docs/spec/revoting.md. */
+  readonly message: Uint8Array;
+}
+
+/**
+ * Semaphore's circuit inputs, as snarkjs's `groth16.fullProve` takes them,
+ * every value a decimal string: the secret, a path of exactly 32 siblings
+ * (`merkleProofLength` is always 32, never a depth computed or supplied;
+ * docs/spec/membership.md, Tree depth) and the mapped scope and message.
+ */
+export interface MembershipWitness {
+  readonly secret: string;
+  readonly merkleProofLength: string;
+  readonly merkleProofIndex: string;
+  readonly merkleProofSiblings: readonly string[];
+  readonly scope: string;
+  readonly message: string;
+}
+
+/** A prover request: the witness for the prover's realm and the signals that stay here. */
+export interface MembershipProverInput {
+  readonly witness: MembershipWitness;
+  readonly signals: MembershipSignals;
+}
+
+// Inputs `membershipProverInput` built: only their signals finish a proof, so
+// no caller can check a proof against signals the prover returned.
+const BUILT = new WeakSet<MembershipProverInput>();
+
+function secretScalar(secret: Uint8Array): bigint {
+  if (!isIdentitySecret(secret)) throw new MembershipProverError("secret");
+  let s = 0n;
+  for (const b of new Uint8Array(secret)) s = (s << 8n) | BigInt(b);
+  return s;
+}
+
+/** `Poseidon2(Ax, Ay)` for `(Ax, Ay) = s · B8`: the identity commitment of secret `s`. */
+function commitmentOf(s: bigint): bigint {
+  const { x, y } = BJJ_G.multiply(s).toAffine();
+  return poseidon2(x, y);
+}
+
+/** The root a path of 32 siblings climbs to from `leaf` at `index`, as the circuit computes it. */
+function climb(leaf: bigint, index: number, siblings: readonly bigint[]): bigint {
+  let node = leaf;
+  for (const [h, sibling] of siblings.entries())
+    // Arithmetic, not `>>`: bitwise operators wrap above 2^31.
+    node =
+      Math.floor(index / 2 ** h) % 2 === 0 ? poseidon2(node, sibling) : poseidon2(sibling, node);
+  return node;
+}
+
+/**
+ * The prover's request for a voter with identity secret `secret` (32 bytes,
+ * big-endian, docs/spec/identity-backup.md) in the tier whose leaves are
+ * `leaves`, in tier-tree order (a cell's: its cell tree's), for `statement`.
+ * The path is built here from every leaf, never fetched (T-10, T-13), at the
+ * first leaf holding the voter's commitment; it must climb to the
+ * definition's root, so leaves that aren't the tier's are refused before any
+ * proving. The scope is derived from the definition hash, the tier and the
+ * root (`membershipScope`), the message mapped by `F`, and the nullifier
+ * computed as `Poseidon2(ŝ, s)`: none is taken from a server or the prover.
+ * The secret is for Abolish proofs only (Security notes, Chosen-scope
+ * linkage). Throws `MembershipProverError`; a definition value out of range
+ * throws as `membershipScope` does.
+ */
+export function membershipProverInput(
+  secret: Uint8Array,
+  leaves: readonly bigint[],
+  statement: MembershipStatement,
+): MembershipProverInput {
+  if (statement === null || typeof statement !== "object")
+    throw new TypeError("statement: expected an object");
+  // Read once, so a getter can't show the checks one value and the inputs another.
+  const { definitionHash, tier, root, message } = statement;
+  const scope = membershipScope(definitionHash, tier, root);
+  const messageField = semaphoreField(message);
+  const s = secretScalar(secret);
+  const commitment = commitmentOf(s);
+  if (!Array.isArray(leaves)) throw new TypeError("leaves: expected an array");
+  const copy = leaves.slice();
+  const index = copy.indexOf(commitment);
+  if (index < 0) throw new MembershipProverError("not-a-member");
+  const siblings = tierTreePath(copy, index);
+  if (climb(commitment, index, siblings) !== root) throw new MembershipProverError("root");
+  const input: MembershipProverInput = Object.freeze({
+    witness: Object.freeze({
+      secret: s.toString(),
+      merkleProofLength: String(MEMBERSHIP_DEPTH),
+      merkleProofIndex: String(index),
+      merkleProofSiblings: Object.freeze(siblings.map(String)),
+      scope: scope.toString(),
+      message: messageField.toString(),
+    }),
+    signals: Object.freeze({
+      root,
+      nullifier: poseidon2(scope, s),
+      message: messageField,
+      scope,
+    }),
+  });
+  BUILT.add(input);
+  return input;
+}
+
+/**
+ * Refuses a proving key that isn't Semaphore's `semaphore-32.zkey` by its
+ * sha256 (`MEMBERSHIP_ZKEY_SHA256`), the key whose reference string was
+ * checked and which `membership_vk_hash` binds, whatever its source; checked
+ * on every use, before the key reaches the prover (T-07, T-12).
+ */
+export function checkMembershipZkey(zkey: Uint8Array): void {
+  if (!(zkey instanceof Uint8Array) || !ArrayBuffer.isView(zkey))
+    throw new TypeError("zkey: expected bytes");
+  if (bytesToHex(sha256(new Uint8Array(zkey))) !== MEMBERSHIP_ZKEY_SHA256)
+    throw new MembershipProverError("zkey");
+}
+
+/** A scalar uniform in `[min, r)`, by rejection over 254-bit draws (kept about 76% of the time). */
+function scalar(draw: (n: number) => Uint8Array, min: bigint): bigint {
+  for (;;) {
+    const b = draw(32);
+    if (!(b instanceof Uint8Array) || b.length !== 32)
+      throw new TypeError("draw: expected 32 bytes");
+    let v = BigInt(b[0] as number) & 0x3fn; // r < 2^254
+    for (let i = 1; i < 32; i++) v = (v << 8n) | BigInt(b[i] as number);
+    if (v >= min && v < BN254_R) return v;
+  }
+}
+
+/**
+ * The test seam of `finishMembershipProof`, with the randomness source
+ * passed in. Not exported from the package: production code draws from the
+ * CSPRNG only.
+ */
+export function finishMembershipProofWith(
+  input: MembershipProverInput,
+  proof: Uint8Array,
+  draw: (n: number) => Uint8Array,
+): Uint8Array {
+  if (!BUILT.has(input)) throw new TypeError("input: expected a membershipProverInput result");
+  if (!(proof instanceof Uint8Array) || !ArrayBuffer.isView(proof))
+    throw new TypeError("proof: expected bytes");
+  const bytes = new Uint8Array(proof);
+  // Before any randomness is drawn: a proof that fails here never leaves.
+  if (bytes.length !== MEMBERSHIP_PROOF_LENGTH || !verifyMembershipProof(bytes, input.signals))
+    throw new MembershipProverError("proof");
+  const t = scalar(draw, 1n);
+  const u = scalar(draw, 0n);
+  const out = rerandomiseMembershipProof(bytes, t, u);
+  if (!verifyMembershipProof(out, input.signals)) throw new MembershipProverError("rerandomised");
+  return out;
+}
+
+/**
+ * The 256-byte `membership_proof` a ballot carries, from the prover's
+ * `proof` for `input`: decoded strictly and verified under the pinned key
+ * against `input`'s signals (computed by `membershipProverInput`, never the
+ * prover's `publicSignals`), re-randomised with `t` uniform in `[1, r)` and
+ * `u` uniform in `[0, r)` from this realm's CSPRNG, and verified again. The
+ * prover's bytes are discarded; only the result may leave the device. Run it
+ * in a realm the prover's code can't reach (docs/spec/membership.md, Security
+ * notes). Throws `MembershipProverError` with `proof` or `rerandomised`.
+ */
+export function finishMembershipProof(input: MembershipProverInput, proof: Uint8Array): Uint8Array {
+  return finishMembershipProofWith(input, proof, randomBytes);
+}

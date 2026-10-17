@@ -5,18 +5,26 @@ import {
   ballotHashV3,
   type BallotRecordV3,
   checkDelivery,
+  COMMITTED_VOTE_V3,
   decodeBallot,
   type DeliveryBallot,
   deliveryBallotHash,
   type DeliveryElection,
   type DeliveryEntry,
+  ds,
+  encode,
   encodeShareReceipt,
+  fieldBn254,
+  H,
   identityKey,
   kemKeygen,
   type RegisteredKeys,
   shareReceiptRecord,
   shareReceiptStatement,
   signStatement,
+  u16,
+  u8,
+  Writer,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -132,6 +140,31 @@ describe("checkDelivery over a version-3 ballot", () => {
       election,
       [ballot],
       [receipt(1, other), ...seats.slice(1).map((s) => receipt(s, own))],
+      1,
+    );
+    expect(got.ballots[0]).toMatchObject({ counted: false, delivered: false, missing: [1] });
+  });
+
+  test("a receipt over the same fields hashed under another ballot version delivers nothing (T-38)", () => {
+    // Hashes (version 3)'s input with the version byte 2: what a verifier
+    // that read the record under version 2's header would name.
+    const hashUnder = (version: number) => {
+      const w = new Writer();
+      w.bytes(new Uint8Array(definitionHash));
+      u16.write(w, 0x0002);
+      u8.write(w, version);
+      u8.write(w, r.cell);
+      fieldBn254.write(w, r.nullifier);
+      w.bytes(encode(COMMITTED_VOTE_V3, r.committed_vote));
+      return H(ds("abolish/v1/ballot", w.finish()));
+    };
+    expect(toHex(hashUnder(3))).toBe(toHex(own));
+    const asV2 = hashUnder(2);
+    expect(toHex(asV2)).not.toBe(toHex(own));
+    const got = checkDelivery(
+      election,
+      [ballot],
+      [receipt(1, asV2), ...seats.slice(1).map((s) => receipt(s, own))],
       1,
     );
     expect(got.ballots[0]).toMatchObject({ counted: false, delivered: false, missing: [1] });

@@ -98,7 +98,15 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - It pins the EntryPoint, the group registry, the signing service's account, its admin (the timelock behind our Safe) and `maxCost` as immutables; deployment refuses an EntryPoint, registry or admin without code (or with only an EIP-7702 delegation), no service and a zero cap (T-62).
 - `validatePaymasterUserOp` sponsors an operation only if, in this order: its sender is the service's account, it deploys no account, `paymasterAndData` is the 52-byte prefix with no data after it, its call is exactly the standard ABI encoding of `execute(registry, 0, inner)` with `inner` exactly the standard ABI encoding of `addMembers(record)`, and its `maxCost` is at most the cap. It returns no context (so `postOp` is never called, and reverts) and no time range, and reads no storage, so bundlers accept it unstaked (ERC-7562). Refusals name the rule (`NotSponsored(Refusal)`).
 - Anyone may `deposit()`; only the admin may `withdrawTo`, `addStake`, `unlockStake` and `withdrawStake`. Nothing else can change: a new service account or cap is a new paymaster. It emits no log and holds nothing a verifier reads, so it doesn't inherit the event accumulator.
-- `test/RegistrationPaymaster.t.sol` runs it against a stand-in EntryPoint and account (`test/utils/MockEntryPoint.sol`) and a real group registry: a sponsored operation lands a signed batch from the vectors' registrars; every rule refuses its case (by fuzzing too: any sender but the service, any cost over the cap, any byte of the call changed outside the record); a changed record is sponsored and refused by the registry, costing the deposit at most the cap; and only the admin moves funds.
+- `test/RegistrationPaymaster.t.sol` runs it against a stand-in EntryPoint and account (`test/utils/MockEntryPoint.sol`) and a real group registry: a sponsored operation lands a signed batch from the vectors' registrars; every rule refuses its case (by fuzzing too: any sender but the service, any cost over the cap, any byte of the call changed outside the record); a changed record is sponsored and refused by the registry, costing the deposit at most the cap; and only the admin moves funds. `test/RegistrationEntryPoint.t.sol` runs it through EntryPoint v0.8 itself (Registration account, below).
+
+## Registration account
+
+`src/RegistrationAccount.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Registration account: the signing service's ERC-4337 account, the paymaster's `service`, which submits each Tier 0 batch as `execute(registry, 0, addMembers(record))`.
+
+- It is eth-infinitism's `BaseAccount` (v0.8, vendored, below) with one owner key and the EntryPoint as immutables: `execute` and `executeBatch` run only for the EntryPoint, and an operation validates only if its 65-byte, low-`s` signature with `v` 27 or 28 over EntryPoint v0.8's `userOpHash` recovers to the owner; any other signature is a failed validation (`SIG_VALIDATION_FAILED`), never a revert. Deployment refuses an EntryPoint without code (or with only an EIP-7702 delegation) and a zero owner.
+- Nothing can change it: no proxy, no upgrade entry, no delegatecall, no owner change. It has no `receive` or fallback, so it holds no ether unless someone sends it some (an EntryPoint deposit or a forced transfer), which only the owner key could spend; it emits no log (T-62, T-69).
+- `test/RegistrationEntryPoint.t.sol` runs it and the paymaster through EntryPoint v0.8 itself (vendored, compiled for the test): the owner's signed operation lands the batch, paid from the paymaster's deposit to the bundler within the cap; the signed hash is the EIP-712 digest computed from ERC-4337's definition; a replay is refused by nonce; a record the registry refuses costs at most the cap and adds nothing; a signature by any other key (fuzzed), any changed byte of it (fuzzed), a malformed, high-`s` or other-`v` one, or one over another operation fails validation; each paymaster rule reaches the EntryPoint as `AA33`, with another call, a batch of one, extra paymaster data, a fee over the cap and another account with the same owner; only the EntryPoint runs the account (`execute` and `executeBatch`); its code has no storage, create, delegatecall, callcode or selfdestruct opcode; and nothing it logs is text.
 
 ## Bindings
 
@@ -130,7 +138,7 @@ The release build, whose bytecode and immutable ranges verifier 1.2 pins and fro
 
 ## Vendored code
 
-`vendor/openzeppelin-contracts/` holds six unmodified files of [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) (MIT, its `LICENSE` beside them) at tag `v5.6.1`, commit `5fd1781b1454fd1ef8e722282f86f9293cacf256`: `P256.sol` and the four files it imports, and `ECDSA.sol`, which imports nothing. They are byte-identical to the same paths in that commit and in the npm package `@openzeppelin/contracts@5.6.1`. `foundry.toml` maps `@openzeppelin/contracts/` to them and nothing else. The `P256` library has been in OpenZeppelin's audited releases since 5.1, and `ECDSA` for much longer.
+`vendor/openzeppelin-contracts/` holds eighteen unmodified files of [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) (MIT, its `LICENSE` beside them) at tag `v5.6.1`, commit `5fd1781b1454fd1ef8e722282f86f9293cacf256`: `P256.sol` and the four files it imports, `ECDSA.sol`, which imports nothing, and, for the tests' EntryPoint only (below), `ReentrancyGuardTransient.sol`, `ERC165.sol` and `EIP712.sol` with the files they import. They are byte-identical to the same paths in that commit and in the npm package `@openzeppelin/contracts@5.6.1`. `foundry.toml` maps `@openzeppelin/contracts/` to them and nothing else. The `P256` library has been in OpenZeppelin's audited releases since 5.1, and `ECDSA` for much longer.
 
 `test/vendor.test.ts` checks that each directory holds exactly its files with these sha256 sums (the `sha256sum` lines below), and that the tree hash, the sha256 of those lines, is the one recorded here:
 
@@ -138,28 +146,54 @@ The release build, whose bytecode and immutable ranges verifier 1.2 pins and fro
 
 ```text
 20aebc68b11c063133aa2af0ef4bb29875477c6d16d715718f0daec563938b84  LICENSE
+f89772d2d4fafcbef8b73bb10ee9a3373edec2eedb2f1b302320915b351dc3d1  contracts/interfaces/IERC5267.sol
+3ce9120a27934c75a074cb785d3a88868069ef6529dbe4dc6b845af0836f3c70  contracts/utils/Bytes.sol
 0704b9d6c032cca8512a3bc3f30f49f86f1f03102d2896a3d23e794b82efea66  contracts/utils/Errors.sol
 270fc8401c1a13fae6a7a4a2dd6e381b95d658896701e51f0d3e2688acab3dec  contracts/utils/Panic.sol
+cff7c20aed945d939b764d876adbd42e1b7725d62d5b1f2bd303db237567b575  contracts/utils/ReentrancyGuardTransient.sol
+1cfa08d3c551e9ec0b9cd249b09987f04e7e90f352e1a5e3b0d6a3bc426b3de7  contracts/utils/ShortStrings.sol
+75704538dcb223239280c6726d9a31cf769a7816718517c997fc7d63bdb70778  contracts/utils/StorageSlot.sol
+e318709bbe73a7831d64c1351e8bdc43780b245f25191234e361e6ab9b98c67b  contracts/utils/Strings.sol
+ea92f361d697ba8b1fbd322b4d84b989998862c21fbebfa4b45289dc94a9eea2  contracts/utils/TransientSlot.sol
 ba7c2d314fcd61c9783e0b3f0c664d004b76b408fda6a84edc8267d17c5012d6  contracts/utils/cryptography/ECDSA.sol
+2845caaaf70757b6cce612ae4ffbec2c382cb3d1cb9765c98fa649c0f5f1c794  contracts/utils/cryptography/EIP712.sol
+538a0d7c4f0ec5a8562f58561890f7b49d14580674ecf58bc5f505b45c73df65  contracts/utils/cryptography/MessageHashUtils.sol
 0d7bb2f2b5e0ceb0e1a28523ee179c1aee5980cb793df739dd9ccf87170dffe2  contracts/utils/cryptography/P256.sol
+61a2b12c96857aaa35f48aeda67a4281637a42494c0b3795be0ae976aa7b3793  contracts/utils/introspection/ERC165.sol
+9055c2994b37dea1a41b7b7926dcb510f05dbe2540b0aafc5fbee9558fffd0ca  contracts/utils/introspection/IERC165.sol
 bdfdbe133991c0c78042957ff5cd97167926fcaf6d15664f3835a076cb066457  contracts/utils/math/Math.sol
 5779bc848bde39f1ad7bc02b4f708a0040888e0083b1a33f119cd94639350134  contracts/utils/math/SafeCast.sol
+1ed50b1056af886752f0fb48a0165d381e69bb4a4b18b893b066dc144a7e08d7  contracts/utils/math/SignedMath.sol
 ```
 
-Tree hash: `4629cf8a19588eecd38051c0dbd0966ca3187c1651d3187136e411eedff90771`.
+Tree hash: `a78db2cd0a731aa74865b24a46a0ce8d34cbd8d30215f1f9338e3d784c988cde`.
 
-`vendor/account-abstraction/` holds three unmodified interface files of [eth-infinitism's account-abstraction](https://github.com/eth-infinitism/account-abstraction), ERC-4337's reference implementation, at tag `v0.8.0`, commit `4cbc06072cdc19fd60f285c5997f4f7f57a588de` (EntryPoint v0.8): `IPaymaster.sol`, the `PackedUserOperation.sol` it imports, and `IStakeManager.sol`, which imports nothing. They are byte-identical to the same paths in that commit and under `interfaces/` in the npm package `@account-abstraction/contracts@0.8.0`. Each file declares `SPDX-License-Identifier: MIT`, as the npm package does; the repository's `LICENSE`, beside them, is GPL-3.0, which this AGPL-3.0-only package can include either way. `foundry.toml` maps `@account-abstraction/contracts/` to them. They are declarations only: no code of theirs runs in the paymaster.
-
+`vendor/account-abstraction/` holds eighteen unmodified files of [eth-infinitism's account-abstraction](https://github.com/eth-infinitism/account-abstraction), ERC-4337's reference implementation, at tag `v0.8.0`, commit `4cbc06072cdc19fd60f285c5997f4f7f57a588de` (EntryPoint v0.8): `core/EntryPoint.sol` and every file it imports, among them `BaseAccount.sol`'s own imports, and `core/BaseAccount.sol`. They are byte-identical to the same paths in that commit and in the npm package `@account-abstraction/contracts@0.8.0` (whose `@openzeppelin/contracts` range, `^5.1.0`, admits the 5.6.1 files above). The paymaster uses the interfaces only; the registration account inherits `BaseAccount`, so its `execute` and validation are the reference account's; and only the tests deploy `EntryPoint`, compiled with this package's settings, so its bytecode isn't the canonical deployment's (the deployment record names the canonical one). The interfaces, `BaseAccount.sol` and the helpers declare `SPDX-License-Identifier: MIT`, and `EntryPoint.sol`, `StakeManager.sol`, `NonceManager.sol` and `SenderCreator.sol` declare `GPL-3.0`, as the npm package's do; the repository's `LICENSE`, beside them, is GPL-3.0, which this AGPL-3.0-only package can include either way (AGPL-3.0, section 13). No GPL-3.0 file is part of a contract we deploy. `foundry.toml` maps `@account-abstraction/contracts/` to them.
 <!-- vendored:account-abstraction -->
 
 ```text
 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  LICENSE
+d1cdb2bc26b1acc1c6217cba0060f0608d51267526f736f6bbbd14e49d2c655f  contracts/core/BaseAccount.sol
+e3f6dc4d80f0e1094c822f0124dff8672b848bb11ff9329ff15245c36ab27e99  contracts/core/Eip7702Support.sol
+c6572f5f940c32c8f9e0ba8f8db0b5b01f59a3626d27bc0fc2e08eca0148926f  contracts/core/EntryPoint.sol
+c3da33a3d7916abc048af7c5a7ccafc5df7eb18c7b335315d2f4492a6133fc5c  contracts/core/Helpers.sol
+5206bd20e1b46ed89f62cc53ef3cc12d8b032571c9471663e4f68e15833eb662  contracts/core/NonceManager.sol
+b38ebc6a7c0b16ddb373e07f01448e21c6b3ac7aa72970be427ffbfaeae249f0  contracts/core/SenderCreator.sol
+32936cfbf289cb67b874c1684873d93b3395035914ffa2de91f48f69e6174f83  contracts/core/StakeManager.sol
+5eb7ed0461f6157d641ae38e60564067c49459415701edcd206115a12ea4289b  contracts/core/UserOperationLib.sol
+2c1b8edec106515424e725970139d0bdb1f624377e3452c82095310642647ac8  contracts/interfaces/IAccount.sol
+2fe4601d013ae48c9960aba8918843abe0ff11391a71c7d1d167f5f0aff72a20  contracts/interfaces/IAccountExecute.sol
+f2986a91e9b3c694241af5803d6657c985af962620a0646e4fdaea95ddc4d35e  contracts/interfaces/IAggregator.sol
+a3f1fa434462383b862082f062228eb1075dc90aab6ab2981522a58add4d5bba  contracts/interfaces/IEntryPoint.sol
+46717d66cbde8176989a4a320f6d8a937fddae42abc772a8e22abe22c62f57b5  contracts/interfaces/INonceManager.sol
 afa15dcc078da38975c9c34320f4312ec5fe4cd02d3e88f40dcf0cdaab6a7856  contracts/interfaces/IPaymaster.sol
+a1448e8754f7a1e9f2fd97cba36a951b55c6ab422164250913904bd587c905a2  contracts/interfaces/ISenderCreator.sol
 b5b638a2d9f046c7f77b83a1bb2a1f5804527cac17ca9726febdbe3607c86a2a  contracts/interfaces/IStakeManager.sol
 e1c1f25c071c981fa03901e86a85e7ac4300cdc5c54165a1b96962427d9a1930  contracts/interfaces/PackedUserOperation.sol
+fb027b5d2397bf767cc1caa5660c408ea900c1a8c48b8e2db1b19ae6e856972d  contracts/utils/Exec.sol
 ```
 
-Tree hash: `4cac5efd3330ca2ebcea0a3c37375cfca8763d29ecf0185125facc0d3591a1d5`.
+Tree hash: `efa4d5c9136075d04d5eff8ff1396e8e13398357c6eb3763d45c3553cffca405`.
 
 The check proves the files haven't changed since they were vendored, not that they match upstream: re-deriving them from the tag in CI needs a `ci:` change (rule B), recorded as known-weak in [`docs/status/P1-18.md`](../../docs/status/P1-18.md).
 

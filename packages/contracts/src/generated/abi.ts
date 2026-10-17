@@ -1688,6 +1688,118 @@ export const groupRegistryAbi = [
 ] as const;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// RegistrationAccount
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const registrationAccountAbi = [
+  {
+    type: "constructor",
+    inputs: [
+      {
+        name: "entryPoint_",
+        internalType: "contract IEntryPoint",
+        type: "address",
+      },
+      { name: "owner_", internalType: "address", type: "address" },
+    ],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "entryPoint",
+    outputs: [{ name: "", internalType: "contract IEntryPoint", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "target", internalType: "address", type: "address" },
+      { name: "value", internalType: "uint256", type: "uint256" },
+      { name: "data", internalType: "bytes", type: "bytes" },
+    ],
+    name: "execute",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      {
+        name: "calls",
+        internalType: "struct BaseAccount.Call[]",
+        type: "tuple[]",
+        components: [
+          { name: "target", internalType: "address", type: "address" },
+          { name: "value", internalType: "uint256", type: "uint256" },
+          { name: "data", internalType: "bytes", type: "bytes" },
+        ],
+      },
+    ],
+    name: "executeBatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "getNonce",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "owner",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      {
+        name: "userOp",
+        internalType: "struct PackedUserOperation",
+        type: "tuple",
+        components: [
+          { name: "sender", internalType: "address", type: "address" },
+          { name: "nonce", internalType: "uint256", type: "uint256" },
+          { name: "initCode", internalType: "bytes", type: "bytes" },
+          { name: "callData", internalType: "bytes", type: "bytes" },
+          {
+            name: "accountGasLimits",
+            internalType: "bytes32",
+            type: "bytes32",
+          },
+          {
+            name: "preVerificationGas",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          { name: "gasFees", internalType: "bytes32", type: "bytes32" },
+          { name: "paymasterAndData", internalType: "bytes", type: "bytes" },
+          { name: "signature", internalType: "bytes", type: "bytes" },
+        ],
+      },
+      { name: "userOpHash", internalType: "bytes32", type: "bytes32" },
+      { name: "missingAccountFunds", internalType: "uint256", type: "uint256" },
+    ],
+    name: "validateUserOp",
+    outputs: [{ name: "validationData", internalType: "uint256", type: "uint256" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "index", internalType: "uint256", type: "uint256" },
+      { name: "error", internalType: "bytes", type: "bytes" },
+    ],
+    name: "ExecuteError",
+  },
+  { type: "error", inputs: [], name: "InvalidDeployment" },
+] as const;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // RegistrationPaymaster
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

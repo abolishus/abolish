@@ -66,6 +66,7 @@ interface Vm {
     function store(address target, bytes32 slot, bytes32 value) external;
     function toString(uint256 value) external pure returns (string memory);
     function toString(bytes calldata value) external pure returns (string memory);
+    function txGasPrice(uint256 newGasPrice) external;
     function warp(uint256 newTimestamp) external;
 }
 

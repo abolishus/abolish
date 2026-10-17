@@ -22,6 +22,7 @@
 // quorum's anchor ahead of creation costs an identifier, never an election.
 
 import { PARAMETERS } from "@abolishus/crypto";
+import { PINNED_SEQUENCER_DRIFT } from "@abolishus/verifier";
 import { and, asc, eq, isNull, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
@@ -61,11 +62,15 @@ export const MAX_ANCHOR_CHECK_SEGMENTS = 10_000;
 export const ANCHOR_CHECKS_PER_RUN = 20;
 
 /**
- * How long after its L1 origin a creation's slots are read: the release's
- * ceiling on any definition's `max_sequencer_drift`, so no shorter drift a
- * deployment runs at leaves an anchor made before the creation unread.
+ * How long after its L1 origin a creation's slots are read: the larger of the
+ * drift the verifier release pins for an event's origin and the ceiling on
+ * any definition's `max_sequencer_drift`, so neither can be raised without
+ * lengthening the check to match ([[contracts]], Election registry, Events).
  */
-export const ANCHOR_CHECK_DELAY = BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT);
+export const ANCHOR_CHECK_DELAY =
+  PINNED_SEQUENCER_DRIFT > BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT)
+    ? PINNED_SEQUENCER_DRIFT
+    : BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT);
 
 /** One run's outcome, in counts only (T-10, T-67). */
 export interface AnchorCheckReport {
@@ -75,6 +80,12 @@ export interface AnchorCheckReport {
   waiting: number;
   /** Identifiers abandoned, their polls returned to the creation step. */
   abandoned: number;
+  /**
+   * Of those, identifiers abandoned because their range was too long to
+   * read (a check left for over a year): not counted toward the poll's
+   * `MAX_ABANDONED_IDS`, since no anchor was found.
+   */
+  overdue: number;
   /** Polls failed with `creation-anchored`. */
   failed: number;
 }
@@ -100,7 +111,8 @@ export function anchorCheckSegments(
   // u32 segments; past that no period can be anchored at all.
   const end = last > 0xffffffffn ? 0xffffffffn : last;
   // A check runs within hours of its creation; this many is a node's
-  // malformed answer, not a backlog.
+  // malformed answer or a worker down for a year, and the caller abandons
+  // the identifier rather than read it.
   if (end - first + 1n > BigInt(MAX_ANCHOR_CHECK_SEGMENTS))
     throw new RangeError("too many segments to check");
   const out: number[] = [];
@@ -113,8 +125,12 @@ export function anchorCheckSegments(
  * each whose `C` is finalized is marked checked at that block if every word
  * is zero, or abandons its identifier (back to `submitted`, its creation
  * cleared, so the creation step creates it again) or, at the
- * `MAX_ABANDONED_IDS`th abandoned one, fails. Each step is safe to rerun
- * after a crash at any point: a poll moves only from `created` unchecked.
+ * `MAX_ABANDONED_IDS`th abandoned one, fails. `C` must also be no earlier
+ * than when the poll was seen `created`: after a sequencer stall an event's
+ * L2 time, and so its origin, can lag the creation's real time, and only a
+ * block after the creation itself shows every anchor made before it. Each
+ * step is safe to rerun after a crash at any point: a poll moves only from
+ * `created` unchecked, holding the identifier it was read with.
  */
 export async function checkCreationAnchors(
   client: Sql,
@@ -124,13 +140,20 @@ export async function checkCreationAnchors(
   const { epoch, period } = anchors.clock;
   if (period < 1n || epoch < 0n) throw new RangeError("the anchor's clock is malformed");
   const db = drizzle({ client });
-  const report: AnchorCheckReport = { checked: 0, waiting: 0, abandoned: 0, failed: 0 };
+  const report: AnchorCheckReport = {
+    checked: 0,
+    waiting: 0,
+    abandoned: 0,
+    overdue: 0,
+    failed: 0,
+  };
   const polls = await db
     .select({
       id: accountPolls.id,
       electionId: accountPolls.electionId,
       origin: accountPolls.l1OriginTimestamp,
       abandoned: accountPolls.abandonedIds,
+      seen: accountPolls.updatedAt,
     })
     .from(accountPolls)
     .where(and(eq(accountPolls.state, "created"), isNull(accountPolls.anchorsCheckedBlock)))
@@ -140,14 +163,54 @@ export async function checkCreationAnchors(
   // One block for the run, read once: every poll is judged at the same `C`.
   const block = await anchors.finalized();
   if (block.hash.length !== 32) throw new Error("the L1 node gave a malformed block hash");
-  const unchecked = and(
-    eq(accountPolls.state, "created"),
-    isNull(accountPolls.anchorsCheckedBlock),
-  );
+  // Keyed by the identifier too: a poll another run abandoned and the
+  // creation step created again holds a new identifier this run never read.
+  const unchecked = (id: string, electionId: Uint8Array) =>
+    and(
+      eq(accountPolls.id, id),
+      eq(accountPolls.state, "created"),
+      isNull(accountPolls.anchorsCheckedBlock),
+      eq(accountPolls.electionId, electionId),
+    );
+  // The creation's transaction stays in the ledger, still counted against
+  // the ceiling; the creation step takes the poll again by its submission
+  // time.
+  const abandon = async (id: string, electionId: Uint8Array, counted: boolean) => {
+    const moved = await db
+      .update(accountPolls)
+      .set({
+        state: "submitted",
+        creatorAddress: null,
+        createTxHash: null,
+        electionId: null,
+        createdBlock: null,
+        l1OriginTimestamp: null,
+        ...(counted && { abandonedIds: q`${accountPolls.abandonedIds} + 1` }),
+        updatedAt: options.now,
+      })
+      .where(unchecked(id, electionId))
+      .returning({ id: accountPolls.id });
+    return moved.length;
+  };
   for (const p of polls) {
     // The table requires both from `created` on.
     const electionId = p.electionId as Uint8Array;
-    const segments = anchorCheckSegments(anchors.clock, p.origin as bigint, block.timestamp);
+    if (block.timestamp < BigInt(Math.floor(p.seen.getTime() / 1000))) {
+      report.waiting++;
+      continue;
+    }
+    let segments: number[] | undefined;
+    try {
+      segments = anchorCheckSegments(anchors.clock, p.origin as bigint, block.timestamp);
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      // Too long to read, never a reason to hold up the polls behind it:
+      // abandoning is always safe.
+      const n = await abandon(p.id, electionId, false);
+      report.abandoned += n;
+      report.overdue += n;
+      continue;
+    }
     if (segments === undefined) {
       report.waiting++;
       continue;
@@ -159,7 +222,7 @@ export async function checkCreationAnchors(
       const moved = await db
         .update(accountPolls)
         .set({ anchorsCheckedBlock: block.number, updatedAt: options.now })
-        .where(and(eq(accountPolls.id, p.id), unchecked))
+        .where(unchecked(p.id, electionId))
         .returning({ id: accountPolls.id });
       report.checked += moved.length;
     } else if (p.abandoned + 1 >= MAX_ABANDONED_IDS) {
@@ -173,29 +236,10 @@ export async function checkCreationAnchors(
           abandonedIds: q`${accountPolls.abandonedIds} + 1`,
           updatedAt: options.now,
         })
-        .where(and(eq(accountPolls.id, p.id), unchecked))
+        .where(unchecked(p.id, electionId))
         .returning({ id: accountPolls.id });
       report.failed += moved.length;
-    } else {
-      // The creation's transaction stays in the ledger, still counted
-      // against the ceiling; the poll keeps its place in the queue by its
-      // submission time.
-      const moved = await db
-        .update(accountPolls)
-        .set({
-          state: "submitted",
-          creatorAddress: null,
-          createTxHash: null,
-          electionId: null,
-          createdBlock: null,
-          l1OriginTimestamp: null,
-          abandonedIds: q`${accountPolls.abandonedIds} + 1`,
-          updatedAt: options.now,
-        })
-        .where(and(eq(accountPolls.id, p.id), unchecked))
-        .returning({ id: accountPolls.id });
-      report.abandoned += moved.length;
-    }
+    } else report.abandoned += await abandon(p.id, electionId, true);
   }
   return report;
 }

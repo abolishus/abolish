@@ -28,6 +28,8 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const NOW = new Date("2026-10-17T12:00:00Z");
 const NOW_S = BigInt(NOW.getTime() / 1000);
 const CLOCK = { epoch: 1_700_000_000n, period: 3600n };
+/** When the creation step saw a test's poll created: before every block the tests prove at. */
+const SEEN = new Date(Number(CLOCK.epoch) * 1000);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 const draft = (): PollDraft => ({
@@ -114,7 +116,7 @@ async function created(origin: bigint): Promise<{ id: string; election: string }
   await db.admin`
     UPDATE account_polls SET state = 'created', creator_address = ${new Uint8Array(20).fill(0xc0)},
       create_tx_hash = ${randomBytes(32)}, election_id = ${election}, created_block = 7,
-      l1_origin_timestamp = ${origin.toString()}
+      l1_origin_timestamp = ${origin.toString()}, updated_at = ${SEEN}
     WHERE id = ${id}`;
   return { id, election: hex(election) };
 }
@@ -196,7 +198,13 @@ describe("checkCreationAnchors", () => {
     const origin = originAt(10n);
     const { id, election } = await created(origin);
     anchors.at(origin + ANCHOR_CHECK_DELAY);
-    expect(await run(anchors)).toEqual({ checked: 0, waiting: 1, abandoned: 0, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 0,
+      waiting: 1,
+      abandoned: 0,
+      overdue: 0,
+      failed: 0,
+    });
     expect(anchors.reads).toEqual([]);
     expect((await row(id))["anchors_checked_block"]).toBeNull();
 
@@ -204,7 +212,13 @@ describe("checkCreationAnchors", () => {
     // An anchor before `f`, and one in a period not yet ended, don't count.
     anchors.anchor(election, 9);
     anchors.anchor(election, 13);
-    expect(await run(anchors)).toEqual({ checked: 1, waiting: 0, abandoned: 0, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 1,
+      waiting: 0,
+      abandoned: 0,
+      overdue: 0,
+      failed: 0,
+    });
     expect(anchors.reads).toEqual([{ election, segments: [10, 11, 12], at: anchors.block.number }]);
     expect(await row(id)).toMatchObject({
       state: "created",
@@ -213,7 +227,13 @@ describe("checkCreationAnchors", () => {
       election,
     });
     // Checked once: a later run reads nothing.
-    expect(await run(anchors)).toEqual({ checked: 0, waiting: 0, abandoned: 0, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 0,
+      waiting: 0,
+      abandoned: 0,
+      overdue: 0,
+      failed: 0,
+    });
     expect(anchors.reads).toHaveLength(1);
   });
 
@@ -233,7 +253,13 @@ describe("checkCreationAnchors", () => {
     const { id, election } = await created(origin);
     anchors.at(CLOCK.epoch + 12n * CLOCK.period);
     anchors.anchor(election, 10);
-    expect(await run(anchors)).toEqual({ checked: 0, waiting: 0, abandoned: 1, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 0,
+      waiting: 0,
+      abandoned: 1,
+      overdue: 0,
+      failed: 0,
+    });
     expect(await row(id)).toMatchObject({
       state: "submitted",
       failure: null,
@@ -246,7 +272,13 @@ describe("checkCreationAnchors", () => {
       l1_origin_timestamp: null,
     });
     // Nothing to check now; the creation step owns it again.
-    expect(await run(anchors)).toEqual({ checked: 0, waiting: 0, abandoned: 0, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 0,
+      waiting: 0,
+      abandoned: 0,
+      overdue: 0,
+      failed: 0,
+    });
   });
 
   test(`fails a poll on its ${MAX_ABANDONED_IDS}rd anchored identifier, keeping the identifier`, async () => {
@@ -259,7 +291,7 @@ describe("checkCreationAnchors", () => {
       await db.admin`
         UPDATE account_polls SET state = 'created', creator_address = ${new Uint8Array(20).fill(0xc0)},
           create_tx_hash = ${randomBytes(32)}, election_id = ${election}, created_block = 7,
-          l1_origin_timestamp = ${origin.toString()}
+          l1_origin_timestamp = ${origin.toString()}, updated_at = ${SEEN}
         WHERE id = ${id}`;
       anchors.anchor(hex(election), 11);
       const report = await run(anchors);
@@ -285,7 +317,13 @@ describe("checkCreationAnchors", () => {
     const b = await created(originAt(11n, 3000n));
     anchors.at(CLOCK.epoch + 13n * CLOCK.period);
     anchors.anchor(b.election, 12);
-    expect(await run(anchors)).toEqual({ checked: 1, waiting: 0, abandoned: 1, failed: 0 });
+    expect(await run(anchors)).toEqual({
+      checked: 1,
+      waiting: 0,
+      abandoned: 1,
+      overdue: 0,
+      failed: 0,
+    });
     // In whichever order the run took them.
     const reads = new Map(anchors.reads.map((r) => [r.election, r.segments]));
     expect(reads).toEqual(
@@ -308,21 +346,69 @@ describe("checkCreationAnchors", () => {
     expect(await row(id)).toMatchObject({ state: "created", anchors_checked_block: null });
   });
 
-  test("leaves a poll another run already moved", async () => {
+  test("leaves a poll whose identifier changed while it was read", async () => {
     const anchors = new FakeAnchors();
-    const { id, election } = await created(originAt(10n));
+    const origin = originAt(10n);
+    const { id, election } = await created(origin);
     anchors.at(CLOCK.epoch + 13n * CLOCK.period);
-    anchors.anchor(election, 10);
     // Between this run's read and its write, another run abandoned the
-    // identifier and the creation step created the poll again.
+    // identifier and the creation step created the poll again, under an
+    // identifier this run never read.
+    const fresh = randomBytes(32);
     const words = anchors.words.bind(anchors);
     anchors.words = async (...args) => {
       const out = await words(...args);
-      await db.admin`UPDATE account_polls SET anchors_checked_block = 1 WHERE id = ${id}`;
+      await db.admin`UPDATE account_polls SET election_id = ${fresh}, abandoned_ids = 1 WHERE id = ${id}`;
       return out;
     };
-    expect(await run(anchors)).toEqual({ checked: 0, waiting: 0, abandoned: 0, failed: 0 });
-    expect(await row(id)).toMatchObject({ state: "created", abandoned_ids: 0 });
+    expect(await run(anchors)).toMatchObject({ checked: 0, abandoned: 0, failed: 0 });
+    expect(await row(id)).toMatchObject({
+      state: "created",
+      anchors_checked_block: null,
+      election: hex(fresh),
+    });
+    // The same holds when the old identifier's words would abandon or fail it.
+    anchors.words = words;
+    await db.admin`UPDATE account_polls SET election_id = ${Buffer.from(election, "hex")} WHERE id = ${id}`;
+    anchors.anchor(election, 11);
+    anchors.words = async (...args) => {
+      const out = await words(...args);
+      await db.admin`UPDATE account_polls SET election_id = ${fresh} WHERE id = ${id}`;
+      return out;
+    };
+    expect(await run(anchors)).toMatchObject({ checked: 0, abandoned: 0, failed: 0 });
+    expect(await row(id)).toMatchObject({ state: "created", election: hex(fresh) });
+  });
+
+  test("waits for a block no earlier than when the poll was seen created", async () => {
+    const anchors = new FakeAnchors();
+    const origin = originAt(10n);
+    const { id } = await created(origin);
+    const seen = CLOCK.epoch + 20n * CLOCK.period;
+    await db.admin`UPDATE account_polls SET updated_at = ${new Date(Number(seen) * 1000)} WHERE id = ${id}`;
+    anchors.at(seen - 1n);
+    expect(await run(anchors)).toMatchObject({ checked: 0, waiting: 1 });
+    expect(anchors.reads).toEqual([]);
+    anchors.at(seen);
+    expect(await run(anchors)).toMatchObject({ checked: 1, waiting: 0 });
+    expect(anchors.reads[0]!.segments).toEqual(Array.from({ length: 10 }, (_, i) => 10 + i));
+  });
+
+  test("abandons an identifier too long unchecked to read, uncounted, and goes on to the next", async () => {
+    const anchors = new FakeAnchors();
+    const old = await created(originAt(0n));
+    const next = await created(originAt(20_000n));
+    anchors.at(CLOCK.epoch + 20_002n * CLOCK.period);
+    expect(await run(anchors)).toEqual({
+      checked: 1,
+      waiting: 0,
+      abandoned: 1,
+      overdue: 1,
+      failed: 0,
+    });
+    expect(await row(old.id)).toMatchObject({ state: "submitted", abandoned_ids: 0 });
+    expect(await row(next.id)).toMatchObject({ state: "created" });
+    expect(anchors.reads.map((r) => r.election)).toEqual([next.election]);
   });
 });
 

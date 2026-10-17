@@ -3,6 +3,7 @@
 
 import {
   advancePollCreations,
+  type AnchorCheckReport,
   checkCreationAnchors,
   type CreationAnchors,
   type AnchorChain,
@@ -207,24 +208,27 @@ async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promis
     now: ctx.now(),
     dailyCeiling: ctx.pollCreation.dailyCeiling,
   });
-  const anchors = await checkCreationAnchors(ctx.sql, ctx.pollCreation.anchors, {
-    now: ctx.now(),
-  });
-  const failed = { ...report.failed };
-  if (anchors.failed > 0) failed["creation-anchored"] = anchors.failed;
-  const moved =
-    report.sent + report.resent + report.sendFailed + report.created > 0 ||
-    anchors.checked + anchors.abandoned > 0 ||
-    Object.keys(failed).length > 0 ||
-    report.ceilingReached;
-  if (moved)
-    ctx.log({
-      queue: "{poll-create}",
-      ...report,
-      checked: anchors.checked,
-      abandoned: anchors.abandoned,
-      failed,
-    });
+  let anchors: AnchorCheckReport = { checked: 0, waiting: 0, abandoned: 0, overdue: 0, failed: 0 };
+  try {
+    anchors = await checkCreationAnchors(ctx.sql, ctx.pollCreation.anchors, { now: ctx.now() });
+  } finally {
+    // Logged even when the check throws, so this tick's creations are counted.
+    const failed = { ...report.failed };
+    if (anchors.failed > 0) failed["creation-anchored"] = anchors.failed;
+    const moved =
+      report.sent + report.resent + report.sendFailed + report.created > 0 ||
+      anchors.checked + anchors.abandoned > 0 ||
+      Object.keys(failed).length > 0 ||
+      report.ceilingReached;
+    if (moved)
+      ctx.log({
+        queue: "{poll-create}",
+        ...report,
+        checked: anchors.checked,
+        abandoned: anchors.abandoned,
+        failed,
+      });
+  }
 }
 
 /**

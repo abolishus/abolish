@@ -43,6 +43,8 @@ const CHAIN_ID = 11_155_111n;
 const PERIOD = 3600n;
 const NOW = new Date();
 const NOW_S = BigInt(Math.floor(NOW.getTime() / 1000));
+/** When the creation step saw a test's poll created: before Anvil's finalized block. */
+const SEEN = new Date(NOW.getTime() - 3600_000);
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -251,6 +253,7 @@ describe("the per-slot check through the reader", () => {
       checked: 1,
       waiting: 0,
       abandoned: 1,
+      overdue: 0,
       failed: 0,
     });
     const [a] =
@@ -302,7 +305,7 @@ async function created(origin: bigint): Promise<{ id: string; election: Uint8Arr
   await db.admin`
     UPDATE account_polls SET state = 'created', creator_address = ${new Uint8Array(20).fill(0xc0)},
       create_tx_hash = ${randomBytes(32)}, election_id = ${election}, created_block = 7,
-      l1_origin_timestamp = ${origin.toString()}
+      l1_origin_timestamp = ${origin.toString()}, updated_at = ${SEEN}
     WHERE id = ${id}`;
   return { id, election };
 }

@@ -55,6 +55,15 @@ export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
 export { readBlockStore, type BlockStore } from "./blocks.ts";
 export { DEFAULT_MAX_BOARD_BYTES, loadBundle, readBundle } from "./files.ts";
 export {
+  DEFAULT_GATEWAY_TIMEOUT_MS,
+  type GatewayOptions,
+  type Gateways,
+  type GatewayStats,
+  gatewaySource,
+  MAX_GATEWAYS,
+  parseGateway,
+} from "./gateways.ts";
+export {
   anchorsFromState,
   checkpointSlot,
   decodeHeader,

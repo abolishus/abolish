@@ -27,6 +27,7 @@
 
 import {
   type Anchor,
+  type AsyncBlockSource,
   BoardError,
   type BoardEntryVersion,
   boardPayloadTypes,
@@ -51,6 +52,7 @@ import {
 } from "./ballots.ts";
 import type { L1RefCode } from "./references.ts";
 import type { BlockStore } from "./blocks.ts";
+import type { Gateways } from "./gateways.ts";
 import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -480,7 +482,8 @@ function runBoard(
 
 /**
  * Reads the board copy of a bundle parsed without one from a local block
- * store, by the CIDs its counted checkpoints name (docs/spec/verifier.md,
+ * store, gateways over the network, or both, the store asked first for each
+ * block, by the CIDs its counted checkpoints name (docs/spec/verifier.md,
  * Board by CID; docs/spec/board.md, A copy from L1's CIDs), within `maxBytes`
  * for the whole copy, and returns the bundle with that copy. The anchors are
  * read as `verifyBundle` reads them, with no copy to match words against, so
@@ -489,24 +492,41 @@ function runBoard(
  * before they need a copy, the read doesn't run and the copy stays empty:
  * `verifyBundle` then reports the same stop from the bundle alone. Nothing
  * read here is trusted: `verifyBundle` authenticates every entry against the
- * anchored heads and roots, so the store can only leave the copy short
- * (T-49, T-53).
+ * anchored heads and roots, so a store or a gateway can only leave the copy
+ * short (T-49, T-53).
  */
 export async function readBoardByCid(
   bundle: Bundle,
-  store: BlockStore,
+  store: BlockStore | undefined,
   maxBytes: number,
+  gateways?: Gateways,
 ): Promise<Bundle> {
   if (bundle.entries.length !== 0 || bundle.unreadableBytes !== 0 || bundle.byCid !== undefined)
     throw new TypeError("the bundle already holds a board copy");
+  if (store === undefined && gateways === undefined)
+    throw new TypeError("a read by CID needs a store or gateways");
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
     throw new RangeError("maxBytes must be a positive integer");
-  const read = { storeBlocks: store.blocks, storeUnreadableBytes: store.unreadableBytes };
-  const notReached = { ...bundle, byCid: { ...read, stopped: { reason: "not-reached" } } } as const;
+  // Taken once the read is over, so the gateways' counts cover all of it.
+  const read = () => ({
+    ...(store !== undefined && {
+      storeBlocks: store.blocks,
+      storeUnreadableBytes: store.unreadableBytes,
+    }),
+    ...(gateways !== undefined && { gateways: gateways.stats() }),
+  });
+  const notReached = () =>
+    ({ ...bundle, byCid: { ...read(), stopped: { reason: "not-reached" } } }) as const;
   const definition = fromDefinition(bundle);
-  if ("rows" in definition) return notReached;
+  if ("rows" in definition) return notReached();
   const input = anchoring(bundle, definition.inputs);
-  if (input instanceof L1Error) return notReached;
+  if (input instanceof L1Error) return notReached();
+  // The store first: a block it holds costs no request, and tells no gateway
+  // what is being read (T-11).
+  const source: AsyncBlockSource = async (cid, limit) => {
+    const held = store === undefined ? [] : await store.source(cid, limit);
+    return held.length !== 0 || gateways === undefined ? held : gateways.source(cid, limit);
+  };
   let copy;
   try {
     copy = await readBoardCopy(
@@ -514,17 +534,17 @@ export async function readBoardByCid(
       input.anchors,
       bundle.clock,
       input.now,
-      store.source,
+      source,
       maxBytes,
     );
   } catch (e) {
     if (!(e instanceof BoardError)) throw e;
-    return notReached;
+    return notReached();
   }
   return {
     ...bundle,
     entries: copy.encodedEntries,
-    byCid: { ...read, ...(copy.stopped !== undefined && { stopped: copy.stopped }) },
+    byCid: { ...read(), ...(copy.stopped !== undefined && { stopped: copy.stopped }) },
   };
 }
 

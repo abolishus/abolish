@@ -3,6 +3,10 @@
 # fuzz + invariant) and circuit (Noir) tests, Playwright e2e and Storybook
 # interaction/a11y tests, plus supply-chain policy. Pull requests run only the
 # affected packages and their dependents; pushes to main run everything.
+# `packages/crypto`'s tests run in three parallel shards (`test-crypto`), the
+# rest in `test`. A pull request push that only rebases (the same changes, by
+# patch-id) whose previous head passed `ci` reuses that result for the heavy
+# jobs (the `reuse` job); pushes to main and merge groups always run in full.
 name: ci
 
 on:
@@ -24,6 +28,68 @@ env:
   CI: "true"
 
 jobs:
+  reuse:
+    name: ci (reuse check)
+    # A rebase that leaves the pull request's own changes untouched doesn't
+    # need its tests again. The previous head's result carries over only when
+    # the push is a synchronize, the diff against the base (by `git patch-id
+    # --stable`, which ignores line offsets) is identical before and after, and
+    # that head's `ci` check concluded success. Anything else, including an
+    # error here, runs everything. The policy jobs (supply-chain, ballot)
+    # always run, and so does main after the merge.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      reuse: ${{ steps.compare.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare with the previous head
+        id: compare
+        env:
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHECK: ci
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          echo "reuse=false" >>"$GITHUB_OUTPUT"
+          if [ "$ACTION" != synchronize ] || ! [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            echo "Not a push to an existing head: full run."
+            exit 0
+          fi
+          if ! git fetch --no-tags --quiet origin "$BEFORE"; then
+            echo "Previous head unavailable: full run."
+            exit 0
+          fi
+          changes() {
+            git -c core.quotePath=false diff --text --no-textconv --no-ext-diff --no-renames "$BASE_SHA...$1" |
+              git patch-id --stable | cut -d' ' -f1
+          }
+          old="$(changes "$BEFORE" || true)"
+          new="$(changes "$HEAD_SHA" || true)"
+          if [ -z "$old" ] || [ "$old" != "$new" ]; then
+            echo "The changes differ from $BEFORE: full run."
+            exit 0
+          fi
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=$CHECK&filter=latest" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | first | .conclusion // ""' || true)"
+          if [ "$conclusion" != success ]; then
+            echo "$CHECK on $BEFORE concluded '$conclusion': full run."
+            exit 0
+          fi
+          echo "Same changes as $BEFORE, whose $CHECK passed: reusing its tests, build and checks." | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "reuse=true" >>"$GITHUB_OUTPUT"
+
   plan:
     name: plan
     runs-on: ubuntu-24.04
@@ -31,6 +97,7 @@ jobs:
     outputs:
       check: ${{ steps.affected.outputs.check }}
       test: ${{ steps.affected.outputs.test }}
+      test_crypto: ${{ steps.affected.outputs.test_crypto }}
       build: ${{ steps.affected.outputs.build }}
       e2e: ${{ steps.affected.outputs.e2e }}
       storybook: ${{ steps.affected.outputs.storybook }}
@@ -60,9 +127,17 @@ jobs:
           for pair in check:check test:test build:build e2e:test:e2e storybook:test:storybook; do
             key="${pair%%:*}"
             task="${pair#*:}"
-            args="$(vp node .github/tools/ci/src/cli.ts affected "${scope[@]}" --task "$task")"
+            extra=()
+            # crypto's tests run in their own sharded job.
+            [ "$key" = test ] && extra=(--exclude @abolishus/crypto)
+            args="$(vp node .github/tools/ci/src/cli.ts affected "${scope[@]}" --task "$task" "${extra[@]}")"
             echo "$key=$args" >>"$GITHUB_OUTPUT"
           done
+          all="$(vp node .github/tools/ci/src/cli.ts affected "${scope[@]}" --task test)"
+          case " $all " in
+            *" -r "* | *" @abolishus/crypto "*) echo "test_crypto=true" >>"$GITHUB_OUTPUT" ;;
+            *) echo "test_crypto=" >>"$GITHUB_OUTPUT" ;;
+          esac
 
   supply-chain:
     name: supply-chain
@@ -157,7 +232,8 @@ jobs:
 
   check:
     name: check
-    needs: plan
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -180,8 +256,8 @@ jobs:
 
   test:
     name: test
-    needs: plan
-    if: needs.plan.outputs.test != ''
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' && needs.plan.outputs.test != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -226,10 +302,39 @@ jobs:
           read -ra args <<<"$ARGS"
           vp run "${args[@]}" test
 
+  test-crypto:
+    name: test-crypto (${{ matrix.shard }}/3)
+    # packages/crypto holds most of the tests and, at FC_NUM_RUNS=1000, most of
+    # the time, so its files are split across three runners. The check runs
+    # that the result of `ci` can't pass without are all three (a shard that is
+    # skipped is skipped for all, when crypto and its dependents are unaffected).
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' && needs.plan.outputs.test_crypto == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      # fast-check: larger runs in CI than locally; seed is printed on failure.
+      FC_NUM_RUNS: "1000"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - name: packages/crypto tests, shard ${{ matrix.shard }} of 3
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: vp run --filter @abolishus/crypto test --shard="$SHARD/3"
+
   build:
     name: build
-    needs: plan
-    if: needs.plan.outputs.build != ''
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' && needs.plan.outputs.build != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -248,8 +353,8 @@ jobs:
 
   e2e:
     name: e2e
-    needs: plan
-    if: needs.plan.outputs.e2e != ''
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' && needs.plan.outputs.e2e != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -276,8 +381,8 @@ jobs:
 
   storybook:
     name: storybook
-    needs: plan
-    if: needs.plan.outputs.storybook != ''
+    needs: [plan, reuse]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.reuse.outputs.reuse != 'true' && needs.plan.outputs.storybook != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -297,7 +402,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [plan, supply-chain, ballot, check, test, build, e2e, storybook]
+    needs: [reuse, plan, supply-chain, ballot, check, test, test-crypto, build, e2e, storybook]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -322,4 +427,9 @@ jobs:
       - name: All jobs passed or were not needed
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: python3 .github/scripts/require-jobs.py plan supply-chain ballot check
+          REUSED: ${{ needs.reuse.outputs.reuse }}
+        run: |
+          # `check` must run, unless the previous head's passing result is reused.
+          must=(plan supply-chain ballot)
+          [ "$REUSED" = true ] || must+=(check)
+          python3 .github/scripts/require-jobs.py "${must[@]}"

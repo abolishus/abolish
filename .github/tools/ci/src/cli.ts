@@ -1,8 +1,9 @@
 // CI entry point. Run with `vp node .github/tools/ci/src/cli.ts <command>` from the repo root.
 //
-//   affected (--base <ref> | --all) --task <name>
+//   affected (--base <ref> | --all) --task <name> [--exclude <package>]
 //                           print `vp run <name>` selection args for packages changed
-//                           since <ref> (and their dependents) that define the task
+//                           since <ref> (and their dependents) that define the task,
+//                           without <package> if given
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
@@ -56,6 +57,7 @@ import {
   selectAffected,
   toRunArgs,
   type WorkspacePackage,
+  without,
 } from "./affected.ts";
 import {
   alternateManifestViolations,
@@ -184,7 +186,10 @@ function affected(): void {
   const changed = process.argv.includes("--all") ? undefined : changedFiles(arg("--base"));
   const affectedSelection =
     changed === undefined ? ({ mode: "all" } as const) : selectAffected(changed, packages);
-  const selection = forTask(affectedSelection, task, packages);
+  const forThisTask = forTask(affectedSelection, task, packages);
+  const exclude = process.argv.includes("--exclude") ? arg("--exclude") : undefined;
+  const selection =
+    exclude === undefined ? forThisTask : without(forThisTask, exclude, task, packages);
   const args = toRunArgs(selection);
   summary(`\`${task}\`: \`${selection.mode}\` ${args.join(" ")}`);
   process.stdout.write(`${args.join(" ")}\n`);

@@ -82,6 +82,25 @@ export function forTask(
   return run.length === 0 ? { mode: "none" } : { mode: "some", packages: run };
 }
 
+/**
+ * The selection minus one package. "all" becomes the packages that define the
+ * task, named, since `-r` can't be combined with an exclusion.
+ */
+export function without(
+  selection: Selection,
+  name: string,
+  task: string,
+  packages: readonly WorkspacePackage[],
+): Selection {
+  if (selection.mode === "none") return selection;
+  const names =
+    selection.mode === "all"
+      ? packages.filter((p) => p.scripts.includes(task)).map((p) => p.name)
+      : selection.packages;
+  const rest = names.filter((n) => n !== name).sort();
+  return rest.length === 0 ? { mode: "none" } : { mode: "some", packages: rest };
+}
+
 /** Arguments for `vp run <task>`, e.g. ["-r"] or ["--filter", "a", "--filter", "b"]. */
 export function toRunArgs(selection: Selection): string[] {
   switch (selection.mode) {

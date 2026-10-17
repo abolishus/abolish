@@ -12,6 +12,7 @@ import {
   missingRequiredScripts,
   selectAffected,
   toRunArgs,
+  without,
   withDependents,
   workspaceRoots,
 } from "../src/affected.ts";
@@ -76,6 +77,30 @@ describe("selectAffected", () => {
       "@abolishus/node",
       "@abolishus/verifier",
     ]);
+  });
+
+  test("without drops one package, naming the rest when everything was selected", () => {
+    const some = { mode: "some", packages: ["@abolishus/crypto", "@abolishus/node"] } as const;
+    expect(without(some, "@abolishus/crypto", "test", pkgs)).toEqual({
+      mode: "some",
+      packages: ["@abolishus/node"],
+    });
+    expect(
+      without({ mode: "some", packages: ["@abolishus/crypto"] }, "@abolishus/crypto", "test", pkgs),
+    ).toEqual({ mode: "none" });
+    expect(without({ mode: "none" }, "@abolishus/crypto", "test", pkgs)).toEqual({ mode: "none" });
+    const all = without({ mode: "all" }, "@abolishus/crypto", "test", pkgs);
+    expect(all.mode).toBe("some");
+    if (all.mode === "some") {
+      expect(all.packages).not.toContain("@abolishus/crypto");
+      expect(all.packages).toEqual(
+        pkgs
+          .filter((p) => p.scripts.includes("test") && p.name !== "@abolishus/crypto")
+          .map((p) => p.name)
+          .sort(),
+      );
+    }
+    expect(without(some, "@abolishus/absent", "test", pkgs)).toEqual(some);
   });
 
   test("forTask keeps only packages (and dependents) that define the task", () => {

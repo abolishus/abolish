@@ -34,6 +34,7 @@ import {
   type PollStubDeployment,
   postCeremonyApproval,
   postCeremonyMessage,
+  REGISTRATION_MARGIN_SECONDS,
   SETUP_SECONDS,
   type StoredTierElectorate,
   stubPolls,
@@ -292,6 +293,38 @@ describe("a whole ceremony", () => {
     ).toBe("refused");
     expect(await three!.act()).toEqual([]);
   }, 60_000);
+
+  test("retries a run that ended unapproved under rule 10's new stub, which the seats then approve", async () => {
+    const first = await stubbed();
+    await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
+    // No seat sends: round 1 ends the run at its deadline.
+    await close(ROUND_SECONDS);
+    expect(await runRow(first)).toMatchObject({ outcome: "too-few-messages" });
+    const [{ opens_at }] = (await db.admin`
+      SELECT opens_at FROM ceremony_stubs WHERE stub_hash = ${first}`) as unknown as [
+      { opens_at: string },
+    ];
+    const retry = new Date((Number(opens_at) - REGISTRATION_MARGIN_SECONDS) * 1000);
+    expect(await stubPolls(app, DEPLOYMENT, { now: retry })).toMatchObject({ restubbed: 1 });
+    const [row] = await db.admin`SELECT stub_hash FROM account_polls`;
+    const second = Uint8Array.from(row!["stub_hash"]);
+    expect(Buffer.from(second)).not.toEqual(Buffer.from(first));
+    expect(await openCeremonyRuns(app, DEPLOYMENT, { now: retry })).toEqual({
+      opened: 1,
+      mismatched: 0,
+      expired: 0,
+    });
+    // Only the new stub's run is asked for.
+    const asked = await coordinatorRequests(app, DEPLOYMENT, 1);
+    const [current] = await db.admin`SELECT stub FROM ceremony_stubs WHERE stub_hash = ${second}`;
+    expect(asked).toHaveLength(1);
+    expect(Buffer.from(asked[0]!.stub)).toEqual(Buffer.from(current!["stub"]));
+    const panel = seats();
+    for (let round = 1; round <= 5; round++) for (const s of panel) await s.act();
+    expect(await runRow(second)).toMatchObject({ outcome: "approved", qualified: [1, 2, 3] });
+    await expectApproved(second, [1, 2, 3]);
+    expect(await approvedCeremony(app, first)).toBeUndefined();
+  }, 120_000);
 
   test("asks nothing for a run whose poll has left `ceremony`", async () => {
     await stubbed();

@@ -12,7 +12,7 @@ import {
 } from "@abolishus/crypto";
 import { createHash, randomBytes } from "node:crypto";
 import type { Sql } from "postgres";
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
   advancePollCreations,
   advancePollRegistrations,
@@ -447,6 +447,67 @@ describe("a poll left for later", () => {
     expect(await run(chain, later(edge))).toEqual({ ...quiet, late: 1 });
     expect(chain.signed.size).toBe(0);
     expect(await run(chain, later(edge - 1))).toMatchObject({ sent: 1, late: 0 });
+  });
+
+  describe("against rule 10's new stub (the stub step)", () => {
+    // The stub step's clock at the margin, the registration step's a minute
+    // before it: whichever takes the poll's row lock first wins, and the
+    // other finds its write.
+    const margin = later(Number(OPENS_AT - NOW_S) - REGISTRATION_MARGIN_SECONDS);
+    const before = new Date(margin.getTime() - 60_000);
+    const restub = (client = app) => stubPolls(client, DEPLOYMENT, { now: margin });
+    const stubs = async () => {
+      const [r] = await db.admin`
+        SELECT count(*)::int AS n FROM ceremony_stubs s
+          JOIN account_polls p ON p.election_id = s.election_id WHERE p.id = ${pollId}`;
+      return r!["n"] as number;
+    };
+    afterEach(async () => {
+      await db.admin`UPDATE account_polls SET stub_hash = ${stubHash} WHERE id = ${pollId}`;
+      await db.admin`
+        DELETE FROM ceremony_stubs WHERE stub_hash <> ${stubHash}
+          AND stub_hash NOT IN (SELECT stub_hash FROM ceremony_runs)`;
+    });
+    const restubbed = async () => {
+      const [r] = await db.admin`SELECT stub_hash FROM account_polls WHERE id = ${pollId}`;
+      return !Buffer.from(r!["stub_hash"]).equals(Buffer.from(stubHash));
+    };
+
+    test("a registration recorded first keeps its stub", async () => {
+      const chain = new FakeChain();
+      expect((await run(chain, before)).sent).toBe(1);
+      expect((await restub()).restubbed).toBe(0);
+      expect(await restubbed()).toBe(false);
+      expect(await stubs()).toBe(1);
+    });
+
+    test("a new stub first leaves nothing to sign", async () => {
+      expect((await restub()).restubbed).toBe(1);
+      const chain = new FakeChain();
+      // The new stub has no approved run yet.
+      expect(await run(chain, before)).toEqual({
+        ...quiet,
+        waiting: 1,
+      });
+      expect(chain.signed.size).toBe(0);
+      expect(await ledger()).toEqual([]);
+    });
+
+    test("raced on separate connections, exactly one of the two acts", async () => {
+      const other = await db.as("abolish_app");
+      const chain = new FakeChain();
+      const [registered, stubbed] = await Promise.all([run(chain, before), restub(other)]);
+      expect(registered.sent + stubbed.restubbed).toBe(1);
+      if (stubbed.restubbed === 1) {
+        expect(await ledger()).toEqual([]);
+        expect(await poll()).toMatchObject({ register_tx_hash: null });
+        expect(await stubs()).toBe(2);
+      } else {
+        expect((await ledger()).length).toBe(2);
+        expect(await restubbed()).toBe(false);
+        expect(await stubs()).toBe(1);
+      }
+    });
   });
 
   test("isn't signed under another panel", async () => {

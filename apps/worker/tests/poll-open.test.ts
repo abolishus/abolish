@@ -216,7 +216,6 @@ describe.skipIf(redisUrl === undefined)("the opening job", () => {
         opened: 1,
         waiting: 0,
         early: 0,
-        late: 0,
         otherAnchor: 0,
         unboarded: 0,
         errored: 0,

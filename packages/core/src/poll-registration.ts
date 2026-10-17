@@ -88,7 +88,8 @@ export interface PollRegistrationChain extends Pick<
  * How close to `opens_at` a registration may still be signed: the registry
  * refuses one included at or after it (`AlreadyOpen`), and an L2 includes a
  * transaction within seconds, so five minutes is a node or a fee that isn't
- * moving. A poll this late waits for rule 10's new stub (part 5c).
+ * moving. A poll this late gets rule 10's new stub from the stub step
+ * (`stubPolls`), unless its registration is already recorded.
  */
 export const REGISTRATION_MARGIN_SECONDS = 5 * 60;
 

@@ -165,7 +165,13 @@ export interface BoardClock {
 /** Why the opening step fails a poll (the `failure` column's codes it writes). */
 export type OpenFailure =
   /** What the registry holds isn't the draft's (rule 13), or the display text is refused against it. */
-  "open-mismatch";
+  | "open-mismatch"
+  /**
+   * Still not open when its `closes_at` passed, left for the registry sync,
+   * the clock, another anchor's worker or its board: it can never take a
+   * ballot (rule 14).
+   */
+  | "open-timeout";
 
 /** One run's outcome, in counts only (T-10, T-67). */
 export interface PollOpenReport {
@@ -175,8 +181,6 @@ export interface PollOpenReport {
   waiting: number;
   /** Polls left because the clock is before their first segment `f`. */
   early: number;
-  /** Polls left because they close before they could open (part 5d fails them). */
-  late: number;
   /** Polls left because their stub pins another anchor than the clock's. */
   otherAnchor: number;
   /** Polls left because their board already starts with another entry. */
@@ -192,7 +196,7 @@ export const OPENS_PER_RUN = 20;
 
 const MAX_SEGMENT = 0xffffffffn;
 
-type Outcome = "opened" | "waiting" | "early" | "late" | "otherAnchor" | "unboarded" | "failed";
+type Outcome = "opened" | "waiting" | "early" | "otherAnchor" | "unboarded" | OpenFailure;
 
 /**
  * One run of the opening step: up to `OPENS_PER_RUN` registered polls,
@@ -201,10 +205,11 @@ type Outcome = "opened" | "waiting" | "early" | "late" | "otherAnchor" | "unboar
  * event's hash alone until its definition is stored; a mismatch fails it as
  * `open-mismatch`. Once stored and matching, its transcript is boarded as
  * entry 0 in the clock's current segment (never below `f`), its display text
- * is stored, and it moves to `open`. A poll left (waiting, early, late,
- * another anchor, unboarded) has its time touched, so polls that can't move
- * never hold the run's slots from the rest; one whose step throws is
- * counted in `errored` and the run goes on. Safe to rerun after a crash at
+ * is stored, and it moves to `open`. A poll left (waiting, early, another
+ * anchor, unboarded) has its time touched, so polls that can't move never
+ * hold the run's slots from the rest, and fails `open-timeout` once its
+ * `closes_at` has passed; one whose step throws is counted in `errored` and
+ * the run goes on. Safe to rerun after a crash at
  * any point: the first entry and the text are written once and found again,
  * and a poll moves only from `registered`, holding the identifier it was
  * read with.
@@ -221,7 +226,6 @@ export async function openPolls(
     opened: 0,
     waiting: 0,
     early: 0,
-    late: 0,
     otherAnchor: 0,
     unboarded: 0,
     errored: 0,
@@ -267,10 +271,8 @@ export async function openPolls(
     const electionId = Uint8Array.from(p.electionId as Uint8Array);
     const stubHash = Uint8Array.from(p.stubHash as Uint8Array);
     const origin = p.origin as bigint;
-    const fail = async () =>
-      (await move(p.id, electionId, { state: "failed", failure: "open-mismatch" }))
-        ? "failed"
-        : undefined;
+    const fail = async (failure: OpenFailure = "open-mismatch") =>
+      (await move(p.id, electionId, { state: "failed", failure })) ? failure : undefined;
     const [registration] = await db
       .select({ definitionHash: electionRegistrations.definitionHash })
       .from(electionRegistrations)
@@ -312,7 +314,7 @@ export async function openPolls(
     // Timing).
     if (!equal(decodeElectionDefinitionV5(definition).l1_anchor, clock.anchor))
       return "otherAnchor";
-    if (now >= draft.closesAt) return "late";
+    if (now >= draft.closesAt) return fail("open-timeout");
     // Anchors count from segment 0 up, so an origin before the epoch is `f` = 0.
     const first = origin < clock.epoch ? 0n : (origin - clock.epoch) / clock.period;
     const segment = now < clock.epoch ? -1n : (now - clock.epoch) / clock.period;
@@ -346,9 +348,25 @@ export async function openPolls(
   };
 
   for (const p of polls) {
-    let outcome;
+    let outcome: Outcome | undefined;
     try {
       outcome = await open(p);
+      // Left past its close, it can never take a ballot: back to its author
+      // (rule 14). Judged after the step, so a poll the read-back refuses is
+      // still rule 13's alert.
+      if (
+        (outcome === "waiting" ||
+          outcome === "early" ||
+          outcome === "otherAnchor" ||
+          outcome === "unboarded") &&
+        now >= BigInt((p.draft as { closesAt: string }).closesAt)
+      )
+        outcome = (await move(p.id, Uint8Array.from(p.electionId as Uint8Array), {
+          state: "failed",
+          failure: "open-timeout",
+        }))
+          ? "open-timeout"
+          : undefined;
     } catch {
       // One poll's malformed row or unexpected refusal never holds up the
       // rest; the count fails the job, so it is still seen.
@@ -356,8 +374,8 @@ export async function openPolls(
       continue;
     }
     if (outcome === undefined) continue;
-    if (outcome === "failed") {
-      report.failed["open-mismatch"] = (report.failed["open-mismatch"] ?? 0) + 1;
+    if (outcome === "open-mismatch" || outcome === "open-timeout") {
+      report.failed[outcome] = (report.failed[outcome] ?? 0) + 1;
       continue;
     }
     report[outcome]++;

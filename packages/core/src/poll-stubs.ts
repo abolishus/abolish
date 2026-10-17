@@ -12,6 +12,10 @@
 // step records is one the election registry's checks and 2.1 to 2.3 accept,
 // before any seat is asked to lend it keys (T-17, T-28, T-34).
 //
+// A poll whose registration can't be signed before its stub opens gets a new
+// stub under rule 10, and a new ceremony, until STUBS_PER_POLL (P2-22 part
+// 5d).
+//
 // T-10: the stub and its display text are public once the poll registers,
 // and name no voter. T-34: the display text is the draft's, field for field,
 // under a fresh salt, and the stub's questions are the draft's.
@@ -37,7 +41,7 @@ import {
   TALLY_SCHEMES,
   type TierElectorate,
 } from "@abolishus/crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { accountPolls, ceremonyStubs } from "./db/schema/index.ts";
@@ -48,6 +52,7 @@ import {
   type PollDraft,
   SETUP_SECONDS,
 } from "./poll-drafts.ts";
+import { REGISTRATION_MARGIN_SECONDS } from "./poll-registration.ts";
 import type { StoredTierElectorate } from "./poll-roots.ts";
 
 /**
@@ -227,30 +232,107 @@ export type StubFailure =
    * The stub breaks a definition rule or a stored value has no encoding:
    * never for a draft submission accepted, so a bug or a setting.
    */
-  | "stub-refused";
+  | "stub-refused"
+  /**
+   * The poll's `STUBS_PER_POLL`th stub missed its registration too: no
+   * ceremony was approved and registered in time, however often retried
+   * (rule 14).
+   */
+  | "ceremony-timeout";
 
 /** One run's outcome, in counts only (T-10, T-67). */
 export interface PollStubReport {
   /** Polls moved to `ceremony` with a recorded stub. */
   stubbed: number;
+  /** Polls in `ceremony` given a new stub under rule 10. */
+  restubbed: number;
   /** Polls moved to `failed`, by reason. */
   failed: Partial<Record<StubFailure, number>>;
 }
 
-/** Most polls one run builds stubs for; the next run takes the rest. */
+/** Most polls one run builds stubs for, in each pass; the next run takes the rest. */
 export const STUBS_PER_RUN = 20;
 
 /**
- * One run of the stub step: every rooted poll, oldest first, gets a stub
- * opening `SETUP_SECONDS` from now (rule 10), with a fresh display-text
- * salt. A poll whose draft would then close within `MIN_OPEN_SECONDS` of
- * opening fails `closes-too-soon`, which registration would refuse as
- * `timing`; a stub that breaks a definition rule, or holds a value with no
- * encoding, fails `stub-refused`.
- * Otherwise the stub and its display text are recorded and the poll moves
- * to `ceremony` naming the stub, in one transaction. Safe to rerun after a
- * crash at any point: a poll moves only from `rooted`, holding the
- * identifier it was read with, and a stub is recorded only with that move.
+ * Most stubs one poll's identifier gets: the first and three retries under
+ * rule 10, each a whole ceremony of `SETUP_SECONDS`, so a panel that can't
+ * finish one for about two hours sends the poll back to its author rather
+ * than keep it in setup for good.
+ */
+export const STUBS_PER_POLL = 4;
+
+type BuiltStub = { displayText: Uint8Array; stub: Uint8Array; stubHash: Uint8Array };
+
+/** A poll as the stub step reads it. */
+interface StubbedPoll {
+  readonly id: string;
+  readonly draft: unknown;
+  readonly electionId: Uint8Array | null;
+  readonly electorate: unknown;
+}
+
+/**
+ * The stub of `p` opening at `opensAt` with a fresh display-text salt, or
+ * the reason the poll fails instead.
+ */
+function buildStub(
+  deployment: PollStubDeployment,
+  p: StubbedPoll,
+  opensAt: bigint,
+): BuiltStub | "closes-too-soon" | "stub-refused" {
+  const stored = p.draft as { closesAt: string } & Omit<PollDraft, "closesAt">;
+  const draft: PollDraft = { ...stored, closesAt: BigInt(stored.closesAt) };
+  if (draft.closesAt < opensAt + BigInt(MIN_OPEN_SECONDS)) return "closes-too-soon";
+  try {
+    const text: DisplayTextV2 = draftDisplayText(draft, newDisplayTextSalt());
+    const stub = pollStub(deployment, {
+      // The table requires an identifier and an electorate from `rooted` on.
+      electionId: p.electionId as Uint8Array,
+      questions: draftQuestions(draft),
+      electorate: (p.electorate as StoredTierElectorate[]).map(tierElectorate),
+      opensAt,
+      closesAt: draft.closesAt,
+      displayTextCommitment: displayTextV2Commitment(text),
+    });
+    if (stubRule(stub) !== undefined) return "stub-refused";
+    return {
+      displayText: encodeDisplayTextV2(text),
+      stub: encodeElectionDefinitionV5(stub),
+      stubHash: electionStubV5Hash(stub),
+    };
+  } catch (e) {
+    // A stored value outside its codec's range has no encoding: this poll
+    // fails, rather than stopping every later one behind it (T-25).
+    if (!(e instanceof EncodeError)) throw e;
+    return "stub-refused";
+  }
+}
+
+/**
+ * One run of the stub step, in two passes.
+ *
+ * First, every rooted poll, oldest first, gets a stub opening
+ * `SETUP_SECONDS` from now (rule 10), with a fresh display-text salt. A
+ * poll whose draft would then close within `MIN_OPEN_SECONDS` of opening
+ * fails `closes-too-soon`, which registration would refuse as `timing`; a
+ * stub that breaks a definition rule, or holds a value with no encoding,
+ * fails `stub-refused`. Otherwise the stub and its display text are
+ * recorded and the poll moves to `ceremony` naming the stub, in one
+ * transaction.
+ *
+ * Then rule 10's retry: every poll in `ceremony` with no registration
+ * recorded whose stub opens within `REGISTRATION_MARGIN_SECONDS`, the point
+ * past which the registration step no longer signs one, earliest opening
+ * first, gets a new stub for the same identifier the same way, whatever its
+ * run did (none, unfinished, ended unapproved, or approved but never
+ * signed). Seats approve at most one transcript per stub, and nothing was
+ * registered under the identifier, so the new stub is a new ceremony, never
+ * a second approval. A poll whose identifier already has `STUBS_PER_POLL`
+ * stubs fails `ceremony-timeout` instead (rule 14).
+ *
+ * Safe to rerun after a crash at any point: a poll moves only from the state
+ * and stub it was read with, holding its identifier (and, on a retry, while
+ * no registration is recorded), and a stub is recorded only with that move.
  */
 export async function stubPolls(
   client: Sql,
@@ -258,8 +340,42 @@ export async function stubPolls(
   options: { readonly now: Date },
 ): Promise<PollStubReport> {
   const db = drizzle({ client });
-  const report: PollStubReport = { stubbed: 0, failed: {} };
-  const polls = await db
+  const report: PollStubReport = { stubbed: 0, restubbed: 0, failed: {} };
+  const now = BigInt(Math.floor(options.now.getTime() / 1000));
+  const opensAt = now + BigInt(SETUP_SECONDS);
+  const failed = (failure: StubFailure) =>
+    (report.failed[failure] = (report.failed[failure] ?? 0) + 1);
+
+  /**
+   * Moves the poll as `where` finds it to `ceremony` under `built`, or to
+   * `failed`, recording the stub with the move; whether it moved.
+   */
+  const move = (where: SQL | undefined, electionId: Uint8Array, built: BuiltStub | StubFailure) =>
+    db.transaction(async (tx) => {
+      const rows = await tx
+        .update(accountPolls)
+        .set(
+          typeof built === "string"
+            ? { state: "failed", failure: built, updatedAt: options.now }
+            : { state: "ceremony", stubHash: built.stubHash, updatedAt: options.now },
+        )
+        .where(where)
+        .returning({ id: accountPolls.id });
+      // Another run moved it first: its stub is the one recorded.
+      if (rows.length === 0) return false;
+      if (typeof built !== "string")
+        await tx.insert(ceremonyStubs).values({
+          stubHash: built.stubHash,
+          electionId,
+          stub: built.stub,
+          displayText: built.displayText,
+          opensAt,
+          createdAt: options.now,
+        });
+      return true;
+    });
+
+  const rooted = await db
     .select({
       id: accountPolls.id,
       draft: accountPolls.draft,
@@ -270,80 +386,63 @@ export async function stubPolls(
     .where(eq(accountPolls.state, "rooted"))
     .orderBy(asc(accountPolls.updatedAt), asc(accountPolls.id))
     .limit(STUBS_PER_RUN);
-  const now = BigInt(Math.floor(options.now.getTime() / 1000));
-  const opensAt = now + BigInt(SETUP_SECONDS);
-  // Keyed by the identifier too, as the earlier steps' writes are.
-  const unstubbed = (id: string, electionId: Uint8Array) =>
-    and(
-      eq(accountPolls.id, id),
+  for (const p of rooted) {
+    const electionId = p.electionId as Uint8Array;
+    const built = buildStub(deployment, p, opensAt);
+    // Keyed by the identifier too, as the earlier steps' writes are.
+    const where = and(
+      eq(accountPolls.id, p.id),
       eq(accountPolls.state, "rooted"),
       eq(accountPolls.electionId, electionId),
     );
-  const fail = async (id: string, electionId: Uint8Array, failure: StubFailure) => {
-    const moved = await db
-      .update(accountPolls)
-      .set({ state: "failed", failure, updatedAt: options.now })
-      .where(unstubbed(id, electionId))
-      .returning({ id: accountPolls.id });
-    if (moved.length > 0) report.failed[failure] = (report.failed[failure] ?? 0) + 1;
-  };
-  for (const p of polls) {
-    // The table requires an identifier and an electorate from `rooted` on.
+    if (!(await move(where, electionId, built))) continue;
+    if (typeof built === "string") failed(built);
+    else report.stubbed++;
+  }
+
+  // Rule 10: the polls whose registration can no longer be signed before
+  // their stub opens. A stub built in the first pass opens SETUP_SECONDS
+  // ahead, so none of them is taken here.
+  const late = await db
+    .select({
+      id: accountPolls.id,
+      draft: accountPolls.draft,
+      electionId: accountPolls.electionId,
+      electorate: accountPolls.electorate,
+      stubHash: accountPolls.stubHash,
+      stubs: sql<number>`(SELECT count(*)::int FROM ${ceremonyStubs} s
+        WHERE s.election_id = ${accountPolls.electionId})`,
+    })
+    .from(accountPolls)
+    .innerJoin(ceremonyStubs, eq(ceremonyStubs.stubHash, accountPolls.stubHash))
+    .where(
+      and(
+        eq(accountPolls.state, "ceremony"),
+        isNull(accountPolls.registerTxHash),
+        lte(ceremonyStubs.opensAt, now + BigInt(REGISTRATION_MARGIN_SECONDS)),
+      ),
+    )
+    .orderBy(asc(ceremonyStubs.opensAt), asc(accountPolls.id))
+    .limit(STUBS_PER_RUN);
+  for (const p of late) {
+    // The table requires both on every poll in `ceremony`.
     const electionId = p.electionId as Uint8Array;
-    const stored = p.draft as { closesAt: string } & Omit<PollDraft, "closesAt">;
-    const draft: PollDraft = { ...stored, closesAt: BigInt(stored.closesAt) };
-    if (draft.closesAt < opensAt + BigInt(MIN_OPEN_SECONDS)) {
-      await fail(p.id, electionId, "closes-too-soon");
-      continue;
-    }
-    let built: { displayText: Uint8Array; stub: Uint8Array; stubHash: Uint8Array } | undefined;
-    try {
-      const text: DisplayTextV2 = draftDisplayText(draft, newDisplayTextSalt());
-      const stub = pollStub(deployment, {
-        electionId,
-        questions: draftQuestions(draft),
-        electorate: (p.electorate as StoredTierElectorate[]).map(tierElectorate),
-        opensAt,
-        closesAt: draft.closesAt,
-        displayTextCommitment: displayTextV2Commitment(text),
-      });
-      built =
-        stubRule(stub) === undefined
-          ? {
-              displayText: encodeDisplayTextV2(text),
-              stub: encodeElectionDefinitionV5(stub),
-              stubHash: electionStubV5Hash(stub),
-            }
-          : undefined;
-    } catch (e) {
-      // A stored value outside its codec's range has no encoding: this poll
-      // fails, rather than stopping every later one behind it (T-25).
-      if (!(e instanceof EncodeError)) throw e;
-    }
-    if (built === undefined) {
-      await fail(p.id, electionId, "stub-refused");
-      continue;
-    }
-    const { displayText, stubHash } = built;
-    const moved = await db.transaction(async (tx) => {
-      const rows = await tx
-        .update(accountPolls)
-        .set({ state: "ceremony", stubHash, updatedAt: options.now })
-        .where(unstubbed(p.id, electionId))
-        .returning({ id: accountPolls.id });
-      // Another run moved it first: its stub is the one recorded.
-      if (rows.length === 0) return 0;
-      await tx.insert(ceremonyStubs).values({
-        stubHash,
-        electionId,
-        stub: built.stub,
-        displayText,
-        opensAt,
-        createdAt: options.now,
-      });
-      return 1;
-    });
-    report.stubbed += moved;
+    const stubHash = p.stubHash as Uint8Array;
+    const built =
+      p.stubs >= STUBS_PER_POLL ? "ceremony-timeout" : buildStub(deployment, p, opensAt);
+    // Never under a registration the creation key recorded meanwhile: the
+    // registration step takes the same row lock before it signs, so one of
+    // the two writes finds the other's (rule 12).
+    const where = and(
+      eq(accountPolls.id, p.id),
+      eq(accountPolls.state, "ceremony"),
+      eq(accountPolls.electionId, electionId),
+      eq(accountPolls.stubHash, stubHash),
+      isNull(accountPolls.registerTxHash),
+    );
+    if (!(await move(where, electionId, built))) continue;
+    if (typeof built === "string") failed(built);
+    else report.restubbed++;
   }
   return report;
 }

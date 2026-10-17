@@ -4,7 +4,7 @@ How a client asks the panel for its Tier 2 keyed nullifier and shows the atteste
 
 What this page doesn't yet specify:
 
-- **The circuits themselves** (P3-4 part 2b-3b-2b): the Noir code of both statements in `packages/circuits`, their verification keys, the soundness tests of each constraint and the checks `query-proof` and `output-proof` below, which take the verification keys the release pins.
+- **The circuits' keys and proofs** (P3-4 part 2b-3b-2b): both statements are Noir circuits in `packages/circuits` (`nullifier_query`, `nullifier_output`), with a soundness test for each constraint and every vector run through them (part 2b-3b-2b-1); their verification keys, the proof round trips through bb (with the `ctx` and `q` tests below) and the checks `query-proof` and `output-proof`, which take the verification keys the release pins, are part 2b-3b-2b-2.
 - **Part 2b-4:** the identity chain a query's `comm_in` must come from and its checks ([[0010-tier2-identity-provider]]'s pinned circuit set, US anchors, proof date and predicates), the transport of queries and answers under the registration KEM keys ([[nullifier-key]]) and a fresh client key, the attestation's group position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
@@ -62,7 +62,7 @@ B = r · H1(σ, x)
 
 - **`comm_in`'s opening.** `d_1` to `d_4` are the salted hashes of `dg1`, the expiry date, the normalised `dg2` hash and its hash type, in either of zkPassport's forms, which the circuit doesn't need to tell apart. The fifth slot is opened only in the clear-value form, `Sponge(s_x, x)[0]` with both non-zero (`SaltedValue::get_hash` on a clear value), never as a bare hash: zkPassport's hash-only form carries the private nullifier's value as 0, and every document would then share a second `x` ([[0022-tier2-keyed-nullifier]], Amendment; T-03). That `comm_in` came from this document's identity chain, so that `x` is its private nullifier, is checked outside the circuit, against the chain's own proofs of the same `comm_in` (part 2b-4).
 - **`x ≠ 0`.** `H1` is defined at 0 ([[keyed-nullifier-hashes]], H1); the circuit refuses it.
-- **`r`.** `0 < r < l` by `validate_babyjubjub_field` (`r < l`) and `r ≠ 0`: `scalar_mul` bounds its scalar only below `2²⁵¹` ([[keyed-nullifier-hashes]], TACEO's gadgets). `B` is then never the identity, since `H1` isn't ([[keyed-nullifier-hashes]], H1, The identity).
+- **`r`.** `0 < r < l` by `validate_babyjubjub_field` (`r < l`) and `r ≠ 0`: `scalar_mul` bounds its scalar only below `2²⁵¹` ([[keyed-nullifier-hashes]], TACEO's gadgets). The circuits take `r`'s 251 bits from `validate_scalar_field_with_bits`, which applies that bound, and multiply with `scalar_mul_bits`, `scalar_mul`'s own loop; the output circuit multiplies `H1(σ, x)` and `U` by the same bits. `B` is then never the identity, since `H1` isn't ([[keyed-nullifier-hashes]], H1, The identity).
 - **`B`** is computed with `H1` and `scalar_mul` from [[keyed-nullifier-hashes]]' gadgets; every point that meets `add` is on the curve.
 - **`ctx` enters no constraint.** A public input is bound by the proof itself: the verifier absorbs every public input into its transcript, so a proof made under one `ctx` doesn't verify under another. `σ` is a public input for the same reason and is also an input of `H1`. That rests on Noir and bb keeping a `pub` parameter that no constraint uses, so part 2b-3b-2b MUST test that a proof verifies under its own `ctx` and fails under any other.
 

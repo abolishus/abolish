@@ -2,6 +2,8 @@
 members = [
   "lib/abolish",
   "lib/keyed_nullifier",
+  "nullifier_query",
+  "nullifier_output",
   "vendor/oprf-nr/babyjubjub",
   "vendor/noir-poseidon/poseidon2",
   "vendor/noir-poseidon/hash_utils",

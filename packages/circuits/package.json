@@ -2,7 +2,7 @@
   "name": "@abolishus/circuits",
   "version": "0.0.0",
   "private": true,
-  "description": "Abolish's Noir circuits: the shared packing library so far; the first custom circuit follows.",
+  "description": "Abolish's Noir circuits: the shared libraries and Tier 2's nullifier query and output circuits.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

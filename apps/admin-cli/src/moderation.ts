@@ -1,10 +1,17 @@
 // Moderation commands (docs/moderation-policy.md; T-68): the moderators' queue
-// of reports, reviewing them, recording decisions and reading the log. Until
+// of reports, reviewing them, recording decisions and reading the log, the
+// moderators' handles, and the creators' appeals. Until
 // the owner names moderators, the operator of the deployment is the only one
 // (docs/moderation-policy.md, Moderators), so this tooling is a command line
 // on the operator's own connection rather than a page anyone can reach.
 
 import {
+  addModerator,
+  APPEAL_DECISIONS,
+  type AppealDecision,
+  AppealError,
+  decideAppeal,
+  MAX_APPEAL_QUEUE,
   MAX_MODERATION_PAGE,
   MAX_REPORT_QUEUE,
   moderate,
@@ -12,12 +19,14 @@ import {
   ModerationError,
   moderationStatus,
   readModerationLog,
+  readAppealQueue,
   readReportQueue,
   REMOVAL_REASONS,
   type RemovalReason,
   type ReportQueueCursor,
   RESTORE_REASONS,
   type RestoreReason,
+  retireModerator,
   reviewReports,
 } from "@abolishus/core";
 import type { Command } from "./cli.ts";
@@ -48,6 +57,12 @@ function limitArg(s: unknown, max: number): number {
   return Number(s);
 }
 
+function appealDecision(s: string): AppealDecision {
+  const d = APPEAL_DECISIONS.find((x) => x === s);
+  if (d === undefined) throw new UsageError(`a decision is ${APPEAL_DECISIONS.join(" or ")}`);
+  return d;
+}
+
 function removalReason(s: string): RemovalReason {
   const r = REMOVAL_REASONS.find((x) => x === s);
   if (r === undefined)
@@ -67,7 +82,7 @@ async function refusable<T>(p: Promise<T>): Promise<T> {
   try {
     return await p;
   } catch (e) {
-    if (e instanceof ModerationError) throw new CliError(e.code);
+    if (e instanceof ModerationError || e instanceof AppealError) throw new CliError(e.code);
     throw e;
   }
 }
@@ -210,6 +225,74 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
         });
       const last = entries.at(-1);
       if (entries.length === limit && last !== undefined) io.out({ next: String(last.seq) });
+    },
+  },
+
+  "moderator-add": {
+    usage: "<handle> <account-id>",
+    options: {},
+    positionals: 2,
+    async run(sql, [handle, account], _, io) {
+      // Who the handle is, so `decide` refuses a moderator's own poll and an
+      // appeal goes to someone else (docs/moderation-policy.md, Moderators).
+      await refusable(addModerator(sql, handle!, account!));
+      io.out({ handle });
+    },
+  },
+
+  "moderator-retire": {
+    usage: "<handle>",
+    options: {},
+    positionals: 1,
+    async run(sql, [handle], _, io) {
+      await refusable(retireModerator(sql, handle!));
+      io.out({ handle, retired: true });
+    },
+  },
+
+  appeals: {
+    usage: `[--limit 1..${MAX_APPEAL_QUEUE}] [--after <seq>]`,
+    options: { limit: { type: "string" }, after: { type: "string" } },
+    positionals: 0,
+    async run(sql, _, values, io) {
+      const limit = limitArg(values["limit"], MAX_APPEAL_QUEUE);
+      const after = values["after"];
+      const rows = await readAppealQueue(
+        sql,
+        limit,
+        typeof after === "string" ? bigintArg(after, 0n, "--after") : 0n,
+      );
+      // The poll and the decision appealed, never who appealed.
+      for (const a of rows)
+        io.out({
+          decisionSeq: String(a.decisionSeq),
+          electionId: hex(a.electionId),
+          action: a.action,
+          reason: a.reason,
+          decidedAt: a.decidedAt.toISOString(),
+          filedAt: a.filedAt.toISOString(),
+        });
+      const last = rows.at(-1);
+      if (rows.length === limit && last !== undefined) io.out({ next: String(last.decisionSeq) });
+    },
+  },
+
+  "appeal-decide": {
+    usage: "<decision-seq> <upheld|rejected> --moderator <handle>",
+    options: { moderator: { type: "string" } },
+    positionals: 2,
+    async run(sql, [seq, decision], values, io) {
+      const decisionSeq = bigintArg(seq!, 1n, "decision-seq");
+      const outcome = appealDecision(decision!);
+      const moderator = values["moderator"];
+      if (typeof moderator !== "string") throw new UsageError("--moderator is required");
+      const review = await refusable(decideAppeal(sql, decisionSeq, outcome, moderator));
+      io.out({
+        decisionSeq: seq,
+        outcome: review.outcome,
+        state: review.state,
+        ...(review.restoreSeq !== undefined && { restoreSeq: String(review.restoreSeq) }),
+      });
     },
   },
 };

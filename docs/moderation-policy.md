@@ -73,11 +73,15 @@ A moderator reviews a poll's reports under a ground by marking the ones they saw
 
 ## Appeals
 
-The poll's creator can appeal any decision once, from their account. A different moderator from the one who decided reviews it. An upheld appeal is a `restore` with `appeal-upheld`; a rejected one leaves the state, and the log, as they are. While there is only one moderator (Moderators, below), appeals wait for a second one, and Phase 2 doesn't go public before one is named.
+The poll's creator can appeal any decision once, from their account. A different moderator from the one who decided reviews it, and never one whose account created the poll. An upheld appeal is a `restore` with `appeal-upheld`, and no other decision may cite that reason; a rejected one leaves the state, and the log, as they are. Only the poll's newest decision can be appealed, and only a removal; if a later decision changes the poll before the review, the appeal is closed as superseded and the creator can appeal the new one. Moderators see an appeal's poll and decision, never who filed it. While there is only one moderator (Moderators, below), appeals wait for a second one, and Phase 2 doesn't go public before one is named.
+
+In the tooling (`packages/core` `src/appeals.ts`, the `apps/admin-cli` commands `appeals` and `appeal-decide`): `fileAppeal`, `readAppealQueue` and `decideAppeal`. Filing an appeal from the website follows ([[P2-10]] part 3b-2).
 
 ## Moderators
 
 Moderators act through the tooling only, under handles. They never see or handle ballots, voting identities or anything from the ballot path, and the tooling gives them nothing from it. A moderator who created, or has a stake in, a poll doesn't decide on it.
+
+Each handle belongs to one account (`moderator-add`), for good: a retired handle, or one whose account is deleted, is never given to anyone else, so a handle in the log always meant the same person. The tooling refuses a decision by a handle that isn't active and by a moderator whose account created the poll; a stake other than authorship is the moderator's to declare, since nothing records it.
 
 **Owner:** who may act as a moderator, and on whose behalf, is an entity matter. Until the owner names moderators, the only moderator is the operator of the deployment, and Phase 2 doesn't go public.
 
@@ -98,7 +102,8 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 - Hiding an open poll for `illegal` or `personal-data` stops voting through our client; voters then need the text from elsewhere, or the direct-submit path. A `threat` hide doesn't (Open polls).
 - While a poll is open, the text of a `threat` hide stays pinned by us and shown in our ballot client, so anyone can read it there; our web pages only stop broadcasting it.
 - If the ballot client can't read a poll's state it shows whatever text it can fetch and check, so during an outage of `GET /moderation/status` it can show the text of an `illegal` or `personal-data` hide that someone else still pins.
-- Appeals and the front-end behaviour above are later parts (P2-9, P2-8), and keeping a `threat`-hidden open poll's text pinned until it closes is the pinning job's (P4-3). The moderators' tooling is a command line for the operator (`apps/admin-cli`), the only moderator until the owner names others; it can't check that a moderator has no stake in the poll they decide on, since nothing records who created a poll yet.
+- Filing an appeal from the website (P2-10 part 3b-2) and the front-end behaviour above are later parts (P2-9, P2-8), and keeping a `threat`-hidden open poll's text pinned until it closes is the pinning job's (P4-3). The moderators' tooling is a command line for the operator (`apps/admin-cli`), the only moderator until the owner names others.
+- A moderator's stake in a poll other than having created it isn't recorded, so the tooling can't refuse it; the operator's records of who holds each handle are what stand behind the rule.
 - Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
 - A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
 

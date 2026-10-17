@@ -5,6 +5,7 @@ import {
   accountUsers,
   accountVerifications,
 } from "./accounts.ts";
+import { accountAppeals, accountModerators } from "./appeals.ts";
 import { boardBallotKeys, boardCheckpoints, boardEntries, boardSubtrees } from "./board.ts";
 import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
@@ -13,7 +14,9 @@ import { moderationActions, moderationReports } from "./moderation.ts";
 import { accountPolls, pollCreationTxs } from "./polls.ts";
 
 export {
+  accountAppeals,
   accountCredentials,
+  accountModerators,
   accountPolls,
   accountPasskeys,
   accountSessions,
@@ -56,7 +59,9 @@ export const TABLE_CLASSES = {
     "election_registrations",
   ],
   account: [
+    "account_appeals",
     "account_credentials",
+    "account_moderators",
     "account_passkeys",
     "account_polls",
     "account_sessions",

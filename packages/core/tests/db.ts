@@ -6,7 +6,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import postgres, { type Sql } from "postgres";
-import { migrate, storeDefinition } from "../src/index.ts";
+import { addModerator, migrate, newAccountId, storeDefinition } from "../src/index.ts";
 
 // Each test file gets its own schema (AGENTS.md, Testing: Database), migrated
 // as abolish_migrator, and clients that act as each role through SET ROLE.
@@ -91,4 +91,30 @@ export async function newElection(
     }),
   );
   return electionId;
+}
+
+/** A fresh account, as better-auth stores a passkey account. */
+export async function newAccount(sql: Sql): Promise<string> {
+  const id = newAccountId();
+  await sql`
+    INSERT INTO account_users VALUES (${id}, ${`${newAccountId()}@account.invalid`},
+      false, '', NULL, now(), now())`;
+  return id;
+}
+
+/**
+ * Gives each of `handles` a fresh account, so `moderate` accepts it, and
+ * returns each handle's account.
+ */
+export async function addModerators(
+  sql: Sql,
+  ...handles: readonly string[]
+): Promise<Map<string, string>> {
+  const accounts = new Map<string, string>();
+  for (const handle of handles) {
+    const account = await newAccount(sql);
+    await addModerator(sql, handle, account);
+    accounts.set(handle, account);
+  }
+  return accounts;
 }

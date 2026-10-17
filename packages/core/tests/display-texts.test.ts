@@ -14,7 +14,7 @@ import {
   storeDefinition,
   storeDisplayText,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb } from "./db.ts";
 
 // Display text (migrations/0011_display_texts.sql, src/display-texts.ts;
 // docs/spec/display-text.md, docs/moderation-policy.md; T-34, T-41, T-68):
@@ -53,6 +53,7 @@ let owner: Sql;
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
+  await addModerators(app, "mod-1");
   owner = await db.as("abolish_migrator");
 });
 afterAll(() => db?.close());

@@ -250,6 +250,25 @@ library GroupFixture {
         require(t == tier && e == exists && c == memberCount, "group slot layout");
     }
 
+    /// Sets a group's record with the block that created it, which the
+    /// Tier 1 path checks a vouch's Tier 2 group against.
+    function setGroup(
+        GroupRegistry registry,
+        uint64 groupId,
+        uint8 tier,
+        bool exists,
+        uint64 memberCount,
+        uint64 createdBlock
+    ) internal {
+        bytes32 slot = keccak256(abi.encode(uint256(groupId), GROUPS_SLOT));
+        uint256 packed = uint256(memberCount) | (uint256(tier) << 64)
+            | (exists ? uint256(1) << 72 : 0) | (uint256(createdBlock) << 80);
+        vm.store(address(registry), slot, bytes32(packed));
+        (uint8 t, bool e, uint64 c) = registry.groupOf(groupId);
+        require(t == tier && e == exists && c == memberCount, "group slot layout");
+        require(registry.groupCreatedBlock(groupId) == createdBlock, "created block slot layout");
+    }
+
     function setGroupCount(GroupRegistry registry, uint256 count) internal {
         vm.store(address(registry), bytes32(GROUP_COUNT_SLOT), bytes32(count));
         require(registry.groupCount() == count, "group count slot layout");

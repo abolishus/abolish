@@ -1353,6 +1353,13 @@ export const groupRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "addTier1Member",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
     name: "createGroup",
     outputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
@@ -1380,6 +1387,13 @@ export const groupRegistryAbi = [
     inputs: [],
     name: "groupCount",
     outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
+    name: "groupCreatedBlock",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
     stateMutability: "view",
   },
   {
@@ -1492,6 +1506,12 @@ export const groupRegistryAbi = [
     name: "RegistrarsPinned",
   },
   {
+    type: "event",
+    anonymous: false,
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes", indexed: false }],
+    name: "Tier1MemberAdded",
+  },
+  {
     type: "error",
     inputs: [{ name: "index", internalType: "uint64", type: "uint64" }],
     name: "AlreadyRemoved",
@@ -1518,6 +1538,16 @@ export const groupRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "DuplicateSlot",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "DuplicateVoucher",
+  },
+  {
+    type: "error",
     inputs: [{ name: "position", internalType: "uint256", type: "uint256" }],
     name: "ForbiddenCommitment",
   },
@@ -1539,6 +1569,7 @@ export const groupRegistryAbi = [
     inputs: [{ name: "position", internalType: "uint256", type: "uint256" }],
     name: "IndicesOutOfOrder",
   },
+  { type: "error", inputs: [], name: "InsufficientGas" },
   {
     type: "error",
     inputs: [
@@ -1562,6 +1593,17 @@ export const groupRegistryAbi = [
   },
   { type: "error", inputs: [], name: "MalformedRecord" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
+  { type: "error", inputs: [], name: "PrecompileFailed" },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "RootGrid",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "RootWindow",
+  },
   {
     type: "error",
     inputs: [
@@ -1569,6 +1611,11 @@ export const groupRegistryAbi = [
       { name: "memberCount", internalType: "uint64", type: "uint64" },
     ],
     name: "SizeBeyondCount",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "Tier2Group",
   },
   {
     type: "error",
@@ -1598,6 +1645,29 @@ export const groupRegistryAbi = [
     type: "error",
     inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
     name: "UnsupportedTier",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "VouchNullifier",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "vouch", internalType: "uint256", type: "uint256" },
+      { name: "slotProof", internalType: "bool", type: "bool" },
+    ],
+    name: "VouchProof",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "VouchRoot",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "vouch", internalType: "uint256", type: "uint256" }],
+    name: "VouchSlot",
   },
   {
     type: "error",

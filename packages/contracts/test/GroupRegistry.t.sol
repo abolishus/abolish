@@ -686,9 +686,21 @@ contract GroupRegistryTest is GroupTestBase {
         assertEq(logs[0].data.length, 0, "no data");
     }
 
+    function test_CreateGroupTakesTierOneAndRecordsItsBlock() public {
+        vm.roll(4_321);
+        vm.recordLogs();
+        uint64 id = registry.createGroup(1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (uint8 tier, bool exists, uint64 members) = registry.groupOf(id);
+        assertTrue(tier == 1 && exists && members == 0, "record");
+        assertEq(registry.groupCreatedBlock(id), 4_321, "created block");
+        assertEq(logs.length, 1, "one log");
+        assertEq(logs[0].topics[2], bytes32(uint256(1)), "tier topic");
+    }
+
     function test_CreateGroupRefusesTiersWithoutAnAdditionPath() public {
-        uint8[3] memory tiers = [1, 2, 255];
-        for (uint256 i; i < 3; i++) {
+        uint8[2] memory tiers = [2, 255];
+        for (uint256 i; i < 2; i++) {
             (bool ok, bytes memory ret) =
                 address(registry).call(abi.encodeCall(GroupRegistry.createGroup, (tiers[i])));
             _assertRefused(

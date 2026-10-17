@@ -25,8 +25,8 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json (version 1), contract-event-v2.json
-// (version 2) and contract-event-v3.json (version 3) come from independent
+// docs/spec/vectors/contract-event.json (version 1) to contract-event-v6.json
+// (version 6, with its own strict Tier 1 addition decoder) come from independent
 // Python implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
 // SEC 1 decompression and accumulator, scripts/contract-event-v2-vectors.py,
@@ -93,6 +93,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   3: load("contract-event-v3.json"),
   4: load("contract-event-v4.json"),
   5: load("contract-event-v5.json"),
+  6: load("contract-event-v6.json"),
 };
 const vectors = FILES[1];
 
@@ -210,6 +211,8 @@ function project(e: ContractEvent): unknown {
         signer: e.signer,
         record: bytesToHex(e.record),
       };
+    case "Tier1MemberAdded":
+      return { event: e.event, record: bytesToHex(e.record) };
   }
 }
 
@@ -334,6 +337,8 @@ function reencode(
         topics: [sig(e.event), e.definitionHash, uintWord(e.seat)],
         data: dyn([], tail(e.record)),
       };
+    case "Tier1MemberAdded":
+      return { topics: [sig(e.event)], data: dyn([], tail(e.record)) };
   }
 }
 
@@ -355,6 +360,7 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ShareReceiptBatchSubmitted: "board",
   ShareComplaintBatchSubmitted: "board",
   ObligationRootSubmitted: "board",
+  Tier1MemberAdded: "group-registry",
 };
 
 describe.each([
@@ -363,6 +369,7 @@ describe.each([
   [3, "contract-event-v3.json"],
   [4, "contract-event-v4.json"],
   [5, "contract-event-v5.json"],
+  [6, "contract-event-v6.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -735,6 +742,39 @@ describe("contract-event version 5 against version 4", () => {
     for (const v of added) {
       const record = { ...recordOf(v.fields), contract: v4.board };
       expect(checkContractEvent(record, v4, 4)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+});
+
+describe("contract-event version 6 against version 5", () => {
+  const v6 = contractsOf(FILES[6]);
+
+  // Version 6 keeps every row of version 5 unchanged, and adds only the
+  // group registry's Tier 1 addition event.
+  test("every version-5 vector has the same verdict under version 6", () => {
+    const all = [...FILES[5].records, ...FILES[5].eventFailures];
+    expect(all.length).toBeGreaterThan(40);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 5, 6) };
+      const result = checkContractEvent(record, v6, 6);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  test("version 5 names no Tier 1 event, so it refuses each as unknown-event", () => {
+    const v5 = contractsOf(FILES[5]);
+    const added = FILES[6].records.filter(
+      (r) => (r.event as { event?: string }).event === "Tier1MemberAdded",
+    );
+    expect(added.map((r) => r.id)).toEqual(
+      (FILES[6] as Vectors & { unknownUnderVersion5: string[] }).unknownUnderVersion5,
+    );
+    expect(added.length).toBe(53);
+    for (const v of added) {
+      const record = { ...recordOf(v.fields), contract: v5.groupRegistry };
+      expect(checkContractEvent(record, v5, 5)).toEqual({ ok: false, error: "unknown-event" });
     }
   });
 });

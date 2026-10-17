@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 5
+// The contract-event record, record type 0x0008 versions 1 to 6
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -7,8 +7,9 @@
 // events as the deployable registries emit them, and version 3 adds the
 // board's relayed-ballot and close-statement events (the close rule, T-50,
 // T-35), version 4 the board's share-receipt and share-complaint batch events
-// (T-25, P1-12d, P1-12e), and version 5 its obligation-root event (T-25,
-// T-52, P1-12f).
+// (T-25, P1-12d, P1-12e), version 5 its obligation-root event (T-25,
+// T-52, P1-12f), and version 6 the group registry's Tier 1 addition event
+// (T-53, P3-3).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -54,6 +55,7 @@ import {
 } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { MAX_TRUSTEES, p256Key } from "./trustee.ts";
+import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
 
 /**
  * `MAX_EVENT_DATA`: the framing bound on a record's `data`, checked before
@@ -77,7 +79,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 5 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 6 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -86,6 +88,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   3: contractEventV1,
   4: contractEventV1,
   5: contractEventV1,
+  6: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -93,7 +96,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -253,6 +256,11 @@ export type ContractEvent =
       readonly definitionHash: Uint8Array;
       readonly seat: number;
       /** The obligation root, which decodes strictly as version 1. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "Tier1MemberAdded";
+      /** The Tier 1 addition record, which decodes strictly (docs/spec/vouching.md). */
       readonly record: Uint8Array;
     };
 
@@ -767,6 +775,24 @@ const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
   },
 };
 
+// A Tier 1 addition (Group registry, Tier 1 additions): the record whole,
+// which decodes strictly as docs/spec/vouching.md decodes it, and no topic beyond
+// topic 0, since the group is the record's. The registry refuses every
+// record that doesn't decode (rules 2, 4, 5 and 7), so every one it logs
+// passes (T-53); whether it counts is the counting rule's.
+const TIER1_ADDITION_LENGTH = 8 + 32 + 1 + VOUCH_K * VOUCH_LENGTH;
+
+const TIER1_MEMBER_ADDED: EventSpec = {
+  signature: "Tier1MemberAdded(bytes)",
+  decode(topics, data) {
+    if (topics.length !== 1) return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: TIER1_ADDITION_LENGTH }])
+      ?.tails[0];
+    if (record === undefined || !decodeTier1Addition(record).ok) return "event-data";
+    return { event: "Tier1MemberAdded", record };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -833,10 +859,24 @@ const TABLES: Readonly<
       OBLIGATION_ROOT_SUBMITTED,
     ],
   },
+  // Version 5's rows, with the group registry's Tier 1 addition event added.
+  6: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [...GROUP_EVENTS, TIER1_MEMBER_ADDED],
+    board: [
+      ...BOARD_EVENTS,
+      RELAYED_BALLOT_SUBMITTED,
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED,
+      SHARE_COMPLAINT_BATCH_SUBMITTED,
+      OBLIGATION_ROOT_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -868,6 +908,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   3: signaturesOf(3),
   4: signaturesOf(4),
   5: signaturesOf(5),
+  6: signaturesOf(6),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

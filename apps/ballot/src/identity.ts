@@ -3,8 +3,10 @@
 // to, kept in this origin's IndexedDB and nowhere else. The secret never
 // leaves the device unencrypted: it goes from here only to the ballot worker,
 // which zeroes its copy, and every read hands out a fresh copy for the caller
-// to zero once used (T-12, T-18). Backup and recovery, which seal it for the
-// voter's passkey, come with registration (P2-8 part 3b-2c-2b-2).
+// to zero once used (T-12, T-18). The identity is kept from the moment it is
+// made, whatever registration's outcome ([[registration]], Outcome), with the
+// Tier 0 request it is waiting on, if any. Backup and recovery, which seal it
+// for the voter's passkey, come later (P2-8 part 3b-2c-2b-2b).
 //
 // What is stored is checked on every read as strictly as a decoder: a record
 // of another version, a value that isn't an identity secret or a membership
@@ -20,11 +22,25 @@ export interface Membership {
   readonly group: bigint;
 }
 
+/**
+ * The Tier 0 request the identity waits on ([[registration]], Outcome): the
+ * region it asked for, which every repeat and the direct path keep (T-16),
+ * and when the route last accepted it, for the retry heuristic.
+ */
+export interface Tier0Request {
+  /** The region code, a u32. */
+  readonly region: number;
+  /** Milliseconds since the UNIX epoch, by this device's clock. */
+  readonly acceptedAt: number;
+}
+
 export interface VotingIdentity {
   /** 32 bytes, `identity_secret`'s encoding: zero it once used. */
   readonly secret: Uint8Array;
-  /** At most one per tier, in ascending order of tier. */
+  /** None to three, at most one per tier, in ascending order of tier. */
   readonly memberships: readonly Membership[];
+  /** The Tier 0 request waiting on the board, never beside a Tier 0 membership. */
+  readonly tier0Request?: Tier0Request;
 }
 
 /** The identity, none, or a store this device couldn't open or a record it couldn't read. */
@@ -38,8 +54,12 @@ export const IDENTITY_DB = "abolish-voting-identity";
 const STORE = "identity";
 const KEY = "voter";
 
-/** The stored record's version: another is unreadable, never migrated by guessing. */
-const RECORD_VERSION = 1;
+/**
+ * The stored record's version: another is unreadable, never migrated by
+ * guessing. Version 1, which had no request and at least one membership,
+ * was never written outside the tests.
+ */
+const RECORD_VERSION = 2;
 
 const TIERS = [0, 1, 2];
 
@@ -58,19 +78,35 @@ function membershipOf(v: unknown): Membership | undefined {
   return { tier, group };
 }
 
+const MAX_U32 = 0xffff_ffff;
+
+function tier0RequestOf(v: unknown): Tier0Request | undefined {
+  if (!isRecord(v) || !hasExactly(v, ["region", "acceptedAt"])) return undefined;
+  const { region, acceptedAt } = v;
+  if (typeof region !== "number" || !Number.isInteger(region) || region < 0 || region > MAX_U32)
+    return undefined;
+  if (Object.is(region, -0)) return undefined;
+  if (typeof acceptedAt !== "number" || !Number.isSafeInteger(acceptedAt) || acceptedAt < 0)
+    return undefined;
+  if (Object.is(acceptedAt, -0)) return undefined;
+  return { region, acceptedAt };
+}
+
 /**
  * The identity a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 1, an identity secret, and one to three
- * memberships in strictly ascending order of tier. The secret is a copy.
+ * record this client writes: version 2, an identity secret, none to three
+ * memberships in strictly ascending order of tier, and a Tier 0 request
+ * (`null` for none) only while there is no Tier 0 membership. The secret is
+ * a copy.
  */
 export function parseStoredIdentity(value: unknown): VotingIdentity | undefined {
-  if (!isRecord(value) || !hasExactly(value, ["v", "secret", "memberships"])) return undefined;
-  const { v, secret, memberships } = value;
+  if (!isRecord(value) || !hasExactly(value, ["v", "secret", "memberships", "tier0Request"]))
+    return undefined;
+  const { v, secret, memberships, tier0Request } = value;
   if (v !== RECORD_VERSION) return undefined;
   if (!(secret instanceof Uint8Array) || !isIdentitySecret(secret)) return undefined;
   if (
     !Array.isArray(memberships) ||
-    memberships.length < 1 ||
     memberships.length > TIERS.length ||
     // A cloned array keeps any extra own properties: only the indices are a record's.
     Object.keys(memberships).length !== memberships.length
@@ -85,7 +121,11 @@ export function parseStoredIdentity(value: unknown): VotingIdentity | undefined 
       return undefined;
     parsed.push(membership);
   }
-  return { secret: secret.slice(), memberships: parsed };
+  if (tier0Request === null) return { secret: secret.slice(), memberships: parsed };
+  const request = tier0RequestOf(tier0Request);
+  // Registered at Tier 0, the client has no request left to wait on.
+  if (request === undefined || parsed[0]?.tier === 0) return undefined;
+  return { secret: secret.slice(), memberships: parsed, tier0Request: request };
 }
 
 /** The record `saveIdentity` stores; throws on an identity `parseStoredIdentity` would refuse. */
@@ -94,6 +134,10 @@ export function storedIdentity(identity: VotingIdentity): Record<string, unknown
     v: RECORD_VERSION,
     secret: identity.secret.slice(),
     memberships: identity.memberships.map(({ tier, group }) => ({ tier, group })),
+    tier0Request:
+      identity.tier0Request === undefined
+        ? null
+        : { region: identity.tier0Request.region, acceptedAt: identity.tier0Request.acceptedAt },
   };
   const back = parseStoredIdentity(record);
   if (back === undefined) throw new TypeError("not a voting identity this client stores");

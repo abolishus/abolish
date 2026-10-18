@@ -18,6 +18,7 @@ import {
   membershipProverInput,
   signGroupApproval,
   statedTierElectorate,
+  tier0Registration,
   type TierChoice,
   type TierElectorate,
   tierMembership,
@@ -1355,5 +1356,53 @@ describe("statedTierElectorate", () => {
     expect(() => statedTierElectorate(t.records, { ...choice, groups: many }, pins)).toThrow(
       RangeError,
     );
+  });
+});
+
+describe("tier0Registration over regional-cells.json's signed groups", () => {
+  test(
+    "a commitment is registered in its first adder's region and moved in any other, for any region codes",
+    { timeout: 300_000 },
+    () => {
+      const t = tierOf("split");
+      const ids = t.electorate.groups.map((g) => g.group_id);
+      const leaves = [...new Set(t.groups.flatMap((g) => g.leaves))];
+      fc.assert(
+        fc.property(
+          fc.array(fc.nat({ max: 0xffff_ffff }), { minLength: ids.length, maxLength: ids.length }),
+          fc.constantFrom(...leaves),
+          fc.nat({ max: ids.length - 1 }),
+          (codes, leaf, asked) => {
+            const groups = ids.map((group_id, i) => ({ group_id, region: codes[i] as number }));
+            const region = codes[asked] as number;
+            const home = homeOf(t, leaf) as bigint;
+            const homeRegion = groups.find((g) => g.group_id === home)?.region;
+            expect(
+              tier0Registration(t.records, { block: ROOT_BLOCK, groups }, leaf, region, pins),
+            ).toEqual({ kind: homeRegion === region ? "registered" : "moved", group: home });
+          },
+        ),
+        { numRuns: Math.min(numRuns, 50) },
+      );
+    },
+  );
+
+  test("a commitment no published group adds is not yet registered", () => {
+    const t = tierOf("split");
+    const groups = { block: ROOT_BLOCK, groups: t.electorate.groups };
+    const region = t.electorate.groups[0]?.region as number;
+    expect(tier0Registration(t.records, groups, 1n << 200n, region, pins)).toEqual({
+      kind: "not-yet",
+    });
+    // Nor one only a group outside the published list adds.
+    const elsewhere = logs(
+      [{ kind: "created", groupId: 98n, tier: 0 }, ...additions(98n, [1n << 200n])],
+      t.records.length + 10,
+    );
+    expect(
+      tier0Registration([...t.records, ...elsewhere], groups, 1n << 200n, region, pins),
+    ).toEqual({
+      kind: "not-yet",
+    });
   });
 });

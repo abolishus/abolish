@@ -435,6 +435,9 @@ export {
 export {
   type GroupRegistryPins,
   statedTierElectorate,
+  type Tier0Groups,
+  type Tier0Registration,
+  tier0Registration,
   type TierChoice,
   type TierMembership,
   tierMembership,

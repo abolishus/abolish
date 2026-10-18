@@ -494,3 +494,89 @@ export function statedTierElectorate(
     cells: derived.cells.map((c) => ({ root: c.root, members: c.members })),
   };
 }
+
+/** Where a Tier 0 registrant's commitment stands (docs/spec/registration.md, Outcome). */
+export type Tier0Registration =
+  /** Counted in a published group of the region it asked for, signed or self-paid. */
+  | { readonly kind: "registered"; readonly group: bigint }
+  /**
+   * Counted in a group of another region: a copy someone else added first
+   * moved it there. An alarm: the client registers again only under a new
+   * secret, since the commitment's place can't be taken back (T-16).
+   */
+  | { readonly kind: "moved"; readonly group: bigint }
+  /** In no group, or only as a removed leaf: the client may send its request again. */
+  | { readonly kind: "not-yet" };
+
+/** The deployment's published Tier 0 groups, read at one block (docs/spec/registration.md, Groups). */
+export interface Tier0Groups {
+  /** The L2 block the registry is read at: finalized for the outcome, the latest for the direct path's check. */
+  readonly block: bigint;
+  /**
+   * Every published Tier 0 group, signed and self-paid, in strictly
+   * ascending `group_id`, each with its region code (a u32), from the
+   * signed release, never a list an API or an indexer names.
+   */
+  readonly groups: readonly { readonly group_id: bigint; readonly region: number }[];
+}
+
+const MAX_U32 = 0xffff_ffff;
+
+/**
+ * Where `commitment` stands among the published Tier 0 groups at
+ * `groups.block`, for a registrant who asked for region `region`, from the
+ * group registry's own records (`records`, as `statedTierElectorate` takes
+ * them; other contracts' are ignored). Each group is replayed strictly, as
+ * `tierMembership` and the verifier's 2.4 replay it, under the release's
+ * registrars, and the first-occurrence rule (signed groups first, then
+ * self-paid additions in chain order) picks the one occurrence that counts.
+ * The client reads the whole registry, never asking a server about its own
+ * commitment (T-11, T-13). Throws `TierMembershipError` for a history the
+ * release's registry can't log; malformed arguments throw `TypeError` or
+ * `RangeError`, as does a region no published group serves.
+ */
+export function tier0Registration(
+  records: readonly ContractEventRecord[],
+  groups: Tier0Groups,
+  commitment: bigint,
+  region: number,
+  pins: GroupRegistryPins,
+): Tier0Registration {
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  if (groups === null || typeof groups !== "object")
+    throw new TypeError("groups: expected an object");
+  if (pins === null || typeof pins !== "object") throw new TypeError("pins: expected an object");
+  if (typeof commitment !== "bigint" || isForbiddenCommitment(commitment))
+    throw new RangeError("commitment: expected one that isn't forbidden");
+  // Each field read once, so a getter can't show one check a value and the next another.
+  const { block } = groups;
+  const listed = Array.isArray(groups.groups)
+    ? groups.groups.map((g) => ({ group_id: g.group_id, region: g.region }))
+    : groups.groups;
+  if (typeof block !== "bigint" || block < 0n || block > MAX_U64)
+    throw new RangeError("groups.block: expected a u64");
+  if (!Array.isArray(listed) || listed.length === 0 || listed.length > MAX_TIER_GROUPS)
+    throw new RangeError(`groups.groups: expected 1 to ${MAX_TIER_GROUPS} groups`);
+  for (const [i, g] of listed.entries()) {
+    if (typeof g.group_id !== "bigint" || g.group_id < 0n || g.group_id > MAX_U64)
+      throw new RangeError("groups.groups: expected u64 group_ids");
+    if (i > 0 && (listed[i - 1]?.group_id as bigint) >= g.group_id)
+      throw new RangeError("groups.groups: expected strictly ascending group_id");
+    if (!Number.isSafeInteger(g.region) || g.region < 0 || g.region > MAX_U32)
+      throw new RangeError("groups.groups: expected u32 region codes");
+  }
+  if (!listed.some((g) => g.region === region))
+    throw new RangeError("region: expected one a published group serves");
+
+  const raw = listedGroupLeaves(records, 0, block, listed, pins);
+  const counted = firstOccurrence(
+    raw.map((g) => g.leaves),
+    raw.map((g) => g.chainOrder),
+  );
+  const home = counted.findIndex((leaves) => leaves.includes(commitment));
+  const found = listed[home];
+  if (found === undefined) return { kind: "not-yet" };
+  return found.region === region
+    ? { kind: "registered", group: found.group_id }
+    : { kind: "moved", group: found.group_id };
+}

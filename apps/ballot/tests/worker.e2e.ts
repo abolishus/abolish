@@ -642,7 +642,7 @@ describe("the device's voting identity", () => {
       [secret, memberships] as const,
     );
     await page.evaluate(() =>
-      (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampIdentity(2),
+      (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampIdentity(1),
     );
     await expect(read()).resolves.toEqual({ kind: "unreadable" });
   });

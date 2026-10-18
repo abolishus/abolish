@@ -79,12 +79,19 @@ beforeAll(async () => {
 });
 
 /** A board with entries in `segments`, anchored a minute after each period ends, under a clock from `opens_at`. */
-function boardOf(electionId: Uint8Array, epoch: bigint, segments: readonly number[]) {
+function boardOf(
+  electionId: Uint8Array,
+  epoch: bigint,
+  segments: readonly number[],
+  wrongIndexAt?: number,
+) {
   const entries = segments.map((segment, index) =>
     encodeBoardEntry(
       {
         election_id: electionId,
-        index: BigInt(index),
+        // An entry whose `index` isn't its position fails step 4 only: the
+        // checkpoints below are computed from these bytes as they are.
+        index: BigInt(index === wrongIndexAt ? index + 1 : index),
         segment,
         payload: Uint8Array.of(RECORD_TYPES.ballot >> 8, RECORD_TYPES.ballot & 0xff, 1, index),
       },
@@ -128,13 +135,26 @@ interface World {
 const SEGMENTS = [0, 0, 3, 10, 24, 25, 25, 26, 27];
 const SEAL = 30;
 
-function world(seatIndex = 1, options: { segments?: readonly number[] } = {}): World {
+function world(
+  seatIndex = 1,
+  options: { segments?: readonly number[]; lastSegment?: number; wrongIndexAt?: number } = {},
+): World {
   const election = approved.elections[seatIndex - 1] as ApprovedElection;
   // A store of its own per world, so each test's duty starts unsigned.
   const own = new MemoryStore();
   const epoch = election.closesAt - 86_400n;
-  const clock: AnchorClock = { epoch, period: PERIOD, deadline: DEADLINE, lastSegment: SEAL };
-  const board = boardOf(election.electionId, epoch, options.segments ?? SEGMENTS);
+  const clock: AnchorClock = {
+    epoch,
+    period: PERIOD,
+    deadline: DEADLINE,
+    lastSegment: options.lastSegment ?? SEAL,
+  };
+  const board = boardOf(
+    election.electionId,
+    epoch,
+    options.segments ?? SEGMENTS,
+    options.wrongIndexAt,
+  );
   const sA = (election.closesAt - epoch) / PERIOD + 1n;
   const fixedAt = epoch + (sA + 1n) * PERIOD + DEADLINE;
   const w: World = {
@@ -382,6 +402,82 @@ describe("the ballot extent", () => {
       code: "checkpoint-equivocation",
     });
     expect(w.sent).toEqual([]);
+  });
+
+  test("a fully read board that fails a later board check gets neither record", async () => {
+    // Segment 24's entry-hash list CID names no list of its entries: `checkpoint-cid`.
+    const cid = world();
+    cid.anchors = cid.anchors.map((a) =>
+      a.checkpoint.segment === 24
+        ? { ...a, checkpoint: { ...a.checkpoint, hashes_cid: a.checkpoint.object_cid } }
+        : a,
+    );
+    // An entry whose index isn't its position: step 4's `wrong-index`.
+    const index = world(1, { wrongIndexAt: 3 });
+    for (const [w, code] of [
+      [cid, "checkpoint-cid"],
+      [index, "wrong-index"],
+    ] as const) {
+      expect(await w.seat.step()).toEqual({ state: "board-failed", code });
+      w.wall = w.cutoff;
+      expect(await w.seat.step()).toEqual({ state: "board-failed", code });
+      expect(w.sent).toEqual([]);
+    }
+  });
+
+  test("an anchored run whose bytes match neither its head nor its root is no copy: the seat complains naming it", async () => {
+    const w = world();
+    w.anchors = w.anchors.map((a) =>
+      a.checkpoint.segment === 25
+        ? {
+            ...a,
+            checkpoint: {
+              ...a.checkpoint,
+              head: new Uint8Array(32).fill(1),
+              root: new Uint8Array(32).fill(2),
+            },
+          }
+        : a,
+    );
+    expect(await w.seat.step()).toEqual({ state: "fetching" });
+    w.wall = w.cutoff;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "complaint" });
+    const c = decodeAvailabilityComplaint(w.sent[0] as Uint8Array, 1);
+    expect(key(c.cid)).toBe(key(cA(w).object_cid));
+  });
+
+  test("a seal never anchored doesn't stop the attestation: it judges past the extent", async () => {
+    // Nothing in segment 25, the seal: C_A is segment 24's checkpoint.
+    const w = world(1, { segments: [0, 3, 24], lastSegment: 25 });
+    w.l1Now = w.fixedAt + 1n;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    const a = decodeAvailabilityAttestation(w.sent[0] as Uint8Array, 1);
+    expect(key(a.checkpoint_hash)).toBe(
+      key(checkpointHash(w.board.checkpoints.get(24) as Checkpoint)),
+    );
+  });
+
+  test("two steps at once send only the stored attestation", async () => {
+    const w = world();
+    await Promise.all([w.seat.step(), w.seat.step(), w.seat.step()]);
+    const stored = await w.store.get(
+      `availability/${key(w.election.definitionHash)}/ballot/attestation`,
+    );
+    expect(w.sent.length).toBeGreaterThan(0);
+    for (const b of w.sent) expect(key(b)).toBe(key(stored as Uint8Array));
+  });
+
+  test("stops sending a record the contract never recorded once t_A has passed", async () => {
+    const w = world();
+    await w.seat.step();
+    w.wall = w.seat.deadline;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    w.wall = w.seat.deadline + 1n;
+    expect(await w.seat.step()).toEqual({ state: "unrecorded", kind: "attestation" });
+    expect(w.sent).toHaveLength(2);
+    // A record recorded in time is still found as such.
+    w.recorded.set("attestation", w.sent[0] as Uint8Array);
+    expect(await w.seat.step()).toEqual({ state: "recorded" });
   });
 
   test("whatever the sources, failures and timing: one attestation and one complaint at most, signed by the cutoff, resent byte for byte until recorded", async () => {

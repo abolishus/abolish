@@ -110,6 +110,12 @@ export type AvailabilityStatus =
   /** `c_I` has passed with no attestation; a complaint, if the seat signed one, was resent. */
   | { readonly state: "past-cutoff"; readonly complained: boolean }
   /**
+   * `t_A` has passed and the contract never recorded the seat's stored
+   * record: it can't count, so the seat stops sending it. An alarm for the
+   * operator of the node (a refused call, a censored path it couldn't force).
+   */
+  | { readonly state: "unrecorded"; readonly kind: AvailabilityKind }
+  /**
    * The contract recorded another record of this kind for the seat's slot:
    * its per-election key signed bytes this node didn't store (a key leak, or
    * a store rolled back). An alarm, never a step the node retries past.
@@ -140,8 +146,8 @@ const PAST_EXTENT: ReadonlySet<BoardErrorCode> = new Set<BoardErrorCode>([
 /**
  * The ballot-extent duty of one seat of the default panel for one election
  * it approved. `step` is idempotent: the node calls it on a schedule until it
- * returns `recorded`, or `past-cutoff` once the cutoff and the record's
- * forced inclusion are behind it.
+ * returns `recorded`, `unrecorded` or `foreign-record`, or `past-cutoff`
+ * once `t_A` is behind it.
  */
 export class AvailabilitySeat {
   readonly #o: AvailabilityOptions;
@@ -163,20 +169,26 @@ export class AvailabilitySeat {
     return availabilityWindows(closesAt, l1InclusionBound, 0n, RELEASE_WINDOWS).ballotCutoff;
   }
 
+  /** `t_A`: a ballot-extent record counts only if submitted by then. */
+  get deadline(): bigint {
+    const { closesAt, l1InclusionBound } = this.#o.election;
+    return availabilityWindows(closesAt, l1InclusionBound, 0n, RELEASE_WINDOWS).ballotDeadline;
+  }
+
   async step(): Promise<AvailabilityStatus> {
     const o = this.#o;
-    const stored = await o.store.get(`${this.#prefix}/attestation`);
-    if (stored !== undefined) return this.#deliver("attestation", stored);
     const cutoff = this.cutoff;
     const wall = o.clock();
+    const stored = await o.store.get(`${this.#prefix}/attestation`);
+    if (stored !== undefined) return this.#deliver("attestation", stored, wall);
     // A record signed after `c_I` may not be in time for `t_A`, and the
     // seat's view at `c_I` is what it decides what it owes by (docs/spec/
     // availability.md, The ballot extent and what a node owes).
     if (wall > cutoff) {
       const complaint = await o.store.get(`${this.#prefix}/complaint`);
       if (complaint === undefined) return { state: "past-cutoff", complained: false };
-      const delivered = await this.#deliver("complaint", complaint);
-      return delivered.state === "foreign-record"
+      const delivered = await this.#deliver("complaint", complaint, wall);
+      return delivered.state === "foreign-record" || delivered.state === "unrecorded"
         ? delivered
         : { state: "past-cutoff", complained: true };
     }
@@ -198,7 +210,7 @@ export class AvailabilitySeat {
       // Stored before it is sent, so a crash or a retry resends these bytes
       // and the seat never signs a second attestation of the point.
       const kept = await o.store.putOnce(`${this.#prefix}/attestation`, record);
-      return this.#deliver("attestation", kept.value);
+      return this.#deliver("attestation", kept.value, wall);
     }
     if ("state" in held) return held;
     if (wall < cutoff - o.sendMargin) return { state: "fetching" };
@@ -219,7 +231,7 @@ export class AvailabilitySeat {
           ),
         )
       ).value;
-    return this.#deliver("complaint", complaint);
+    return this.#deliver("complaint", complaint, wall);
   }
 
   /**
@@ -235,7 +247,16 @@ export class AvailabilitySeat {
     now: bigint,
   ): AvailabilityStatus | { readonly checkpoint: Checkpoint; readonly through: Anchor[] } {
     const { electionId, closesAt } = this.#o.election;
-    if (closesAt < clock.epoch) return { state: "no-checkpoint" };
+    // A board failing from L1 alone is reported first, as the verifier does.
+    if (closesAt < clock.epoch) {
+      try {
+        countedCheckpoints(electionId, anchors, clock, now);
+      } catch (e) {
+        if (e instanceof BoardError) return { state: "board-failed", code: e.code };
+        throw e;
+      }
+      return { state: "no-checkpoint" };
+    }
     const sA = (closesAt - clock.epoch) / clock.period + 1n;
     const fixedAt = clock.epoch + (sA + 1n) * clock.period + clock.deadline;
     // L1 timestamps increase, so at a finalized time at or past the deadline
@@ -289,8 +310,16 @@ export class AvailabilitySeat {
     return true;
   }
 
-  /** Sends a stored record unless the contract has recorded it; a retry resends the same bytes. */
-  async #deliver(kind: AvailabilityKind, record: Uint8Array): Promise<AvailabilityStatus> {
+  /**
+   * Sends a stored record unless the contract has recorded it; a retry
+   * resends the same bytes. Past `t_A` no submission can count, so a record
+   * still unrecorded then is reported once and never sent again.
+   */
+  async #deliver(
+    kind: AvailabilityKind,
+    record: Uint8Array,
+    wall: bigint,
+  ): Promise<AvailabilityStatus> {
     const o = this.#o;
     const recorded = await o.contract.recorded(
       kind,
@@ -304,6 +333,7 @@ export class AvailabilitySeat {
       // A recorded complaint leaves the attestation still to do.
       return kind === "attestation" ? { state: "recorded" } : { state: "complained" };
     }
+    if (wall > this.deadline) return { state: "unrecorded", kind };
     await o.contract.send(record);
     return { state: "sent", kind };
   }

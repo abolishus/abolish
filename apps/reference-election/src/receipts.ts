@@ -25,6 +25,7 @@ import {
   signReceipt,
 } from "@abolishus/crypto";
 import { boardEntryVersion, type FixtureDefinition } from "./election.ts";
+import type { DropOutcome } from "./verify.ts";
 
 /** What receipts and their checks read from an election's definition. */
 export interface ReceiptElection {
@@ -143,6 +144,16 @@ export function judge(
  */
 export type ExpectedVerdict = "included" | "forked-copy" | "forked-l1";
 
+/**
+ * What the drop rule must find for a receipt (docs/spec/receipts.md, Drops):
+ * nothing to judge for one that isn't an alarm, the ballot `present` at the
+ * board entry carrying it, or a `drop`.
+ */
+export type ExpectedDrop =
+  | { readonly status: "not-alarm" }
+  | { readonly status: "present"; readonly entry: number }
+  | { readonly status: "drop" };
+
 /** One receipt the operator signed, with what its voter's later check must find. */
 export interface Receipted {
   readonly name: string;
@@ -150,6 +161,7 @@ export interface Receipted {
   readonly payload: Uint8Array;
   readonly receipt: Uint8Array;
   readonly expected: ExpectedVerdict;
+  readonly drop: ExpectedDrop;
 }
 
 /** Whether `v` is the verdict `expected` names. */
@@ -161,5 +173,17 @@ export function verdictIs(expected: ExpectedVerdict, v: ReceiptVerdict): boolean
       return v.verdict === "forked" && v.by === "copy";
     case "forked-l1":
       return v.verdict === "forked" && v.by === "l1";
+  }
+}
+
+/** Whether `o` is the outcome `expected` names. */
+export function dropIs(expected: ExpectedDrop, o: DropOutcome): boolean {
+  switch (expected.status) {
+    case "not-alarm":
+      return o.status === "not-drop" && o.code === "not-alarm";
+    case "present":
+      return o.status === "not-drop" && o.code === "present" && o.entry === expected.entry;
+    case "drop":
+      return o.status === "drop";
   }
 }

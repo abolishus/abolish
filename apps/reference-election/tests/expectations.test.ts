@@ -3,6 +3,8 @@ import {
   checkBallots,
   checkControl,
   checkExpectations,
+  checkRows,
+  checkSelected,
   type ExpectedBallots,
   REQUIRED_PASSES,
 } from "../src/expectations.ts";
@@ -179,6 +181,34 @@ test("a control must show each row it pins, with its code", () => {
   expect(checkControl("c", { report }, { "9.9": { status: "pass" } })).toEqual([
     "control c: check 9.9 must be pass , got no row ",
   ]);
+});
+
+test("rows pinned outside a control are reported under the run's own name", () => {
+  const report = { verdict: "unverifiable", checks: rows({ "3.2": "fail" }) };
+  expect(checkRows("q", { report }, { "3.2": { status: "fail", code: "x" } })).toEqual([]);
+  expect(checkRows("q", { report }, { "3.2": { status: "pass" } })).toEqual([
+    "q: check 3.2 must be pass , got fail x",
+  ]);
+});
+
+test("the selected ballots must be exactly the entries expected, in order", () => {
+  const withSelected = (selected?: number[]) => ({
+    report: {
+      ...honest.report,
+      ballots: {
+        admitted: 3,
+        rejected: [],
+        ...(selected !== undefined && { selected: selected.map((entry) => ({ entry })) }),
+      },
+    },
+  });
+  expect(checkSelected("q", withSelected([1, 3, 4]), [1, 3, 4])).toEqual([]);
+  expect(checkSelected("q", withSelected([1, 2, 3]), [1, 3, 4])).toEqual([
+    "q: selected [1,2,3], not [1,3,4]",
+  ]);
+  expect(checkSelected("q", withSelected([3, 1, 4]), [1, 3, 4])).toHaveLength(1);
+  // A report where selection didn't pass has no selected ballots.
+  expect(checkSelected("q", withSelected(), [1, 3, 4])).toEqual(["q: selected null, not [1,3,4]"]);
 });
 
 test("the transcript lists the nine stages of AGENTS.md once each, in order", () => {

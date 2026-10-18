@@ -50,6 +50,22 @@ export function checkBallots(
   return problems;
 }
 
+/**
+ * Why the report's selected ballots (6.1) aren't the entries `expected`
+ * lists, in copy order; empty if they are. Selection passes over any set,
+ * so a run whose ballots include a re-vote pins which one counts.
+ */
+export function checkSelected(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: readonly number[],
+): string[] {
+  const selected = run.report.ballots?.selected?.map((s) => s.entry);
+  return selected !== undefined && selected.join() === expected.join()
+    ? []
+    : [`${name}: selected ${JSON.stringify(selected ?? null)}, not ${JSON.stringify(expected)}`];
+}
+
 // The verifier's exit codes (packages/verifier, EXIT_CODES).
 const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
 
@@ -128,11 +144,10 @@ export interface ExpectedRow {
 }
 
 /**
- * Why a control's report differs from the rows it must show; empty if it
- * doesn't. A control pins each row's code, not only that it didn't pass, so
- * it can't be satisfied by an unrelated reason such as a rejected bundle.
+ * Why a report differs from the rows it must show, each with its status and
+ * code; empty if it doesn't.
  */
-export function checkControl(
+export function checkRows(
   name: string,
   run: Pick<VerifierRun, "report">,
   expected: Readonly<Record<string, ExpectedRow>>,
@@ -143,8 +158,21 @@ export function checkControl(
     const got = rows.get(id);
     if (got?.status !== want.status || got.code !== want.code)
       problems.push(
-        `control ${name}: check ${id} must be ${want.status} ${want.code ?? ""}, got ${got?.status ?? "no row"} ${got?.code ?? ""}`,
+        `${name}: check ${id} must be ${want.status} ${want.code ?? ""}, got ${got?.status ?? "no row"} ${got?.code ?? ""}`,
       );
   }
   return problems;
+}
+
+/**
+ * Why a control's report differs from the rows it must show; empty if it
+ * doesn't. A control pins each row's code, not only that it didn't pass, so
+ * it can't be satisfied by an unrelated reason such as a rejected bundle.
+ */
+export function checkControl(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: Readonly<Record<string, ExpectedRow>>,
+): string[] {
+  return checkRows(`control ${name}`, run, expected);
 }

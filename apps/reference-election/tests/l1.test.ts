@@ -3,7 +3,14 @@ import fc from "fast-check";
 import { checkpointHash } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { expect, test } from "vite-plus/test";
-import { anchorCalldata, checkpointFromLog, headerRlp, type Log, word } from "../src/l1.ts";
+import {
+  anchorCalldata,
+  checkpointFromLog,
+  headerRlp,
+  headers,
+  type Log,
+  word,
+} from "../src/l1.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -82,6 +89,25 @@ test("a header that doesn't hash to the reported hash is refused", () => {
   // A field the node returns but the list doesn't know can't be dropped silently.
   const { requestsHash: _, ...pre } = GENESIS;
   expect(() => headerRlp(pre)).toThrow(/doesn't hash/);
+});
+
+test("the run of headers is every block from 0 to the head, each checked against its hash", async () => {
+  const asked: unknown[] = [];
+  const rpc = (block: Readonly<Record<string, unknown>>) => ({
+    call: async <T>(method: string, params: readonly unknown[] = []): Promise<T> => {
+      expect(method).toBe("eth_getBlockByNumber");
+      asked.push(params[0]);
+      return block as T;
+    },
+  });
+  expect(await headers(rpc(GENESIS), 0n)).toEqual([headerRlp(GENESIS)]);
+  expect(asked).toEqual(["0x0"]);
+  asked.length = 0;
+  await headers(rpc(GENESIS), 17n);
+  expect(asked).toEqual(Array.from({ length: 18 }, (_, n) => `0x${n.toString(16)}`));
+  await expect(headers(rpc({ ...GENESIS, timestamp: "0x6acd3ce4" }), 0n)).rejects.toThrow(
+    /doesn't hash/,
+  );
 });
 
 // docs/spec/vectors/board.json's checkpoints, with the hash the independent

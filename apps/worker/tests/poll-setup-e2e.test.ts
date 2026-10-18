@@ -378,13 +378,18 @@ async function advance(seconds: bigint) {
  * posts hours behind the head, long after Ponder has the block's logs, while
  * here the creation worker's transactions mine L2 blocks at any moment, and
  * a root posted for one `indexLogs` hasn't copied yet fails the registry
- * sync's accumulator check as `incomplete`.
+ * sync's accumulator check as `incomplete`. And never the latest block: Anvil
+ * answers `eth_getProof` for its latest block from its current state, so a
+ * block the creation worker mines meanwhile can stand in for it, and the
+ * registry's proof then fails under the root as `l2-proof-missing`.
  */
 const proposer = {
   async latest() {
+    const latest = await l2.client.getBlockNumber({ cacheTime: 0 });
     const finalized = await l2.client.getBlock({ blockTag: "finalized" });
+    const below = [indexed, latest - 1n].reduce((a, b) => (a < b ? a : b));
     const head =
-      finalized.number <= indexed ? finalized : await l2.client.getBlock({ blockNumber: indexed });
+      finalized.number <= below ? finalized : await l2.client.getBlock({ blockNumber: below });
     const passer = await l2.client.getProof({
       address: MESSAGE_PASSER,
       storageKeys: [],

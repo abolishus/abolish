@@ -797,6 +797,8 @@ export function verifyBundle(bundle: Bundle): Report {
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
       // Releases, step 1).
       if (
+        // 7.1 passes only where 6.1 did, which needs 5.8 and so format 5.
+        bundle.format === "abolish-verifier-bundle/5" &&
         isLive(definition.definition) &&
         implemented.get("7.5")?.code === "not-reached" &&
         implemented.get("7.1")?.status === "pass" &&
@@ -825,7 +827,7 @@ export function verifyBundle(bundle: Bundle): Report {
           boardEntryVersion: definition.inputs.boardEntryVersion,
           extent,
           clock: bundle.clock,
-          blocks: bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : [],
+          blocks: bundle.l1Blocks,
           counted: countedSets,
         });
         implemented = new Map<string, Outcome>([...implemented, ...live.rows]);

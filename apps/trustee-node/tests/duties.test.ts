@@ -4,6 +4,7 @@
 // anything the node can't get past ending the loop; and the receipt duty's
 // on the same schedule (P2-13 part 4b-2b-2b), settling once its batches are
 // recorded or can't be, and giving up a view no retry can read.
+import { kemKeygen } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import fc from "fast-check";
@@ -39,6 +40,7 @@ const approvedOf = (n: number): ApprovedElection => ({
   l1InclusionBound: 0n,
   members: 0n,
   signingSecret: new Uint8Array(32).fill(0xee),
+  kemKeyPair: kemKeygen(),
 });
 
 type Step = AvailabilityStatus | Error | Promise<AvailabilityStatus> | (() => AvailabilityStatus);

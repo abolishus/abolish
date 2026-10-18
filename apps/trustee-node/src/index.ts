@@ -20,6 +20,13 @@ export {
   type SeatResult,
 } from "./ceremony.ts";
 export {
+  ComplaintDuty,
+  type ComplaintDutyOptions,
+  type ComplaintDutyStatus,
+  type ComplaintPath,
+  type RecordedPosting,
+} from "./complaint.ts";
+export {
   ReceiptDuty,
   type ReceiptDutyOptions,
   type ReceiptDutyStatus,

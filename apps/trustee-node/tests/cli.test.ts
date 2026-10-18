@@ -8,6 +8,7 @@ import {
   cidText,
   encodeElectionDefinition,
   identityKey,
+  kemKeygen,
   objectCar,
   objectCid,
   panelId,
@@ -462,6 +463,7 @@ describe("run with the availability duty", () => {
       l1InclusionBound: 0n,
       members: 0n,
       signingSecret: new Uint8Array(32),
+      kemKeyPair: kemKeygen(),
     };
     const reader = { boardVersion: 5 as const, read: async () => expect.fail("not read") };
     const o = w.seat(election, reader);
@@ -548,6 +550,7 @@ describe("run with the availability duty", () => {
       l1InclusionBound: 0n,
       members: 0n,
       signingSecret: new Uint8Array(32),
+      kemKeyPair: kemKeygen(),
     };
     expect(await w.view.extent(election)).toBeUndefined();
     expect(asked).toEqual([]);

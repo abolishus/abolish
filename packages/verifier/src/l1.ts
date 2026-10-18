@@ -493,7 +493,11 @@ export function latestLocatorFromState(
   const low = head[31] as number;
   if ((low & 1) === 0) {
     const len = low >> 1;
-    if (len === 0) return { kind: "none", count };
+    // An empty `bytes` is an all-zero slot; anything else in it is no layout's.
+    if (len === 0)
+      return head.some((x) => x !== 0)
+        ? { kind: "locator-framing", count }
+        : { kind: "none", count };
     if (len > 31) return { kind: "locator-framing", count };
     return { kind: "locator", locator: head.slice(0, len), count };
   }
@@ -502,8 +506,7 @@ export function latestLocatorFromState(
   const start = wordValue(keccak_256(word(ANCHOR_NAMESPACE + 2n)));
   const out = new Uint8Array(Number(len));
   for (let i = 0; i * 32 < out.length; i++) {
-    // Slots wrap at 2^256, as the EVM's arithmetic does.
-    const w = read(word((start + BigInt(i)) & ((1n << 256n) - 1n)));
+    const w = read(word(start + BigInt(i)));
     out.set(w.subarray(0, Math.min(32, out.length - i * 32)), i * 32);
   }
   return { kind: "locator", locator: out, count };

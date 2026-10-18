@@ -16,7 +16,6 @@ import {
   MANIFEST_BOUND,
   readArchivedObject,
   type ArchiveManifest,
-  type ManifestLink,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
@@ -84,7 +83,8 @@ export type ArchiveFinding =
   | {
       readonly code: "link-conflict";
       readonly sequence: bigint;
-      readonly reached: Uint8Array;
+      /** The CID the first link to the sequence named. */
+      readonly claimed: Uint8Array;
       readonly named: Uint8Array;
     }
   | { readonly code: "archive-gap"; readonly first: bigint; readonly last: bigint }
@@ -94,8 +94,8 @@ export type ArchiveFinding =
       readonly locator: number;
       readonly sequence: bigint;
       readonly named: Uint8Array;
-      /** The CID the walk reached at that sequence, if it reached one. */
-      readonly reached: Uint8Array | undefined;
+      /** The CID the chain's links name at that sequence, if they name one. */
+      readonly chain: Uint8Array | undefined;
     };
 
 /** A manifest the walk reached, valid for this deployment at the sequence its link named. */
@@ -117,7 +117,11 @@ export interface ArchiveWalk {
 }
 
 export interface ArchiveWalkOptions {
-  /** The earlier locators, from `ArchiveLocated` logs, in any order; each is checked against the chain. */
+  /**
+   * The earlier locators, from the anchor's `ArchiveLocated` logs at or
+   * before `B` (a later one isn't in the state the latest was proven from),
+   * in log order; a repeated locator is judged once.
+   */
   readonly earlier?: readonly Uint8Array[];
   /** The objects' CIDs whose listings to keep (the counted checkpoints' CIDs, say). */
   readonly objects?: readonly Uint8Array[];
@@ -136,43 +140,58 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 
 type Read =
   | { readonly kind: "manifest"; readonly manifest: ArchiveManifest }
-  | { readonly kind: "unavailable" | "malformed" | "budget" };
+  | { readonly kind: "unavailable" | "malformed" };
 
 // What the walk knows of a sequence: the CID the first link to it named,
-// and whether a manifest was reached there. `done` is set once the sequence
-// can't be reached under that CID (its bytes aren't a manifest of this
-// deployment at this sequence), so no later link retries it.
+// whether a manifest was reached there, and every transaction queued or
+// read for it. `done` is set once the sequence can't be reached under that
+// CID (its bytes aren't a manifest of this deployment at this sequence), so
+// nothing retries it.
 interface Slot {
   readonly cid: Uint8Array;
   reached: boolean;
   done: boolean;
+  conflict: boolean;
+  readonly tried: Uint8Array[];
   readonly unavailable: Uint8Array[];
+}
+
+interface Pending {
+  readonly sequence: bigint;
+  readonly transaction: Uint8Array;
 }
 
 /**
  * Walks the archive from `locator`, the board anchor's latest locator proven
  * at `B` (`latestLocatorFromState`), and checks each earlier locator against
- * what it reached (docs/spec/archive.md, The chain from a locator, steps 1
- * to 4). The locator's manifest is read from its transaction within one
- * chunk, and must be this deployment's (`l1_chain_id` and `anchor`); each
- * link's manifest is read the same way and must be at the link's sequence.
- * Links are followed breadth first, in each manifest's order, and each
- * sequence once: the first link to a sequence fixes its CID, a later link
- * naming another is `link-conflict`, and a later link naming the same CID
- * under another transaction is tried only while the sequence is unreached
- * (a manifest posted again after a failed upload keeps its bytes). Once the
- * walk is done, the sequences from 0 to the latest's that no manifest
- * reached are reported as ranges, and every transaction tried for an
- * unreached sequence as `unavailable`. A walk that runs out of reads stops
- * there with `over-budget` and reports no gap or unavailable link: what it
- * didn't read is unverifiable for this reader, never missing.
+ * the chain (docs/spec/archive.md, The chain from a locator, steps 1 to 4).
+ * The locator's manifest is read from its transaction within one chunk, and
+ * must be this deployment's (`l1_chain_id` and `anchor`); each link's
+ * manifest is read the same way and must be at the link's sequence.
  *
- * An earlier locator naming a CID the walk reached matches. Any other is
- * read, and a manifest of this deployment at a sequence where the walk
- * reached another CID, or none, is `locator-mismatch`: a locator overwritten
- * by a seized authority, while the logs that carried earlier ones last
- * (T-69). Earlier locators are judged only if the latest's manifest was
- * reached, since otherwise there is no chain to judge them against.
+ * Links are taken breadth first, in each manifest's order, and each is
+ * settled when its manifest is reached: the first link to a sequence fixes
+ * its CID, a later one naming another CID is `link-conflict` (once per
+ * sequence) and never read, and one naming the same CID under another
+ * transaction is queued while the sequence is unreached (a manifest posted
+ * again after a failed upload keeps its bytes). Every queued read counts
+ * against the budget when it is queued, so the queue never holds more than
+ * the reads left: a walk that would need more stops at once with
+ * `over-budget` and reports no gap or unavailable link, since what it
+ * didn't read is unverifiable for this reader, never missing (T-52).
+ * Otherwise the sequences from 0 to the latest's that no manifest reached
+ * are reported as ranges, and every transaction read for an unreached
+ * sequence as `unavailable`.
+ *
+ * An earlier locator naming the CID the chain names at a sequence is that
+ * sequence's manifest: if it is unreached and the locator's transaction is
+ * new, it is read there, and once reached the walk goes on from it, so a
+ * source's lapse on a link isn't reported as a mismatch. Any other is read,
+ * and a manifest of this deployment is `locator-mismatch`, with the CID the
+ * chain names at its sequence, if any: a locator overwritten by a seized
+ * authority, while the logs that carried earlier ones last (T-69). Earlier
+ * locators are judged only if the latest's manifest was reached, since
+ * otherwise there is no chain to judge them against.
  */
 export async function walkArchive(
   locator: Uint8Array,
@@ -189,11 +208,13 @@ export async function walkArchive(
     (options.objects ?? []).map((c) => [bytesToHex(c), []]),
   );
   const slots = new Map<bigint, Slot>();
+  const byCid = new Map<string, bigint>();
+  const queue: Pending[] = [];
+  let head = 0;
   let reads = 0;
   let overBudget = false;
 
   const read = async (cid: Uint8Array, transaction: Uint8Array): Promise<Read> => {
-    if (reads >= budget) return { kind: "budget" };
     reads++;
     for (const data of await source(transaction, MANIFEST_DATA_LIMIT)) {
       // A source past the limit is that source's failure, never parsed (T-52).
@@ -218,7 +239,7 @@ export async function walkArchive(
     from: ManifestOrigin,
     cid: Uint8Array,
     transaction: Uint8Array,
-  ): Promise<ArchiveManifest | "unavailable" | "budget" | undefined> => {
+  ): Promise<ArchiveManifest | "unavailable" | undefined> => {
     const got = await read(cid, transaction);
     if (got.kind !== "manifest") {
       if (got.kind !== "malformed") return got.kind;
@@ -239,17 +260,80 @@ export async function walkArchive(
     return m;
   };
 
-  const queue: ManifestLink[] = [];
-  const reach = (sequence: bigint, cid: Uint8Array, m: ArchiveManifest) => {
-    const slot = slots.get(sequence);
-    if (slot === undefined)
-      slots.set(sequence, { cid, reached: true, done: true, unavailable: [] });
-    else {
-      slot.reached = true;
-      slot.done = true;
-    }
+  const claim = (sequence: bigint, cid: Uint8Array): Slot => {
+    const slot: Slot = {
+      cid,
+      reached: false,
+      done: false,
+      conflict: false,
+      tried: [],
+      unavailable: [],
+    };
+    slots.set(sequence, slot);
+    byCid.set(bytesToHex(cid), sequence);
+    return slot;
+  };
+
+  // Settles a reached manifest's links in order, queueing the reads they
+  // need; false once the budget can't cover them.
+  const reach = (slot: Slot, m: ArchiveManifest): boolean => {
+    slot.reached = true;
+    slot.done = true;
     for (const o of m.objects) wanted.get(bytesToHex(o.cid))?.push(o.transaction);
-    queue.push(...m.links);
+    for (const link of m.links) {
+      const known = slots.get(link.sequence);
+      if (known !== undefined && !equal(known.cid, link.cid)) {
+        if (!known.conflict)
+          findings.push({
+            code: "link-conflict",
+            sequence: link.sequence,
+            claimed: known.cid,
+            named: link.cid,
+          });
+        known.conflict = true;
+        continue;
+      }
+      if (known?.done === true || known?.tried.some((t) => equal(t, link.transaction)) === true)
+        continue;
+      if (reads + queue.length - head >= budget) return false;
+      (known ?? claim(link.sequence, link.cid)).tried.push(link.transaction);
+      queue.push({ sequence: link.sequence, transaction: link.transaction });
+    }
+    return true;
+  };
+
+  // Reads `transaction` for the sequence `slot` holds, and goes on from its
+  // manifest if it is reached there.
+  const attempt = async (
+    sequence: bigint,
+    slot: Slot,
+    transaction: Uint8Array,
+    from: ManifestOrigin,
+  ): Promise<boolean> => {
+    const m = await fetch(from, slot.cid, transaction);
+    if (m === "unavailable") {
+      slot.unavailable.push(transaction);
+      return true;
+    }
+    if (m === undefined) slot.done = true;
+    else if (m.sequence !== sequence) {
+      findings.push({ code: "link-sequence", sequence, cid: slot.cid, found: m.sequence });
+      slot.done = true;
+    } else return reach(slot, m);
+    return true;
+  };
+
+  const drain = async (): Promise<boolean> => {
+    while (head < queue.length) {
+      // Taken off the queue before it is read, so `reach` counts only what is still pending.
+      const { sequence, transaction } = queue[head++] as Pending;
+      const slot = slots.get(sequence) as Slot;
+      // Reached since it was queued (from an earlier locator, or a sibling
+      // upload), or its bytes refused.
+      if (slot.done) continue;
+      if (!(await attempt(sequence, slot, transaction, { link: sequence }))) return false;
+    }
+    return true;
   };
 
   const unknown = (ref: LocatorRef, l: ReturnType<typeof decodeArchiveLocator>) => {
@@ -271,54 +355,57 @@ export async function walkArchive(
         cid: named.manifest,
         transaction: named.transaction,
       });
-    else if (m !== undefined && m !== "budget") {
+    else if (m !== undefined) {
       latest = m.sequence;
-      reach(m.sequence, named.manifest, m);
+      const slot = claim(m.sequence, named.manifest);
+      slot.tried.push(named.transaction);
+      overBudget = !reach(slot, m) || !(await drain());
     }
   }
 
-  for (let at = 0; at < queue.length; at++) {
-    const link = queue[at] as ManifestLink;
-    let slot = slots.get(link.sequence);
-    if (slot !== undefined && !equal(slot.cid, link.cid)) {
-      findings.push({
-        code: "link-conflict",
-        sequence: link.sequence,
-        reached: slot.cid,
-        named: link.cid,
-      });
-      continue;
+  if (!overBudget && latest !== undefined) {
+    const seen = new Set<string>();
+    for (const [i, bytes] of (options.earlier ?? []).entries()) {
+      const key = bytesToHex(bytes);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const l = decodeArchiveLocator(bytes);
+      unknown(i, l);
+      if (l.kind !== "manifest") continue;
+      const from = { locator: i };
+      const at = byCid.get(bytesToHex(l.manifest));
+      if (at !== undefined) {
+        // The chain's own manifest at `at`: nothing to judge, but a new
+        // transaction for it may reach what the links' didn't.
+        const slot = slots.get(at) as Slot;
+        if (slot.done || slot.tried.some((t) => equal(t, l.transaction))) continue;
+        if (reads >= budget) {
+          overBudget = true;
+          break;
+        }
+        slot.tried.push(l.transaction);
+        if (!(await attempt(at, slot, l.transaction, from)) || !(await drain())) {
+          overBudget = true;
+          break;
+        }
+        continue;
+      }
+      if (reads >= budget) {
+        overBudget = true;
+        break;
+      }
+      const m = await fetch(from, l.manifest, l.transaction);
+      if (m === "unavailable")
+        findings.push({ code: "unavailable", from, cid: l.manifest, transaction: l.transaction });
+      else if (m !== undefined)
+        findings.push({
+          code: "locator-mismatch",
+          locator: i,
+          sequence: m.sequence,
+          named: l.manifest,
+          chain: slots.get(m.sequence)?.cid,
+        });
     }
-    if (slot?.done === true || slot?.unavailable.some((t) => equal(t, link.transaction)) === true)
-      continue;
-    if (slot === undefined) {
-      slot = { cid: link.cid, reached: false, done: false, unavailable: [] };
-      slots.set(link.sequence, slot);
-    }
-    const m = await fetch({ link: link.sequence }, link.cid, link.transaction);
-    if (m === "budget") {
-      overBudget = true;
-      break;
-    }
-    if (m === "unavailable") {
-      slot.unavailable.push(link.transaction);
-      continue;
-    }
-    if (m === undefined) {
-      slot.done = true;
-      continue;
-    }
-    if (m.sequence !== link.sequence) {
-      findings.push({
-        code: "link-sequence",
-        sequence: link.sequence,
-        cid: link.cid,
-        found: m.sequence,
-      });
-      slot.done = true;
-      continue;
-    }
-    reach(link.sequence, link.cid, m);
   }
 
   const reached = [...slots]
@@ -326,53 +413,21 @@ export async function walkArchive(
     .map(([sequence, s]) => ({ sequence, cid: s.cid }))
     .sort((a, b) => (a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0));
 
-  // The chain's own reports stand whether or not the earlier locators fit
-  // in what is left of the budget.
-  const walked = !overBudget;
-  if (walked && latest !== undefined) {
-    const byCid = new Set(reached.map((r) => bytesToHex(r.cid)));
-    for (const [i, bytes] of (options.earlier ?? []).entries()) {
-      const l = decodeArchiveLocator(bytes);
-      unknown(i, l);
-      if (l.kind !== "manifest" || byCid.has(bytesToHex(l.manifest))) continue;
-      const from = { locator: i };
-      const m = await fetch(from, l.manifest, l.transaction);
-      if (m === "budget") {
-        overBudget = true;
-        break;
-      }
-      if (m === "unavailable")
-        findings.push({ code: "unavailable", from, cid: l.manifest, transaction: l.transaction });
-      else if (m !== undefined) {
-        const slot = slots.get(m.sequence);
-        findings.push({
-          code: "locator-mismatch",
-          locator: i,
-          sequence: m.sequence,
-          named: l.manifest,
-          reached: slot?.reached === true ? slot.cid : undefined,
-        });
-      }
-    }
-  }
-
-  if (walked) {
+  if (overBudget) findings.push({ code: "over-budget", budget });
+  else if (latest !== undefined) {
     for (const [sequence, s] of slots)
       if (!s.reached)
         for (const transaction of s.unavailable)
           findings.push({ code: "unavailable", from: { link: sequence }, cid: s.cid, transaction });
-    if (latest !== undefined) {
-      // `reached` is sorted and holds `latest`, so the gaps are the holes
-      // between consecutive reached sequences from 0.
-      let next = 0n;
-      for (const r of reached) {
-        if (r.sequence > next)
-          findings.push({ code: "archive-gap", first: next, last: r.sequence - 1n });
-        next = r.sequence + 1n;
-      }
+    // `reached` is sorted and holds `latest`, so the gaps are the holes
+    // between consecutive reached sequences from 0.
+    let next = 0n;
+    for (const r of reached) {
+      if (r.sequence > next)
+        findings.push({ code: "archive-gap", first: next, last: r.sequence - 1n });
+      next = r.sequence + 1n;
     }
   }
-  if (overBudget) findings.push({ code: "over-budget", budget });
 
   return { latest, manifests: reached, listings: wanted, findings, reads };
 }

@@ -157,7 +157,7 @@ describe("walkArchive", () => {
     const { source, asked } = arweave([m0, other, m1, m2]);
     const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source);
     expect(walk.findings).toEqual([
-      { code: "link-conflict", sequence: 0n, reached: m0.cid, named: other.cid },
+      { code: "link-conflict", sequence: 0n, claimed: m0.cid, named: other.cid },
     ]);
     expect(asked).not.toContain(bytesToHex(other.transaction));
     expect(walk.manifests.map((m) => bytesToHex(m.cid))).toEqual(
@@ -288,7 +288,8 @@ describe("walkArchive", () => {
     const { source } = arweave([...chain, top]);
     const walk = await walkArchive(locatorOf(top), DEPLOYMENT, source, { maxManifests: 3 });
     expect(walk.findings).toEqual([{ code: "over-budget", budget: 3 }]);
-    expect(walk.reads).toBe(3);
+    // It stops once the reads queued can't fit, before making them.
+    expect(walk.reads).toBe(2);
     const whole = await walkArchive(locatorOf(top), DEPLOYMENT, source, { maxManifests: 8 });
     expect(whole.findings).toEqual([
       { code: "unavailable", from: { link: 9n }, cid: lost.cid, transaction: lost.transaction },
@@ -325,9 +326,9 @@ describe("walkArchive", () => {
     ];
     const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source, { earlier });
     expect(walk.findings).toEqual([
-      { code: "locator-mismatch", locator: 1, sequence: 1n, named: fork.cid, reached: m1.cid },
+      { code: "locator-mismatch", locator: 1, sequence: 1n, named: fork.cid, chain: m1.cid },
       { code: "locator-version", locator: 2, version: 9 },
-      { code: "locator-mismatch", locator: 3, sequence: 3n, named: ahead.cid, reached: undefined },
+      { code: "locator-mismatch", locator: 3, sequence: 3n, named: ahead.cid, chain: undefined },
       { code: "unavailable", from: { locator: 4 }, cid: gone.cid, transaction: gone.transaction },
       {
         code: "manifest-foreign",
@@ -368,6 +369,93 @@ describe("walkArchive", () => {
     expect([...walk.listings].map(([k, v]) => [k, v.map(bytesToHex)])).toEqual([
       [bytesToHex(a), [tx(3), tx(1)].map(bytesToHex)],
       [bytesToHex(object(1002)), []],
+    ]);
+  });
+
+  test("a sequence whose bytes were refused is never read again under another transaction", async () => {
+    const bytes = Uint8Array.of(4, 5, 6);
+    const junk: Stored = {
+      manifest: manifest(0n, []).manifest,
+      cid: objectCid(bytes),
+      transaction: tx(710),
+      bytes,
+    };
+    const again = { ...junk, transaction: tx(711) };
+    const m1 = manifest(1n, [junk]);
+    const m2 = manifest(2n, [again, m1]);
+    const { source, asked } = arweave([junk, again, m1, m2]);
+    const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source);
+    expect(codes(walk.findings)).toEqual(["manifest-malformed", "archive-gap"]);
+    expect(asked).not.toContain(bytesToHex(junk.transaction));
+  });
+
+  test("a link a source lapsed on, then reached through an earlier locator, is the chain's", async () => {
+    const m0 = manifest(0n, []);
+    const m1 = manifest(1n, [m0]);
+    const m2 = manifest(2n, [m1]);
+    // m1 is served only on its second request, and under a second upload.
+    const reupload = { ...m1, transaction: tx(901) };
+    for (const second of [m1, reupload]) {
+      let first = true;
+      const held = arweave([m0, second, m2]);
+      const source: TransactionSource = async (t, limit) => {
+        if (first && bytesToHex(t) === bytesToHex(m1.transaction)) {
+          first = false;
+          return [];
+        }
+        return held.source(t, limit);
+      };
+      const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source, {
+        earlier: [locatorOf(second)],
+      });
+      // Never a mismatch: the locator names the chain's own manifest 1. Read
+      // under a new transaction it reaches 1; under the link's, already
+      // read, it is still unavailable.
+      if (second === m1) expect(codes(walk.findings)).toEqual(["unavailable", "archive-gap"]);
+      else {
+        expect(walk.findings).toEqual([]);
+        expect(walk.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
+      }
+    }
+  });
+
+  test("a repeated earlier locator is judged once", async () => {
+    const m0 = manifest(0n, []);
+    const m1 = manifest(1n, [m0]);
+    const fork = manifest(1n, [m0], { objects: [{ cid: object(6), transaction: tx(6) }] }, tx(811));
+    const { source } = arweave([m0, m1, fork]);
+    const walk = await walkArchive(locatorOf(m1), DEPLOYMENT, source, {
+      earlier: [locatorOf(fork), locatorOf(m0), locatorOf(fork)],
+    });
+    expect(codes(walk.findings)).toEqual(["locator-mismatch"]);
+    expect(walk.reads).toBe(3);
+  });
+
+  test("a wide tree stops at once, its queue no longer than the reads left", async () => {
+    const leaves = Array.from({ length: 1024 }, (_, i) =>
+      manifest(BigInt(i), [], {}, tx(20_000 + i)),
+    );
+    const root = manifest(5000n, leaves);
+    const { source, asked } = arweave([root, ...leaves]);
+    const walk = await walkArchive(locatorOf(root), DEPLOYMENT, source, { maxManifests: 10 });
+    expect(walk.findings).toEqual([{ code: "over-budget", budget: 10 }]);
+    expect(walk.reads).toBe(1);
+    expect(asked.length).toBe(1);
+    // A conflict is reported once per sequence however many links name it.
+    const others = Array.from({ length: 3 }, (_, i) =>
+      manifest(0n, [], { objects: [{ cid: object(300 + i), transaction: tx(1) }] }, tx(30_000 + i)),
+    );
+    const m0 = leaves[0] as Stored;
+    // Four manifests each link sequence 0, three of them to another CID.
+    const mids = [m0, ...others].map((o, k) => manifest(BigInt(1 + k), [o]));
+    const top = manifest(10n, mids);
+    const conflicts = await walkArchive(
+      locatorOf(top),
+      DEPLOYMENT,
+      arweave([m0, ...mids, top]).source,
+    );
+    expect(codes(conflicts.findings).filter((c) => c === "link-conflict")).toEqual([
+      "link-conflict",
     ]);
   });
 
@@ -475,8 +563,28 @@ describe("latestLocatorFromState", () => {
     }
   });
 
+  test("any locator length round-trips through Solidity's layout", () => {
+    fc.assert(
+      fc.property(
+        fc.uint8Array({ minLength: 1, maxLength: 128 }),
+        fc.bigInt({ min: 1n, max: (1n << 256n) - 1n }),
+        (bytes, count) => {
+          expect(latestLocatorFromState(state(layout(bytes, count)))).toEqual({
+            kind: "locator",
+            locator: bytes,
+            count,
+          });
+        },
+      ),
+      { numRuns },
+    );
+  });
+
   test("a length no locator has is framing, and never reads past 128 bytes", () => {
     const head = (w: Uint8Array) => state([[word(A + 2n), stored(w)]]);
+    const empty = new Uint8Array(32);
+    empty[0] = 1; // bytes beside a zero length
+    expect(latestLocatorFromState(head(empty)).kind).toBe("locator-framing");
     const short = new Uint8Array(32);
     short[31] = 64; // 32 bytes claimed in the short form
     expect(latestLocatorFromState(head(short)).kind).toBe("locator-framing");

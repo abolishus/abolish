@@ -621,6 +621,18 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       // as a user would export it from any node holding the same blocks.
       const blocks = readFileSync(join(mirror, `${e.name}.car`));
       writeBundle(dir, e, clock, evidenceFor, { blocks });
+      // The same bundle in format 5, with the run of finalized L1 headers
+      // from block 0: what the community node gathers (stage 9, by the node)
+      // must be judged as this is.
+      const withBlocks = join(OUT, e.name, "bundle-l1-blocks");
+      writeBundle(
+        withBlocks,
+        e,
+        clock,
+        { ...evidenceFor, blocks: await headers(anvil, l1.number) },
+        { blocks },
+      );
+      if (e.name !== "questions") failures.push(...verify(withBlocks, () => []));
       if (e.name === "honest") {
         failures.push(...verify(dir, (r) => checkExpectations(r, "blocks.car", HONEST_BALLOTS)));
         // The same election read from the node's gateway alone, no copy in the bundle.
@@ -677,21 +689,12 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
             }),
           ),
         );
-        // The same bundle in format 5, with the run of finalized L1 headers
-        // from block 0: the verifier judges each ballot's L1 reference (5.8)
-        // and selects over the admitted ballots (6.1): voter 1's re-vote
+        // Its format-5 bundle: the verifier judges each ballot's L1 reference
+        // (5.8) and selects over the admitted ballots (6.1): voter 1's re-vote
         // (entry 4) over its first ballot (entry 2). Past the close it looks
         // for the tally and the shares' destruction, which no stage posts yet
         // (stage 6), so 7.2 and 8.5 fail and are pinned as failing until one
         // does; nothing else of the report is required here.
-        const withBlocks = join(OUT, e.name, "bundle-l1-blocks");
-        writeBundle(
-          withBlocks,
-          e,
-          clock,
-          { ...evidenceFor, blocks: await headers(anvil, l1.number) },
-          { blocks },
-        );
         failures.push(
           ...verify(withBlocks, (r) => [
             ...checkRows("questions (l1 blocks)", r, {
@@ -822,7 +825,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       readFileSync(join(reports, id, "report.json"), "utf8"),
     ) as VerifierRun["report"];
     const theirs = JSON.parse(
-      readFileSync(join(OUT, e.name, "bundle-report.json"), "utf8"),
+      readFileSync(join(OUT, e.name, "bundle-l1-blocks-report.json"), "utf8"),
     ) as VerifierRun["report"];
     if (
       ours.verdict !== theirs.verdict ||

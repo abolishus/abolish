@@ -2,7 +2,7 @@
 // the board anchor's checkpoints name on L1, the verifier's own checks over
 // the board copy read by CID from the node's directory, with every other
 // input read from L1 and L2, never from our servers (T-24, T-49, T-51). The
-// node only gathers inputs into a format-4 bundle the verifier parses as
+// node only gathers inputs into a format-5 bundle the verifier parses as
 // strictly as one on disk, and judges nothing itself: the report is
 // `verifyBundle`'s. Each election's bundle and report are written beside
 // each other, so anyone can rerun `abolish-verify` on the same inputs.
@@ -19,6 +19,11 @@
 // - The clock's `epoch`, `period` and `deadline`: the anchor's getters; its
 //   seal, `lastSegment`: the highest proven checkpoint's segment, since no
 //   seal is derived from a definition yet ([[election-definition]], The seal).
+// - The run of finalized L1 headers (`l1Blocks`), which 5.8, selection, the
+//   close check, the tally and live releases read: every header from before
+//   the window's start to after its end, linked by parent hashes and ending
+//   in the finalized header where it reaches it (src/l1.ts, `headerRun`); the
+//   L1 node is trusted for which block is finalized, as for the anchors.
 //
 // Every one of these is reported by the verifier as an unauthenticated input
 // where it is one, so the verdict stays unverifiable while any is (T-53).
@@ -32,10 +37,11 @@ import {
   CHUNK_SIZE,
   encodeCheckpoint,
   type EventContracts,
+  L1_REF_MARGIN,
 } from "@abolishus/crypto";
 import {
   type BlockStore,
-  BUNDLE_FORMAT_CEREMONY,
+  BUNDLE_FORMAT_BLOCKS,
   BundleError,
   L1Error,
   type L1Header,
@@ -46,7 +52,7 @@ import {
   verifyBundle,
 } from "@abolishus/verifier";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { type AnchorTiming, loggedCheckpoints, provenCheckpoints } from "./l1.ts";
+import { type AnchorTiming, headerRun, loggedCheckpoints, provenCheckpoints } from "./l1.ts";
 import { L2Error, pinnedPanel, registration } from "./l2.ts";
 import { type Rpc, RpcError } from "./rpc.ts";
 import type { Mirror } from "./store.ts";
@@ -100,6 +106,8 @@ export interface VerifyOptions {
   readonly l2FromBlock: bigint;
   /** The byte budget for one election's board copy. */
   readonly maxBoardBytes: number;
+  /** The byte budget for one election's run of L1 headers (`MAX_RUN_BYTES`). */
+  readonly maxRunBytes: number;
   readonly report: (r: VerifyReport) => void;
 }
 
@@ -201,9 +209,18 @@ async function gather(
   // In segment order, as the reader proves them.
   const seal = proven.checkpoints.at(-1)?.segment;
   if (seal === undefined) return { error: "unanchored" };
+  // From an hour before opening, where 5.8's window starts, to past the
+  // close and its inclusion bound, which 6.3 and the live snapshots read
+  // (docs/spec/verifier.md, L1 references, Close check, Releases).
+  const blocks = await headerRun(
+    l1,
+    { header, rlp: options.headerRlp },
+    { before: d.opens_at - L1_REF_MARGIN, after: d.closes_at + BigInt(d.l1_inclusion_bound) },
+    options.maxRunBytes,
+  ).catch(tagged("l1"));
   const json = JSON.stringify(
     {
-      format: BUNDLE_FORMAT_CEREMONY,
+      format: BUNDLE_FORMAT_BLOCKS,
       definition: hex(reg.definition),
       clock: {
         epoch: timing.epoch.toString(),
@@ -220,6 +237,7 @@ async function gather(
         checkpoints: checkpoints.map((c) => hex(encodeCheckpoint(c))),
       },
       panel: { threshold: panel.threshold.toString(), keys: panel.keys.map(hex) },
+      l1Blocks: blocks.map(hex),
     },
     null,
     2,

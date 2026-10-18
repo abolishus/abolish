@@ -192,6 +192,40 @@ contract BallotCheckTest is TestBase {
         (p.authorThreshold, p.authorPanelSize) = (0, 0);
         stub.set(h, p, tiers, roots);
         _expectRefusedV4(record, stub, 6, 0, BallotCheckLib.Code.ValidityShape);
+
+        // ok-default-only's author half as `T` rows of no element, beside
+        // no share hash: the second encoding the one-encoding rule refuses,
+        // as its shape, before its ballot hash changes anything.
+        ParametersStub own = _stubV4(json, ".elections.default-only");
+        bytes memory honest = _bytes(json, ".ballots[7].encoding");
+        assertTrue(_eq(_str(json, ".ballots[7].id"), "ok-default-only"), "the default-only ballot");
+        lib.check(honest, own, 6, 0);
+        // `vss` (9 rows of 2) and `share_hashes` (3) end at 1080.
+        uint256 at = BallotCheckLib.VOTE_AT + 4 + 9 * (4 + 64) + 4 + 3 * 32;
+        assertEq(_u32(honest, at), 0, "the empty author_vss");
+        bytes memory rows = abi.encodePacked(uint32(9), new bytes(4 * 9));
+        _expectRefusedV4(
+            bytes.concat(
+                _slice(honest, 0, at), rows, _slice(honest, at + 4, honest.length - at - 4)
+            ),
+            own,
+            6,
+            0,
+            BallotCheckLib.Code.ValidityShape
+        );
+    }
+
+    /// A definition with an author panel fits no ballot of versions 1 to 3,
+    /// so the author share hashes are never read from a record without them.
+    function test_AuthorPanelFitsNoEarlierVersion() public {
+        (bytes memory honest, ParametersStub stub) = _honestV1();
+        string memory json = vm.readFile(V1);
+        bytes32 h = bytes32(_bytes(json, ".elections.plurality.definitionHash"));
+        (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
+            _electionV1(json, ".elections.plurality");
+        (p.authorThreshold, p.authorPanelSize) = (1, 1);
+        stub.set(h, p, tiers, roots);
+        _expectRefusedV4(honest, stub, 6, 2, BallotCheckLib.Code.ValidityShape);
     }
 
     /// Every decode rejection at its offset. The one record of another type
@@ -929,6 +963,17 @@ contract BallotCheckTest is TestBase {
             o += 4 + 32 * _u32(r, o);
         }
         return o + 4 + 32 * _u32(r, o);
+    }
+
+    function _slice(bytes memory r, uint256 from, uint256 length)
+        internal
+        pure
+        returns (bytes memory c)
+    {
+        c = new bytes(length);
+        for (uint256 i; i < length; i++) {
+            c[i] = r[from + i];
+        }
     }
 
     function _u32(bytes memory r, uint256 o) internal pure returns (uint256 v) {

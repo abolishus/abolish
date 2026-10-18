@@ -238,7 +238,8 @@ library BallotCheckLib {
     /// pinned beside a definition with several fits no shape. Version 4's
     /// author half has `T` options of exactly `k_A` and `n_A` share hashes
     /// with an author panel, and is two empty lists without one, never `T`
-    /// empty lists, so such a ballot has one encoding.
+    /// empty lists, so such a ballot has one encoding. Versions 1 to 3 fit
+    /// no definition with an author panel, which pins version 4.
     function shapeOk(
         bytes calldata record,
         Layout memory l,
@@ -249,11 +250,12 @@ library BallotCheckLib {
             l.vssCount != p.optionCount || !l.degreesK || l.shareCount != p.panelSize
                 || l.optionProofCount != p.optionCount
         ) return false;
+        // Below version 4 both author counts are 0, so a definition with an
+        // author panel fits no earlier version's shape, and the share-hash
+        // check never reads an author list a record doesn't have.
         if (
-            version >= 4
-                && (l.authorVssCount != (p.authorThreshold == 0 ? 0 : p.optionCount)
-                    || !l.authorDegreesK
-                    || l.authorShareCount != p.authorPanelSize)
+            l.authorVssCount != (p.authorThreshold == 0 ? 0 : p.optionCount) || !l.authorDegreesK
+                || l.authorShareCount != p.authorPanelSize
         ) return false;
         uint256 count = _uint(record, l.sumAt, 4);
         if (version < 3) {
@@ -285,6 +287,9 @@ library BallotCheckLib {
     {
         (l.vssCount, l.degreesK, o) = _vss(r, o, k);
         (l.shareHashesAt, l.shareCount, o) = _shareHashes(r, o);
+        // Below version 4 the author half is absent: no rows, so none of
+        // the wrong degree.
+        l.authorDegreesK = true;
         if (version >= 4) {
             (l.authorVssCount, l.authorDegreesK, o) = _vss(r, o, kA);
             (l.authorShareHashesAt, l.authorShareCount, o) = _shareHashes(r, o);

@@ -142,7 +142,7 @@ and accepts if the recomputed `c` equals the proof's. Every point is a `bjj-poin
 
 ## Answer record
 
-A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (version 1 of the key transcript, [[nullifier-key]], uses version 1). It travels to the client encrypted to a fresh client key (part 2b-4), and the client forwards the `k` it combined to every attester (part 2b-4).
+A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (version 1 of the key transcript, [[nullifier-key]], uses version 1). It travels to the client encrypted to a fresh client key ([[nullifier-transport]], Reply), and the client forwards the `k` it combined to every attester (part 2b-4).
 
 Record type `0x0010`, version 1:
 
@@ -204,7 +204,7 @@ with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` ([[keyed-nullif
 
 - **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof ([[nullifier-query]], Query circuit) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers (part 2b-3b-2b makes `packages/crypto`'s evaluation take only a query whose proof has been checked; until then its `evaluate` answers any well-formed `B`, and nothing calls it outside tests), and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
 - **Threshold one-more Diffie–Hellman.** Fewer than `k` seats can't evaluate, and `q` queries give no more than `q` evaluations, under the threshold one-more Diffie–Hellman assumption in the random-oracle model (TOPPSS; [[0022-tier2-keyed-nullifier]], Pros).
-- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-4, to the registration KEM keys of [[nullifier-key]]) narrows it to clients and seats.
+- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit ([[nullifier-transport]], to the registration KEM keys of [[nullifier-key]] and a fresh client key) narrows it to clients and seats.
 - **Not constant time everywhere.** `@noble/curves`' scalar multiplication is constant time, and `packages/crypto` uses it for every secret (`sk_i`, `s_i`, `w_1`, `w_2`, `r⁻¹`): `s_i` with the public `C_i` gives `sk_i · G`, which the commitment's hiding must keep. `sk_i`, `s_i`, `w_1` and `w_2` are `bigint`s, which JavaScript can't zeroise, and the response arithmetic is plain `bigint` arithmetic. A seat's node runs on hardware it controls; the mainnet audit covers it (T-14).
 
 ## Test vectors

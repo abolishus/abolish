@@ -6,7 +6,7 @@ What this page doesn't cover yet (P3-4 part 2b's later steps):
 
 - **Resharing** the key to a new panel or epoch, and how a later epoch's key succeeds this one, are [[nullifier-reshare]]'s (part 2b-2b). A scope's initial key is made once, here; every later key is a reshare of the one before it.
 - **Where approvals are recorded** is the group registry ([[contracts]], Group registry, Nullifier keys), which decides whether a key counts. [[verifier]] 2.4's use of the key, and where transcripts are published: part 2b-4. This page defines the approval statement and the rule an honest seat follows.
-- **Queries** ([[nullifier-query]]) and their transport to the registration KEM keys this page registers: part 2b-4.
+- **Queries** ([[nullifier-query]]) and their transport to the registration KEM keys this page registers: [[nullifier-transport]].
 
 ## Sources
 
@@ -18,7 +18,7 @@ What this page doesn't cover yet (P3-4 part 2b's later steps):
 
 The panel is the scope's **initial panel**, the one the deployment's release pins for the Tier 2 scope's initial key ([[trustee-identity]], Panel identifier). That pin is kept apart from the panel that holds the key today and never changes, even after a reshare hands the key to another panel ([[nullifier-reshare]]); a checker accepts an initial key only under it. The panel has `k`, `n` and the identity keys `Q_1 … Q_n`. Each seat `i` that takes part generates, fresh for this key and this run, from the CSPRNG:
 
-- a **registration KEM key** pair (`kem_key_i`, `kem_secret_i`) ([[share-encryption]], Trustee KEM key). It receives the seat's dealt shares in round 2 and, from part 2b-4, clients' queries. Unlike a per-election KEM key, it lives as long as the seat's share of `sk`;
+- a **registration KEM key** pair (`kem_key_i`, `kem_secret_i`) ([[share-encryption]], Trustee KEM key). It receives the seat's dealt shares in round 2 and clients' queries ([[nullifier-transport]]). Unlike a per-election KEM key, it lives as long as the seat's share of `sk`;
 - a **registration signing key** `P_i = d_i · G` on P-256, `d_i` uniform on 1 to `n_P256 − 1`. It signs the seat's keyed-nullifier answers ([[keyed-nullifier]], Answer record), so the identity key signs only this page's messages and approval, at a ceremony with a person present, and never automatically (T-37).
 
 A **coordinator** relays messages and assembles the transcript, as in [[ceremony]]. It is trusted for nothing but liveness (Security notes).

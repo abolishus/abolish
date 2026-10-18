@@ -1,15 +1,31 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 
-import { type DraftsClient, DraftsError, type PollSummary } from "../account/drafts.ts";
+import {
+  type DraftsClient,
+  DraftsError,
+  type PollModerationView,
+  type PollSummary,
+} from "../account/drafts.ts";
 import { AccountPolls } from "./account-polls.tsx";
+
+const VISIBLE: PollModerationView = {
+  state: "visible",
+  latest: undefined,
+  appealable: false,
+  appeals: [],
+};
 
 /** A drafts handler in memory: the list's calls, with no network. */
 function fakeDrafts(
   polls: PollSummary[],
-  { refuse }: { refuse?: DraftsError } = {},
+  {
+    refuse,
+    moderated = {},
+  }: { refuse?: DraftsError; moderated?: Record<string, PollModerationView> } = {},
 ): DraftsClient & { calls: string[] } {
   let list = [...polls];
+  const moderation = new Map(Object.entries(moderated));
   const calls: string[] = [];
   const act = (name: string, id: string, change: () => void) => {
     calls.push(`${name} ${id}`);
@@ -29,6 +45,25 @@ function fakeDrafts(
       throw new DraftsError("failed");
     },
     update: async () => {},
+    moderation: async (id) => moderation.get(id) ?? VISIBLE,
+    appeal: async (id) =>
+      act("appeal", id, () => {
+        const m = moderation.get(id);
+        if (m?.latest === undefined) throw new DraftsError("changed");
+        moderation.set(id, {
+          ...m,
+          appealable: false,
+          appeals: [
+            ...m.appeals,
+            {
+              decisionSeq: m.latest.seq,
+              filedAt: "2026-10-18T09:30:00.000Z",
+              outcome: undefined,
+              reviewedAt: undefined,
+            },
+          ],
+        });
+      }),
     retry: async (id) =>
       act("retry", id, () => {
         list = list.map((p) =>
@@ -228,6 +263,177 @@ export const ListUnavailable: Story = {
   play: async ({ canvasElement }) => {
     await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
       "Your polls couldn't be loaded. Try again shortly.",
+    );
+  },
+};
+
+const DELISTED: PollModerationView = {
+  state: "delisted",
+  latest: { seq: 41n, action: "delist", reason: "spam", decidedAt: "2026-10-17T16:45:00.000Z" },
+  appealable: true,
+  appeals: [],
+};
+
+export const AppealADecision: Story = {
+  args: { client: fakeDrafts([OPEN], { moderated: { [OPEN.id]: DELISTED } }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const block = await canvas.findByRole("group", {
+      name: "Delisted: Spam, October 17, 2026 at 4:45 PM UTC",
+    });
+    const moderation = within(block);
+    await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
+    await expect(moderation.getByRole("link", { name: "See the moderation log" })).toHaveAttribute(
+      "href",
+      "/moderation",
+    );
+    // Asks once more, and can step back.
+    await userEvent.click(
+      moderation.getByRole("button", {
+        name: "Appeal this decision…",
+        description: "Name the new ferry",
+      }),
+    );
+    await userEvent.click(moderation.getByRole("button", { name: "Not now" }));
+    await expect(calls(args.client)).toEqual([]);
+    await userEvent.click(moderation.getByRole("button", { name: "Appeal this decision…" }));
+    await expect(moderation.getByRole("group", { name: /^Appeal this decision\?/ })).toBeVisible();
+    await userEvent.click(moderation.getByRole("button", { name: "Send appeal" }));
+    await expect(await moderation.findByRole("status")).toHaveTextContent(
+      "Your appeal is filed. A different moderator will review it.",
+    );
+    await expect(
+      moderation.getByText(
+        "You appealed decision No. 41 on October 18, 2026 at 9:30 AM UTC: waiting for a moderator other than the one who decided.",
+      ),
+    ).toBeVisible();
+    // Once filed, the decision can't be appealed again.
+    await expect(moderation.queryByRole("button", { name: /Appeal/ })).toBeNull();
+    await expect(
+      moderation.getByText("Delisted: Spam, October 17, 2026 at 4:45 PM UTC"),
+    ).toHaveFocus();
+    await expect(calls(args.client)).toEqual([`appeal ${OPEN.id}`]);
+  },
+};
+
+const HIDDEN: PollModerationView = {
+  state: "hidden",
+  latest: {
+    seq: 52n,
+    action: "hide",
+    reason: "personal-data",
+    decidedAt: "2026-10-16T08:00:00.000Z",
+  },
+  appealable: false,
+  appeals: [
+    {
+      decisionSeq: 47n,
+      filedAt: "2026-10-14T12:00:00.000Z",
+      outcome: "superseded",
+      reviewedAt: "2026-10-16T08:00:00.000Z",
+    },
+    {
+      decisionSeq: 52n,
+      filedAt: "2026-10-16T09:10:00.000Z",
+      outcome: "rejected",
+      reviewedAt: "2026-10-17T11:00:00.000Z",
+    },
+  ],
+};
+
+const RESTORED: PollModerationView = {
+  state: "visible",
+  latest: {
+    seq: 60n,
+    action: "restore",
+    reason: "appeal-upheld",
+    decidedAt: "2026-10-17T15:00:00.000Z",
+  },
+  appealable: false,
+  appeals: [
+    {
+      decisionSeq: 55n,
+      filedAt: "2026-10-17T10:00:00.000Z",
+      outcome: "upheld",
+      reviewedAt: "2026-10-17T15:00:00.000Z",
+    },
+  ],
+};
+
+const HIDDEN_POLL = poll("hidden", { state: "open", title: "Rename the east pier?" });
+
+const showsModeration: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  const hidden = within(
+    await canvas.findByRole("group", {
+      name: "Text hidden: Personal data, October 16, 2026 at 8:00 AM UTC",
+    }),
+  );
+  await expect(hidden.getByText(/don't show this poll's text/)).toBeVisible();
+  await expect(
+    hidden.getByText(
+      /decision No. 47 .*: closed on October 16, 2026 at 8:00 AM UTC, because a later decision changed the poll first\./,
+    ),
+  ).toBeVisible();
+  await expect(
+    hidden.getByText(/decision No. 52 .*: rejected on October 17, 2026 at 11:00 AM UTC\./),
+  ).toBeVisible();
+  await expect(hidden.queryByRole("button")).toBeNull();
+  const restored = within(
+    canvas.getByRole("group", { name: "Restored: Appeal upheld, October 17, 2026 at 3:00 PM UTC" }),
+  );
+  await expect(restored.getByText("Our pages list and show this poll again.")).toBeVisible();
+  await expect(
+    restored.getByText(/upheld on October 17, 2026 at 3:00 PM UTC, and the poll restored\./),
+  ).toBeVisible();
+  // A poll nothing was decided about, and a draft, show no moderation at all.
+  await expect(canvas.getAllByRole("group")).toHaveLength(2);
+};
+
+const MODERATED = fakeDrafts([HIDDEN_POLL, OPEN, SETTING_UP, DRAFT], {
+  moderated: { [HIDDEN_POLL.id]: HIDDEN, [OPEN.id]: RESTORED },
+});
+
+export const ModerationHistory: Story = {
+  args: { client: MODERATED },
+  play: showsModeration,
+};
+
+export const ModerationHistoryDark: Story = {
+  args: { client: MODERATED },
+  parameters: { theme: "dark" },
+  play: showsModeration,
+};
+
+export const AppealRefusedAsChanged: Story = {
+  args: {
+    client: fakeDrafts([OPEN], {
+      moderated: { [OPEN.id]: DELISTED },
+      refuse: new DraftsError("changed"),
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Appeal this decision…" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Send appeal" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "That decision changed or was already appealed since this page read it. This shows how it stands now.",
+    );
+  },
+};
+
+export const ModerationUnavailable: Story = {
+  args: {
+    client: {
+      ...fakeDrafts([OPEN]),
+      moderation: async () => {
+        throw new DraftsError("failed");
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
+      "This poll's moderation couldn't be loaded. Try again shortly.",
     );
   },
 };

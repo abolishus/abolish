@@ -12,6 +12,7 @@ import {
 import { catalogs, type Messages, POLL_FAILURE_MESSAGES } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 import { Section } from "./page-parts.tsx";
+import { PollModeration } from "./poll-moderation.tsx";
 
 type Shown = "drafted" | "setup" | "open" | "failed";
 
@@ -53,7 +54,8 @@ export interface AccountPollsProps {
  * those that failed in setup, each failure in plain words with what the
  * author can do about it (ADR 0032, rule 14). A failed poll that can be
  * retried goes back to its draft or is discarded; one whose election is
- * registered stays, as an open poll does.
+ * registered stays, as an open poll does. Under each poll past its draft,
+ * what moderation decided about it and the author's appeal.
  */
 export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) {
   const t = useTranslate(catalogs);
@@ -255,6 +257,15 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
                     </p>
                   )}
                   {confirming?.id === p.id ? confirm(p, title, confirming.action) : null}
+                  {/* A draft has no election, so nothing to moderate. */}
+                  {shown === "drafted" ? null : (
+                    <PollModeration
+                      client={client}
+                      pollId={p.id}
+                      titleId={`poll-${p.id}-title`}
+                      {...(onSignedOut === undefined ? {} : { onSignedOut })}
+                    />
+                  )}
                 </li>
               );
             })}

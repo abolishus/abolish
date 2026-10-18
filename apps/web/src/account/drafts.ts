@@ -6,9 +6,11 @@
 // client's does (src/account/client.ts); the handler names the account
 // from it, and nothing here names one (T-10).
 
-import type { PollState } from "@abolishus/core";
+import type { AppealOutcome, ModerationState, PollState } from "@abolishus/core";
 import type { DraftQuestion, PollDraft } from "@abolishus/core/poll-draft-rules";
 import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
+
+import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
 
 // Every state core's table admits (`satisfies` keeps this list core's).
 const STATES: ReadonlySet<string> = new Set([
@@ -73,6 +75,43 @@ export interface PollWithDraft {
   readonly draft: PollDraft;
 }
 
+type RemovalGround = (typeof REMOVAL_GROUNDS)[number];
+type RestoreGround = (typeof RESTORE_GROUNDS)[number];
+
+/** A moderation decision about the author's poll, as the public log has it, never its moderator. */
+export type ModerationDecision = {
+  /** Its number in the public log. */
+  readonly seq: bigint;
+  /** ISO 8601. */
+  readonly decidedAt: string;
+} & (
+  | { readonly action: "delist" | "hide"; readonly reason: RemovalGround }
+  | { readonly action: "restore"; readonly reason: RestoreGround }
+);
+
+/** One of the author's appeals, never its reviewer. */
+export interface ModerationAppeal {
+  /** The log number of the decision it contests. */
+  readonly decisionSeq: bigint;
+  /** ISO 8601. */
+  readonly filedAt: string;
+  /** None while it waits for review. */
+  readonly outcome: AppealOutcome | undefined;
+  /** ISO 8601, with the outcome. */
+  readonly reviewedAt: string | undefined;
+}
+
+/** A poll's moderation as its author sees it (docs/moderation-policy.md, Appeals). */
+export interface PollModerationView {
+  readonly state: ModerationState;
+  /** The newest decision; none while nothing has been decided about the poll. */
+  readonly latest: ModerationDecision | undefined;
+  /** Whether the newest decision can be appealed now. */
+  readonly appealable: boolean;
+  /** Oldest decision first. */
+  readonly appeals: readonly ModerationAppeal[];
+}
+
 /** Every call the pages make, so they can be shown with stand-ins (stories, tests). */
 export interface DraftsClient {
   /** The account's polls, newest first. */
@@ -89,6 +128,10 @@ export interface DraftsClient {
   create(draft: PollDraft): Promise<string>;
   /** Replaces a draft, which must still be one. */
   update(id: string, draft: PollDraft): Promise<void>;
+  /** A poll's moderation: its state, newest decision and the author's appeals. */
+  moderation(id: string): Promise<PollModerationView>;
+  /** Appeals the poll's newest decision, which must be an unappealed removal. */
+  appeal(id: string): Promise<void>;
 }
 
 // The handler's refusal codes (src/node/drafts.ts), as the page tells them.
@@ -100,6 +143,9 @@ const REFUSALS: Readonly<Record<string, DraftsFailure>> = {
   REGISTERED: "registered",
   TOO_MANY_DRAFTS: "tooManyDrafts",
   DRAFT_REFUSED: "refused",
+  // The decision was appealed or replaced since the page read it.
+  NOT_APPEALABLE: "changed",
+  ALREADY_APPEALED: "changed",
 };
 
 async function call(path: string, body?: unknown): Promise<unknown> {
@@ -221,6 +267,73 @@ function draftOf(value: unknown): PollDraft {
   };
 }
 
+const STATES_SHOWN: ReadonlySet<string> = new Set([
+  "visible",
+  "delisted",
+  "hidden",
+] as const satisfies readonly ModerationState[]);
+const OUTCOMES: ReadonlySet<string> = new Set([
+  "upheld",
+  "rejected",
+  "superseded",
+] as const satisfies readonly AppealOutcome[]);
+const REMOVALS: ReadonlySet<string> = new Set(REMOVAL_GROUNDS);
+const RESTORES: ReadonlySet<string> = new Set(RESTORE_GROUNDS);
+
+const iso = (value: unknown): string => {
+  if (typeof value !== "string" || !ISO.test(value)) throw new DraftsError("failed");
+  return value;
+};
+
+const seq = (value: unknown): bigint => {
+  if (typeof value !== "string" || !U64.test(value)) throw new DraftsError("failed");
+  return BigInt(value);
+};
+
+function decisionOf(value: unknown): ModerationDecision {
+  const d = record(value);
+  const common = { seq: seq(d.seq), decidedAt: iso(d.decidedAt) };
+  const reason = text(d.reason);
+  if ((d.action === "delist" || d.action === "hide") && REMOVALS.has(reason))
+    return { ...common, action: d.action, reason: reason as RemovalGround };
+  if (d.action === "restore" && RESTORES.has(reason))
+    return { ...common, action: "restore", reason: reason as RestoreGround };
+  throw new DraftsError("failed");
+}
+
+/**
+ * The handler's answer for a poll's moderation, refused unless it holds
+ * together: the state is the newest decision's, only a removal can be
+ * appealable, and an appeal has a review time exactly when it has an
+ * outcome. The page words what it shows from these alone (T-68).
+ */
+function moderationOf(value: unknown): PollModerationView {
+  const m = record(value);
+  if (typeof m.state !== "string" || !STATES_SHOWN.has(m.state)) throw new DraftsError("failed");
+  if (typeof m.appealable !== "boolean") throw new DraftsError("failed");
+  const latest = m.latest === undefined ? undefined : decisionOf(m.latest);
+  const after =
+    latest === undefined || latest.action === "restore"
+      ? "visible"
+      : latest.action === "delist"
+        ? "delisted"
+        : "hidden";
+  if (m.state !== after || (m.appealable && after === "visible")) throw new DraftsError("failed");
+  const appeals = array(m.appeals).map((v): ModerationAppeal => {
+    const a = record(v);
+    const outcome = a.outcome === undefined ? undefined : text(a.outcome);
+    if (outcome !== undefined && !OUTCOMES.has(outcome)) throw new DraftsError("failed");
+    if ((outcome === undefined) !== (a.reviewedAt === undefined)) throw new DraftsError("failed");
+    return {
+      decisionSeq: seq(a.decisionSeq),
+      filedAt: iso(a.filedAt),
+      outcome: outcome as AppealOutcome | undefined,
+      reviewedAt: a.reviewedAt === undefined ? undefined : iso(a.reviewedAt),
+    };
+  });
+  return { state: m.state as ModerationState, latest, appealable: m.appealable, appeals };
+}
+
 // The handler's own wire form: `closesAt` a decimal string.
 const wire = (d: PollDraft) => ({ ...d, closesAt: d.closesAt.toString() });
 
@@ -259,5 +372,11 @@ export const draftsClient: DraftsClient = {
   },
   async update(id, draft) {
     await call("/update", { id, draft: wire(draft) });
+  },
+  async moderation(id) {
+    return moderationOf(await call("/moderation", { id }));
+  },
+  async appeal(id) {
+    await call("/appeal", { id });
   },
 };

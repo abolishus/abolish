@@ -280,3 +280,187 @@ describe("drafts client", () => {
       expect(init.headers).toEqual({ "content-type": "application/json" });
   });
 });
+
+// A poll's moderation as the handler answers it (`POST /drafts/moderation`,
+// P2-10 part 3b-2a): the page shows only an answer that holds together.
+describe("moderation", () => {
+  const DELIST = {
+    seq: "41",
+    action: "delist",
+    reason: "spam",
+    decidedAt: "2026-10-17T16:45:00.000Z",
+  };
+  const ANSWER = {
+    state: "delisted",
+    latest: DELIST,
+    appealable: false,
+    appeals: [
+      {
+        decisionSeq: "12",
+        filedAt: "2026-10-14T12:00:00.000Z",
+        outcome: "superseded",
+        reviewedAt: "2026-10-16T08:00:00.000Z",
+      },
+      { decisionSeq: "41", filedAt: "2026-10-17T17:00:00.000Z" },
+    ],
+  };
+
+  test("reads the state, the newest decision and the appeals as the handler answers them", async () => {
+    const calls = serve(
+      Response.json(ANSWER),
+      Response.json({ state: "visible", appealable: false, appeals: [] }),
+    );
+    expect(await draftsClient.moderation(ID)).toEqual({
+      state: "delisted",
+      latest: { ...DELIST, seq: 41n },
+      appealable: false,
+      appeals: [
+        {
+          decisionSeq: 12n,
+          filedAt: "2026-10-14T12:00:00.000Z",
+          outcome: "superseded",
+          reviewedAt: "2026-10-16T08:00:00.000Z",
+        },
+        {
+          decisionSeq: 41n,
+          filedAt: "2026-10-17T17:00:00.000Z",
+          outcome: undefined,
+          reviewedAt: undefined,
+        },
+      ],
+    });
+    // A poll nothing was decided about.
+    expect(await draftsClient.moderation(ID)).toEqual({
+      state: "visible",
+      latest: undefined,
+      appealable: false,
+      appeals: [],
+    });
+    expect(calls.map((c) => [c.url, c.init.body])).toEqual([
+      ["/drafts/moderation", JSON.stringify({ id: ID })],
+      ["/drafts/moderation", JSON.stringify({ id: ID })],
+    ]);
+  });
+
+  test("takes every ground under its own actions only", async () => {
+    const removals = [
+      "illegal",
+      "personal-data",
+      "threat",
+      "harassment",
+      "spam",
+      "impersonation",
+      "legal-notice",
+    ];
+    const restores = ["appeal-upheld", "error", "notice-withdrawn"];
+    for (const [action, state] of [
+      ["delist", "delisted"],
+      ["hide", "hidden"],
+      ["restore", "visible"],
+    ] as const)
+      for (const reason of [...removals, ...restores]) {
+        serve(
+          Response.json({
+            state,
+            latest: { ...DELIST, action, reason },
+            appealable: false,
+            appeals: [],
+          }),
+        );
+        const fits = (action === "restore" ? restores : removals).includes(reason);
+        const read = draftsClient.moderation(ID);
+        if (fits) expect((await read).latest).toMatchObject({ action, reason });
+        else expect(await failure(read)).toBe("failed");
+      }
+  });
+
+  test("refuses an answer that doesn't hold together", async () => {
+    const bad: unknown[] = [
+      // A state that isn't the newest decision's.
+      { ...ANSWER, state: "visible" },
+      { ...ANSWER, state: "hidden" },
+      { ...ANSWER, latest: undefined },
+      { ...ANSWER, state: "removed" },
+      // Appealable with nothing to appeal.
+      { state: "visible", appealable: true, appeals: [] },
+      {
+        ...ANSWER,
+        latest: { ...DELIST, action: "restore", reason: "error" },
+        state: "visible",
+        appealable: true,
+      },
+      { ...ANSWER, appealable: "yes" },
+      // A decision or an appeal that isn't one.
+      { ...ANSWER, latest: { ...DELIST, seq: 41 } },
+      { ...ANSWER, latest: { ...DELIST, seq: "041" } },
+      { ...ANSWER, latest: { ...DELIST, decidedAt: "2026-10-17" } },
+      { ...ANSWER, latest: { ...DELIST, action: "remove" } },
+      { ...ANSWER, appeals: {} },
+      {
+        ...ANSWER,
+        appeals: [{ decisionSeq: "41", filedAt: "2026-10-17T17:00:00.000Z", outcome: "upheld" }],
+      },
+      {
+        ...ANSWER,
+        appeals: [
+          {
+            decisionSeq: "41",
+            filedAt: "2026-10-17T17:00:00.000Z",
+            reviewedAt: "2026-10-17T18:00:00.000Z",
+          },
+        ],
+      },
+      {
+        ...ANSWER,
+        appeals: [
+          {
+            decisionSeq: "41",
+            filedAt: "2026-10-17T17:00:00.000Z",
+            outcome: "granted",
+            reviewedAt: "2026-10-17T18:00:00.000Z",
+          },
+        ],
+      },
+      [],
+      null,
+    ];
+    for (const answer of bad) {
+      serve(Response.json(answer));
+      expect(await failure(draftsClient.moderation(ID))).toBe("failed");
+    }
+  });
+
+  test("appeals the poll's newest decision, and words each refusal", async () => {
+    const calls = serve(
+      Response.json({ decisionSeq: "41" }, { status: 201 }),
+      refusal(409, "NOT_APPEALABLE"),
+      refusal(409, "ALREADY_APPEALED"),
+      refusal(404, "NOT_FOUND"),
+      refusal(401, "SIGNED_OUT"),
+      refusal(500, "INTERNAL"),
+    );
+    await draftsClient.appeal(ID);
+    expect(calls[0]).toMatchObject({
+      url: "/drafts/appeal",
+      init: { method: "POST", body: JSON.stringify({ id: ID }) },
+    });
+    for (const expected of ["changed", "changed", "gone", "signedOut", "failed"])
+      expect(await failure(draftsClient.appeal(ID))).toBe(expected);
+  });
+
+  test("never throws anything but its own error reading moderation, whatever the handler answers", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.jsonValue(), fc.constantFrom(200, 201, 404, 409), async (j, s) => {
+        serve(Response.json(j, { status: s }), Response.json(j, { status: s }));
+        for (const run of [draftsClient.moderation(ID), draftsClient.appeal(ID)]) {
+          const e = await run.then(
+            () => undefined,
+            (x: unknown) => x,
+          );
+          if (e !== undefined) expect(e).toBeInstanceOf(DraftsError);
+        }
+      }),
+      runs,
+    );
+  });
+});

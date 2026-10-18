@@ -86,6 +86,13 @@ function fakeDrafts({
       writes.push(["update", id, draft]);
       if (refuse !== undefined) throw refuse;
     },
+    // The form never reads moderation: the list's stories do (account-polls.stories.tsx).
+    moderation: async () => {
+      throw new DraftsError("failed");
+    },
+    appeal: async () => {
+      throw new DraftsError("failed");
+    },
   };
 }
 

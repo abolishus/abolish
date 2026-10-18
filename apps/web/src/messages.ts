@@ -585,6 +585,32 @@ const enUS = {
   pollsFailure_unlisted: "Your polls couldn't be loaded. Try again shortly.",
   pollsFailure_refused:
     "The server found a problem with that draft, so it wasn't saved. Check it and try again.",
+  moderationOfPoll: "Moderation",
+  moderationDecision: "{action}: {reason}, {when} UTC",
+  moderationMeans_visible: "Our pages list and show this poll again.",
+  moderationMeans_delisted:
+    "Our pages don't list this poll, but it stays open at its address. The board, the count and the result aren't affected.",
+  moderationMeans_hidden:
+    "Our pages don't show this poll's text. The board, the count and the result aren't affected.",
+  moderationAppealed: "You appealed decision No. {seq} on {when} UTC: {outcome}.",
+  moderationAppealPending: "waiting for a moderator other than the one who decided",
+  moderationAppeal_upheld: "upheld on {when} UTC, and the poll restored",
+  moderationAppeal_rejected: "rejected on {when} UTC",
+  moderationAppeal_superseded:
+    "closed on {when} UTC, because a later decision changed the poll first",
+  moderationAppeal: "Appeal this decision…",
+  moderationAppealQuestion:
+    "Appeal this decision? A moderator other than the one who decided reviews it. You can appeal a decision only once.",
+  moderationAppealConfirm: "Send appeal",
+  moderationAppealCancel: "Not now",
+  moderationAppealFiled: "Your appeal is filed. A different moderator will review it.",
+  moderationFailure_signedOut:
+    "You've been signed out. Sign in again to see this poll's moderation.",
+  moderationFailure_gone: "That poll is no longer here.",
+  moderationFailure_changed:
+    "That decision changed or was already appealed since this page read it. This shows how it stands now.",
+  moderationFailure_failed: "The appeal didn't go through. Nothing changed; try again shortly.",
+  moderationFailure_unloaded: "This poll's moderation couldn't be loaded. Try again shortly.",
   pollsCreate: "Create a poll",
   pollsEdit: "Edit draft",
   pollFormEyebrow: "Your polls",

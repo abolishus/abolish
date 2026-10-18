@@ -34,6 +34,11 @@ const CHALLENGE_LEN = 32;
 const USER_HANDLE_LEN = 32;
 const PRF_LEN = 32;
 
+// A credential ID's bounds (WebAuthn Level 3, Credential ID), which the
+// device's record of it also holds to.
+const MIN_CREDENTIAL_ID = 16;
+const MAX_CREDENTIAL_ID = 1023;
+
 /**
  * How long a ceremony may take: WebAuthn Level 3's recommended range for one
  * that requires user verification tops out at 10 minutes, and five gives a
@@ -240,6 +245,8 @@ function readCredential(
   const flags = data === undefined ? undefined : authenticatorFlags(data);
   if (
     credentialId === undefined ||
+    credentialId.length < MIN_CREDENTIAL_ID ||
+    credentialId.length > MAX_CREDENTIAL_ID ||
     flags === undefined ||
     (first !== undefined && prf?.length !== PRF_LEN)
   ) {
@@ -351,6 +358,8 @@ export async function putIdentityBackup(
       mode: "cors",
       method: "POST",
       headers: { "content-type": "application/json" },
+      // The locator's hex lives on in a string, which can't be zeroed: the
+      // spec's one exception, the locator in a request.
       body: JSON.stringify({ locator: toHex(locator), envelope: toHex(envelope) }),
     });
   } catch {
@@ -367,6 +376,62 @@ export async function putIdentityBackup(
   if (response.status === 422 && code === "BACKUP_REJECTED") return "rejected";
   if (response.status === 400 && code === "BAD_REQUEST") return "rejected";
   return "unreachable";
+}
+
+/**
+ * What the fetch route answered: the envelope stored under the locator, none
+ * (`not-found`), or not reached, or an answer that isn't the route's
+ * (`unreachable`).
+ */
+export type BackupFetchAnswer =
+  | { readonly kind: "found"; readonly envelope: Uint8Array }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "unreachable" };
+
+const ENVELOPE_HEX = /^[0-9a-f]{126}$/;
+
+/**
+ * The envelope stored under `locator` (`backups.fetch`), a POST so the
+ * locator sits in no URL, sent as `putIdentityBackup` sends. Only its own
+ * shape is read: an envelope of exactly 63 bytes as lowercase hex, or the
+ * route's `BACKUP_NOT_FOUND`.
+ */
+export async function fetchIdentityBackup(
+  deployment: Pick<Deployment, "api">,
+  locator: Uint8Array,
+  fetchFn: Fetch,
+): Promise<BackupFetchAnswer> {
+  let response: Response;
+  try {
+    response = await fetchFn(`${deployment.api}/backups/fetch`, {
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      cache: "no-store",
+      redirect: "error",
+      mode: "cors",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ locator: toHex(locator) }),
+    });
+  } catch {
+    return { kind: "unreachable" };
+  }
+  const answer = await readJson(response);
+  if (!isRecord(answer) || Array.isArray(answer)) return { kind: "unreachable" };
+  if (response.status === 404 && answer["code"] === "BACKUP_NOT_FOUND")
+    return { kind: "not-found" };
+  const { envelope } = answer;
+  if (
+    response.status !== 200 ||
+    Object.keys(answer).length !== 1 ||
+    typeof envelope !== "string" ||
+    !ENVELOPE_HEX.test(envelope)
+  )
+    return { kind: "unreachable" };
+  return {
+    kind: "found",
+    envelope: Uint8Array.from(envelope.match(/../g) ?? [], (x) => Number.parseInt(x, 16)),
+  };
 }
 
 /** What a backup needs; injected so tests and stories need no authenticator, store, worker or network. */
@@ -389,6 +454,8 @@ export interface BackupSteps {
   seal(prf: Uint8Array, secret: Uint8Array): Promise<BackupSealResult>;
   /** The envelope stored under `locator` (`putIdentityBackup`). */
   put(locator: Uint8Array, envelope: Uint8Array): Promise<BackupPutAnswer>;
+  /** The envelope the route now holds under `locator` (`fetchIdentityBackup`). */
+  fetch(locator: Uint8Array): Promise<BackupFetchAnswer>;
   /** This device's clock, in milliseconds since the UNIX epoch. */
   now(): number;
 }
@@ -397,7 +464,8 @@ export interface BackupSteps {
  * Why a backup stopped: no identity to back up, or one or a backup
  * credential that couldn't be read (`unreadable`); a new passkey's ID the
  * browser refused to keep (`unwritable`); a ceremony's problem; the worker
- * failed; or the route's answer.
+ * failed; the route's answer; or a store the route accepted but doesn't
+ * give back (`not-kept`).
  */
 export type BackupProblem =
   | "no-identity"
@@ -405,15 +473,17 @@ export type BackupProblem =
   | "unwritable"
   | PasskeyProblem
   | "worker-failed"
-  | Exclude<BackupPutAnswer, "stored">;
+  | Exclude<BackupPutAnswer, "stored">
+  | "not-kept";
 
 /**
- * A backup's outcome: stored, and whether the passkey is backed up by its
- * provider, so it outlives this authenticator (if not, the voter is told;
- * Option A, step 2); or why it stopped.
+ * A backup's outcome: stored, with the passkey's flags, so the voter is told
+ * if it can't sync (BE clear) or isn't synced yet (BS clear), either way
+ * dying with this authenticator for now (Option A, step 2); or why it
+ * stopped.
  */
 export type BackupOutcome =
-  | { readonly kind: "stored"; readonly survives: boolean }
+  | { readonly kind: "stored"; readonly syncable: boolean; readonly backedUp: boolean }
   | { readonly kind: "stopped"; readonly problem: BackupProblem };
 
 const stopped = (problem: BackupProblem): BackupOutcome => ({ kind: "stopped", problem });
@@ -426,7 +496,7 @@ const missing = (read: Exclude<IdentityRead, { kind: "found" }>): BackupProblem 
  * Backs up the identity this device holds ([[identity-backup]], Sealing):
  * the PRF from the backup passkey this device keeps, or from a new one,
  * kept first; the identity read afresh and sealed in the worker; the
- * envelope stored under its locator; and the passkey's record updated with
+ * envelope stored under its locator and read back; and the passkey's record updated with
  * whether its provider has backed it up, checked anew on every use, and when
  * the envelope was stored. Run again, it replaces the stored envelope with a
  * new seal, which is how a backup is kept past the route's retention.
@@ -480,11 +550,22 @@ export async function backUp(steps: BackupSteps): Promise<BackupOutcome> {
   }
   // The store checks the secret on every read, so the worker never refuses it.
   if (!sealed.ok) return stopped("unreadable");
-  const answer = await steps.put(sealed.locator, sealed.envelope);
-  sealed.locator.fill(0);
-  if (answer !== "stored") return stopped(answer);
+  const { locator, envelope } = sealed;
+  try {
+    const answer = await steps.put(locator, envelope);
+    if (answer !== "stored") return stopped(answer);
+    // Read back, so an envelope the route accepted but didn't keep (a bug, a
+    // full disk) isn't recorded as stored. An operator can still drop it
+    // later, or answer with it now and drop it after (T-66).
+    const back = await steps.fetch(locator);
+    if (back.kind === "unreachable") return stopped("unreachable");
+    if (back.kind === "not-found" || !equalBytes(back.envelope, envelope))
+      return stopped("not-kept");
+  } finally {
+    locator.fill(0);
+  }
   // The envelope is stored whether or not this is kept: a record that
   // couldn't be updated only shows an older time and flag.
   await steps.keep({ credentialId, backedUp: flags.bs, storedAt: steps.now() });
-  return { kind: "stored", survives: flags.bs };
+  return { kind: "stored", syncable: flags.be, backedUp: flags.bs };
 }

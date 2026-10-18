@@ -13,6 +13,7 @@ import {
   createBackupPasskey,
   type Credentials,
   evaluateBackupPasskey,
+  fetchIdentityBackup,
   putIdentityBackup,
 } from "../src/backup.ts";
 import type { BackupCredential, BackupCredentialRead, IdentityRead } from "../src/identity.ts";
@@ -192,6 +193,8 @@ describe("createBackupPasskey", () => {
     ["a PRF output of 31 bytes", { prf: new Uint8Array(31) }, "failed"],
     ["a PRF output of 33 bytes", { prf: new Uint8Array(33) }, "failed"],
     ["BS without BE", { flags: UV | BS }, "failed"],
+    ["a credential ID of 15 bytes", { rawId: new Uint8Array(15) }, "failed"],
+    ["a credential ID of 1,024 bytes", { rawId: new Uint8Array(1024) }, "failed"],
     ["the voter cancelling", new DOMException("no", "NotAllowedError"), "cancelled"],
     ["an excluded credential", new DOMException("no", "InvalidStateError"), "failed"],
     ["any other error", new TypeError("no"), "failed"],
@@ -308,6 +311,40 @@ describe("putIdentityBackup", () => {
   });
 });
 
+describe("fetchIdentityBackup", () => {
+  const locator = new Uint8Array(32).fill(0xcd);
+  const respond = (status: number, body: unknown) => async () =>
+    new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+
+  test("posts the locator in the body and reads the envelope back", async () => {
+    const calls: [string, RequestInit][] = [];
+    const answer = await fetchIdentityBackup({ api: API }, locator, async (url, init) => {
+      calls.push([url, init]);
+      return new Response(JSON.stringify({ envelope: "0a".repeat(63) }), { status: 200 });
+    });
+    expect(answer).toEqual({ kind: "found", envelope: new Uint8Array(63).fill(0x0a) });
+    const [url, init] = calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API}/backups/fetch`);
+    expect(init).toMatchObject({ method: "POST", credentials: "omit", redirect: "error" });
+    expect(JSON.parse(init.body as string)).toEqual({ locator: "cd".repeat(32) });
+  });
+
+  test.each<[string, number, unknown, string]>([
+    ["the route's not-found", 404, { code: "BACKUP_NOT_FOUND" }, "not-found"],
+    ["a bare 404", 404, "Not Found", "unreachable"],
+    ["not-found at another status", 422, { code: "BACKUP_NOT_FOUND" }, "unreachable"],
+    ["an envelope of 62 bytes", 200, { envelope: "0a".repeat(62) }, "unreachable"],
+    ["an envelope in uppercase hex", 200, { envelope: "0A".repeat(63) }, "unreachable"],
+    ["an extra key", 200, { envelope: "0a".repeat(63), extra: 1 }, "unreachable"],
+    ["an envelope at another status", 201, { envelope: "0a".repeat(63) }, "unreachable"],
+    ["a list", 200, [], "unreachable"],
+  ])("%s reads as %s", async (_, status, body, kind) => {
+    expect(await fetchIdentityBackup({ api: API }, locator, respond(status, body))).toEqual({
+      kind,
+    });
+  });
+});
+
 describe("backUp", () => {
   const SECRET = be32(BABYJUBJUB_ORDER - 2n);
   const PRF = new Uint8Array(32).fill(0x33);
@@ -323,6 +360,7 @@ describe("backUp", () => {
       keep?: "saved" | "unwritable";
       worker?: "fails";
       put?: "stored" | "rejected" | "unreachable";
+      fetch?: "kept" | "other" | "not-found" | "unreachable";
     } = {},
   ) {
     const auth = authenticator({
@@ -370,6 +408,16 @@ describe("backUp", () => {
         stored.push({ locator: toHex(locator), envelope });
         return options.put ?? "stored";
       },
+      fetch: async (locator) => {
+        order.push("fetch");
+        const last = stored.at(-1);
+        const kind = options.fetch ?? "kept";
+        if (kind === "not-found" || kind === "unreachable") return { kind };
+        if (last === undefined || last.locator !== toHex(locator)) return { kind: "not-found" };
+        const envelope = last.envelope.slice();
+        if (kind === "other") envelope[62] = (envelope[62] as number) ^ 1;
+        return { kind: "found", envelope };
+      },
       now: () => 1_700_000_000_000,
     };
     return { s, auth, kept, sealedWith, secrets, stored, order };
@@ -377,10 +425,10 @@ describe("backUp", () => {
 
   test("with no backup passkey, makes one, keeps it before anything else, and stores an envelope that opens to the identity", async () => {
     const t = steps();
-    expect(await backUp(t.s)).toEqual({ kind: "stored", survives: true });
+    expect(await backUp(t.s)).toEqual({ kind: "stored", syncable: true, backedUp: true });
     expect(t.auth.created).toHaveLength(1);
     expect(t.auth.got).toHaveLength(0);
-    expect(t.order).toEqual(["identity", "keep", "identity", "seal", "put", "keep"]);
+    expect(t.order).toEqual(["identity", "keep", "identity", "seal", "put", "fetch", "keep"]);
     expect(t.kept).toEqual([
       { credentialId: RAW_ID, backedUp: true },
       { credentialId: RAW_ID, backedUp: true, storedAt: 1_700_000_000_000 },
@@ -394,7 +442,7 @@ describe("backUp", () => {
 
   test("a passkey that answers no PRF at creation is evaluated once, by its ID", async () => {
     const t = steps({ create: { rawId: RAW_ID, prf: null, enabled: true } });
-    expect(await backUp(t.s)).toEqual({ kind: "stored", survives: true });
+    expect(await backUp(t.s)).toEqual({ kind: "stored", syncable: true, backedUp: true });
     expect(t.auth.got).toHaveLength(1);
     expect(t.auth.got[0]?.publicKey?.allowCredentials).toEqual([
       { type: "public-key", id: RAW_ID },
@@ -407,7 +455,7 @@ describe("backUp", () => {
       held: { kind: "found", credential: { credentialId: RAW_ID, backedUp: true } },
       get: { rawId: RAW_ID, prf: PRF, flags: UV | BE },
     });
-    expect(await backUp(t.s)).toEqual({ kind: "stored", survives: false });
+    expect(await backUp(t.s)).toEqual({ kind: "stored", syncable: true, backedUp: false });
     expect(t.auth.created).toHaveLength(0);
     expect(t.auth.got[0]?.publicKey?.allowCredentials).toEqual([
       { type: "public-key", id: RAW_ID },
@@ -480,6 +528,19 @@ describe("backUp", () => {
     expect(t.secrets.every(zeroed)).toBe(true);
     expect(t.stored).toHaveLength(0);
   });
+
+  test.each<[string, Parameters<typeof steps>[0], string]>([
+    ["no envelope", { fetch: "not-found" }, "not-kept"],
+    ["another envelope", { fetch: "other" }, "not-kept"],
+    ["no answer", { fetch: "unreachable" }, "unreachable"],
+  ])(
+    "a read-back giving %s stops it, and the record keeps no time",
+    async (_, options, problem) => {
+      const t = steps(options);
+      expect(await backUp(t.s)).toEqual({ kind: "stopped", problem });
+      expect(t.kept).toEqual([{ credentialId: RAW_ID, backedUp: true }]);
+    },
+  );
 
   test.each(["rejected", "unreachable"] as const)(
     "a route answering %s stops it, and the record keeps no time",

@@ -5,6 +5,20 @@ export {
   ViemAnchorChain,
 } from "./anchor-chain.ts";
 export {
+  type AnchorSafe,
+  checkAnchorSafe,
+  checkAnchorSafeHistory,
+  checkAnchorSafeState,
+  FALLBACK_HANDLER_SLOT,
+  GUARD_SLOT,
+  keySigner,
+  LOG_RANGE,
+  safeAbi,
+  safeSender,
+  type SafeSenderOptions,
+  type SafeSigner,
+} from "./anchor-safe.ts";
+export {
   BALLOT_EVENTS_MAX_LEN,
   BALLOT_MAX_AGE_MS,
   BALLOT_OUTCOME,

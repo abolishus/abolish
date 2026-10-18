@@ -6,7 +6,8 @@
 // the opening is judged by @abolishus/crypto's own challenge check,
 // under a context made here from the same records, not from the worker. The
 // voter's cell is found from the whole board, for an identity the board's
-// registry records added (T-10, T-13).
+// registry records added (T-10, T-13), and a Tier 0 registration's outcome
+// from the group registry's whole log (T-11, T-13, T-16).
 
 import {
   checkChallengeOpeningV2,
@@ -26,19 +27,23 @@ import {
   type FindCellRequest,
   PROTOCOL_VERSION,
   type SealRequest,
+  type Tier0OutcomeRequest,
 } from "../src/worker/protocol.ts";
 import { BallotSession } from "../src/worker/session.ts";
 import {
   board,
+  cellLeaves,
   definition,
   definitionBytes,
   displayText,
   entry,
   GROUP,
   members,
+  OTHER_GROUP,
   panel,
   registeredHash,
   registrars,
+  registryWith,
 } from "./poll.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -330,6 +335,113 @@ describe("the identity commitment", () => {
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
     session.commitment(commitmentRequest(Uint8Array.from(members[0] as Uint8Array)));
     expect(session.seal(sealRequest([0, 1, 0, 0, 1])).ok).toBe(true);
+    expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+  });
+});
+
+// GROUP serves region 3 and OTHER_GROUP region 7: region codes, not indices.
+const REGISTRY = registryWith(cellLeaves.slice(1));
+const outcomeRequest = (change: Partial<Tier0OutcomeRequest> = {}): Tier0OutcomeRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 6,
+  kind: "tier0-outcome",
+  secret: Uint8Array.from(members[1] as Uint8Array),
+  region: 3,
+  block: 1_000n,
+  groups: [
+    { group_id: GROUP, region: 3 },
+    { group_id: OTHER_GROUP, region: 7 },
+  ],
+  records: REGISTRY,
+  registry: definition.group_registry,
+  chainId: definition.l2_chain_id,
+  version: 8,
+  ...registrars,
+  ...change,
+});
+
+describe("a Tier 0 registration's outcome", () => {
+  test("registered in the region it asked for, moved in any other, and the secret zeroed", () => {
+    for (const [region, kind] of [
+      [3, "registered"],
+      [7, "moved"],
+    ] as const) {
+      const secret = Uint8Array.from(members[2] as Uint8Array);
+      expect(new BallotSession().tier0Outcome(outcomeRequest({ secret, region }))).toEqual({
+        ok: true,
+        outcome: { kind, group: GROUP },
+      });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("not yet for a commitment the registry never added, or added after the block read", () => {
+    const absent = Uint8Array.from(members[0] as Uint8Array);
+    expect(new BallotSession().tier0Outcome(outcomeRequest({ secret: absent }))).toEqual({
+      ok: true,
+      outcome: { kind: "not-yet" },
+    });
+    // The addition is logged at block 20 (tests/poll.ts).
+    for (const [block, kind] of [
+      [19n, "not-yet"],
+      [20n, "registered"],
+    ] as const)
+      expect(new BallotSession().tier0Outcome(outcomeRequest({ block }))).toMatchObject({
+        ok: true,
+        outcome: { kind },
+      });
+  });
+
+  test("a record that isn't a contract-event record of the pinned version is refused", () => {
+    const [first, ...rest] = REGISTRY;
+    for (const records of [
+      [new Uint8Array([0, 8]), ...rest],
+      [Uint8Array.from([...(first as Uint8Array), 0]), ...rest],
+    ])
+      expect(new BallotSession().tier0Outcome(outcomeRequest({ records }))).toEqual({
+        ok: false,
+        problem: "record",
+      });
+    // Version 7's tables are version 8's but for events this log has none
+    // of, so only the version byte refuses it.
+    expect(new BallotSession().tier0Outcome(outcomeRequest({ version: 7 }))).toEqual({
+      ok: false,
+      problem: "record",
+    });
+  });
+
+  test("a history the pinned registry and registrars didn't log is refused with the replay's code", () => {
+    // The batch carries `threshold` approvals, one fewer than this asks.
+    const stricter = { ...registrars, threshold: registrars.threshold + 1 };
+    expect(new BallotSession().tier0Outcome(outcomeRequest(stricter))).toEqual({
+      ok: false,
+      problem: "registry",
+      code: "group-history",
+    });
+    // Another contract's logs are no registry's: the listed groups were never created.
+    expect(
+      new BallotSession().tier0Outcome(outcomeRequest({ registry: new Uint8Array(20).fill(1) })),
+    ).toEqual({ ok: false, problem: "registry", code: "group-created" });
+  });
+
+  test("bytes that aren't an identity secret are refused and zeroed", () => {
+    for (const fill of [0x00, 0xff]) {
+      const secret = new Uint8Array(32).fill(fill);
+      expect(new BallotSession().tier0Outcome(outcomeRequest({ secret }))).toEqual({
+        ok: false,
+        problem: "secret",
+      });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("leaves the held poll, the voter's cell and the seals as they were", () => {
+    const session = holding();
+    const sealed = session.seal(sealRequest([1, 0, 0, 1, 0]));
+    if (!sealed.ok) throw new Error(sealed.problem);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+    expect(session.tier0Outcome(outcomeRequest()).ok).toBe(true);
     expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
   });

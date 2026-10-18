@@ -5,10 +5,11 @@
 // (T-10, T-11, T-34, T-52). The board's first entry, which carries the
 // ceremony transcript, is fetched beside the records; the whole board, for
 // the voter's cell, page by page, naming nothing but the election and a
-// position (T-10, T-13). Whether the records may be shown is the worker's
+// position (T-10, T-13); the whole group registry from the L2, naming
+// nothing but its address and block ranges (T-11, T-13). Whether the records may be shown is the worker's
 // check, tested in election.test.ts and packages/crypto.
 
-import { PARAMETERS } from "@abolishus/crypto";
+import { decodeContractEvent, MAX_EVENT_DATA, PARAMETERS } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
@@ -16,7 +17,13 @@ import { describe, expect, test } from "vite-plus/test";
 import type { Deployment } from "../src/deployment.ts";
 import { STAGING } from "../src/deployment.ts";
 import { parseLink } from "../src/link.ts";
-import { DEFINITION_HASH_OF, type Fetch, loadBoard, loadElection } from "../src/load.ts";
+import {
+  DEFINITION_HASH_OF,
+  type Fetch,
+  loadBoard,
+  loadElection,
+  loadGroupRegistry,
+} from "../src/load.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -702,6 +709,297 @@ describe("the whole board", () => {
   });
 });
 
+describe("the group registry's log", () => {
+  const GROUP_REGISTRY = "0x00000000000000000000000000000000000000bb";
+  const DEPLOYED_AT = 100n;
+  const HEAD = 140n;
+  const WITH_REGISTRY: Deployment = {
+    ...DEPLOYMENT,
+    groupRegistry: { address: GROUP_REGISTRY, deployedAt: DEPLOYED_AT, eventVersion: 8 },
+  };
+  const quantity = (n: bigint) => `0x${n.toString(16)}`;
+
+  interface Log {
+    readonly block: bigint;
+    readonly index: bigint;
+    readonly topics: readonly string[];
+    readonly data: string;
+  }
+  const logJson = (l: Log, change: Record<string, unknown> = {}) => ({
+    address: GROUP_REGISTRY,
+    topics: l.topics.map((t) => `0x${t}`),
+    data: `0x${l.data}`,
+    blockNumber: quantity(l.block),
+    logIndex: quantity(l.index),
+    removed: false,
+    ...change,
+  });
+
+  /** An L2 node holding `logs`, answering each range with the ones in it, or as `answer` decides. */
+  function node(
+    logs: readonly Log[],
+    answer: (method: string, from: bigint, to: bigint) => unknown = () => undefined,
+  ) {
+    const calls: { init: RequestInit; body: { id: number; method: string; params: unknown[] } }[] =
+      [];
+    const fetchFn: Fetch = (url, init) => {
+      expect(url).toBe(WITH_REGISTRY.rpc);
+      const body = JSON.parse(init.body as string) as (typeof calls)[number]["body"];
+      calls.push({ init, body });
+      const filter = body.params[0] as { fromBlock?: string; toBlock?: string } | undefined;
+      const from = BigInt(filter?.fromBlock ?? 0);
+      const to = BigInt(filter?.toBlock ?? 0);
+      const own = answer(body.method, from, to);
+      if (own === "network") return Promise.reject(new TypeError("Failed to fetch"));
+      // `undefined` is the honest answer; anything else, `null` included, is served as it is.
+      const result =
+        own !== undefined
+          ? own
+          : body.method === "eth_chainId"
+            ? "0x14a34"
+            : body.method === "eth_getBlockByNumber"
+              ? { number: quantity(HEAD), timestamp: "0x68f00000", transactions: [] }
+              : logs.filter((l) => l.block >= from && l.block <= to).map((l) => logJson(l));
+      return Promise.resolve(
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), { status: 200 }),
+      );
+    };
+    return { calls, fetchFn };
+  }
+
+  const word = (b: number) => b.toString(16).padStart(64, "0");
+  const arbitraryLogs = fc
+    .array(
+      fc.record({
+        block: fc.bigInt({ min: DEPLOYED_AT, max: HEAD }),
+        topics: fc.array(fc.integer({ min: 0, max: 255 }).map(word), {
+          minLength: 1,
+          maxLength: 4,
+        }),
+        data: fc.uint8Array({ maxLength: 96 }).map(hex),
+      }),
+      { maxLength: 40 },
+    )
+    .map((logs) => {
+      const sorted = logs
+        .slice()
+        .sort((a, b) => (a.block < b.block ? -1 : a.block > b.block ? 1 : 0));
+      // Log indices count up within each block, as a node numbers them.
+      return sorted.map((l, i) => ({
+        ...l,
+        index: BigInt(sorted.slice(0, i).filter((m) => m.block === l.block).length),
+      }));
+    });
+
+  test("every log since the deployment comes back in order, numbered from 0, from ranges that name only the registry", async () => {
+    await fc.assert(
+      fc.asyncProperty(arbitraryLogs, fc.integer({ min: 1, max: 50 }), async (logs, range) => {
+        const { calls, fetchFn } = node(logs);
+        const loaded = await loadGroupRegistry(WITH_REGISTRY, fetchFn, undefined, BigInt(range));
+        if (!loaded.ok) throw new Error(loaded.problem);
+        expect(loaded.block).toBe(HEAD);
+        expect(loaded.timestamp).toBe(0x68f00000n);
+        expect(loaded.records.map((r) => decodeContractEvent(r, 8))).toEqual(
+          logs.map((l, n) => ({
+            contract: Uint8Array.from(Buffer.from(GROUP_REGISTRY.slice(2), "hex")),
+            n: BigInt(n),
+            l2_block: l.block,
+            l2_timestamp: 0n,
+            topics: l.topics.map((t) => Uint8Array.from(Buffer.from(t, "hex"))),
+            data: Uint8Array.from(Buffer.from(l.data, "hex")),
+          })),
+        );
+        // The finalized head, then ranges from the deployment to it, end to end.
+        expect(calls.find((c) => c.body.method === "eth_getBlockByNumber")?.body.params).toEqual([
+          "finalized",
+          false,
+        ]);
+        const ranges = calls.filter((c) => c.body.method === "eth_getLogs");
+        let next = DEPLOYED_AT;
+        for (const { body, init } of ranges) {
+          expect(body.params).toEqual([
+            {
+              address: GROUP_REGISTRY,
+              fromBlock: quantity(next),
+              toBlock: quantity(
+                next + BigInt(range) - 1n < HEAD ? next + BigInt(range) - 1n : HEAD,
+              ),
+            },
+          ]);
+          next += BigInt(range);
+          expect(init).toMatchObject({
+            credentials: "omit",
+            referrerPolicy: "no-referrer",
+            redirect: "error",
+          });
+        }
+        expect(next).toBeGreaterThan(HEAD);
+      }),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+
+  test("a build that pins no group registry asks nothing of anyone", async () => {
+    const { calls, fetchFn } = node([]);
+    expect(await loadGroupRegistry(DEPLOYMENT, fetchFn)).toEqual({
+      ok: false,
+      problem: "no-registry",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("an RPC on another chain isn't believed", async () => {
+    const { fetchFn } = node([], (method) => (method === "eth_chainId" ? "0x1" : undefined));
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn)).toEqual({
+      ok: false,
+      problem: "wrong-chain",
+    });
+  });
+
+  const LOG: Log = { block: 120n, index: 0n, topics: [word(1)], data: "" };
+
+  test.each([
+    ["another address's log", logJson(LOG, { address: DEPLOYMENT.electionRegistry })],
+    ["a log reorganised away", logJson(LOG, { removed: true })],
+    ["a log outside the range asked", logJson({ ...LOG, block: HEAD + 1n })],
+    ["a log before the deployment", logJson({ ...LOG, block: DEPLOYED_AT - 1n })],
+    ["a log with no topics", logJson({ ...LOG, topics: [] })],
+    ["a log with five topics", logJson({ ...LOG, topics: Array(5).fill(word(1)) })],
+    ["a short topic", logJson(LOG, { topics: [`0x${"00".repeat(31)}`] })],
+    ["odd-length data", logJson(LOG, { data: "0x0" })],
+    ["data with no 0x", logJson(LOG, { data: "00" })],
+    ["a block number with a leading zero", logJson(LOG, { blockNumber: "0x078" })],
+    ["a log with no index", logJson(LOG, { logIndex: undefined })],
+    ["an uppercase topic", logJson(LOG, { topics: [`0x${word(171).toUpperCase()}`] })],
+    ["uppercase data", logJson(LOG, { data: "0xAB" })],
+    ["data past MAX_EVENT_DATA", logJson({ ...LOG, data: "00".repeat(MAX_EVENT_DATA + 1) })],
+    ["a log that isn't an object", "0x00"],
+  ])("refuses %s", async (_, log) => {
+    const { fetchFn } = node([], (method) => (method === "eth_getLogs" ? [log] : undefined));
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+  });
+
+  test("refuses logs out of order or repeated, within a range or across two", async () => {
+    const a = { ...LOG, index: 3n };
+    for (const logs of [
+      [a, { ...a, index: 2n }],
+      [a, a],
+      [a, { ...a, block: a.block - 1n, index: 9n }],
+    ]) {
+      expect(
+        await loadGroupRegistry(
+          WITH_REGISTRY,
+          node([], (method) => (method === "eth_getLogs" ? logs.map((l) => logJson(l)) : undefined))
+            .fetchFn,
+        ),
+      ).toEqual({ ok: false, problem: "bad-answer" });
+    }
+    // The same log served again by the next range, as a node ignoring the range would.
+    const { fetchFn } = node([], (method, from) =>
+      method === "eth_getLogs" ? (from <= 130n ? [logJson(LOG)] : []) : undefined,
+    );
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn, undefined, 10n)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+  });
+
+  test("a finalized block, chain id or log list outside its form is refused", async () => {
+    for (const [method, result] of [
+      ["eth_getBlockByNumber", null],
+      ["eth_getBlockByNumber", { number: "0x8c" }],
+      ["eth_getBlockByNumber", { number: 140, timestamp: "0x1" }],
+      ["eth_getBlockByNumber", { number: "0x8C", timestamp: "0x1" }],
+      ["eth_chainId", 84532],
+      ["eth_getLogs", {}],
+      ["eth_getLogs", null],
+    ] as const) {
+      const { fetchFn } = node([], (m) => (m === method ? result : undefined));
+      expect(
+        await loadGroupRegistry(WITH_REGISTRY, fetchFn),
+        `${method} ${JSON.stringify(result)}`,
+      ).toEqual({ ok: false, problem: "bad-answer" });
+    }
+  });
+
+  test("the largest event's data is read, and a finalized block's answer past its cap refused", async () => {
+    const largest = { ...LOG, data: "00".repeat(MAX_EVENT_DATA) };
+    const loaded = await loadGroupRegistry(WITH_REGISTRY, node([largest]).fetchFn);
+    expect(loaded.ok && loaded.records.length).toBe(1);
+    // 2 MiB: a block's header with tens of thousands of transaction hashes.
+    const transactions = Array.from({ length: 32 * 1024 }, () => `0x${word(1)}`);
+    const { fetchFn } = node([], (method) =>
+      method === "eth_getBlockByNumber"
+        ? { number: quantity(HEAD), timestamp: "0x1", transactions }
+        : undefined,
+    );
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+  });
+
+  test("a node's error or a failed network is unreachable", async () => {
+    const failing = (method: string): Fetch => {
+      const { fetchFn } = node([], (m) => (m === method ? "network" : undefined));
+      return fetchFn;
+    };
+    for (const method of ["eth_chainId", "eth_getBlockByNumber", "eth_getLogs"])
+      expect(await loadGroupRegistry(WITH_REGISTRY, failing(method))).toEqual({
+        ok: false,
+        problem: "unreachable",
+      });
+    // A node refusing the range ("too many results") says so in `error`.
+    const fetchFn: Fetch = (_url, init) => {
+      const { id, method } = JSON.parse(init.body as string) as { id: number; method: string };
+      const answer =
+        method === "eth_getLogs"
+          ? { jsonrpc: "2.0", id, error: { code: -32005, message: "limit exceeded" } }
+          : {
+              jsonrpc: "2.0",
+              id,
+              result: method === "eth_chainId" ? "0x14a34" : { number: "0x8c", timestamp: "0x1" },
+            };
+      return Promise.resolve(new Response(JSON.stringify(answer), { status: 200 }));
+    };
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn)).toEqual({
+      ok: false,
+      problem: "unreachable",
+    });
+  });
+
+  test("a registry that never ends is refused once it runs out the budget, not read forever", async () => {
+    // Each range costs 1 KiB of the budget, and each log its bytes, 32 a topic and 64.
+    const MiB = 1024 * 1024;
+    const kilobyte = (block: bigint, index: bigint): Log => ({
+      block,
+      index,
+      topics: [word(1)],
+      data: "00".repeat(1024),
+    });
+    const many = Array.from({ length: 41 * 64 }, (_, i) =>
+      kilobyte(DEPLOYED_AT + BigInt(Math.floor(i / 64)), BigInt(i % 64)),
+    );
+    expect(await loadGroupRegistry(WITH_REGISTRY, node(many).fetchFn, MiB, 1n)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    // One range a block, with nothing in it: the ranges' cost stops it.
+    const empty = node([]);
+    expect(await loadGroupRegistry(WITH_REGISTRY, empty.fetchFn, 4 * 1024, 1n)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(empty.calls.filter((c) => c.body.method === "eth_getLogs")).toHaveLength(5);
+    // A registry within the budget is read.
+    const loaded = await loadGroupRegistry(WITH_REGISTRY, node(many.slice(0, 512)).fetchFn, MiB);
+    expect(loaded.ok && loaded.records.length).toBe(512);
+  });
+});
+
 describe("the deployments", () => {
   test("staging's origins are the ones the CSP lets the client reach, and its registry is a plain address or none", () => {
     expect(STAGING.api).toBe("https://api-staging.abolish.us");
@@ -710,6 +1008,8 @@ describe("the deployments", () => {
     // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
     if (STAGING.electionRegistry !== undefined)
       expect(STAGING.electionRegistry).toMatch(/^0x[0-9a-f]{40}$/);
+    if (STAGING.groupRegistry !== undefined)
+      expect(STAGING.groupRegistry.address).toMatch(/^0x[0-9a-f]{40}$/);
     // Registrars are addresses, at least `threshold` of them.
     if (STAGING.registrars !== undefined) {
       expect(STAGING.registrars.registrars.every((r) => r.length === 20)).toBe(true);

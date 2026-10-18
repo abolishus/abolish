@@ -6,14 +6,22 @@
 // the election may be shown (election.ts, worker/session.ts). The
 // worker does no I/O (T-43); this module decides nothing about the records,
 // only whether they could be fetched (T-34, T-41), and whether the
-// moderation policy lets this client show them (T-68).
+// moderation policy lets this client show them (T-68). It also reads the
+// whole board, for the voter's cell, and the whole group registry from the
+// L2, for a Tier 0 registration's outcome, each naming nothing about the
+// voter (T-10, T-13).
 //
 // Every answer is untrusted. A wrong one ends in a refusal: here, when it
 // isn't even shaped like an answer, or in the worker, when the records don't
 // hash to the registry's hash. What this module can't catch is an RPC that
 // lies about the registry's state; see Known-weak in docs/status/P2-8.md.
 
-import { PARAMETERS } from "@abolishus/crypto";
+import {
+  encodeContractEvent,
+  MAX_EVENT_DATA,
+  MAX_EVENT_TOPICS,
+  PARAMETERS,
+} from "@abolishus/crypto";
 
 import type { Deployment } from "./deployment.ts";
 
@@ -155,11 +163,7 @@ async function registeredHashOf(
   fetchFn: Fetch,
 ): Promise<Uint8Array> {
   const [, word] = await both(
-    rpc(deployment, fetchFn, 1, "eth_chainId", []).then((id) => {
-      if (!/^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/.test(id)) throw new Stop("bad-answer");
-      if (BigInt(id) !== deployment.chainId) throw new Stop("wrong-chain");
-      return id;
-    }),
+    checkChain(deployment, fetchFn),
     rpc(deployment, fetchFn, 2, "eth_call", [
       { to: registry, data: `0x${DEFINITION_HASH_OF}${toHex(electionId)}` },
       BLOCK,
@@ -201,6 +205,16 @@ async function both<A, B>(a: Promise<A>, b: Promise<B>): Promise<[A, B]> {
   );
 }
 
+/** Request 1: the RPC must serve the chain this build pins. */
+async function checkChain(deployment: Deployment, fetchFn: Fetch): Promise<void> {
+  const id = await rpc(deployment, fetchFn, 1, "eth_chainId", []);
+  if (!QUANTITY.test(id)) throw new Stop("bad-answer");
+  if (BigInt(id) !== deployment.chainId) throw new Stop("wrong-chain");
+}
+
+/** A JSON-RPC quantity of at most 64 bits, as nodes serialize it: lowercase, no leading zero. */
+const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,15})$/;
+
 /** One JSON-RPC call; its `result`, which must be a string. */
 async function rpc(
   deployment: Deployment,
@@ -209,6 +223,20 @@ async function rpc(
   method: string,
   params: readonly unknown[],
 ): Promise<string> {
+  const result = await rpcResult(deployment, fetchFn, id, method, params, MAX_RPC_ANSWER);
+  if (typeof result !== "string") throw new Stop("bad-answer");
+  return result;
+}
+
+/** One JSON-RPC call, its answer read up to `maxAnswer` bytes; its `result`. */
+async function rpcResult(
+  deployment: Deployment,
+  fetchFn: Fetch,
+  id: number,
+  method: string,
+  params: readonly unknown[],
+  maxAnswer: number,
+): Promise<unknown> {
   const response = await fetchFn(deployment.rpc, {
     ...REQUEST,
     method: "POST",
@@ -216,15 +244,13 @@ async function rpc(
     body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
   });
   if (!response.ok) throw new Stop("unreachable");
-  const answer = await readJson(response, MAX_RPC_ANSWER);
+  const answer = await readJson(response, maxAnswer);
   if (!isRecord(answer) || answer["jsonrpc"] !== "2.0" || answer["id"] !== id)
     throw new Stop("bad-answer");
   // A node that can't answer (rate-limited, behind, misconfigured) says so in
   // `error`; that is the node's trouble, not a claim about the registry.
   if ("error" in answer) throw new Stop("unreachable");
-  const result = answer["result"];
-  if (typeof result !== "string") throw new Stop("bad-answer");
-  return result;
+  return answer["result"];
 }
 
 /** A record from one of the API's GET routes, as bytes. */
@@ -359,6 +385,179 @@ export async function loadBoard(
     if (error instanceof Stop) return { ok: false, problem: error.problem };
     throw error;
   }
+}
+
+export type LoadedRegistry =
+  | {
+      readonly ok: true;
+      /** The finalized L2 block the registry was read up to, and its timestamp. */
+      readonly block: bigint;
+      readonly timestamp: bigint;
+      /**
+       * Every log the group registry emitted from its deployment to `block`,
+       * in log order, each as a contract-event record (`0x0008`) under the
+       * deployment's `eventVersion`, numbered `n` from 0. Their
+       * `l2_timestamp` is 0, not the chain's, so they are for the outcome's
+       * replay alone: never archived or checked against an accumulator.
+       */
+      readonly records: readonly Uint8Array[];
+    }
+  | { readonly ok: false; readonly problem: LoadProblem };
+
+/** The most blocks one `eth_getLogs` call spans: public endpoints cap ranges (the worker's `TIER0_LOG_RANGE`). */
+export const LOG_RANGE = 10_000n;
+// A finalized block's header with its transaction hashes, and a range's
+// logs: each log at most a `MembersAdded` or self-paid record as hex, with
+// its JSON. The whole read shares the board's budget (T-52).
+const MAX_BLOCK_ANSWER = 2 * 1024 * 1024;
+const MAX_LOGS_ANSWER = 64 * 1024 * 1024;
+// Each range's charge: small, since the number of ranges grows with the
+// chain's age, not with what the RPC chooses to serve, yet enough that a
+// node claiming a head far ahead runs the budget out (256 MiB is 262,144
+// ranges, about 166 years of Base blocks).
+const RANGE_COST = 1024;
+
+/**
+ * The deployment's group registry as of the L2's finalized head: every log
+ * it emitted since it was deployed, as the outcome of a Tier 0 registration
+ * is read from them (`tier0Registration`, in the worker). The requests name
+ * the registry and block ranges only, never a group or a commitment, so the
+ * RPC learns nothing of the voter's registration (T-10, T-11, T-13).
+ *
+ * The RPC is trusted for which logs exist (Known-weak); what it can't do
+ * here is answer outside its forms: a log of another address, outside the
+ * range asked, reorganised away, out of log order or repeated, or a read
+ * that runs out the `maxBytes` budget, is `bad-answer`. The logs are
+ * numbered by their place in the whole sequence, which the event
+ * accumulator binds; `l2_timestamp` is 0, since the replay reads none.
+ */
+export async function loadGroupRegistry(
+  deployment: Deployment,
+  fetchFn: Fetch,
+  maxBytes = MAX_BOARD_BYTES,
+  range = LOG_RANGE,
+): Promise<LoadedRegistry> {
+  const registry = deployment.groupRegistry;
+  if (registry === undefined) return { ok: false, problem: "no-registry" };
+  const contract = fromHex(registry.address.slice(2));
+  const records: Uint8Array[] = [];
+  let budget = maxBytes;
+  try {
+    const [, head] = await both(
+      checkChain(deployment, fetchFn),
+      finalizedHead(deployment, fetchFn),
+    );
+    // The last log read, as (block, logIndex): each must come strictly after it.
+    let last: readonly [bigint, bigint] | undefined;
+    let id = 3;
+    for (let from = registry.deployedAt; from <= head.block; from += range) {
+      const to = from + range - 1n < head.block ? from + range - 1n : head.block;
+      const logs = await rpcResult(
+        deployment,
+        fetchFn,
+        id++,
+        "eth_getLogs",
+        [{ address: registry.address, fromBlock: quantity(from), toBlock: quantity(to) }],
+        MAX_LOGS_ANSWER,
+      ).catch((e: unknown) => {
+        throw e instanceof TypeError ? new Stop("unreachable") : e;
+      });
+      if (!Array.isArray(logs)) throw new Stop("bad-answer");
+      // Charged before the logs, so a node that claims a head far ahead,
+      // with nothing in its ranges, runs the budget out too.
+      budget -= RANGE_COST;
+      if (budget < 0) throw new Stop("bad-answer");
+      for (const log of logs as unknown[]) {
+        const read = logOf(log, registry.address, from, to);
+        if (
+          last !== undefined &&
+          !(read.block > last[0] || (read.block === last[0] && read.index > last[1]))
+        )
+          throw new Stop("bad-answer");
+        last = [read.block, read.index];
+        budget -= read.data.length + 32 * read.topics.length + ENTRY_COST;
+        if (budget < 0) throw new Stop("bad-answer");
+        records.push(
+          encodeContractEvent(
+            {
+              contract,
+              n: BigInt(records.length),
+              l2_block: read.block,
+              l2_timestamp: 0n,
+              topics: read.topics,
+              data: read.data,
+            },
+            registry.eventVersion,
+          ),
+        );
+      }
+    }
+    return { ok: true, block: head.block, timestamp: head.timestamp, records };
+  } catch (error) {
+    if (error instanceof Stop) return { ok: false, problem: error.problem };
+    throw error;
+  }
+}
+
+/** Request 2: the L2's finalized block, by number and timestamp: logs past it could be reorganised away (T-34). */
+async function finalizedHead(
+  deployment: Deployment,
+  fetchFn: Fetch,
+): Promise<{ block: bigint; timestamp: bigint }> {
+  const block = await rpcResult(
+    deployment,
+    fetchFn,
+    2,
+    "eth_getBlockByNumber",
+    [BLOCK, false],
+    MAX_BLOCK_ANSWER,
+  );
+  if (!isRecord(block)) throw new Stop("bad-answer");
+  const { number, timestamp } = block;
+  if (typeof number !== "string" || !QUANTITY.test(number)) throw new Stop("bad-answer");
+  if (typeof timestamp !== "string" || !QUANTITY.test(timestamp)) throw new Stop("bad-answer");
+  return { block: BigInt(number), timestamp: BigInt(timestamp) };
+}
+
+const quantity = (n: bigint) => `0x${n.toString(16)}`;
+
+const WORD = /^0x[0-9a-f]{64}$/;
+const DATA = /^0x(?:[0-9a-f]{2})*$/;
+
+/**
+ * One log of `address` in blocks `from` to `to`, as the event's fields, or
+ * `bad-answer`. Topics and data are lowercase hex, as nodes serialize them
+ * and as every other answer is read; the address is compared in any case,
+ * since some nodes give its checksum spelling.
+ */
+function logOf(log: unknown, address: string, from: bigint, to: bigint) {
+  if (!isRecord(log)) throw new Stop("bad-answer");
+  const { address: emitter, topics, data, blockNumber, logIndex, removed } = log;
+  if (
+    removed === true ||
+    typeof emitter !== "string" ||
+    emitter.toLowerCase() !== address ||
+    !Array.isArray(topics) ||
+    topics.length < 1 ||
+    topics.length > MAX_EVENT_TOPICS ||
+    !topics.every((t) => typeof t === "string" && WORD.test(t)) ||
+    typeof data !== "string" ||
+    !DATA.test(data) ||
+    (data.length - 2) / 2 > MAX_EVENT_DATA ||
+    typeof blockNumber !== "string" ||
+    !QUANTITY.test(blockNumber) ||
+    typeof logIndex !== "string" ||
+    !QUANTITY.test(logIndex)
+  )
+    throw new Stop("bad-answer");
+  const block = BigInt(blockNumber);
+  if (block < from || block > to) throw new Stop("bad-answer");
+  return {
+    block,
+    index: BigInt(logIndex),
+    topics: (topics as string[]).map((t) => fromHex(t.slice(2))),
+    data: fromHex(data.slice(2)),
+  };
 }
 
 /** A `{ entries }` answer of at most `limit` entries, each lowercase hex, as bytes. */

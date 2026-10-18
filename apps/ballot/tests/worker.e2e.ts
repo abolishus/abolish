@@ -612,6 +612,19 @@ describe("the device's voting identity", () => {
     createIdentity(secret: string): Promise<string>;
     recordTier0Request(secret: string, region: number, acceptedAt: number): Promise<string>;
     commitment(secret: string): Promise<string>;
+    tier0Outcome(
+      secret: string,
+      query: {
+        readonly region: number;
+        readonly block: string;
+        readonly groups: readonly { readonly group_id: string; readonly region: number }[];
+        readonly records: readonly string[];
+        readonly registry: string;
+        readonly chainId: string;
+        readonly registrars: readonly string[];
+        readonly threshold: number;
+      },
+    ): Promise<string>;
     readIdentity(): Promise<string>;
     restampIdentity(version: number): Promise<void>;
   };
@@ -776,6 +789,47 @@ describe("the device's voting identity", () => {
       ),
     ).resolves.toBe("changed");
     await expect(read()).resolves.toEqual({ kind: "found", identity: { secret, memberships } });
+  });
+
+  test("the worker reads a registration's outcome from the registry's log under the client's CSP", async () => {
+    type Query = Parameters<Harness["tier0Outcome"]>[1];
+    const answer = (s: string, region: number) =>
+      page
+        .evaluate(
+          ([x, q]) =>
+            (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.tier0Outcome(x, q),
+          [
+            s,
+            {
+              region,
+              block: "1000",
+              groups: [
+                { group_id: String(poll.GROUP), region: 3 },
+                { group_id: String(poll.OTHER_GROUP), region: 7 },
+              ],
+              records: poll.registryWith(poll.cellLeaves).map(hex),
+              registry: hex(poll.definition.group_registry),
+              chainId: String(poll.definition.l2_chain_id),
+              registrars: poll.registrars.registrars.map(hex),
+              threshold: poll.registrars.threshold,
+            } satisfies Query,
+          ] as const,
+        )
+        .then((json) => JSON.parse(json) as unknown);
+    const member = hex(poll.members[0] as Uint8Array);
+    await expect(answer(member, 3)).resolves.toEqual({
+      result: { ok: true, outcome: { kind: "registered", group: String(poll.GROUP) } },
+      // Copied to the worker: the page's copy stays the page's to zero.
+      intact: true,
+    });
+    await expect(answer(member, 7)).resolves.toMatchObject({
+      result: { ok: true, outcome: { kind: "moved", group: String(poll.GROUP) } },
+    });
+    await expect(answer(`01${"0b".repeat(31)}`, 3)).resolves.toMatchObject({
+      result: { ok: true, outcome: { kind: "not-yet" } },
+    });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
   });
 
   test("the worker commits a secret under the client's CSP, and refuses one that isn't", async () => {

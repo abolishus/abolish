@@ -203,11 +203,11 @@ const abiBytes = (b: Uint8Array) => {
 };
 
 /**
- * The whole board: the transcript, then the first tier's group created and
- * `commitments` added to it in one batch the test registrars signed, under
- * the definition's chain and group registry.
+ * The group registry's log: `GROUP` created at Tier 0 and `commitments`
+ * added to it in one batch the test registrars signed, under the
+ * definition's chain and group registry, numbered from 1.
  */
-export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
+function groupLog(commitments: readonly bigint[]): ContractEventRecord[] {
   const domain = groupRegistryDomainSeparator(definition.l2_chain_id, definition.group_registry);
   const digest = groupAdditionDigest(domain, {
     groupId: GROUP,
@@ -218,7 +218,7 @@ export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
   const approvals = registryVectors.registrars.secretKeys
     .slice(0, registrars.threshold)
     .map((k, i) => signGroupApproval(digest, i + 1, hex(k)));
-  const records = [
+  return [
     log(1n, [topic0("GroupCreated(uint64,uint8)"), word(GROUP), word(0n)], new Uint8Array(0)),
     log(
       2n,
@@ -226,9 +226,16 @@ export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
       abiBytes(encodeGroupAddition({ groupId: GROUP, firstIndex: 0n, commitments, approvals })),
     ),
   ];
+}
+
+/**
+ * The whole board: the transcript, then the first tier's group created and
+ * `commitments` added to it (`groupLog`).
+ */
+export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
   return [
     entry,
-    ...records.map((r, i) =>
+    ...groupLog(commitments).map((r, i) =>
       encodeBoardEntry(
         {
           election_id: definition.election_id,
@@ -240,6 +247,21 @@ export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
       ),
     ),
   ];
+}
+
+/** A second Tier 0 group, created before `GROUP` and never added to. */
+export const OTHER_GROUP = 2n;
+
+/**
+ * The whole group registry as the page reads it from the L2, as
+ * contract-event records of version 8: `OTHER_GROUP` created at Tier 0,
+ * then `groupLog(commitments)`.
+ */
+export function registryWith(commitments: readonly bigint[]): Uint8Array[] {
+  return [
+    log(0n, [topic0("GroupCreated(uint64,uint8)"), word(OTHER_GROUP), word(0n)], new Uint8Array(0)),
+    ...groupLog(commitments),
+  ].map((r) => encodeContractEvent(r, 8));
 }
 
 /** The board as the API serves it. */

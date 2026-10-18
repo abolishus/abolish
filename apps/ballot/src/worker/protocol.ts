@@ -11,14 +11,17 @@
 
 import type {
   BallotV2Code,
+  ContractEventVersion,
   MembershipProverErrorCode,
   Panel,
+  Tier0Registration,
+  TierMembershipErrorCode,
   VoterCellCode,
 } from "@abolishus/crypto";
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -130,9 +133,38 @@ export interface CommitmentRequest {
   readonly secret: Uint8Array;
 }
 
+/**
+ * Where the identity commitment of `secret` stands among the deployment's
+ * published Tier 0 groups (`groups`) at the finalized L2 block `block`, for
+ * a request that asked for `region` ([[registration]], Outcome):
+ * `tier0Registration` over `records`, every log the group registry
+ * (`registry`, on `chainId`) emitted up to `block`, as contract-event
+ * records under `version`, replayed under `registrars` and `threshold`. The
+ * page reads the logs (`loadGroupRegistry`) and takes the rest from its
+ * build's deployment, as it does for `find-cell`; it needs no poll.
+ */
+export interface Tier0OutcomeRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "tier0-outcome";
+  /** 32 bytes; the worker zeroes its copy once it has the commitment. */
+  readonly secret: Uint8Array;
+  readonly region: number;
+  readonly block: bigint;
+  readonly groups: readonly { readonly group_id: bigint; readonly region: number }[];
+  readonly records: readonly Uint8Array[];
+  /** 20 bytes. */
+  readonly registry: Uint8Array;
+  readonly chainId: bigint;
+  readonly version: ContractEventVersion;
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+}
+
 export type WorkerRequest =
   | CheckElectionRequest
   | CommitmentRequest
+  | Tier0OutcomeRequest
   | FindCellRequest
   | SealRequest
   | ChallengeRequest
@@ -160,6 +192,18 @@ export type FindCellResult =
 export type CommitmentResult =
   | { readonly ok: true; readonly commitment: bigint }
   | { readonly ok: false; readonly problem: "secret" };
+
+/**
+ * The registration's outcome, or why there is none: bytes that aren't an
+ * identity secret, or whose commitment can't be registered (`secret`), a
+ * record that isn't a contract-event record of the pinned version
+ * (`record`), or `tier0Registration`'s refusal of the registry's history
+ * (`registry`, with its code), which the page shows, never retries.
+ */
+export type Tier0OutcomeResult =
+  | { readonly ok: true; readonly outcome: Tier0Registration }
+  | { readonly ok: false; readonly problem: "secret" | "record" }
+  | { readonly ok: false; readonly problem: "registry"; readonly code: TierMembershipErrorCode };
 
 /**
  * A seal, or why none was made: no version-5 poll checked under that
@@ -211,6 +255,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "commitment";
       readonly result: CommitmentResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "tier0-outcome";
+      readonly result: Tier0OutcomeResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -283,6 +333,32 @@ const FIND_CELL_KEYS = [
   "v",
 ];
 const COMMITMENT_KEYS = ["id", "kind", "secret", "v"];
+const OUTCOME_KEYS = [
+  "block",
+  "chainId",
+  "groups",
+  "id",
+  "kind",
+  "records",
+  "region",
+  "registrars",
+  "registry",
+  "secret",
+  "threshold",
+  "v",
+  "version",
+];
+
+const isU64 = (x: unknown): x is bigint => typeof x === "bigint" && x >= 0n && x >> 64n === 0n;
+
+const isTier0Group = (x: unknown): x is { group_id: bigint; region: number } =>
+  isRecord(x) &&
+  hasKeys(x, ["group_id", "region"]) &&
+  isU64(x["group_id"]) &&
+  Number.isSafeInteger(x["region"]);
+
+const isEventVersion = (x: unknown): x is ContractEventVersion =>
+  Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 8;
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
@@ -329,6 +405,39 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
   if (data["kind"] === "commitment") {
     if (!hasKeys(data, COMMITMENT_KEYS) || !isBytes(data["secret"], 32)) return undefined;
     return { v, id, kind: "commitment", secret: data["secret"] };
+  }
+  if (data["kind"] === "tier0-outcome") {
+    if (!hasKeys(data, OUTCOME_KEYS)) return undefined;
+    const { secret, region, block, groups, records, registry, chainId, version } = data;
+    const { registrars, threshold } = data;
+    if (
+      !isBytes(secret, 32) ||
+      !Number.isSafeInteger(region) ||
+      !isU64(block) ||
+      !isListOf(groups, isTier0Group) ||
+      !isListOf(records, isAnyBytes) ||
+      !isBytes(registry, 20) ||
+      !isU64(chainId) ||
+      !isEventVersion(version) ||
+      !isListOf(registrars, isAnyBytes) ||
+      !Number.isSafeInteger(threshold)
+    )
+      return undefined;
+    return {
+      v,
+      id,
+      kind: "tier0-outcome",
+      secret,
+      region: region as number,
+      block,
+      groups,
+      records,
+      registry,
+      chainId,
+      version,
+      registrars,
+      threshold: threshold as number,
+    };
   }
   if (data["kind"] === "find-cell") {
     if (!hasKeys(data, FIND_CELL_KEYS)) return undefined;
@@ -411,6 +520,7 @@ export function requestId(data: unknown): number | undefined {
 const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
   "commitment",
+  "tier0-outcome",
   "find-cell",
   "seal",
   "challenge",

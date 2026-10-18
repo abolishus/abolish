@@ -177,6 +177,41 @@ const harness = {
       typeof v === "bigint" ? v.toString() : v,
     );
   },
+  /**
+   * The worker's outcome of a Tier 0 registration for `secret` over the
+   * registry's `records`, with its bigints as strings, and whether the
+   * page's copy of the secret was left whole.
+   */
+  async tier0Outcome(
+    secret: string,
+    query: {
+      readonly region: number;
+      readonly block: string;
+      readonly groups: readonly { readonly group_id: string; readonly region: number }[];
+      readonly records: readonly string[];
+      readonly registry: string;
+      readonly chainId: string;
+      readonly registrars: readonly string[];
+      readonly threshold: number;
+    },
+  ): Promise<string> {
+    const given = fromHex(secret);
+    const result = await worker.tier0Outcome({
+      secret: given,
+      region: query.region,
+      block: BigInt(query.block),
+      groups: query.groups.map((g) => ({ group_id: BigInt(g.group_id), region: g.region })),
+      records: query.records.map(fromHex),
+      registry: fromHex(query.registry),
+      chainId: BigInt(query.chainId),
+      version: 8,
+      registrars: query.registrars.map(fromHex),
+      threshold: query.threshold,
+    });
+    return JSON.stringify({ result, intact: given.some((b) => b !== 0) }, (_, v: unknown) =>
+      typeof v === "bigint" ? v.toString() : v,
+    );
+  },
   /** The identity this device holds, read as the page reads it, with hex and decimal strings. */
   async readIdentity(): Promise<string> {
     return JSON.stringify(await readIdentity(), (_, v: unknown) =>

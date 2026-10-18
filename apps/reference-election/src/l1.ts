@@ -219,6 +219,7 @@ export function headerRlp(block: Block): Uint8Array {
 
 export interface Evidence {
   readonly header: Uint8Array;
+  readonly number: bigint;
   readonly timestamp: bigint;
   readonly nodes: readonly Uint8Array[];
 }
@@ -239,7 +240,28 @@ export async function evidence(
     storageProof: { proof: string[] }[];
   }>("eth_getProof", [hex(anchor), slots.map(hex), block.number]);
   const nodes = [...proof.accountProof, ...proof.storageProof.flatMap((p) => p.proof)];
-  return { header: headerRlp(block), timestamp: BigInt(block.timestamp), nodes: nodes.map(unhex) };
+  return {
+    header: headerRlp(block),
+    number: BigInt(block.number),
+    timestamp: BigInt(block.timestamp),
+    nodes: nodes.map(unhex),
+  };
+}
+
+/**
+ * Every header from block 0 to block `head`, as RLP, each checked against
+ * its hash: the run of finalized L1 headers a format-5 bundle gives
+ * (docs/spec/verifier.md, Bundle), which ballots' L1 references (5.8) are
+ * judged against. Starting at block 0 settles where the voting window starts
+ * whatever `opens_at` is; a local L1 is short enough to give it whole.
+ */
+export async function headers(rpc: Rpc, head: bigint): Promise<Uint8Array[]> {
+  const out: Uint8Array[] = [];
+  for (let n = 0n; n <= head; n++)
+    out.push(
+      headerRlp(await rpc.call<Block>("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])),
+    );
+  return out;
 }
 
 /**

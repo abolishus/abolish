@@ -11,7 +11,9 @@
 // definition version 5 (P2-14), which must verify as the honest one does.
 // Its ballots get receipts signed by the fixture as board operator, among
 // them one for a forked board and one for a ballot it never boards, which
-// the voter's later checks must find from L1 (P1-13b).
+// the voter's later checks must find from L1, and the verifier's drop rule
+// must tell apart over the poll's bundle in format 5: the first ballot is on
+// the board, the second dropped (P1-13b).
 // Besides these, the run holds controls the verifier must not
 // pass, each with the rows it must show, so the honest run's passes can't be
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
@@ -75,13 +77,20 @@ import {
   runQuestionCeremony,
   STUBS,
 } from "./election.ts";
-import { checkBallots, checkControl, checkExpectations } from "./expectations.ts";
+import {
+  checkBallots,
+  checkControl,
+  checkExpectations,
+  checkRows,
+  checkSelected,
+} from "./expectations.ts";
 import { blocksCar, segmentObjects } from "./blocks.ts";
 import {
   anchorAt,
   type DeployedAnchor,
   deployAnchor,
   evidence,
+  headers,
   l1RefAt,
   loggedAnchors,
   loggedCheckpoints,
@@ -99,6 +108,7 @@ import {
 import { nodeVerify, startNode } from "./node.ts";
 import {
   checkAtCast,
+  dropIs,
   judge,
   type JudgeView,
   operatorReceipt,
@@ -108,7 +118,7 @@ import {
 } from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import { STAGES } from "./stages.ts";
-import { runVerifier, type VerifierRun } from "./verify.ts";
+import { judgeDrops, runVerifier, type VerifierRun } from "./verify.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const OUT = join(ROOT, "reference-election-output");
@@ -191,12 +201,17 @@ function writeBundle(
     header: Uint8Array;
     nodes: readonly Uint8Array[];
     checkpoints: readonly Checkpoint[];
+    /**
+     * For format 5, the run of headers from block 0 to the finalized head
+     * `header` names; format 4 without.
+     */
+    blocks?: readonly Uint8Array[];
   },
   copy: Copy,
 ): void {
   mkdirSync(dir, { recursive: true });
   const bundle = {
-    format: "abolish-verifier-bundle/4",
+    format: l1.blocks === undefined ? "abolish-verifier-bundle/4" : "abolish-verifier-bundle/5",
     definition: hex(definitionBytes(e.definition)),
     clock: {
       epoch: clock.epoch.toString(),
@@ -211,6 +226,7 @@ function writeBundle(
       checkpoints: l1.checkpoints.map((c) => hex(encodeCheckpoint(c))),
     },
     panel: { threshold: e.panel.threshold.toString(), keys: e.panel.keys.map(hex) },
+    ...(l1.blocks === undefined ? {} : { l1Blocks: l1.blocks.map(hex) }),
   };
   writeFileSync(join(dir, "bundle.json"), `${JSON.stringify(bundle, null, 2)}\n`);
   if (copy === "none") return;
@@ -230,6 +246,11 @@ function verify(
 }
 
 async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<void> {
+  // Each L1 block a second after the one before unless a step sets its time:
+  // Anvil otherwise mines blocks within one wall-clock second at one
+  // timestamp, and a run of finalized headers (format 5) must have them
+  // strictly increasing, as Ethereum's are (docs/spec/verifier.md, Bundle).
+  await anvil.call("anvil_setBlockTimestampInterval", [1]);
   const genesis = await anvil.call<{ timestamp: string }>("eth_getBlockByNumber", [
     "latest",
     false,
@@ -464,6 +485,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         payload,
         receipt: operatorReceipt(receiptSecret, receiptsOf, questions.entries, cast),
         expected: "included",
+        drop: { status: "not-alarm" },
       });
     }
     // Two receipts the operator signs for boards it never anchors. A fork:
@@ -489,6 +511,8 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         cast,
       ),
       expected: "forked-copy",
+      // Voter 0's ballot is on the anchored board, at entry 1: no drop.
+      drop: { status: "present", entry: 1 },
     });
     const v3 = voters[3];
     if (v3 === undefined) throw new Error("too few voters");
@@ -506,6 +530,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         cast,
       ),
       expected: "forked-l1",
+      drop: { status: "drop" },
     });
     // The client can't tell any of them apart at cast: each passes.
     for (const r of receipts)
@@ -529,7 +554,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   // client would, from the anchors and the receipt key's record at the
   // finalized L1 block and the operator's entry-hash lists, after every
   // window has closed (docs/spec/receipts.md, Verdicts; T-26, T-24).
-  {
+  const judged = await (async () => {
     const { value } = questions.definition;
     const { words, timestamp } = await storageWords(
       anvil,
@@ -557,24 +582,11 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         failures.push(
           `receipts (questions): the ${r.name} receipt is ${verdict.verdict}${"by" in verdict ? ` by ${verdict.by}` : ""}, not ${r.expected}`,
         );
-    writeFileSync(
-      join(OUT, "questions", "receipts.json"),
-      `${JSON.stringify(
-        judged.map(({ r, verdict }) => ({
-          name: r.name,
-          receipt: hex(r.receipt),
-          verdict: verdict.verdict,
-          ...("by" in verdict ? { by: verdict.by } : {}),
-          alarm: isReceiptAlarm(verdict),
-        })),
-        null,
-        2,
-      )}\n`,
-    );
     log(
       `stage 4 (questions, receipts): ${judged.filter(({ verdict }) => verdict.verdict === "included").length} included, ${judged.filter(({ verdict }) => isReceiptAlarm(verdict)).length} alarms, judged from L1 and the operator's entry-hash lists`,
     );
-  }
+    return judged;
+  })();
 
   // Stage 8, the board: each election's segment objects and entry-hash lists
   // published as blocks to a community node, which serves them by CID from
@@ -664,6 +676,76 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
               passes: QUESTIONS_PASSES,
             }),
           ),
+        );
+        // The same bundle in format 5, with the run of finalized L1 headers
+        // from block 0: the verifier judges each ballot's L1 reference (5.8)
+        // and selects over the admitted ballots (6.1): voter 1's re-vote
+        // (entry 4) over its first ballot (entry 2). Past the close it looks
+        // for the tally and the shares' destruction, which no stage posts yet
+        // (stage 6), so 7.2 and 8.5 fail and are pinned as failing until one
+        // does; nothing else of the report is required here.
+        const withBlocks = join(OUT, e.name, "bundle-l1-blocks");
+        writeBundle(
+          withBlocks,
+          e,
+          clock,
+          { ...evidenceFor, blocks: await headers(anvil, l1.number) },
+          { blocks },
+        );
+        failures.push(
+          ...verify(withBlocks, (r) => [
+            ...checkRows("questions (l1 blocks)", r, {
+              "5.8": { status: "pass" },
+              "6.1": { status: "pass" },
+              "7.2": { status: "fail", code: "tally-missing" },
+              "8.5": { status: "fail", code: "destruction-missing" },
+            }),
+            ...checkBallots("questions (l1 blocks)", r, HONEST_BALLOTS),
+            ...checkSelected("questions (l1 blocks)", r, [1, 3, 4]),
+          ]),
+        );
+        // Stage 4's alarms judged for drops by the verifier over that bundle
+        // (docs/spec/receipts.md, Drops), which needs 5.8 and 6.1: the forked
+        // receipt's ballot is on the anchored board, the dropped one's on no
+        // board. Every input is a local file, so `drop` stays unjudged, and
+        // what the run shows is `dropAgainstInputs` (T-26, T-25, T-53).
+        const drops = judgeDrops(
+          withBlocks,
+          judged.map(({ r, verdict }) => ({ receipt: r.receipt, payload: r.payload, verdict })),
+        );
+        const rows = judged.map(({ r, verdict }, i) => {
+          const d = drops[i];
+          if (d === undefined) throw new Error("the drop judge skipped a receipt");
+          if (!dropIs(r.drop, d.dropAgainstInputs))
+            failures.push(
+              `receipts (questions): the ${r.name} receipt's drop is ${JSON.stringify(d.dropAgainstInputs)}, not ${JSON.stringify(r.drop)}`,
+            );
+          // A receipt that isn't an alarm is no drop whatever the inputs;
+          // an alarm's drop stands only on authenticated ones.
+          if (
+            r.drop.status === "not-alarm"
+              ? !dropIs(r.drop, d.drop)
+              : d.drop.status !== "unjudged" || d.drop.code !== "inputs-unauthenticated"
+          )
+            failures.push(
+              `receipts (questions): the ${r.name} receipt's drop is ${JSON.stringify(d.drop)}, not ${r.drop.status === "not-alarm" ? "not-alarm" : "unjudged from local inputs"}`,
+            );
+          return {
+            name: r.name,
+            receipt: hex(r.receipt),
+            verdict: verdict.verdict,
+            ...("by" in verdict ? { by: verdict.by } : {}),
+            alarm: isReceiptAlarm(verdict),
+            drop: d.drop,
+            dropAgainstInputs: d.dropAgainstInputs,
+          };
+        });
+        writeFileSync(
+          join(OUT, "questions", "receipts.json"),
+          `${JSON.stringify(rows, null, 2)}\n`,
+        );
+        log(
+          `stage 4 (questions, drops): ${drops.filter((d) => d.dropAgainstInputs.status === "drop").length} drop and ${drops.filter((d) => d.dropAgainstInputs.code === "present").length} present among the alarms, judged by the verifier against the bundle's inputs`,
         );
       } else if (e.name === "rejected-ballot") {
         // A control: the second ballot's proof is the first's, made for

@@ -10,8 +10,10 @@ import { concatBytes } from "@noble/hashes/utils.js";
 import { expect, test } from "vite-plus/test";
 import { segmentObjects } from "../src/blocks.ts";
 import { word } from "../src/l1.ts";
+import { tagged, taggedReviver } from "../src/verify.ts";
 import {
   checkAtCast,
+  dropIs,
   judge,
   type JudgeView,
   operatorReceipt,
@@ -167,4 +169,45 @@ test("a receipt is no evidence under a key the anchor never registered or a key 
     verdict: "not-evidence",
     reason: "receipt-key",
   });
+});
+
+test("a forked-from-L1 verdict crosses to the verifier's process as it was", () => {
+  // The verdict judgeDrops hands the verifier holds a checkpoint: integers
+  // and byte strings, which plain JSON would turn into strings and objects.
+  fc.assert(
+    fc.property(bodies, (bs) => {
+      const [dropped, ...kept] = bs.map(ballot);
+      const entries = [
+        entry(0, FIRST, ballot(Uint8Array.of(0))),
+        ...kept.map((p, i) => entry(i + 1, CAST, p)),
+      ];
+      const d = dropped as Uint8Array;
+      const receipt = operatorReceipt(
+        secret,
+        election,
+        [...entries, entry(entries.length, CAST, d)],
+        CAST,
+      );
+      const v = judge(election, receipt, d, { ...viewOf(entries), sources: [] });
+      expect(JSON.parse(tagged(v), taggedReviver)).toEqual(v);
+    }),
+    { numRuns },
+  );
+});
+
+test("a drop outcome matches only the expectation that names it", () => {
+  const notAlarm = { status: "not-drop", code: "not-alarm" } as const;
+  const present = { status: "not-drop", code: "present", entry: 1 } as const;
+  const drop = { status: "drop" } as const;
+  const unjudged = { status: "unjudged", code: "inputs-unauthenticated" } as const;
+  expect(dropIs({ status: "not-alarm" }, notAlarm)).toBe(true);
+  expect(dropIs({ status: "present", entry: 1 }, present)).toBe(true);
+  expect(dropIs({ status: "drop" }, drop)).toBe(true);
+  // The entry carrying the ballot is pinned, not only that one does.
+  expect(dropIs({ status: "present", entry: 2 }, present)).toBe(false);
+  for (const o of [notAlarm, present, unjudged]) expect(dropIs({ status: "drop" }, o)).toBe(false);
+  for (const o of [notAlarm, drop, unjudged])
+    expect(dropIs({ status: "present", entry: 1 }, o)).toBe(false);
+  for (const o of [present, drop, unjudged, { status: "not-drop", code: "decode" } as const])
+    expect(dropIs({ status: "not-alarm" }, o)).toBe(false);
 });

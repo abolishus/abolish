@@ -31,7 +31,9 @@ export function pollPreview(
     question: undefined,
     askedBy: undefined,
     place: undefined,
-    questionCount: 1,
+    // An ill-formed version-5 definition can have no questions; its card
+    // still draws one, as the page shows the broken rule beside it.
+    questionCount: Math.max(1, poll.questions.length),
     answers: undefined,
     closesAt: closes,
     civic: false,

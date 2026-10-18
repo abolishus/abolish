@@ -10,8 +10,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { shortCode } from "@abolishus/core/short-codes";
 import {
   decodeElectionDefinition,
+  decodeElectionDefinitionV5,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -60,8 +63,25 @@ const hiddenDefinition = toHex(
   }),
 );
 
+/** A version-5 poll of four questions: the typical vector under an ID of its own. */
+const typicalV5 = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/election-definition-v5.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { vectors: Vector[] }
+).vectors.find((v) => v.id === "definition-v5-typical");
+if (typicalV5 === undefined) throw new Error("vectors missing");
+const QUESTIONS_ID = "a5".repeat(32);
+const questionsDefinition = encodeElectionDefinitionV5({
+  ...decodeElectionDefinitionV5(fromHex(typicalV5.encoding)),
+  election_id: fromHex(QUESTIONS_ID),
+});
+
 const definitions = new Map([
   [ID, typical.encoding],
+  [QUESTIONS_ID, toHex(questionsDefinition)],
   [HIDDEN_ID, hiddenDefinition],
   [SWAPPED_ID, typical.encoding],
 ]);
@@ -312,6 +332,26 @@ describe("poll page", () => {
     expect(html).not.toContain('name="robots"');
     expect(html).toContain(`href="/p/${CODE}"`);
     expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
+  });
+
+  test("shows a version-5 poll question by question, with version 5's hash", async () => {
+    const response = await get(`/polls/${QUESTIONS_ID}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    const text = html.replace(/<[^>]+>/g, "");
+    expect(text).toContain(
+      toHex(electionDefinitionV5Hash(decodeElectionDefinitionV5(questionsDefinition))),
+    );
+    expect(text).toContain("Question by question");
+    expect(text).toContain("4 questions, 18 options");
+    expect(text).toContain("Question 1: Pick one, from 3 options; 0 to 1 selections");
+    expect(text).toContain("Question 2: Pick any, from 5 options; 0 to 5 selections");
+    expect(text).toContain("Question 3: Pick up to 2, from 4 options; 0 to 2 selections");
+    expect(text).toContain("Question 4: Pick exactly 3, from 6 options; 3 to 3 selections");
+    // Tier 0's regions, 5,000 + 1,200 + 40 + 980, and Tier 2's one.
+    expect(text).toContain("7,220 members");
+    expect(text).toContain("120 members");
+    expect(text).not.toContain("Selections per ballot");
   });
 
   test("shows a collided poll's longer code, as the API resolves it", async () => {

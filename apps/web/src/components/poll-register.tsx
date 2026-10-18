@@ -2,18 +2,20 @@ import { buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { ArrowRight } from "lucide-react";
 import { useId } from "react";
 
-import { catalogs, type Messages } from "../messages.ts";
-import { POLL_STATUSES, pollStatus, type PollStatus, type PollView } from "../poll.ts";
+import { catalogs } from "../messages.ts";
+import { type Counting, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
 import type { ListedPoll, PollList as List } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { LookupForm } from "./lookup-form.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollRows } from "./poll-list.tsx";
-import { STATUS_MARK } from "./poll-status.ts";
+import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 
-export type Counting = PollView["electionType"];
-
-export const COUNTINGS = ["plurality", "approval"] as const satisfies readonly Counting[];
+export const COUNTINGS = [
+  "plurality",
+  "approval",
+  "questions",
+] as const satisfies readonly Counting[];
 
 /**
  * What the register shows of a page of the list: one value per group, or
@@ -29,11 +31,6 @@ export interface RegisterFilters {
 /** A group's value, if it filters anything. */
 const chosen = <T extends string>(value: T | "all" | undefined): T | undefined =>
   value === "all" ? undefined : value;
-
-const COUNTING_LABEL = {
-  plurality: "typePlurality",
-  approval: "typeApproval",
-} as const satisfies Record<Counting, keyof Messages>;
 
 /**
  * The register's address for `after` and `filters`, so the next page keeps
@@ -59,7 +56,7 @@ function matches(entry: ListedPoll, filters: RegisterFilters, asOf: List["asOf"]
   if (entry.kind !== "poll") return false;
   return (
     (status === undefined || pollStatus(entry.poll, asOf) === status) &&
-    (counting === undefined || entry.poll.electionType === counting)
+    (counting === undefined || entry.poll.counting === counting)
   );
 }
 
@@ -194,9 +191,7 @@ export function PollRegister({ list, after, filters, invalid }: PollRegisterProp
                 options={COUNTINGS}
                 checked={counting}
                 count={(c) =>
-                  c === "all"
-                    ? list.polls.length
-                    : readable.filter((p) => p.electionType === c).length
+                  c === "all" ? list.polls.length : readable.filter((p) => p.counting === c).length
                 }
                 label={(c) => t(COUNTING_LABEL[c])}
               />

@@ -7,11 +7,10 @@ import { PollRegister, registerHref } from "./poll-register.tsx";
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
   definitionHash: "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750",
+  version: 1,
   illFormed: undefined,
-  electionType: "plurality",
-  optionCount: 3,
-  minSelections: 0,
-  maxSelections: 1,
+  counting: "plurality",
+  questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [{ tier: 0, groupSize: "5000" }],
   threshold: 4,
   panelSize: 7,
@@ -25,6 +24,7 @@ const SCHEDULED = "20".repeat(32);
 const CLOSED = "30".repeat(32);
 const UNREADABLE = "40".repeat(32);
 const NEXT = "50".repeat(32);
+const QUESTIONS = "60".repeat(32);
 
 const meta = {
   component: PollRegister,
@@ -35,7 +35,7 @@ const meta = {
         {
           kind: "poll",
           poll: poll(SCHEDULED, {
-            electionType: "approval",
+            counting: "approval",
             opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
             closesAt: { seconds: "18446744073709551615", iso: undefined },
           }),
@@ -141,6 +141,40 @@ export const AllSent: Story = {
       "href",
       `/polls?after=${NEXT}&counting=approval`,
     );
+  },
+};
+
+/** A version-5 poll is counted question by question, and filtered as such. */
+export const QuestionByQuestion: Story = {
+  args: {
+    list: {
+      ...meta.args.list,
+      polls: [
+        ...meta.args.list.polls,
+        {
+          kind: "poll",
+          poll: poll(QUESTIONS, {
+            version: 5,
+            counting: "questions",
+            questions: [
+              { optionCount: 3, minSelections: 0, maxSelections: 1 },
+              { optionCount: 6, minSelections: 3, maxSelections: 3 },
+            ],
+          }),
+        },
+      ],
+    },
+    filters: { status: undefined, counting: "questions" },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("radio", { name: "Question by question 1" })).toBeChecked();
+    await expect(canvas.getByRole("radio", { name: "One choice 2" })).not.toBeChecked();
+    await expect(canvas.getByText("1 of 5 polls on this page match.")).toBeVisible();
+    await expect(shown(canvasElement)).toEqual([`/polls/${QUESTIONS}`]);
+    const row = canvas.getByRole("article");
+    await expect(within(row).getByText("Question by question")).toBeVisible();
+    await expect(within(row).getByText("Open")).toBeVisible();
   },
 };
 

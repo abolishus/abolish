@@ -231,16 +231,36 @@ describe("the short code", () => {
 });
 
 describe("a poll page's preview today", () => {
-  const poll = {
+  const poll: PollView = {
     electionId: "ab".repeat(32),
+    version: 1,
     definitionHash: SEAL,
+    illFormed: undefined,
+    counting: "plurality",
+    questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
+    electorate: [{ tier: 0, groupSize: "5000" }],
+    threshold: 4,
+    panelSize: 7,
+    opensAt: { seconds: "1767225600", iso: "2026-01-01T00:00:00.000Z" },
     closesAt: { seconds: "1794772800", iso: "2026-11-15T20:00:00.000Z" },
-  } as PollView;
+  };
   const closes = Date.parse("2026-11-15T20:00:00.000Z");
 
   test("is open until it closes, then counting, and never a result", () => {
     expect(pollPreview(poll, CODE, "abolish.us", closes - 1).results).toEqual({ state: "open" });
     expect(pollPreview(poll, CODE, "abolish.us", closes).results).toEqual({ state: "counting" });
+  });
+
+  test("counts a version-5 poll's questions, and draws one for a poll with none", () => {
+    const q = poll.questions[0]!; // the fixture has one
+    expect(pollPreview(poll, CODE, "abolish.us", 0).questionCount).toBe(1);
+    expect(
+      pollPreview({ ...poll, questions: [q, q, q] }, CODE, "abolish.us", 0).questionCount,
+    ).toBe(3);
+    // An ill-formed definition (`questions`) still gets a card the model accepts.
+    const none = pollPreview({ ...poll, questions: [] }, CODE, "abolish.us", 0);
+    expect(none.questionCount).toBe(1);
+    expect(() => checkPreview(none)).not.toThrow();
   });
 
   test("gets a new version when what it draws changes, and only then", async () => {

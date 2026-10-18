@@ -17,7 +17,7 @@ import {
   storageAtOutputRoot,
 } from "../src/index.ts";
 import { rlp } from "./headers.ts";
-import { buildTrie, stored } from "./state.ts";
+import { type Account, buildTrie, CODE, l2State, uint } from "./state.ts";
 
 // Storage under an output root posted on L1 (src/output-root.ts;
 // docs/spec/contracts.md, Event accumulator, Output root). The vectors are a
@@ -104,77 +104,12 @@ describe("output-root.json", () => {
   });
 });
 
-// A synthetic L2 state: the contract at `address` holding `accumulator` and
-// `count` at the spec's slots, beside `others` (address, storage) accounts.
-
-const uint = (n: bigint) => {
-  const out: number[] = [];
-  for (let x = n; x > 0n; x >>= 8n) out.unshift(Number(x & 0xffn));
-  return Uint8Array.from(out);
-};
 const word = (n: bigint) => {
   const b = new Uint8Array(32);
   for (let i = 31, x = n; x > 0n; i--, x >>= 8n) b[i] = Number(x & 0xffn);
   return b;
 };
-const CODE = keccak_256(Uint8Array.of(0xfe));
 const NO_CODE = keccak_256(new Uint8Array());
-
-interface Account {
-  readonly address: Uint8Array;
-  readonly storage: readonly (readonly [Uint8Array, Uint8Array])[];
-  readonly codeHash?: Uint8Array;
-}
-
-function l2State(accounts: readonly Account[], number: bigint, timestamp: bigint) {
-  const nodes: Uint8Array[] = [];
-  const entries = accounts.map((a): [Uint8Array, Uint8Array] => {
-    const nonZero = a.storage.filter(([, w]) => w.some((x) => x !== 0));
-    // An empty storage trie has the empty root and no nodes.
-    let root = keccak_256(Uint8Array.of(0x80));
-    if (nonZero.length > 0) {
-      const trie = buildTrie(nonZero.map(([slot, w]) => [slot, stored(w)] as const));
-      root = trie.root;
-      nodes.push(...trie.nodes);
-    }
-    return [a.address, rlp([uint(1n), uint(0n), root, a.codeHash ?? CODE])];
-  });
-  const state = buildTrie(entries);
-  nodes.push(...state.nodes);
-  const z = (n: number) => new Uint8Array(n);
-  const header = rlp([
-    z(32),
-    z(32),
-    z(20),
-    state.root,
-    z(32),
-    z(32),
-    z(256),
-    uint(0n),
-    uint(number),
-    uint(30_000_000n),
-    uint(0n),
-    uint(timestamp),
-    new Uint8Array(),
-    z(32),
-    z(8),
-    uint(1n),
-  ]);
-  const messagePasserStorageRoot = keccak_256(Uint8Array.of(0x42));
-  // Written out here rather than through outputRootV0, which is under test.
-  const outputRoot = keccak_256(
-    Uint8Array.from([
-      ...new Uint8Array(32),
-      ...state.root,
-      ...messagePasserStorageRoot,
-      ...keccak_256(header),
-    ]),
-  );
-  return {
-    evidence: { outputRoot, messagePasserStorageRoot, header, nodes },
-    hash: keccak_256(header),
-  };
-}
 
 const S = word(ACCUMULATOR_SLOT);
 const S1 = word(ACCUMULATOR_SLOT + 1n);

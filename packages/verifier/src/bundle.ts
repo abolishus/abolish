@@ -16,6 +16,7 @@ import {
   panelId,
 } from "@abolishus/crypto";
 import { decodeHeader, type L1Evidence, type L1Header, NodePool, RlpError } from "./l1.ts";
+import type { L2BoardEvidence } from "./availability.ts";
 import type { GatewayStats } from "./gateways.ts";
 
 /**
@@ -40,6 +41,7 @@ export interface InputSources {
   readonly definition?: InputSource;
   readonly panel?: InputSource;
   readonly l1Blocks?: InputSource;
+  readonly l2OutputRoot?: InputSource;
 }
 
 /**
@@ -123,8 +125,25 @@ export interface BlocksBundle extends Omit<CeremonyBundle, "format"> {
   readonly l1Blocks: readonly L1Header[];
 }
 
+/**
+ * Format 6: as format 5, with the board contract's events and its event
+ * accumulator under an L2 output root, which the availability check (4.6)
+ * reads. The output root should be read from a dispute game on L1 (P1-19
+ * part 3b); until then it is a local input of its own.
+ */
+export interface L2Bundle extends Omit<BlocksBundle, "format"> {
+  readonly format: typeof BUNDLE_FORMAT_L2;
+  readonly l2Board: L2BoardEvidence;
+}
+
 /** One election's inputs: the board copy, and what the board checks judge it against. */
-export type Bundle = LocalBundle | L1Bundle | DefinitionBundle | CeremonyBundle | BlocksBundle;
+export type Bundle =
+  | LocalBundle
+  | L1Bundle
+  | DefinitionBundle
+  | CeremonyBundle
+  | BlocksBundle
+  | L2Bundle;
 
 /** A bundle that doesn't follow docs/spec/verifier.md, Bundle. */
 export class BundleError extends Error {
@@ -136,6 +155,7 @@ export const BUNDLE_FORMAT_L1 = "abolish-verifier-bundle/2";
 export const BUNDLE_FORMAT_DEFINITION = "abolish-verifier-bundle/3";
 export const BUNDLE_FORMAT_CEREMONY = "abolish-verifier-bundle/4";
 export const BUNDLE_FORMAT_BLOCKS = "abolish-verifier-bundle/5";
+export const BUNDLE_FORMAT_L2 = "abolish-verifier-bundle/6";
 
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
@@ -290,6 +310,29 @@ function parseBlocks(value: unknown, anchorHeader: L1Header): readonly L1Header[
   return blocks;
 }
 
+// Bytes only: decoding the events and the header, and proving the
+// accumulator, are 4.6's, so evidence that doesn't hold up is reported there,
+// never a rejected bundle.
+function parseL2Board(value: unknown): L2BoardEvidence {
+  const l = object(
+    value,
+    ["events", "outputRoot", "messagePasserStorageRoot", "header", "nodes"],
+    "l2Board",
+  );
+  return {
+    events: array(l["events"], "l2Board.events").map((e, i) => hexBytes(e, `l2Board.events[${i}]`)),
+    proof: {
+      outputRoot: hex32(l["outputRoot"], "l2Board.outputRoot"),
+      messagePasserStorageRoot: hex32(
+        l["messagePasserStorageRoot"],
+        "l2Board.messagePasserStorageRoot",
+      ),
+      header: hexBytes(l["header"], "l2Board.header"),
+      nodes: array(l["nodes"], "l2Board.nodes").map((n, i) => hexBytes(n, `l2Board.nodes[${i}]`)),
+    },
+  };
+}
+
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -376,14 +419,22 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
   if (
     format === BUNDLE_FORMAT_DEFINITION ||
     format === BUNDLE_FORMAT_CEREMONY ||
-    format === BUNDLE_FORMAT_BLOCKS
+    format === BUNDLE_FORMAT_BLOCKS ||
+    format === BUNDLE_FORMAT_L2
   ) {
-    const blocks = format === BUNDLE_FORMAT_BLOCKS;
+    const l2 = format === BUNDLE_FORMAT_L2;
+    const blocks = l2 || format === BUNDLE_FORMAT_BLOCKS;
     const ceremony = blocks || format === BUNDLE_FORMAT_CEREMONY;
     const members = ["format", "definition", "clock", "l1"];
     const b = object(
       value,
-      blocks ? [...members, "panel", "l1Blocks"] : ceremony ? [...members, "panel"] : members,
+      l2
+        ? [...members, "panel", "l1Blocks", "l2Board"]
+        : blocks
+          ? [...members, "panel", "l1Blocks"]
+          : ceremony
+            ? [...members, "panel"]
+            : members,
       "bundle.json",
     );
     const definition = hexBytes(b["definition"], "definition");
@@ -391,6 +442,7 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     const l1 = parseL1(b["l1"], false);
     const panel = ceremony ? parsePanel(b["panel"]) : undefined;
     const l1Blocks = blocks ? parseBlocks(b["l1Blocks"], l1.header) : undefined;
+    const l2Board = l2 ? parseL2Board(b["l2Board"]) : undefined;
     const split = splitEntries(board);
     const common = {
       definition,
@@ -411,24 +463,28 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
       definition: "local-file",
     } as const;
     if (panel === undefined) return { format: BUNDLE_FORMAT_DEFINITION, ...common, sources };
-    return l1Blocks === undefined
-      ? {
-          format: BUNDLE_FORMAT_CEREMONY,
-          ...common,
-          panel,
-          sources: { ...sources, panel: "local-file" },
-        }
+    if (l1Blocks === undefined)
+      return {
+        format: BUNDLE_FORMAT_CEREMONY,
+        ...common,
+        panel,
+        sources: { ...sources, panel: "local-file" },
+      };
+    const withBlocks = { ...sources, panel: "local-file", l1Blocks: "local-file" } as const;
+    return l2Board === undefined
+      ? { format: BUNDLE_FORMAT_BLOCKS, ...common, panel, l1Blocks, sources: withBlocks }
       : {
-          format: BUNDLE_FORMAT_BLOCKS,
+          format: BUNDLE_FORMAT_L2,
           ...common,
           panel,
           l1Blocks,
-          sources: { ...sources, panel: "local-file", l1Blocks: "local-file" },
+          l2Board,
+          sources: { ...withBlocks, l2OutputRoot: "local-file" },
         };
   }
   if (format !== BUNDLE_FORMAT && format !== BUNDLE_FORMAT_L1)
     throw new BundleError(
-      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1}, ${BUNDLE_FORMAT_DEFINITION}, ${BUNDLE_FORMAT_CEREMONY} or ${BUNDLE_FORMAT_BLOCKS}`,
+      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1}, ${BUNDLE_FORMAT_DEFINITION}, ${BUNDLE_FORMAT_CEREMONY}, ${BUNDLE_FORMAT_BLOCKS} or ${BUNDLE_FORMAT_L2}`,
     );
   const b = object(
     value,

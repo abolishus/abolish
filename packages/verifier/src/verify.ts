@@ -47,6 +47,7 @@ import {
   readBoardCopy,
   type ReceiptVerdict,
   RECORD_TYPES,
+  SEAT_PANELS,
   verifyBoard,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -64,6 +65,11 @@ import { type DropOutcome, judgeDropRule } from "./drops.ts";
 import { type L1RefCode, referenceJudge } from "./references.ts";
 import type { BlockStore } from "./blocks.ts";
 import type { Gateways } from "./gateways.ts";
+import {
+  availabilityChecks,
+  type AvailabilityEvidenceCode,
+  type AvailabilityReport,
+} from "./availability.ts";
 import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -124,6 +130,8 @@ export type CheckCode =
   | ReceiptKeyCode
   | EventCode
   | ReleaseRowCode
+  | AvailabilityEvidenceCode
+  | "unavailable"
   | "decode"
   | "membership-key"
   | "profile-combination"
@@ -160,6 +168,10 @@ export type CheckAt =
   | { readonly snapshot: number }
   /** 8.5's first registered seat that isn't `destroyed`, or isn't decided; 2.5's `default-seat`'s first author seat. */
   | { readonly seat: number }
+  /** 4.6's first point and panel that doesn't hold (1 the ballot extent; 1 the default panel, 2 the author panel). */
+  | { readonly point: number; readonly panel: number }
+  /** 4.6's first board event, by its position in the bundle's `l2Board.events`, that doesn't decode. */
+  | { readonly event: number; readonly decodeError?: DecodeErrorCode }
   | Record<string, never>;
 
 export interface CheckResult {
@@ -199,6 +211,8 @@ export interface Report {
   readonly close?: CloseReport;
   /** A format-5 bundle's releases under a live definition, once 7.5 fixed its snapshots. */
   readonly releases?: ReleasesReport;
+  /** A format-6 bundle's availability check, once the board's accumulator replayed (4.6). */
+  readonly availability?: AvailabilityReport;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -382,8 +396,7 @@ function fromDefinition(
     ["4.4", NOT_REACHED],
     ["7.5", NOT_REACHED],
     ["7.6", NOT_REACHED],
-    ...(bundle.format === "abolish-verifier-bundle/4" ||
-    bundle.format === "abolish-verifier-bundle/5"
+    ...("panel" in bundle
       ? ([
           ["2.5", NOT_REACHED],
           ["3.1", NOT_REACHED],
@@ -402,12 +415,13 @@ function fromDefinition(
           ["7.3", NOT_REACHED],
           ["8.5", NOT_REACHED],
           ["6.3", NOT_REACHED],
-          ...(bundle.format === "abolish-verifier-bundle/5"
+          ...("l1Blocks" in bundle
             ? ([
                 ["5.8", NOT_REACHED],
                 ["6.1", NOT_REACHED],
               ] satisfies [string, Outcome][])
             : []),
+          ...("l2Board" in bundle ? ([["4.6", NOT_REACHED]] satisfies [string, Outcome][]) : []),
         ] satisfies [string, Outcome][])
       : []),
   ];
@@ -624,6 +638,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
   let tallies: readonly TallyReport[] | undefined;
   let counted: CountedResult | undefined;
   let releases: ReleasesReport | undefined;
+  let availability: AvailabilityReport | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -686,7 +701,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
                   ? undefined
                   : board.entries - board.unauthenticated,
                 // Format 5's run decides whether an L1 origin is a finalized block.
-                bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+                "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
               ),
             ] as const,
           ]),
@@ -713,8 +728,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
     // The transcript's bytes are authenticated by the definition's hash of
     // them, not by the board checks, so they run whatever 4.1 and 4.2 found.
     if (
-      (bundle.format === "abolish-verifier-bundle/4" ||
-        bundle.format === "abolish-verifier-bundle/5") &&
+      "panel" in bundle &&
       definition.definition !== undefined &&
       definition.hash !== undefined &&
       definition.stubHash !== undefined
@@ -740,7 +754,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
         bundle.entries,
         definition.inputs.boardEntryVersion,
         bundle.clock,
-        bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+        "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
       );
       implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
       ballots = admission.report;
@@ -804,7 +818,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
           // and 6.1's pass put every admitted ballot of the anchored extent
           // there.
           admitted: admission.candidates.filter((c) => c.entry < extent),
-          blocks: bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+          blocks: "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
         });
       }
       implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
@@ -813,8 +827,9 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
       // Releases, step 1).
       if (
-        // 7.1 passes only where 6.1 did, which needs 5.8 and so format 5.
-        bundle.format === "abolish-verifier-bundle/5" &&
+        // 7.1 passes only where 6.1 did, which needs 5.8 and so a run of
+        // L1 headers (format 5 or 6).
+        "l1Blocks" in bundle &&
         isLive(definition.definition) &&
         implemented.get("7.5")?.code === "not-reached" &&
         implemented.get("7.1")?.status === "pass" &&
@@ -885,6 +900,56 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       );
       implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
       openings = spoiled.report;
+      // 4.6 reads L1's counted checkpoints and the board contract's events
+      // alone, never the copy, so it runs whatever 4.1 and 4.2 found
+      // (docs/spec/availability.md, Availability check, Precedence).
+      if ("l2Board" in bundle) {
+        const d = definition.definition.value;
+        const author = authorRunOf(definition.definition);
+        const checkedAvailability =
+          input instanceof L1Error || checked.registered === undefined
+            ? { row: NOT_REACHED }
+            : availabilityChecks({
+                definitionHash: definition.hash,
+                electionId: d.election_id,
+                closesAt: d.closes_at,
+                l1InclusionBound: BigInt(d.l1_inclusion_bound),
+                l2ChainId: d.l2_chain_id,
+                eventVersion: pinnedVersion(d, RECORD_TYPES.contractEvent),
+                contracts: {
+                  electionRegistry: d.election_registry,
+                  trusteeRegistry: d.trustee_registry,
+                  groupRegistry: d.group_registry,
+                  board: d.board,
+                },
+                panels: [
+                  {
+                    panel: SEAT_PANELS.default,
+                    threshold: d.threshold,
+                    registered: checked.registered,
+                  },
+                  // The board contract has no author panel key set yet, so no
+                  // author seat's record can count and the panel holds no
+                  // point (docs/spec/availability.md, Contract path; P2-16
+                  // parts 3 and 5); 2.3 refuses every author panel anyway.
+                  ...(author === undefined
+                    ? []
+                    : [
+                        {
+                          panel: SEAT_PANELS.author,
+                          threshold: author.panel.threshold,
+                          registered: [],
+                        },
+                      ]),
+                ],
+                anchors: input.anchors,
+                clock: bundle.clock,
+                now: input.now,
+                l2: bundle.l2Board,
+              });
+        implemented = new Map<string, Outcome>([...implemented, ["4.6", checkedAvailability.row]]);
+        if ("report" in checkedAvailability) availability = checkedAvailability.report;
+      }
     }
   }
   const checks = CHECKS.map((c): CheckResult => ({
@@ -911,6 +976,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
     ...(counted?.close !== undefined && { close: counted.close }),
     ...(releases !== undefined && { releases }),
+    ...(availability !== undefined && { availability }),
     board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {
@@ -977,7 +1043,7 @@ export function judgeDrop(
     "rows" in definition ||
     definition.definition === undefined ||
     definition.stubHash === undefined ||
-    (bundle.format !== "abolish-verifier-bundle/4" && bundle.format !== "abolish-verifier-bundle/5")
+    !("panel" in bundle)
   )
     return report({ status: "unjudged", code: "not-reached" }, authenticates);
   const d = definition.definition;
@@ -1012,7 +1078,7 @@ export function judgeDrop(
     bundle.entries,
     boardEntryVersion,
   );
-  const blocks = bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined;
+  const blocks = "l1Blocks" in bundle ? bundle.l1Blocks : undefined;
   return report(
     judgeDropRule({
       verdict,
@@ -1050,7 +1116,7 @@ export function anchoredAdmitted(
     bundle.entries,
     inputs.boardEntryVersion,
     extent,
-    bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+    "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
   );
   const admission = ballotChecks(
     definition,
@@ -1059,7 +1125,7 @@ export function anchoredAdmitted(
     bundle.entries,
     inputs.boardEntryVersion,
     bundle.clock,
-    bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+    "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
   );
   const chosen = selectionCheck({
     admissionSettled: admissionSettled(admission.rows),

@@ -157,6 +157,7 @@ export {
   type BoardEntry,
   boardEntryHash,
   anchoredCheckpoints,
+  countedCheckpoints,
   type BoardCopy,
   type BoardCopyStop,
   BoardError,

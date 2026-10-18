@@ -654,6 +654,29 @@ export function anchoredCheckpoints(
   return counted;
 }
 
+/**
+ * The checkpoints counted for an election at the finalized L1 time `now`,
+ * after the board checks' steps 1 and 2 only (docs/spec/board.md, Board
+ * checks), never `unsealed`: for the availability check, whose ballot extent
+ * is decided whether or not the seal was ever anchored, so withholding the
+ * seal can't turn its failure into an unverifiable run
+ * (docs/spec/availability.md, Availability check, Precedence; T-24, T-54).
+ * Throws `BoardError` on a failure of those steps.
+ */
+export function countedCheckpoints(
+  electionId: Uint8Array,
+  anchors: readonly Anchor[],
+  clock: AnchorClock,
+  now: bigint,
+): Checkpoint[] {
+  if (!Array.isArray(anchors)) throw new TypeError("anchors must be an array");
+  if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
+  const c = checkClock(clock);
+  const id = copyBytes(electionId, "electionId");
+  if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
+  return countedAnchors(id, anchors, c, now).map(([, cp]) => cp);
+}
+
 /** Why `readBoardCopy` stopped: its copy ends before this checkpoint's run. */
 export interface BoardCopyStop {
   /** The first counted anchor of the run's size, by its position in `anchors`. */

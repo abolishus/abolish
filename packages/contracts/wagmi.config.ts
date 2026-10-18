@@ -1,8 +1,9 @@
 // Typed ABI bindings for the deployable contracts (contracts skill, Bindings;
 // brief: "Contract ABIs → typed bindings via the wagmi CLI Foundry plugin").
 // The package build compiles first, so the plugin only reads `out/`. Only the
-// eight deployable contracts are listed: test harnesses, fixtures and vendored
-// libraries in `out/` are not part of the deployed interface.
+// nine deployable contracts are listed (the ballot check is deployed by the
+// board's constructor): test harnesses, fixtures and vendored libraries in
+// `out/` are not part of the deployed interface.
 import { defineConfig } from "@wagmi/cli";
 import { foundry } from "@wagmi/cli/plugins";
 
@@ -12,6 +13,7 @@ export default defineConfig({
     foundry({
       forge: { build: false, rebuild: false },
       include: [
+        "BallotCheck.sol/BallotCheck.json",
         "BallotRelay.sol/BallotRelay.json",
         "Board.sol/Board.json",
         "BoardAnchor.sol/BoardAnchor.json",

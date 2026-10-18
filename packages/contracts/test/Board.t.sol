@@ -1971,9 +1971,11 @@ contract BoardTest is TestBase {
         uint256 post = _gas(_postingCall(posting, alice));
         board = new Board(address(elections), address(trustees), RELAY);
         uint256 pairing = ballot - _gas(_ballotCall(honestBallot));
-        // Measured about 393,000 (ballot), 343,000 (one receipt), 950,000
-        // (three), 342,000 (complaint), 29,000 (a repeat), and for a posting
-        // 239,000 with the pairing mocked and 183,000 more for the pairing.
+        // Measured about 405,000 (ballot, the ballot check's call to
+        // `BallotCheck` and the author key set's read included), 343,000 (one
+        // receipt), 950,000 (three), 342,000 (complaint), 29,000 (a repeat),
+        // and for a posting 251,000 with the pairing mocked and 183,000 more
+        // for the pairing.
         assertTrue(ballot < 450_000, "ballot");
         assertTrue(one < 400_000, "one receipt");
         assertTrue(three < 1_100_000, "three receipts");

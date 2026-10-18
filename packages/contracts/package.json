@@ -11,7 +11,7 @@
   "scripts": {
     "build": "forge build && rm -rf out/build-info && wagmi generate && vp fmt src/generated",
     "check": "forge fmt --check && forge build --sizes",
-    "test": "forge test && FOUNDRY_PROFILE=precompile EXPECT_P256VERIFY=true forge test --match-path test/TrusteeRegistry.t.sol && FOUNDRY_PROFILE=precompile EXPECT_P256VERIFY=true forge test --match-path 'test/{MembershipProof,BallotCheck,Board,BoardAvailability,BoardCloseRule,Tier1Additions,NullifierKeys,ElectionRegistryAuthorPanel}.t.sol' && vp test run"
+    "test": "forge test && FOUNDRY_PROFILE=precompile EXPECT_P256VERIFY=true forge test --match-path test/TrusteeRegistry.t.sol && FOUNDRY_PROFILE=precompile EXPECT_P256VERIFY=true forge test --match-path 'test/{MembershipProof,BallotCheck,Board,BoardAvailability,BoardCloseRule,Tier1Additions,NullifierKeys,ElectionRegistryAuthorPanel,BoardBallotV4}.t.sol' && vp test run"
   },
   "devDependencies": {
     "@types/node": "catalog:",

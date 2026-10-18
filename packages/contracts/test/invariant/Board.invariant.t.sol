@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
-import {BallotCheckLib} from "../../src/BallotCheck.sol";
+import {BallotCheck, BallotCheckLib} from "../../src/BallotCheck.sol";
 import {Board} from "../../src/Board.sol";
 import {CanonicalCalldata} from "../../src/CanonicalCalldata.sol";
 import {DeliveryCheckLib, IBoardElections, IBoardTrustees} from "../../src/DeliveryCheck.sol";
@@ -16,6 +16,8 @@ import {TestBase, Vm} from "../utils/Vm.sol";
 /// The board's checks as stateless calls, to re-run each emitted record
 /// against the same registries.
 contract BoardChecks {
+    BallotCheck internal immutable checker = new BallotCheck();
+
     function receipt(bytes calldata r, IBoardElections e, IBoardTrustees t)
         external
         view
@@ -39,7 +41,7 @@ contract BoardChecks {
         IBoardTrustees t,
         uint256 qualified
     ) external view returns (bytes32, bytes32) {
-        return DeliveryCheckLib.checkPosting(r, b, e, t, qualified);
+        return DeliveryCheckLib.checkPosting(r, b, e, t, checker, [qualified, 0]);
     }
 
     function receiptBatch(bytes calldata r, IBoardElections e, IBoardTrustees t)
@@ -71,7 +73,7 @@ contract BoardChecks {
         view
         returns (bytes32, bytes32)
     {
-        BallotCheckLib.Admitted memory a = BallotCheckLib.check(r, e, qualified);
+        (BallotCheckLib.Admitted memory a,) = BallotCheckLib.check(r, e, qualified, 0);
         return (a.definitionHash, a.ballotHash);
     }
 }

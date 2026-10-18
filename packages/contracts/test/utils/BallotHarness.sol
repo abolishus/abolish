@@ -7,12 +7,23 @@ import {ElectionRegistry} from "../../src/ElectionRegistry.sol";
 /// Exposes the ballot check to tests, with the record in calldata as the
 /// board holds it.
 contract BallotHarness {
+    /// The check with no author key set, as every election below ballot
+    /// version 4 and one without an author panel has.
     function check(bytes calldata record, IElectionParameters registry, uint256 qualified)
         external
         view
-        returns (BallotCheckLib.Admitted memory)
+        returns (BallotCheckLib.Admitted memory a)
     {
-        return BallotCheckLib.check(record, registry, qualified);
+        (a,) = BallotCheckLib.check(record, registry, qualified, 0);
+    }
+
+    function check(
+        bytes calldata record,
+        IElectionParameters registry,
+        uint256 qualified,
+        uint256 authorQualified
+    ) external view returns (BallotCheckLib.Admitted memory a) {
+        (a,) = BallotCheckLib.check(record, registry, qualified, authorQualified);
     }
 
     /// The gas `check` used, measured inside the call so the harness's own
@@ -23,19 +34,20 @@ contract BallotHarness {
         returns (uint256 used)
     {
         uint256 before = gasleft();
-        BallotCheckLib.check(record, registry, qualified);
+        BallotCheckLib.check(record, registry, qualified, 0);
         used = before - gasleft();
     }
 
     /// Frames a committed vote alone, offsets counted from its first byte,
-    /// and checks its shape against `p`.
+    /// and checks its shape against `p`, the author half's rows against its
+    /// `authorThreshold`.
     function vote(
         bytes calldata committedVote,
         uint8 version,
         ElectionRegistry.Parameters calldata p
     ) external pure returns (bool shapeOk) {
         BallotCheckLib.Layout memory l =
-            BallotCheckLib.frameVote(committedVote, 0, version, p.threshold);
+            BallotCheckLib.frameVote(committedVote, 0, version, p.threshold, p.authorThreshold);
         return BallotCheckLib.shapeOk(committedVote, l, p, version);
     }
 
@@ -47,7 +59,7 @@ contract BallotHarness {
     ) external view returns (uint256 used) {
         uint256 before = gasleft();
         BallotCheckLib.Layout memory l =
-            BallotCheckLib.frameVote(committedVote, 0, version, p.threshold);
+            BallotCheckLib.frameVote(committedVote, 0, version, p.threshold, p.authorThreshold);
         BallotCheckLib.shapeOk(committedVote, l, p, version);
         used = before - gasleft();
     }

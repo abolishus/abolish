@@ -426,6 +426,7 @@ export {
   castSealV3,
   challengeSealV3,
   finishSealV3,
+  receiptSealV3,
   type L1Reference,
   sealBallotV3,
   type SealedBallotV3,

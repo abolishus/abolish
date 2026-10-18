@@ -76,6 +76,7 @@ export type RecordCastOutcome =
   | "recorded"
   | "not-newer"
   | "other-election"
+  | "unreceipted"
   | "unreadable"
   | "unwritable";
 
@@ -454,30 +455,48 @@ async function updateCasts<T extends string>(
  * ballot naming another definition than theirs. A seat whose receipt for an
  * earlier cast also receipts this one (a recast of the same seal, which
  * carries its ballot hash) keeps that receipt in place of its `m_i`, so a
- * receipted seat's `m_i` is never stored again (Client rule 2). Throws on
- * bytes that aren't a version-3 ballot record, and on shares that aren't
- * exactly its qualified seats', each with a 32-byte `m` and hashing to its
- * share hash: the worker's own output, so a mismatch is this client's fault.
+ * receipted seat's `m_i` is never stored again (Client rule 2); the worker
+ * hands none for a seat whose receipt it passed for the seal
+ * (`receiptSealV3`), and such a share is kept only with an earlier cast's
+ * receipt for it: `unreceipted` if none is held, since this device would
+ * then keep neither the seat's `m_i` nor its receipt. Throws on bytes that
+ * aren't a version-3 ballot record, and on shares that aren't exactly its
+ * qualified seats', each hashing to its share hash with a 32-byte `m` or
+ * none: the worker's own output, so a mismatch is this client's fault.
  */
 export function withCast(
   casts: readonly CastRecord[],
   ballot: Uint8Array,
   shares: readonly CastShare[],
-): CastRecord[] | "not-newer" | "other-election" {
+): CastRecord[] | "not-newer" | "other-election" | "unreceipted" {
   const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
   if (decoded === undefined || ballot.length > MAX_BOARD_PAYLOAD)
     throw new TypeError("not a version-3 ballot record");
-  // In the form `sharesFor` reads, with no receipt yet.
+  // A receipt an earlier cast keeps for `seat` that also receipts this one.
+  const carried = (seat: number) =>
+    casts
+      .flatMap((cast) => cast.shares)
+      .find(
+        (held): held is Extract<KeptShare, { receipt: Uint8Array }> =>
+          held.seat === seat && "receipt" in held && receiptFits(decoded, seat, held.receipt),
+      )?.receipt;
+  // In the form `sharesFor` reads: a share without `m` takes its carried receipt.
+  let unreceipted = false;
   const asStored: unknown = Array.isArray(shares)
-    ? shares.map((share: unknown) =>
-        isRecord(share) && hasExactly(share, ["seat", "ciphertext", "m"])
-          ? { ...share, receipt: null }
-          : null,
-      )
+    ? shares.map((share: unknown) => {
+        if (!isRecord(share)) return null;
+        if (hasExactly(share, ["seat", "ciphertext", "m"])) return { ...share, receipt: null };
+        if (!hasExactly(share, ["seat", "ciphertext"]) || typeof share["seat"] !== "number")
+          return null;
+        const receipt = carried(share["seat"]);
+        if (receipt === undefined) unreceipted = true;
+        return { ...share, m: null, receipt: receipt ?? null };
+      })
     : shares;
+  // Checked first, so its shares are judged in full only once every one has its `m` or receipt.
+  if (unreceipted) return "unreceipted";
   const kept = sharesFor(decoded, asStored);
-  if (kept === undefined || kept.some((share) => !("m" in share)))
-    throw new TypeError("not the ballot's qualified seats' shares");
+  if (kept === undefined) throw new TypeError("not the ballot's qualified seats' shares");
   const first = casts[0];
   if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
     return "other-election";
@@ -485,14 +504,8 @@ export function withCast(
   const newest = newestBlock(casts);
   if (newest !== undefined && l1Number <= newest) return "not-newer";
   const receipted = kept.map((share): KeptShare => {
-    const receipt = casts
-      .flatMap((cast) => cast.shares)
-      .find(
-        (held): held is Extract<KeptShare, { receipt: Uint8Array }> =>
-          held.seat === share.seat &&
-          "receipt" in held &&
-          receiptFits(decoded, share.seat, held.receipt),
-      )?.receipt;
+    if (!("m" in share)) return share;
+    const receipt = carried(share.seat);
     return receipt === undefined
       ? share
       : { seat: share.seat, ciphertext: share.ciphertext, receipt: receipt.slice() };

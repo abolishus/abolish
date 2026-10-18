@@ -48,7 +48,11 @@ const vector = decodeBallot(new Uint8Array(Buffer.from(VECTORS.ballots[0]!.encod
 const PANEL = vector.committed_vote.share_hashes.length;
 // Every seat qualified but the second, whose share hash is zero.
 const UNQUALIFIED = 2;
-const SHARES: readonly CastShare[] = Array.from({ length: PANEL }, (_, i) => i + 1)
+// Every share held here keeps its `m`, as the worker hands one before any receipt.
+const SHARES: readonly (CastShare & { readonly m: Uint8Array })[] = Array.from(
+  { length: PANEL },
+  (_, i) => i + 1,
+)
   .filter((seat) => seat !== UNQUALIFIED)
   .map((seat) => ({
     seat,
@@ -155,7 +159,7 @@ function sharesRefused(): [string, unknown][] {
     b[0] = (b[0] as number) ^ 1;
     return b;
   };
-  const first = { ...(SHARES[0] as CastShare), receipt: null };
+  const first = { ...(SHARES[0] as (typeof SHARES)[number]), receipt: null };
   return [
     ["shares that aren't a list", {}],
     ["no shares", []],
@@ -489,7 +493,7 @@ describe("a seat's receipt in the casts", () => {
     const stored = storedCasts(changed);
     expect(
       JSON.stringify(stored, (_, v: unknown) => (v instanceof Uint8Array ? [...v] : v)),
-    ).not.toContain(JSON.stringify([...(SHARES[0] as CastShare).m]).slice(1, -1));
+    ).not.toContain(JSON.stringify([...(SHARES[0] as (typeof SHARES)[number]).m]).slice(1, -1));
     expect(parseStoredCasts(stored)).toEqual(changed);
   });
 
@@ -528,6 +532,33 @@ describe("a seat's receipt in the casts", () => {
     if (typeof recast === "string") throw new Error(recast);
     expect(first(recast, 1)).toEqual(first(once, 0));
     expect(recast[1]?.shares.slice(1)).toEqual(shares().slice(1));
+  });
+
+  test("takes the place of a recast's share the worker erased the m of (receiptSealV3)", () => {
+    const once = withReceipt([cast(10n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
+    if (once === "missing") throw new Error("expected the casts");
+    const erased = shares().map(({ seat, ciphertext, m }) =>
+      seat === FIRST ? { seat, ciphertext } : { seat, ciphertext, m },
+    );
+    const recast = withCast(once, naming(11n), erased);
+    if (typeof recast === "string") throw new Error(recast);
+    expect(first(recast, 1)).toEqual(first(once, 0));
+    expect(recast[1]?.shares.slice(1)).toEqual(shares().slice(1));
+  });
+
+  test("is unreceipted for a share with no m that no receipt kept here covers, and nothing is kept", () => {
+    const erased = shares().map(({ seat, ciphertext, m }) =>
+      seat === FIRST ? { seat, ciphertext } : { seat, ciphertext, m },
+    );
+    // No cast held, an earlier cast with no receipt, and another seal's receipt.
+    expect(withCast([], naming(11n), erased)).toBe("unreceipted");
+    expect(withCast([cast(10n)], naming(11n), erased)).toBe("unreceipted");
+    const once = withReceipt([cast(10n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
+    if (once === "missing") throw new Error("expected the casts");
+    const otherSeal = BALLOT.slice();
+    otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
+    new DataView(otherSeal.buffer).setBigUint64(L1_AT, 11n);
+    expect(withCast(once, otherSeal, erased)).toBe("unreceipted");
   });
 
   test("doesn't carry to another seal's cast, whose shares are its own", () => {

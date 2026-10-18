@@ -642,6 +642,9 @@ export function Ballot({
             // than the one recorded here, is this client's fault: never sent.
             case "not-asked":
             case "other-election":
+            // The worker erased a seat's `m_i` on a receipt this device
+            // never kept: neither is left to deliver or post with.
+            case "unreceipted":
               return stopped("cast-faulty");
           }
           const sending = { ballot: cast.ballot, tier, trackingCode };

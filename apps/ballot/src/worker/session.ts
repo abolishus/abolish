@@ -31,6 +31,7 @@ import {
   MembershipProverError,
   openIdentityBackup,
   type QuestionBallotElection,
+  receiptSealV3,
   sealBallotV3,
   type SealedBallotV3,
   sealIdentityBackup,
@@ -415,11 +416,12 @@ export class BallotSession {
         ok: true,
         ballot: Uint8Array.from(cast.ballot),
         ballotHash: Uint8Array.from(cast.ballotHash),
-        ciphertexts: cast.ciphertexts.map(({ seat, ciphertext, m }) => ({
-          seat,
-          ciphertext: Uint8Array.from(ciphertext),
-          m: Uint8Array.from(m),
-        })),
+        // A seat whose receipt passed here has no `m` left to copy.
+        ciphertexts: cast.ciphertexts.map(({ seat, ciphertext, m }) =>
+          m === undefined
+            ? { seat, ciphertext: Uint8Array.from(ciphertext) }
+            : { seat, ciphertext: Uint8Array.from(ciphertext), m: Uint8Array.from(m) },
+        ),
       };
     } catch (e) {
       if (e instanceof MembershipProverError) return { ok: false, problem: e.code };
@@ -436,6 +438,9 @@ export class BallotSession {
    * the signing keys the held poll's ceremony registered (`castReceiptSeatV3`;
    * [[delivery]], Client rule 1). A ballot that isn't a version-3 record of
    * the held poll is `unknown`: the page asked about another poll's cast.
+   * A pass also erases that seat's `m_i` from the seal this worker cast the
+   * ballot from, if it still holds it (`receiptSealV3`), so a recast hands
+   * none to the page (Client rule 2; T-18).
    */
   receipt(request: ReceiptRequest): ReceiptResult {
     const poll = this.#poll;
@@ -448,6 +453,13 @@ export class BallotSession {
         return { ok: false, problem: "unknown" };
       throw e;
     }
-    return seat === undefined ? { ok: false, problem: "refused" } : { ok: true, seat };
+    if (seat === undefined) return { ok: false, problem: "refused" };
+    // Every seal given a witness here is cast; the ballot names at most one.
+    for (const [id, commitment] of this.#cast) {
+      const sealed = this.#seals.get(id);
+      if (commitment === undefined || sealed === undefined) continue;
+      if (receiptSealV3(sealed, request.ballot, request.receipt) !== undefined) break;
+    }
+    return { ok: true, seat };
   }
 }

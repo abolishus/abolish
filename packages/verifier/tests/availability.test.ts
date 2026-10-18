@@ -7,6 +7,7 @@ import {
   DELIVERY_WINDOW,
   encodeAvailabilityAttestation,
   encodeAvailabilityComplaint,
+  decodeContractEvent,
   encodeContractEvent,
   identityKey,
   objectCid,
@@ -235,7 +236,7 @@ describe("the ballot extent", () => {
         silent: [],
       },
     ]);
-    expect(r.report?.records.map((x) => x.code)).toEqual(["valid", "valid", "valid"]);
+    expect(r.report?.records?.map((x) => x.code)).toEqual(["valid", "valid", "valid"]);
     expect(r.report?.proven.count).toBe("3");
   });
 
@@ -259,7 +260,7 @@ describe("the ballot extent", () => {
   test("an attestation submitted a second after t_A doesn't count", () => {
     const r = availabilityChecks(inputs([attest(1), attest(2, T_A + 1n)], { provenAt: T_A + 5n }));
     expect(r.row).toMatchObject({ status: "fail", code: "unavailable" });
-    expect(r.report?.records[1]).toMatchObject({ code: "availability-late", seat: 2, point: 1 });
+    expect(r.report?.records?.[1]).toMatchObject({ code: "availability-late", seat: 2, point: 1 });
   });
 
   test("an attestation naming another checkpoint than C_A doesn't count", () => {
@@ -273,7 +274,7 @@ describe("the ballot extent", () => {
       ]),
     );
     expect(r.row).toMatchObject({ status: "fail", code: "unavailable" });
-    expect(r.report?.records.map((x) => x.code)).toEqual([
+    expect(r.report?.records?.map((x) => x.code)).toEqual([
       "valid",
       "availability-checkpoint",
       "availability-checkpoint",
@@ -312,7 +313,7 @@ describe("the ballot extent", () => {
       ]),
     );
     expect(r.row).toMatchObject({ status: "fail", code: "unavailable" });
-    expect(r.report?.records.map((x) => x.code)).toEqual([
+    expect(r.report?.records?.map((x) => x.code)).toEqual([
       "availability-signature",
       "availability-stray",
       "valid",
@@ -328,7 +329,7 @@ describe("the ballot extent", () => {
       }),
     );
     expect(r.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 2 } });
-    expect(r.report?.records[2]).toMatchObject({ code: "availability-seat" });
+    expect(r.report?.records?.[2]).toMatchObject({ code: "availability-seat" });
   });
 
   test("the counted extent's records are left out of the report, and decide nothing yet", () => {
@@ -339,11 +340,37 @@ describe("the ballot extent", () => {
         attest(1),
         attest(2),
         complain(3, undefined, counted),
+        attest(3, undefined, { ...counted, definition: filled(32, 0xd2) }),
       ]),
     );
     expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
     // Positions are in the board's events, the counted extent's left out.
-    expect(r.report?.records.map((x) => x.at)).toEqual([1, 2]);
+    expect(r.report?.records?.map((x) => x.at)).toEqual([1, 2]);
+  });
+
+  test("a seal never anchored doesn't hide a failure, since 4.6 reads no copy", () => {
+    // The seal's window (segment 20's end plus the deadline) closed before
+    // `now` with no checkpoint for it: the board checks fail `unsealed`,
+    // which no attestation settles, and 4.6 still decides the ballot extent.
+    const clock = { ...CLOCK, lastSegment: 20 };
+    expect(CLOCK.epoch + 21n * CLOCK.period + CLOCK.deadline).toBeLessThan(T_A + 1n);
+    expect(availabilityChecks(inputs([], { clock })).row).toEqual({
+      status: "fail",
+      code: "unavailable",
+      at: { point: 1, panel: 1 },
+    });
+    expect(availabilityChecks(inputs([attest(1), attest(2)], { clock })).row).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
+  test("a close before the clock's epoch isn't reached, even within a period of it", () => {
+    for (const closesAt of [CLOCK.epoch - 1n, CLOCK.epoch - CLOCK.period])
+      expect(availabilityChecks(inputs([], { closesAt })).row).toEqual({
+        status: "unverifiable",
+        code: "not-reached",
+      });
   });
 
   test("a panel holds exactly when its threshold of seats attested in time", () => {
@@ -383,7 +410,9 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
   test("before s_A's anchoring deadline on finalized L1", () => {
     const r = availabilityChecks(inputs([], { now: S_A_DUE - 1n }));
     expect(r.row).toEqual({ status: "unverifiable", code: "availability-pending", at: {} });
-    expect(r.report?.ballotExtent.panels).toBeUndefined();
+    // `C_A` isn't fixed yet, so nothing judged against it is reported.
+    expect(r.report?.ballotExtent).toEqual({ deadline: T_A.toString() });
+    expect(r.report?.records).toBeUndefined();
     expect(availabilityChecks(inputs([], { now: S_A_DUE })).row).toMatchObject({
       status: "fail",
     });
@@ -434,6 +463,17 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
       status: "unverifiable",
       code: "decode",
       at: { event: 0, decodeError: "trailing-bytes" },
+    });
+  });
+
+  test("a proven event with no topics, which the replay can't take", () => {
+    const l2 = board([attest(1)], { timestamp: T_A + 10n });
+    const record = decodeContractEvent(l2.events[0] as Uint8Array, 8);
+    const events = [encodeContractEvent({ ...record, topics: [] }, 8)];
+    expect(availabilityChecks(inputs([], { l2: { ...l2, events } })).row).toEqual({
+      status: "unverifiable",
+      code: "event-topics",
+      at: {},
     });
   });
 

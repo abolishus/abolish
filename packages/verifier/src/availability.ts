@@ -21,7 +21,6 @@
 import {
   type Anchor,
   type AnchorClock,
-  anchoredCheckpoints,
   AVAILABILITY_POINTS,
   type AvailabilityEvent,
   type AvailabilityPanel,
@@ -32,10 +31,13 @@ import {
   checkContractEvent,
   checkEventAccumulatorProof,
   checkpointHash,
+  countedCheckpoints,
   type ContractEventError,
   contractEventLog,
   type ContractEventRecord,
   DecodeError,
+  decodeAvailabilityAttestation,
+  decodeAvailabilityComplaint,
   type DecodeErrorCode,
   decodeContractEvent,
   type EventAccumulatorProofError,
@@ -134,13 +136,12 @@ export interface AvailabilityReport {
   readonly ballotExtent: {
     /** `t_A`. */
     readonly deadline: string;
-    /** `C_A`, or `null` where no counted checkpoint is at or before `s_A`. */
-    readonly checkpoint: { readonly segment: number; readonly hash: string } | null;
-    /** Absent while the point's evidence isn't held. */
+    /** `C_A`, or `null` where no counted checkpoint is at or before `s_A`; absent, as `panels` is, while the point's evidence isn't held. */
+    readonly checkpoint?: { readonly segment: number; readonly hash: string } | null;
     readonly panels?: readonly PanelAvailabilityReport[];
   };
-  /** Every availability record in event order, by its position in the board's events, with its code; the counted extent's are left out. */
-  readonly records: readonly AvailabilityRecordReport[];
+  /** Once the ballot extent's evidence is held: its availability records in event order, by their positions in the board's events, with their codes. */
+  readonly records?: readonly AvailabilityRecordReport[];
 }
 
 export interface AvailabilityResult {
@@ -161,16 +162,18 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   if (eventVersion !== 8) return { row: { status: "unverifiable", code: "not-reached" } };
   // `C_A`: the counted checkpoint with the largest segment at or before
   // `s_A = period(closes_at) + 1`, from L1 alone. A failure of the board
-  // checks' first steps is 4.2's, which no attestation can settle.
+  // checks' first steps is 4.2's, which no attestation can settle; a seal
+  // never anchored is not, since withholding it mustn't hide a failure here.
   let counted;
   try {
-    counted = anchoredCheckpoints(inputs.electionId, inputs.anchors, clock, inputs.now);
+    counted = countedCheckpoints(inputs.electionId, inputs.anchors, clock, inputs.now);
   } catch (e) {
     if (e instanceof BoardError) return { row: { status: "unverifiable", code: "not-reached" } };
     throw e;
   }
+  if (inputs.closesAt < clock.epoch)
+    return { row: { status: "unverifiable", code: "not-reached" } };
   const sA = countedFloor(inputs.closesAt, clock);
-  if (sA < 0n) return { row: { status: "unverifiable", code: "not-reached" } };
   let cA: (typeof counted)[number] | undefined;
   for (const cp of counted)
     if (BigInt(cp.segment) <= sA && (cA === undefined || cp.segment > cA.segment)) cA = cp;
@@ -199,6 +202,10 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
         row: { status: "unverifiable", code: "decode", at: { event: at, decodeError: e.code } },
       };
     }
+  // The replay takes a counted log's 1 to 4 topics on trust; one with none
+  // isn't any log our contracts emit, so the archive isn't the board's.
+  if (records.slice(0, Number(proven.count)).some((r) => r.topics.length === 0))
+    return { row: { status: "unverifiable", code: "event-topics", at: {} } };
   const replay = checkEventAccumulatorProof(
     inputs.l2ChainId,
     inputs.contracts.board,
@@ -211,6 +218,10 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   // them is in time for a point the proof's block is at or after.
   const events: AvailabilityEvent[] = [];
   const eventAt: number[] = [];
+  // Each record's point, read from the record the event check decoded, so
+  // a counted-extent record is left out whatever its code (stray, seat and
+  // signature codes carry none).
+  const pointAt: number[] = [];
   for (const [at, record] of records.slice(0, Number(proven.count)).entries()) {
     const checked = checkContractEvent(record, inputs.contracts, eventVersion);
     // Every log the board emits passes the event check (T-53), so one that
@@ -227,6 +238,11 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
       continue;
     events.push({ payload: event.record, submittedAt: record.l2_timestamp });
     eventAt.push(at);
+    pointAt.push(
+      event.event === "AvailabilityAttestationSubmitted"
+        ? decodeAvailabilityAttestation(event.record, 1).point
+        : decodeAvailabilityComplaint(event.record, 1).point,
+    );
   }
 
   const judged = checkAvailability(
@@ -241,7 +257,7 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     events,
   );
   const ballotRecords = judged.records
-    .filter((r) => !("point" in r) || r.point === AVAILABILITY_POINTS.ballotExtent)
+    .filter((r) => pointAt[r.at] === AVAILABILITY_POINTS.ballotExtent)
     .map((r) => ({ ...r, at: eventAt[r.at] as number }));
   const anchoringDeadline = clock.epoch + (sA + 1n) * clock.period + clock.deadline;
   // The point waits on its evidence alone: L1 past the anchoring deadline
@@ -258,8 +274,11 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     },
     ballotExtent: {
       deadline: tA.toString(),
-      checkpoint:
-        cA === undefined ? null : { segment: cA.segment, hash: bytesToHex(checkpointHash(cA)) },
+      // `C_A` and every code judged against it are fixed only once held.
+      ...(held && {
+        checkpoint:
+          cA === undefined ? null : { segment: cA.segment, hash: bytesToHex(checkpointHash(cA)) },
+      }),
       ...(held &&
         point !== undefined && {
           panels: point.panels.map((p) => ({
@@ -271,7 +290,7 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
           })),
         }),
     },
-    records: ballotRecords,
+    ...(held && { records: ballotRecords }),
   };
   if (!held)
     return { row: { status: "unverifiable", code: "availability-pending", at: {} }, report };

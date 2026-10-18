@@ -1401,6 +1401,12 @@ export const groupRegistryAbi = [
     inputs: [
       { name: "threshold_", internalType: "uint8", type: "uint8" },
       { name: "registrars_", internalType: "address[]", type: "address[]" },
+      {
+        name: "trusteeRegistry_",
+        internalType: "contract ITrusteePanels",
+        type: "address",
+      },
+      { name: "initialPanelId_", internalType: "bytes32", type: "bytes32" },
     ],
     stateMutability: "nonpayable",
   },
@@ -1490,6 +1496,13 @@ export const groupRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [],
+    name: "initialPanelId",
+    outputs: [{ name: "", internalType: "bytes32", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [
       { name: "groupId", internalType: "uint64", type: "uint64" },
       { name: "index", internalType: "uint64", type: "uint64" },
@@ -1504,6 +1517,37 @@ export const groupRegistryAbi = [
     name: "isSelfPaid",
     outputs: [{ name: "", internalType: "bool", type: "bool" }],
     stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "nullifierKey",
+    outputs: [
+      { name: "keyId", internalType: "bytes32", type: "bytes32" },
+      { name: "panelId", internalType: "bytes32", type: "bytes32" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "keyId", internalType: "bytes32", type: "bytes32" }],
+    name: "nullifierKeyRecorded",
+    outputs: [{ name: "", internalType: "bool", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "recordNullifierKey",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "recordNullifierReshare",
+    outputs: [],
+    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -1524,6 +1568,13 @@ export const groupRegistryAbi = [
     inputs: [],
     name: "threshold",
     outputs: [{ name: "", internalType: "uint8", type: "uint8" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "trusteeRegistry",
+    outputs: [{ name: "", internalType: "contract ITrusteePanels", type: "address" }],
     stateMutability: "view",
   },
   {
@@ -1573,6 +1624,46 @@ export const groupRegistryAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "MembersRemoved",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "keyId",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "NullifierKeyRecorded",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "predecessor",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "keyId",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "newPanelId",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "NullifierKeyReshared",
   },
   {
     type: "event",
@@ -1685,6 +1776,11 @@ export const groupRegistryAbi = [
     inputs: [{ name: "position", internalType: "uint256", type: "uint256" }],
     name: "IndicesOutOfOrder",
   },
+  {
+    type: "error",
+    inputs: [{ name: "panelId", internalType: "bytes32", type: "bytes32" }],
+    name: "InitialPanel",
+  },
   { type: "error", inputs: [], name: "InsufficientGas" },
   {
     type: "error",
@@ -1707,8 +1803,48 @@ export const groupRegistryAbi = [
     inputs: [{ name: "seat", internalType: "uint8", type: "uint8" }],
     name: "InvalidSignature",
   },
+  {
+    type: "error",
+    inputs: [{ name: "keyId", internalType: "bytes32", type: "bytes32" }],
+    name: "KeyAlreadyRecorded",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "deadline", internalType: "uint64", type: "uint64" }],
+    name: "KeyDeadline",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "consents", internalType: "bool", type: "bool" },
+      { name: "count", internalType: "uint256", type: "uint256" },
+      { name: "quorum", internalType: "uint256", type: "uint256" },
+    ],
+    name: "KeyQuorum",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "consents", internalType: "bool", type: "bool" },
+      { name: "index", internalType: "uint8", type: "uint8" },
+    ],
+    name: "KeySeat",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "consents", internalType: "bool", type: "bool" },
+      { name: "index", internalType: "uint8", type: "uint8" },
+    ],
+    name: "KeySignature",
+  },
   { type: "error", inputs: [], name: "MalformedRecord" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
+  {
+    type: "error",
+    inputs: [{ name: "predecessor", internalType: "bytes32", type: "bytes32" }],
+    name: "NotCurrentKey",
+  },
   { type: "error", inputs: [], name: "PrecompileFailed" },
   {
     type: "error",
@@ -1756,6 +1892,11 @@ export const groupRegistryAbi = [
     type: "error",
     inputs: [{ name: "groupId", internalType: "uint64", type: "uint64" }],
     name: "UnknownGroup",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "panelId", internalType: "bytes32", type: "bytes32" }],
+    name: "UnknownPanel",
   },
   {
     type: "error",
@@ -1811,6 +1952,7 @@ export const groupRegistryAbi = [
     ],
     name: "WrongTier",
   },
+  { type: "error", inputs: [], name: "ZeroKeyId" },
 ] as const;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

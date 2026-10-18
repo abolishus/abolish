@@ -433,9 +433,18 @@ beforeAll(async () => {
     "src/TrusteeRegistry.sol:TrusteeRegistry",
     [[panelInput(SECRETS, 2, 2)]],
   );
+  // The pinned panel is the Tier 2 scope's initial panel too.
+  const panelId = await l2.client.readContract({
+    address: trusteeRegistry,
+    abi: trusteeRegistryAbi,
+    functionName: "panelIds",
+    args: [0n],
+  });
   groupRegistry = await deploy(l2, groupRegistryAbi, "src/GroupRegistry.sol:GroupRegistry", [
     REGISTRAR_THRESHOLD,
     REGISTRARS,
+    trusteeRegistry,
+    panelId,
   ]);
   // A relay on L1 that nothing here calls.
   const l1Relay = getAddress(toHex(0xd0005n, { size: 20 }));

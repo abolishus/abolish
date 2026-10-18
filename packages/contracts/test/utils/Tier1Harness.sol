@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {EventAccumulatorLib} from "../../src/EventAccumulator.sol";
 import {GroupRegistry, VouchLib} from "../../src/GroupRegistry.sol";
 import {MembershipProofLib} from "../../src/MembershipProof.sol";
+import {NullifierKeyFixture} from "./NullifierKeyFixture.sol";
 
 /// The group registry with its Tier 1 proof check (rule 7) exposed alone,
 /// and VouchLib's scopes and messages, so docs/spec/vectors/vouch.json,
@@ -11,7 +12,12 @@ import {MembershipProofLib} from "../../src/MembershipProof.sol";
 /// exactly as `addTier1Member` does.
 contract Tier1Harness is GroupRegistry {
     constructor(uint8 threshold_, address[] memory registrars_)
-        GroupRegistry(threshold_, registrars_)
+        GroupRegistry(
+            threshold_,
+            registrars_,
+            NullifierKeyFixture.trustees(),
+            NullifierKeyFixture.INITIAL_PANEL
+        )
     {}
 
     /// Rule 7 over every vouch of a record that already frames, under this

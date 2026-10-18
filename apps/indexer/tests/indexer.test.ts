@@ -572,9 +572,6 @@ beforeAll(async () => {
 
   deployer = accounts[0] as Address;
 
-  registry = await deploy("src/GroupRegistry.sol:GroupRegistry", groupRegistryAbi, [2, registrars]);
-  sent(registry, "RegistrarsPinned");
-
   // A panel of three made-up seats; only their public keys are pinned.
   const keys = [0, 1, 2].map(() => {
     const jwk = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({
@@ -601,6 +598,21 @@ beforeAll(async () => {
     ],
   ]);
   sent(trusteeRegistry, "PanelPinned");
+
+  // The group registry, with the pinned panel as its Tier 2 scope's initial panel.
+  const initialPanel = await publicClient.readContract({
+    address: trusteeRegistry,
+    abi: trusteeRegistryAbi,
+    functionName: "panelIds",
+    args: [0n],
+  });
+  registry = await deploy("src/GroupRegistry.sol:GroupRegistry", groupRegistryAbi, [
+    2,
+    registrars,
+    trusteeRegistry,
+    initialPanel,
+  ]);
+  sent(registry, "RegistrarsPinned");
 
   elections = await deploy("test/utils/BoardFixture.sol:ElectionsStub", [], []);
   trustees = await deploy("test/utils/BoardFixture.sol:TrusteesStub", [], []);

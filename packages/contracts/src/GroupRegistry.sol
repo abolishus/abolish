@@ -5,6 +5,8 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {EventAccumulator, EventAccumulatorLib} from "./EventAccumulator.sol";
 import {MembershipProofLib} from "./MembershipProof.sol";
+import {ITrusteePanels, NullifierKeyLib} from "./NullifierKey.sol";
+import {TrusteeIdentityLib} from "./TrusteeRegistry.sol";
 
 /// @title The group registry's EIP-712 messages and constants
 /// (docs/spec/contracts.md, Group registry, Signed messages).
@@ -212,6 +214,29 @@ contract GroupRegistry is EventAccumulator {
         uint256 slotNullifier;
     }
 
+    /// A reshare record's fields and its two panels' sizes, held in memory
+    /// rather than on the stack.
+    struct Reshare {
+        bytes32 predecessor;
+        bytes32 newPanel;
+        uint64 deadline;
+        bytes32 keyId;
+        bytes32 oldPanel;
+        uint256 oldSize;
+        uint256 newSize;
+    }
+
+    /// One list of a nullifier-key record's signatures: which list (for the
+    /// errors), the statement's tag, the panel that signs it and its size,
+    /// and the statement's bytes after the seat's index.
+    struct Seats {
+        bool consents;
+        bytes ds;
+        bytes32 panel;
+        uint256 size;
+        bytes rest;
+    }
+
     /// Why a deployment's registrars were refused, in the order the checks run.
     enum RegistrarError {
         Size,
@@ -249,6 +274,18 @@ contract GroupRegistry is EventAccumulator {
     /// `record` is the whole self-paid record.
     event SelfPaidMemberAdded(uint64 indexed groupId, uint64 indexed index, bytes record);
 
+    /// @notice The Tier 2 scope's initial key `keyId` was recorded.
+    /// `record` is the whole record, approvals included, so anyone can
+    /// recheck it against the initial panel's pinned keys.
+    event NullifierKeyRecorded(bytes32 indexed keyId, bytes record);
+
+    /// @notice `keyId`, held by `newPanelId`, succeeded `predecessor` as the
+    /// scope's current key. `record` is the whole record, consents and
+    /// approvals included.
+    event NullifierKeyReshared(
+        bytes32 indexed predecessor, bytes32 indexed keyId, bytes32 indexed newPanelId, bytes record
+    );
+
     error InvalidRegistrars(RegistrarError reason);
     error UnsupportedTier(uint8 tier);
     error TooManyGroups();
@@ -280,6 +317,18 @@ contract GroupRegistry is EventAccumulator {
     error DuplicateSlot(uint256 vouch);
     /// `slotProof` false for the vouchee proof, true for the slot proof.
     error VouchProof(uint256 vouch, bool slotProof);
+    /// The trustee registry doesn't pin the initial panel (`initial-panel`).
+    error InitialPanel(bytes32 panelId);
+    /// A second initial key, or a successor's `key_id` recorded before.
+    error KeyAlreadyRecorded(bytes32 keyId);
+    error NotCurrentKey(bytes32 predecessor);
+    error UnknownPanel(bytes32 panelId);
+    error KeyDeadline(uint64 deadline);
+    error ZeroKeyId();
+    /// `consents` true for the old panel's consents, false for approvals.
+    error KeyQuorum(bool consents, uint256 count, uint256 quorum);
+    error KeySeat(bool consents, uint8 index);
+    error KeySignature(bool consents, uint8 index);
 
     /// `u64(group_id) ‖ u64(first_index) ‖ u16(count)`.
     uint256 private constant ADD_HEADER = 18;
@@ -293,7 +342,7 @@ contract GroupRegistry is EventAccumulator {
     /// The wei a self-paid addition must send (`GroupRegistryLib.SELF_PAID_FEE`).
     uint256 public constant SELF_PAID_FEE = GroupRegistryLib.SELF_PAID_FEE;
 
-    // The three immutables are the ones verifier 1.2 masks and compares with
+    // The five immutables are the ones verifier 1.2 masks and compares with
     // its release's values; the registrars are in storage and checked
     // through `RegistrarsPinned` (docs/spec/contracts.md, Group registry).
 
@@ -302,6 +351,10 @@ contract GroupRegistry is EventAccumulator {
     /// The domain separator at deployment, and the chain it was computed for.
     bytes32 private immutable _cachedDomainSeparator;
     uint256 private immutable _cachedChainId;
+    /// The deployment's trustee registry, which pins every panel a key may pass to.
+    ITrusteePanels public immutable trusteeRegistry;
+    /// The `panel_id` of the Tier 2 scope's initial panel.
+    bytes32 public immutable initialPanelId;
 
     /// The registrars, in ascending order: seat `i` is `_registrars[i − 1]`.
     address[] private _registrars;
@@ -311,11 +364,24 @@ contract GroupRegistry is EventAccumulator {
     mapping(uint64 groupId => Group) private _groups;
     /// One bit per removed index, 256 indices to a word.
     mapping(uint64 groupId => mapping(uint256 word => uint256 bits)) private _removed;
+    /// The scope's current nullifier key and its panel, both zero until the
+    /// initial key is recorded.
+    bytes32 private _keyId;
+    bytes32 private _keyPanelId;
+    /// Every `key_id` recorded, so no record makes an earlier key current again.
+    mapping(bytes32 keyId => bool) public nullifierKeyRecorded;
 
     /// Pins `registrars` (ascending, non-zero, 2 to 16 of them) and
-    /// `threshold_` (2 to their number). EventAccumulator's constructor has
-    /// already refused a chain ID above `u64`.
-    constructor(uint8 threshold_, address[] memory registrars_) {
+    /// `threshold_` (2 to their number), then the Tier 2 scope's trustee
+    /// registry and initial panel, which that registry must pin.
+    /// EventAccumulator's constructor has already refused a chain ID above
+    /// `u64`.
+    constructor(
+        uint8 threshold_,
+        address[] memory registrars_,
+        ITrusteePanels trusteeRegistry_,
+        bytes32 initialPanelId_
+    ) {
         uint256 n = registrars_.length;
         if (n < 2 || n > GroupRegistryLib.MAX_REGISTRARS) {
             revert InvalidRegistrars(RegistrarError.Size);
@@ -329,8 +395,12 @@ contract GroupRegistry is EventAccumulator {
             if (registrars_[i] <= previous) revert InvalidRegistrars(RegistrarError.Order);
             previous = registrars_[i];
         }
+        (uint8 k,,) = trusteeRegistry_.panelOf(initialPanelId_);
+        if (k == 0) revert InitialPanel(initialPanelId_);
         threshold = threshold_;
         _registrars = registrars_;
+        trusteeRegistry = trusteeRegistry_;
+        initialPanelId = initialPanelId_;
         _cachedChainId = block.chainid;
         _cachedDomainSeparator = GroupRegistryLib.domainSeparator(block.chainid, address(this));
         _log1(RegistrarsPinned.selector, abi.encode(threshold_, registrars_));
@@ -678,6 +748,173 @@ contract GroupRegistry is EventAccumulator {
     {
         uint256 at = VouchLib.HEADER + VouchLib.VOUCH_LENGTH * i + offset;
         return bytes32(record[at:at + 32]);
+    }
+
+    /// @notice The Tier 2 scope's current nullifier key and its panel's
+    /// `panel_id`, both zero until the initial key is recorded.
+    function nullifierKey() external view returns (bytes32 keyId, bytes32 panelId) {
+        return (_keyId, _keyPanelId);
+    }
+
+    /// @notice Records the Tier 2 scope's initial nullifier key, once ever.
+    /// The record is `u64(deadline) ‖ key_id ‖ u8(count) ‖ count ×
+    /// (u8(index) ‖ p256-sig)`, checked in the order of docs/spec/contracts.md
+    /// (Group registry, Nullifier keys, The initial key). Its authorisation
+    /// is a quorum of the initial panel's seats, each signing the deadline,
+    /// so approvals held past it can't be recorded (T-54); the sender is
+    /// never read (T-71). Once any key is recorded this reverts for good, so
+    /// no second key, and no second nullifier for any document, can count (T-03).
+    function recordNullifierKey(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        uint256 len = record.length;
+        if (len < NullifierKeyLib.KEY_HEADER) revert MalformedRecord();
+        uint256 count = uint8(record[NullifierKeyLib.KEY_HEADER - 1]);
+        if (len != NullifierKeyLib.KEY_HEADER + NullifierKeyLib.APPROVAL_LENGTH * count) {
+            revert MalformedRecord();
+        }
+        bytes32 keyId = bytes32(record[8:40]);
+        if (_keyId != bytes32(0)) revert KeyAlreadyRecorded(keyId);
+        uint64 deadline = uint64(bytes8(record[0:8]));
+        _requireDeadline(deadline, NullifierKeyLib.MAX_KEY_WINDOW);
+        if (keyId == bytes32(0)) revert ZeroKeyId();
+        bytes32 panel = initialPanelId;
+        (uint8 k, uint8 n,) = trusteeRegistry.panelOf(panel);
+        uint256 quorum = NullifierKeyLib.quorum(k, n);
+        if (count < quorum) revert KeyQuorum(false, count, quorum);
+        _requireSeats(
+            record,
+            NullifierKeyLib.KEY_HEADER,
+            count,
+            Seats({
+                consents: false,
+                ds: NullifierKeyLib.DS_KEY_APPROVAL,
+                panel: panel,
+                size: n,
+                rest: NullifierKeyLib.keyApprovalRest(keyId, deadline)
+            })
+        );
+
+        _keyId = keyId;
+        _keyPanelId = panel;
+        nullifierKeyRecorded[keyId] = true;
+        _log2(NullifierKeyRecorded.selector, keyId, abi.encode(record));
+    }
+
+    /// @notice Records a successor of the current nullifier key. The record is
+    /// `predecessor ‖ new_panel_id ‖ u64(deadline) ‖ key_id ‖ u8(consents) ‖
+    /// consents × (u8(index) ‖ p256-sig) ‖ u8(count) ‖ count × (u8(index) ‖
+    /// p256-sig)`, checked in the order of docs/spec/contracts.md (Group
+    /// registry, Nullifier keys, A reshare). It needs a quorum of the current
+    /// panel's consents as well as one of the new panel's approvals, so a
+    /// panel pinned beside the old one can't take the chain without the old
+    /// trustees (T-37, T-40). Only the current key has a successor, which
+    /// replaces it, so the scope's keys stay one chain (T-03).
+    function recordNullifierReshare(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        uint256 len = record.length;
+        if (len < NullifierKeyLib.RESHARE_HEADER) revert MalformedRecord();
+        uint256 consents = uint8(record[NullifierKeyLib.RESHARE_HEADER - 1]);
+        uint256 countAt =
+            NullifierKeyLib.RESHARE_HEADER + NullifierKeyLib.APPROVAL_LENGTH * consents;
+        if (len < countAt + 1) revert MalformedRecord();
+        uint256 count = uint8(record[countAt]);
+        if (len != countAt + 1 + NullifierKeyLib.APPROVAL_LENGTH * count) revert MalformedRecord();
+
+        Reshare memory r = Reshare({
+            predecessor: bytes32(record[0:32]),
+            newPanel: bytes32(record[32:64]),
+            deadline: uint64(bytes8(record[64:72])),
+            keyId: bytes32(record[72:104]),
+            oldPanel: _keyPanelId,
+            oldSize: 0,
+            newSize: 0
+        });
+        if (_keyId == bytes32(0) || r.predecessor != _keyId) revert NotCurrentKey(r.predecessor);
+        (uint8 k, uint8 n,) = trusteeRegistry.panelOf(r.newPanel);
+        if (k == 0) revert UnknownPanel(r.newPanel);
+        uint256 newQuorum = NullifierKeyLib.quorum(k, n);
+        r.newSize = n;
+        _requireDeadline(r.deadline, NullifierKeyLib.MAX_RESHARE_WINDOW);
+        if (r.keyId == bytes32(0)) revert ZeroKeyId();
+        if (nullifierKeyRecorded[r.keyId]) revert KeyAlreadyRecorded(r.keyId);
+        (k, n,) = trusteeRegistry.panelOf(r.oldPanel);
+        r.oldSize = n;
+        if (consents < NullifierKeyLib.quorum(k, n)) {
+            revert KeyQuorum(true, consents, NullifierKeyLib.quorum(k, n));
+        }
+        if (count < newQuorum) revert KeyQuorum(false, count, newQuorum);
+        _requireSeats(
+            record,
+            NullifierKeyLib.RESHARE_HEADER,
+            consents,
+            Seats({
+                consents: true,
+                ds: NullifierKeyLib.DS_CONSENT,
+                panel: r.oldPanel,
+                size: r.oldSize,
+                rest: NullifierKeyLib.consentRest(r.predecessor, r.newPanel, r.keyId, r.deadline)
+            })
+        );
+        _requireSeats(
+            record,
+            countAt + 1,
+            count,
+            Seats({
+                consents: false,
+                ds: NullifierKeyLib.DS_RESHARE_APPROVAL,
+                panel: r.newPanel,
+                size: r.newSize,
+                rest: NullifierKeyLib.reshareApprovalRest(r.predecessor, r.keyId, r.deadline)
+            })
+        );
+
+        _keyId = r.keyId;
+        _keyPanelId = r.newPanel;
+        nullifierKeyRecorded[r.keyId] = true;
+        _log4(NullifierKeyReshared.selector, r.predecessor, r.keyId, r.newPanel, abi.encode(record));
+    }
+
+    /// `block.number ≤ deadline ≤ block.number + window`: recorded by the
+    /// run's deadline, which every seat signed, and never further ahead than
+    /// an honest run's (T-54).
+    function _requireDeadline(uint64 deadline, uint256 window) private view {
+        if (deadline < block.number || deadline > block.number + window) {
+            revert KeyDeadline(deadline);
+        }
+    }
+
+    /// The `count` signatures from offset `at`, seat by seat in record order:
+    /// strictly increasing seats from 1 to at most the panel's size, so each
+    /// counts once, never each signature (T-31), and each a P-256 signature
+    /// by its seat's identity key in the panel on the statement for that
+    /// seat, built here under its tag from this chain, this registry, the
+    /// panel and `list.rest`. Every signature must verify, including any
+    /// beyond the quorum.
+    function _requireSeats(bytes calldata record, uint256 at, uint256 count, Seats memory list)
+        private
+        view
+    {
+        uint64 chainId = EventAccumulatorLib.chainId64(block.chainid);
+        uint8 previous;
+        for (uint256 i; i < count; i++) {
+            uint256 o = at + NullifierKeyLib.APPROVAL_LENGTH * i;
+            uint8 index = uint8(record[o]);
+            if (index <= previous || index > list.size) revert KeySeat(list.consents, index);
+            previous = index;
+            (uint256 x, uint256 y) = trusteeRegistry.keyOf(list.panel, index);
+            bytes32 digest = NullifierKeyLib.digest(
+                list.ds, chainId, address(this), list.panel, index, list.rest
+            );
+            if (!TrusteeIdentityLib.verify(
+                    digest,
+                    uint256(bytes32(record[o + 1:o + 33])),
+                    uint256(bytes32(record[o + 33:o + 65])),
+                    x,
+                    y
+                )) {
+                revert KeySignature(list.consents, index);
+            }
+        }
     }
 
     /// The group was created here as a signed group, with tier 0, the only

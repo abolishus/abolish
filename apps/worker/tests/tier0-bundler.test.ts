@@ -7,6 +7,7 @@ import {
   groupRegistryAbi,
   registrationAccountAbi,
   registrationPaymasterAbi,
+  trusteeRegistryAbi,
 } from "@abolishus/contracts/abi";
 import {
   decodeGroupAddition,
@@ -46,6 +47,7 @@ import {
   type Tier0BundlerOptions,
   ViemTier0Chain,
 } from "../src/index.ts";
+import { TIER2_INITIAL_PANEL, TIER2_PANELS } from "./tier2-scope.ts";
 
 // The Tier 0 batch job's submitter (P3-2 part 4d-2b-2b) against EntryPoint
 // v0.8 itself on Anvil, with the group registry, the registration account
@@ -221,18 +223,29 @@ interface Deployment {
   readonly paymaster: Address;
 }
 
-let bytecodes: { entryPoint: Hex; registry: Hex; account: Hex; paymaster: Hex } | undefined;
+let bytecodes:
+  | { entryPoint: Hex; trustees: Hex; registry: Hex; account: Hex; paymaster: Hex }
+  | undefined;
 
 /** EntryPoint v0.8, a group registry with one Tier 0 group, the account and a funded paymaster. */
 async function deployAll(maxCost = MAX_COST): Promise<Deployment> {
   bytecodes ??= {
     entryPoint: inspect("vendor/account-abstraction/contracts/core/EntryPoint.sol:EntryPoint"),
+    trustees: inspect("src/TrusteeRegistry.sol:TrusteeRegistry"),
     registry: inspect("src/GroupRegistry.sol:GroupRegistry"),
     account: inspect("src/RegistrationAccount.sol:RegistrationAccount"),
     paymaster: inspect("src/RegistrationPaymaster.sol:RegistrationPaymaster"),
   };
   const entryPoint = (await deploy(entryPoint08Abi, bytecodes.entryPoint, [])).address;
-  const registry = await deploy(groupRegistryAbi, bytecodes.registry, [THRESHOLD, REGISTRARS]);
+  // The trustee registry pinning the Tier 2 scope's initial panel, which the
+  // group registry's deployment requires.
+  const trustees = await deploy(trusteeRegistryAbi, bytecodes.trustees, [TIER2_PANELS]);
+  const registry = await deploy(groupRegistryAbi, bytecodes.registry, [
+    THRESHOLD,
+    REGISTRARS,
+    trustees.address,
+    TIER2_INITIAL_PANEL,
+  ]);
   await write(registry.address, groupRegistryAbi, "createGroup", [0]);
   const account = (
     await deploy(registrationAccountAbi, bytecodes.account, [

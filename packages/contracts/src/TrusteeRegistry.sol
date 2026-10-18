@@ -5,6 +5,7 @@ import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {EventAccumulator, EventAccumulatorLib} from "./EventAccumulator.sol";
 import {ITrusteeRegistry} from "./ITrusteeRegistry.sol";
+import {ITrusteePanels} from "./NullifierKey.sol";
 
 /// @title Trustee identity keys, panels and signatures on chain
 /// (docs/spec/trustee-identity.md, On chain).
@@ -128,7 +129,7 @@ library TrusteeIdentityLib {
 /// (T-71, T-37). A seat counts at most once, so one key can't reach a quorum
 /// by signing twice (T-14). There is no admin, proxy, pause or upgrade path,
 /// and no way to add, change or remove a panel after deployment.
-contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry {
+contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     /// A panel as the deployment pins it.
     struct PanelInput {
         uint8 threshold;

@@ -650,6 +650,9 @@ importers:
       '@abolishus/membership-prover':
         specifier: workspace:*
         version: link:../../packages/membership-prover
+      '@abolishus/trustee-node':
+        specifier: workspace:*
+        version: link:../trustee-node
       '@noble/curves':
         specifier: 'catalog:'
         version: 2.4.0

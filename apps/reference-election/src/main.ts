@@ -38,7 +38,8 @@
 // The node then verifies every election itself (`abolish-node verify`), from
 // its blocks and the two chains alone, and must find what the verifier found.
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -47,6 +48,7 @@ import {
   type Checkpoint,
   copyCheckpoints,
   decodeOpening,
+  deliveryDeadlines,
   type ElectionDefinition,
   encodeBallot,
   encodeCheckpoint,
@@ -73,15 +75,17 @@ import {
 } from "./casting.ts";
 import {
   boardEntry,
+  boundDefinition,
   type Ceremony,
   definitionBytes,
+  definitionHash,
   displayText,
   type FixtureDefinition,
   newTrustees,
   PANEL,
   questionsDisplayText,
-  runCeremony,
   runQuestionCeremony,
+  singleStub,
   STUBS,
 } from "./election.ts";
 import {
@@ -109,8 +113,10 @@ import {
   ceremonyRegistration,
   createElection,
   deployL2,
+  type Registered,
   registerCeremony,
   registerDefinition,
+  registrationCheck,
 } from "./l2.ts";
 import { nodeVerify, startNode } from "./node.ts";
 import {
@@ -124,6 +130,15 @@ import {
   verdictIs,
 } from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
+import {
+  electorateCheck,
+  nodeCeremony,
+  nodeIntake,
+  nodeKeys,
+  registrationFrom,
+  startSeats,
+  stubOf,
+} from "./seats.ts";
 import { STAGES } from "./stages.ts";
 import { type Counted, destructionStatements, intake, tallyOpening } from "./tally.ts";
 import { judgeDrops, runVerifier, type VerifierRun } from "./verify.ts";
@@ -167,7 +182,11 @@ interface Election<D extends FixtureDefinition = FixtureDefinition> {
   readonly definition: D;
   readonly panel: Panel;
   readonly transcript: Uint8Array;
-  /** Each seat's per-election secrets, which the fixture holds as every trustee node. */
+  /**
+   * Each seat's per-election secrets, for the tally and destruction statements
+   * the fixture runs: read from each seat's trustee node in the elections of
+   * one question, the fixture's own in the poll.
+   */
   readonly secrets: Ceremony["secrets"];
   readonly entries: Uint8Array[];
 }
@@ -256,7 +275,12 @@ function verify(
   return judge(run);
 }
 
-async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<void> {
+async function run(
+  anvil: Anvil,
+  l2Anvil: Anvil,
+  stores: string,
+  failures: string[],
+): Promise<void> {
   // Each L1 block a second after the one before unless a step sets its time:
   // Anvil otherwise mines blocks within one wall-clock second at one
   // timestamp, and a run of finalized headers (format 5) must have them
@@ -315,6 +339,19 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     closesAt: end(first) + PERIOD / 2n,
     inclusionBound: 600,
   };
+  // The panel's nodes, which run the ceremonies and intake of the elections
+  // of one question (definition version 1, the one the node reads): their
+  // registration check reads the registries for the definitions registered
+  // here, and their clock is the L1's time as the run moves it.
+  const registered = new Map<string, Registered>();
+  let l1Time = now;
+  const nodes = await startSeats(stores, trustees, {
+    l2ChainId: L2_CHAIN_ID,
+    trusteeRegistry: l2.trusteeRegistry,
+    electorate: electorateCheck(electorate),
+    registration: registrationCheck(l2, registered),
+    now: () => l1Time,
+  });
   // Elections of one question (definition version 1), then the poll of
   // questions (version 5).
   const singles: Election<{ readonly version: 1; readonly value: ElectionDefinition }>[] = [];
@@ -325,19 +362,45 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   ] as const) {
     const text = displayText();
     const counter = await createElection(l2, anvil);
-    const c = runCeremony(timing, l2, trustees, text, { counter, absent, electorate });
-    const record = ceremonyRegistration(l2, trustees, c);
+    const stub = singleStub(timing, l2, trustees.panel, text, { counter, electorate });
+    const ran = await nodeCeremony(nodes, stub, absent);
+    const definition = boundDefinition(stub, ran.transcript);
+    const c: Ceremony<typeof definition> = {
+      panel: trustees.panel,
+      definition,
+      transcript: ran.transcript,
+      seats: trustees.seats.slice(0, trustees.seats.length - absent),
+      secrets: await nodeKeys(nodes, ran.stubHash),
+    };
     if (absent === 0) {
-      await registerCeremony(l2, anvil, record);
-      await registerDefinition(l2, anvil, c.definition);
+      const approvals = ran.approvals.map((a, i) => {
+        if (!a.ok)
+          throw new Error(`seat ${i + 1} refused to approve ${name}'s ceremony: ${a.code}`);
+        return a.value;
+      });
+      await registerCeremony(l2, anvil, registrationFrom(stub, trustees.panel, ran, approvals));
+      await registerDefinition(l2, anvil, definition);
+      registered.set(hex(definitionHash(definition)), {
+        electionId: stub.election_id,
+        stubHash: ran.stubHash,
+        panelId: stub.panel_id,
+      });
     } else {
-      // Its five seats are under the quorum, so no definition can name it.
+      // Five seats are under rule 7's quorum: every node that took part
+      // refuses to approve (T-54), and the registries refuse the ceremony
+      // even when its seats sign it anyway, so no definition can name it.
+      const approved = ran.approvals.filter((a) => a.ok || a.code !== "participation");
+      if (approved.length > 0)
+        throw new Error(
+          `${approved.length} nodes didn't refuse ${name}'s ceremony for participation`,
+        );
+      const record = ceremonyRegistration(l2, trustees, c);
       await registerCeremony(l2, anvil, record, "BelowQuorum(uint256,uint8)");
       await registerDefinition(l2, anvil, c.definition, "CeremonyNotRecorded(bytes32,bytes32)");
     }
     writeRecords(name, c, encodeDisplayText(text));
     log(
-      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony with ${c.panel.keys.length - absent} seats, election 0x${hex(c.definition.value.election_id)}, ${absent === 0 ? "registered on L2" : "refused by both registries"}`,
+      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony run by ${c.panel.keys.length - absent} trustee nodes, election 0x${hex(c.definition.value.election_id)}, ${absent === 0 ? "approved by every node and registered on L2" : "refused by every node and both registries"}`,
     );
     singles.push(firstEntry(name, c, first));
   }
@@ -444,12 +507,47 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       [v2, [0, 0, 0], refs[0]],
       [v1, [0, 0, 1], refs[1]],
     ] as const;
+    // Each seat's node takes every ballot in and signs its receipt. The
+    // fixture opens the same shares with the node's keys for the tally, which
+    // no node runs yet (STUBS, seats), and must reach the very receipts the
+    // nodes signed (RFC 6979), so it tallies what the nodes hold.
+    l1Time = timing.opensAt + 240n;
+    let lastBallot:
+      | { readonly bytes: Uint8Array; readonly ciphertexts: readonly Uint8Array[] }
+      | undefined;
     for (const [voter, votes, ref] of ballots) {
       const ballot = await castVote(casting, voter, votes, ref);
       board(honest, ballot.bytes);
+      const signed = await nodeIntake(
+        nodes,
+        honest.definition.value,
+        honest.transcript,
+        ballot.bytes,
+        ballot.ciphertexts,
+      );
       const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
-      receipts.push(...taken.receipts);
+      if (
+        signed.length !== taken.receipts.length ||
+        signed.some((r, i) => hex(r) !== hex(taken.receipts[i] ?? new Uint8Array()))
+      )
+        throw new Error("the nodes' share receipts aren't the ones their keys sign");
+      receipts.push(...signed);
       last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
+      lastBallot = ballot;
+    }
+    // A control: by the delivery deadline `t_D` the intake cutoff has
+    // passed, and every node refuses the same ballot again (T-54).
+    if (lastBallot === undefined) throw new Error("no ballot was cast");
+    l1Time = deliveryDeadlines(timing.closesAt, BigInt(timing.inclusionBound)).delivery;
+    for (const s of nodes) {
+      const late = await s.intake.intake(
+        stubOf(honest.definition.value),
+        honest.transcript,
+        lastBallot.bytes,
+        lastBallot.ciphertexts[s.index - 1] ?? new Uint8Array(),
+      );
+      if (late.ok || late.code !== "intake-closed")
+        throw new Error(`seat ${s.index}'s node took a ballot past the intake cutoff`);
     }
     for (const r of receipts) board(honest, r);
     counted.set(honest, {
@@ -458,7 +556,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       counts: countsOf([...last.values()].map((b) => b.votes)),
     });
     log(
-      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each with every seat's share receipt; one challenged attempt checked`,
+      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each with every seat's share receipt from its trustee node, and every node refusing intake past the cutoff; one challenged attempt checked`,
     );
   }
   {
@@ -945,9 +1043,13 @@ async function main(): Promise<number> {
     const anvil = await startAnvil(L1_CHAIN_ID);
     try {
       const l2 = await startAnvil(L2_CHAIN_ID);
+      // The trustee nodes' stores, which hold their secrets and shares:
+      // outside the run's output, and removed however it ends.
+      const stores = mkdtempSync(join(tmpdir(), "reference-election-seats-"));
       try {
-        await run(anvil, l2, failures);
+        await run(anvil, l2, stores, failures);
       } finally {
+        rmSync(stores, { recursive: true, force: true });
         await l2.stop();
       }
     } finally {

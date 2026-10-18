@@ -31,6 +31,7 @@ import {
   encodeElectionDefinitionV5,
   identityKey,
   keysMessage,
+  type KemSecretKey,
   membershipVkHash,
   newDisplayTextSalt,
   type Panel,
@@ -40,7 +41,6 @@ import {
   type Question,
   RECORD_TYPES,
   revealsMessage,
-  type SeatSecrets,
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -64,7 +64,9 @@ export const STUBS = Object.freeze({
   l1References:
     "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name, and the poll's receipt keys are read at the latest block, not the latest finalized one; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
   casting:
-    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission, and the seats' intake, summed shares, openings and destruction statements are made by the fixture through @abolishus/crypto, not by apps/trustee-node, with summed-share messages passed in memory (P2-8, P2-3, P2-13); the poll's receipts are signed by the fixture as operator, not by the API's board service",
+    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission (P2-8, P2-3); the poll's receipts are signed by the fixture as operator, not by the API's board service",
+  seats:
+    "the elections of one question run their ceremony and intake in apps/trustee-node's own code (CeremonySeat, IntakeSeat), one node per seat over its own store, with the fixture as coordinator and handing each ballot to every seat in memory, not over the intake endpoint (P2-13 part 4b); the nodes' electorate check compares the stub with the fixture's voters' tree and their registration check reads Anvil's latest L2 block, not finalized state through packages/verifier (P2-13 part 3); their clock is the fixture's L1 time; the summed shares, openings and destruction statements are made by the fixture through @abolishus/crypto with the nodes' per-election keys, summed-share messages passed in memory (P2-13 part 5); the poll of questions (definition version 5, which the node doesn't read yet) keeps the fixture's own ceremony and intake",
 });
 
 // Distinct, recognisable placeholder values: anyone can recompute them from
@@ -125,6 +127,16 @@ export function stubHash(d: FixtureDefinition): Uint8Array {
   return d.version === 1 ? electionStubHash(d.value) : electionStubV5Hash(d.value);
 }
 
+/**
+ * A seat's per-election secrets from the ceremony, as its duties after it
+ * read them: intake, its summed shares and its statements.
+ */
+export interface SeatKeys {
+  readonly index: number;
+  readonly kemSecret: KemSecretKey;
+  readonly signingSecret: Uint8Array;
+}
+
 export interface Ceremony<D extends FixtureDefinition = FixtureDefinition> {
   readonly panel: Panel;
   readonly definition: D;
@@ -136,7 +148,7 @@ export interface Ceremony<D extends FixtureDefinition = FixtureDefinition> {
    * fixture holds every trustee node's keys, to take ballots' shares, tally
    * and state destruction as each node would (stages 4 and 6).
    */
-  readonly secrets: readonly SeatSecrets[];
+  readonly secrets: readonly SeatKeys[];
 }
 
 export interface Timing {
@@ -298,7 +310,7 @@ function keyCeremony(
 ): {
   readonly transcript: Uint8Array;
   readonly seats: readonly Trustee[];
-  readonly secrets: readonly SeatSecrets[];
+  readonly secrets: readonly SeatKeys[];
 } {
   const params = {
     l2ChainId: stub.l2_chain_id,
@@ -324,23 +336,26 @@ function keyCeremony(
     answers,
     reveals,
   });
-  return { transcript, seats: present, secrets: seats };
+  return {
+    transcript,
+    seats: present,
+    secrets: seats.map((s) => ({
+      index: s.index,
+      kemSecret: s.kem.secretKey,
+      signingSecret: s.signingSecret,
+    })),
+  };
 }
 
-/**
- * Writes the stub of the election `l2` created as number `counter`, runs the
- * key ceremony over it with all but `absent` of `trustees` taking part, and
- * returns the definition that binds the transcript.
- */
-export function runCeremony(
+/** The stub of the election `l2` created as number `counter`: one question of three options. */
+export function singleStub(
   timing: Timing,
   l2: L2Deployment,
-  trustees: Trustees,
+  panel: Panel,
   text: DisplayText,
-  { counter, absent, electorate }: CeremonyOptions,
-): Ceremony<{ readonly version: 1; readonly value: ElectionDefinition }> {
-  const { panel } = trustees;
-  const stub: ElectionDefinition = {
+  { counter, electorate }: Omit<CeremonyOptions, "absent">,
+): ElectionDefinition {
+  return {
     profile: profile(PINNED),
     ...stubFields(timing, l2, panel, counter),
     election_type: 1,
@@ -358,16 +373,40 @@ export function runCeremony(
     ],
     display_text_commitment: displayTextCommitment(text),
   };
+}
+
+/** The definition that binds `transcript` to `stub`, once it passes the well-formedness rule. */
+export function boundDefinition(
+  stub: ElectionDefinition,
+  transcript: Uint8Array,
+): { readonly version: 1; readonly value: ElectionDefinition } {
+  const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
+  const rule = electionDefinitionRule(definition);
+  if (rule !== undefined) throw new Error(`the fixture's definition breaks ${rule}`);
+  return { version: 1, value: definition };
+}
+
+/**
+ * Writes the stub of the election `l2` created as number `counter`, runs the
+ * key ceremony over it with all but `absent` of `trustees` taking part, and
+ * returns the definition that binds the transcript.
+ */
+export function runCeremony(
+  timing: Timing,
+  l2: L2Deployment,
+  trustees: Trustees,
+  text: DisplayText,
+  { counter, absent, electorate }: CeremonyOptions,
+): Ceremony<{ readonly version: 1; readonly value: ElectionDefinition }> {
+  const { panel } = trustees;
+  const stub = singleStub(timing, l2, panel, text, { counter, electorate });
   const { transcript, seats, secrets } = keyCeremony(
     stub,
     electionStubHash(stub),
     trustees,
     absent,
   );
-  const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
-  const rule = electionDefinitionRule(definition);
-  if (rule !== undefined) throw new Error(`the fixture's definition breaks ${rule}`);
-  return { panel, definition: { version: 1, value: definition }, transcript, seats, secrets };
+  return { panel, definition: boundDefinition(stub, transcript), transcript, seats, secrets };
 }
 
 export interface QuestionCeremonyOptions {

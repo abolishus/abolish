@@ -48,3 +48,4 @@ export {
   encodeRequests,
   MAX_RECORD,
 } from "./wire.ts";
+export { l2RecordedAvailability, RecordedError, type RecordedOptions } from "./recorded.ts";

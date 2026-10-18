@@ -36,6 +36,12 @@ export const DEFINITION_REGISTERED = topic(
   "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)",
 );
 export const PANEL_PINNED = topic("PanelPinned(bytes32,uint8,uint8,bytes)");
+export const AVAILABILITY_ATTESTATION_SUBMITTED = topic(
+  "AvailabilityAttestationSubmitted(bytes32,uint8,bytes)",
+);
+export const AVAILABILITY_COMPLAINT_SUBMITTED = topic(
+  "AvailabilityComplaintSubmitted(bytes32,uint8,bytes)",
+);
 
 /**
  * The newest contract-event version this release reads: its tables hold
@@ -87,7 +93,7 @@ const WORD = /^0x[0-9a-fA-F]{64}$/u;
  * of another address, of another shape, outside the range or marked removed
  * (reorganised away) is dropped.
  */
-async function contractLogs(
+export async function contractLogs(
   rpc: Rpc,
   address: Uint8Array,
   topics: readonly (Uint8Array | readonly Uint8Array[])[],

@@ -21,6 +21,9 @@ export {
   provenCheckpoints,
 } from "./l1.ts";
 export {
+  AVAILABILITY_ATTESTATION_SUBMITTED,
+  AVAILABILITY_COMPLAINT_SUBMITTED,
+  contractLogs,
   DEFINITION_REGISTERED,
   ELECTION_CREATED,
   L2Error,

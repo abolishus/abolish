@@ -237,8 +237,8 @@ const source: ElectionSource = {
       ),
     ),
   casts: (electionId, tier) => readCasts(electionId, tier),
-  record: async (electionId, tier, ballot, asked) =>
-    castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot) : "not-asked",
+  record: async (electionId, tier, ballot, shares, asked) =>
+    castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot, shares) : "not-asked",
   send: (electionId, ballot) =>
     sendBallot(STAGING, electionId, ballot, (url, init) => fetch(url, init)),
   keepBoarded: (electionId, tier, ballot, boarded) =>

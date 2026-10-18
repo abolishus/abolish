@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   checkBallotV3,
+  checkPosting,
   decodeBallot,
+  encodeBallotV3,
   decodeDisplayText,
   decodeElectionDefinition,
   type ElectionDefinition,
@@ -24,6 +26,7 @@ import {
   identityBackupLocator,
   sealIdentityBackup,
   sealingElectionV5,
+  shareCiphertextHash,
 } from "@abolishus/crypto";
 import { type Browser, chromium, type Page } from "playwright";
 import { build, preview, type PreviewServer } from "vite-plus";
@@ -467,6 +470,14 @@ describe("sealing a version-5 poll", () => {
 describe("casting a version-5 poll's seal", () => {
   const l1 = { number: "9000000", hash: "ab".repeat(32) };
 
+  /** A cast's result as the harness hands it out, its bytes in hex. */
+  type Cast = {
+    ok: boolean;
+    ballot: string;
+    ballotHash: string;
+    ciphertexts: { seat: number; ciphertext: string; m: string }[];
+  };
+
   /** Checks `poll`, finds `secret`'s cell from its board, seals there and casts, in the page. */
   const sealAndCast = (secret = poll.members[1] as Uint8Array) =>
     page
@@ -530,14 +541,19 @@ describe("casting a version-5 poll's seal", () => {
           JSON.parse(json) as {
             check: boolean;
             found?: { ok: boolean; problem?: string; code?: string };
-            cast?: { ok: boolean; ballot: string; ballotHash: string };
+            cast?: Cast;
             opened?: unknown;
             progress?: [number, number][];
           },
       );
 
-  /** The record, judged here under a context made from the same records, not by the worker. */
-  const admitted = (cast: { ok: boolean; ballot: string; ballotHash: string } | undefined) => {
+  /**
+   * The record, judged here under a context made from the same records, not
+   * by the worker, with each qualified seat's share: its `m_i` makes a
+   * posting that passes the public check under the seat's registered key
+   * ([[delivery]], Client rule 4), and no other seat has one.
+   */
+  const admitted = (cast: Cast | undefined) => {
     expect(cast?.ok, JSON.stringify(cast)).toBe(true);
     const independent = sealingElectionV5(poll.definition, [poll.panel], [poll.entry]);
     if (!independent.ok) throw new Error(independent.code);
@@ -545,6 +561,19 @@ describe("casting a version-5 poll's seal", () => {
     const verdict = checkBallotV3(independent.election, record);
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(hex(verdict.ballotHash)).toBe(cast?.ballotHash);
+    const shares = cast?.ciphertexts ?? [];
+    expect(shares.map((s) => s.seat)).toEqual(poll.registered.map((k) => k.index));
+    for (const { seat, ciphertext, m } of shares) {
+      const key = poll.registered.find((k) => k.index === seat)?.kemKey;
+      if (key === undefined) throw new Error(`seat ${seat}: no registered key`);
+      const { vss, share_hashes } = record.committed_vote;
+      expect(
+        checkPosting({ definitionHash: record.definition_hash }, seat, key, vss, share_hashes, {
+          ciphertext: fromHex(ciphertext),
+          m: fromHex(m),
+        }),
+      ).toEqual({ ok: true });
+    }
     return record;
   };
 
@@ -1015,8 +1044,9 @@ describe("the device's voting identity", () => {
 });
 
 describe("the device's records of its casts", () => {
+  type Share = { seat: number; ciphertext: string; m: string };
   type Harness = {
-    recordCast(electionId: string, tier: number, ballot: string): Promise<string>;
+    recordCast(electionId: string, tier: number, ballot: string, shares: Share[]): Promise<string>;
     recordBoarded(
       electionId: string,
       tier: number,
@@ -1029,14 +1059,41 @@ describe("the device's records of its casts", () => {
   };
   const election = "5e".repeat(32);
   let ballot: Uint8Array;
+  // Each qualified seat's share: every seat but the second, whose share hash
+  // is zero. Ciphertexts stand in as bytes, judged by their hashes alone.
+  let shares: Share[];
   beforeAll(async () => {
     const text = await readFile(
       new URL("../../../docs/spec/vectors/ballot-v3-records.json", import.meta.url),
       "utf8",
     );
-    ballot = fromHex(
-      (JSON.parse(text) as { ballots: { encoding: string }[] }).ballots[0]!.encoding,
+    const vector = decodeBallot(
+      fromHex((JSON.parse(text) as { ballots: { encoding: string }[] }).ballots[0]!.encoding),
+      3,
     );
+    const seats = vector.committed_vote.share_hashes.map((_, i) => i + 1);
+    const made = seats
+      .filter((seat) => seat !== 2)
+      .map((seat) => ({
+        seat,
+        ciphertext: new Uint8Array(40 + seat).fill(seat),
+        m: new Uint8Array(32).fill(0x80 + seat),
+      }));
+    shares = made.map(({ seat, ciphertext, m }) => ({
+      seat,
+      ciphertext: hex(ciphertext),
+      m: hex(m),
+    }));
+    ballot = encodeBallotV3({
+      ...vector,
+      committed_vote: {
+        ...vector.committed_vote,
+        share_hashes: seats.map((seat) => {
+          const share = made.find((s) => s.seat === seat);
+          return share === undefined ? new Uint8Array(32) : shareCiphertextHash(share.ciphertext);
+        }),
+      },
+    });
   });
   // The vector's ballot naming L1 block `n`, after the record header, the
   // definition hash, the cell and the nullifier.
@@ -1045,12 +1102,19 @@ describe("the device's records of its casts", () => {
     new DataView(b.buffer).setBigUint64(3 + 32 + 1 + 32, n);
     return hex(b);
   };
-  const record = (tier: number, b: string) =>
+  const record = (tier: number, b: string, kept: Share[] = shares) =>
     page.evaluate(
-      ([e, t, x]) =>
-        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordCast(e, t, x),
-      [election, tier, b] as const,
+      ([e, t, x, y]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordCast(e, t, x, y),
+      [election, tier, b, kept] as const,
     );
+  /** A recorded cast as `readCasts` hands it out. */
+  const castOf = (b: string, n: string, boarded?: { entry: string; link: string }) => ({
+    ballot: b,
+    l1Number: n,
+    shares,
+    ...(boarded === undefined ? {} : { boarded }),
+  });
   const boarded = (tier: number, b: string, entry: string, link: string) =>
     page.evaluate(
       ([e, t, x, y, z]) =>
@@ -1078,10 +1142,7 @@ describe("the device's records of its casts", () => {
     await expect(record(0, naming(12n))).resolves.toBe("recorded");
     const kept = {
       kind: "read",
-      casts: [
-        { ballot: naming(10n), l1Number: "10" },
-        { ballot: naming(12n), l1Number: "12" },
-      ],
+      casts: [castOf(naming(10n), "10"), castOf(naming(12n), "12")],
     };
     await expect(read(0)).resolves.toEqual(kept);
     // Another tier's casts are its own (Client rule 7): the same block is new there.
@@ -1091,7 +1152,7 @@ describe("the device's records of its casts", () => {
     await expect(read(0)).resolves.toEqual(kept);
     await expect(read(1)).resolves.toEqual({
       kind: "read",
-      casts: [{ ballot: naming(10n), l1Number: "10" }],
+      casts: [castOf(naming(10n), "10")],
     });
     await expect(read(2)).resolves.toEqual({ kind: "read", casts: [] });
     expect(violations).toEqual([]);
@@ -1111,10 +1172,7 @@ describe("the device's records of its casts", () => {
     expect(both.toSorted()).toEqual(["not-newer", "recorded"]);
     await expect(read(0)).resolves.toEqual({
       kind: "read",
-      casts: [
-        { ballot: naming(10n), l1Number: "10" },
-        { ballot: naming(11n), l1Number: "11" },
-      ],
+      casts: [castOf(naming(10n), "10"), castOf(naming(11n), "11")],
     });
   });
 
@@ -1145,7 +1203,7 @@ describe("the device's records of its casts", () => {
     );
     await expect(read(0)).resolves.toEqual({
       kind: "read",
-      casts: [{ ballot: naming(10n), l1Number: "10", boarded: { entry, link } }],
+      casts: [castOf(naming(10n), "10", { entry, link })],
     });
   });
 
@@ -1156,7 +1214,7 @@ describe("the device's records of its casts", () => {
     await expect(record(0, hex(other))).resolves.toBe("other-election");
     await expect(read(0)).resolves.toEqual({
       kind: "read",
-      casts: [{ ballot: naming(10n), l1Number: "10" }],
+      casts: [castOf(naming(10n), "10")],
     });
   });
 
@@ -1164,7 +1222,7 @@ describe("the device's records of its casts", () => {
     await expect(record(0, naming(10n))).resolves.toBe("recorded");
     await page.evaluate(
       ([e]) =>
-        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampCasts(e, 0, 2),
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampCasts(e, 0, 1),
       [election] as const,
     );
     await expect(read(0)).resolves.toEqual({ kind: "unreadable" });
@@ -1174,16 +1232,35 @@ describe("the device's records of its casts", () => {
 
   test("refuse bytes that aren't a version-3 ballot record, leaving the store as it was", async () => {
     const refused = await page.evaluate(
-      ([e, b]) =>
+      ([e, b, s]) =>
         (globalThis as unknown as { ballotHarness: Harness }).ballotHarness
-          .recordCast(e, 0, b)
+          .recordCast(e, 0, b, s)
           .then(
             () => "recorded",
             (error: unknown) => (error instanceof Error ? error.name : "?"),
           ),
-      [election, naming(10n).slice(0, -2)] as const,
+      [election, naming(10n).slice(0, -2), shares] as const,
     );
     expect(refused).toBe("TypeError");
+    await expect(read(0)).resolves.toEqual({ kind: "read", casts: [] });
+  });
+
+  test("refuse shares that aren't exactly the ballot's qualified seats', leaving the store as it was", async () => {
+    const refused = (kept: Share[]) =>
+      record(0, naming(10n), kept).then(
+        () => "recorded",
+        (error: unknown) => (error instanceof Error ? error.message : "?"),
+      );
+    const first = shares[0] as Share;
+    // A seat missing, a share for the unqualified seat, a ciphertext not
+    // hashing to its share hash, and an m that isn't 32 bytes.
+    for (const kept of [
+      shares.slice(1),
+      [...shares, { ...first, seat: 2 }],
+      [{ ...first, ciphertext: `00${first.ciphertext.slice(2)}` }, ...shares.slice(1)],
+      [{ ...first, m: first.m.slice(2) }, ...shares.slice(1)],
+    ])
+      await expect(refused(kept)).resolves.toMatch(/qualified seats' shares/);
     await expect(read(0)).resolves.toEqual({ kind: "read", casts: [] });
   });
 });

@@ -123,7 +123,11 @@ const CAST: CastResult = {
   ok: true,
   ballot: ballotBytes(0xb0),
   ballotHash: new Uint8Array(32),
-  ciphertexts: [],
+  ciphertexts: [1, 3].map((seat) => ({
+    seat,
+    ciphertext: new Uint8Array(4).fill(seat),
+    m: new Uint8Array(32).fill(0x80 + seat),
+  })),
 };
 const LINK = "1c".repeat(32);
 const toHex = (bytes: Uint8Array) =>
@@ -494,10 +498,13 @@ export const SealedThenCast: Story = {
       await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
     ).toHaveFocus();
     await expect(mocks(args.source).record).toHaveBeenCalledOnce();
+    // With every qualified seat's ciphertext and m_i, kept before the ballot
+    // leaves ([[delivery]], Client rule 4).
     await expect(mocks(args.source).record).toHaveBeenCalledWith(
       fromHex(ELECTION_ID),
       0,
       CAST.ballot,
+      CAST.ciphertexts,
       { definitionHash: fromHex(REGISTERED), cell: 2, l1Number: L1.number, l1Hash: L1.hash },
     );
     await expect(mocks(args.source).send).toHaveBeenCalledOnce();
@@ -1019,7 +1026,10 @@ export const CastOnABlockAlreadyUsed: Story = {
   name: "Cast on a block no newer than this device's last cast",
   args: {
     source: castsSource({
-      held: { kind: "read", casts: [{ ballot: new Uint8Array(8), l1Number: L1.number }] },
+      held: {
+        kind: "read",
+        casts: [{ ballot: new Uint8Array(8), l1Number: L1.number, shares: [] }],
+      },
     }),
   },
   play: async ({ canvasElement, args }) => {

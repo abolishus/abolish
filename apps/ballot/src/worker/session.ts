@@ -412,9 +412,10 @@ export class BallotSession {
         ok: true,
         ballot: Uint8Array.from(cast.ballot),
         ballotHash: Uint8Array.from(cast.ballotHash),
-        ciphertexts: cast.ciphertexts.map(({ seat, ciphertext }) => ({
+        ciphertexts: cast.ciphertexts.map(({ seat, ciphertext, m }) => ({
           seat,
           ciphertext: Uint8Array.from(ciphertext),
+          m: Uint8Array.from(m),
         })),
       };
     } catch (e) {

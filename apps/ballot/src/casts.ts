@@ -5,7 +5,11 @@
 // its ballot leaves the device, so each later one names a strictly newer
 // block and never ties it (T-45, T-38), and a retry after a failure or a
 // crash resends the identical bytes from here, never a new ballot on the same
-// block (T-25). Kept in this origin's IndexedDB and nowhere else: the records
+// block (T-25). Each cast keeps every qualified seat's share ciphertext and
+// ML-KEM message `m_i` beside its ballot, recorded before the ballot leaves,
+// so delivery to each seat's intake, and the posting a voter may choose for
+// a seat that never receipts, survive a reload ([[delivery]], Client rule 4).
+// Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
 // What is stored is checked on every read as strictly as a decoder: a record
@@ -13,7 +17,13 @@
 // unreadable, never guessed at, and the client then casts nothing more in
 // that election and tier until the voter decides.
 
-import { type BallotRecordV3, decodeBallot, MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
+import {
+  type BallotRecordV3,
+  type CastShare,
+  decodeBallot,
+  MAX_BOARD_PAYLOAD,
+  shareCiphertextHash,
+} from "@abolishus/crypto";
 
 import { withStore } from "./store.ts";
 
@@ -31,6 +41,12 @@ export interface CastRecord {
   readonly ballot: Uint8Array;
   /** Its `l1_ref_number`, read from the bytes. */
   readonly l1Number: bigint;
+  /**
+   * Each qualified seat's `ct_i` and `m_i`, in seat order: exactly the seats
+   * whose share hash in the ballot isn't zero, each ciphertext hashing to
+   * its seat's share hash.
+   */
+  readonly shares: readonly CastShare[];
   /** The operator's checked answer, once one passed. */
   readonly boarded?: Boarded;
 }
@@ -60,8 +76,15 @@ export type RecordBoardedOutcome =
 export const CASTS_DB = "abolish-ballot-casts";
 const STORE = "casts";
 
-/** The stored record's version: another is unreadable, never migrated by guessing. */
-const RECORD_VERSION = 1;
+/**
+ * The stored record's version: another is unreadable, never migrated by
+ * guessing. Version 1 kept no shares; no build wrote one, since none records
+ * a cast before it delivers (open.tsx, `delivers`).
+ */
+const RECORD_VERSION = 2;
+
+/** The length of an ML-KEM-768 message `m` ([[share-encryption]], Ciphertext). */
+const M_LENGTH = 32;
 
 /** The ballot record version these casts are of: the one definition version 5 pins. */
 const BALLOT_VERSION = 3;
@@ -91,13 +114,49 @@ function keyOf(electionId: Uint8Array, tier: number): string {
   return `${toHex(electionId)}/${tier}`;
 }
 
-/** The ballot's `l1_ref_number`, or `undefined` for bytes that aren't a version-3 ballot record. */
-function l1NumberOf(ballot: Uint8Array): bigint | undefined {
+/** The decoded ballot, or `undefined` for bytes that aren't a version-3 ballot record. */
+function decodedOf(ballot: Uint8Array): BallotRecordV3 | undefined {
   try {
-    return decodeBallot(ballot, BALLOT_VERSION).l1_ref_number;
+    return decodeBallot(ballot, BALLOT_VERSION);
   } catch {
     return undefined;
   }
+}
+
+const isZero = (bytes: Uint8Array) => bytes.every((b) => b === 0);
+
+/**
+ * Copies of `shares` if they are exactly the qualified seats' of `record`:
+ * one per seat whose share hash isn't zero, in seat order, each a
+ * ciphertext hashing to that share hash and a 32-byte `m`; `undefined`
+ * otherwise. So a cast kept here carries a share for every seat its ballot
+ * must be delivered to and none it doesn't name (T-25, T-38).
+ */
+function sharesFor(record: BallotRecordV3, shares: unknown): CastShare[] | undefined {
+  // A cloned array keeps any extra own properties: only the indices are a record's.
+  if (!Array.isArray(shares) || Object.keys(shares).length !== shares.length) return undefined;
+  const seats = record.committed_vote.share_hashes.flatMap((hash, i) =>
+    isZero(hash) ? [] : [{ seat: i + 1, hash }],
+  );
+  if (shares.length !== seats.length) return undefined;
+  const copies: CastShare[] = [];
+  for (let i = 0; i < seats.length; i++) {
+    const share: unknown = shares[i];
+    const expected = seats[i] as (typeof seats)[number];
+    if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m"])) return undefined;
+    const { seat, ciphertext, m } = share;
+    if (
+      seat !== expected.seat ||
+      !(ciphertext instanceof Uint8Array) ||
+      ciphertext.length > MAX_BOARD_PAYLOAD ||
+      !(m instanceof Uint8Array) ||
+      m.length !== M_LENGTH ||
+      !equalBytes(shareCiphertextHash(ciphertext), expected.hash)
+    )
+      return undefined;
+    copies.push({ seat, ciphertext: ciphertext.slice(), m: m.slice() });
+  }
+  return copies;
 }
 
 // Where a board entry's fields sit (docs/spec/board.md): after the record
@@ -140,15 +199,11 @@ export interface CastAsked {
  * client read ([[revoting]], Client rules 1 and 3). Checked before the cast
  * is recorded, so a worker that made a ballot on another block can't have
  * this device record, and send, a cast that ties or outranks the wrong one
- * (T-45, T-38).
+ * (T-45, T-38). `recordCast` checks the shares beside it.
  */
 export function castAsAsked(ballot: Uint8Array, asked: CastAsked): boolean {
-  let decoded: BallotRecordV3;
-  try {
-    decoded = decodeBallot(ballot, BALLOT_VERSION);
-  } catch {
-    return false;
-  }
+  const decoded = decodedOf(ballot);
+  if (decoded === undefined) return false;
   return (
     equalBytes(decoded.definition_hash, asked.definitionHash) &&
     decoded.cell === asked.cell &&
@@ -161,21 +216,24 @@ export function castAsAsked(ballot: Uint8Array, asked: CastAsked): boolean {
 const definitionOf = (ballot: Uint8Array) => ballot.subarray(3, 35);
 
 function castOf(v: unknown): CastRecord | undefined {
-  if (!isRecord(v) || !hasExactly(v, ["ballot", "boarded"])) return undefined;
-  const { ballot, boarded } = v;
+  if (!isRecord(v) || !hasExactly(v, ["ballot", "shares", "boarded"])) return undefined;
+  const { ballot, shares, boarded } = v;
   if (!(ballot instanceof Uint8Array) || ballot.length > MAX_BOARD_PAYLOAD) return undefined;
-  const l1Number = l1NumberOf(ballot);
-  if (l1Number === undefined) return undefined;
-  if (boarded === null) return { ballot: ballot.slice(), l1Number };
+  const decoded = decodedOf(ballot);
+  if (decoded === undefined) return undefined;
+  const kept = sharesFor(decoded, shares);
+  if (kept === undefined) return undefined;
+  const cast = { ballot: ballot.slice(), l1Number: decoded.l1_ref_number, shares: kept };
+  if (boarded === null) return cast;
   const answer = boardedOf(boarded, ballot);
-  return answer === undefined ? undefined : { ballot: ballot.slice(), l1Number, boarded: answer };
+  return answer === undefined ? undefined : { ...cast, boarded: answer };
 }
 
 /**
  * The casts a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 1 and a list of version-3 ballot
- * records naming strictly ascending L1 blocks, each with its checked board
- * entry or `null`. Every byte array is a copy.
+ * record this client writes: version 2 and a list of version-3 ballot
+ * records naming strictly ascending L1 blocks, each with its qualified
+ * seats' shares and its checked board entry or `null`. Every byte array is a copy.
  */
 export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
   if (!isRecord(value) || !hasExactly(value, ["v", "casts"])) return undefined;
@@ -211,8 +269,13 @@ export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
 export function storedCasts(casts: readonly CastRecord[]): Record<string, unknown> {
   const record = {
     v: RECORD_VERSION,
-    casts: casts.map(({ ballot, boarded }) => ({
+    casts: casts.map(({ ballot, shares, boarded }) => ({
       ballot: ballot.slice(),
+      shares: shares.map(({ seat, ciphertext, m }) => ({
+        seat,
+        ciphertext: ciphertext.slice(),
+        m: m.slice(),
+      })),
       boarded:
         boarded === undefined ? null : { entry: boarded.entry.slice(), link: boarded.link.slice() },
     })),
@@ -293,27 +356,34 @@ async function updateCasts<T extends string>(
 
 /**
  * Records `ballot`, a version-3 ballot record about to be sent, as cast in
- * `electionId` at `tier`, before it leaves the device ([[revoting]], Client
- * rule 3). Only a ballot naming a block strictly newer than every one
+ * `electionId` at `tier` with its qualified seats' `shares`, before it
+ * leaves the device ([[revoting]], Client rule 3; [[delivery]], Client rule
+ * 4). Only a ballot naming a block strictly newer than every one
  * recorded there is kept, in the same transaction as the read, so two tabs
  * can't both record a cast on one block: `not-newer` otherwise, and the
  * ballot must not be sent (T-45). `unreadable` for casts this device can't
  * read, which are never replaced; `other-election` for a ballot naming
  * another definition than those recorded there, which is never kept beside
  * them; `unwritable` for storage the browser refuses. Throws on bytes that
- * aren't a version-3 ballot record.
+ * aren't a version-3 ballot record, and on shares that aren't exactly its
+ * qualified seats', each hashing to its share hash: the worker's own
+ * output, so a mismatch is this client's fault.
  */
 export async function recordCast(
   electionId: Uint8Array,
   tier: number,
   ballot: Uint8Array,
+  shares: readonly CastShare[],
   factory: IDBFactory = indexedDB,
 ): Promise<RecordCastOutcome> {
   const key = keyOf(electionId, tier);
-  const l1Number = ballot instanceof Uint8Array ? l1NumberOf(ballot) : undefined;
-  if (l1Number === undefined || ballot.length > MAX_BOARD_PAYLOAD)
+  const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
+  if (decoded === undefined || ballot.length > MAX_BOARD_PAYLOAD)
     throw new TypeError("not a version-3 ballot record");
-  const cast: CastRecord = { ballot: ballot.slice(), l1Number };
+  const kept = sharesFor(decoded, shares);
+  if (kept === undefined) throw new TypeError("not the ballot's qualified seats' shares");
+  const l1Number = decoded.l1_ref_number;
+  const cast: CastRecord = { ballot: ballot.slice(), l1Number, shares: kept };
   return updateCasts(key, factory, (casts) => {
     const first = casts[0];
     if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))

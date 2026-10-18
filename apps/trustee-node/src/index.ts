@@ -26,6 +26,18 @@ export {
   IntakeSeat,
   type RegistrationCheck,
 } from "./intake.ts";
+export {
+  BUSY_RETRY_SECONDS,
+  decodeDelivery,
+  type Delivery,
+  encodeDelivery,
+  type Endpoint,
+  type EndpointOptions,
+  type Intake,
+  INTAKE_GROUPS,
+  MAX_DELIVERY,
+  serveIntake,
+} from "./endpoint.ts";
 export { L1AnchorError, type L1AnchorOptions, type L1AnchorRefusal, l1BoardAnchors } from "./l1.ts";
 export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
 export { type ServedBlocks, servedBlocks } from "./served.ts";

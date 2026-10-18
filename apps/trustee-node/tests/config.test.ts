@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { panelId } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { DEFAULT_MAX_BOARD_BYTES } from "@abolishus/verifier";
-import { ConfigError, parseConfig, readAccountKey, readIdentityKey } from "../src/config.ts";
+import {
+  ConfigError,
+  parseConfig,
+  readAccountKey,
+  readIdentityKey,
+  readTlsKey,
+} from "../src/config.ts";
 import { panelOf } from "./fixture.ts";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -180,6 +186,40 @@ describe("the availability configuration", () => {
   });
 });
 
+describe("the intake endpoint's configuration", () => {
+  test("listens where it says, over TLS with a certificate and key or on loopback without", () => {
+    const tls = parseConfig(
+      JSON.stringify(
+        config({
+          intake: { host: "0.0.0.0", port: 8443, tlsCertFile: "/c.pem", tlsKeyFile: "/k.pem" },
+        }),
+      ),
+    );
+    expect(tls.intake).toEqual({
+      host: "0.0.0.0",
+      port: 8443,
+      tls: { certFile: "/c.pem", keyFile: "/k.pem" },
+      queue: 16,
+    });
+    const plain = parseConfig(
+      JSON.stringify(config({ intake: { host: "::1", port: 0, queue: 2 } })),
+    );
+    expect(plain.intake).toEqual({ host: "::1", port: 0, tls: undefined, queue: 2 });
+    expect(parseConfig(JSON.stringify(config())).intake).toBeUndefined();
+  });
+
+  test.each([
+    ["plain HTTP off loopback", { host: "0.0.0.0", port: 80 }],
+    ["a certificate without its key", { host: "0.0.0.0", port: 443, tlsCertFile: "/c.pem" }],
+    ["a key without its certificate", { host: "127.0.0.1", port: 443, tlsKeyFile: "/k.pem" }],
+    ["a port past 65535", { host: "127.0.0.1", port: 65_536 }],
+    ["an empty queue", { host: "127.0.0.1", port: 0, queue: 0 }],
+    ["an unknown field", { host: "127.0.0.1", port: 0, extra: 1 }],
+  ])("refuses %s", (_, intake) => {
+    expect(() => parseConfig(JSON.stringify(config({ intake })))).toThrow(/^config: intake(\.|: )/);
+  });
+});
+
 describe("the identity key file", () => {
   let dir: string;
   beforeAll(async () => {
@@ -235,5 +275,26 @@ describe("the account key file", () => {
     await chmod(path, 0o644);
     await expect(readAccountKey(path)).rejects.toThrow("account key:");
     await expect(readAccountKey(join(dir, "missing"))).rejects.toThrow("account key: ENOENT");
+  });
+});
+
+describe("the TLS key file", () => {
+  let dir: string;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "trustee-node-tls-key-"));
+  });
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  test("is read whole from a file its owner alone can reach", async () => {
+    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
+    const path = join(dir, "key.pem");
+    await writeFile(path, pem, { mode: 0o600 });
+    expect(await readTlsKey(path)).toBe(pem);
+    await chmod(path, 0o640);
+    await expect(readTlsKey(path)).rejects.toThrow("TLS key:");
+    const link = join(dir, "link");
+    await symlink(path, link);
+    await chmod(path, 0o600);
+    await expect(readTlsKey(link)).rejects.toThrow("TLS key: ELOOP");
   });
 });

@@ -1,7 +1,8 @@
 // The node's command line: `keygen`, a seat's identity key; `run`, one
 // seat's node against its coordinator, with its availability duty and the
 // gateway serving what it attests when the configuration names the chains
-// and sources it needs; and `local-ceremony`, a whole
+// and sources it needs, and its intake endpoint when it names where to
+// listen; and `local-ceremony`, a whole
 // ceremony between a local panel's nodes and a local coordinator over HTTP
 // on loopback. Output is one JSON object per line, never a secret.
 import { once } from "node:events";
@@ -33,8 +34,11 @@ import {
   parseConfig,
   readAccountKey,
   readIdentityKey,
+  readTlsKey,
 } from "./config.ts";
 import { AvailabilityDuties, type DutyEvent } from "./duties.ts";
+import { type Endpoint, serveIntake } from "./endpoint.ts";
+import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
@@ -66,6 +70,13 @@ const json = (v: unknown) =>
  * `stub-electorate` until it is.
  */
 const NO_ELECTORATE_CHECK: ElectorateCheck = () => Promise.resolve(false);
+
+/**
+ * Nor is the registration read from finalized L2 (P2-13 part 3), so the
+ * deployed endpoint refuses every delivery until it is: with no stub
+ * approved, `intake-unapproved` comes first.
+ */
+const NO_REGISTRATION_CHECK: RegistrationCheck = () => Promise.resolve(false);
 
 /**
  * Exit codes: 0 done, 2 bad usage or configuration, 1 a local ceremony that
@@ -132,7 +143,13 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
     return 1;
   }
   const duties = availability?.duties;
-  io.out({ event: "started", seat: config.seat, availability: duties !== undefined });
+  const endpoint = await intakeEndpoint(config, seat, store, io);
+  io.out({
+    event: "started",
+    seat: config.seat,
+    availability: duties !== undefined,
+    ...(endpoint === undefined ? {} : { intake: endpoint.url }),
+  });
   // Either loop failing (a store it can't read) stops the other, and the
   // failure is rethrown once both have stopped and the gateway is closed.
   const stop = new AbortController();
@@ -151,8 +168,61 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
     server.closeAllConnections();
     await once(server, "close");
   }
+  await endpoint?.close();
   for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
   return 0;
+}
+
+/**
+ * The seat's intake endpoint (README, Intake endpoint), or undefined when
+ * the configuration has no `intake`. A port it can't take is the
+ * configuration's error.
+ */
+async function intakeEndpoint(
+  config: NodeConfig,
+  seat: CeremonySeat,
+  store: SeatStore,
+  io: CliIo,
+): Promise<Endpoint | undefined> {
+  const i = config.intake;
+  if (i === undefined) return undefined;
+  let tls;
+  if (i.tls !== undefined) {
+    let cert;
+    try {
+      cert = await readFile(i.tls.certFile, "utf8");
+    } catch (e) {
+      throw new ConfigError(
+        `TLS certificate: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`,
+      );
+    }
+    tls = { cert, key: await readTlsKey(i.tls.keyFile) };
+  }
+  const intake = new IntakeSeat({
+    panel: config.panel,
+    l2ChainId: config.l2ChainId,
+    trusteeRegistry: config.trusteeRegistry,
+    index: config.seat,
+    ceremony: seat,
+    electorate: NO_ELECTORATE_CHECK,
+    registration: NO_REGISTRATION_CHECK,
+    store,
+    now: () => BigInt(Math.floor(Date.now() / 1000)),
+  });
+  try {
+    return await serveIntake(intake, {
+      host: i.host,
+      port: i.port,
+      ...(tls === undefined ? {} : { tls }),
+      queue: i.queue,
+      log: (e) => io.out(e),
+    });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    // A certificate or key OpenSSL can't read has a code of its own too.
+    if (code === undefined) throw e;
+    throw new ConfigError(`intake: ${code}`);
+  }
 }
 
 /**

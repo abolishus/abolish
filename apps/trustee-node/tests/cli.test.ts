@@ -14,6 +14,7 @@ import {
 } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli, dutyWiring } from "../src/cli.ts";
+import { encodeDelivery } from "../src/endpoint.ts";
 import { parseConfig } from "../src/config.ts";
 import { servedBlocks } from "../src/served.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -127,6 +128,73 @@ describe("run", () => {
     } finally {
       server.close();
     }
+  }, 60_000);
+});
+
+describe("run with the intake endpoint", () => {
+  test("serves it and refuses every delivery until the node approves a stub", async () => {
+    const { panel, secrets } = panelOf(3, 2);
+    const keyFile = join(dir, "identity-intake");
+    await writeFile(keyFile, hex(secrets[0] as Uint8Array), { mode: 0o600 });
+    const configFile = join(dir, "config-intake.json");
+    await writeFile(
+      configFile,
+      JSON.stringify({
+        panel: { threshold: 2, keys: panel.keys.map(hex) },
+        panelId: hex(panelId(panel)),
+        l2ChainId: L2_CHAIN_ID.toString(),
+        trusteeRegistry: hex(TRUSTEE_REGISTRY),
+        seat: 1,
+        identityKeyFile: keyFile,
+        store: join(dir, "store-intake"),
+        // Nothing listens there: the ceremony loop's failures don't stop `run`.
+        coordinator: `http://127.0.0.1:${await freePort()}/`,
+        pollSeconds: 3600,
+        intake: { host: "127.0.0.1", port: 0 },
+      }),
+    );
+    const stop = new AbortController();
+    const t = io(stop.signal);
+    let url: string | undefined;
+    let stopped: Promise<number> | undefined;
+    const started = new Promise<void>((resolve) => {
+      const running = cli(["run", "--config", configFile], {
+        ...t.io,
+        out: (v) => {
+          t.out.push(v);
+          const e = v as { event?: string; intake?: string };
+          if (e.event === "started") {
+            url = e.intake;
+            resolve();
+          }
+        },
+      });
+      void running.finally(resolve);
+      stopped = running;
+    });
+    await started;
+    try {
+      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1\/intake$/);
+      const res = await fetch(url as string, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: Buffer.from(
+          encodeDelivery({
+            stub: encodeElectionDefinition(stubFor(panel)),
+            transcript: new Uint8Array(0),
+            record: new Uint8Array(0),
+            ciphertext: new Uint8Array(0),
+          }),
+        ),
+      });
+      expect(res.status).toBe(422);
+      expect(await res.text()).toBe("intake-unapproved");
+    } finally {
+      stop.abort();
+    }
+    expect(await stopped).toBe(0);
+    // The endpoint closed with `run`.
+    await expect(fetch(url as string, { method: "OPTIONS" })).rejects.toThrow();
   }, 60_000);
 });
 

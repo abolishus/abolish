@@ -29,10 +29,12 @@ import { type MembershipProverArtifacts, proveMembership } from "@abolishus/memb
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   CeremonySeat,
+  encodeDelivery,
   type IntakeConfig,
   IntakeSeat,
   type RegistrationCheck,
   type SeatStore,
+  serveIntake,
 } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -369,6 +371,45 @@ describe("intake", () => {
     );
     expect(out).toEqual({ ok: false, code: "membership-proof" });
     expect(await stores[0]!.list(`intake/${hex(s.e.stubHash)}`)).toEqual([]);
+  });
+});
+
+describe("the intake endpoint over a seat", () => {
+  it("returns the receipt the seat gives in-process, and a refusal's code", async () => {
+    const [seat] = seatsOf(s, { store: new MemoryStore() }).intake;
+    const endpoint = await serveIntake(seat!, { host: "127.0.0.1", port: 0, queue: 4 });
+    try {
+      const body = (ciphertext: Uint8Array) =>
+        Buffer.from(
+          encodeDelivery({
+            stub: s.e.stubBytes,
+            transcript: s.transcript,
+            record: honest.bytes,
+            ciphertext,
+          }),
+        );
+      const deliver = (ciphertext: Uint8Array) =>
+        fetch(endpoint.url, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: body(ciphertext),
+        });
+      const res = await deliver(honest.ciphertexts[0] as Uint8Array);
+      expect(res.status).toBe(200);
+      const direct = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!direct.ok) expect.fail(direct.code);
+      expect(hex(new Uint8Array(await res.arrayBuffer()))).toBe(hex(direct.receipt));
+      const refused = await deliver(honest.ciphertexts[1] as Uint8Array);
+      expect(refused.status).toBe(422);
+      expect(await refused.text()).toBe("share-hash");
+    } finally {
+      await endpoint.close();
+    }
   });
 });
 

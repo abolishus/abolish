@@ -7,7 +7,7 @@
 // anchor).
 
 import { readFileSync } from "node:fs";
-import { type Checkpoint, checkpointHash, encodeCheckpoint } from "@abolishus/crypto";
+import { type Anchor, type Checkpoint, checkpointHash, encodeCheckpoint } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { Rpc } from "./anvil.ts";
@@ -243,27 +243,31 @@ export async function evidence(
 }
 
 /**
- * The anchor's storage words at `slots` in the latest block, and that block's
- * timestamp: what a ballot client reads the listed receipt keys' records from
- * before casting (docs/spec/election-definition.md, Receipt keys).
+ * The anchor's storage words at `slots` in the `block` ("latest" unless
+ * named), and that block's timestamp: what a ballot client reads the listed
+ * receipt keys' records from before casting, at the latest block
+ * (docs/spec/election-definition.md, Receipt keys), and a judge of receipts
+ * at the finalized one (docs/spec/receipts.md, Verdicts).
  */
-export async function latestWords(
+export async function storageWords(
   rpc: Rpc,
   address: Uint8Array,
   slots: readonly Uint8Array[],
+  block: "latest" | "finalized" = "latest",
 ): Promise<{ readonly words: Uint8Array[]; readonly timestamp: bigint }> {
-  const block = await rpc.call<Block>("eth_getBlockByNumber", ["latest", false]);
+  const at = await rpc.call<Block>("eth_getBlockByNumber", [block, false]);
   const words = await Promise.all(
     slots.map(async (slot) =>
-      unhex(await rpc.call<string>("eth_getStorageAt", [hex(address), hex(slot), block.number])),
+      unhex(await rpc.call<string>("eth_getStorageAt", [hex(address), hex(slot), at.number])),
     ),
   );
-  return { words, timestamp: BigInt(block.timestamp) };
+  return { words, timestamp: BigInt(at.timestamp) };
 }
 
 export interface Log {
   readonly topics: readonly string[];
   readonly data: string;
+  readonly blockNumber?: string;
 }
 
 const CHECKPOINT_ANCHORED = keccak_256(
@@ -331,7 +335,30 @@ export async function loggedCheckpoints(
   anchor: Uint8Array,
   electionId: Uint8Array,
 ): Promise<Checkpoint[]> {
-  const logs = await rpc.call<Log[]>("eth_getLogs", [
+  return (await anchorLogs(rpc, anchor, electionId)).map(checkpointFromLog);
+}
+
+/**
+ * Every anchor for `electionId` up to the finalized block: each logged
+ * checkpoint with the timestamp of the block that anchored it, what a judge
+ * of receipts reads from L1 (docs/spec/receipts.md, Verdicts; T-24).
+ */
+export async function loggedAnchors(
+  rpc: Rpc,
+  anchor: Uint8Array,
+  electionId: Uint8Array,
+): Promise<Anchor[]> {
+  const anchors: Anchor[] = [];
+  for (const log of await anchorLogs(rpc, anchor, electionId)) {
+    if (log.blockNumber === undefined) throw new Error("a log without its block number");
+    const block = await rpc.call<Block>("eth_getBlockByNumber", [log.blockNumber, false]);
+    anchors.push({ checkpoint: checkpointFromLog(log), anchoredAt: BigInt(block.timestamp) });
+  }
+  return anchors;
+}
+
+function anchorLogs(rpc: Rpc, anchor: Uint8Array, electionId: Uint8Array): Promise<Log[]> {
+  return rpc.call<Log[]>("eth_getLogs", [
     {
       address: hex(anchor),
       fromBlock: "earliest",
@@ -339,5 +366,4 @@ export async function loggedCheckpoints(
       topics: [hex(CHECKPOINT_ANCHORED), hex(electionId)],
     },
   ]);
-  return logs.map(checkpointFromLog);
 }

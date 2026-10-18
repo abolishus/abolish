@@ -1277,6 +1277,15 @@ export {
   VOUCH_ROOT_WINDOW,
 } from "./vouch-count.ts";
 export {
+  finishVouch,
+  pickVouchSlot,
+  VouchProverError,
+  type VouchProverErrorCode,
+  type VouchProverInput,
+  vouchProverInput,
+  type VouchStatement,
+} from "./vouch-prover.ts";
+export {
   type Block,
   CHUNK_SIZE,
   cidText,

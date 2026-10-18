@@ -1295,6 +1295,7 @@ export const BacksUpOnceSent: Story = {
             backUp: fn<Backer["backUp"]>(() =>
               Promise.resolve({ kind: "stored", syncable: true, backedUp: true }),
             ),
+            now: () => NOW,
           },
         },
       ),

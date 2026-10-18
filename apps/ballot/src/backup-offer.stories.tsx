@@ -17,6 +17,8 @@ const POLL = {
 };
 
 const CREDENTIAL_ID = new Uint8Array(16).fill(7);
+const NOW = 1_760_000_000_000;
+const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * A backer whose device keeps `held`, and whose backups give `outcomes` in
@@ -29,6 +31,7 @@ function backer(held: BackupCredentialRead, ...outcomes: BackupOutcome[]): Backe
     backUp: fn<Backer["backUp"]>(() =>
       Promise.resolve(outcomes[Math.min(given++, outcomes.length - 1)] as BackupOutcome),
     ),
+    now: () => NOW,
   };
 }
 
@@ -59,7 +62,7 @@ export const Offered: Story = {
       await canvas.findByRole("heading", { name: "Back up with a passkey?" }),
     ).toBeVisible();
     await expect(canvas.getByText(/A new device would start as someone new/)).toBeVisible();
-    // A double tap runs one backup.
+    // A double tap runs one backup: the first tap replaces the button.
     await userEvent.dblClick(canvas.getByRole("button", START));
     await expect(await canvas.findByText("Backed up with your passkey")).toBeVisible();
     await expect(args.backer.backUp).toHaveBeenCalledOnce();
@@ -124,7 +127,7 @@ export const KeptAndSynced: Story = {
   args: {
     backer: backer({
       kind: "found",
-      credential: { credentialId: CREDENTIAL_ID, backedUp: true, storedAt: 1_760_000_000_000 },
+      credential: { credentialId: CREDENTIAL_ID, backedUp: true, storedAt: NOW - DAY },
     }),
   },
   play: async ({ canvasElement, args }) => {
@@ -141,7 +144,7 @@ export const KeptNotSynced: Story = {
     backer: backer(
       {
         kind: "found",
-        credential: { credentialId: CREDENTIAL_ID, backedUp: false, storedAt: 1_760_000_000_000 },
+        credential: { credentialId: CREDENTIAL_ID, backedUp: false, storedAt: NOW - DAY },
       },
       STORED,
     ),
@@ -155,6 +158,26 @@ export const KeptNotSynced: Story = {
     await expect(args.backer.backUp).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
     await expect(await canvas.findByText("Backed up with your passkey")).toBeVisible();
+  },
+};
+
+export const KeptLongAgo: Story = {
+  name: "A later visit: stored over 18 months ago, offered again to renew",
+  args: {
+    backer: backer(
+      {
+        kind: "found",
+        credential: { credentialId: CREDENTIAL_ID, backedUp: true, storedAt: NOW - 550 * DAY },
+      },
+      STORED,
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // The route drops an envelope after 24 months unrewritten (T-66): never shown as backed up.
+    await userEvent.click(await canvas.findByRole("button", START));
+    await expect(await canvas.findByText("Backed up with your passkey")).toBeVisible();
+    await expect(args.backer.backUp).toHaveBeenCalledOnce();
   },
 };
 
@@ -236,6 +259,7 @@ export const Throws: Story = {
     backer: {
       credential: () => Promise.resolve({ kind: "none" }),
       backUp: () => Promise.reject(new Error("worker gone")),
+      now: () => NOW,
     },
   },
   play: async ({ canvasElement }) => {

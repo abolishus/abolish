@@ -22,7 +22,17 @@ export interface Backer {
   readonly credential: () => Promise<BackupCredentialRead>;
   /** A backup, or a check that renews one, in its steps (`backUp`). */
   readonly backUp: () => Promise<BackupOutcome>;
+  /** This device's clock, in milliseconds since the UNIX epoch. */
+  readonly now: () => number;
 }
+
+/**
+ * How old a stored backup may get before it is offered again: the route
+ * drops an envelope not rewritten for 24 whole months (T-66), and a backup
+ * run again rewrites it under the same locator, so 18 leaves the voter
+ * months of visits to renew it in.
+ */
+const RENEW_AFTER_MS = 18 * 30 * 24 * 60 * 60 * 1000;
 
 /** Where the backup stands, as the offer shows it. */
 type State =
@@ -60,15 +70,19 @@ const STOPPED: Record<
   "not-kept": { title: "backupNotKeptTitle", detail: "backupNotKept", retry: true },
 };
 
-/** The state a kept credential record shows before anything is pressed. */
-function heldState(read: BackupCredentialRead): State {
+/** The state a kept credential record shows at `now`, before anything is pressed. */
+function heldState(read: BackupCredentialRead, now: number): State {
   if (read.kind === "unreadable") return { kind: "stopped", problem: "unreadable" };
   // A passkey kept with no envelope stored yet (a backup that stopped after
-  // the ceremony) is offered again: the next try evaluates that one.
-  if (read.kind === "none" || read.credential.storedAt === undefined) return { kind: "offer" };
+  // the ceremony) is offered again: the next try evaluates that one. So is
+  // one stored long enough ago that the route may soon drop it; a clock set
+  // back shows it as stored, a clock set forward only offers it early.
+  if (read.kind === "none") return { kind: "offer" };
+  const { storedAt, backedUp } = read.credential;
+  if (storedAt === undefined || now - storedAt > RENEW_AFTER_MS) return { kind: "offer" };
   // The record keeps BS but not BE: one that isn't backed up is checked anew
   // on the voter's tap, which reads both again.
-  return { kind: "stored", syncable: true, backedUp: read.credential.backedUp };
+  return { kind: "stored", syncable: true, backedUp };
 }
 
 /** The backup offer, or where the backup stands, as a section of a registration screen. */
@@ -102,7 +116,7 @@ export function BackupOffer({ backer }: { backer: Backer }) {
   }
 
   useEffect(() => {
-    run(async () => heldState(await backer.credential()));
+    run(async () => heldState(await backer.credential(), backer.now()));
     // Once, on the first render: later reads come from a button.
   }, []);
 

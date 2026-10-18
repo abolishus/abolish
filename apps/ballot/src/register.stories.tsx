@@ -193,8 +193,31 @@ export const Joined: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("You're registered");
+    // A build that offers no backup shows none.
+    await expect(canvas.queryByRole("button", { name: "Back up with a passkey" })).toBeNull();
     await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
     await expect(onJoined).toHaveBeenCalledOnce();
+  },
+};
+
+export const JoinedWithBackup: Story = {
+  name: "Registered, with the backup offered",
+  render: () => (
+    <RegisterJoined
+      poll={POLL}
+      backer={{
+        credential: () => Promise.resolve({ kind: "none" }),
+        backUp: () => Promise.resolve({ kind: "stored", syncable: true, backedUp: true }),
+        now: () => 1_760_000_000_000,
+      }}
+      onBack={onJoined}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await userEvent.click(await canvas.findByRole("button", { name: "Back up with a passkey" }));
+    await expect(await canvas.findByText("Backed up with your passkey")).toBeVisible();
   },
 };
 

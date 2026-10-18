@@ -387,14 +387,13 @@ const enUS = {
   // Backing up the voting identity with a passkey (backup-offer.tsx).
   backupOfferTitle: "Back up with a passkey?",
   backupOffer:
-    "So you can keep answering from your other devices as the same person, and keep your place if you lose this one.",
+    "So your voting identity isn't lost with this device: a sealed copy is stored that only your passkey opens.",
   backupStart: "Back up with a passkey",
   backupSkip: "Not now",
   backupSkipMeans:
     "If you skip it, you can still answer on this device. A new device would start as someone new. Your receipts stay on this device either way.",
   backupSectionTitle: "Passkey backup",
-  backupSkipped:
-    "No backup for now. You can keep answering on this device, and back up later from this app.",
+  backupSkipped: "No backup for now. You can keep answering on this device.",
   backupWorking:
     "Follow your browser's passkey prompt. This device seals your voting identity under the passkey, then stores the sealed copy.",
   backupStoredTitle: "Backed up with your passkey",

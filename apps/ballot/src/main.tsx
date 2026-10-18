@@ -54,8 +54,6 @@ const region = tier0Region(STAGING);
 const groupRegistry = STAGING.groupRegistry;
 const pinned = STAGING.registrars;
 // The passkey backup, where this build offers one (`Deployment.backups`).
-// It seals in the ballot worker, spawning one if none is running: a backup
-// needs no checked poll, and a stopped worker is replaced on the next try.
 const backer: Backer | undefined = !STAGING.backups
   ? undefined
   : {
@@ -67,16 +65,24 @@ const backer: Backer | undefined = !STAGING.backups
           identity: () => readIdentity(),
           credential: () => readBackupCredential(),
           keep: (credential) => saveBackupCredential(credential),
-          // `withWorker` reaches the worker's postMessage before its first
-          // await, so both are copied before this returns.
-          seal: (prf, secret) =>
-            withWorker((used) => used.backupSeal(prf, secret), { spawn: true }),
+          // In a worker of its own, so a backup never waits behind, or stops,
+          // the worker holding the poll. `backupSeal` reaches its postMessage
+          // before its first await, so both are copied before this returns.
+          async seal(prf, secret) {
+            const own = new BallotWorker();
+            try {
+              return await own.backupSeal(prf, secret);
+            } finally {
+              own.terminate();
+            }
+          },
           put: (locator, envelope) =>
             putIdentityBackup(STAGING, locator, envelope, (url, init) => fetch(url, init)),
           fetch: (locator) =>
             fetchIdentityBackup(STAGING, locator, (url, init) => fetch(url, init)),
           now: () => Date.now(),
         }),
+      now: () => Date.now(),
     };
 
 const registrar: Registrar | undefined =
@@ -188,11 +194,8 @@ const source: ElectionSource = {
   registrar,
 };
 
-async function withWorker<T>(
-  ask: (used: BallotWorker) => Promise<T>,
-  { spawn = false }: { spawn?: boolean } = {},
-): Promise<T> {
-  const used = spawn ? (worker ??= new BallotWorker()) : worker;
+async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {
+  const used = worker;
   if (used === undefined) throw new WorkerFailure("no ballot worker");
   try {
     return await ask(used);

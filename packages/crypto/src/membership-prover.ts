@@ -109,8 +109,11 @@ export function secretScalar(secret: Uint8Array): bigint {
   return s;
 }
 
-/** `Poseidon2(Ax, Ay)` for `(Ax, Ay) = s · B8`: the identity commitment of secret `s`. */
-function commitmentOf(s: bigint): bigint {
+/**
+ * Internal: `Poseidon2(Ax, Ay)` for `(Ax, Ay) = s · B8`, the identity
+ * commitment of secret scalar `s`.
+ */
+export function commitmentOf(s: bigint): bigint {
   const { x, y } = BJJ_G.multiply(s).toAffine();
   return poseidon2(x, y);
 }
@@ -183,7 +186,24 @@ export function membershipProverInput(
   const scope = membershipScope(definitionHash, tier, root);
   const messageField = semaphoreField(message);
   const s = secretScalar(secret);
-  const commitment = commitmentOf(s);
+  return proverInputAt(s, memberPath(commitmentOf(s), leaves, root), scope, messageField);
+}
+
+/** A member's leaf index and its 32 siblings, climbing to the tier's root. */
+export interface MemberPath {
+  readonly root: bigint;
+  readonly index: number;
+  readonly siblings: readonly bigint[];
+}
+
+/**
+ * Internal: the path of `commitment` at its first leaf of `leaves`, in one
+ * pass that holds no copy of the leaves, which must climb to `root`; or
+ * `MembershipProverError` with `not-a-member` or `root`. The package entry
+ * point doesn't export it; the vouch prover builds both of a vouch's proofs
+ * on one path.
+ */
+export function memberPath(commitment: bigint, leaves: Iterable<bigint>, root: bigint): MemberPath {
   // A forbidden commitment is never a leaf (part 2's contract), and the path
   // builder refuses to look for one.
   if (isForbiddenCommitment(commitment)) throw new MembershipProverError("not-a-member");
@@ -194,6 +214,21 @@ export function membershipProverInput(
   // refuses here rather than in a proof that fails verification later.
   if (found.root !== root || climb(commitment, index, siblings) !== root)
     throw new MembershipProverError("root");
+  return { root, index, siblings };
+}
+
+/**
+ * Internal: the prover's request for secret scalar `s` on `path`, under the
+ * mapped `scope` and `messageField`, with the nullifier computed here. The
+ * package entry point doesn't export it.
+ */
+export function proverInputAt(
+  s: bigint,
+  path: MemberPath,
+  scope: bigint,
+  messageField: bigint,
+): MembershipProverInput {
+  const { root, index, siblings } = path;
   const input: MembershipProverInput = Object.freeze({
     witness: Object.freeze({
       secret: s.toString(),

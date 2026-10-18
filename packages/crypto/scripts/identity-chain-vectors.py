@@ -332,7 +332,7 @@ class Reader:
     def var(self, limit):
         n = int.from_bytes(self.take(4), "big")
         if n > limit:
-            raise Reject("length-exceeds-bound")
+            raise Reject("length-over-max")
         return self.take(n)
 
     def end(self):
@@ -458,6 +458,10 @@ def main():
         make_anchor("usa-2027", b"USA", [cert_rsa, cert_ec], t2027, t2028),
     ]
     anchors_zkr = [make_anchor("zkr", b"ZKR", [cert_mock], t2026, t2028)]
+    # An issuer's sets never overlap.
+    for anchors in (anchors_usa, anchors_zkr):
+        for a, b in zip(anchors, anchors[1:]):
+            assert a["valid_until"] <= b["valid_from"]
 
     circuits = {
         "dsc": [label_bytes(b"key dsc rsa pkcs 4096 sha256"), label_bytes(b"key dsc ecdsa p384 sha384")],
@@ -505,16 +509,21 @@ def main():
         (b"usa yesterday ec", usa, anchors_usa[0], today - DAY, 1, 1),
         (b"usa tomorrow", usa, anchors_usa[0], today + DAY, 0, 1),
         (b"zkr", zkr, anchors_zkr[0], today, 1, 0),
+        (b"usa last day", usa, anchors_usa[0], t2027 - DAY, 0, 0),
+        (b"usa longest proof", usa, anchors_usa[0], today, 0, 0),
     ]:
         c = make_chain(label, anchor, date, dsc, idk)
+        if label == b"usa longest proof":
+            c["age_proof"] = label_bytes(b"longest proof", MAX_PROOF)
+        at = date + 12 * 3600 if label == b"usa last day" else now
         data = encode_chain(c)
-        assert decode_chain(data) == c and check_chain(deployment, now, data) == c
+        assert decode_chain(data) == c and check_chain(deployment, at, data) == c
         comm_in = field(label + b" comm_in")
         accepted.append(
             {
                 "id": label.decode().replace(" ", "-"),
                 "deployment": deployment["issuer"].decode(),
-                "now": str(now),
+                "now": str(at),
                 "commIn": hexf(comm_in),
                 "fields": chain_json(c),
                 "encoded": data.hex(),
@@ -552,7 +561,7 @@ def main():
     off_id = off_dsc + 32 + 4 + STAND_IN_PROOF + 32
     reject("comm-id-at-p", base_data[:off_id] + f32(P + 1) + base_data[off_id + 32 :], "non-canonical")
     over = encode_chain({**base, "age_proof": b"\x00" * (MAX_PROOF + 1)})
-    reject("proof-over-bound", over, "length-exceeds-bound", note="the age proof's length field is 65,537, with its bytes present")
+    reject("proof-over-bound", over, "length-over-max", note="the age proof's length field is 65,537, with its bytes present")
     reject("date-not-midnight", with_(proof_date=today + 3600), "chain-date")
     reject("date-two-days-old", with_(proof_date=today - 2 * DAY), "chain-date")
     reject("date-two-days-ahead", with_(proof_date=today + 2 * DAY), "chain-date")
@@ -563,10 +572,19 @@ def main():
         "chain-anchor",
         note="usa-2027's root under a 2026 proof date",
     )
+    reject(
+        "anchor-at-interval-end",
+        with_(proof_date=t2027),
+        "chain-anchor",
+        at=t2027 + 12 * 3600,
+        note="usa-2026's root under a proof date equal to its valid_until",
+    )
     reject("anchor-mock-on-usa", with_(anchor_root=anchors_zkr[0]["root"]), "chain-anchor")
     reject("anchor-usa-on-mock", base_data, "chain-anchor", deployment=zkr)
     reject("dsc-key-unpinned", with_(dsc_key=label_bytes(b"key dsc rsa pkcs 1024 sha1")), "chain-circuit")
     reject("dsc-key-of-another-role", with_(dsc_key=circuits["id"][0]), "chain-circuit")
+    reject("id-key-of-another-role", with_(id_key=circuits["integrity"][0]), "chain-circuit")
+    reject("integrity-key-of-another-role", with_(integrity_key=circuits["dsc"][0]), "chain-circuit")
     reject("id-key-unpinned", with_(id_key=label_bytes(b"key id unpinned")), "chain-circuit")
     reject("integrity-key-unpinned", with_(integrity_key=label_bytes(b"key integrity sa sha1 dg sha1")), "chain-circuit")
 

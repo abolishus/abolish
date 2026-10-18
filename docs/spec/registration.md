@@ -40,13 +40,13 @@ A member's region is the one they asked for, unverified: results say so (P3-6; T
 
 Turnstile's widget is third-party code, which the ballot client never runs (AGENTS.md; P2-8's bundle tests), so the widget runs on a page of its own and only its token crosses to the client.
 
-**Origin.** The challenge page is served at one HTTPS origin, the **challenge origin**, pinned in the signed release next to the entry points (P4-4 part 2). Its host:
+**Origin.** The challenge page is served at one HTTPS origin, the **challenge origin**, pinned in the signed release next to the entry points: the origin of the release record's challenge site ([[release]]). Its host:
 
 - MUST NOT be the ballot RP ID, a subdomain of it, or under any registrable domain that is the RP ID of a passkey we ask voters or account holders to make (the second domain, abolish.us). A page may use as its RP ID its own host or any registrable domain suffix of it (W3C Web Authentication Level 3, the definition of RP ID), so Cloudflare's script on such a host, compromised or compelled, could request an assertion with the PRF extension under the backup's RP ID and open the voter's recovery backup ([[identity-backup]]; T-41, T-20), or use an account passkey. [[0020-entry-points]] already keeps every other host off the second domain. Nor is the challenge origin ever listed among the RP ID's related origins (`/.well-known/webauthn`, [[0017-identity-recovery-backup]], A.7).
 - MUST NOT receive any cookie of ours: it is on a registrable domain where nothing of ours sets cookies, so an account cookie never reaches it (T-10).
 - serves the challenge page and its static assets and nothing else, with no analytics (T-67).
 
-A host on a domain in the Public Suffix List's private section (a hosting provider's per-project subdomain) is its own registrable domain and meets all three without a purchase; the deployment record names the host (P2-11, P4-4).
+A host on a domain in the Public Suffix List's private section (a hosting provider's per-project subdomain) is its own registrable domain and meets all three without a purchase; the release record's challenge site lists its origin ([[release]], Record; P2-11, P4-4).
 
 **The page.** It is static, built reproducibly from this repository with the ballot client (P2-8), and:
 

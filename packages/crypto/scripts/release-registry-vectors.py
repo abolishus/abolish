@@ -135,7 +135,7 @@ class Registry:
             self.put(times_slot(s), t | timestamp << 64)
             topics = [keccak256(REVOKED.encode()), word(s), word(self.get(hash_slot(s)))]
             return None, [{"topics": topics, "data": b""}]
-        return "selector", None
+        return 0, None
 
 
 def publish_data(release_hash, previous):
@@ -161,8 +161,21 @@ def is_loopback(origin):
 
 def combined(headers, name):
     """RFC 9110 §5.3: a field's lines, in order, joined by ", ", or None if absent."""
-    lines = [v for n, v in headers if n == name]
+    lines = [v for n, v in headers if n.lower() == name]
     return ", ".join(lines) if lines else None
+
+
+# Headers a host may add beside the site's own (verifier.md, Served client):
+# dates, caching, validators, transfer framing and the hosts' trace headers.
+# Any other unlisted header can change what the page does (`refresh`,
+# `clear-site-data`, `link`, reporting), so it fails.
+HOST_HEADERS = {
+    "accept-ranges", "age", "alt-svc", "cache-control", "cf-cache-status", "cf-ray", "connection",
+    "content-encoding", "content-length", "date", "etag", "expires", "keep-alive", "last-modified",
+    "proxy-connection", "server", "strict-transport-security", "transfer-encoding", "upgrade", "vary",
+    "via", "x-cache", "x-railway-edge", "x-railway-request-id", "x-served-by",
+}
+MAX_STALENESS = 3600
 
 
 def judge(v, records, chain_id, registry, now):
@@ -172,6 +185,9 @@ def judge(v, records, chain_id, registry, now):
     def read(slot):
         return int.from_bytes(words.get(slot, bytes(32)), "big")
 
+    run_at = int(v["runAt"])
+    if run_at < now or run_at - now > MAX_STALENESS:
+        return "unverifiable", "l1-stale", {}, None
     c = read(COUNT_SLOT)
     if c >> 64:
         return "fail", "release-registry-state", {"slot": "count"}, None
@@ -203,6 +219,7 @@ def judge(v, records, chain_id, registry, now):
     }
     if revoked_at:
         release["revokedAt"] = str(revoked_at)
+        return "fail", "release-revoked", {}, release
     enc = next((e for e in records if rr.release_hash(e) == release_hash), None)
     if enc is None:
         return "unverifiable", "release-record-missing", {}, release
@@ -213,11 +230,9 @@ def judge(v, records, chain_id, registry, now):
     bad = rr.ill_formed(r)
     if bad:
         rule, at = bad
-        return "fail", "release-record", {"rule": rule, **at}, release
+        return "fail", "release-record", {"rule": rule, **{k: str(x) for k, x in at.items()}}, release
     if r["l1_chain_id"] != chain_id or r["registry"] != registry or r["sequence"] != s or r["previous"] != previous:
         return "fail", "release-chain", {}, release
-    if revoked_at:
-        return "fail", "release-revoked", {}, release
     origin = v["origin"].encode()
     if is_loopback(v["origin"]):
         site = next((x for x in r["sites"] if x["kind"] == 1 and x["loopback"]), None)
@@ -263,7 +278,7 @@ def served(x, f, site):
         return "fail", "served-status", {"httpStatus": x["status"]}
     headers = [(n, val) for n, val in x["headers"]]
     encoding = combined(headers, "content-encoding")
-    if encoding is not None and encoding != "identity":
+    if encoding is not None and encoding.lower() != "identity":
         return "unverifiable", "served-encoding", {}
     if body_of(x) != obj_of(f):
         return "fail", "file-mismatch", {}
@@ -275,6 +290,10 @@ def served(x, f, site):
             return "fail", "header-missing", {"header": hd["name"].decode()}
         if got != hd["value"].decode():
             return "fail", "header-mismatch", {"header": hd["name"].decode()}
+    listed = {hd["name"].decode() for hd in site["headers"]} | {"content-type"}
+    for n, _ in headers:
+        if n.lower() not in listed and n.lower() not in HOST_HEADERS:
+            return "fail", "header-unlisted", {"header": n.lower()}
     return None
 
 
@@ -354,6 +373,8 @@ def main():
     assert step("revoke a sequence not yet published", revoke_data(3), T0 + 7300) == 3
     assert step("revoke the second release", revoke_data(1), T0 + 7300) is None
     assert step("revoke the second release again", revoke_data(1), T0 + 7400) == 4
+    assert step("empty calldata", b"", T0 + 7400) == 0
+    assert step("an unknown selector", selector("owner()"), T0 + 7400) == 0
     history_storage = {h(word(k)): h(w) for k, w in sorted(reg.storage.items())}
 
     honest = {
@@ -394,6 +415,13 @@ def main():
             if x is not None:
                 out.append(x)
         return out
+
+    def with_case():
+        def change(path, x):
+            hs = [(n.title() if n != "content-type" else "Content-Type", val) for n, val in x["headers"]]
+            return {**x, "headers": hs + [("Content-Encoding", "IDENTITY")]}
+
+        return change
 
     def at(target, fn):
         return lambda path, x: fn(x) if path == target else x
@@ -472,12 +500,20 @@ def main():
         {"id": "fetch-unavailable", "description": "A listed file answered 503: unsettled, never failed", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, at(second_file, lambda x: {**x, "status": 503}))},
         {"id": "fetch-no-response", "description": "No response for one file (a network failure)", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, at(second_file, lambda x: None))},
         {"id": "fail-beats-unverifiable", "description": "One file unanswered and a later one tampered: the mismatch is final", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, lambda path, x: None if path == "/" else ({**x, "body": {"label": "tampered", "length": x["body"]["length"]}} if path == second_file else x))},
+        {"id": "header-names-any-case", "description": "Header names in mixed case and a coding of IDENTITY: names and codings compare without case", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, with_case())},
+        {"id": "header-unlisted-refresh", "description": "The host adds `refresh`, which navigates the page away: fails", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, at("/", with_headers(lambda hs: hs + [("refresh", "0; url=https://ballot.example/")])))},
+        {"id": "header-unlisted-clear-site-data", "description": "The host adds `clear-site-data`, which wipes the voter's stored identity: fails", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, at(second_file, with_headers(lambda hs: hs + [("Clear-Site-Data", '"storage"')])))},
+        {"id": "l1-stale", "description": "B more than an hour before the run: revocations since B could be missed", "runAt": str(NOW + 3601), "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1)},
+        {"id": "l1-after-run", "description": "B after the run's own clock", "runAt": str(NOW - 1), "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1)},
+        {"id": "l1-hour-old", "description": "B exactly an hour before the run: still fresh", "runAt": str(NOW + 3600), "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1)},
+        {"id": "revoked-record-missing", "description": "A revoked release fails from L1 alone, with no record given", "storage": revoked, "records": [], "sequence": "1", "origin": ballot_origin, "responses": []},
         {"id": "served-encoding", "description": "A file sent gzip-coded although the run asked for identity", "storage": honest, "records": all_records, "origin": ballot_origin, "responses": responses(third, 1, at(second_file, with_headers(lambda hs: hs + [("content-encoding", "gzip")])))},
         {"id": "release-directory", "description": "Every file matches, but the published record's directory isn't the CID its files make", "storage": replace_latest(ew), "records": [ew], "origin": ballot_origin, "responses": responses(wrong_dir, 1)},
     ]
 
     out = []
     for v in vectors:
+        v.setdefault("runAt", str(NOW + 600))
         status, code, where, release = judge(v, v["records"], rr.SEPOLIA, rr.REGISTRY, NOW)
         row = {
             "id": v["id"],
@@ -487,6 +523,7 @@ def main():
         }
         if "sequence" in v:
             row["sequence"] = v["sequence"]
+        row["runAt"] = v.get("runAt", str(NOW + 600))
         row["origin"] = v["origin"]
         row["responses"] = [
             {"path": x["path"], "status": x["status"], "headers": [[n, val] for n, val in x["headers"]], "body": x["body"]}
@@ -504,12 +541,14 @@ def main():
         out.append(row)
 
     statuses = {r["id"]: r["expect"]["status"] for r in out}
-    assert statuses["latest"] == "pass" and statuses["revoked-latest-unaffected"] == "pass", statuses
+    for i in ("latest", "revoked-latest-unaffected", "header-names-any-case", "l1-hour-old", "extra-headers"):
+        assert statuses[i] == "pass", i
     codes = {r["expect"].get("code") for r in out}
     for c in [
         "release-registry-state", "release-none", "release-unpublished", "release-record-missing", "release-record",
         "release-chain", "release-revoked", "origin-unlisted", "fetch-failed", "served-status", "served-encoding",
-        "file-mismatch", "media-type-mismatch", "header-missing", "header-mismatch", "release-directory",
+        "file-mismatch", "media-type-mismatch", "header-missing", "header-mismatch", "header-unlisted",
+        "release-directory", "l1-stale",
     ]:
         assert c in codes, c
 

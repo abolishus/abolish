@@ -105,10 +105,11 @@ describe("release registry (docs/spec/contracts.md, Release registry)", () => {
     }
   });
 
-  test("logs each accepted call with its sequence and hash, and leaves the words they write", () => {
+  test("logs each accepted call with its sequence and hash, and leaves exactly the words they write", () => {
     const published = file.topics["ReleasePublished(uint64,bytes32,bytes32)"];
     const revoked = file.topics["ReleaseRevoked(uint64,bytes32)"];
     const hashes: string[] = [];
+    const times: bigint[] = [];
     for (const step of file.history.steps) {
       if (step.refused !== undefined) {
         expect(step.logs, step.description).toBeUndefined();
@@ -120,16 +121,23 @@ describe("release registry (docs/spec/contracts.md, Release registry)", () => {
         expect(log?.topics).toEqual([published, slotKey(BigInt(hashes.length)), args.slice(0, 64)]);
         expect(log?.data).toBe(args.slice(64));
         hashes.push(args.slice(0, 64));
+        times.push(BigInt(step.timestamp));
       } else {
         const s = Number(BigInt(`0x${args}`));
         expect(log?.topics).toEqual([revoked, args, hashes[s]]);
         expect(log?.data).toBe("");
+        times[s] = (times[s] ?? 0n) | (BigInt(step.timestamp) << 64n);
       }
     }
-    expect(file.history.storage[slotKey(base)]).toBe(slotKey(BigInt(hashes.length)));
+    // Every word the accepted calls write, and nothing else: the count, and
+    // per release its hash and its times word (published_at, revoked_at).
+    const expected: Record<string, string> = { [slotKey(base)]: slotKey(BigInt(hashes.length)) };
     hashes.forEach((h, s) => {
-      expect(file.history.storage[slotKey(hashSlot(BigInt(s)))]).toBe(h);
+      const slot = hashSlot(BigInt(s));
+      expected[slotKey(slot)] = h;
+      expected[slotKey(slot + 1n)] = toHex(word(times[s] ?? 0n));
     });
+    expect(file.history.storage).toEqual(expected);
   });
 
   test("lists 1.1's codes, each with a vector", () => {
@@ -156,7 +164,10 @@ describe("release registry (docs/spec/contracts.md, Release registry)", () => {
       expect(release.behind).toBe(String(BigInt(release.latest) - BigInt(release.sequence)));
       expect(v.storage[slotKey(hashSlot(BigInt(release.sequence)))]).toBe(release.hash);
       const held = v.records.some((r) => releaseHash(r) === release.hash);
-      expect(held).toBe(v.expect.code !== "release-record-missing");
+      // Revocation is read from L1 before any record, so only a missing
+      // record and a pass say whether one was held.
+      if (v.expect.code === "release-record-missing") expect(held).toBe(false);
+      if (v.expect.status === "pass") expect(held).toBe(true);
     },
   );
 });

@@ -6,8 +6,10 @@ import {ElectionDefinitionLib} from "../src/ElectionDefinition.sol";
 import {ElectionRegistry} from "../src/ElectionRegistry.sol";
 import {EventAccumulatorLib} from "../src/EventAccumulator.sol";
 import {GroupRegistry, GroupRegistryLib} from "../src/GroupRegistry.sol";
+import {ITrusteePanels} from "../src/NullifierKey.sol";
 import {DefinitionHarness, MockTrusteeRegistry} from "./utils/DefinitionHarness.sol";
 import {GroupFixture, GroupHarness} from "./utils/GroupFixture.sol";
+import {NullifierKeyFixture} from "./utils/NullifierKeyFixture.sol";
 import {RegistryFixture} from "./utils/RegistryFixture.sol";
 import {TestBase, Vm} from "./utils/Vm.sol";
 
@@ -444,7 +446,12 @@ contract GroupRegistryVectorsTest is GroupTestBase {
     /// Each boundary commitment is refused exactly when the vectors mark it
     /// forbidden, by the library and by the registry, alone in a signed batch.
     function test_CommitmentVectors() public {
-        GroupRegistry registry = new GroupRegistry(threshold, registrarAddrs);
+        GroupRegistry registry = new GroupRegistry(
+            threshold,
+            registrarAddrs,
+            NullifierKeyFixture.trustees(),
+            NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createGroup(0);
         uint256 i;
         uint256 refused;
@@ -567,8 +574,12 @@ contract GroupRegistryVectorsTest is GroupTestBase {
     /// Anvil's first deployment lands there (CREATE from `DEPLOYER` at nonce 0).
     function _deployAtVectorAddress() internal returns (GroupRegistry registry) {
         vm.chainId(GroupFixture.VECTOR_CHAIN_ID);
+        // Before the prank, which the trustee registry's creation would take.
+        ITrusteePanels trustees = NullifierKeyFixture.trustees();
         vm.prank(GroupFixture.DEPLOYER);
-        registry = new GroupRegistry(threshold, registrarAddrs);
+        registry = new GroupRegistry(
+            threshold, registrarAddrs, trustees, NullifierKeyFixture.INITIAL_PANEL
+        );
         assertTrue(address(registry) == GroupFixture.VECTOR_REGISTRY, "deployment address");
     }
 
@@ -602,15 +613,23 @@ contract GroupRegistryTest is GroupTestBase {
     function setUp() public {
         json = vm.readFile(GroupFixture.VECTORS);
         (secrets, registrarAddrs, threshold) = GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, registrarAddrs);
+        registry = new GroupRegistry(
+            threshold,
+            registrarAddrs,
+            NullifierKeyFixture.trustees(),
+            NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createGroup(0);
     }
 
     // --- deployment --------------------------------------------------------------
 
     function test_DeploymentPinsRegistrarsAndLogsThemFirst() public {
+        ITrusteePanels trustees = NullifierKeyFixture.trustees();
         vm.recordLogs();
-        GroupRegistry reg = new GroupRegistry(threshold, registrarAddrs);
+        GroupRegistry reg = new GroupRegistry(
+            threshold, registrarAddrs, trustees, NullifierKeyFixture.INITIAL_PANEL
+        );
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1, "one log");
         assertEq(logs[0].topics.length, 1, "topics");
@@ -632,15 +651,21 @@ contract GroupRegistryTest is GroupTestBase {
         _expectDeployRefused(2, _ascending(0), GroupRegistry.RegistrarError.Size);
         _expectDeployRefused(2, _ascending(1), GroupRegistry.RegistrarError.Size);
         _expectDeployRefused(2, _ascending(17), GroupRegistry.RegistrarError.Size);
-        new GroupRegistry(2, _ascending(2));
-        new GroupRegistry(16, _ascending(16));
+        new GroupRegistry(
+            2, _ascending(2), NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
+        new GroupRegistry(
+            16, _ascending(16), NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
     }
 
     function test_DeploymentRefusesTheWrongThreshold() public {
         _expectDeployRefused(0, _ascending(3), GroupRegistry.RegistrarError.Threshold);
         _expectDeployRefused(1, _ascending(3), GroupRegistry.RegistrarError.Threshold);
         _expectDeployRefused(4, _ascending(3), GroupRegistry.RegistrarError.Threshold);
-        new GroupRegistry(3, _ascending(3));
+        new GroupRegistry(
+            3, _ascending(3), NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
     }
 
     function test_DeploymentRefusesUnorderedRepeatedOrZeroAddresses() public {
@@ -1482,7 +1507,9 @@ contract GroupRegistryTest is GroupTestBase {
         address[] memory regs,
         GroupRegistry.RegistrarError reason
     ) internal {
-        try new GroupRegistry(t, regs) {
+        try new GroupRegistry(
+            t, regs, NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        ) {
             revert("deployed");
         } catch (bytes memory ret) {
             assertTrue(
@@ -1514,7 +1541,9 @@ contract GroupRegistryGasTest is TestBase {
         address[] memory addrs;
         uint8 threshold;
         (secrets, addrs, threshold) = GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, addrs);
+        registry = new GroupRegistry(
+            threshold, addrs, NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createGroup(0);
         registry.addMembers(
             GroupFixture.addition(

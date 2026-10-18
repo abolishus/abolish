@@ -5,9 +5,11 @@ import {CanonicalCalldata} from "../src/CanonicalCalldata.sol";
 import {ElectionDefinitionLib} from "../src/ElectionDefinition.sol";
 import {ElectionRegistry} from "../src/ElectionRegistry.sol";
 import {GroupRegistry, GroupRegistryLib, VouchLib} from "../src/GroupRegistry.sol";
+import {ITrusteePanels} from "../src/NullifierKey.sol";
 import {GroupTestBase} from "./GroupRegistry.t.sol";
 import {DefinitionHarness, MockTrusteeRegistry} from "./utils/DefinitionHarness.sol";
 import {GroupFixture} from "./utils/GroupFixture.sol";
+import {NullifierKeyFixture} from "./utils/NullifierKeyFixture.sol";
 import {RegistryFixture} from "./utils/RegistryFixture.sol";
 import {Vm} from "./utils/Vm.sol";
 
@@ -33,7 +35,12 @@ contract SelfPaidAdditionsTest is GroupTestBase {
         json = vm.readFile(GroupFixture.VECTORS);
         uint8 threshold;
         (secrets, registrarAddrs, threshold) = GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, registrarAddrs);
+        registry = new GroupRegistry(
+            threshold,
+            registrarAddrs,
+            NullifierKeyFixture.trustees(),
+            NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createGroup(0);
         registry.createSelfPaidGroup();
         vm.deal(address(this), 1 ether);
@@ -94,8 +101,9 @@ contract SelfPaidAdditionsTest is GroupTestBase {
     // --- additions -----------------------------------------------------------------
 
     function test_AddsAtTheNextIndexFromAnyoneAndKeepsTheFee() public {
+        ITrusteePanels trustees = NullifierKeyFixture.trustees();
         vm.recordLogs();
-        registry = new GroupRegistry(2, registrarAddrs);
+        registry = new GroupRegistry(2, registrarAddrs, trustees, NullifierKeyFixture.INITIAL_PANEL);
         registry.createSelfPaidGroup();
         registry.createSelfPaidGroup();
         for (uint256 i; i < 3; i++) {
@@ -411,8 +419,9 @@ contract SelfPaidAdditionsTest is GroupTestBase {
     /// generator), so they pass 4.4's event check (T-53).
     function test_EventsAreTheVersion7Records() public {
         string memory v7 = vm.readFile("../../docs/spec/vectors/contract-event-v7.json");
+        ITrusteePanels trustees = NullifierKeyFixture.trustees();
         vm.recordLogs();
-        registry = new GroupRegistry(2, registrarAddrs);
+        registry = new GroupRegistry(2, registrarAddrs, trustees, NullifierKeyFixture.INITIAL_PANEL);
         registry.createGroup(0);
         registry.createSelfPaidGroup();
         string[4] memory added = [
@@ -646,7 +655,9 @@ contract SelfPaidGasTest is GroupTestBase {
     function setUp() public {
         string memory json = vm.readFile(GroupFixture.VECTORS);
         (, address[] memory addrs, uint8 threshold) = GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, addrs);
+        registry = new GroupRegistry(
+            threshold, addrs, NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createSelfPaidGroup();
         vm.deal(address(this), 1 ether);
         // A warm group and accumulator, as for every addition after the first.

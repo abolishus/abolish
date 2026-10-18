@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import {GroupRegistry} from "../../src/GroupRegistry.sol";
 import {GroupFixture} from "../utils/GroupFixture.sol";
+import {NullifierKeyFixture} from "../utils/NullifierKeyFixture.sol";
 import {TestBase} from "../utils/Vm.sol";
 
 /// Submits Tier 1 additions from any account at any block around their root
@@ -89,7 +90,18 @@ contract Tier1AdditionsInvariantTest is TestBase {
             GroupFixture.keys(vm.readFile(GroupFixture.VECTORS));
         // The vectors' proofs bind their chain and registry address.
         vm.chainId(CHAIN_ID);
-        vm.etch(REGISTRY, address(new GroupRegistry(threshold, addrs)).code);
+        vm.etch(
+            REGISTRY,
+            address(
+                new GroupRegistry(
+                    threshold,
+                    addrs,
+                    NullifierKeyFixture.trustees(),
+                    NullifierKeyFixture.INITIAL_PANEL
+                )
+            )
+            .code
+        );
         registry = GroupRegistry(REGISTRY);
         GroupFixture.setGroup(registry, 0, 0, true, 5, 900_000);
         GroupFixture.setGroup(registry, 7, 2, true, 0, 1_000_000);

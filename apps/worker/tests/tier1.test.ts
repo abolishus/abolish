@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { groupRegistryAbi } from "@abolishus/contracts/abi";
+import { groupRegistryAbi, trusteeRegistryAbi } from "@abolishus/contracts/abi";
 import { decodeTier1Addition, groupRegistryEvents } from "@abolishus/crypto";
 import {
   parseTier1Index,
@@ -44,6 +44,7 @@ import {
   Tier1ChainError,
   ViemTier1Chain,
 } from "../src/index.ts";
+import { TIER2_INITIAL_PANEL, TIER2_PANELS } from "./tier2-scope.ts";
 
 // The Tier 1 relay's chain adapter against a real chain (P3-3 part
 // 3c-2b-2b): Anvil runs the group registry pinned to the vectors'
@@ -131,6 +132,7 @@ let client: PublicClient;
 let wallet: ReturnType<typeof createWalletClient>;
 let accounts: Address[];
 let bytecode: Hex;
+let trustees: Address;
 let redis: Redis;
 let db: TestDb;
 let app: Sql;
@@ -170,6 +172,24 @@ beforeAll(async () => {
     ["inspect", "--root", contractsRoot, "src/GroupRegistry.sol:GroupRegistry", "bytecode"],
     { encoding: "utf8" },
   ).trim() as Hex;
+  // The trustee registry pinning the Tier 2 scope's initial panel, which
+  // every group registry's deployment requires.
+  const pinned = await client.waitForTransactionReceipt({
+    hash: await wallet.deployContract({
+      account: accounts[0] as Address,
+      chain,
+      abi: trusteeRegistryAbi,
+      bytecode: execFileSync(
+        "forge",
+        ["inspect", "--root", contractsRoot, "src/TrusteeRegistry.sol:TrusteeRegistry", "bytecode"],
+        { encoding: "utf8" },
+      ).trim() as Hex,
+      args: [TIER2_PANELS],
+    }),
+    pollingInterval: 20,
+  });
+  if (!pinned.contractAddress) throw new Error("TrusteeRegistry wasn't deployed");
+  trustees = pinned.contractAddress;
   redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
   db = await testDb();
   app = await db.as("abolish_app");
@@ -195,7 +215,7 @@ async function deployRegistry(): Promise<{ registry: Address; fromBlock: bigint 
     chain,
     abi: groupRegistryAbi,
     bytecode,
-    args: [THRESHOLD, REGISTRARS],
+    args: [THRESHOLD, REGISTRARS, trustees, TIER2_INITIAL_PANEL],
   });
   const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
   if (!receipt.contractAddress) throw new Error("GroupRegistry wasn't deployed");

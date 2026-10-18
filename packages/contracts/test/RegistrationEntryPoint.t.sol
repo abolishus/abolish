@@ -13,6 +13,7 @@ import {RegistrationPaymaster} from "../src/RegistrationPaymaster.sol";
 import {GroupTestBase} from "./GroupRegistry.t.sol";
 import {GroupFixture} from "./utils/GroupFixture.sol";
 import {Vm} from "./utils/Vm.sol";
+import {NullifierKeyFixture} from "./utils/NullifierKeyFixture.sol";
 
 /// Stands in for the timelock, as in the paymaster's own tests.
 contract TimelockStub {}
@@ -49,7 +50,9 @@ contract RegistrationEntryPointTest is GroupTestBase {
         address[] memory registrars;
         uint8 threshold;
         (secrets, registrars, threshold) = GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, registrars);
+        registry = new GroupRegistry(
+            threshold, registrars, NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
         registry.createGroup(0);
         entryPoint = new EntryPoint();
         account = new RegistrationAccount(IEntryPoint(address(entryPoint)), vm.addr(OWNER_KEY));

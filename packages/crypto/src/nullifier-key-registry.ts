@@ -164,7 +164,7 @@ export function decodeNullifierReshareRecord(bytes: Uint8Array): NullifierReshar
 
 /** What the replay checks a log against: the release's pins. */
 export interface NullifierKeyReplayPins extends NullifierKeyRegistryScope {
-  /** The scope's initial panel, which `Tier2ScopePinned` must name. */
+  /** The scope's initial panel, which the registry's `initialPanelId` immutable must name. */
   readonly initialPanel: Panel;
   /** Every panel the deployment's trustee registry pins, the initial panel among them. */
   readonly panels: readonly Panel[];

@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import {GroupRegistry, GroupRegistryLib} from "../../src/GroupRegistry.sol";
 import {GroupFixture} from "../utils/GroupFixture.sol";
+import {NullifierKeyFixture} from "../utils/NullifierKeyFixture.sol";
 import {TestBase} from "../utils/Vm.sol";
 
 /// Creates signed and self-paid groups and submits additions and removals
@@ -234,7 +235,9 @@ contract GroupRegistryInvariantTest is TestBase {
         string memory json = vm.readFile(GroupFixture.VECTORS);
         (uint256[] memory secrets, address[] memory addrs, uint8 threshold) =
             GroupFixture.keys(json);
-        registry = new GroupRegistry(threshold, addrs);
+        registry = new GroupRegistry(
+            threshold, addrs, NullifierKeyFixture.trustees(), NullifierKeyFixture.INITIAL_PANEL
+        );
         handler = new GroupHandler(registry, secrets);
     }
 

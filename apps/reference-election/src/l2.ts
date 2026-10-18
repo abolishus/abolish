@@ -13,6 +13,7 @@ import {
   keySetEntry,
   keySetHash,
   type Panel,
+  panelId,
   signCeremonyRegistration,
 } from "@abolishus/crypto";
 import { p256 } from "@noble/curves/nist.js";
@@ -132,13 +133,21 @@ export async function deployL2(rpc: Rpc, l1: Rpc, inputs: L2Inputs): Promise<L2>
   };
   const trusteeRegistry = await deploy("TrusteeRegistry", panelInputs(inputs.panel, inputs.quorum));
   // Two placeholder registrars in ascending order, threshold 2: no group is
-  // created yet (STUBS.groupRegistrars).
+  // created yet (STUBS.groupRegistrars). The pinned panel is the Tier 2
+  // scope's initial panel too; no nullifier key is recorded.
   const registrars = [placeholder("registrar-1"), placeholder("registrar-2")].sort((a, b) =>
     hex(a) < hex(b) ? -1 : 1,
   );
   const groupRegistry = await deploy(
     "GroupRegistry",
-    concatBytes(word(2n), word(64n), word(2n), ...registrars.map(address)),
+    concatBytes(
+      word(2n),
+      word(128n),
+      address(trusteeRegistry),
+      panelId(inputs.panel),
+      word(2n),
+      ...registrars.map(address),
+    ),
   );
   const l1Relay = placeholder("l1-relay");
   const nonce = BigInt(await rpc.call<string>("eth_getTransactionCount", [operator, "latest"]));

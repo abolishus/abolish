@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {CanonicalCalldata} from "../src/CanonicalCalldata.sol";
 import {GroupRegistry, GroupRegistryLib} from "../src/GroupRegistry.sol";
 import {GroupFixture} from "./utils/GroupFixture.sol";
+import {NullifierKeyFixture} from "./utils/NullifierKeyFixture.sol";
 import {Tier1Harness} from "./utils/Tier1Harness.sol";
 import {GroupTestBase} from "./GroupRegistry.t.sol";
 import {Vm} from "./utils/Vm.sol";
@@ -37,7 +38,18 @@ contract Tier1AdditionsTest is GroupTestBase {
         // release bytecode runs there; its storage starts empty, and each
         // test writes the group table it needs.
         vm.chainId(CHAIN_ID);
-        vm.etch(REGISTRY, address(new GroupRegistry(threshold, addrs)).code);
+        vm.etch(
+            REGISTRY,
+            address(
+                new GroupRegistry(
+                    threshold,
+                    addrs,
+                    NullifierKeyFixture.trustees(),
+                    NullifierKeyFixture.INITIAL_PANEL
+                )
+            )
+            .code
+        );
         registry = GroupRegistry(REGISTRY);
     }
 
@@ -601,7 +613,18 @@ contract Tier1AdditionsTest is GroupTestBase {
         // Only the proof check runs on the harness; its address is the
         // vectors' registry, which the registry under test then leaves.
         vm.etch(REGISTRY, address(new Tier1Harness(threshold, addrs)).code);
-        vm.etch(at, address(new GroupRegistry(threshold, addrs)).code);
+        vm.etch(
+            at,
+            address(
+                new GroupRegistry(
+                    threshold,
+                    addrs,
+                    NullifierKeyFixture.trustees(),
+                    NullifierKeyFixture.INITIAL_PANEL
+                )
+            )
+            .code
+        );
         h = Tier1Harness(REGISTRY);
         registry = GroupRegistry(at);
     }

@@ -23,6 +23,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@abolishus/membership-prover": "workspace:*",
     "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
     "fast-check": "catalog:",

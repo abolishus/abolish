@@ -43,6 +43,7 @@ import {
   encodeCeremonyTranscript,
   identityKey,
   KEM_SECRET_KEY,
+  type KemSecretKey,
   type KeysMessage,
   keysMessage,
   keySetEntry,
@@ -122,6 +123,19 @@ export interface ApprovedElection {
   readonly closesAt: bigint;
   readonly l1InclusionBound: bigint;
   /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
+  readonly signingSecret: Uint8Array;
+}
+
+/**
+ * What intake reads of an election this seat approved: the transcript and
+ * key set the approval signed for, and the approved run's per-election keys
+ * (docs/spec/share-encryption.md, Intake and receipts). Never logged.
+ */
+export interface IntakeSecrets {
+  readonly transcriptHash: Uint8Array;
+  /** The key set the seat's own check of the transcript returned, which its approval signed. */
+  readonly keySetHash: Uint8Array;
+  readonly kemSecret: KemSecretKey;
   readonly signingSecret: Uint8Array;
 }
 
@@ -467,6 +481,32 @@ export class CeremonySeat {
       electionId: Uint8Array.from(run.params.electionId),
       closesAt: r.closes_at,
       l1InclusionBound: BigInt(r.l1_inclusion_bound),
+      signingSecret: Uint8Array.from(run.seat.signingSecret),
+    };
+  }
+
+  /**
+   * The approval's transcript and key set, with the approved run's KEM and
+   * signing secrets, for intake; undefined unless this seat approved the stub.
+   */
+  async intakeSecrets(stubHash: Uint8Array): Promise<IntakeSecrets | undefined> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
+    const name = hex(stubHash);
+    const approval = await this.#durable(`approvals/${name}`);
+    if (approval === undefined) return undefined;
+    const runRecord = await this.#durable(`approved-runs/${name}`);
+    if (runRecord === undefined)
+      throw new Error(`trustee node: approval of ${name} without its run`);
+    const run = await this.#run(stubHash, decode(APPROVED_RUN, runRecord).run_id);
+    if (run === undefined) throw new Error(`trustee node: the approved run of ${name} is gone`);
+    const a = decode(APPROVED, approval);
+    return {
+      transcriptHash: a.transcript_hash,
+      keySetHash: a.key_set_hash,
+      kemSecret: {
+        seed: Uint8Array.from(run.seat.kem.secretKey.seed),
+        x: run.seat.kem.secretKey.x,
+      },
       signingSecret: Uint8Array.from(run.seat.signingSecret),
     };
   }

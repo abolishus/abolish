@@ -5,6 +5,7 @@ export {
   BUNDLE_FORMAT_CEREMONY,
   BUNDLE_FORMAT_DEFINITION,
   BUNDLE_FORMAT_L1,
+  BUNDLE_FORMAT_L2,
   type BlocksBundle,
   BundleError,
   type CeremonyBundle,
@@ -13,6 +14,7 @@ export {
   type InputSource,
   type InputSources,
   type L1Bundle,
+  type L2Bundle,
   type LocalBundle,
   parseBundle,
   splitEntries,
@@ -30,6 +32,14 @@ export {
   type WindowCode,
 } from "./ballots.ts";
 export { type EventCode, type OriginCode, PINNED_SEQUENCER_DRIFT } from "./events.ts";
+export {
+  type AvailabilityEvidenceCode,
+  type AvailabilityReport,
+  type L2BoardEvidence,
+  PINNED_FORCED_INCLUSION,
+  PINNED_MARGIN,
+  type PanelAvailabilityReport,
+} from "./availability.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";

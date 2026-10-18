@@ -85,17 +85,80 @@ export function buildTrie(entries: readonly (readonly [Uint8Array, Uint8Array])[
   return { root: keccak_256(root), nodes };
 }
 
-const uint = (n: bigint) => {
+export const uint = (n: bigint) => {
   const out: number[] = [];
   for (let x = n; x > 0n; x >>= 8n) out.unshift(Number(x & 0xffn));
   return Uint8Array.from(out);
 };
-const word = (n: bigint) => {
+export const word = (n: bigint) => {
   const b = new Uint8Array(32);
   for (let i = 31, x = n; x > 0n; i--, x >>= 8n) b[i] = Number(x & 0xffn);
   return b;
 };
 export const stored = (w: Uint8Array) => rlp(w.subarray(w.findIndex((x) => x !== 0)));
+
+// A synthetic L2 state: the contracts in `accounts`, each with its storage,
+// and the header of a block numbered `number` at `timestamp` over it, with
+// the version-0 output root committing to them (docs/spec/contracts.md,
+// Event accumulator, Output root), written out here rather than through the
+// reader under test.
+export const CODE = keccak_256(Uint8Array.of(0xfe));
+
+export interface Account {
+  readonly address: Uint8Array;
+  readonly storage: readonly (readonly [Uint8Array, Uint8Array])[];
+  readonly codeHash?: Uint8Array;
+}
+
+export function l2State(accounts: readonly Account[], number: bigint, timestamp: bigint) {
+  const nodes: Uint8Array[] = [];
+  const entries = accounts.map((a): [Uint8Array, Uint8Array] => {
+    const nonZero = a.storage.filter(([, w]) => w.some((x) => x !== 0));
+    // An empty storage trie has the empty root and no nodes.
+    let root = keccak_256(Uint8Array.of(0x80));
+    if (nonZero.length > 0) {
+      const trie = buildTrie(nonZero.map(([slot, w]) => [slot, stored(w)] as const));
+      root = trie.root;
+      nodes.push(...trie.nodes);
+    }
+    return [a.address, rlp([uint(1n), uint(0n), root, a.codeHash ?? CODE])];
+  });
+  const state = buildTrie(entries);
+  nodes.push(...state.nodes);
+  const z = (n: number) => new Uint8Array(n);
+  const header = rlp([
+    z(32),
+    z(32),
+    z(20),
+    state.root,
+    z(32),
+    z(32),
+    z(256),
+    uint(0n),
+    uint(number),
+    uint(30_000_000n),
+    uint(0n),
+    uint(timestamp),
+    new Uint8Array(),
+    z(32),
+    z(8),
+    uint(1n),
+  ]);
+  const messagePasserStorageRoot = keccak_256(Uint8Array.of(0x42));
+  // Written out here rather than through outputRootV0, which is under test.
+  const outputRoot = keccak_256(
+    Uint8Array.from([
+      ...new Uint8Array(32),
+      ...state.root,
+      ...messagePasserStorageRoot,
+      ...keccak_256(header),
+    ]),
+  );
+  return {
+    evidence: { outputRoot, messagePasserStorageRoot, header, nodes },
+    hash: keccak_256(header),
+  };
+}
 
 /**
  * An L1 state whose only account is the anchor at `anchor`, its storage
@@ -180,6 +243,6 @@ export function anchoredL1(
     firstSegment: "0",
     header: toHex(header),
     nodes: [...stateTrie.nodes, ...storageTrie.nodes].map(toHex),
-    checkpoints: [],
+    checkpoints: [] as string[],
   };
 }

@@ -48,6 +48,7 @@ export const RECORD_TYPES = Object.freeze({
   archiveManifest: 0x0021,
   nullifierRequest: 0x0022,
   nullifierReply: 0x0023,
+  identityChain: 0x0024,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

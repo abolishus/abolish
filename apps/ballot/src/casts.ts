@@ -13,7 +13,7 @@
 // unreadable, never guessed at, and the client then casts nothing more in
 // that election and tier until the voter decides.
 
-import { decodeBallot, MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
+import { type BallotRecordV3, decodeBallot, MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
 
 import { withStore } from "./store.ts";
 
@@ -39,6 +39,22 @@ export interface CastRecord {
 export type CastsRead =
   | { readonly kind: "read"; readonly casts: readonly CastRecord[] }
   | { readonly kind: "unreadable" };
+
+/** `recordCast`'s outcome: only `recorded` lets the ballot leave the device. */
+export type RecordCastOutcome =
+  | "recorded"
+  | "not-newer"
+  | "other-election"
+  | "unreadable"
+  | "unwritable";
+
+/** `recordBoarded`'s outcome. */
+export type RecordBoardedOutcome =
+  | "recorded"
+  | "missing"
+  | "conflict"
+  | "unreadable"
+  | "unwritable";
 
 /** The IndexedDB database and object store the casts live under. */
 export const CASTS_DB = "abolish-ballot-casts";
@@ -106,6 +122,39 @@ function boardedOf(v: unknown, ballot: Uint8Array): Boarded | undefined {
   if (length !== ballot.length || !equalBytes(entry.subarray(BOARD_ENTRY_OVERHEAD), ballot))
     return undefined;
   return { entry: entry.slice(), link: link.slice() };
+}
+
+/** What a cast asked the worker for: the poll, the voter's cell and the L1 block its ballot names. */
+export interface CastAsked {
+  /** 32 bytes. */
+  readonly definitionHash: Uint8Array;
+  readonly cell: number;
+  readonly l1Number: bigint;
+  /** 32 bytes. */
+  readonly l1Hash: Uint8Array;
+}
+
+/**
+ * Whether `ballot` is a version-3 ballot record naming exactly what the cast
+ * asked for: the poll's definition, the voter's cell and the L1 block this
+ * client read ([[revoting]], Client rules 1 and 3). Checked before the cast
+ * is recorded, so a worker that made a ballot on another block can't have
+ * this device record, and send, a cast that ties or outranks the wrong one
+ * (T-45, T-38).
+ */
+export function castAsAsked(ballot: Uint8Array, asked: CastAsked): boolean {
+  let decoded: BallotRecordV3;
+  try {
+    decoded = decodeBallot(ballot, BALLOT_VERSION);
+  } catch {
+    return false;
+  }
+  return (
+    equalBytes(decoded.definition_hash, asked.definitionHash) &&
+    decoded.cell === asked.cell &&
+    decoded.l1_ref_number === asked.l1Number &&
+    equalBytes(decoded.l1_ref_hash, asked.l1Hash)
+  );
 }
 
 /** The definition hash a decoded ballot record names, after its header. */
@@ -259,7 +308,7 @@ export async function recordCast(
   tier: number,
   ballot: Uint8Array,
   factory: IDBFactory = indexedDB,
-): Promise<"recorded" | "not-newer" | "other-election" | "unreadable" | "unwritable"> {
+): Promise<RecordCastOutcome> {
   const key = keyOf(electionId, tier);
   const l1Number = ballot instanceof Uint8Array ? l1NumberOf(ballot) : undefined;
   if (l1Number === undefined || ballot.length > MAX_BOARD_PAYLOAD)
@@ -288,7 +337,7 @@ export async function recordBoarded(
   ballot: Uint8Array,
   boarded: Boarded,
   factory: IDBFactory = indexedDB,
-): Promise<"recorded" | "missing" | "conflict" | "unreadable" | "unwritable"> {
+): Promise<RecordBoardedOutcome> {
   const key = keyOf(electionId, tier);
   // Only the entry and the link are kept: a `CheckedBoarded` also carries
   // where the entry says it is, which the entry itself holds.

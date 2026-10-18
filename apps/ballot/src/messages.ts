@@ -63,9 +63,6 @@ const enUS = {
   workerFailedTitle: "This device couldn't check the poll",
   workerFailed: "The check stopped before it finished. Try again. Nothing was sent.",
   tryAgain: "Try again",
-  notSentTitle: "Your answers weren't sent",
-  notSent:
-    "This device made your ballot and checked it, but this version of the ballot can't send it yet, so nothing left this device and nothing was counted.",
   answerAgain: "Answer again",
   // The arrival check (check.tsx).
   realPoll: "This is the real poll, checked",
@@ -195,8 +192,7 @@ const enUS = {
   scan: "If you want to check this device, scan the code with another phone or computer before you choose. It keeps the code, so it can tell later whether this device opened the same ballot it showed you.",
   chooseTitle: "Two ways to go on",
   cast: "Cast this ballot",
-  castExplained:
-    "Sends the sealed ballot to the public board, where it counts. This version of the ballot can't send it yet.",
+  castExplained: "Sends the sealed ballot to the public board.",
   challenge: "Check the encryption first",
   challengeExplained:
     "Opens this sealed ballot so your other device can show it holds exactly what you chose. An opened ballot can never be counted, so you then answer again and seal a fresh one.",
@@ -259,6 +255,57 @@ const enUS = {
   castFaultyTitle: "Your ballot didn't pass this device's check",
   castFaulty:
     "This device checks every ballot before it is sent, and this one was wrong, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  noDeliveryTitle: "This ballot can't send your ballot yet",
+  noDelivery:
+    "A cast ballot counts only once its parts reach the poll's trustees, and this version of the ballot can't deliver them yet. Your ballot wasn't made and nothing was sent.",
+  castsUnreadableTitle: "This device's record of your ballots can't be read",
+  castsUnreadable:
+    "This device keeps a record of every ballot it sends, so a new one never cancels an earlier one, and that record can't be read now. Nothing was sent. Check that this browser keeps site data, then answer again.",
+  castsUnwritableTitle: "This device couldn't record your ballot",
+  castsUnwritable:
+    "A ballot is sent only once this device has recorded it, so a new one never cancels it, and this browser refused the record. Nothing was sent. Check that this browser keeps site data, then answer again.",
+  notNewerTitle: "Wait a moment, then answer again",
+  notNewer:
+    "Your last ballot from this device is so recent that a new one now would cancel it instead of replacing it. Nothing was sent. Answer again in a minute.",
+  // Sending a cast ballot (sealed.tsx).
+  sendingTitle: "Sending your ballot",
+  sending:
+    "This device recorded your sealed ballot and is sending it to the public board. Keep this page open.",
+  sendAgain: "Send again",
+  sendAgainTitle: "Sending again is safe",
+  sendAgainExplained:
+    "It sends the same sealed ballot this device recorded, never a new one, so it can't count twice or cancel itself.",
+  unsentBusyTitle: "The board is busy",
+  unsentBusy: "Your ballot wasn't taken yet. Wait a minute, then send it again.",
+  unsentUnavailableTitle: "Your ballot may not be on the board yet",
+  unsentUnavailable:
+    "The board didn't answer in time, so this device can't tell whether it took your ballot. Send it again to find out.",
+  unsentUnreachableTitle: "Your ballot couldn't be sent",
+  unsentUnreachable:
+    "The board couldn't be reached, or its answer wasn't one this device reads. Check your connection, then send it again.",
+  unsentUnconfirmedTitle: "The board's answer doesn't show your ballot",
+  unsentUnconfirmed:
+    "It answered with something other than your ballot, so this device can't tell whether it took it. Send it again, or later open the ballot from abolishus.eth or another address Abolish lists.",
+  sentTitle: "Your ballot is on the board",
+  sent: "The public board took your sealed ballot, and this device checked that the board's answer carries exactly the ballot it sent.",
+  sentCopy: "The public board already holds a copy of your sealed ballot, which stands for yours.",
+  sentIndex: "Entry {index} on the board",
+  sentUnsignedTitle: "What this device checked",
+  sentUnsigned:
+    "The board's answer isn't signed yet, so it is the board's word. Later, check on the board from another device that your tracking code is there.",
+  revoteExplained:
+    "You can change your answers until the poll closes. A new ballot from this device replaces this one.",
+  sendRejectedTitle: "The board refused your ballot",
+  sendRejected:
+    "It named the check your ballot failed. This copy of the ballot may be faulty: open the ballot from abolishus.eth or another address Abolish lists.",
+  sendRefusedTitle: "The board couldn't take your ballot",
+  sendRefused:
+    "It doesn't know this poll, or couldn't read the request. Nothing was counted. Open the ballot from abolishus.eth or another address Abolish lists.",
+  notOpenTitle: "This poll isn't taking ballots",
+  notOpen: "By the board's clock the poll hasn't opened yet or has closed, so nothing was counted.",
+  answerConflictTitle: "The board gave two answers for one ballot",
+  answerConflict:
+    "This device recorded where the board put your ballot, and the board now says somewhere else. Report it, with your tracking code, to whoever runs the poll.",
   // Proving membership (proving.tsx); each refusal names the check that stopped it.
   provingTitle: "Proving you can answer",
   proving:

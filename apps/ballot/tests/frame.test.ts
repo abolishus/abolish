@@ -7,7 +7,7 @@ import { Home, SharedOrigin } from "../src/app.tsx";
 import { ArrivalCheck, ArrivalChecklist, ElectionRefused } from "../src/check.tsx";
 import type { CheckedElection, ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
-import { Ballot, BrokenLink, Checking, NotSent, Unavailable } from "../src/open.tsx";
+import { Ballot, BrokenLink, Checking, Unavailable } from "../src/open.tsx";
 import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
 import {
   RegisterChallenge,
@@ -17,7 +17,7 @@ import {
   RegisterWaiting,
   RegisterWorking,
 } from "../src/register.tsx";
-import { Opened, Sealed, SealStopped, Working } from "../src/sealed.tsx";
+import { Opened, Sealed, SealStopped, Sent, Unsent, Working } from "../src/sealed.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
 // attribute (T-43); the e2e test renders only the screens without a poll, so
@@ -93,6 +93,7 @@ describe("the frame under the client's CSP", () => {
       version: 1,
       questions: [{ minSelections: 0, maxSelections: 1 }],
       tiers: [],
+      boardEntryVersion: undefined,
       opensAt: 1_790_000_000n,
       closesAt: 1_792_000_000n,
       translations: [
@@ -125,7 +126,12 @@ describe("the frame under the client's CSP", () => {
           l1Block: () => new Promise<never>(() => {}),
           loadArtifacts: () => new Promise<never>(() => {}),
           cast: () => new Promise<never>(() => {}),
+          casts: () => new Promise<never>(() => {}),
+          record: () => new Promise<never>(() => {}),
+          send: () => new Promise<never>(() => {}),
+          keepBoarded: () => new Promise<never>(() => {}),
           registrar: undefined,
+          delivers: false,
         },
         languages: ["en-US"],
         onRestart: () => {},
@@ -137,17 +143,7 @@ describe("the frame under the client's CSP", () => {
     // The poll's own text carries its translation's tag; the screens' chrome doesn't.
     expect(ballot).toContain('<h1 lang="en"');
     expect(ballot).toMatch(/<span lang="en"[^>]*><span[^>]*>One<\/span>/);
-    for (const html of [
-      ballot,
-      render(
-        createElement(NotSent, {
-          definitionHash: POLL.definitionHash,
-          closes: "Fri 17 Oct",
-          onAgain: () => {},
-        }),
-      ),
-    ])
-      expect(html).not.toMatch(/\sstyle=/i);
+    expect(ballot).not.toMatch(/\sstyle=/i);
   });
 
   test("the sealed ballot's screens render no inline style", () => {
@@ -157,6 +153,12 @@ describe("the frame under the client's CSP", () => {
       render(createElement(Working, { poll: POLL, kind: "finding" })),
       render(createElement(Working, { poll: POLL, kind: "sealing" })),
       render(createElement(Working, { poll: POLL, kind: "opening" })),
+      render(createElement(Working, { poll: POLL, kind: "sending" })),
+      ...(["busy", "unavailable", "unreachable", "unconfirmed"] as const).map((reason) =>
+        render(createElement(Unsent, { poll: POLL, trackingCode: code, reason, onSend: none })),
+      ),
+      render(createElement(Sent, { poll: POLL, trackingCode: code, index: 41n, onAgain: none })),
+      render(createElement(Sent, { poll: POLL, trackingCode: code, onAgain: none })),
       render(
         createElement(Sealed, {
           poll: POLL,
@@ -177,6 +179,7 @@ describe("the frame under the client's CSP", () => {
       ...(
         [
           "cant-seal-version",
+          "no-delivery",
           "no-identity",
           "identity-unreadable",
           "unregistered",
@@ -189,6 +192,13 @@ describe("the frame under the client's CSP", () => {
           "no-l1",
           "cast-failed",
           "cast-faulty",
+          "casts-unreadable",
+          "casts-unwritable",
+          "not-newer",
+          "send-rejected",
+          "send-refused",
+          "not-open",
+          "answer-conflict",
         ] as const
       ).map((problem) =>
         render(createElement(SealStopped, { poll: POLL, problem, code: "root", onAgain: none })),

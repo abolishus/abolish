@@ -1,8 +1,10 @@
+import { encodeBoardEntry, RECORD_TYPES } from "@abolishus/crypto";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { App } from "./app.tsx";
 import type { Backer } from "./backup-offer.tsx";
+import type { CastsRead, RecordBoardedOutcome, RecordCastOutcome } from "./casts.ts";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
 import { parseLink } from "./link.ts";
@@ -21,6 +23,7 @@ import type { Recoverer } from "./recover.tsx";
 import type { RecoveryOutcome } from "./recovery.ts";
 import type { Registrar } from "./register.tsx";
 import type { Tier0Answer } from "./registration.ts";
+import type { SendAnswer } from "./send.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -51,6 +54,7 @@ const ELECTION: CheckedElection = {
   version: 1,
   questions: [{ minSelections: 0, maxSelections: 1 }],
   tiers: [],
+  boardEntryVersion: undefined,
   opensAt: 1_790_000_000n,
   closesAt: 1_792_000_000n,
   translations: [
@@ -112,12 +116,27 @@ const BOARD: LoadedBoard = { ok: true, entries: [BOARD_ENTRY] };
 const CELL: CellAnswer = { ok: true, cell: 2 };
 const L1: L1Block = { number: 21_000_000n, hash: fromHex("e1".repeat(32)) };
 const ARTIFACTS: ProverArtifacts = { zkey: new Uint8Array(4), wasm: new Uint8Array(4) };
+/** Bytes under a version-3 ballot record's header, which a board entry carries; the rest is `fill`. */
+const ballotBytes = (fill: number) =>
+  Uint8Array.of(RECORD_TYPES.ballot >> 8, RECORD_TYPES.ballot & 0xff, 3, ...Array(8).fill(fill));
 const CAST: CastResult = {
   ok: true,
-  ballot: new Uint8Array(8),
+  ballot: ballotBytes(0xb0),
   ballotHash: new Uint8Array(32),
   ciphertexts: [],
 };
+const LINK = "1c".repeat(32);
+const toHex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+/** The operator's answer for `payload`: an entry of the poll's pinned version at `index`. */
+const boarded = (payload: Uint8Array, index = 41n): SendAnswer => ({
+  kind: "boarded",
+  entry: toHex(
+    encodeBoardEntry({ election_id: fromHex(ELECTION_ID), index, segment: 0, payload }, 5),
+  ),
+  link: LINK,
+});
+const BOARDED = boarded(CAST.ballot);
 
 /** The voter's side of a story's source: what the device holds and what the board and the cast answer. */
 interface Voter {
@@ -132,6 +151,16 @@ interface Voter {
   readonly identityAtCast?: IdentityRead;
   /** Tier 0 registration (`registrar`), whose store then answers every identity read. */
   readonly registrar?: Registrar;
+  /** Whether the build delivers shares to intake (`delivers`). */
+  readonly delivers: boolean;
+  /** This device's casts before the cast. */
+  readonly held: CastsRead;
+  /** What recording the cast answers. */
+  readonly recorded: RecordCastOutcome | "not-asked";
+  /** The ballot route's answers in turn, the last one repeating. */
+  readonly answers: readonly (SendAnswer | "fail")[];
+  /** What keeping a checked answer answers. */
+  readonly kept: RecordBoardedOutcome;
 }
 
 const VOTER: Voter = {
@@ -141,6 +170,11 @@ const VOTER: Voter = {
   l1: L1,
   artifacts: ARTIFACTS,
   cast: CAST,
+  delivers: true,
+  held: { kind: "read", casts: [] },
+  recorded: "recorded",
+  answers: [BOARDED],
+  kept: "recorded",
 };
 
 type Mock<F extends (...args: never[]) => unknown> = F & ReturnType<typeof fn<F>>;
@@ -155,6 +189,10 @@ const MOCKS = new WeakMap<
     readonly loadBoard: Mock<ElectionSource["loadBoard"]>;
     readonly findCell: Mock<ElectionSource["findCell"]>;
     readonly cast: Mock<ElectionSource["cast"]>;
+    readonly casts: Mock<ElectionSource["casts"]>;
+    readonly record: Mock<ElectionSource["record"]>;
+    readonly send: Mock<ElectionSource["send"]>;
+    readonly keepBoarded: Mock<ElectionSource["keepBoarded"]>;
     /** Each secret the page handed on, as given, and a copy taken when it was. */
     readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
     /** Finishes a held cast. */
@@ -187,9 +225,14 @@ function source(
     cell,
     l1,
     artifacts,
-    cast: casts,
+    cast: castResult,
     identityAtCast,
     registrar,
+    delivers,
+    held,
+    recorded,
+    answers,
+    kept,
   } = {
     ...VOTER,
     ...voter,
@@ -213,10 +256,17 @@ function source(
   });
   const cast = fn<ElectionSource["cast"]>((_, secret, __, ___, onProgress) => {
     handed(secret);
-    if (casts !== "hold") return answer(casts);
+    if (castResult !== "hold") return answer(castResult);
     onProgress(2, 5);
     return new Promise((resolve) => (release = () => resolve(CAST)));
   });
+  let sent = 0;
+  const casts = fn<ElectionSource["casts"]>(() => Promise.resolve(held));
+  const record = fn<ElectionSource["record"]>(() => Promise.resolve(recorded));
+  const send = fn<ElectionSource["send"]>(() =>
+    answer(answers[Math.min(sent++, answers.length - 1)] as SendAnswer | "fail"),
+  );
+  const keepBoarded = fn<ElectionSource["keepBoarded"]>(() => Promise.resolve(kept));
   const made: ElectionSource = {
     load,
     check: () => answer(check),
@@ -236,7 +286,12 @@ function source(
     findCell,
     l1Block: () => Promise.resolve(l1),
     cast,
+    casts,
+    record,
+    send,
+    keepBoarded,
     registrar,
+    delivers,
   };
   MOCKS.set(made, {
     load,
@@ -245,6 +300,10 @@ function source(
     loadBoard,
     findCell,
     cast,
+    casts,
+    record,
+    send,
+    keepBoarded,
     secrets,
     release: () => release(),
   });
@@ -317,6 +376,7 @@ const POLL_OF_QUESTIONS: CheckedElection = {
     { minSelections: 1, maxSelections: 1 },
   ],
   tiers: [0],
+  boardEntryVersion: 5,
   translations: [
     {
       language: "en",
@@ -425,12 +485,35 @@ export const SealedThenCast: Story = {
       ARTIFACTS,
       expect.any(Function),
     );
+    // This device's casts in the voter's tier were read before the proof.
+    await expect(mocks(args.source).casts).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).casts).toHaveBeenCalledWith(fromHex(ELECTION_ID), 0);
     mocks(args.source).release();
-    // Sending is part 3c: nothing leaves, the client says so, and the seal is never opened.
+    // Recorded as asked, then sent, and the checked answer kept.
     await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your answers weren't sent" }),
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
     ).toHaveFocus();
-    await expect(canvas.getByText(/made your ballot and checked it/)).toBeVisible();
+    await expect(mocks(args.source).record).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).record).toHaveBeenCalledWith(
+      fromHex(ELECTION_ID),
+      0,
+      CAST.ballot,
+      { definitionHash: fromHex(REGISTERED), cell: 2, l1Number: L1.number, l1Hash: L1.hash },
+    );
+    await expect(mocks(args.source).send).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).send).toHaveBeenCalledWith(fromHex(ELECTION_ID), CAST.ballot);
+    await expect(mocks(args.source).keepBoarded).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).keepBoarded).toHaveBeenCalledWith(
+      fromHex(ELECTION_ID),
+      0,
+      CAST.ballot,
+      expect.objectContaining({ link: fromHex(LINK), index: 41n }),
+    );
+    await expect(canvas.getByText("Entry 41 on the board")).toBeVisible();
+    await expect(
+      canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+    ).toHaveTextContent(CODE);
+    await expect(canvas.getByText(/isn't signed yet/)).toBeVisible();
     await zeroedAfterUse(args.source, 2);
     await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
@@ -913,6 +996,166 @@ export const CastAnotherCell: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
     await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
+  },
+};
+
+const castsSource = (voter: Partial<Voter>) =>
+  source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, voter);
+
+export const CastsUnreadable: Story = {
+  name: "Cast, and this device's record of its casts can't be read",
+  args: { source: castsSource({ held: { kind: "unreadable" } }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device's record of your ballots can't be read");
+    // Never read as no casts: nothing is proved, recorded or sent (T-45).
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Answer again" })).toBeVisible();
+  },
+};
+
+export const CastOnABlockAlreadyUsed: Story = {
+  name: "Cast on a block no newer than this device's last cast",
+  args: {
+    source: castsSource({
+      held: { kind: "read", casts: [{ ballot: new Uint8Array(8), l1Number: L1.number }] },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Wait a moment, then answer again");
+    // It would tie the last cast: nothing is proved or sent (Client rule 3).
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const CastRecordedMeanwhile: Story = {
+  name: "Another tab recorded a cast on this block during the proof",
+  args: { source: castsSource({ recorded: "not-newer" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Wait a moment, then answer again");
+    await expect(mocks(args.source).record).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const CastNotAsAsked: Story = {
+  name: "The ballot names something other than what was asked",
+  args: { source: castsSource({ recorded: "not-asked" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot didn't pass this device's check");
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const CastUnrecorded: Story = {
+  name: "The browser refuses to record the cast",
+  args: { source: castsSource({ recorded: "unwritable" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device couldn't record your ballot");
+    // Never sent unrecorded: a retry would make a new ballot (T-25).
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const SentAgainAfterABusyBoard: Story = {
+  name: "The board is busy, then the same ballot is sent again",
+  args: { source: castsSource({ answers: [{ kind: "busy" }, "fail", BOARDED] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "The board is busy");
+    await expect(canvas.getByText(/never a new one/)).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot couldn't be sent" }),
+    ).toHaveFocus();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toHaveFocus();
+    // Proved and recorded once; the same bytes sent each time.
+    await expect(mocks(args.source).cast).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).record).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).send).toHaveBeenCalledTimes(3);
+    for (const [, ballot] of mocks(args.source).send.mock.calls)
+      await expect(ballot).toEqual(CAST.ballot);
+  },
+};
+
+export const AnsweredWithAnotherBallot: Story = {
+  name: "The board answers with an entry carrying other bytes",
+  args: { source: castsSource({ answers: [boarded(ballotBytes(0x0b))] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "The board's answer doesn't show your ballot");
+    // Not kept, and the voter is never told the ballot is on the board.
+    await expect(mocks(args.source).keepBoarded).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Send again" })).toBeVisible();
+  },
+};
+
+export const AlreadyOnTheBoard: Story = {
+  name: "The board already holds a copy of the ballot",
+  args: { source: castsSource({ answers: [{ kind: "rejected", code: "repeat" }] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // A repeat is the ballot on the board, never a failed cast ([[revoting]], Keyed by content).
+    await castInto(canvas, "Your ballot is on the board");
+    await expect(canvas.getByText(/already holds a copy/)).toBeVisible();
+    await expect(canvas.queryByText(/^Entry \d+ on the board$/)).toBeNull();
+    await expect(mocks(args.source).keepBoarded).not.toHaveBeenCalled();
+  },
+};
+
+export const RefusedByTheBoard: Story = {
+  name: "The board refuses the ballot, naming the check",
+  args: { source: castsSource({ answers: [{ kind: "rejected", code: "ballot-l1-ref" }] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "The board refused your ballot");
+    await expect(canvas.getByText("ballot-l1-ref")).toBeVisible();
+    // The operator chose this answer after the proof: no retry offers it another (T-55).
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const NoDelivery: Story = {
+  name: "Cast by a build that can't deliver shares to the trustees",
+  args: { source: castsSource({ delivers: false }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This ballot can't send your ballot yet");
+    // Never boarded without delivery, which would void an earlier ballot.
+    await expect(mocks(args.source).casts).not.toHaveBeenCalled();
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const BoardNotTakingBallots: Story = {
+  name: "The board says the poll isn't taking ballots",
+  args: { source: castsSource({ answers: [{ kind: "not-open" }] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This poll isn't taking ballots");
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const BoardContradictsItself: Story = {
+  name: "The board's answer differs from the one this device kept",
+  args: { source: castsSource({ kept: "conflict" }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "The board gave two answers for one ballot");
+    await expect(canvas.queryByText("Your ballot is on the board")).toBeNull();
   },
 };
 

@@ -12,6 +12,8 @@
 // beside the code that will encrypt the ballot.
 
 import {
+  BOARD_ENTRY,
+  type BoardEntryVersion,
   checkElectionRecordToShow,
   type SealingElectionCode,
   DecodeError,
@@ -19,6 +21,8 @@ import {
   decodeElectionDefinitionV5,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  pinnedVersion,
+  RECORD_TYPES,
   type ShowRecordRefusal,
 } from "@abolishus/crypto";
 
@@ -71,6 +75,12 @@ export interface CheckedElection {
    * for version 1, which this client never seals.
    */
   readonly tiers: readonly number[];
+  /**
+   * The board-entry version the definition pins: what the operator's answer
+   * to a cast is decoded under (`checkBoarded`). `undefined` for version 1,
+   * which this client never seals.
+   */
+  readonly boardEntryVersion: BoardEntryVersion | undefined;
   /** Seconds since the Unix epoch. */
   readonly opensAt: bigint;
   readonly closesAt: bigint;
@@ -148,6 +158,7 @@ export function checkElection(
           { minSelections: definition.min_selections, maxSelections: definition.max_selections },
         ],
         tiers: [],
+        boardEntryVersion: undefined,
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
         translations: displayText.translations.map((t) => ({
@@ -166,6 +177,11 @@ export function checkElection(
     };
   }
   const { definition, displayText } = checked;
+  // The well-formedness check refuses a definition that pins no board-entry
+  // version this release reads (`unsupported-version`), so this holds.
+  const boardEntryVersion = pinnedVersion(definition, RECORD_TYPES.boardEntry);
+  if (boardEntryVersion === undefined || !Object.hasOwn(BOARD_ENTRY.versions, boardEntryVersion))
+    throw new TypeError("a checked definition pins no board-entry version");
   return {
     ok: true,
     election: {
@@ -177,6 +193,7 @@ export function checkElection(
         maxSelections: q.max_selections,
       })),
       tiers: definition.electorate.map((tier) => tier.tier),
+      boardEntryVersion: boardEntryVersion as BoardEntryVersion,
       opensAt: definition.opens_at,
       closesAt: definition.closes_at,
       translations: displayText.translations.map((t) => ({

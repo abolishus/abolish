@@ -16,6 +16,8 @@ import {
   type ElectionDefinitionV5,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  pinnedVersion,
+  RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -194,6 +196,7 @@ describe("the display text", () => {
         ],
         // Version 1 is never sealed, so it offers no tier to cast in.
         tiers: [],
+        boardEntryVersion: undefined,
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
       });
@@ -302,6 +305,8 @@ describe("a version-5 election, a poll of questions", () => {
           maxSelections: q.max_selections,
         })),
         tiers: definition.electorate.map((tier) => tier.tier),
+        // The board entries the poll's answers are decoded under (`checkBoarded`).
+        boardEntryVersion: pinnedVersion(definition, RECORD_TYPES.boardEntry),
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
         translations: v.value.translations.map((t) => ({

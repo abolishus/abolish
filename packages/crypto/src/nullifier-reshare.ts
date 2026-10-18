@@ -36,8 +36,8 @@ import {
 } from "./keyed-nullifier.ts";
 import {
   checkPolynomials,
-  commitmentAt,
   checkRunDeadline,
+  commitmentAt,
   type DealtShareResult,
   equalBytes,
   evaluatePolynomial,

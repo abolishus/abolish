@@ -119,10 +119,18 @@ export function headerRlp(block: unknown): Uint8Array {
  * The finalized L1 block's header, decoded and as RLP: the one block
  * everything is proven at.
  */
-export async function finalizedBlock(
-  rpc: Rpc,
-): Promise<{ readonly header: L1Header; readonly rlp: Uint8Array }> {
-  const rlp = headerRlp(await rpc.call("eth_getBlockByNumber", ["finalized", false]));
+export async function finalizedBlock(rpc: Rpc): Promise<HeaderBlock> {
+  return block(rpc, "finalized");
+}
+
+/** A block's header, decoded and as RLP. */
+export interface HeaderBlock {
+  readonly header: L1Header;
+  readonly rlp: Uint8Array;
+}
+
+async function block(rpc: Rpc, tag: string): Promise<HeaderBlock> {
+  const rlp = headerRlp(await rpc.call("eth_getBlockByNumber", [tag, false]));
   try {
     return { header: decodeHeader(rlp), rlp };
   } catch (e) {
@@ -130,6 +138,96 @@ export async function finalizedBlock(
     if (e instanceof RlpError) throw new RpcError("a block that isn't an L1 header");
     throw e;
   }
+}
+
+async function numbered(rpc: Rpc, n: bigint): Promise<HeaderBlock> {
+  const b = await block(rpc, `0x${n.toString(16)}`);
+  if (b.header.number !== n) throw new RpcError(`block ${n}: another block's header`);
+  return b;
+}
+
+/**
+ * Most bytes of headers one election's run holds: about two weeks of L1
+ * blocks, so with `MAX_BUNDLE_PROOF_BYTES` of proofs its bundle's JSON stays
+ * far below the runtime's longest string (T-52).
+ */
+export const MAX_RUN_BYTES = 64 * 1024 * 1024;
+
+/** Headers fetched at once while a run is read. */
+const RUN_REQUESTS = 32;
+
+/**
+ * A format-5 run of finalized L1 headers for a window (docs/spec/verifier.md,
+ * L1 references): from the last block before `before` (or block 0, if none
+ * is) to the first block after `after` (or `head`, the finalized block, if
+ * none is yet), so it covers 5.8 with `before` an hour before `opens_at`,
+ * and 6.3 and every live snapshot with `after` at `closes_at` plus the
+ * inclusion bound. Both ends are found by bisection over block numbers; then
+ * every block between is read and must name the one before it as its parent,
+ * and a run ending at `head` ends in `head` itself. The node is trusted for
+ * nothing more than for `head`: a node lying about timestamps can only move
+ * the ends, which the verifier then reports as a short run (`l1-blocks-short`)
+ * against what is a local input to it anyway. Past `maxBytes` of headers the
+ * run keeps its latest blocks and starts later, which the verifier reports
+ * the same way, rather than holding a node's answers without bound (T-52).
+ * Throws `RpcError` on an answer that can't be read or a run that doesn't
+ * chain.
+ */
+export async function headerRun(
+  rpc: Rpc,
+  head: HeaderBlock,
+  window: { readonly before: bigint; readonly after: bigint },
+  maxBytes: number = MAX_RUN_BYTES,
+): Promise<Uint8Array[]> {
+  const time = async (n: bigint) =>
+    n === head.header.number ? head.header.timestamp : (await numbered(rpc, n)).header.timestamp;
+  // The largest `n` in [lo, hi] with `below(n)`, given `below(lo)` and not `below(hi)`.
+  const last = async (lo: bigint, hi: bigint, below: (t: bigint) => boolean) => {
+    while (hi - lo > 1n) {
+      const mid = (lo + hi) / 2n;
+      if (below(await time(mid))) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const top = head.header.number;
+  const before = (t: bigint) => t < window.before;
+  const start =
+    head.header.timestamp < window.before
+      ? top
+      : !before(await time(0n))
+        ? 0n
+        : await last(0n, top, before);
+  const notAfter = (t: bigint) => t <= window.after;
+  const end =
+    head.header.timestamp <= window.after
+      ? top
+      : !notAfter(await time(start))
+        ? start
+        : (await last(start, top, notAfter)) + 1n;
+  // Read from the end down, so a run cut by the budget keeps its end.
+  const run: Uint8Array[] = [];
+  let child = end === top ? head : await numbered(rpc, end);
+  let held = child.rlp.length;
+  run.push(child.rlp);
+  for (let n = end; n > start;) {
+    const from = n - BigInt(RUN_REQUESTS) > start ? n - BigInt(RUN_REQUESTS) : start;
+    const batch: bigint[] = [];
+    for (let m = n - 1n; m >= from; m--) batch.push(m);
+    const blocks = await Promise.all(batch.map((m) => numbered(rpc, m)));
+    for (const b of blocks) {
+      if (bytesToHex(b.header.hash) !== bytesToHex(child.header.parentHash))
+        throw new RpcError(
+          `block ${child.header.number}: its parent isn't block ${b.header.number}`,
+        );
+      held += b.rlp.length;
+      if (held > maxBytes) return run.reverse();
+      run.push(b.rlp);
+      child = b;
+    }
+    n = from;
+  }
+  return run.reverse();
 }
 
 /** The finalized L1 block's header. */

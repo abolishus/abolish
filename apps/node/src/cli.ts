@@ -14,7 +14,13 @@ import {
 } from "@abolishus/verifier";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { gateway } from "./gateway.ts";
-import { anchorTiming, finalizedBlock, finalizedHeader, parseAddress } from "./l1.ts";
+import {
+  anchorTiming,
+  finalizedBlock,
+  finalizedHeader,
+  MAX_RUN_BYTES,
+  parseAddress,
+} from "./l1.ts";
 import { l2Finalized } from "./l2.ts";
 import { DEFAULT_MAX_ELECTION_BYTES, mirrorThen, pinElections } from "./pin.ts";
 import { chainId, parseRpcUrl, rpcClient, RpcError } from "./rpc.ts";
@@ -274,6 +280,7 @@ async function verify(args: readonly string[], io: CliIo): Promise<number> {
       fromBlock: BigInt(values["from-block"]),
       l2FromBlock: BigInt(values["l2-from-block"]),
       maxBoardBytes: Number(maxBytes),
+      maxRunBytes: MAX_RUN_BYTES,
       report: io.out,
     });
     io.out({ refusedLogs: run.refusedLogs });

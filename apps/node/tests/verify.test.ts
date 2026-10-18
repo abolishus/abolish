@@ -12,13 +12,13 @@ import {
   objectCar,
   objectCid,
 } from "@abolishus/crypto";
-import { gatewaySource, loadBundle, verifyBundle } from "@abolishus/verifier";
+import { decodeHeader, gatewaySource, loadBundle, verifyBundle } from "@abolishus/verifier";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli } from "../src/cli.ts";
 import { gateway } from "../src/gateway.ts";
-import { anchorTiming, finalizedBlock } from "../src/l1.ts";
+import { anchorTiming, finalizedBlock, MAX_RUN_BYTES } from "../src/l1.ts";
 import { chainId, type Rpc, RpcError } from "../src/rpc.ts";
 import { openMirror } from "../src/store.ts";
 import { type VerifyReport, verifyElections } from "../src/verify.ts";
@@ -195,7 +195,11 @@ function l2Node(logs: readonly Log[], extra: readonly Log[] = []): Rpc {
 }
 
 /** A checkpoint naming `object`; the node judges nothing else about it. */
-function checkpoint(d: ElectionDefinition, segment: number, object: Uint8Array): Checkpoint {
+function checkpoint(
+  d: Pick<ElectionDefinition, "election_id">,
+  segment: number,
+  object: Uint8Array,
+): Checkpoint {
   return {
     election_id: d.election_id,
     segment,
@@ -226,6 +230,7 @@ async function run(l2: Rpc, dir: string, reports: string, l1: Rpc = chain.rpc) {
     fromBlock: 0n,
     l2FromBlock: 0n,
     maxBoardBytes: 2 ** 30,
+    maxRunBytes: MAX_RUN_BYTES,
     report: (r) => lines.push(r),
   });
   return { lines, header, rlp };
@@ -236,12 +241,27 @@ const byElection = (lines: readonly VerifyReport[], d: ElectionDefinition) =>
 
 describe("verify", () => {
   test("gathers every input from L1, L2 and its blocks into the bundle the verifier reads, and writes its report", async () => {
-    const d = definition("honest");
     // Created in period 1, so `f` is 1; anchored in segments 1 and 2, so the seal is 2.
     const createdAt = anchor.epoch + PERIOD + 5n;
     const objects = [text("segment 1"), text("segments 1 and 2")];
-    const cps = [checkpoint(d, 1, objects[0]!), checkpoint(d, 2, objects[1]!)];
+    const id = { election_id: keccak_256(text("election honest")) };
+    const cps = [checkpoint(id, 1, objects[0]!), checkpoint(id, 2, objects[1]!)];
     await chain.anchorAll(anchor, cps);
+    // Then L1 blocks 1,200 seconds apart, and a window from an hour after
+    // block `b + 5`'s time to an hour before block `b + 12`'s, less the
+    // inclusion bound: the run is blocks `b + 4` to `b + 13`.
+    const b = BigInt((await chain.rpc.call("eth_blockNumber", [])) as string);
+    await chain.rpc.call("anvil_mine", ["0x14", "0x4b0"]);
+    await chain.mine(2);
+    const at = async (n: bigint) =>
+      (await chain.rpc.call("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])) as {
+        hash: string;
+        timestamp: string;
+      };
+    const d = definition("honest", {
+      opens_at: BigInt((await at(b + 5n)).timestamp) + 3600n,
+      closes_at: BigInt((await at(b + 12n)).timestamp) - BigInt(typical.l1_inclusion_bound),
+    });
     const dir = await blocksDir(
       Object.fromEntries(objects.map((o, i) => [`${i}.car`, objectCar(o)])),
     );
@@ -271,7 +291,7 @@ describe("verify", () => {
     const out = join(reports, bytesToHex(d.election_id));
     const bundle = JSON.parse(await readFile(join(out, "bundle.json"), "utf8"));
     expect(bundle).toMatchObject({
-      format: "abolish-verifier-bundle/4",
+      format: "abolish-verifier-bundle/5",
       definition: bytesToHex(encodeElectionDefinition(d)),
       clock: {
         epoch: anchor.epoch.toString(),
@@ -286,6 +306,12 @@ describe("verify", () => {
       },
       panel: { threshold: "2", keys: PANEL.keys.map(bytesToHex) },
     });
+    const headers = (bundle.l1Blocks as string[]).map((h) => decodeHeader(hexToBytes(h)));
+    const numbers = Array.from({ length: 10 }, (_, i) => b + 4n + BigInt(i));
+    expect(headers.map((h) => h.number)).toEqual(numbers);
+    expect(headers.map((h) => `0x${bytesToHex(h.hash)}`)).toEqual(
+      await Promise.all(numbers.map(async (n) => (await at(n)).hash)),
+    );
     // The report is the verifier's own on that bundle, read here through the
     // node's gateway rather than its directory.
     const report = JSON.parse(await readFile(join(out, "report.json"), "utf8"));
@@ -300,6 +326,7 @@ describe("verify", () => {
       anchors: [{ segment: 1 }, { segment: 2 }],
     });
     expect(report.board.byCid).toMatchObject({ storeBlocks: 2 });
+    expect(report.inputs).toMatchObject({ l1Blocks: "local-file" });
   });
 
   test("reports and skips each election whose inputs it can't gather, and verifies the others", async () => {

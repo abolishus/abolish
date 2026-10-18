@@ -12,8 +12,9 @@ import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
 import { AnswerQuestions } from "./questions.tsx";
-import { Register, type Registrar, RegisterWaiting } from "./register.tsx";
+import { type Held, Register, type Registrar, RegisterWaiting } from "./register.tsx";
 import { Opened, Sealed, SealStopped, type SealProblem, Working } from "./sealed.tsx";
+import { formatTime } from "./time.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -287,7 +288,7 @@ type Step =
   | { readonly kind: "proving"; readonly steps: ProvingSteps | undefined }
   | { readonly kind: "proving-refused"; readonly problem: ProvingProblem }
   | { readonly kind: "cast" }
-  | { readonly kind: "register"; readonly registrar: Registrar; readonly made: boolean }
+  | { readonly kind: "register"; readonly registrar: Registrar; readonly held: Held }
   | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "stopped"; readonly problem: SealProblem; readonly code?: string };
 
@@ -399,7 +400,7 @@ export function Ballot({
     if (read.kind === "none")
       return registrar === undefined
         ? stopped("no-identity")
-        : { kind: "register", registrar, made: false };
+        : { kind: "register", registrar, held: "none" };
     if (read.kind !== "found") return stopped("identity-unreadable");
     const { secret, memberships, tier0Request } = read.identity;
     let asked: Promise<CellAnswer>;
@@ -409,14 +410,18 @@ export function Ballot({
       const membership = memberships.find(({ tier }) => election.tiers.includes(tier));
       if (membership === undefined) {
         if (!election.tiers.includes(0)) return stopped("not-listed");
+        // A request that went: its outcome is read from the group registry,
+        // by a build that can; one that can't says when it went.
         if (tier0Request !== undefined)
-          return { kind: "waiting", acceptedAt: tier0Request.acceptedAt };
+          return registrar === undefined
+            ? { kind: "waiting", acceptedAt: tier0Request.acceptedAt }
+            : { kind: "register", registrar, held: "waiting" };
         // An identity made here whose request never went: registered now,
         // never replaced by a new one.
         if (memberships.length === 0)
           return registrar === undefined
             ? stopped("unregistered")
-            : { kind: "register", registrar, made: true };
+            : { kind: "register", registrar, held: "made" };
         return stopped("not-listed");
       }
       asked = source.findCell(definitionHash, secret, membership, board.entries);
@@ -569,7 +574,7 @@ export function Ballot({
       );
     case "register":
       return (
-        <Register poll={poll} registrar={step.registrar} made={step.made} onDone={onRestart} />
+        <Register poll={poll} registrar={step.registrar} held={step.held} onDone={onRestart} />
       );
     case "waiting":
       return (
@@ -620,17 +625,5 @@ export function NotSent({
         </Note>
       </div>
     </EverydayFrame>
-  );
-}
-
-// The largest time a Date holds, in milliseconds either side of the epoch.
-const MAX_DATE_MS = 8.64e15;
-
-/** Seconds since the epoch, for the reader; a time no Date holds is shown as the seconds themselves. */
-export function formatTime(locale: string, seconds: bigint): string {
-  const ms = Number(seconds) * 1000;
-  if (!(Math.abs(ms) <= MAX_DATE_MS)) return seconds.toString();
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(ms),
   );
 }

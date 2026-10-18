@@ -611,6 +611,7 @@ describe("the device's voting identity", () => {
     saveIdentity(secret: string, memberships: { tier: number; group: string }[]): Promise<void>;
     createIdentity(secret: string): Promise<string>;
     recordTier0Request(secret: string, region: number, acceptedAt: number): Promise<string>;
+    recordTier0Membership(secret: string, group: string): Promise<string>;
     commitment(secret: string): Promise<string>;
     tier0Outcome(
       secret: string,
@@ -789,6 +790,71 @@ describe("the device's voting identity", () => {
       ),
     ).resolves.toBe("changed");
     await expect(read()).resolves.toEqual({ kind: "found", identity: { secret, memberships } });
+  });
+
+  test("a registration is kept only beside the identity that waited on it, in place of its request", async () => {
+    const join = (s: string, group: string) =>
+      page.evaluate(
+        ([x, g]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Membership(
+            x,
+            g,
+          ),
+        [s, group] as const,
+      );
+    // None held, or one waiting on no request: nothing to keep it beside.
+    await expect(join(secret, "9")).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "none" });
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+      [secret] as const,
+    );
+    await expect(join(secret, "9")).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "found", identity: { secret, memberships: [] } });
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+          s,
+          7,
+          1_790_000_000_000,
+        ),
+      [secret] as const,
+    );
+    const waiting = {
+      kind: "found",
+      identity: {
+        secret,
+        memberships: [],
+        tier0Request: { region: 7, acceptedAt: 1_790_000_000_000 },
+      },
+    };
+    // Another identity's outcome leaves this one waiting.
+    await expect(join(other, "9")).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual(waiting);
+    // A group outside u64 is refused before the store is touched.
+    await expect(
+      page.evaluate(
+        ([x]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness
+            .recordTier0Membership(x, "18446744073709551616")
+            .then(
+              () => "kept",
+              (e: unknown) => (e instanceof Error ? e.name : "?"),
+            ),
+        [secret] as const,
+      ),
+    ).resolves.toBe("TypeError");
+    await expect(read()).resolves.toEqual(waiting);
+    await expect(join(secret, "18446744073709551615")).resolves.toBe("recorded");
+    const joined = {
+      kind: "found",
+      identity: { secret, memberships: [{ tier: 0, group: "18446744073709551615" }] },
+    };
+    await expect(read()).resolves.toEqual(joined);
+    // Kept once: no longer waiting, a second outcome changes nothing.
+    await expect(join(secret, "3")).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual(joined);
   });
 
   test("the worker reads a registration's outcome from the registry's log under the client's CSP", async () => {

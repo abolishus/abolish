@@ -11,8 +11,10 @@
 import { readFile } from "node:fs/promises";
 import {
   ceremonyTranscriptHash,
+  type ContractEventVersion,
   electionDefinitionHash,
   encodeBoardEntry,
+  encodeContractEvent,
   encodeElectionDefinition,
   frameBallot,
   type L1Origin,
@@ -26,6 +28,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { HeldExtent } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
 import { decideObligation } from "../src/obligation.ts";
+import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
 import { obligationView, ViewError, type ViewOptions } from "../src/view.ts";
 import { anvil, type Node } from "./anvil.ts";
@@ -195,11 +198,19 @@ function relayed(c: Cast, stamp: bigint): Log {
   };
 }
 
-/** An L2 node answering from `logs` as a real one filters them, up to its finalized block, block `n` timestamped `times(n)`. */
+/** Just past the contract-event window's end, by when every in-window ballot the contract records is in a block. */
+const pastWindow = () => s.e.stub.closes_at + RELEASE_WINDOWS.contractEventWindow + 1n;
+
+/**
+ * An L2 node answering from `logs` as a real one filters them, up to its
+ * finalized block, timestamped `finalizedAt`; any earlier block `n` is
+ * timestamped `times(n)`.
+ */
 function l2Node(
   logs: readonly Log[],
   chain = L2_CHAIN_ID,
   times = (n: bigint) => GENESIS + n,
+  finalizedAt = pastWindow(),
 ): Rpc {
   return {
     call: async (method, params) => {
@@ -207,7 +218,8 @@ function l2Node(
       if (method === "eth_getBlockByNumber") {
         const tag = params[0] as string;
         const n = tag === "finalized" ? L2_FINALIZED : BigInt(tag);
-        return { number: `0x${n.toString(16)}`, timestamp: `0x${times(n).toString(16)}` };
+        const t = n === L2_FINALIZED ? finalizedAt : times(n);
+        return { number: `0x${n.toString(16)}`, timestamp: `0x${t.toString(16)}` };
       }
       if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
       const filter = params[0] as {
@@ -239,6 +251,22 @@ function l2Node(
 }
 
 const S_A = 25n;
+
+/** A board log as the anchored board archives it: a contract-event record (`0x0008`) under the pinned version. */
+function archived(log: Log): Uint8Array {
+  const version = pinnedVersion(s.definition, RECORD_TYPES.contractEvent) as ContractEventVersion;
+  return encodeContractEvent(
+    {
+      contract: log.address,
+      n: 1n,
+      l2_block: log.block,
+      l2_timestamp: s.e.stub.opens_at + 60n,
+      topics: log.topics.map((t) => hexToBytes(t.slice(2))),
+      data: log.data,
+    },
+    version,
+  );
+}
 
 /** The ballot extent through `C_A`: the transcript first, then `ballots` at segments 3, 4, …, then `extra` payloads. */
 function extentOf(ballots: readonly Cast[], extra: readonly Uint8Array[] = []): HeldExtent {
@@ -404,6 +432,30 @@ describe("a seat that attested the ballot extent", () => {
     const options = viewOptions(store, { held: extentOf([older]), logs });
     const view = await obligationView(options)(approved);
     expect(view.board.map((b) => plain(b.ballotHash))).toEqual([plain(ballotHashOf(older))]);
+    expect(view.absent).toEqual([]);
+    expect((await owed(options, approved)).receipts).toEqual([plain(ballotHashOf(newer))]);
+  });
+
+  test("waits for the L2 node's finalized history to pass the contract-event window before showing anything absent", async () => {
+    const { store, approved } = await receipted(older, newer);
+    // The node hasn't finalized the block recording the newer ballot yet:
+    // shown absent now, it would lose the receipt the delivery check needs.
+    const logs = [...registrationLogs(), submitted(newer, L2_FINALIZED + 1n)];
+    const lagging = l2Node(logs, L2_CHAIN_ID, (n) => GENESIS + n, pastWindow() - 1n);
+    await expect(
+      obligationView(viewOptions(store, { held: extentOf([older]), l2: lagging }))(approved),
+    ).rejects.toBeInstanceOf(RpcError);
+    // Without the extent nothing is shown absent, so there is nothing to wait for.
+    const view = await obligationView(viewOptions(store, { l2: lagging }))(approved);
+    expect(view.absent).toEqual([]);
+  });
+
+  test("never shows absent a ballot whose contract event the anchored board archived, even one the L2 node hides", async () => {
+    const { store, approved } = await receipted(older, newer);
+    const options = viewOptions(store, {
+      held: extentOf([older], [archived(submitted(newer, 50n))]),
+    });
+    const view = await obligationView(options)(approved);
     expect(view.absent).toEqual([]);
     expect((await owed(options, approved)).receipts).toEqual([plain(ballotHashOf(newer))]);
   });

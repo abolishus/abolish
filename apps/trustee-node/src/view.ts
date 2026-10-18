@@ -16,8 +16,14 @@
 // Residuals): its admission needs the ceremony transcript, which only the
 // board carries.
 import {
+  BOARD_ENTRY,
+  type BoardEntryVersion,
   checkContractEvent,
+  CONTRACT_EVENT_SIGNATURES,
+  type ContractEventVersion,
+  DecodeError,
   decodeBoardEntry,
+  decodeContractEvent,
   electionDefinitionHash,
   type EventContracts,
   type FinalizedL1,
@@ -33,7 +39,6 @@ import {
   finalizedBlock,
   headerRun,
   l2Finalized,
-  READ_VERSION,
   registration,
   type Rpc,
   RpcError,
@@ -51,6 +56,7 @@ import type { ApprovedElection } from "./ceremony.ts";
 import { heldIntake } from "./intake.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
+import { RELEASE_WINDOWS } from "./stub.ts";
 
 export interface ViewOptions {
   readonly store: SeatStore;
@@ -78,7 +84,11 @@ export interface ViewOptions {
 export type ViewRefusal =
   /** A node is on another chain than the deployment's. */
   | "chain"
-  /** The registered definition isn't one this node reads, or isn't the one the seat approved. */
+  /**
+   * The registered definition isn't one this node reads (its version, or the
+   * board-entry or contract-event version it pins), isn't the one the seat
+   * approved, or names another board than the deployment's.
+   */
   | "definition"
   /** Finalized L1 from an hour before `opens_at` to past `closes_at` is longer than `maxRunBytes`. */
   | "l1-run-short";
@@ -105,6 +115,11 @@ const boardOnly = (board: Uint8Array): EventContracts => ({
   groupRegistry: new Uint8Array(20),
   board,
 });
+
+const isBoardVersion = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
+const isEventVersion = (v: number | undefined): v is ContractEventVersion =>
+  v !== undefined && Object.hasOwn(CONTRACT_EVENT_SIGNATURES, v);
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const equal = (a: Uint8Array, b: Uint8Array) =>
@@ -140,12 +155,29 @@ export function obligationView(
       !equal(electionDefinitionHash(reg.decoded.value), election.definitionHash)
     )
       throw new ViewError("definition");
+    const d = reg.decoded.value;
+    // The versions the verifier reads this election's board and events under (4.2, 4.4).
+    const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
+    const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
+    if (
+      !isBoardVersion(boardVersion) ||
+      !isEventVersion(eventVersion) ||
+      !equal(d.board, options.board)
+    )
+      throw new ViewError("definition");
     const { l1: finalized, low } = await finalizedL1(options, election);
     const extent = await options.extent(election);
     const view = { l1: finalized, low };
     if (extent === undefined) return { ...view, board: [], absent: [] };
-    const boardVersion = pinnedVersion(reg.decoded.value, RECORD_TYPES.boardEntry);
-    const entries = extent.entries.map((e) => decodeBoardEntry(e, boardVersion as 1));
+    // Every in-window ballot the contract records is in an L2 block by the
+    // end of the contract-event window: a node whose finalized history stops
+    // short of it could hide one the delivery check selects, which the seat
+    // would then show absent (T-25, T-54).
+    if ((await l2BlockTime(l2, l2Head)) <= election.closesAt + RELEASE_WINDOWS.contractEventWindow)
+      throw new RpcError(
+        "the L2 node's finalized history doesn't reach the contract-event window's end",
+      );
+    const entries = extent.entries.map((e) => decodeBoardEntry(e, boardVersion));
     const admission = electionAdmission(reg.definition, options.panel, extent.entries);
     // The seat attested this extent, so it carries the transcript it approved;
     // an election the verifier can't admit ballots of fails at 3.2 for
@@ -162,7 +194,7 @@ export function obligationView(
       const copy = copyOf(a, { path: "board", value: BigInt(e.segment) });
       if (copy !== undefined) board.push(copy);
     });
-    const recorded = await contractBallots(options, election.definitionHash, l2Head);
+    const recorded = await contractBallots(options, election.definitionHash, l2Head, eventVersion);
     admission.admitAll(recorded.copies.map((c) => c.record)).forEach((a, i) => {
       const c = recorded.copies[i] as (typeof recorded.copies)[number];
       const copy = copyOf(a, c.entry);
@@ -170,12 +202,50 @@ export function obligationView(
     });
     // Absent: receipted, carried by no admitted copy of the extent, and named
     // by no ballot log of the board's for the definition, whether or not it
-    // passed the event check, so no log the node shows is taken as absence.
-    const present = new Set([...board.map((b) => hex(b.ballotHash)), ...recorded.named]);
+    // passed the event check, nor by a ballot event the anchored board
+    // archived, so no log the node shows or hides is taken as absence.
+    const present = new Set([
+      ...board.map((b) => hex(b.ballotHash)),
+      ...recorded.named,
+      ...archivedBallots(entries, options.board, election.definitionHash, eventVersion),
+    ]);
     const held = await heldIntake(options.store, election.stubHash, election.definitionHash);
     const absent = held.receipts.filter((h) => !present.has(hex(h)));
     return { ...view, board, absent, boardSegment: extent.boardSegment };
   };
+}
+
+/** The ballot hashes of the board's ballot events for the definition that the extent archives. */
+function archivedBallots(
+  entries: readonly { readonly payload: Uint8Array }[],
+  board: Uint8Array,
+  definitionHash: Uint8Array,
+  eventVersion: ContractEventVersion,
+): string[] {
+  const named: string[] = [];
+  for (const { payload } of entries) {
+    if (
+      payload.length < 2 ||
+      (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent
+    )
+      continue;
+    let record;
+    try {
+      record = decodeContractEvent(payload, eventVersion);
+    } catch (e) {
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+    const checked = checkContractEvent(record, boardOnly(board), eventVersion);
+    if (!checked.ok) continue;
+    const e = checked.event;
+    if (
+      (e.event === "BallotSubmitted" || e.event === "RelayedBallotSubmitted") &&
+      equal(e.definitionHash, definitionHash)
+    )
+      named.push(hex(e.ballotHash));
+  }
+  return named;
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {
@@ -247,6 +317,7 @@ async function contractBallots(
   options: ViewOptions,
   definitionHash: Uint8Array,
   l2Head: bigint,
+  eventVersion: ContractEventVersion,
 ): Promise<{
   readonly copies: readonly { readonly record: Uint8Array; readonly entry: ViewBallot["entry"] }[];
   readonly named: readonly string[];
@@ -266,7 +337,7 @@ async function contractBallots(
   for (const log of logs) {
     const topic = log.topics[2];
     if (topic !== undefined) named.push(hex(topic));
-    const checked = checkContractEvent(log, boardOnly(board), READ_VERSION);
+    const checked = checkContractEvent(log, boardOnly(board), eventVersion);
     if (!checked.ok) continue;
     const e = checked.event;
     if (e.event === "RelayedBallotSubmitted") {

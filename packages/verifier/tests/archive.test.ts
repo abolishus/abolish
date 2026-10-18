@@ -409,11 +409,15 @@ describe("walkArchive", () => {
         earlier: [locatorOf(second)],
       });
       // Never a mismatch: the locator names the chain's own manifest 1. Read
-      // under a new transaction it reaches 1; under the link's, already
-      // read, it is still unavailable.
+      // under a new transaction it reaches 1 and 0, which the latest's chain
+      // alone doesn't, with the link's transaction still unserved; under the
+      // link's, already read, it is still unavailable.
       if (second === m1) expect(codes(walk.findings)).toEqual(["unavailable", "archive-gap"]);
       else {
-        expect(walk.findings).toEqual([]);
+        expect(walk.findings).toEqual([
+          { code: "unavailable", from: { link: 1n }, cid: m1.cid, transaction: m1.transaction },
+          { code: "earlier-only", first: 0n, last: 1n },
+        ]);
         expect(walk.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
       }
     }
@@ -427,10 +431,12 @@ describe("walkArchive", () => {
     const walk = await walkArchive(locatorOf(chain[10] as Stored), DEPLOYMENT, source, {
       earlier: chain.slice(0, 10).map(locatorOf),
     });
-    // Only 9 is missing: 8 down to 0 are reached from the earlier locators.
+    // Only 9 is missing: 8 down to 0 are reached from the earlier locators,
+    // and reported as such.
     expect(walk.findings).toEqual([
       { code: "unavailable", from: { link: 9n }, cid: nine.cid, transaction: nine.transaction },
       { code: "archive-gap", first: 9n, last: 9n },
+      { code: "earlier-only", first: 0n, last: 8n },
     ]);
     expect(walk.manifests.map((m) => m.sequence)).toEqual([
       0n,
@@ -458,7 +464,10 @@ describe("walkArchive", () => {
       [locatorOf(reupload), locatorOf(m0)],
     ]) {
       const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source, { earlier });
-      expect(walk.findings).toEqual([]);
+      expect(walk.findings).toEqual([
+        { code: "unavailable", from: { link: 1n }, cid: m1.cid, transaction: m1.transaction },
+        { code: "earlier-only", first: 0n, last: 1n },
+      ]);
       expect(walk.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
     }
   });
@@ -509,7 +518,7 @@ describe("walkArchive", () => {
     );
   });
 
-  test("a manifest the whole chain omits, named by an earlier locator, is a mismatch", async () => {
+  test("a manifest the latest's chain omits is reported as reached only from an earlier locator", async () => {
     const m0 = manifest(0n, []);
     const m1 = manifest(1n, [m0]);
     // 3 skips 2, which an earlier locator named, and every link was read.
@@ -518,8 +527,22 @@ describe("walkArchive", () => {
     const walk = await walkArchive(locatorOf(m3), DEPLOYMENT, arweave([m0, m1, m2, m3]).source, {
       earlier: [locatorOf(m1), locatorOf(m2)],
     });
+    expect(walk.findings).toEqual([{ code: "earlier-only", first: 2n, last: 2n }]);
+  });
+
+  test("an authority's dead link to the chain is reported, though earlier locators reach past it", async () => {
+    // The authority posts X at 4, linking the genuine 3 under a transaction
+    // nothing holds, and points the anchor's locator at it.
+    const chain: Stored[] = [manifest(0n, [])];
+    for (let k = 1n; k <= 3n; k++) chain.push(manifest(k, [chain.at(-1) as Stored]));
+    const three = chain[3] as Stored;
+    const x = manifest(4n, [{ ...three, transaction: tx(66_666) }]);
+    const walk = await walkArchive(locatorOf(x), DEPLOYMENT, arweave([...chain, x]).source, {
+      earlier: chain.map(locatorOf),
+    });
     expect(walk.findings).toEqual([
-      { code: "locator-mismatch", locator: 1, sequence: 2n, named: m2.cid, chain: undefined },
+      { code: "unavailable", from: { link: 3n }, cid: three.cid, transaction: tx(66_666) },
+      { code: "earlier-only", first: 0n, last: 3n },
     ]);
   });
 

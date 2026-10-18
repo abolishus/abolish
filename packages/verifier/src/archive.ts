@@ -88,6 +88,8 @@ export type ArchiveFinding =
       readonly named: Uint8Array;
     }
   | { readonly code: "archive-gap"; readonly first: bigint; readonly last: bigint }
+  // Reached only through earlier locators, not from the latest's chain alone.
+  | { readonly code: "earlier-only"; readonly first: bigint; readonly last: bigint }
   | { readonly code: "over-budget"; readonly budget: number }
   | {
       readonly code: "locator-mismatch";
@@ -180,24 +182,26 @@ interface Pending {
  * `over-budget` and reports no gap or unavailable link, since what it
  * didn't read is unverifiable for this reader, never missing (T-52).
  * Otherwise the sequences from 0 to the latest's that no manifest reached
- * are reported as ranges, and every transaction read for an unreached
- * sequence as `unavailable`.
+ * are reported as ranges, and every link transaction no source served as
+ * `unavailable`, even where another transaction reached its sequence: an
+ * honest link names a confirmed upload, so a dead one is a fact about the
+ * chain the latest locator gives, whoever withheld it.
  *
  * An earlier locator naming the CID the chain names at a sequence is that
  * sequence's manifest: if it is unreached and the locator's transaction is
  * new, it is read there and the walk goes on from it, repeating over the
- * earlier locators until nothing more is reached, so a source's lapse on a
- * link isn't reported as a mismatch whatever the locators' order. The rest
- * are then judged against that chain: a manifest of this deployment at a
- * sequence the chain names, or above the latest's, is `locator-mismatch`,
+ * earlier locators until nothing more is reached, whatever their order. The
+ * rest are then judged against that chain: a manifest of this deployment at
+ * a sequence the chain names, or above the latest's, is `locator-mismatch`,
  * with the CID the chain names there, if any: a locator overwritten by a
  * seized authority, while the logs that carried earlier ones last (T-69).
- * One at a sequence below the latest's that the chain doesn't name may sit
- * below a link a source withheld, so it is a mismatch only if the chain
- * left no link unread; either way it is followed, so what it reaches is no
- * gap. Earlier locators are judged only if the latest's manifest was
- * reached, since
- * otherwise there is no chain to judge them against.
+ * One at a sequence below the latest's that the chain doesn't name is
+ * followed: a reader can't tell a link a source withheld from one the
+ * authority cut off, so it is no accusation, but every sequence reached
+ * only through earlier locators, not from the latest's chain alone, is
+ * reported as `earlier-only` ranges, what is lost once those logs expire.
+ * Earlier locators are judged only if the latest's manifest was reached,
+ * since otherwise there is no chain to judge them against.
  */
 export async function walkArchive(
   locator: Uint8Array,
@@ -349,6 +353,9 @@ export async function walkArchive(
   };
 
   let latest: bigint | undefined;
+  // What the latest locator's chain reaches on its own: whatever only an
+  // earlier locator reached is gone once the logs that carried it expire.
+  const alone = new Set<bigint>();
   const named = decodeArchiveLocator(locator);
   unknown("latest", named);
   if (named.kind === "manifest") {
@@ -366,6 +373,7 @@ export async function walkArchive(
       const slot = claim(m.sequence, named.manifest);
       slot.tried.push(named.transaction);
       overBudget = !reach(slot, m) || !(await drain());
+      for (const [sequence, slot] of slots) if (slot.reached) alone.add(sequence);
     }
   }
 
@@ -412,35 +420,19 @@ export async function walkArchive(
     // Then the rest, against the chain as it now stands. One at a sequence
     // the chain names (with another CID) or above the latest's is a
     // mismatch. One at a sequence below the latest's that the chain doesn't
-    // name may sit below a link a source withheld: it is a mismatch only if
-    // the chain left no link unread, and either way it is followed, so what
-    // it reaches is no gap.
+    // name can't be told from one below a link a source withheld, or one the
+    // authority's links cut off: it is followed, and what it reaches is
+    // reported as `earlier-only`, a fact either way.
     const named = new Set(slots.keys());
-    const whole = ![...slots.values()].some((s) => !s.reached && s.unavailable.length > 0);
     for (const e of earlier) {
       if (overBudget) break;
-      if (own.has(e.locator)) continue;
-      const from = { locator: e.locator };
-      const omitted = (sequence: bigint) => {
-        if (whole)
-          findings.push({
-            code: "locator-mismatch",
-            locator: e.locator,
-            sequence,
-            named: e.manifest,
-            chain: undefined,
-          });
-      };
-      // Already followed from another earlier locator.
-      const at = byCid.get(bytesToHex(e.manifest));
-      if (at !== undefined) {
-        omitted(at);
-        continue;
-      }
+      // The chain's own, or already followed from another earlier locator.
+      if (own.has(e.locator) || byCid.has(bytesToHex(e.manifest))) continue;
       if (reads >= budget) {
         overBudget = true;
         break;
       }
+      const from = { locator: e.locator };
       const m = await fetch(from, e.manifest, e.transaction);
       if (m === "unavailable")
         findings.push({ code: "unavailable", from, cid: e.manifest, transaction: e.transaction });
@@ -455,7 +447,6 @@ export async function walkArchive(
         });
         continue;
       }
-      omitted(m.sequence);
       // Another earlier locator already followed a manifest there.
       if (slots.has(m.sequence)) continue;
       const slot = claim(m.sequence, e.manifest);
@@ -471,10 +462,12 @@ export async function walkArchive(
 
   if (overBudget) findings.push({ code: "over-budget", budget });
   else if (latest !== undefined) {
+    // Every transaction no source served, even where another reached its
+    // sequence: an honest link names a confirmed upload, so each is a fact
+    // about the chain as the latest locator gives it.
     for (const s of slots.values())
-      if (!s.reached)
-        for (const { transaction, from } of s.unavailable)
-          findings.push({ code: "unavailable", from, cid: s.cid, transaction });
+      for (const { transaction, from } of s.unavailable)
+        findings.push({ code: "unavailable", from, cid: s.cid, transaction });
     // `reached` is sorted and holds `latest`, so the gaps are the holes
     // between consecutive reached sequences from 0.
     let next = 0n;
@@ -483,6 +476,16 @@ export async function walkArchive(
         findings.push({ code: "archive-gap", first: next, last: r.sequence - 1n });
       next = r.sequence + 1n;
     }
+    let run: { first: bigint; last: bigint } | undefined;
+    for (const r of reached) {
+      if (alone.has(r.sequence)) continue;
+      if (run !== undefined && r.sequence === run.last + 1n) run.last = r.sequence;
+      else {
+        if (run !== undefined) findings.push({ code: "earlier-only", ...run });
+        run = { first: r.sequence, last: r.sequence };
+      }
+    }
+    if (run !== undefined) findings.push({ code: "earlier-only", ...run });
   }
 
   return { latest, manifests: reached, listings: wanted, findings, reads };

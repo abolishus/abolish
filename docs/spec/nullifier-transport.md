@@ -2,7 +2,7 @@
 
 How a client's Tier 2 query reaches each seat and each seat's answer comes back, encrypted end to end ([[0022-tier2-keyed-nullifier]], Consequences, Channels): the nullifier request (record type `0x0022`, version 1), which seals one query to one seat's registration KEM key and names a fresh client key for the reply, the nullifier reply (record type `0x0023`, version 1), which seals that seat's answer to the client key, and the checks each side makes before it opens or uses either. The query and its checks are [[nullifier-query]]'s, the answer and its check [[keyed-nullifier]]'s, the registration KEM keys [[nullifier-key]]'s (and [[nullifier-reshare]]'s for a successor key), and the hybrid KEM, its key format and its combiner [[share-encryption]]'s. Notation is from [[notation]]. Threats: T-15, T-13, T-21, T-30, T-31, T-39.
 
-What this page doesn't cover yet (P3-4 part 2b-4's later steps): the identity chain behind `comm_in` and its checks, the output's transport to the attesters with the attestation's position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
+What this page doesn't cover yet (P3-4 part 2b-4's later steps): carrying the identity-chain record ([[identity-chain]]) to each seat with its query, the output's transport to the attesters with the attestation's position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
 

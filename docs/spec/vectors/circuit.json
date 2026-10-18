@@ -598,6 +598,11 @@
       "tag": "abolish/v1/keyed-nullifier/request",
       "digest": "40e04b8d07a3da8fdbe2eb8af73ea4e2e30cfdddea5d07b1101ba550dd27cd70",
       "field": "114626240175673780758379721180085539338207277394631674197989141341565429709"
+    },
+    {
+      "tag": "abolish/v1/identity-chain/csca",
+      "digest": "23546d4d20b2c2b7bf802fcb341303089953bbe37f551b85757474879ee5feaf",
+      "field": "62422340717058330485874409595845002322804658610762054398117254491772216830"
     }
   ],
   "packBytes": [

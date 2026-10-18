@@ -4,7 +4,7 @@ How a client asks the panel for its Tier 2 keyed nullifier and shows the atteste
 
 What this page doesn't yet specify:
 
-- **Part 2b-4:** queries and answers travel under [[nullifier-transport]]; still to come are the identity chain a query's `comm_in` must come from and its checks ([[0010-tier2-identity-provider]]'s pinned circuit set, US anchors, proof date and predicates), the output's transport to the attesters, the attestation's group position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
+- **Part 2b-4:** queries and answers travel under [[nullifier-transport]], and the identity chain a query's `comm_in` must come from, with its check, is [[identity-chain]]'s; still to come are that chain's transport and its proofs checked as code, the output's transport to the attesters, the attestation's group position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
 
@@ -28,7 +28,7 @@ Record type `0x001d`, version 1. Never on the board, the chain or the archive, a
 | `group_id`       | `u64`          | The Tier 2 group the commitment is to join ([[contracts]], Group registry)                                                    |
 | `commitment`     | `field<bn254>` | The identity commitment to be added ([[membership]])                                                                          |
 | `query_id`       | `bytes[32]`    | Fresh from the client's CSPRNG for every query                                                                                |
-| `comm_in`        | `field<bn254>` | The commitment the client's identity chain output, which its other proofs of the registration share (part 2b-4)               |
+| `comm_in`        | `field<bn254>` | The commitment the client's identity chain output, which its identity chain's proofs share ([[identity-chain]])               |
 | `b`              | `bjj-point`    | `B = r · H1(σ, x)`. Never the identity                                                                                        |
 | `proof`          | `bytes<65536>` | The query proof: an UltraHonk proof, zero-knowledge flavour, of the query circuit under the verification key the release pins |
 
@@ -59,7 +59,7 @@ x ≠ 0,  s_x ≠ 0
 B = r · H1(σ, x)
 ```
 
-- **`comm_in`'s opening.** `d_1` to `d_4` are the salted hashes of `dg1`, the expiry date, the normalised `dg2` hash and its hash type, in either of zkPassport's forms, which the circuit doesn't need to tell apart. The fifth slot is opened only in the clear-value form, `Sponge(s_x, x)[0]` with both non-zero (`SaltedValue::get_hash` on a clear value), never as a bare hash: zkPassport's hash-only form carries the private nullifier's value as 0, and every document would then share a second `x` ([[0022-tier2-keyed-nullifier]], Amendment; T-03). That `comm_in` came from this document's identity chain, so that `x` is its private nullifier, is checked outside the circuit, against the chain's own proofs of the same `comm_in` (part 2b-4).
+- **`comm_in`'s opening.** `d_1` to `d_4` are the salted hashes of `dg1`, the expiry date, the normalised `dg2` hash and its hash type, in either of zkPassport's forms, which the circuit doesn't need to tell apart. The fifth slot is opened only in the clear-value form, `Sponge(s_x, x)[0]` with both non-zero (`SaltedValue::get_hash` on a clear value), never as a bare hash: zkPassport's hash-only form carries the private nullifier's value as 0, and every document would then share a second `x` ([[0022-tier2-keyed-nullifier]], Amendment; T-03). That `comm_in` came from this document's identity chain, so that `x` is its private nullifier, is checked outside the circuit, against the chain's own proofs of the same `comm_in` ([[identity-chain]], Identity-chain check).
 - **`x ≠ 0`.** `H1` is defined at 0 ([[keyed-nullifier-hashes]], H1); the circuit refuses it.
 - **`r`.** `0 < r < l` by `validate_babyjubjub_field` (`r < l`) and `r ≠ 0`: `scalar_mul` bounds its scalar only below `2²⁵¹` ([[keyed-nullifier-hashes]], TACEO's gadgets). The circuits take `r`'s 251 bits from `validate_scalar_field_with_bits`, which applies that bound, and multiply with `scalar_mul_bits`, `scalar_mul`'s own loop; the output circuit multiplies `H1(σ, x)` and `U` by the same bits. `B` is then never the identity, since `H1` isn't ([[keyed-nullifier-hashes]], H1, The identity).
 - **`B`** is computed with `H1` and `scalar_mul_bits` from [[keyed-nullifier-hashes]]' gadgets; every point that meets `add` is on the curve.
@@ -67,7 +67,7 @@ B = r · H1(σ, x)
 
 **What it proves.** The client knows `x ≠ 0` inside the commitment its identity chain output and `r` with `B = r · H1(σ, x)`, for this context. So `sk_i · B = (r · sk_i) · H1(σ, x)` can't serve as a next query without knowing `r · sk_i`, which is what stops chained queries ([[keyed-nullifier]], Security notes), and a query moved to another key, scope, group, commitment or `query_id` fails the proof (T-21, T-30). Its verification key, and so its circuit, is pinned by the release, as [[0010-tier2-identity-provider]] pins the identity chain's; a changed circuit is a new protocol version, never a parameter (T-05).
 
-**What it reveals.** For `r` uniform and unknown to the seat, `B` is uniform in `𝔾`, so it says nothing about `x`. `comm_in` hides the document only if its salts do: the client MUST draw `s_x` and every other salt of its identity chain uniformly from the CSPRNG, fresh for each chain, never a constant (part 2b-4 checks nothing of it; a fixed salt would let anyone holding the chip data recompute `comm_in`). The proof is zero-knowledge, but only computationally: its witness holds the salted hashes of `dg1`, and a seat that kept the proof and later broke the assumption would learn nothing of `dg1` beyond those hashes, but would learn `x` and so the document's chip-recomputable nullifier. Seats delete queries once they have answered or refused ([[0022-tier2-keyed-nullifier]], Consequences, Channels; T-15).
+**What it reveals.** For `r` uniform and unknown to the seat, `B` is uniform in `𝔾`, so it says nothing about `x`. `comm_in` hides the document only if its salts do: the client MUST draw `s_x` and every other salt of its identity chain uniformly from the CSPRNG, fresh for each chain, never a constant ([[identity-chain]] checks nothing of it; a fixed salt would let anyone holding the chip data recompute `comm_in`). The proof is zero-knowledge, but only computationally: its witness holds the salted hashes of `dg1`, and a seat that kept the proof and later broke the assumption would learn nothing of `dg1` beyond those hashes, but would learn `x` and so the document's chip-recomputable nullifier. Seats delete queries once they have answered or refused ([[0022-tier2-keyed-nullifier]], Consequences, Channels; T-15).
 
 ### Query check
 
@@ -82,7 +82,7 @@ A seat checks a query before it answers, against its own pins and the key it hol
 | `query-commitment` | `commitment` isn't forbidden ([[membership]], Commitments and removals).                                                      |
 | `query-proof`      | `proof` verifies under the pinned query-circuit key with public inputs `σ`, `ctx`, `comm_in`, `b.x`, `b.y` (Keys and proofs). |
 
-Only then does the seat answer ([[keyed-nullifier]], Evaluation), with `query_hash` and `b` from the query. In `packages/circuits`, `answerQuery` answers only a query its `checkQuery` passed, proof included. The checks of the identity chain behind `comm_in` come before the answer too (part 2b-4). The proof is checked last because it is the costly check; a query that fails an earlier one costs the seat a decoding and a few lookups.
+Only then does the seat answer ([[keyed-nullifier]], Evaluation), with `query_hash` and `b` from the query. In `packages/circuits`, `answerQuery` answers only a query its `checkQuery` passed, proof included. The identity-chain check of the record that accompanies the query comes before the answer too ([[identity-chain]], Identity-chain check). The proof is checked last because it is the costly check; a query that fails an earlier one costs the seat a decoding and a few lookups.
 
 ## The output
 
@@ -119,11 +119,11 @@ N = H2(σ, x, U)
 - **`U` in `𝔾`, and not the identity.** On the curve first (`is_on_curve`), then an assertion that `check_sub_group` returns true, since it returns a `bool` and asserts nothing itself ([[keyed-nullifier-hashes]], TACEO's finding A): with `U` only on the curve, `U + T` for `T` of order dividing `gcd(r, 8)` would satisfy `Z = r · U` too and hash to a second `N`. The identity is refused as well, closing what part 2b-3b-1 left to this circuit (`h2` accepts it): `Z` would then be the identity, which the attesters refuse anyway, so this costs one constraint and removes the dependence.
 - **`q` enters no constraint**, as `ctx` in the query circuit: it binds the proof to the query, and so to its key, scope, group, commitment, `comm_in` and `B`. `test/proofs.test.ts` shows a proof fails under any other `q`.
 
-**What it proves.** For the query named by `q`, the `N` it outputs is `H2(σ, x, sk · H1(σ, x))` with `x` the document's, given that `Z = sk · B`, which the attesters establish from the answers' proofs. Given that the identity chain is sound, so that `x` is the document's one private nullifier (part 2b-4, and the question [[0022-tier2-keyed-nullifier]]'s Amendment leaves open), one document therefore has one `N` under one key's scope: `H1` and `H2` are deterministic, the map's sign rule is fixed, `U` is unique in `𝔾`, and `r` and `x` are bound as above (T-03). **What it reveals:** nothing beyond `N`, `Z` and the public inputs, computationally; the attesters see `N` and never `x` or `U`.
+**What it proves.** For the query named by `q`, the `N` it outputs is `H2(σ, x, sk · H1(σ, x))` with `x` the document's, given that `Z = sk · B`, which the attesters establish from the answers' proofs. Given that the identity chain is sound, so that `x` is the document's one private nullifier ([[identity-chain]], and the question [[0022-tier2-keyed-nullifier]]'s Amendment leaves open), one document therefore has one `N` under one key's scope: `H1` and `H2` are deterministic, the map's sign rule is fixed, `U` is unique in `𝔾`, and `r` and `x` are bound as above (T-03). **What it reveals:** nothing beyond `N`, `Z` and the public inputs, computationally; the attesters see `N` and never `x` or `U`.
 
 ### Output check
 
-Each attester checks an output against the query it checked (the query check above, with the identity chain of part 2b-4) and the key's transcript, never against values the output supplies for them. In this order, the first failure is the result:
+Each attester checks an output against the query it checked (the query check above, with the identity-chain check of [[identity-chain]]) and the key's transcript, never against values the output supplies for them. In this order, the first failure is the result:
 
 | Code                 | Check                                                                                                                                                                                                                                                    |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

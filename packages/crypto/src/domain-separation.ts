@@ -250,6 +250,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/kem/nullifier-reply", primitive: "kdf-aead", status: "specified" },
       { tag: "abolish/v1/kem/nullifier-reply-aad", primitive: "kdf-aead", status: "specified" },
       { tag: "abolish/v1/keyed-nullifier/request", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/identity-chain/csca", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

@@ -66,6 +66,60 @@ export function checkSelected(
     : [`${name}: selected ${JSON.stringify(selected ?? null)}, not ${JSON.stringify(expected)}`];
 }
 
+/**
+ * Rows a tallied election's format-5 bundle must pass: its ballots' L1
+ * references (5.8), their delivery (5.9), selection (6.1), the tally (7.1 to
+ * 7.3) and every seat's destruction (8.5) (stage 6).
+ */
+export const TALLY_PASSES: readonly string[] = Object.freeze([
+  "5.8",
+  "5.9",
+  "6.1",
+  "7.1",
+  "7.2",
+  "7.3",
+  "8.5",
+]);
+
+/** What a tallied election's one cell must report: its counted ballots and its count per option. */
+export interface ExpectedTally {
+  readonly counted: number;
+  readonly counts: readonly number[];
+}
+
+/**
+ * Why a tallied election's report isn't what stage 6 requires; empty if it
+ * is: `TALLY_PASSES`, its one cell's counted ballots and counts, and every
+ * registered seat `destroyed`. The tally rows pass vacuously on the wrong
+ * counted set's honest opening, so the run pins the result the votes cast
+ * add up to.
+ */
+export function checkTallied(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: ExpectedTally,
+  seats: number,
+): string[] {
+  const problems = checkRows(
+    name,
+    run,
+    Object.fromEntries(TALLY_PASSES.map((id) => [id, { status: "pass" }])),
+  );
+  const cells = run.report.cells ?? [];
+  const [cell] = cells;
+  const counts = cell?.counts?.join();
+  if (cells.length !== 1 || cell?.counted !== expected.counted || counts !== expected.counts.join())
+    problems.push(
+      `${name}: cells ${JSON.stringify(cells)}, not one of ${expected.counted} counted ballots with counts ${expected.counts.join()}`,
+    );
+  const destroyed = run.report.destruction?.seats.filter((s) => s.code === "destroyed") ?? [];
+  if (destroyed.map((s) => s.seat).join() !== Array.from({ length: seats }, (_, i) => i + 1).join())
+    problems.push(
+      `${name}: destroyed ${JSON.stringify(run.report.destruction?.seats ?? null)}, not every seat`,
+    );
+  return problems;
+}
+
 // The verifier's exit codes (packages/verifier, EXIT_CODES).
 const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
 

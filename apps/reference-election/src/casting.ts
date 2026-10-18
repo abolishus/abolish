@@ -16,6 +16,7 @@ import {
   ballotCore,
   ballotElection,
   ballotHash,
+  type CastBallotV3,
   castSealV3,
   challengeSealV3,
   checkBallot,
@@ -198,6 +199,8 @@ export function challengeVote(c: Casting, votes: readonly (0 | 1)[]): Challenge 
 export interface CastBallot {
   readonly record: BallotRecord;
   readonly bytes: Uint8Array;
+  /** Each seat's share ciphertext, in seat order, for its intake (Casting step 5). */
+  readonly ciphertexts: readonly Uint8Array[];
 }
 
 /**
@@ -257,12 +260,14 @@ export async function castVote(
   };
   const checked = checkBallot(c.election, record);
   if (!checked.ok) throw new Error(`an honest ballot fails admission: ${checked.code}`);
-  return { record, bytes: encodeBallot(record) };
+  return { record, bytes: encodeBallot(record), ciphertexts: encrypted.ciphertexts };
 }
 
 /** What every ballot of a version-5 poll is made against, derived as a client derives it. */
 export interface QuestionCasting {
   readonly election: QuestionBallotElection;
+  /** The key set the transcript check registered, in seat order. */
+  readonly registered: readonly RegisteredKeys[];
   /** The one cell's leaves, in cell-tree order. */
   readonly leaves: readonly bigint[];
   readonly artifacts: MembershipProverArtifacts;
@@ -281,7 +286,12 @@ export function questionCastingFor(
   artifacts: MembershipProverArtifacts,
 ): QuestionCasting {
   const registered = registeredKeys(definition, electionStubV5Hash(definition), panel, transcript);
-  return { election: questionBallotElection(definition, registered), leaves, artifacts };
+  return {
+    election: questionBallotElection(definition, registered),
+    registered,
+    leaves,
+    artifacts,
+  };
 }
 
 /** The poll's one cell: every voter here is in the definition's one Tier 0 group. */
@@ -306,15 +316,15 @@ export function challengeQuestions(c: QuestionCasting, votes: readonly (0 | 1)[]
  * scope and the witness built from the cell's leaves (T-10, T-13), proved by
  * the client's prover, and finished by `finishSealV3`, which verifies and
  * re-randomises the proof and runs the admission checks before returning
- * the record (Casting step 4; T-07, T-12).
+ * the record (Casting step 4; T-07, T-12), with each seat's share ciphertext.
  */
 export async function castQuestions(
   c: QuestionCasting,
   voter: Voter,
   votes: readonly (0 | 1)[],
   l1Ref: L1Ref,
-): Promise<Uint8Array> {
+): Promise<CastBallotV3> {
   const sealed = sealBallotV3(c.election, CELL, votes);
   const casting = castSealV3(sealed, voter.secret, c.leaves, l1Ref);
-  return finishSealV3(casting, await proveMembership(casting.witness, c.artifacts)).ballot;
+  return finishSealV3(casting, await proveMembership(casting.witness, c.artifacts));
 }

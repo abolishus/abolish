@@ -14,6 +14,12 @@
 // the voter's later checks must find from L1, and the verifier's drop rule
 // must tell apart over the poll's bundle in format 5: the first ballot is on
 // the board, the second dropped (P1-13b).
+//
+// Every seat takes each ballot of the honest election and the poll in, and
+// its share receipts are boarded; past the close the seats tally each over
+// its counted ballots and then state destruction (stage 6), which the
+// verifier must find in each format-5 bundle, with the counts the votes cast
+// add up to.
 // Besides these, the run holds controls the verifier must not
 // pass, each with the rows it must show, so the honest run's passes can't be
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
@@ -50,6 +56,7 @@ import {
   isReceiptAlarm,
   type Panel,
   receiptKeysCastCheck,
+  type RegisteredKeys,
 } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { type Anvil, startAnvil } from "./anvil.ts";
@@ -81,8 +88,8 @@ import {
   checkBallots,
   checkControl,
   checkExpectations,
-  checkRows,
   checkSelected,
+  checkTallied,
 } from "./expectations.ts";
 import { blocksCar, segmentObjects } from "./blocks.ts";
 import {
@@ -118,6 +125,7 @@ import {
 } from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import { STAGES } from "./stages.ts";
+import { type Counted, destructionStatements, intake, tallyOpening } from "./tally.ts";
 import { judgeDrops, runVerifier, type VerifierRun } from "./verify.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -159,6 +167,8 @@ interface Election<D extends FixtureDefinition = FixtureDefinition> {
   readonly definition: D;
   readonly panel: Panel;
   readonly transcript: Uint8Array;
+  /** Each seat's per-election secrets, which the fixture holds as every trustee node. */
+  readonly secrets: Ceremony["secrets"];
   readonly entries: Uint8Array[];
 }
 
@@ -182,6 +192,7 @@ function firstEntry<D extends FixtureDefinition>(
     definition: c.definition,
     panel: c.panel,
     transcript: c.transcript,
+    secrets: c.secrets,
     entries: [boardEntry(c.definition, 0n, segment, c.transcript)],
   };
 }
@@ -264,11 +275,17 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     deadline: DEADLINE,
   });
   const end = (s: number) => epoch + (BigInt(s) + 1n) * PERIOD;
-  // The ceremony's segment, the voting window's (ballots are boarded in it)
-  // and the seal, which repeats the board's state after the window.
+  // The ceremony's segment; the voting window's, where ballots and their
+  // share receipts are boarded; the one after it, `period(closes_at) + 1`,
+  // the floor of the counted extent's last segment (docs/spec/tally.md,
+  // Tally window), with nothing appended; the tally's, where each cell's
+  // opening is boarded; and the seal, where each seat's destruction
+  // statement is, after the tally's checkpoint is anchored.
   const first = Number((now - epoch) / PERIOD);
   const cast = first + 1;
-  const seal = first + 2;
+  const closed = first + 2;
+  const tallied = first + 3;
+  const seal = first + 4;
   log(`L1: Anvil (chain ${L1_CHAIN_ID}), BoardAnchor at 0x${hex(anchor.address)}`);
 
   // The panel, pinned in the L2's trustee registry at deployment.
@@ -346,12 +363,14 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   const elections: Election[] = [...singles, questions];
 
   // Stage 7: each period's checkpoints anchored in one call, inside its
-  // window. A segment with nothing appended in it, the seal's always,
-  // repeats the board's state after the last one that has.
+  // window. A segment with nothing appended in it repeats the board's state
+  // after the last one that has.
+  const appended = [first, cast, tallied, seal];
   const checkpointsAt = (segment: number) =>
     elections.map((e) => {
-      const copies = copyCheckpoints(e.definition.value.election_id, e.entries, [first, cast]);
-      const c = (segment >= cast ? copies.get(cast) : undefined) ?? copies.get(first);
+      const copies = copyCheckpoints(e.definition.value.election_id, e.entries, appended);
+      const at = appended.filter((s) => s <= segment && copies.has(s)).at(-1);
+      const c = at === undefined ? undefined : copies.get(at);
       if (c === undefined) throw new Error(`no checkpoint for segment ${segment}`);
       return { ...c, segment };
     });
@@ -366,8 +385,22 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   const artifacts = proverArtifacts();
   const [honest, , rejected] = singles;
   if (honest === undefined || rejected === undefined) throw new Error("an election is missing");
-  const board = (e: Election, payload: Uint8Array) =>
-    e.entries.push(boardEntry(e.definition, BigInt(e.entries.length), cast, payload));
+  const board = (e: Election, payload: Uint8Array, segment = cast) =>
+    e.entries.push(boardEntry(e.definition, BigInt(e.entries.length), segment, payload));
+  // Each election's counted ballots, for stage 6: every voter's last ballot,
+  // the one selection keeps (docs/spec/revoting.md), with the shares every
+  // seat took from it; the key set the seats' messages go under; and the
+  // counts per option their votes add up to, which the verifier must report.
+  const counted = new Map<
+    Election,
+    {
+      readonly ballots: readonly Counted[];
+      readonly registered: readonly RegisteredKeys[];
+      readonly counts: readonly number[];
+    }
+  >();
+  const countsOf = (votes: Iterable<readonly number[]>) =>
+    [...votes].reduce<number[]>((sum, v) => v.map((x, j) => x + (sum[j] ?? 0)), []);
   // The poll's receipts, each with the verdict its voter's later check must reach.
   const receipts: Receipted[] = [];
   {
@@ -400,16 +433,32 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       throw new Error("an honest challenge failed its check");
     const [v0, v1, v2] = voters;
     if (v0 === undefined || v1 === undefined || v2 === undefined) throw new Error("too few voters");
-    // Voter 1 re-votes under a later block; voter 3 never votes.
-    for (const [voter, votes, ref] of [
+    // Voter 1 re-votes under a later block; voter 3 never votes. Every seat
+    // takes each ballot in, and its share receipts are boarded after the
+    // window's ballots, in the same segment: their delivery (5.9).
+    const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
+    const receipts: Uint8Array[] = [];
+    const ballots = [
       [v0, [1, 0, 0], refs[0]],
       [v1, [0, 1, 0], refs[0]],
       [v2, [0, 0, 0], refs[0]],
       [v1, [0, 0, 1], refs[1]],
-    ] as const)
-      board(honest, (await castVote(casting, voter, votes, ref)).bytes);
+    ] as const;
+    for (const [voter, votes, ref] of ballots) {
+      const ballot = await castVote(casting, voter, votes, ref);
+      board(honest, ballot.bytes);
+      const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
+      receipts.push(...taken.receipts);
+      last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
+    }
+    for (const r of receipts) board(honest, r);
+    counted.set(honest, {
+      ballots: [...last.values()],
+      registered: casting.registered,
+      counts: countsOf([...last.values()].map((b) => b.votes)),
+    });
     log(
-      `stage 4 (honest): ${honest.entries.length - 1} ballots with real membership proofs boarded in segment ${cast}, one a re-vote; one challenged attempt checked`,
+      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each with every seat's share receipt; one challenged attempt checked`,
     );
   }
   {
@@ -471,13 +520,25 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     // once the ballot is appended, which the voter's client checks at cast.
     const payloads: Uint8Array[] = [];
     const receiptsOf = receiptElection(questions.definition);
+    // Every seat takes each ballot in, as in the honest election.
+    const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
+    const shareReceipts: Uint8Array[] = [];
     for (const [voter, votes, ref] of [
       [v0, [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0], refs[0]],
       [v1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], refs[0]],
       [v2, [0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0], refs[0]],
       [v1, [0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1], refs[1]],
     ] as const) {
-      const payload = await castQuestions(casting, voter, votes, ref);
+      const made = await castQuestions(casting, voter, votes, ref);
+      const payload = made.ballot;
+      const taken = intake(
+        casting.election,
+        questions.secrets,
+        payload,
+        made.ciphertexts.map((c) => c.ciphertext),
+      );
+      shareReceipts.push(...taken.receipts);
+      last.set(voter, { payload, shares: taken.shares, votes });
       payloads.push(payload);
       board(questions, payload);
       receipts.push({
@@ -488,11 +549,15 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         drop: { status: "not-alarm" },
       });
     }
+    // The seats' share receipts after the window's ballots, so the ballots
+    // keep the indices the receipts below name.
+    for (const r of shareReceipts) board(questions, r);
     // Two receipts the operator signs for boards it never anchors. A fork:
     // voter 0's ballot shown at index 2, after voter 1's first, though the
     // anchored board has it at 1; the ballot is on the board, so only the
     // receipt's board is false. A drop: voter 3's ballot, never boarded,
-    // shown appended to the anchored board as index 5 (T-26).
+    // shown appended to the window's anchored board, after the share
+    // receipts (T-26).
     const [p0, p1] = payloads;
     const [transcript] = questions.entries;
     if (p0 === undefined || p1 === undefined || transcript === undefined)
@@ -516,7 +581,8 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     });
     const v3 = voters[3];
     if (v3 === undefined) throw new Error("too few voters");
-    const dropped = await castQuestions(casting, v3, [1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0], refs[1]);
+    const dropped = (await castQuestions(casting, v3, [1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0], refs[1]))
+      .ballot;
     receipts.push({
       name: "dropped",
       payload: dropped,
@@ -534,15 +600,41 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     });
     // The client can't tell any of them apart at cast: each passes.
     for (const r of receipts)
-      if (!checkAtCast(receiptsOf, r.receipt, r.payload, { min: cast, max: seal }))
+      if (!checkAtCast(receiptsOf, r.receipt, r.payload, { min: cast, max: closed }))
         throw new Error(`the poll's ${r.name} receipt failed the client's check at cast`);
+    counted.set(questions, {
+      ballots: [...last.values()],
+      registered: casting.registered,
+      counts: countsOf([...last.values()].map((b) => b.votes)),
+    });
     log(
-      `stage 4 (questions): ${questions.entries.length - 1} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote; one challenged attempt checked; ${receipts.length} receipts signed, one for a forked board and one for a dropped ballot, each passing the client's check at cast`,
+      `stage 4 (questions): ${payloads.length} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote, each with every seat's share receipt; one challenged attempt checked; ${receipts.length} receipts signed, one for a forked board and one for a dropped ballot, each passing the client's check at cast`,
     );
   }
 
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);
+  await anchorAt(anvil, anchor, checkpointsAt(closed), end(closed) + ANCHOR_DELAY);
+
+  // Stage 6, once the counted extent is anchored: each election whose
+  // ballots the seats took in is tallied over its counted ballots, its one
+  // cell's opening boarded in the tally's segment; once that checkpoint is
+  // anchored, each seat states destruction in the seal's (docs/spec/tally.md,
+  // Destruction, When).
+  const tallies = [honest, questions].map((e) => {
+    const taken = counted.get(e);
+    if (taken === undefined) throw new Error(`no counted ballots for ${e.name}`);
+    const { ballots, registered } = taken;
+    board(e, tallyOpening(e.definition, registered, e.secrets, ballots), tallied);
+    return { e, ballots };
+  });
+  await anchorAt(anvil, anchor, checkpointsAt(tallied), end(tallied) + ANCHOR_DELAY);
+  for (const { e } of tallies)
+    for (const statement of destructionStatements(e.definition, e.secrets))
+      board(e, statement, seal);
   await anchorAt(anvil, anchor, checkpointsAt(seal), end(seal) + ANCHOR_DELAY);
+  log(
+    `stage 6: ${tallies.map(({ e, ballots }) => `${e.name}'s cell opened over ${ballots.length} counted ballots`).join(", ")}, each from every seat's summed shares, in segment ${tallied}; every seat's destruction statement in segment ${seal}`,
+  );
   // Past the seal's deadline, so the board checks see closed boards; then
   // enough blocks that Anvil's finalized block includes every anchor.
   const after = end(seal) + DEADLINE + 1n;
@@ -632,7 +724,26 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
         { ...evidenceFor, blocks: await headers(anvil, l1.number) },
         { blocks },
       );
-      if (e.name !== "questions") failures.push(...verify(withBlocks, () => []));
+      // A tallied election's format-5 bundle must show its tally (stage 6):
+      // each voter's last ballot selected (voter 1's re-vote, entry 4, over
+      // its first, entry 2), delivered, counted and opened, and every seat's
+      // destruction stated.
+      const tally = counted.get(e);
+      const tallyRows = (name: string) => (r: VerifierRun) =>
+        tally === undefined
+          ? []
+          : [
+              ...checkTallied(
+                name,
+                r,
+                { counted: tally.ballots.length, counts: tally.counts },
+                PANEL.size,
+              ),
+              ...checkBallots(name, r, HONEST_BALLOTS),
+              ...checkSelected(name, r, [1, 3, 4]),
+            ];
+      if (e.name !== "questions")
+        failures.push(...verify(withBlocks, tallyRows(`${e.name} (l1 blocks)`)));
       if (e.name === "honest") {
         failures.push(...verify(dir, (r) => checkExpectations(r, "blocks.car", HONEST_BALLOTS)));
         // The same election read from the node's gateway alone, no copy in the bundle.
@@ -690,23 +801,9 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
           ),
         );
         // Its format-5 bundle: the verifier judges each ballot's L1 reference
-        // (5.8) and selects over the admitted ballots (6.1): voter 1's re-vote
-        // (entry 4) over its first ballot (entry 2). Past the close it looks
-        // for the tally and the shares' destruction, which no stage posts yet
-        // (stage 6), so 7.2 and 8.5 fail and are pinned as failing until one
-        // does; nothing else of the report is required here.
-        failures.push(
-          ...verify(withBlocks, (r) => [
-            ...checkRows("questions (l1 blocks)", r, {
-              "5.8": { status: "pass" },
-              "6.1": { status: "pass" },
-              "7.2": { status: "fail", code: "tally-missing" },
-              "8.5": { status: "fail", code: "destruction-missing" },
-            }),
-            ...checkBallots("questions (l1 blocks)", r, HONEST_BALLOTS),
-            ...checkSelected("questions (l1 blocks)", r, [1, 3, 4]),
-          ]),
-        );
+        // (5.8), selects over the admitted ballots (6.1) and checks the tally
+        // and destruction, as the honest election's.
+        failures.push(...verify(withBlocks, tallyRows("questions (l1 blocks)")));
         // Stage 4's alarms judged for drops by the verifier over that bundle
         // (docs/spec/receipts.md, Drops), which needs 5.8 and 6.1: the forked
         // receipt's ballot is on the anchored board, the dropped one's on no

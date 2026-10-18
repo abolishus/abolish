@@ -5,8 +5,10 @@ import {
   checkExpectations,
   checkRows,
   checkSelected,
+  checkTallied,
   type ExpectedBallots,
   REQUIRED_PASSES,
+  TALLY_PASSES,
 } from "../src/expectations.ts";
 import type { ReportRow } from "../src/verify.ts";
 import { STAGES } from "../src/stages.ts";
@@ -233,4 +235,57 @@ test("an election's name and its own rows reach the report's problems", () => {
   expect(checkExpectations(honest, "blocks.car", none, options)).toEqual([
     "questions: check 2.9 must pass, got no row ",
   ]);
+});
+
+test("a tallied election must pass the tally rows, open its one cell to the counts expected and have every seat destroyed", () => {
+  const expected = { counted: 3, counts: [1, 0, 1] };
+  const tallied = (report: object) => ({
+    report: {
+      verdict: "unverifiable",
+      checks: TALLY_PASSES.map((id) => ({ id, status: "pass" as const })),
+      cells: [{ cell: 0, counted: 3, counts: ["1", "0", "1"] }],
+      destruction: { seats: [1, 2, 3].map((seat) => ({ seat, code: "destroyed" })) },
+      ...report,
+    },
+  });
+  expect(checkTallied("honest", tallied({}), expected, 3)).toEqual([]);
+  // A failing tally row, by its code.
+  expect(
+    checkTallied(
+      "honest",
+      tallied({
+        checks: TALLY_PASSES.map((id) =>
+          id === "7.2"
+            ? { id, status: "fail" as const, code: "tally-missing" }
+            : { id, status: "pass" as const },
+        ),
+      }),
+      expected,
+      3,
+    ),
+  ).toEqual(["honest: check 7.2 must be pass , got fail tally-missing"]);
+  // Another counted set, other counts, no cell, or two.
+  for (const cells of [
+    [{ cell: 0, counted: 2, counts: ["1", "0", "1"] }],
+    [{ cell: 0, counted: 3, counts: ["0", "1", "1"] }],
+    [{ cell: 0, counted: 3 }],
+    [],
+    [
+      { cell: 0, counted: 3, counts: ["1", "0", "1"] },
+      { cell: 1, counted: 0, counts: ["0", "0", "0"] },
+    ],
+  ])
+    expect(checkTallied("honest", tallied({ cells }), expected, 3)).toHaveLength(1);
+  // A seat whose statement is missing or early, or a report without destruction.
+  for (const destruction of [
+    { seats: [1, 2].map((seat) => ({ seat, code: "destroyed" })) },
+    {
+      seats: [1, 2, 3].map((seat) => ({
+        seat,
+        code: seat === 2 ? "destruction-early" : "destroyed",
+      })),
+    },
+    undefined,
+  ])
+    expect(checkTallied("honest", tallied({ destruction }), expected, 3)).toHaveLength(1);
 });

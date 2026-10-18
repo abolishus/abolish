@@ -8,7 +8,7 @@
 // repository and tag the line it replaces named.
 
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, lstatSync, readdirSync } from "node:fs";
 import { dirname, posix } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -326,7 +326,12 @@ describe("vendored sources", () => {
     const pinned = VENDORED.map((v) => v.path);
     const files = readdirSync(new URL("vendor/", ROOT), { recursive: true, encoding: "utf8" })
       .map((f) => `vendor/${f}`)
-      .filter((f) => !statSync(new URL(f, ROOT)).isDirectory());
+      .filter((f) => {
+        // lstat: a symlink is neither, so it can't pass as a directory.
+        const st = lstatSync(new URL(f, ROOT));
+        expect(st.isFile() || st.isDirectory(), f).toBe(true);
+        return st.isFile();
+      });
     for (const f of files) {
       const covered =
         TEMPLATES.includes(f) || pinned.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p));

@@ -19,7 +19,9 @@ import type { CommitmentResult, Tier0OutcomeResult } from "./worker/protocol.ts"
 // outcome is read from the group registry's whole log on the L2, never asked
 // of the service (T-11, T-13): registered, kept as the identity's Tier 0
 // membership; not yet, with the request offered again once it is due; or
-// moved, an alarm ([[registration]], Outcome).
+// moved, an alarm, read again from a second L2 endpoint of another operator
+// before the voter is offered a new identity in its place ([[registration]],
+// Outcome; [[deployment]], Security notes; T-16).
 
 /** A registry read that succeeded (`loadGroupRegistry`). */
 export type ReadRegistry = Extract<LoadedRegistry, { ok: true }>;
@@ -50,6 +52,13 @@ export interface Registrar {
   /** The group registry's whole log up to the L2's finalized head (`loadGroupRegistry`). */
   registry(): Promise<LoadedRegistry>;
   /**
+   * The same log read through the deployment's second L2 endpoint
+   * (`Deployment.confirmRpc`), or `undefined` where the build names none:
+   * then a move is shown but never acted on, since one endpoint alone could
+   * fake one to make a registered voter discard their identity (T-16).
+   */
+  readonly confirmRegistry: (() => Promise<LoadedRegistry>) | undefined;
+  /**
    * The worker's outcome of a request for `region` by the identity whose
    * secret is `secret`, over `registry` (`BallotWorker.tier0Outcome`);
    * rejects if the worker fails. `secret` is copied to the worker before
@@ -58,6 +67,12 @@ export interface Registrar {
   outcome(secret: Uint8Array, region: number, registry: ReadRegistry): Promise<Tier0OutcomeResult>;
   /** Keeps `group` as the Tier 0 membership of the identity whose secret is `secret`, in place of its request (`recordTier0Membership`). */
   join(secret: Uint8Array, group: bigint): Promise<"recorded" | "changed" | "unwritable">;
+  /**
+   * Replaces the moved identity whose secret is `secret` with a new one made
+   * on this device (`replaceMovedIdentity`), only while it still waits on
+   * its request and is in no group.
+   */
+  replace(secret: Uint8Array): Promise<"replaced" | "changed" | "unwritable">;
   /** This device's clock, in milliseconds since the UNIX epoch. */
   now(): number;
   /**
@@ -115,6 +130,16 @@ const STOPPED = {
   "region-changed": { title: "regionChangedTitle", detail: "regionChanged", retry: false },
   /** Registered, but the device now holds another identity or couldn't keep the membership. */
   "join-not-noted": { title: "joinNotNotedTitle", detail: "joinNotNoted", retry: true },
+  /**
+   * The second L2 endpoint didn't show the move the first did: one of them
+   * misreports the registry's log, so nothing is changed (T-16).
+   */
+  "outcome-disputed": { title: "outcomeDisputedTitle", detail: "outcomeDisputed", retry: true },
+  /**
+   * The identity changed since the move was confirmed (another tab), or is
+   * in a group, so it was kept: the poll is checked anew.
+   */
+  "not-replaced": { title: "notReplacedTitle", detail: "notReplaced", retry: true },
 } as const satisfies Record<
   string,
   { readonly title: keyof Messages; readonly detail: keyof Messages; readonly retry: boolean }
@@ -141,7 +166,10 @@ type Step =
   | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "due"; readonly acceptedAt: number }
   | { readonly kind: "joined" }
-  | { readonly kind: "moved" }
+  // A move both endpoints show, with the commitment they showed moved, or
+  // one shown by the first alone.
+  | { readonly kind: "moved"; readonly confirmed: bigint | undefined }
+  | { readonly kind: "replacing" }
   | { readonly kind: "preparing" }
   | { readonly kind: "challenge"; readonly commitment: bigint; readonly round: number }
   | { readonly kind: "sending" }
@@ -228,6 +256,7 @@ export function Register({
       const read = await registrar.identity();
       if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
       const { secret, tier0Request } = read.identity;
+      let moved: { readonly group: bigint; readonly held: Promise<CommitmentResult> } | undefined;
       try {
         // Registered meanwhile (another tab), or no longer waiting: the poll
         // decides anew. A membership in another tier doesn't end the wait.
@@ -250,7 +279,9 @@ export function Register({
               : { kind: "stopped", problem: "join-not-noted" };
           }
           case "moved":
-            return { kind: "moved" };
+            // Its commitment, so the second endpoint's read is of this identity.
+            moved = { group: outcome.group, held: registrar.commitment(secret) };
+            break;
           case "not-yet":
             return retryDue(tier0Request.acceptedAt, registry.timestamp)
               ? { kind: "due", acceptedAt: tier0Request.acceptedAt }
@@ -259,6 +290,76 @@ export function Register({
       } finally {
         secret.fill(0);
       }
+      return confirmMoved(moved.group, await moved.held);
+    });
+  }
+
+  /**
+   * A move the group registry's log showed, read again through the second
+   * L2 endpoint for the same identity, again without the page holding the
+   * secret for the download. Confirmed only if it shows the same identity
+   * moved to the same group; a second read that fails leaves the move
+   * unconfirmed, and one that shows anything else is a dispute: one of the
+   * two endpoints misreports the log, and nothing is changed (T-16, T-11).
+   */
+  async function confirmMoved(group: bigint, held: CommitmentResult): Promise<Step | "restart"> {
+    if (!held.ok) return { kind: "stopped", problem: "unreadable" };
+    const unconfirmed: Step = { kind: "moved", confirmed: undefined };
+    if (registrar.confirmRegistry === undefined) return unconfirmed;
+    const registry = await registrar.confirmRegistry();
+    if (!registry.ok) return unconfirmed;
+    const read = await registrar.identity();
+    if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
+    const { secret, tier0Request } = read.identity;
+    let result: Tier0OutcomeResult;
+    try {
+      if (tier0Request === undefined) return "restart";
+      if (tier0Request.region !== registrar.region)
+        return { kind: "stopped", problem: "region-changed" };
+      const again = await registrar.commitment(secret);
+      if (!again.ok) return { kind: "stopped", problem: "unreadable" };
+      // Another identity meanwhile (another tab): the poll decides anew.
+      if (again.commitment !== held.commitment) return "restart";
+      result = await registrar.outcome(secret, tier0Request.region, registry);
+    } finally {
+      secret.fill(0);
+    }
+    if (!result.ok)
+      return result.problem === "secret" ? { kind: "stopped", problem: "unreadable" } : unconfirmed;
+    const { outcome } = result;
+    return outcome.kind === "moved" && outcome.group === group
+      ? { kind: "moved", confirmed: held.commitment }
+      : { kind: "stopped", problem: "outcome-disputed" };
+  }
+
+  /**
+   * The voter's choice, once both endpoints showed the move: the identity
+   * they showed moved is replaced with a new one, which the poll then offers
+   * to register ([[registration]], Outcome). Only that identity: one whose
+   * commitment differs (another tab's) is kept (T-18).
+   */
+  function startAgain() {
+    if (step.kind !== "moved" || step.confirmed === undefined) return;
+    const { confirmed } = step;
+    setStep({ kind: "replacing" });
+    run(async () => {
+      const read = await registrar.identity();
+      if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
+      const { secret } = read.identity;
+      let replaced: Awaited<ReturnType<Registrar["replace"]>>;
+      try {
+        const again = await registrar.commitment(secret);
+        if (!again.ok || again.commitment !== confirmed)
+          return { kind: "stopped", problem: "not-replaced" };
+        replaced = await registrar.replace(secret);
+      } finally {
+        secret.fill(0);
+      }
+      if (replaced === "replaced") return "restart";
+      return {
+        kind: "stopped",
+        problem: replaced === "unwritable" ? "unwritable" : "not-replaced",
+      };
     });
   }
 
@@ -376,6 +477,7 @@ export function Register({
         />
       );
     case "reading":
+    case "replacing":
     case "preparing":
     case "sending":
       return <RegisterWorking poll={poll} kind={step.kind} />;
@@ -398,7 +500,11 @@ export function Register({
     case "joined":
       return <RegisterJoined poll={poll} backer={registrar.backup} onBack={onDone} />;
     case "moved":
-      return <RegisterMoved poll={poll} />;
+      return step.confirmed === undefined ? (
+        <RegisterMoved poll={poll} onCheck={read} />
+      ) : (
+        <RegisterMoved poll={poll} onStartAgain={startAgain} />
+      );
     case "challenge":
       return (
         <RegisterChallenge
@@ -476,6 +582,7 @@ export function RegisterIntro({
 
 const WORKING = {
   reading: { title: "registerReadingTitle", detail: "registerReading" },
+  replacing: { title: "registerReplacingTitle", detail: "registerReplacing" },
   preparing: { title: "registerPreparingTitle", detail: "registerPreparing" },
   sending: { title: "registerSendingTitle", detail: "registerSending" },
 } as const satisfies Record<
@@ -660,20 +767,43 @@ export function RegisterJoined({
 
 /**
  * The alarm: the identity's code is counted on another region's list, which
- * someone else put it on first ([[registration]], Outcome; T-16). Nothing to
- * press: its place can't be taken back, and a new identity comes only with
- * its backup and a second look at the list (Known-weak).
+ * someone else put it on first ([[registration]], Outcome; T-16). Its place
+ * can't be taken back, so a new identity is offered (`onStartAgain`), but
+ * only once a second L2 endpoint showed the same move; until then, a check
+ * again where `onCheck` is given.
  */
-export function RegisterMoved({ poll }: { poll: FramePoll }) {
+export function RegisterMoved({
+  poll,
+  onCheck,
+  onStartAgain,
+}: {
+  poll: FramePoll;
+  onCheck?: (() => void) | undefined;
+  onStartAgain?: (() => void) | undefined;
+}) {
   const t = useTranslate(catalogs);
+  const confirmed = onStartAgain !== undefined;
   return (
-    <EverydayFrame poll={poll}>
+    <EverydayFrame
+      poll={poll}
+      primary={
+        confirmed ? (
+          <Button size="lg" className={ACTION} onClick={onStartAgain}>
+            {t("registerStartAgain")}
+          </Button>
+        ) : onCheck === undefined ? undefined : (
+          <Button size="lg" className={ACTION} onClick={onCheck}>
+            {t("checkAgain")}
+          </Button>
+        )
+      }
+    >
       <ScreenTitle title={t("registerMovedTitle")} focus>
-        <p className="m-0">{t("registerMoved")}</p>
+        <p className="m-0">{t(confirmed ? "registerMovedConfirmed" : "registerMoved")}</p>
       </ScreenTitle>
       <div className="mt-8">
         <Note tone="warn" title={t("registerMovedWhyTitle")}>
-          <p className="m-0">{t("registerMovedWhy")}</p>
+          <p className="m-0">{t(confirmed ? "registerMovedStartAgain" : "registerMovedWhy")}</p>
         </Note>
       </div>
     </EverydayFrame>

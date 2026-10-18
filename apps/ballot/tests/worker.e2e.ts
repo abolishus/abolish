@@ -658,6 +658,7 @@ describe("the device's voting identity", () => {
     ): Promise<string>;
     recordTier0Request(secret: string, region: number, acceptedAt: number): Promise<string>;
     recordTier0Membership(secret: string, group: string): Promise<string>;
+    replaceMovedIdentity(secret: string, replacement: string): Promise<string>;
     commitment(secret: string): Promise<string>;
     tier0Outcome(
       secret: string,
@@ -971,6 +972,83 @@ describe("the device's voting identity", () => {
     // Kept once: no longer waiting, a second outcome changes nothing.
     await expect(join(secret, "3")).resolves.toBe("changed");
     await expect(read()).resolves.toEqual(joined);
+  });
+
+  test("a moved identity is replaced only while it still waits on its request and is in no group", async () => {
+    const replace = (s: string, r: string) =>
+      page.evaluate(
+        ([x, y]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.replaceMovedIdentity(
+            x,
+            y,
+          ),
+        [s, r] as const,
+      );
+    const fresh = `04${"0e".repeat(31)}`;
+    // None held, or one waiting on nothing: nothing was moved.
+    await expect(replace(secret, fresh)).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "none" });
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+      [secret] as const,
+    );
+    await expect(replace(secret, fresh)).resolves.toBe("changed");
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+          s,
+          7,
+          1_790_000_000_000,
+        ),
+      [secret] as const,
+    );
+    const waiting = {
+      kind: "found",
+      identity: {
+        secret,
+        memberships: [],
+        tier0Request: { region: 7, acceptedAt: 1_790_000_000_000 },
+      },
+    };
+    // Another identity's secret, the same secret again, or a replacement
+    // that isn't an identity secret: the waiting one is kept.
+    await expect(replace(other, fresh)).resolves.toBe("changed");
+    await expect(replace(secret, secret)).resolves.toBe("TypeError");
+    await expect(replace(secret, "00".repeat(32))).resolves.toBe("TypeError");
+    await expect(read()).resolves.toEqual(waiting);
+    await expect(replace(secret, fresh)).resolves.toBe("replaced");
+    await expect(read()).resolves.toEqual({
+      kind: "found",
+      identity: { secret: fresh, memberships: [] },
+    });
+    // Once replaced, the old secret is no longer held.
+    await expect(replace(secret, `03${"0d".repeat(31)}`)).resolves.toBe("changed");
+    // A waiting identity in another tier's group is never discarded.
+    const inTier2 = [{ tier: 2, group: "4" }];
+    await page.evaluate(
+      ([s, m]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.saveIdentity(s, m),
+      [secret, inTier2] as const,
+    );
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+          s,
+          7,
+          1_790_000_000_000,
+        ),
+      [secret] as const,
+    );
+    await expect(replace(secret, fresh)).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({
+      kind: "found",
+      identity: {
+        secret,
+        memberships: inTier2,
+        tier0Request: { region: 7, acceptedAt: 1_790_000_000_000 },
+      },
+    });
   });
 
   test("the worker reads a registration's outcome from the registry's log under the client's CSP", async () => {

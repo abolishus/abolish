@@ -14,6 +14,15 @@ export interface Deployment {
   readonly api: string;
   /** The L2's JSON-RPC endpoint. */
   readonly rpc: string;
+  /**
+   * A second L2 JSON-RPC endpoint, of another operator than `rpc`, or
+   * `undefined` where the build names none: a Tier 0 request `rpc`'s log
+   * shows moved to another region's group is read again from it, and the
+   * client offers a new identity only if both agree ([[deployment]],
+   * Security notes; T-16, T-11). One endpoint alone could fake a
+   * move to make a registered voter discard their identity.
+   */
+  readonly confirmRpc: string | undefined;
   /** The L2's chain ID, which the RPC must report before it is read. */
   readonly chainId: bigint;
   /**
@@ -95,10 +104,21 @@ export function tier0Region(deployment: Pick<Deployment, "tier0Groups">): number
   return regions.size === 1 ? [...regions][0] : undefined;
 }
 
+/**
+ * `deployment` read through its second L2 endpoint (`confirmRpc`), or
+ * `undefined` where it names none.
+ */
+export function confirming(deployment: Deployment): Deployment | undefined {
+  const { confirmRpc } = deployment;
+  return confirmRpc === undefined ? undefined : { ...deployment, rpc: confirmRpc };
+}
+
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
 export const STAGING: Deployment = {
   api: "https://api-staging.abolish.us",
   rpc: "https://sepolia.base.org",
+  // Allnodes' public Base Sepolia endpoint, beside Coinbase's (T-43).
+  confirmRpc: "https://base-sepolia-rpc.publicnode.com",
   chainId: 84532n,
   // No election registry is deployed yet (P1-12c's and P1-18's gates come
   // first), so a staging build refuses every election link.

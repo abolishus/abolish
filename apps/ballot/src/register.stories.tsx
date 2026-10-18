@@ -235,14 +235,18 @@ export const JoinedWithBackup: Story = {
   },
 };
 
+const onCheck = fn();
+
 export const Moved: Story = {
-  name: "Moved to another region's list: the alarm, with nothing to press",
-  render: () => <RegisterMoved poll={POLL} />,
+  name: "Moved to another region's list, shown by one endpoint: the alarm, with a check again",
+  render: () => <RegisterMoved poll={POLL} onCheck={onCheck} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
     await expect(canvas.getByText("Why this matters")).toBeVisible();
-    await expect(canvas.queryByRole("button")).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Make a new voting identity" })).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
+    await expect(onCheck).toHaveBeenCalled();
   },
 };
 
@@ -250,6 +254,50 @@ export const MovedDark: Story = {
   ...Moved,
   name: "Moved, dark",
   parameters: { layout: "fullscreen", theme: "dark" },
+};
+
+const onStartAgain = fn();
+
+export const MovedConfirmed: Story = {
+  name: "Moved, shown by both endpoints: a new identity offered",
+  render: () => <RegisterMoved poll={POLL} onStartAgain={onStartAgain} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await expect(canvas.getByText(/Two separate sources of the public list agree/)).toBeVisible();
+    await expect(canvas.getByText(/A backup you made of it still holds the old one/)).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Check again" })).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Make a new voting identity" }));
+    await expect(onStartAgain).toHaveBeenCalled();
+  },
+};
+
+export const MovedConfirmedDark: Story = {
+  ...MovedConfirmed,
+  name: "Moved and confirmed, dark",
+  parameters: { layout: "fullscreen", theme: "dark" },
+};
+
+export const Replacing: Story = {
+  name: "Making the new identity: nothing to press",
+  render: () => <RegisterWorking poll={POLL} kind="replacing" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("status")).toHaveTextContent(/Nothing is sent/);
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const OutcomeDisputed: Story = {
+  name: "The two endpoints disagree, with a retry",
+  render: () => <RegisterStopped poll={POLL} problem="outcome-disputed" onRetry={fn()} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Two sources of the list disagree",
+    );
+    await expect(canvas.getByRole("button", { name: "Try again" })).toBeVisible();
+  },
 };
 
 export const RegistryUnavailable: Story = {

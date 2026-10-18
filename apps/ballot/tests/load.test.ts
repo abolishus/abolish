@@ -15,7 +15,7 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import type { Deployment } from "../src/deployment.ts";
-import { STAGING } from "../src/deployment.ts";
+import { confirming, STAGING } from "../src/deployment.ts";
 import { parseLink } from "../src/link.ts";
 import {
   DEFINITION_HASH_OF,
@@ -767,6 +767,22 @@ describe("the group registry's log", () => {
     return { calls, fetchFn };
   }
 
+  test("read through the second endpoint, every request goes to it alone, and a build naming none has none", async () => {
+    const second = confirming(WITH_REGISTRY);
+    expect(second).toEqual({ ...WITH_REGISTRY, rpc: "https://base-sepolia-rpc.publicnode.com" });
+    expect(confirming({ ...WITH_REGISTRY, confirmRpc: undefined })).toBeUndefined();
+    if (second === undefined) throw new Error("staging names a second endpoint");
+    const { fetchFn, calls } = node([]);
+    const urls: string[] = [];
+    const loaded = await loadGroupRegistry(second, (url, init) => {
+      urls.push(url);
+      return fetchFn(WITH_REGISTRY.rpc, init);
+    });
+    expect(loaded.ok).toBe(true);
+    expect(urls).toHaveLength(calls.length);
+    expect(urls.every((u) => u === "https://base-sepolia-rpc.publicnode.com")).toBe(true);
+  });
+
   const word = (b: number) => b.toString(16).padStart(64, "0");
   const arbitraryLogs = fc
     .array(
@@ -1004,6 +1020,7 @@ describe("the deployments", () => {
   test("staging's origins are the ones the CSP lets the client reach, and its registry is a plain address or none", () => {
     expect(STAGING.api).toBe("https://api-staging.abolish.us");
     expect(STAGING.rpc).toBe("https://sepolia.base.org");
+    expect(STAGING.confirmRpc).toBe("https://base-sepolia-rpc.publicnode.com");
     expect(STAGING.chainId).toBe(84532n);
     // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
     if (STAGING.electionRegistry !== undefined)

@@ -323,6 +323,37 @@ export async function recordTier0Membership(
 }
 
 /**
+ * Replaces the identity whose secret is `secret` with a newly made one
+ * (`replacement`, in no group and waiting on no request), for a voter
+ * whose Tier 0 request was moved to another region's group, confirmed
+ * against a second L2 endpoint ([[registration]], Outcome: the client
+ * registers again only under a new secret, since the commitment's place
+ * can't be taken back; T-16). In one transaction with the read, and only
+ * while the held identity still waits on a Tier 0 request and has no
+ * membership in any tier: an identity counted
+ * anywhere is never discarded here, since its loss can't be undone (T-18).
+ * `changed` otherwise, with the store left as it is; `unwritable` for
+ * storage the browser refuses.
+ */
+export async function replaceMovedIdentity(
+  secret: Uint8Array,
+  replacement: Uint8Array,
+  factory: IDBFactory = indexedDB,
+): Promise<"replaced" | "changed" | "unwritable"> {
+  const checked = storedIdentity({ secret: replacement, memberships: [] });
+  (checked["secret"] as Uint8Array).fill(0);
+  // A replacement equal to the secret it replaces would keep the moved commitment.
+  if (equalBytes(secret, replacement)) throw new TypeError("not a new voting identity");
+  // A recovered identity never waits on a request (`parseStoredIdentity`).
+  const replaced = await updateHeld(secret, factory, ({ memberships, tier0Request }) =>
+    tier0Request === undefined || memberships.length > 0
+      ? undefined
+      : { secret: replacement, memberships: [] },
+  );
+  return replaced === "recorded" ? "replaced" : replaced;
+}
+
+/**
  * Replaces the stored identity with what `change` makes of it, in one
  * transaction with the read, only while it is readable and its secret is
  * `secret`; `change` returning `undefined` leaves it as it is (`changed`).

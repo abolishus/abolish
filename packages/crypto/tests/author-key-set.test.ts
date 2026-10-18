@@ -440,6 +440,31 @@ describe("checkDeliveryV2 beside an author panel takes its approved key set", ()
     expect(() => checkDeliveryV2(against, ballots, entries)).toThrow(/needs its definition/);
   });
 
+  test("reads roots only under the definition's own thresholds", () => {
+    const { e, against, ballots, entries } = poll("delivered");
+    e.approve();
+    const roots = (d: number, a: number) => ({
+      bound: 8n,
+      thresholds: { default: d, author: a },
+      attestations: [],
+      leafBlocks: () => [],
+    });
+    const { threshold, author_threshold } = e.d;
+    expect(
+      checkDeliveryV2(against, ballots, entries, e.d, roots(threshold, author_threshold)),
+    ).toEqual(checkDeliveryV2(against, ballots, entries, e.d));
+    // T-25, T-54: a threshold other than the definition's would let fewer
+    // seats withhold a root, or make one available.
+    for (const [d, a] of [
+      [threshold - 1, author_threshold],
+      [threshold, author_threshold - 1],
+      [threshold, author_threshold + 1],
+    ] as const)
+      expect(() => checkDeliveryV2(against, ballots, entries, e.d, roots(d, a))).toThrow(
+        /not the thresholds of this definition/,
+      );
+  });
+
   test("never with no author key set, a copy of it, the default panel's or another run's", () => {
     const { e, against, ballots, entries } = poll("delivered");
     e.approve();

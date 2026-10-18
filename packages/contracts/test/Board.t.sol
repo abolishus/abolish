@@ -514,16 +514,26 @@ contract BoardTest is TestBase {
             ElectionDefinitionLib.DecodeError code =
                 _decodeError(_str(dj, string.concat(d, ".error")));
             if (_eq(t, "share-receipt")) {
-                if (enc.length % RECEIPT_LENGTH != 0) {
+                // The call frames each receipt by its version byte: 165
+                // bytes at version 2, 164 otherwise.
+                uint256 framed = enc[2] == 0x02 ? RECEIPT_LENGTH + 1 : RECEIPT_LENGTH;
+                if (enc.length % framed != 0) {
                     _refuse(
                         _receiptsCall(enc),
                         abi.encodeWithSelector(Board.ReceiptBatchLength.selector, enc.length),
                         id
                     );
-                    // Only the complaint read as a receipt has 164 bytes
-                    // that say something more: their type.
-                    if (code != ElectionDefinitionLib.DecodeError.UnexpectedRecordType) continue;
-                    enc = _slice(enc, 0, RECEIPT_LENGTH);
+                    // Only the complaint read as a receipt, and the receipt
+                    // labelled version 2, say something more in a framed
+                    // record: their type, and their version under ballot
+                    // version 1, refused before any field is read.
+                    if (code == ElectionDefinitionLib.DecodeError.UnexpectedRecordType) {
+                        enc = _slice(enc, 0, framed);
+                    } else if (code == ElectionDefinitionLib.DecodeError.ProfileMismatch) {
+                        enc = bytes.concat(enc, hex"00");
+                    } else {
+                        continue;
+                    }
                 }
                 _refuse(_receiptsCall(enc), _malformed(0, code, _decodeOffset(id)), id);
             } else if (_eq(t, "share-posting")) {
@@ -645,10 +655,12 @@ contract BoardTest is TestBase {
     /// The steps run in the spec's order (contracts.md, Delivery records):
     /// the election before the version, the version before the fields, the
     /// fields before the seat, the seat before the signature; a pinned
-    /// ballot version above 3 is `unknown-version` before `profile-mismatch`.
+    /// ballot version above 4 is `unknown-version` before `profile-mismatch`,
+    /// and ballot version 4 fixes version 2 (Delivery records (version 2)).
     function test_DeliveryCheckOrder() public {
         bytes memory highS = receiptHighS;
-        bytes memory v2HighS = _withByte(highS, 2, 2);
+        // Labelled version 2, so framed as 165 bytes.
+        bytes memory v2HighS = bytes.concat(_withByte(highS, 2, 2), hex"00");
         _refuse(
             _receiptsCall(_withWord(v2HighS, 3, 1)),
             _refused(0, DeliveryCheckLib.Code.DeliveryStray),
@@ -674,13 +686,18 @@ contract BoardTest is TestBase {
         ElectionRegistry.Parameters memory p = elections.parameters(h);
         p.ballotVersion = 4;
         _setParameters(h, p);
+        bytes memory mismatch = _malformed(0, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2);
+        _refuse(_receiptsCall(receipt), mismatch, "receipt under ballot version 4");
+        _refuse(_complaintCall(complaint), mismatch, "complaint under ballot version 4");
+        _refuse(_postingCall(posting, alice), mismatch, "posting under ballot version 4");
+
+        p.ballotVersion = 5;
+        _setParameters(h, p);
         bytes memory unknown = _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
-        _refuse(_receiptsCall(receipt), unknown, "receipt under ballot version 4");
-        _refuse(
-            _receiptsCall(_withByte(receipt, 2, 2)), unknown, "version 2 under ballot version 4"
-        );
-        _refuse(_complaintCall(complaint), unknown, "complaint under ballot version 4");
-        _refuse(_postingCall(posting, alice), unknown, "posting under ballot version 4");
+        _refuse(_receiptsCall(receipt), unknown, "receipt under ballot version 5");
+        _refuse(_receiptsCall(v2HighS), unknown, "version 2 under ballot version 5");
+        _refuse(_complaintCall(complaint), unknown, "complaint under ballot version 5");
+        _refuse(_postingCall(posting, alice), unknown, "posting under ballot version 5");
     }
 
     /// The seat's registered signing key decides: pointing seat 1's at seat

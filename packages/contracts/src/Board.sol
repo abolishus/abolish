@@ -247,18 +247,27 @@ contract Board is EventAccumulator {
         );
     }
 
-    /// @notice Submits share receipts: one or more 164-byte records,
-    /// concatenated, so a trustee node sends what it owes in one call
+    /// @notice Submits share receipts: one or more records of 164 bytes (165
+    /// at version 2), concatenated, so a trustee node sends what it owes in one call
     /// (docs/spec/delivery.md, What a node owes). Each is checked and
     /// emitted on its own; one that fails reverts the batch, naming it.
     function submitReceipts(bytes calldata receipts) external {
         CanonicalCalldata.requireOneBytesArgument(receipts);
-        uint256 length = DeliveryCheckLib.RECEIPT_LENGTH;
-        if (receipts.length == 0 || receipts.length % length != 0) {
+        // The framing first, whole: each receipt's length is the one its
+        // version byte gives, and the argument ends where its last does.
+        uint256 at;
+        while (at < receipts.length) {
+            if (receipts.length - at < 3) revert ReceiptBatchLength(receipts.length);
+            at += _receiptLength(receipts[at + 2]);
+        }
+        if (receipts.length == 0 || at != receipts.length) {
             revert ReceiptBatchLength(receipts.length);
         }
-        for (uint256 i; i < receipts.length / length; i++) {
-            bytes calldata r = receipts[i * length:(i + 1) * length];
+        at = 0;
+        for (uint256 i; at < receipts.length; i++) {
+            uint256 end = at + _receiptLength(receipts[at + 2]);
+            bytes calldata r = receipts[at:end];
+            at = end;
             bytes32 key = keccak256(r);
             if (_accepted[key]) continue;
             (bytes32 definitionHash, bytes32 ballotHash) =
@@ -431,6 +440,14 @@ contract Board is EventAccumulator {
     {
         _accepted[key] = true;
         _log3(selector, t1, t2, abi.encode(record));
+    }
+
+    /// A share receipt's length from its version byte: 165 bytes at version
+    /// 2, which names its panel, and 164 otherwise (version 1, or a version
+    /// its check refuses).
+    function _receiptLength(bytes1 version) private pure returns (uint256) {
+        return
+            version == 0x02 ? DeliveryCheckLib.RECEIPT_V2_LENGTH : DeliveryCheckLib.RECEIPT_LENGTH;
     }
 
     /// The seats of the key set the trustee registry recorded for the

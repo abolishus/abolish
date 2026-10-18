@@ -217,14 +217,39 @@ describe("casting a seal", () => {
       });
       const ask = (receipt: Uint8Array, ballot = result.ballot, on = session) =>
         on.receipt({ v: PROTOCOL_VERSION, id: 6, kind: "receipt", ballot, receipt });
-      result.ciphertexts.forEach(({ seat }, i) =>
-        expect(ask(receipts[i] as Uint8Array)).toEqual({ ok: true, seat }),
-      );
       // Another seat's signature under this seat's statement.
       const [first, second] = receipts as [Uint8Array, Uint8Array];
       const forged = Uint8Array.of(...first.subarray(0, -64), ...second.subarray(-64));
       expect(ask(forged)).toEqual({ ok: false, problem: "refused" });
       expect(ask(first.subarray(1))).toEqual({ ok: false, problem: "refused" });
+      const firstSeat = (result.ciphertexts[0] as (typeof result.ciphertexts)[number]).seat;
+      expect(ask(first)).toEqual({ ok: true, seat: firstSeat });
+
+      // The passing receipt erased its seat's m_i from the seal, and the
+      // refused ones erased nothing: a recast hands every other seat's m_i
+      // as before, and none for that seat (Client rule 2; T-18, T-25).
+      const shares = (cast: CastResult & { ok: true }) =>
+        cast.ciphertexts.map(({ seat, ciphertext, m }) => [
+          seat,
+          toHex(ciphertext),
+          m === undefined ? undefined : toHex(m),
+        ]);
+      const later = snarkjs();
+      const recast = await session.cast(
+        castRequest(seal, later.port, { l1Number: 9_000_100n, l1Hash: new Uint8Array(32) }),
+      );
+      later.close();
+      admitted(recast);
+      if (!recast.ok) throw new Error("unreachable");
+      expect(shares(recast)).toEqual(
+        shares(result).map(([seat, ct, m]) => [seat, ct, seat === firstSeat ? undefined : m]),
+      );
+      // The page's copy from the first cast is its own, never reached from here.
+      expect(result.ciphertexts.every(({ m }) => m?.length === 32)).toBe(true);
+      // A receipt counts for every recast of the seal, so each one names its seat.
+      result.ciphertexts.forEach(({ seat }, i) =>
+        expect(ask(receipts[i] as Uint8Array, recast.ballot)).toEqual({ ok: true, seat }),
+      );
       // A ballot that isn't a cast of the poll held, or no poll held at all.
       expect(ask(first, result.ballot.subarray(1))).toEqual({ ok: false, problem: "unknown" });
       expect(ask(first, result.ballot, new BallotSession())).toEqual({
@@ -232,7 +257,7 @@ describe("casting a seal", () => {
         problem: "unknown",
       });
     },
-    2 * PROOF_TIMEOUT,
+    3 * PROOF_TIMEOUT,
   );
 
   test(

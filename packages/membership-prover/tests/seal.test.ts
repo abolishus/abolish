@@ -10,16 +10,21 @@ import {
   checkCeremonyTranscript,
   decodeBallot,
   decodeElectionDefinitionV5,
+  encodeShareReceipt,
+  type CastBallotV3,
+  type CastShare,
   type ElectionDefinitionV5,
   electionStubV5Hash,
   encodeCeremonyTranscript,
   finishSealV3,
   identityCommitment,
   identityKey,
+  intakeBallot,
   keysMessage,
   type Panel,
   panelId,
   questionBallotElection,
+  receiptSealV3,
   revealsMessage,
   sealBallotV3,
   shareCiphertextHash,
@@ -152,6 +157,7 @@ describe("a sealed ballot, proved", () => {
       for (const { seat, ciphertext, m } of cast.ciphertexts) {
         const key = checked.registered.find((k) => k.index === seat)?.kemKey;
         if (key === undefined) throw new Error(`seat ${seat}: no registered key`);
+        if (m === undefined) throw new Error(`seat ${seat}: no m kept before any receipt`);
         const { vss, share_hashes } = record.committed_vote;
         const post = (posted: Uint8Array) =>
           checkPosting({ definitionHash: record.definition_hash }, seat, key, vss, share_hashes, {
@@ -175,9 +181,12 @@ describe("a sealed ballot, proved", () => {
       expect(recast.nullifier).toBe(cast.nullifier);
       expect(toHex(again.message)).not.toBe(toHex(verdict.message));
       // The recast keeps the same ciphertexts and messages: one seal, one sharing.
-      expect(recast.ciphertexts.map((c) => [c.seat, toHex(c.ciphertext), toHex(c.m)])).toEqual(
-        cast.ciphertexts.map((c) => [c.seat, toHex(c.ciphertext), toHex(c.m)]),
-      );
+      const shares = (c: (typeof cast.ciphertexts)[number]) => [
+        c.seat,
+        toHex(c.ciphertext),
+        c.m === undefined ? undefined : toHex(c.m),
+      ];
+      expect(recast.ciphertexts.map(shares)).toEqual(cast.ciphertexts.map(shares));
       expect(() => challengeSealV3(sealed)).toThrow(/never opened/);
 
       // A proof for one cast never finishes another.
@@ -185,6 +194,79 @@ describe("a sealed ballot, proved", () => {
       expect(() => finishSealV3(other, decodeProofOf(cast.ballot))).toThrow(/proof/);
     },
     3 * PROOF_TIMEOUT,
+  );
+});
+
+describe("a seat's receipt for a cast seal", () => {
+  test(
+    "erases that seat's m_i from the seal only when it counts for a cast of it, so no recast hands it out",
+    async () => {
+      const secret = members[2] as Uint8Array;
+      const l1 = { number: 9_000_000n, hash: new Uint8Array(32).fill(0xab) };
+      const sealed = sealBallotV3(election, 0, [...VOTES]);
+      expect(() => receiptSealV3(sealed, new Uint8Array(0), new Uint8Array(0))).toThrow(
+        /wasn't cast/,
+      );
+      const casting = castSealV3(sealed, secret, cell0, l1);
+      const cast = finishSealV3(casting, await proveMembership(casting.witness, artifacts));
+      // The seat's own intake, run with its ceremony keys, makes the receipt.
+      const receiptOf = (ballot: Uint8Array, seat: number, ciphertext: Uint8Array) => {
+        const keys = seats[seat - 1];
+        if (keys === undefined) throw new Error(`no seat ${seat}`);
+        const intake = intakeBallot(
+          election,
+          { seat, kemSecret: keys.kem.secretKey, signingSecret: keys.signingSecret },
+          ballot,
+          ciphertext,
+        );
+        if (!intake.ok) throw new Error(intake.code);
+        return encodeShareReceipt({
+          definition_hash: election.definitionHash,
+          ballot_hash: intake.ballotHash,
+          seat,
+          share_hash: intake.shareHash,
+          signature: intake.receipt,
+        });
+      };
+      const [one, two] = cast.ciphertexts as [CastShare, CastShare];
+      const receipt = receiptOf(cast.ballot, one.seat, one.ciphertext);
+      const other = receiptOf(cast.ballot, two.seat, two.ciphertext);
+
+      // Another cast seal's ballot: the same voter and votes, another sharing.
+      const otherSealed = sealBallotV3(election, 0, [...VOTES]);
+      const otherCasting = castSealV3(otherSealed, secret, cell0, l1);
+      const otherCast = finishSealV3(
+        otherCasting,
+        await proveMembership(otherCasting.witness, artifacts),
+      );
+      const forged = Uint8Array.of(...receipt.subarray(0, -64), ...other.subarray(-64));
+      expect(receiptSealV3(sealed, cast.ballot, forged)).toBeUndefined();
+      expect(receiptSealV3(sealed, cast.ballot, receipt.subarray(1))).toBeUndefined();
+      expect(receiptSealV3(sealed, otherCast.ballot, receipt)).toBeUndefined();
+      expect(receiptSealV3(otherSealed, cast.ballot, receipt)).toBeUndefined();
+      expect(() => receiptSealV3(sealed, cast.ballot.subarray(1), receipt)).toThrow();
+      // Nothing refused erased anything.
+      const held = (c: CastBallotV3) => c.ciphertexts.map(({ seat, m }) => [seat, m && toHex(m)]);
+      const recastAt = async (s: typeof sealed, n: bigint) => {
+        const recasting = castSealV3(s, secret, cell0, { number: n, hash: l1.hash });
+        return finishSealV3(recasting, await proveMembership(recasting.witness, artifacts));
+      };
+      const before = held(cast);
+      expect(held(await recastAt(sealed, 9_000_001n))).toEqual(before);
+
+      expect(receiptSealV3(sealed, cast.ballot, receipt)).toBe(one.seat);
+      const recast = await recastAt(sealed, 9_000_002n);
+      expect(held(recast)).toEqual(
+        before.map(([seat, m]) => [seat, seat === one.seat ? undefined : m]),
+      );
+      expect(recast.ciphertexts.find((c) => c.seat === one.seat)).not.toHaveProperty("m");
+      // The cast handed out earlier keeps its own copy; a receipt passes again,
+      // for any recast of the seal; the other seal kept every m_i.
+      expect(one.m?.length).toBe(32);
+      expect(receiptSealV3(sealed, recast.ballot, receipt)).toBe(one.seat);
+      expect(held(await recastAt(otherSealed, 9_000_003n))).toEqual(held(otherCast));
+    },
+    6 * PROOF_TIMEOUT,
   );
 });
 

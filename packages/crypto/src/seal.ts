@@ -342,16 +342,21 @@ export interface CastBallotV3 {
    * Each qualified seat's share ciphertext, for its intake (Casting step 5),
    * with its ML-KEM message `m`, the one secret a cast keeps: a seat that
    * never receipts can still be posted, by the voter's choice
-   * ([[delivery]], Client rules 2 and 4). No other seat has one.
+   * ([[delivery]], Client rules 2 and 4). No other seat has one, and a seat
+   * whose receipt `receiptSealV3` passed has none either (Client rule 2).
    */
   readonly ciphertexts: readonly CastShare[];
 }
 
-/** One qualified seat's share ciphertext `ct_i` and ML-KEM message `m_i`. */
+/**
+ * One qualified seat's share ciphertext `ct_i` and ML-KEM message `m_i`;
+ * `m` is absent once the seat's receipt for a cast of the seal passed
+ * (`receiptSealV3`), since that `m_i` was erased.
+ */
 export interface CastShare {
   readonly seat: number;
   readonly ciphertext: Uint8Array;
-  readonly m: Uint8Array;
+  readonly m?: Uint8Array;
 }
 
 /**
@@ -391,12 +396,15 @@ interface Seal {
    * Set once a cast's witness is made: the seal is then never opened. It
    * keeps each qualified seat's `m_i`, and nothing else of the encryption's
    * randomness, for a posting the voter may choose ([[challenge]], Client
-   * rules, step 3; T-18).
+   * rules, step 3; T-18), until that seat's receipt passes
+   * (`receiptSealV3`), which erases it: `m` is then absent.
    */
   cast?: {
     readonly nullifier: bigint;
     readonly vote: CommittedVoteV3;
-    readonly messages: readonly { readonly seat: number; readonly m: Uint8Array }[];
+    /** The ballot hash every record of this seal carries: it binds no L1 block. */
+    readonly ballotHash: Uint8Array;
+    readonly messages: { readonly seat: number; m?: Uint8Array }[];
   };
 }
 
@@ -582,7 +590,7 @@ export function castSealV3(
       seat,
       m: Uint8Array.from((randomness[seat - 1] as ShareEncapsulation).m),
     }));
-    seal.cast = { nullifier, vote, messages };
+    seal.cast = { nullifier, vote, ballotHash, messages };
     // Erased as far as the platform allows: the ML-KEM messages' bytes are
     // zeroed, and the polynomials, the ephemerals `e_i` and the nonces `w_i`
     // (immutable bigints) dropped.
@@ -642,14 +650,15 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
     ballotHash: checked.ballotHash,
     nullifier: record.nullifier,
     ciphertexts: Object.freeze(
-      seal.ciphertexts.map(({ seat, ciphertext }, i) =>
-        Object.freeze({
-          seat,
-          ciphertext: Uint8Array.from(ciphertext),
-          // Both lists are the qualified seats in order.
-          m: Uint8Array.from((messages[i] as (typeof messages)[number]).m),
-        }),
-      ),
+      seal.ciphertexts.map(({ seat, ciphertext }, i) => {
+        // Both lists are the qualified seats in order.
+        const { m } = messages[i] as (typeof messages)[number];
+        return Object.freeze(
+          m === undefined
+            ? { seat, ciphertext: Uint8Array.from(ciphertext) }
+            : { seat, ciphertext: Uint8Array.from(ciphertext), m: Uint8Array.from(m) },
+        );
+      }),
     ),
   });
 }
@@ -706,4 +715,41 @@ export function castReceiptSeatV3(
   )
     return undefined;
   return checkShareReceiptV3(keys, ctx, vote, seat, decoded.signature) ? seat : undefined;
+}
+
+/**
+ * `castReceiptSeatV3` for a cast of `sealed`, a seal this client cast
+ * (`castSealV3`): the seat `receipt` receipts `ballot` for, if `ballot`
+ * carries the seal's ballot hash (any record of it, whatever L1 block it
+ * names) and the receipt counts for it under the election's own key set.
+ * On a pass, that seat's `m_i` is zeroed and dropped from the seal, so no
+ * later `finishSealV3` of it hands one out ([[delivery]], Client rule 2;
+ * T-18). `undefined`, with nothing erased, for a receipt that doesn't count
+ * or a ballot of another seal: an unchecked answer never erases a share a
+ * posting may still need (T-25). A seat already receipted passes again.
+ * Throws on a seal not yet cast, and as `castReceiptSeatV3` does.
+ */
+export function receiptSealV3(
+  sealed: SealedBallotV3,
+  ballot: Uint8Array,
+  receipt: Uint8Array,
+): number | undefined {
+  const seal = sealOf(sealed);
+  const { cast } = seal;
+  if (cast === undefined) throw new TypeError("receiptSealV3: this seal wasn't cast");
+  const record = decodeBallot(ballot, 3);
+  const ballotHash = ballotHashV3(
+    { definitionHash: record.definition_hash, cell: record.cell, nullifier: record.nullifier },
+    record.committed_vote,
+  );
+  // Compared before the signature: a cast of another seal costs no verification.
+  if (!equalBytes(ballotHash, cast.ballotHash)) return undefined;
+  const seat = castReceiptSeatV3(seal.election, ballot, receipt);
+  if (seat === undefined) return undefined;
+  const kept = cast.messages.find((message) => message.seat === seat);
+  if (kept?.m !== undefined) {
+    kept.m.fill(0);
+    delete kept.m;
+  }
+  return seat;
 }

@@ -386,6 +386,7 @@ describe("l1BoardAnchors", () => {
       boardVersion: 1,
       l1: await l1BoardAnchors(options, election),
       blocks: async () => [],
+      pin: async () => expect.fail("nothing is pinned before C_A is fixed"),
       contract: {
         send: async () => {
           throw new Error("nothing is sent before C_A is fixed");

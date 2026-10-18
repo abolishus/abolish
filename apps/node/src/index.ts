@@ -41,6 +41,7 @@ export {
   type ObjectOutcome,
   type PinReport,
   pinElections,
+  pinObject,
 } from "./pin.ts";
 export { chainId, parseRpcUrl, type Rpc, rpcClient, RpcError } from "./rpc.ts";
 export {

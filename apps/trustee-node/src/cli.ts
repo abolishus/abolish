@@ -1,9 +1,12 @@
 // The node's command line: `keygen`, a seat's identity key; `run`, one
-// seat's node against its coordinator, with its availability duty when the
-// configuration names the chains and sources it needs; and `local-ceremony`, a whole
+// seat's node against its coordinator, with its availability duty and the
+// gateway serving what it attests when the configuration names the chains
+// and sources it needs; and `local-ceremony`, a whole
 // ceremony between a local panel's nodes and a local coordinator over HTTP
 // on loopback. Output is one JSON object per line, never a secret.
+import { once } from "node:events";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -13,7 +16,7 @@ import {
   encodeElectionDefinition,
   identityKey,
 } from "@abolishus/crypto";
-import { mirrorThen, openMirror, type Rpc, rpcClient, RpcError } from "@abolishus/node";
+import { gateway, mirrorThen, type Rpc, rpcClient, RpcError } from "@abolishus/node";
 import { gatewaySource } from "@abolishus/verifier";
 import {
   type AvailabilityOptions,
@@ -37,6 +40,7 @@ import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
 import { l2RecordedAvailability, RecordedError } from "./recorded.ts";
 import { availabilitySender, SendError } from "./send.ts";
+import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
 
@@ -119,17 +123,18 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
     coordinator: new HttpCoordinator(config.coordinator),
     log: (e: NodeEvent) => io.out(e),
   });
-  let duties: AvailabilityDuties | undefined;
+  let availability: { duties: AvailabilityDuties; server: Server } | undefined;
   try {
-    duties = await availabilityDuties(config, seat, store, identitySecret, io);
+    availability = await availabilityDuties(config, seat, store, identitySecret, io);
   } catch (e) {
     if (!(e instanceof RpcError)) throw e;
     io.err({ error: `availability: ${e.message}` });
     return 1;
   }
+  const duties = availability?.duties;
   io.out({ event: "started", seat: config.seat, availability: duties !== undefined });
   // Either loop failing (a store it can't read) stops the other, and the
-  // failure is rethrown once both have stopped.
+  // failure is rethrown once both have stopped and the gateway is closed.
   const stop = new AbortController();
   const signal = AbortSignal.any([stop.signal, io.signal]);
   const ms = config.pollSeconds * 1000;
@@ -139,18 +144,26 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
       throw error;
     }),
   );
-  for (const outcome of await Promise.allSettled(loops))
-    if (outcome.status === "rejected") throw outcome.reason;
+  const outcomes = await Promise.allSettled(loops);
+  if (availability !== undefined) {
+    const { server } = availability;
+    server.close();
+    server.closeAllConnections();
+    await once(server, "close");
+  }
+  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
   return 0;
 }
 
 /**
  * The availability duty over the configured nodes, contracts and sources
- * (README, Availability duty), or undefined when the configuration has no
- * `availability`. One sender for the one paying account, shared by every
- * election, so two sends never take one nonce. Its setup checks both
- * chains and the contracts' code: a mismatch is the configuration's error,
- * a node that can't be read an `RpcError`.
+ * (README, Availability duty), with the gateway serving the blocks
+ * directory and what the duty pins into it, listening; or undefined when the
+ * configuration has no `availability`. One sender for the one paying
+ * account, shared by every election, so two sends never take one nonce. Its
+ * setup checks both chains and the contracts' code: a mismatch, or an
+ * address the gateway can't listen on, is the configuration's error, a node
+ * that can't be read an `RpcError`.
  */
 async function availabilityDuties(
   config: NodeConfig,
@@ -158,7 +171,7 @@ async function availabilityDuties(
   store: SeatStore,
   identitySecret: Uint8Array,
   io: CliIo,
-): Promise<AvailabilityDuties | undefined> {
+): Promise<{ duties: AvailabilityDuties; server: Server } | undefined> {
   const a = config.availability;
   if (a === undefined) return undefined;
   const l1 = rpcClient(a.l1);
@@ -199,9 +212,19 @@ async function availabilityDuties(
       throw new ConfigError(`availability: ${e.message}`);
     throw e;
   }
-  const blocks = await blockSource(a.gateways, a.blocks, io);
-  const wiring = dutyWiring(config.l2ChainId, a, { l1, l2, contract, blocks, store, clock });
-  return new AvailabilityDuties({
+  const served = await servedOf(a.blocks, io);
+  const gateways: AsyncBlockSource =
+    a.gateways.length > 0 ? gatewaySource(a.gateways).source : () => Promise.resolve([]);
+  const wiring = dutyWiring(config.l2ChainId, a, {
+    l1,
+    l2,
+    contract,
+    served,
+    gateways,
+    store,
+    clock,
+  });
+  const duties = new AvailabilityDuties({
     seat,
     clock,
     log: (e: DutyEvent) => io.out(e),
@@ -210,6 +233,20 @@ async function availabilityDuties(
       return new AvailabilitySeat(wiring.seat(election, reader));
     },
   });
+  const server = gateway(served);
+  server.listen(a.serve.port, a.serve.host);
+  try {
+    await once(server, "listening");
+  } catch (e) {
+    throw new ConfigError(`availability.serve: ${(e as NodeJS.ErrnoException).code ?? "failed"}`);
+  }
+  // T-52: an error after listening (an accept that fails because descriptors
+  // ran out) is reported, never fatal, as `apps/node`'s `serve` does.
+  server.on("error", (e: NodeJS.ErrnoException) =>
+    io.err({ error: `serve: ${e.code ?? "failed"}` }),
+  );
+  io.out({ event: "serving", address: server.address() });
+  return { duties, server };
 }
 
 /** What `run` builds the duty over, besides the configuration. */
@@ -217,7 +254,9 @@ export interface DutySources {
   readonly l1: Rpc;
   readonly l2: Rpc;
   readonly contract: ContractPath;
-  readonly blocks: AsyncBlockSource;
+  /** The blocks directory, read first, where the seat pins what it attests. */
+  readonly served: ServedBlocks;
+  readonly gateways: AsyncBlockSource;
   readonly store: SeatStore;
   readonly clock: () => bigint;
 }
@@ -225,7 +264,8 @@ export interface DutySources {
 /**
  * The L1 reader's options and each election's duty options from the
  * configuration: the board is checked under the registered definition's
- * own board-entry pin, which the reader gives, never a configured one.
+ * own board-entry pin, which the reader gives, never a configured one;
+ * blocks are read from the directory the seat pins into, then the gateways.
  */
 export function dutyWiring(
   l2ChainId: bigint,
@@ -238,6 +278,10 @@ export function dutyWiring(
     reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
   ) => AvailabilityOptions;
 } {
+  // The directory first: a block it holds costs no request and tells no
+  // gateway which election the seat reads (T-11). Every block is checked
+  // against its CID by the readers, so neither source is trusted (T-49, T-53).
+  const blocks = mirrorThen(s.served, s.gateways);
   return {
     anchors: {
       l1: s.l1,
@@ -255,7 +299,8 @@ export function dutyWiring(
       election,
       boardVersion: reader.boardVersion,
       l1: reader,
-      blocks: s.blocks,
+      blocks,
+      pin: s.served.pin,
       contract: s.contract,
       clock: s.clock,
       sendMargin: a.sendMargin,
@@ -264,31 +309,18 @@ export function dutyWiring(
   };
 }
 
-/**
- * The operator's directory of CAR files first, then the gateways: a block
- * the directory holds costs no request and tells no gateway which election
- * the seat reads (T-11). Every block is checked against its CID by the
- * readers, so neither source is trusted (T-49, T-53). The directory is read
- * once, at start.
- */
-async function blockSource(
-  gateways: readonly URL[],
-  dir: string | undefined,
-  io: CliIo,
-): Promise<AsyncBlockSource> {
-  const remote: AsyncBlockSource =
-    gateways.length > 0 ? gatewaySource(gateways).source : () => Promise.resolve([]);
-  if (dir === undefined) return remote;
-  let mirror;
+/** The operator's directory of CAR files, read at start, each file reported. */
+async function servedOf(dir: string, io: CliIo): Promise<ServedBlocks> {
+  let served;
   try {
-    mirror = await openMirror(dir);
+    served = await servedBlocks(dir);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === undefined) throw e;
     throw new ConfigError(`availability.blocks: ${code}`);
   }
-  for (const file of mirror.files) io.out({ event: "blocks", ...file });
-  return mirrorThen(mirror, remote);
+  for (const file of served.files) io.out({ event: "blocks", ...file });
+  return served;
 }
 
 /**

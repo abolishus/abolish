@@ -78,6 +78,8 @@ function availability(change: Record<string, unknown> = {}) {
     forceLeadSeconds: 3600,
     sendMarginSeconds: 1800,
     gateways: ["https://ipfs.example/", "https://archive.example/gateway"],
+    blocks: "/srv/blocks",
+    serve: { port: 8080 },
     ...change,
   };
 }
@@ -108,7 +110,17 @@ describe("the availability configuration", () => {
       "https://ipfs.example/",
       "https://archive.example/gateway",
     ]);
-    expect(a.blocks).toBeUndefined();
+    expect(a.blocks).toBe("/srv/blocks");
+    // Loopback unless the operator publishes it.
+    expect(a.serve).toEqual({ port: 8080, host: "127.0.0.1" });
+  });
+
+  test("takes the address the seat serves on", () => {
+    const c = config({ availability: availability({ serve: { port: 0, host: "0.0.0.0" } }) });
+    expect(parseConfig(JSON.stringify(c)).availability?.serve).toEqual({
+      port: 0,
+      host: "0.0.0.0",
+    });
   });
 
   test("takes the operator's board budget", () => {
@@ -116,11 +128,9 @@ describe("the availability configuration", () => {
     expect(parseConfig(JSON.stringify(c)).availability?.maxBoardBytes).toBe(4096);
   });
 
-  test("takes a directory of CAR files in place of gateways", () => {
+  test("takes the directory of CAR files alone, with no gateway", () => {
     const a = parseConfig(
-      JSON.stringify(
-        config({ availability: availability({ gateways: [], blocks: "/srv/blocks" }) }),
-      ),
+      JSON.stringify(config({ availability: availability({ gateways: [] }) })),
     ).availability;
     expect(a?.gateways).toEqual([]);
     expect(a?.blocks).toBe("/srv/blocks");
@@ -128,7 +138,11 @@ describe("the availability configuration", () => {
 
   test.each([
     ["an unknown field", { extra: 1 }],
-    ["no block source", { gateways: [] }],
+    ["no blocks directory, where what is attested is pinned", { blocks: undefined }],
+    ["nowhere to serve it", { serve: undefined }],
+    ["a port past 65535", { serve: { port: 65_536 } }],
+    ["a port as text", { serve: { port: "8080" } }],
+    ["an unknown serve field", { serve: { port: 1, path: "/" } }],
     [
       "seventeen gateways",
       { gateways: Array.from({ length: 17 }, (_, i) => `https://g${i}.example/`) },

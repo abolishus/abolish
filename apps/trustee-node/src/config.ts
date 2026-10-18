@@ -1,7 +1,7 @@
 // The node's deployment configuration (README, Configuration): the pinned
 // panel, the seat, where the identity key and the store live, the
 // coordinator, and, for the availability duty, the chains' nodes, the
-// deployment's contracts, the paying account's key and the block sources. JSON at a transport boundary, so it is parsed with a strict
+// deployment's contracts, the paying account's key, the block sources and where it serves them. JSON at a transport boundary, so it is parsed with a strict
 // schema; the panel's keys are protocol bytes, so they are checked by
 // `@abolishus/crypto` (`panelId`) and must hash to the `panelId` the trustee
 // compared out of band, so a mistyped key can't pin another panel (T-17).
@@ -35,42 +35,42 @@ const seconds = z
   .max(7 * 86_400)
   .transform(BigInt);
 
-const AVAILABILITY = z
-  .strictObject({
-    l1: z.string().min(1),
-    l1ChainId: decimal(64),
-    l2: z.string().min(1),
-    anchor: hexOf(20),
-    anchorFromBlock: decimal(64),
-    anchorClock: z.strictObject({
-      epoch: decimal(64),
-      period: decimal(64).refine((v) => v > 0n, "must be positive"),
-      deadline: decimal(64),
-    }),
-    registry: hexOf(20),
-    registryFromBlock: decimal(64),
-    board: hexOf(20),
-    boardFromBlock: decimal(64),
-    portal: hexOf(20),
-    accountKeyFile: z.string().min(1),
-    l1MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
-    l2MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
-    forceAfterSeconds: seconds,
-    forceLeadSeconds: seconds,
-    sendMarginSeconds: seconds,
-    maxBoardBytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(Number.MAX_SAFE_INTEGER)
-      .default(DEFAULT_MAX_BOARD_BYTES),
-    gateways: z.array(z.string()).max(MAX_GATEWAYS).default([]),
-    blocks: z.string().min(1).optional(),
-  })
-  .refine((a) => a.gateways.length > 0 || a.blocks !== undefined, {
-    message: "needs a gateway or a blocks directory",
-    path: ["gateways"],
-  });
+const AVAILABILITY = z.strictObject({
+  l1: z.string().min(1),
+  l1ChainId: decimal(64),
+  l2: z.string().min(1),
+  anchor: hexOf(20),
+  anchorFromBlock: decimal(64),
+  anchorClock: z.strictObject({
+    epoch: decimal(64),
+    period: decimal(64).refine((v) => v > 0n, "must be positive"),
+    deadline: decimal(64),
+  }),
+  registry: hexOf(20),
+  registryFromBlock: decimal(64),
+  board: hexOf(20),
+  boardFromBlock: decimal(64),
+  portal: hexOf(20),
+  accountKeyFile: z.string().min(1),
+  l1MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
+  l2MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
+  forceAfterSeconds: seconds,
+  forceLeadSeconds: seconds,
+  sendMarginSeconds: seconds,
+  maxBoardBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .default(DEFAULT_MAX_BOARD_BYTES),
+  gateways: z.array(z.string()).max(MAX_GATEWAYS).default([]),
+  blocks: z.string().min(1),
+  serve: z.strictObject({
+    port: z.number().int().min(0).max(65_535),
+    // Loopback unless the operator publishes it, as `apps/node`'s `serve`.
+    host: z.string().min(1).default("127.0.0.1"),
+  }),
+});
 
 const CONFIG = z.strictObject({
   panel: z.strictObject({
@@ -120,8 +120,13 @@ export interface AvailabilityConfig {
   readonly sendMargin: bigint;
   readonly maxBoardBytes: number;
   readonly gateways: readonly URL[];
-  /** A directory of CAR files read before any gateway. */
-  readonly blocks: string | undefined;
+  /**
+   * A directory of CAR files read before any gateway, where the seat pins
+   * every object it attests (docs/spec/availability.md, What a seat does, 4).
+   */
+  readonly blocks: string;
+  /** Where the seat serves that directory as a trustless gateway. */
+  readonly serve: { readonly port: number; readonly host: string };
 }
 
 export interface NodeConfig {
@@ -215,6 +220,7 @@ function availabilityOf(a: z.output<typeof AVAILABILITY>): AvailabilityConfig {
     maxBoardBytes: a.maxBoardBytes,
     gateways: a.gateways.map((g, i) => url(`gateways.${i}`, parseGateway, g)),
     blocks: a.blocks,
+    serve: a.serve,
   };
 }
 

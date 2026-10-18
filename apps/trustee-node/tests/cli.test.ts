@@ -1,10 +1,21 @@
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeElectionDefinition, identityKey, panelId } from "@abolishus/crypto";
+import {
+  cidText,
+  encodeElectionDefinition,
+  identityKey,
+  objectCar,
+  objectCid,
+  panelId,
+} from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli, dutyWiring } from "../src/cli.ts";
 import { parseConfig } from "../src/config.ts";
+import { servedBlocks } from "../src/served.ts";
 import { MemoryStore } from "../src/store.ts";
 import { LocalCoordinator, serveCoordinator } from "../src/local.ts";
 import { anvil, freePort, type Node } from "./anvil.ts";
@@ -173,7 +184,10 @@ describe("run with the availability duty", () => {
   let chain: Node;
   let seatConfig: Record<string, unknown>;
   let accountKeyFile: string;
+  let emptyBlocks: string;
   beforeAll(async () => {
+    emptyBlocks = join(dir, "empty-blocks");
+    await mkdir(emptyBlocks);
     chain = await anvil(L2_CHAIN_ID, true);
     for (const address of [BOARD, PORTAL]) await chain.rpc.call("anvil_setCode", [address, ACCEPT]);
     const { panel, secrets } = panelOf(3, 2);
@@ -216,10 +230,18 @@ describe("run with the availability duty", () => {
     forceLeadSeconds: 3600,
     sendMarginSeconds: 1800,
     gateways: ["http://127.0.0.1:1/"],
+    blocks: emptyBlocks,
+    serve: { port: 0 },
     ...change,
   });
 
-  async function runWith(name: string, change: Record<string, unknown>, abortOn?: string) {
+  async function runWith(
+    name: string,
+    change: Record<string, unknown>,
+    abortOn?: string,
+    // Awaited before aborting, while the node still runs.
+    onEvent?: (e: { event?: string; address?: AddressInfo }) => Promise<void>,
+  ) {
     const configFile = join(dir, `${name}.json`);
     await writeFile(
       configFile,
@@ -235,7 +257,10 @@ describe("run with the availability duty", () => {
       ...t.io,
       out: (v) => {
         t.out.push(v);
-        if ((v as { event?: string }).event === abortOn) stop.abort();
+        const e = v as { event?: string; address?: AddressInfo };
+        if (e.event !== abortOn) return;
+        if (onEvent === undefined) stop.abort();
+        else void onEvent(e).finally(() => stop.abort());
       },
     });
     return { code, out: t.out, err: t.err };
@@ -249,8 +274,44 @@ describe("run with the availability duty", () => {
     expect(run.code).toBe(0);
     expect(run.out).toEqual([
       { event: "blocks", file: "broken.car", error: "not-a-car" },
+      {
+        event: "serving",
+        address: { address: "127.0.0.1", family: "IPv4", port: expect.any(Number) },
+      },
       { event: "started", seat: 1, availability: true },
     ]);
+  }, 60_000);
+
+  test("serves the blocks directory over the trustless gateway while it runs, and closes it when stopped", async () => {
+    const blocks = join(dir, "served-blocks");
+    await mkdir(blocks);
+    const object = Uint8Array.from({ length: 40 }, (_, i) => i);
+    const cid = objectCid(object);
+    await writeFile(join(blocks, `${cidText(cid)}.car`), objectCar(object));
+    let url = "";
+    let answer: number | undefined;
+    const run = await runWith("serving", { blocks }, "serving", async (e) => {
+      url = `http://127.0.0.1:${e.address?.port}/ipfs/${cidText(cid)}?format=raw`;
+      answer = (await fetch(url)).status;
+    });
+    expect(run.code).toBe(0);
+    expect(answer).toBe(200);
+    await expect(fetch(url)).rejects.toThrow();
+  }, 60_000);
+
+  test("refuses a port already taken as bad configuration", async () => {
+    const taken = createServer();
+    taken.listen(0, "127.0.0.1");
+    await once(taken, "listening");
+    try {
+      const port = (taken.address() as AddressInfo).port;
+      const run = await runWith("taken", { serve: { port } });
+      expect(run.code).toBe(2);
+      expect(run.err).toEqual([{ error: "availability.serve: EADDRINUSE" }]);
+      expect(run.out).toEqual([]);
+    } finally {
+      taken.close();
+    }
   }, 60_000);
 
   test.each<[string, Record<string, unknown>, string]>([
@@ -278,7 +339,7 @@ describe("run with the availability duty", () => {
     expect(run.err).toEqual([{ error: "account key: must not be the identity key" }]);
   });
 
-  test("wires the reader and each election's duty from the configuration, under the definition's own board version", () => {
+  test("wires the reader and each election's duty from the configuration, under the definition's own board version", async () => {
     const parsed = parseConfig(
       JSON.stringify({
         ...seatConfig,
@@ -294,11 +355,19 @@ describe("run with the availability duty", () => {
     );
     const a = parsed.availability;
     if (a === undefined) return expect.fail("no availability");
+    const servedDir = join(dir, "wiring-blocks");
+    await mkdir(servedDir);
+    const atStart = Uint8Array.from({ length: 30 }, (_, i) => i + 1);
+    await writeFile(join(servedDir, `${cidText(objectCid(atStart))}.car`), objectCar(atStart));
+    const remote = Uint8Array.of(9, 9, 9);
     const sources = {
       l1: { call: async () => null },
       l2: { call: async () => null },
       contract: { send: async () => {}, recorded: async () => undefined },
-      blocks: async () => [],
+      served: await servedBlocks(servedDir),
+      // A gateway holding only `remote`'s block.
+      gateways: async (cid: Uint8Array) =>
+        hex(cid) === hex(objectCid(remote)) ? [remote] : ([] as Uint8Array[]),
       store: new MemoryStore(),
       clock: () => 7n,
     };
@@ -330,12 +399,21 @@ describe("run with the availability duty", () => {
       election,
       boardVersion: 5,
       l1: reader,
-      blocks: sources.blocks,
+      blocks: expect.any(Function),
+      pin: sources.served.pin,
       contract: sources.contract,
       clock: sources.clock,
       sendMargin: 1234n,
       maxBytes: 5678,
     });
+    // The directory, then the gateways; what the seat pins is read back from it.
+    expect(await o.blocks(objectCid(atStart), 1 << 20)).toHaveLength(1);
+    expect((await o.blocks(objectCid(remote), 1 << 20)).map(hex)).toEqual([hex(remote)]);
+    const attested = Uint8Array.from({ length: 50 }, (_, i) => 200 - i);
+    expect(await o.blocks(objectCid(attested), 1 << 20)).toEqual([]);
+    await o.pin(objectCid(attested), attested);
+    expect(await stat(join(servedDir, `${cidText(objectCid(attested))}.car`))).toBeTruthy();
+    expect(await o.blocks(objectCid(attested), 1 << 20)).toHaveLength(1);
   });
 
   test("refuses an account key others can read", async () => {

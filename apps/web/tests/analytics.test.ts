@@ -57,10 +57,15 @@ describe("pages", () => {
       "/account",
       "/how-it-works",
     ]);
+    expect(pageOf(`/account/polls/${"a".repeat(32)}`)).toBe("/account/polls/:id");
+    expect(pageOf("/account/polls/new")).toBe("/account/polls/:id");
     for (const path of [
       "/polls/",
       "/polls/a/b",
       "/account/x",
+      "/account/polls",
+      "/account/polls/",
+      "/account/polls/a/b",
       "/moderation/",
       "/how-it-works/",
       "/x",

@@ -21,6 +21,14 @@ function fakeDrafts(
     list: async () => list,
     remove: async (id) => act("remove", id, () => (list = list.filter((p) => p.id !== id))),
     discard: async (id) => act("discard", id, () => (list = list.filter((p) => p.id !== id))),
+    // The list never reads or writes a draft: the form's stories do (poll-form.stories.tsx).
+    read: async () => {
+      throw new DraftsError("gone");
+    },
+    create: async () => {
+      throw new DraftsError("failed");
+    },
+    update: async () => {},
     retry: async (id) =>
       act("retry", id, () => {
         list = list.map((p) =>
@@ -93,6 +101,15 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   const [draft, untitled, setup, open, timedOut, registered] = items.map((i) => within(i));
   await expect(draft!.getByText("Draft")).toBeVisible();
   await expect(draft!.getByText("Last edited October 11, 2026 at 2:20 PM UTC")).toBeVisible();
+  // A draft opens in the form; nothing past a draft does.
+  await expect(
+    draft!.getByRole("link", {
+      name: "Edit draft",
+      description: "Should the harbor library open on Sundays?",
+    }),
+  ).toHaveAttribute("href", `/account/polls/${DRAFT.id}`);
+  await expect(setup!.queryByRole("link")).toBeNull();
+  await expect(timedOut!.queryByRole("link")).toBeNull();
   await expect(untitled!.getByRole("heading", { name: "Untitled draft" })).toBeVisible();
   // Setup's steps are one state, never a step's name or a hash.
   await expect(setup!.getByText("Setting up")).toBeVisible();

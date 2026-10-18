@@ -77,6 +77,13 @@ const noPolls: DraftsClient = {
   remove: async () => {},
   retry: async () => {},
   discard: async () => {},
+  read: async () => {
+    throw new DraftsError("gone");
+  },
+  create: async () => {
+    throw new DraftsError("failed");
+  },
+  update: async () => {},
 };
 
 /** The panel's own notice; the polls list below it has its own. */

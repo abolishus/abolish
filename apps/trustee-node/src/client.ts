@@ -1,7 +1,8 @@
-// The node's side of the coordinator transport (README, Transport). The node
-// only ever calls out: it fetches what the coordinator asks of its seat and
-// posts its answers, so nothing listens on the host that holds the seat's
-// keys. The coordinator is trusted for liveness only
+// The node's side of the coordinator transport (README, Transport). For the
+// ceremony the node only calls out: it fetches what the coordinator asks of
+// its seat and posts its answers, so no ceremony request reaches the host
+// that holds the seat's keys unasked (it listens only for intake deliveries,
+// endpoint.ts, and gateway requests for what it attests). The coordinator is trusted for liveness only
 // (docs/spec/ceremony.md, Parties and keys): every body it returns is checked
 // by the seat before the node acts on it, and every body the node posts is
 // signed or public.

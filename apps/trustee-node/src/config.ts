@@ -1,8 +1,10 @@
 // The node's deployment configuration (README, Configuration): the pinned
 // panel, the seat, where the identity key and the store live, the
 // coordinator, and, for the availability duty, the chains' nodes, the
-// deployment's contracts, the paying account's key, the block sources and where it serves them. JSON at a transport boundary, so it is parsed with a strict
-// schema; the panel's keys are protocol bytes, so they are checked by
+// deployment's contracts, the paying account's key, the block sources and
+// where it serves them, and where the intake endpoint listens. JSON at a
+// transport boundary, so it is parsed with a strict schema; the panel's keys
+// are protocol bytes, so they are checked by
 // `@abolishus/crypto` (`panelId`) and must hash to the `panelId` the trustee
 // compared out of band, so a mistyped key can't pin another panel (T-17).
 import { constants } from "node:fs";
@@ -72,6 +74,25 @@ const AVAILABILITY = z.strictObject({
   }),
 });
 
+const LOOPBACK = ["127.0.0.1", "::1", "localhost"];
+
+const INTAKE = z
+  .strictObject({
+    host: z.string().min(1),
+    port: z.number().int().min(0).max(65_535),
+    tlsCertFile: z.string().min(1).optional(),
+    tlsKeyFile: z.string().min(1).optional(),
+    queue: z.number().int().min(1).max(1024).default(16),
+  })
+  .refine((i) => (i.tlsCertFile === undefined) === (i.tlsKeyFile === undefined), {
+    message: "needs both tlsCertFile and tlsKeyFile, or neither",
+    path: ["tlsCertFile"],
+  })
+  .refine((i) => i.tlsCertFile !== undefined || LOOPBACK.includes(i.host), {
+    message: "plain HTTP only on a loopback address",
+    path: ["host"],
+  });
+
 const CONFIG = z.strictObject({
   panel: z.strictObject({
     threshold: z.number().int().min(1),
@@ -90,7 +111,20 @@ const CONFIG = z.strictObject({
   coordinator: z.string().min(1),
   pollSeconds: z.number().min(1).max(3600).default(5),
   availability: AVAILABILITY.optional(),
+  intake: INTAKE.optional(),
 });
+
+/**
+ * Where the intake endpoint listens (README, Intake endpoint). With the
+ * certificate and key it serves HTTPS; without, plain HTTP on loopback only,
+ * behind a TLS proxy on the same host.
+ */
+export interface IntakeEndpointConfig {
+  readonly host: string;
+  readonly port: number;
+  readonly tls: { readonly certFile: string; readonly keyFile: string } | undefined;
+  readonly queue: number;
+}
 
 /**
  * Where the availability duty reads and sends (docs/spec/availability.md,
@@ -139,6 +173,7 @@ export interface NodeConfig {
   readonly coordinator: string;
   readonly pollSeconds: number;
   readonly availability: AvailabilityConfig | undefined;
+  readonly intake: IntakeEndpointConfig | undefined;
 }
 
 /** A configuration the node can't run with; the message says which field. */
@@ -185,6 +220,15 @@ export function parseConfig(json: string): NodeConfig {
     coordinator: c.coordinator,
     pollSeconds: c.pollSeconds,
     availability: c.availability && availabilityOf(c.availability),
+    intake: c.intake && {
+      host: c.intake.host,
+      port: c.intake.port,
+      tls:
+        c.intake.tlsCertFile === undefined || c.intake.tlsKeyFile === undefined
+          ? undefined
+          : { certFile: c.intake.tlsCertFile, keyFile: c.intake.tlsKeyFile },
+      queue: c.intake.queue,
+    },
   };
 }
 
@@ -243,7 +287,23 @@ export function readAccountKey(path: string): Promise<Uint8Array> {
   return readKeyFile(path, "account key");
 }
 
+/**
+ * The intake endpoint's TLS private key, PEM, held as the identity key is:
+ * whoever reads it can pose as the seat's endpoint and read each delivery's
+ * ballot record (T-11), though never a share, which is sealed to the seat's
+ * KEM key.
+ */
+export function readTlsKey(path: string): Promise<string> {
+  return readOwnerFile(path, "TLS key");
+}
+
 async function readKeyFile(path: string, what: string): Promise<Uint8Array> {
+  const text = (await readOwnerFile(path, what)).replace(/\n$/, "");
+  if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError(`${what}: expected 64 hex digits`);
+  return Uint8Array.from(Buffer.from(text, "hex"));
+}
+
+async function readOwnerFile(path: string, what: string): Promise<string> {
   // Opened without following a link and checked through the same handle, so
   // the file checked is the file read.
   let file;
@@ -257,9 +317,7 @@ async function readKeyFile(path: string, what: string): Promise<Uint8Array> {
     if (!info.isFile()) throw new ConfigError(`${what}: not a regular file`);
     if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())
       throw new ConfigError(`${what}: the file must be owned by this user and mode 0600 or 0400`);
-    const text = (await file.readFile("utf8")).replace(/\n$/, "");
-    if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError(`${what}: expected 64 hex digits`);
-    return Uint8Array.from(Buffer.from(text, "hex"));
+    return await file.readFile("utf8");
   } finally {
     await file.close();
   }

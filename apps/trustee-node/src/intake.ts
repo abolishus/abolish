@@ -65,7 +65,26 @@ export interface IntakeConfig extends Pins {
   readonly store: SeatStore;
   /** The node's clock, in Unix seconds; intake closes at `c_I` by it. */
   readonly now: () => bigint;
+  /** How many distinct ballots each member may have the seat hold; `MEMBER_LIMIT` by default. */
+  readonly memberLimit?: MemberLimit;
 }
+
+/**
+ * The seat holds at most `burst` distinct ballots per tier and nullifier
+ * once voting opens, and one more for each `every` seconds since
+ * `opens_at`, so re-voting stays open for the whole poll while one member
+ * can grow the store only at that pace (T-39, T-52). Only a ballot the
+ * membership proof admitted counts, so nobody can spend another member's
+ * allowance; a delivery of a ballot the seat holds, under any L1 reference,
+ * is never limited.
+ */
+export interface MemberLimit {
+  readonly burst: number;
+  readonly every: bigint;
+}
+
+/** Eight ballots at once and one more an hour: a week's poll holds at most 176 per member. */
+export const MEMBER_LIMIT: MemberLimit = { burst: 8, every: 3600n };
 
 /** Why a seat refuses an election's intake, before reading the ballot. */
 export type ElectionRefusal =
@@ -78,7 +97,9 @@ export type ElectionRefusal =
   /** Finalized L2 doesn't show the definition registered under the approved key set. */
   | "intake-unregistered"
   /** The intake cutoff `c_I` has passed. */
-  | "intake-closed";
+  | "intake-closed"
+  /** The member's allowance of distinct ballots is spent for now (`MemberLimit`); a later delivery may pass. */
+  | "intake-rate";
 
 export type IntakeRefusal = ElectionRefusal | IntakeCode;
 
@@ -114,6 +135,7 @@ const COPY = struct([
 interface Opened {
   readonly election: BallotElection;
   readonly stubHash: Uint8Array;
+  readonly opensAt: bigint;
   readonly cutoff: bigint;
   readonly keys: Parameters<typeof intakeBallot>[1];
 }
@@ -128,8 +150,14 @@ export class IntakeSeat {
   // check reads finalized state, so a pass stays one; a refusal isn't kept,
   // since a check that couldn't decide yet may pass later.
   readonly #opened = new Map<string, Opened>();
+  // One allowance decision at a time per member, so two deliveries raced
+  // can't both take its last slot.
+  readonly #members = new Map<string, Promise<unknown>>();
 
   constructor(config: IntakeConfig) {
+    const limit = config.memberLimit ?? MEMBER_LIMIT;
+    if (!Number.isSafeInteger(limit.burst) || limit.burst < 1 || limit.every < 1n)
+      throw new RangeError("trustee node: a member limit needs a burst and a period of at least 1");
     if (
       !Number.isSafeInteger(config.index) ||
       config.index < 1 ||
@@ -163,9 +191,20 @@ export class IntakeSeat {
     // The proofs take a while: a delivery begun before `c_I` that finishes
     // after it stores and signs nothing (What a node owes).
     if (this.#closed(opened.value)) return { ok: false, code: "intake-closed" };
+    const ballot = hex(taken.ballotHash);
+    const member = `members/${hex(stubHash)}/${taken.tier}-${taken.nullifier.toString(16).padStart(64, "0")}`;
+    const counted = await this.#serial(member, async () => {
+      const store = this.#config.store;
+      if ((await store.get(`${member}/${ballot}`)) !== undefined) return true;
+      if ((await store.list(member)).length >= this.#allowance(opened.value)) return false;
+      // Counted before the ballot is held: a crash between the two leaves a
+      // slot spent, never a held ballot uncounted.
+      await store.putOnce(`${member}/${ballot}`, new Uint8Array());
+      return true;
+    });
+    if (!counted) return { ok: false, code: "intake-rate" };
     // Held before the receipt leaves the node, so a crash after this never
     // leaves a receipt for a share the seat lost (Intake and receipts).
-    const ballot = hex(taken.ballotHash);
     const stored = await this.#config.store.putOnce(
       `intake/${hex(stubHash)}/${ballot}`,
       encode(TAKEN, {
@@ -222,6 +261,26 @@ export class IntakeSeat {
     }
     if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
     return { ok: true, value: opened };
+  }
+
+  #allowance(opened: Opened): number {
+    const { burst, every } = this.#config.memberLimit ?? MEMBER_LIMIT;
+    const since = this.#config.now() - opened.opensAt;
+    if (since <= 0n) return burst;
+    // Clamped so the sum stays exact; no store holds 2^40 records of a member.
+    const slots = since / every;
+    return burst + Number(slots < 1n << 40n ? slots : 1n << 40n);
+  }
+
+  async #serial<T>(name: string, run: () => Promise<T>): Promise<T> {
+    const before = this.#members.get(name) ?? Promise.resolve();
+    const result = before.then(run, run);
+    const settled = result.catch(() => undefined);
+    this.#members.set(name, settled);
+    void settled.then(() => {
+      if (this.#members.get(name) === settled) this.#members.delete(name);
+    });
+    return result;
   }
 
   // From `c_I` on, the seat's obligation is decided: a receipt issued later
@@ -291,6 +350,7 @@ export class IntakeSeat {
       value: {
         election,
         stubHash,
+        opensAt: stub.opens_at,
         cutoff: intakeCutoff(stub.closes_at, BigInt(stub.l1_inclusion_bound), RELEASE_WINDOWS),
         keys: {
           seat: config.index,

@@ -7,7 +7,7 @@ Status: not deployable yet. Until the node checks the electorate against finaliz
 ## Host
 
 - One host per seat, under the trustee's own control, at the hosting provider the panel lists for the seat ([[0006-trustees]]), with full-disk encryption and nothing else running on it.
-- Outbound HTTPS to the coordinator only. Nothing listens on the node: open no inbound port.
+- Outbound HTTPS to the coordinator. Inbound, only the ports you configure: the intake endpoint's (below) and the availability duty's `serve` gateway. Open no other port.
 - Keep the clock synchronized (NTP); deadlines are the coordinator's, but logs are only useful with a sane clock.
 
 ## Identity key
@@ -25,6 +25,15 @@ The store (`store` in the configuration) holds the write-once records every cere
 ## Configuration
 
 The JSON file the README describes, with the panel copied from the registered panel and its `panelId` compared out of band with the other trustees: the node refuses a panel whose keys don't hash to that identifier. The coordinator URL must be HTTPS.
+
+## Intake endpoint
+
+With an `intake` section the node serves its seat's intake endpoint (README, Intake endpoint): voters' clients deliver to it directly through a network anonymiser when the operator's route fails, and the operator's relay delivers through it too ([[delivery]], Client rules; T-11). Until the node approves stubs (part 3) it refuses every delivery with `intake-unapproved`.
+
+- **TLS on the node.** Give `tlsCertFile` and `tlsKeyFile` (PEM) and a public `host`: the node then takes TLS 1.3 only, with the hybrid post-quantum group `X25519MLKEM768` and no classical fallback, as [[0002-everlasting-privacy]] requires of every intake endpoint (a recorded share ciphertext is otherwise exposed to a later quantum break). Hold the key as the identity key is (owner-only, never a link): whoever reads it can pose as the endpoint and read each ballot record delivered to it, with the voter's network address, though never a share. A client too old for the group can't connect; it falls back to the operator's route.
+- **Or a proxy on the host.** Without the TLS files the node listens only on loopback; a TLS proxy on the same host must then negotiate `X25519MLKEM768` only, and keep no log of addresses or bodies.
+- **Publish the URL** (`https://<host>:<port>/v1/intake`) for the release record's panel listing.
+- **The queue** (`queue`, 16 by default) bounds the deliveries held at once; past it the node answers 503 with `Retry-After`. Each delivery is checked one at a time, so raise it only with the CPU to drain it. One member may have at most 8 distinct ballots held, and one more an hour after the poll opens (`intake-rate`, 429).
 
 ## Availability duty
 
@@ -49,4 +58,4 @@ Rule 6 of [[0006-trustees]] applies in full (T-61):
 
 ## Logs
 
-The node writes one JSON event per line to stdout: `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`), `transport` failures, and the availability duty's events above. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).
+The node writes one JSON event per line to stdout: `started` (with the intake endpoint's URL when it serves one), `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`), `transport` failures, `intake-error` (an intake that threw, by the error's name only), and the availability duty's events above. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).

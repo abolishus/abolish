@@ -29,10 +29,12 @@ import { type MembershipProverArtifacts, proveMembership } from "@abolishus/memb
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   CeremonySeat,
+  encodeDelivery,
   type IntakeConfig,
   IntakeSeat,
   type RegistrationCheck,
   type SeatStore,
+  serveIntake,
 } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -369,6 +371,99 @@ describe("intake", () => {
     );
     expect(out).toEqual({ ok: false, code: "membership-proof" });
     expect(await stores[0]!.list(`intake/${hex(s.e.stubHash)}`)).toEqual([]);
+  });
+});
+
+describe("the member limit", () => {
+  let other: Cast;
+  let neighbour: Cast;
+  beforeAll(async () => {
+    // A second ballot of the same member, and one of another member.
+    other = await cast(s, 0, 0);
+    neighbour = await cast(s, 1, 0);
+  }, 120_000);
+
+  const give = (seat: IntakeSeat, c: Cast) =>
+    seat.intake(s.e.stubBytes, s.transcript, c.bytes, c.ciphertexts[0] as Uint8Array);
+
+  it("holds at most the burst of a member's ballots, then one more each period (T-39, T-52)", async () => {
+    const store = new MemoryStore();
+    const seats = seatsOf(s, { store, memberLimit: { burst: 1, every: 100n } });
+    const [seat] = seats.intake;
+    expect((await give(seat!, honest)).ok).toBe(true);
+    expect(await give(seat!, other)).toEqual({ ok: false, code: "intake-rate" });
+    expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toHaveLength(1);
+    // The ballot it holds is never limited, under any L1 reference.
+    expect((await give(seat!, honest)).ok).toBe(true);
+    const recast = await castAgain(s, 0, honest, {
+      number: 102n,
+      hash: new Uint8Array(32).fill(9),
+    });
+    expect((await give(seat!, recast)).ok).toBe(true);
+    // Another member's allowance is their own.
+    expect((await give(seat!, neighbour)).ok).toBe(true);
+    seats.clock = s.e.stub.opens_at + 99n;
+    expect(await give(seat!, other)).toEqual({ ok: false, code: "intake-rate" });
+    seats.clock = s.e.stub.opens_at + 100n;
+    expect((await give(seat!, other)).ok).toBe(true);
+    expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toHaveLength(3);
+  });
+
+  it("gives one of two raced ballots the last slot", async () => {
+    const store = new MemoryStore();
+    const [seat] = seatsOf(s, { store, memberLimit: { burst: 1, every: 100n } }).intake;
+    const outs = await Promise.all([give(seat!, honest), give(seat!, other)]);
+    expect(outs.filter((o) => o.ok)).toHaveLength(1);
+    expect(outs.filter((o) => !o.ok && o.code === "intake-rate")).toHaveLength(1);
+    expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toHaveLength(1);
+  });
+
+  it("refuses a limit of no ballots or no period", () => {
+    for (const memberLimit of [
+      { burst: 0, every: 1n },
+      { burst: 1, every: 0n },
+      { burst: 1.5, every: 1n },
+    ])
+      expect(() => seatsOf(s, { memberLimit })).toThrow(RangeError);
+  });
+});
+
+describe("the intake endpoint over a seat", () => {
+  it("returns the receipt the seat gives in-process, and a refusal's code", async () => {
+    const [seat] = seatsOf(s, { store: new MemoryStore() }).intake;
+    const endpoint = await serveIntake(seat!, { host: "127.0.0.1", port: 0, queue: 4 });
+    try {
+      const body = (ciphertext: Uint8Array) =>
+        Buffer.from(
+          encodeDelivery({
+            stub: s.e.stubBytes,
+            transcript: s.transcript,
+            record: honest.bytes,
+            ciphertext,
+          }),
+        );
+      const deliver = (ciphertext: Uint8Array) =>
+        fetch(endpoint.url, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: body(ciphertext),
+        });
+      const res = await deliver(honest.ciphertexts[0] as Uint8Array);
+      expect(res.status).toBe(200);
+      const direct = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!direct.ok) expect.fail(direct.code);
+      expect(hex(new Uint8Array(await res.arrayBuffer()))).toBe(hex(direct.receipt));
+      const refused = await deliver(honest.ciphertexts[1] as Uint8Array);
+      expect(refused.status).toBe(422);
+      expect(await refused.text()).toBe("share-hash");
+    } finally {
+      await endpoint.close();
+    }
   });
 });
 

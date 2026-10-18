@@ -131,8 +131,11 @@ const vouchees = Array.from(
   (_, i) => new Identity(`abolish vouch vector vouchee ${i}`).commitment,
 );
 
-// One proof by `voucher` at its leaf, with the circuit inputs generateProof
-// builds for it (its `fullProve` call, packages/proof/src/generate-proof.ts).
+// One proof by `voucher` at its leaf, with the circuit inputs written out as
+// generateProof builds them for its `fullProve` call
+// (packages/proof/src/generate-proof.ts). It returns only the proof, so they
+// are rebuilt here from the same secret, path, scope and message, and the
+// proof's public signals (root, nullifier, scope, message) must agree.
 async function prove(voucher, scope, msg) {
   const identity = vouchers[voucher];
   const siblings = t2.path(voucher);

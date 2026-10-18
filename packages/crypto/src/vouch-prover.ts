@@ -132,12 +132,18 @@ export function vouchProverInput(
     if (typeof v !== "bigint" || v < 0n || v >= 2n ** 64n)
       throw new RangeError("statement: tier2GroupId and rootBlock must be u64s");
   if (rootBlock % VOUCH_ROOT_INTERVAL !== 0n) throw new VouchProverError("root-grid");
-  const voucheeScope = semaphoreField(vouchScope(context, groupId, commitment));
-  const slotScope = semaphoreField(vouchSlotScope(context, slot));
+  if (context === null || typeof context !== "object")
+    throw new TypeError("vouch context: expected an object");
+  // The context too, so every scope and message binds one chain and registry.
+  const ctx: VouchContext = {
+    chainId: context.chainId,
+    registry:
+      context.registry instanceof Uint8Array ? new Uint8Array(context.registry) : context.registry,
+  };
+  const voucheeScope = semaphoreField(vouchScope(ctx, groupId, commitment));
+  const slotScope = semaphoreField(vouchSlotScope(ctx, slot));
   const message = (role: 0 | 1, other: bigint) =>
-    semaphoreField(
-      vouchMessage(context, role, groupId, commitment, tier2GroupId, rootBlock, other),
-    );
+    semaphoreField(vouchMessage(ctx, role, groupId, commitment, tier2GroupId, rootBlock, other));
   const s = secretScalar(secret);
   const path = memberPath(commitmentOf(s), fresh(leaves, commitment), root);
   // Each nullifier needs only the secret and its scope, so both exist before
@@ -165,7 +171,8 @@ export function finishVouchWith(
   const built = BUILT.get(input);
   if (built === undefined) throw new TypeError("input: expected a vouchProverInput result");
   // The slot proof is verified before the vouchee proof is re-randomised, so
-  // a bad pair draws nothing.
+  // a bad pair draws nothing; finishing verifies it again, one pairing check
+  // more per vouch.
   if (!(slotProof instanceof Uint8Array) || !ArrayBuffer.isView(slotProof))
     throw new TypeError("proof: expected bytes");
   const slotCopy = new Uint8Array(slotProof);

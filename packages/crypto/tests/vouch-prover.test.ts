@@ -9,6 +9,7 @@ import {
   type MembershipProverErrorCode,
   pickVouchSlot,
   poseidon2,
+  semaphoreField,
   type Vouch,
   VOUCH_K,
   VOUCH_ROOT_INTERVAL,
@@ -17,14 +18,15 @@ import {
   type VouchProverErrorCode,
   vouchProverInput,
   type VouchStatement,
+  vouchMessage,
 } from "../src/index.ts";
 import { finishVouchWith, pickVouchSlotWith } from "../src/vouch-prover.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/vouch-prover.json holds Semaphore v4.14.3's own voucher
-// identities (secret scalars and commitments), the circuit inputs its
-// generateProof hands snarkjs for both proofs of each vouch, and real proofs
-// for them, made outside the workspace by scripts/vouch-prover-vectors.mjs
+// identities (secret scalars and commitments), both proofs' circuit inputs
+// for each vouch as its generateProof builds them for snarkjs (rebuilt from
+// the same secret, path, scope and message), and real proofs for them, made outside the workspace by scripts/vouch-prover-vectors.mjs
 // (docs/spec/vouching.md, Prover rules; P3-3 part 3c-3a; T-02, T-06, T-32).
 // No expected value comes from the code under test.
 
@@ -163,6 +165,21 @@ describe("vouch-prover.json", () => {
     expect(decimal(vectors.tier2.rootBlock) % VOUCH_ROOT_INTERVAL).toBe(0n);
   });
 
+  test("its binding, Tier 2 leaves and vouchees are vouch.json's", () => {
+    const vouch = JSON.parse(readFileSync(new URL("vouch.json", SPEC_VECTORS), "utf8")) as {
+      context: unknown;
+      tier2: { groupId: string; leaves: readonly string[]; root: string };
+      additions: readonly { id: string; groupId: string; commitment: string }[];
+    };
+    expect(vectors.context).toEqual(vouch.context);
+    expect(vectors.tier2.groupId).toBe(vouch.tier2.groupId);
+    expect(vectors.tier2.leaves).toEqual(vouch.tier2.leaves);
+    expect(vectors.tier2.root).toBe(vouch.tier2.root);
+    const honest = vouch.additions.find((a) => a.id === "honest");
+    expect(honest?.groupId).toBe(vectors.groupId);
+    expect(honest?.commitment).toBe(vectors.vouchees[0]);
+  });
+
   test("its addition passes every check of one addition", () => {
     expect(checkTier1Addition(bytes(vectors.addition.record), context)).toMatchObject({
       ok: true,
@@ -186,11 +203,15 @@ describe("vouchProverInput", () => {
   );
 
   test("the vouchee proof's message names the slot nullifier, and the slot proof's the vouchee nullifier", () => {
-    // The scopes differ, so the nullifiers do; a message that named its own
-    // proof's nullifier, or none, would differ from Semaphore's input above.
+    // vouchMessage is held to vouch.json's messages in vouch.test.ts.
     const input = inputOf(first);
-    expect(input.vouchee.signals.nullifier).not.toBe(input.slot.signals.nullifier);
-    expect(input.vouchee.signals.message).not.toBe(input.slot.signals.message);
+    const s = statementOf(first);
+    const message = (role: 0 | 1, other: bigint) =>
+      semaphoreField(
+        vouchMessage(context, role, s.groupId, s.commitment, s.tier2GroupId, s.rootBlock, other),
+      );
+    expect(input.vouchee.signals.message).toBe(message(0, input.slot.signals.nullifier));
+    expect(input.slot.signals.message).toBe(message(1, input.vouchee.signals.nullifier));
   });
 
   test("refuses each statement the prover rules forbid, before any proof", () => {
@@ -225,6 +246,12 @@ describe("vouchProverInput", () => {
     const vouchee = decimal(vectors.vouchees[first.vouchee]);
     expect(
       refusal(() => vouchProverInput(secretOf(first), [...leaves, vouchee], statementOf(first))),
+    ).toBe("not-fresh");
+    // After removed leaves (0), which a tier tree keeps in place.
+    expect(
+      refusal(() =>
+        vouchProverInput(secretOf(first), [...leaves, 0n, 0n, vouchee], statementOf(first)),
+      ),
     ).toBe("not-fresh");
   });
 });
@@ -313,6 +340,10 @@ describe("finishVouch", () => {
         .bigInt({ min: 0n, max: 2n ** 64n - 1n })
         .filter((c) => c !== base.context.chainId)
         .map((chainId) => ({ context: { ...context, chainId } })),
+      fc
+        .uint8Array({ minLength: 20, maxLength: 20 })
+        .filter((r) => !r.every((b, i) => b === context.registry[i]))
+        .map((registry) => ({ context: { ...context, registry } })),
     );
     fc.assert(
       fc.property(change, (c) => {

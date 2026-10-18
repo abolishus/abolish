@@ -33,7 +33,6 @@ import {
   type QuestionBallotElection,
   sealBallotV3,
   type SealedBallotV3,
-  type ReceiptSigner,
   sealIdentityBackup,
   sealingElectionV5,
   tier0Registration,
@@ -77,7 +76,6 @@ export class BallotSession {
         readonly definitionHash: string;
         readonly definition: ElectionDefinitionV5;
         readonly election: QuestionBallotElection;
-        readonly signers: readonly ReceiptSigner[];
       }
     | undefined;
   /** The voter's cell in the poll, found by `findCell`: what `cast` proves with. */
@@ -126,7 +124,6 @@ export class BallotSession {
       definitionHash: check.election.definitionHash,
       definition,
       election: sealing.election,
-      signers: sealing.signers,
     };
     return check;
   }
@@ -436,7 +433,7 @@ export class BallotSession {
 
   /**
    * The seat `request.receipt` receipts `request.ballot` for, checked under
-   * the held poll's registered signing keys (`castReceiptSeatV3`;
+   * the signing keys the held poll's ceremony registered (`castReceiptSeatV3`;
    * [[delivery]], Client rule 1). A ballot that isn't a version-3 record of
    * the held poll is `unknown`: the page asked about another poll's cast.
    */
@@ -445,7 +442,7 @@ export class BallotSession {
     if (poll === undefined) return { ok: false, problem: "unknown" };
     let seat: number | undefined;
     try {
-      seat = castReceiptSeatV3(poll.election, poll.signers, request.ballot, request.receipt);
+      seat = castReceiptSeatV3(poll.election, request.ballot, request.receipt);
     } catch (e) {
       if (e instanceof DecodeError || e instanceof TypeError)
         return { ok: false, problem: "unknown" };

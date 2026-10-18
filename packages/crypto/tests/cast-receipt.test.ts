@@ -59,10 +59,16 @@ const definitionOf = (name: string) => {
   return decodeElectionDefinitionV5(hex(e.definition));
 };
 
-function electionOf(name: string, seats: readonly number[]): QuestionBallotElection {
+/** The election under `seats`' registered keys, with any seat's signing key replaced by `signing`'s. */
+function electionOf(
+  name: string,
+  seats: readonly number[],
+  signing: Readonly<Record<number, Uint8Array>> = {},
+): QuestionBallotElection {
   const d = definitionOf(name);
   const keys: RegisteredKeys[] = signers(seats).map((s) => ({
     ...s,
+    signingKey: signing[s.index] ?? s.signingKey,
     kemKey: kem[s.index - 1]?.publicKey as RegisteredKeys["kemKey"],
   }));
   return questionBallotElection(d, checkedKeySetForTests(keys, d.ceremony_transcript_hash));
@@ -90,9 +96,7 @@ describe("castReceiptSeatV3", () => {
   for (const c of accepted)
     test(`${c.id}: passes for seat ${c.seat}`, () => {
       const election = electionOf(c.election, c.registered);
-      expect(castReceiptSeatV3(election, signers(c.registered), hex(c.record), receiptOf(c))).toBe(
-        c.seat,
-      );
+      expect(castReceiptSeatV3(election, hex(c.record), receiptOf(c))).toBe(c.seat);
     });
 
   test("refuses a receipt for another ballot, even under the right seat's signature", () => {
@@ -100,9 +104,7 @@ describe("castReceiptSeatV3", () => {
     const other = caseOf("intake-ok-remainder");
     expect(other.record).not.toBe(one.record);
     const election = electionOf(one.election, one.registered);
-    expect(
-      castReceiptSeatV3(election, signers(one.registered), hex(other.record), receiptOf(one)),
-    ).toBeUndefined();
+    expect(castReceiptSeatV3(election, hex(other.record), receiptOf(one))).toBeUndefined();
   });
 
   test("refuses every single-byte change to a passing receipt record", () => {
@@ -116,9 +118,7 @@ describe("castReceiptSeatV3", () => {
         (at, flip) => {
           const changed = Uint8Array.from(receipt);
           changed[at] = (changed[at] as number) ^ flip;
-          expect(
-            castReceiptSeatV3(election, signers(c.registered), hex(c.record), changed),
-          ).toBeUndefined();
+          expect(castReceiptSeatV3(election, hex(c.record), changed)).toBeUndefined();
         },
       ),
       { numRuns: Math.min(numRuns, 200) },
@@ -130,38 +130,37 @@ describe("castReceiptSeatV3", () => {
     const election = electionOf(c.election, c.registered);
     const receipt = receiptOf(c);
     for (const bytes of [receipt.subarray(0, -1), Uint8Array.of(...receipt, 0), new Uint8Array()])
-      expect(
-        castReceiptSeatV3(election, signers(c.registered), hex(c.record), bytes),
-      ).toBeUndefined();
+      expect(castReceiptSeatV3(election, hex(c.record), bytes)).toBeUndefined();
   });
 
-  test("refuses a seat with no registered signing key, or another seat's key", () => {
+  test("refuses a seat whose registered signing key is another seat's", () => {
     const c = caseOf("intake-ok-seat-3");
-    const election = electionOf(c.election, c.registered);
     const receipt = receiptOf(c);
-    expect(
-      castReceiptSeatV3(
-        election,
-        signers(c.registered).filter((s) => s.index !== c.seat),
-        hex(c.record),
-        receipt,
-      ),
-    ).toBeUndefined();
-    const swapped = signers(c.registered).map((s) =>
-      s.index === c.seat ? { ...s, signingKey: hex((vectors.panel[0] as Seat).signingKey) } : s,
-    );
-    expect(castReceiptSeatV3(election, swapped, hex(c.record), receipt)).toBeUndefined();
+    const swapped = electionOf(c.election, c.registered, {
+      [c.seat]: hex((vectors.panel[0] as Seat).signingKey),
+    });
+    expect(castReceiptSeatV3(swapped, hex(c.record), receipt)).toBeUndefined();
   });
 
-  test("throws for a ballot of another election or bytes that aren't a version-3 ballot", () => {
+  test("refuses a seat with no registered signing key", () => {
+    const c = caseOf("intake-ok-seat-3");
+    const without = electionOf(
+      c.election,
+      c.registered.filter((seat) => seat !== c.seat),
+    );
+    expect(castReceiptSeatV3(without, hex(c.record), receiptOf(c))).toBeUndefined();
+  });
+
+  test("throws for an election questionBallotElection didn't make, a ballot of another election or bytes that aren't a version-3 ballot", () => {
     const c = caseOf("intake-ok-seat-1");
     const election = electionOf(c.election, c.registered);
-    const other = { ...election, definitionHash: new Uint8Array(32).fill(7) };
-    expect(() =>
-      castReceiptSeatV3(other, signers(c.registered), hex(c.record), receiptOf(c)),
-    ).toThrow(TypeError);
-    expect(() =>
-      castReceiptSeatV3(election, signers(c.registered), hex(c.record).subarray(1), receiptOf(c)),
-    ).toThrow();
+    // A copy with another definition hash: not a context the key set was bound to.
+    const copied = { ...election, definitionHash: new Uint8Array(32).fill(7) };
+    expect(() => castReceiptSeatV3(copied, hex(c.record), receiptOf(c))).toThrow(TypeError);
+    const other = electionOf("questions", c.registered);
+    const changed = hex(c.record).slice();
+    changed[3] = (changed[3] as number) ^ 1;
+    expect(() => castReceiptSeatV3(other, changed, receiptOf(c))).toThrow(TypeError);
+    expect(() => castReceiptSeatV3(election, hex(c.record).subarray(1), receiptOf(c))).toThrow();
   });
 });

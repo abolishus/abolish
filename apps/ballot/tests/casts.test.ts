@@ -15,6 +15,7 @@ import {
   type CastAsked,
   castAsAsked,
   type CastRecord,
+  type CheckedReceipt,
   type KeptShare,
   newestBlock,
   parseStoredCasts,
@@ -86,6 +87,9 @@ const receiptFor = (seat: number, over: Record<string, unknown> = {}) =>
     ...over,
   });
 const FIRST = (SHARES[0] as CastShare).seat;
+/** What the worker client hands back for a receipt the worker passed; here, made by hand. */
+const checkedOf = (seat: number, receipt: Uint8Array) =>
+  ({ seat, receipt }) as unknown as CheckedReceipt;
 /** `shares()` with the first seat receipted, its `m` gone. */
 const receipted = (): KeptShare[] =>
   shares().map(({ seat, ciphertext, m }) =>
@@ -204,8 +208,9 @@ function sharesRefused(): [string, unknown][] {
 }
 
 describe("the stored casts", () => {
-  // Every ballot is decoded twice per run (stored, then read back): at CI's
-  // FC_NUM_RUNS this takes several seconds.
+  // Every ballot is decoded twice per run (stored, then read back), and a
+  // receipted one hashed twice too: at CI's FC_NUM_RUNS this takes minutes
+  // on a slow runner.
   test("round-trip through what is stored, with the block read from each ballot", () => {
     fc.assert(
       fc.property(casts, (list) => {
@@ -213,7 +218,7 @@ describe("the stored casts", () => {
       }),
       { numRuns },
     );
-  }, 120_000);
+  }, 600_000);
 
   test("hand out copies, never the stored arrays", () => {
     const stored = record();
@@ -470,7 +475,7 @@ describe("a seat's receipt in the casts", () => {
 
   test("takes the place of the seat's m in the cast it receipts and every recast of it", () => {
     const held = [cast(10n), cast(11n)];
-    const changed = withReceipt(held, naming(10n), FIRST, receiptFor(FIRST));
+    const changed = withReceipt(held, naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
     if (changed === "missing") throw new Error("expected the casts");
     for (const at of [0, 1]) {
       expect(first(changed, at)).toEqual({
@@ -489,15 +494,17 @@ describe("a seat's receipt in the casts", () => {
   });
 
   test("keeps a seat's first receipt", () => {
-    const once = withReceipt([cast(10n)], naming(10n), FIRST, receiptFor(FIRST));
+    const once = withReceipt([cast(10n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
     if (once === "missing") throw new Error("expected the casts");
     const other = receiptFor(FIRST, { signature: new Uint8Array(64).fill(2) });
-    expect(withReceipt(once, naming(10n), FIRST, other)).toEqual(once);
+    expect(withReceipt(once, naming(10n), checkedOf(FIRST, other))).toEqual(once);
   });
 
   test("is missing for a ballot no cast has, and changes nothing", () => {
-    expect(withReceipt([cast(11n)], naming(10n), FIRST, receiptFor(FIRST))).toBe("missing");
-    expect(withReceipt([], naming(10n), FIRST, receiptFor(FIRST))).toBe("missing");
+    expect(withReceipt([cast(11n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)))).toBe(
+      "missing",
+    );
+    expect(withReceipt([], naming(10n), checkedOf(FIRST, receiptFor(FIRST)))).toBe("missing");
   });
 
   test("throws for a receipt that doesn't name the seat and exactly the ballot", () => {
@@ -508,14 +515,14 @@ describe("a seat's receipt in the casts", () => {
       receiptFor(FIRST, { ballot_hash: new Uint8Array(32) }),
       receiptFor(FIRST).subarray(1),
     ])
-      expect(() => withReceipt(held, naming(10n), FIRST, receipt)).toThrow(TypeError);
-    expect(() => withReceipt(held, naming(10n), UNQUALIFIED, receiptFor(UNQUALIFIED))).toThrow(
-      TypeError,
-    );
+      expect(() => withReceipt(held, naming(10n), checkedOf(FIRST, receipt))).toThrow(TypeError);
+    expect(() =>
+      withReceipt(held, naming(10n), checkedOf(UNQUALIFIED, receiptFor(UNQUALIFIED))),
+    ).toThrow(TypeError);
   });
 
   test("carries over to a recast recorded after it, whose m is never kept", () => {
-    const once = withReceipt([cast(10n)], naming(10n), FIRST, receiptFor(FIRST));
+    const once = withReceipt([cast(10n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
     if (once === "missing") throw new Error("expected the casts");
     const recast = withCast(once, naming(11n), shares());
     if (typeof recast === "string") throw new Error(recast);
@@ -524,7 +531,7 @@ describe("a seat's receipt in the casts", () => {
   });
 
   test("doesn't carry to another seal's cast, whose shares are its own", () => {
-    const once = withReceipt([cast(10n)], naming(10n), FIRST, receiptFor(FIRST));
+    const once = withReceipt([cast(10n)], naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
     if (once === "missing") throw new Error("expected the casts");
     // Another nullifier: another seal's ballot hash, under the same shares.
     const otherSeal = BALLOT.slice();

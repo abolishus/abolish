@@ -75,7 +75,7 @@ import {
   type KemPublicKey,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
-import { checkShareReceiptV3, type ReceiptSigner } from "./share-receipt.ts";
+import { checkShareReceiptV3 } from "./share-receipt.ts";
 import {
   tierMembership,
   TierMembershipError,
@@ -109,12 +109,7 @@ export type SealingElectionCode =
   | "ceremony-participation";
 
 export type SealingElection =
-  | {
-      readonly ok: true;
-      readonly election: QuestionBallotElection;
-      /** Each registered seat's signing key, which its share receipts verify under. */
-      readonly signers: readonly ReceiptSigner[];
-    }
+  | { readonly ok: true; readonly election: QuestionBallotElection }
   | {
       readonly ok: false;
       readonly code: SealingElectionCode;
@@ -195,14 +190,7 @@ export function sealingElectionV5(
   // and the tally's failure margin with it (T-54, T-40).
   if (checked.registered.length < Math.max(panel.threshold, panel.keys.length - 1))
     return refuse("ceremony-participation");
-  return {
-    ok: true,
-    election: questionBallotElection(definition, checked.registered),
-    signers: checked.registered.map(({ index, signingKey }) => ({
-      index,
-      signingKey: Uint8Array.from(signingKey),
-    })),
-  };
+  return { ok: true, election: questionBallotElection(definition, checked.registered) };
 }
 
 const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
@@ -672,20 +660,23 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
  * version 1, the version ballot version 3 fixes) naming exactly what
  * `ballot`, a version-3 ballot record of `election`, gives: the definition,
  * the ballot hash recomputed from the ballot and that seat's share hash,
- * with a signature that verifies under the seat's registered signing key
- * among `signers` (`sealingElectionV5`). `undefined` otherwise, whatever the
+ * with a signature that verifies under the seat's signing key in the key
+ * set `election` was made with, never keys the caller supplies (T-37).
+ * `undefined` otherwise, whatever the
  * bytes, so a seat counts as receipted, and its `m_i` may be erased, only
  * on a receipt that counts for exactly this ballot (T-25, T-38). The ballot
  * hash binds no L1 block, so a receipt for one cast of a seal counts for
- * every recast of it. Throws on a `ballot` that isn't a version-3 ballot
- * record of `election`: the client's own record.
+ * every recast of it. Throws on an `election` `questionBallotElection`
+ * didn't make, and on a `ballot` that isn't a version-3 ballot record of
+ * it: the client's own record.
  */
 export function castReceiptSeatV3(
   election: QuestionBallotElection,
-  signers: readonly ReceiptSigner[],
   ballot: Uint8Array,
   receipt: Uint8Array,
 ): number | undefined {
+  const { ballotVersion, keys } = cellContextOf(election);
+  if (ballotVersion !== 3) throw new TypeError("castReceiptSeatV3: expected a version-3 election");
   const record = decodeBallot(ballot, 3);
   if (!equalBytes(record.definition_hash, election.definitionHash))
     throw new TypeError("castReceiptSeatV3: a ballot of another election");
@@ -714,5 +705,5 @@ export function castReceiptSeatV3(
     !equalBytes(decoded.share_hash, shareHash)
   )
     return undefined;
-  return checkShareReceiptV3(signers, ctx, vote, seat, decoded.signature) ? seat : undefined;
+  return checkShareReceiptV3(keys, ctx, vote, seat, decoded.signature) ? seat : undefined;
 }

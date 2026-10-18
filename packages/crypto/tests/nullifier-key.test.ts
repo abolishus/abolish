@@ -14,7 +14,9 @@ import {
 import { dealingMessageWith, type RegistrationSecrets } from "../src/nullifier-key.ts";
 import {
   approveNullifierKey,
+  approveNullifierKeyV2,
   approvingSeats,
+  approvingSeatsV2,
   checkDealtShare,
   checkNullifierKeyTranscript,
   complaintsMessage,
@@ -23,13 +25,17 @@ import {
   DecodeError,
   decodeDealtShare,
   decodeNullifierKeyTranscript,
+  decodeNullifierKeyTranscriptV2,
   encodeDealtShare,
   encodeNullifierKeyTranscript,
+  encodeNullifierKeyTranscriptV2,
   identityKey,
   KEM_PUBLIC_KEY,
+  MAX_KEY_WINDOW,
   nullifierKeyApprovalMessage,
   type NullifierKeyCheck,
   nullifierKeyContext,
+  nullifierKeyCounts,
   nullifierKeyId,
   type NullifierKeyParams,
   nullifierKeyQuorum,
@@ -74,6 +80,7 @@ interface Result {
   readonly ok: boolean;
   readonly code?: string;
   readonly keyId?: string;
+  readonly deadline?: string;
   readonly seats?: readonly { readonly index: number; readonly reasons: readonly string[] }[];
   readonly dealers?: readonly number[];
   readonly qualified?: readonly {
@@ -82,6 +89,33 @@ interface Result {
     readonly signingKey: string;
     readonly commitment: string;
   }[];
+}
+
+interface TranscriptVector {
+  readonly id: string;
+  readonly panel: string;
+  readonly transcript: string;
+  readonly result: Result;
+  readonly shares?: readonly {
+    readonly index: number;
+    readonly sk: string;
+    readonly s: string;
+  }[];
+  readonly runId?: string;
+  readonly deadline?: string;
+  readonly context?: string;
+  readonly seats?: readonly SeatVector[];
+}
+
+interface ApprovalsVector {
+  readonly panel: string;
+  readonly keyId: string;
+  readonly approvals: readonly {
+    readonly index: number;
+    readonly message: string;
+    readonly signature: string;
+  }[];
+  readonly notCounted: readonly { readonly index: number; readonly signature: string }[];
 }
 
 interface Vectors {
@@ -99,20 +133,7 @@ interface Vectors {
       }
     >
   >;
-  readonly transcripts: readonly {
-    readonly id: string;
-    readonly panel: string;
-    readonly transcript: string;
-    readonly result: Result;
-    readonly shares?: readonly {
-      readonly index: number;
-      readonly sk: string;
-      readonly s: string;
-    }[];
-    readonly runId?: string;
-    readonly context?: string;
-    readonly seats?: readonly SeatVector[];
-  }[];
+  readonly transcripts: readonly TranscriptVector[];
   readonly dealtShareChecks: readonly {
     readonly id: string;
     readonly run: string;
@@ -123,21 +144,22 @@ interface Vectors {
     readonly share?: string;
     readonly blind?: string;
   }[];
-  readonly approvals: {
-    readonly panel: string;
-    readonly keyId: string;
-    readonly approvals: readonly {
-      readonly index: number;
-      readonly message: string;
-      readonly signature: string;
-    }[];
-    readonly notCounted: readonly { readonly index: number; readonly signature: string }[];
-  };
+  readonly approvals: ApprovalsVector;
   readonly decode: readonly {
     readonly id: string;
     readonly transcript: string;
     readonly error: string;
   }[];
+  readonly version2: {
+    readonly transcripts: readonly TranscriptVector[];
+    readonly approvals: ApprovalsVector;
+    readonly decode: readonly {
+      readonly id: string;
+      readonly pinned: 1 | 2;
+      readonly transcript: string;
+      readonly error: string;
+    }[];
+  };
 }
 
 const V = JSON.parse(readFileSync(new URL("nullifier-key.json", SPEC_VECTORS), "utf8")) as Vectors;
@@ -156,7 +178,7 @@ const scopeOf = (panel: Panel): NullifierKeyScope => ({
   panel,
 });
 
-const vectorOf = (id: string) => {
+const vectorOf = (id: string): TranscriptVector => {
   const t = V.transcripts.find((x) => x.id === id);
   if (t === undefined) throw new Error(`no transcript ${id}`);
   return t;
@@ -171,6 +193,7 @@ function asVector(r: NullifierKeyCheck): Result {
   return {
     ok: true,
     keyId: toHex(r.keyId),
+    ...(r.deadline === null ? {} : { deadline: String(r.deadline) }),
     seats: r.seats,
     dealers: r.dealers,
     qualified: r.qualified.map((q) => ({
@@ -182,7 +205,7 @@ function asVector(r: NullifierKeyCheck): Result {
   };
 }
 
-function seatsOf(t: ReturnType<typeof vectorOf>): RegistrationSecrets[] {
+function seatsOf(t: TranscriptVector): RegistrationSecrets[] {
   const p = V.panels[t.panel];
   if (p === undefined || t.seats === undefined) throw new Error("bad vector");
   return t.seats.map((s) => ({
@@ -193,9 +216,10 @@ function seatsOf(t: ReturnType<typeof vectorOf>): RegistrationSecrets[] {
   }));
 }
 
-const paramsOf = (t: ReturnType<typeof vectorOf>): NullifierKeyParams => ({
+const paramsOf = (t: TranscriptVector): NullifierKeyParams => ({
   ...scopeOf(panelOf(t.panel)),
   runId: hex(t.runId ?? ""),
+  deadline: t.deadline === undefined ? null : BigInt(t.deadline),
 });
 
 const polynomialsOf = (s: SeatVector) => ({ f: s.f.map(BigInt), g: s.g.map(BigInt) });
@@ -446,7 +470,7 @@ function honestRun(threshold: number, n: number, runId: Uint8Array) {
     groupRegistry: new Uint8Array(20).fill(7),
     panel,
   };
-  const params: NullifierKeyParams = { ...scope, runId };
+  const params: NullifierKeyParams = { ...scope, runId, deadline: null };
   const seats = identitySecrets.map((d, i) => registrationKeygen(i + 1, d));
   const keys = seats.map((s) => registrationKeysMessage(params, s));
   const dealings = seats.map((s) => dealingMessage(params, s, keys));
@@ -755,4 +779,248 @@ describe("a seat's node", () => {
 test("the package entry point exports no way to choose the randomness", async () => {
   const api = (await import("../src/index.ts")) as Record<string, unknown>;
   expect(api["dealingMessageWith"]).toBeUndefined();
+});
+
+describe("nullifier-key.json, version 2", () => {
+  const V2 = V.version2;
+  const honest = V2.transcripts.find((t) => t.id === "honest-5") as TranscriptVector;
+  const scope = scopeOf(panelOf("panel-5"));
+  const deadline = BigInt(honest.deadline ?? "");
+
+  test.each(V2.transcripts.map((t) => [t.id, t] as const))(
+    "%s checks as the vector says",
+    (_, t) => {
+      const r = checkNullifierKeyTranscript(scopeOf(panelOf(t.panel)), hex(t.transcript), 2);
+      expect(asVector(r)).toEqual(t.result);
+      if (r.ok) {
+        expect(r.version).toBe(2);
+        expect(r.deadline).toBe(deadline);
+        expect(r.keyId).toEqual(nullifierKeyId(hex(t.transcript)));
+      }
+      // The version-1 check refuses every version-2 transcript before reading it.
+      expect(checkNullifierKeyTranscript(scope, hex(t.transcript), 1)).toEqual({
+        ok: false,
+        code: "profile-mismatch",
+      });
+    },
+    60_000,
+  );
+
+  test("honest-5 is reproduced byte for byte from its seats' secrets and deadline", () => {
+    const params = paramsOf(honest);
+    expect(params.deadline).toBe(deadline);
+    expect(toHex(nullifierKeyContext(params))).toBe(honest.context);
+    // Version 1's context of the same run is another value under another tag.
+    expect(toHex(nullifierKeyContext({ ...scope, runId: params.runId, deadline: null }))).not.toBe(
+      honest.context,
+    );
+    const seats = seatsOf(honest);
+    const vs = honest.seats as readonly SeatVector[];
+    const keys = seats.map((s) => registrationKeysMessage(params, s, deadline - 1n));
+    const dealings = seats.map((s, i) => {
+      const v = vs[i] as SeatVector;
+      const d = dealingMessageWith(
+        params,
+        s,
+        keys,
+        polynomialsOf(v),
+        v.shareRandomness.map((x) => ({ mu: hex(x.mu), e: BigInt(x.e) })),
+      );
+      expect(d.shares.map((x) => toHex(x.bytes))).toEqual(v.dealtShares.map((x) => x.bytes));
+      return d.message;
+    });
+    const transcript = {
+      run_id: params.runId,
+      deadline,
+      keys,
+      dealings,
+      complaints: [],
+      responses: [],
+    };
+    const bytes = encodeNullifierKeyTranscriptV2(transcript);
+    expect(toHex(bytes)).toBe(honest.transcript);
+    expect(decodeNullifierKeyTranscriptV2(bytes, 2)).toEqual(transcript);
+  }, 120_000);
+
+  test("honest-5: each seat's share is the vector's", () => {
+    const params = paramsOf(honest);
+    const tr = decodeNullifierKeyTranscriptV2(hex(honest.transcript), 2);
+    const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    if (!r.ok) throw new Error("expected a valid transcript");
+    const vs = honest.seats as readonly SeatVector[];
+    const got = seatsOf(honest).map((seat, i) => {
+      const received: ReceivedShare[] = [];
+      for (const d of vs) {
+        const shared = d.dealtShares.find((x) => x.recipient === seat.index);
+        if (shared === undefined) continue;
+        const c = checkDealtShare(
+          params,
+          { index: seat.index, secretKey: seat.kem.secretKey },
+          tr,
+          hex(shared.bytes),
+        );
+        if (!c.ok) throw new Error(`dealt share fails: ${c.code}`);
+        received.push({ dealer: c.dealer, share: c.share, blind: c.blind });
+      }
+      const share = seatShareOf(r, tr, seat.index, polynomialsOf(vs[i] as SeatVector), received);
+      return { index: seat.index, sk: String(share.sk), s: String(share.s) };
+    });
+    expect(got).toEqual(honest.shares);
+  }, 60_000);
+
+  test("approvals are re-made byte for byte, and a key counts only under version 2", () => {
+    const a = V2.approvals;
+    const keyId = hex(a.keyId);
+    const secrets = V.panels[a.panel]?.identitySecrets ?? [];
+    const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    if (!r.ok) throw new Error("expected a valid transcript");
+    expect(r.keyId).toEqual(keyId);
+    for (const x of a.approvals) {
+      expect(toHex(nullifierKeyApprovalMessage(scope, x.index, keyId))).toBe(x.message);
+      expect(
+        toHex(
+          approveNullifierKeyV2(scope, hex(secrets[x.index - 1] ?? ""), x.index, r, deadline - 1n),
+        ),
+      ).toBe(x.signature);
+    }
+    const sig = (x: { index: number; signature: string }) => ({
+      index: x.index,
+      signature: hex(x.signature),
+    });
+    const approvals = a.approvals.map(sig);
+    expect(approvingSeatsV2(scope, keyId, [...approvals, ...a.notCounted.map(sig)])).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+    expect(approvingSeatsV2(scope, keyId, a.notCounted.map(sig))).toEqual([]);
+    // Neither statement counts for the other.
+    expect(approvingSeats(scope, keyId, approvals)).toEqual([]);
+    const v1 = V.approvals;
+    expect(approvingSeatsV2(scope, hex(v1.keyId), v1.approvals.map(sig))).toEqual([]);
+
+    expect(nullifierKeyCounts(scope, r, approvals.slice(0, 4))).toBe(true);
+    expect(nullifierKeyCounts(scope, r, approvals.slice(0, 3))).toBe(false);
+    const one = approvals[0] as { index: number; signature: Uint8Array };
+    expect(nullifierKeyCounts(scope, r, [one, one, one, one])).toBe(false);
+    // A version-1 key never counts, whatever approves it.
+    const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
+    if (!r1.ok) throw new Error("expected a valid transcript");
+    expect(r1.version).toBe(1);
+    expect(r1.deadline).toBeNull();
+    expect(nullifierKeyCounts(scope, r1, v1.approvals.map(sig))).toBe(false);
+  }, 60_000);
+
+  test("a seat approves only a version-2 key whose deadline is ahead and in the window", () => {
+    const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
+    if (!r.ok || !r1.ok) throw new Error("expected valid transcripts");
+    const secret = hex(V.panels["panel-5"]?.identitySecrets[0] ?? "");
+    const approve = (key: typeof r, block: bigint) =>
+      approveNullifierKeyV2(scope, secret, 1, key, block);
+    expect(() => approve(r1, 0n)).toThrow(/version-2/);
+    expect(() => approve(r, deadline)).toThrow(/passed/);
+    expect(() => approve(r, deadline + 1n)).toThrow(/passed/);
+    expect(() => approve(r, deadline - MAX_KEY_WINDOW - 1n)).toThrow(/too far/);
+    expect(approve(r, deadline - MAX_KEY_WINDOW)).toHaveLength(64);
+    expect(() => approveNullifierKeyV2(scope, secret, 2, r, deadline - 1n)).toThrow(/seat/);
+  }, 60_000);
+
+  test("a seat takes part only in a run whose deadline is ahead and in the window", () => {
+    const params = paramsOf(honest);
+    const seat = seatsOf(honest)[0] as RegistrationSecrets;
+    expect(() => registrationKeysMessage(params, seat)).toThrow(TypeError);
+    expect(() => registrationKeysMessage(params, seat, deadline)).toThrow(/passed/);
+    expect(() => registrationKeysMessage(params, seat, deadline - MAX_KEY_WINDOW - 1n)).toThrow(
+      /too far/,
+    );
+    expect(registrationKeysMessage(params, seat, deadline - MAX_KEY_WINDOW).index).toBe(1);
+  }, 60_000);
+
+  test.each(V2.decode.map((d) => [d.id, d] as const))(
+    "%s is rejected when decoded",
+    (_, d) => {
+      const decode = () =>
+        d.pinned === 2
+          ? decodeNullifierKeyTranscriptV2(hex(d.transcript), 2)
+          : decodeNullifierKeyTranscript(hex(d.transcript), 1);
+      expect(decode).toThrow(expect.objectContaining({ name: DecodeError.name, code: d.error }));
+      expect(checkNullifierKeyTranscript(scope, hex(d.transcript), d.pinned)).toEqual({
+        ok: false,
+        code: d.error,
+      });
+    },
+    60_000,
+  );
+
+  test("approving and counting take only a check's own result", () => {
+    const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
+    if (!r.ok || !r1.ok) throw new Error("expected valid transcripts");
+    const secret = hex(V.panels["panel-5"]?.identitySecrets[0] ?? "");
+    const approvals = V2.approvals.approvals.map((x) => ({
+      index: x.index,
+      signature: hex(x.signature),
+    }));
+    // A copy, and a version-1 result relabelled version 2 with this deadline.
+    for (const forged of [{ ...r }, { ...r1, version: 2 as const, deadline }]) {
+      expect(() => approveNullifierKeyV2(scope, secret, 1, forged, deadline - 1n)).toThrow(
+        /checkNullifierKeyTranscript/,
+      );
+      expect(() => nullifierKeyCounts(scope, forged, approvals)).toThrow(
+        /checkNullifierKeyTranscript/,
+      );
+    }
+    expect(Object.isFrozen(r) && Object.isFrozen(r.qualified)).toBe(true);
+  }, 60_000);
+
+  test("a dealt share of a version-2 run isn't taken in version 1's run of the same run_id", () => {
+    const params = paramsOf(honest);
+    const tr = decodeNullifierKeyTranscriptV2(hex(honest.transcript), 2);
+    const seat = seatsOf(honest)[1] as RegistrationSecrets;
+    const shared = ((honest.seats as readonly SeatVector[])[0] as SeatVector).dealtShares.find(
+      (x) => x.recipient === 2,
+    );
+    if (shared === undefined) throw new Error("no share");
+    const secret = { index: 2, secretKey: seat.kem.secretKey };
+    expect(checkDealtShare(params, secret, tr, hex(shared.bytes)).ok).toBe(true);
+    // Under the version-1 context the rounds it was dealt in don't check, so
+    // the node refuses before it reads the share.
+    expect(() =>
+      checkDealtShare({ ...params, deadline: null }, secret, tr, hex(shared.bytes)),
+    ).toThrow(/key-signature/);
+  }, 60_000);
+
+  test("a scope carrying a deadline doesn't change a version-1 check", () => {
+    const t = vectorOf("honest-2");
+    const withDeadline = { ...scopeOf(panelOf("panel-2")), deadline };
+    expect(checkNullifierKeyTranscript(withDeadline, hex(t.transcript), 1).ok).toBe(true);
+  }, 60_000);
+
+  test("any other deadline fails the whole transcript", () => {
+    const t = decodeNullifierKeyTranscriptV2(hex(honest.transcript), 2);
+    fc.assert(
+      fc.property(fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }), (other) => {
+        fc.pre(other !== deadline);
+        const b = encodeNullifierKeyTranscriptV2({ ...t, deadline: other });
+        expect(checkNullifierKeyTranscript(scope, b, 2)).toEqual({
+          ok: false,
+          code: "key-signature",
+        });
+      }),
+      { numRuns: Math.max(10, Math.ceil(numRuns / 10)) },
+    );
+  }, 300_000);
+
+  test("random bytes decode only if they re-encode to themselves", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ maxLength: 256 }), (tail) => {
+        const b = new Uint8Array([0x00, 0x11, 0x02, ...tail]);
+        try {
+          expect(encodeNullifierKeyTranscriptV2(decodeNullifierKeyTranscriptV2(b, 2))).toEqual(b);
+        } catch (e) {
+          expect(e).toBeInstanceOf(DecodeError);
+        }
+      }),
+      { numRuns },
+    );
+  }, 60_000);
 });

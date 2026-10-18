@@ -403,13 +403,34 @@ export function checkShares(
     throw new RangeError("checkShares: index must be a trustee seat from 1");
   if (shares.length !== vss.length) return false;
   const x = BigInt(index);
-  return vss.every((e, j) => {
-    // Horner's rule: ((E_{k−1})^i · E_{k−2})^i · … · E_0.
-    let acc = IDENTITY;
-    for (let t = e.length - 1; t >= 0; t--) acc = mul(acc, x).add(e[t] as Element);
-    const s = shares[j] as Share;
-    return acc.equals(pedersen(s.v, s.r));
-  });
+  return vss.every((e, j) => shareHolds(e, x, shares[j] as Share));
+}
+
+/**
+ * `checkShares` over every option, never stopping at the first that fails,
+ * so the time it takes doesn't tell which option failed, or whether one
+ * did: for a check whose timing the sender of the shares can see
+ * (docs/spec/tally.md, Summed-share message, Notes; T-39).
+ */
+export function checkEveryShare(
+  vss: CommittedVote["vss"],
+  index: number,
+  shares: readonly Share[],
+): boolean {
+  if (!Number.isSafeInteger(index) || index < 1 || index > MAX_TRUSTEES)
+    throw new RangeError("checkEveryShare: index must be a trustee seat from 1");
+  if (shares.length !== vss.length) return false;
+  const x = BigInt(index);
+  let ok = true;
+  for (const [j, e] of vss.entries()) ok = shareHolds(e, x, shares[j] as Share) && ok;
+  return ok;
+}
+
+/** One option's check: `g^v · h^r = Π_t E_t^{x^t}`, by Horner's rule: `((E_{k−1})^x · E_{k−2})^x · … · E_0`. */
+function shareHolds(e: CommittedVote["vss"][number], x: bigint, s: Share): boolean {
+  let acc = IDENTITY;
+  for (let t = e.length - 1; t >= 0; t--) acc = mul(acc, x).add(e[t] as Element);
+  return acc.equals(pedersen(s.v, s.r));
 }
 
 /** One option's sharing polynomials: `f` holds the vote then `a_1 … a_{k−1}`, `g` holds `r` then `b_1 … b_{k−1}`. */

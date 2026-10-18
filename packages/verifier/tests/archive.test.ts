@@ -1044,6 +1044,42 @@ describe("listed objects", () => {
     expect(asked).toHaveLength(1);
   });
 
+  test("a CID named twice is tried once, even when the first try failed", async () => {
+    const a = Uint8Array.of(1, 3);
+    const { source, asked } = objectSource([]);
+    const read = await readListedObjects(
+      [target(a, 1n), target(a, 2n)],
+      listing([a, [tx(1)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings.map((f) => f.code)).toEqual(["object-unavailable"]);
+    expect(asked).toHaveLength(1);
+  });
+
+  test("an object of identical chunks is charged its own length, not its short CAR's", async () => {
+    // Three identical chunks: the CAR holds one leaf, so it is about a third
+    // of the object. Charged by its CAR, b would also be read and held.
+    const a = new Uint8Array(3 * CHUNK_SIZE).fill(1);
+    const b = new Uint8Array(3 * CHUNK_SIZE).fill(2);
+    expect(objectCar(a).length).toBeLessThan(CHUNK_SIZE + 4096);
+    const { source } = objectSource([
+      [tx(1), a],
+      [tx(2), b],
+    ]);
+    const bound = 4n * BigInt(CHUNK_SIZE);
+    const read = await readListedObjects(
+      [target(a, 1n, bound), target(b, 2n, bound)],
+      listing([a, [tx(1)]], [b, [tx(2)]]),
+      source,
+      4 * CHUNK_SIZE,
+    );
+    // a, then b's answer, up to the budget.
+    expect(read.spent).toBe(4 * CHUNK_SIZE);
+    expect(read.findings.map((f) => f.code)).toEqual(["objects-over-budget"]);
+    expect([...read.objects.keys()]).toEqual([bytesToHex(objectCid(a))]);
+  });
+
   test("a transaction listed in several manifests is asked once", async () => {
     const a = Uint8Array.of(2, 2);
     const { source, asked } = objectSource([]);

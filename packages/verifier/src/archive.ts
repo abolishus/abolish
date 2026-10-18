@@ -592,7 +592,7 @@ export interface ListedObjects {
   /** The blocks of every object read, served by their CIDs, for `readBoardCopy` beside other sources. */
   readonly blocks: AsyncBlockSource;
   readonly findings: readonly ListedFinding[];
-  /** Bytes of every answer the sources gave, read or not, against `maxBytes`. */
+  /** Bytes charged against `maxBytes`: every answer the sources gave, or the object it read, if longer. */
   readonly spent: number;
   /** Transactions asked of the sources, against `maxReads`. */
   readonly reads: number;
@@ -611,8 +611,9 @@ export interface ListedObjects {
  * again.
  *
  * Both budgets are the reader's (T-52). Every answer a source gives counts
- * against `maxBytes`, read or not, and is held only up to the CAR of what is
- * left, so junk served for a listing spends the budget rather than the
+ * against `maxBytes`, read or not, and an object read counts its own length
+ * where that is more than its answer's (identical chunks make a long object
+ * of a short CAR); an answer is held only up to the CAR of what is left, so junk served for a listing spends the budget rather than the
  * reader's bandwidth unbounded; every transaction asked counts against
  * `maxReads`, so an authority listing a CID in every manifest under dead
  * transactions costs at most that many asks. The reads stop
@@ -642,6 +643,8 @@ export async function readListedObjects(
     throw new RangeError("maxReads must be a positive integer");
   const objects = new Map<string, Uint8Array>();
   const blocks = new Map<string, Uint8Array>();
+  // A CID that is a target twice is tried once, whatever came of it.
+  const attempted = new Set<string>();
   const findings: ListedFinding[] = [];
   let spent = 0;
   let reads = 0;
@@ -653,7 +656,8 @@ export async function readListedObjects(
       findings.push({ code: "not-archived", size, cid });
       continue;
     }
-    if (stopped || objects.has(key)) continue;
+    if (stopped || attempted.has(key)) continue;
+    attempted.add(key);
     const over = () => {
       findings.push({ code: "objects-over-budget", size, cid, maxBytes, maxReads });
       stopped = true;
@@ -675,8 +679,11 @@ export async function readListedObjects(
       for await (const data of await source(transaction, limit)) {
         // A source past the limit is that source's failure, never parsed.
         if (data.length > limit) continue;
-        spent = Math.min(maxBytes, spent + data.length);
         const got = readArchivedObject(data, cid, within);
+        // What is held is charged: the object read, which identical chunks
+        // can make far longer than its CAR, or else the answer (T-52). The
+        // object is at most `within`, so the total held never passes `maxBytes`.
+        spent = Math.min(maxBytes, spent + Math.max(data.length, got.ok ? got.bytes.length : 0));
         // Data that doesn't read as the CID is that source's failure.
         if (!got.ok && got.reason === "inconsistent") {
           // Junk that spent the budget: the reads stop below.

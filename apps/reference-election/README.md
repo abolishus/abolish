@@ -4,7 +4,7 @@ The reference election (AGENTS.md, Reference election; P1-20): the single end-to
 
 ## Running
 
-From the repository root, with the toolchain on `PATH` (`.github/scripts/install-toolchain.sh`, for `anvil` and `forge`):
+From the repository root, with the toolchain on `PATH` (`.github/scripts/install-toolchain.sh`, for `anvil` and `forge`) and a Postgres and Redis to run the operator's API and worker on (`TEST_DATABASE_URL`, `REDIS_URL`, as the tests use them; the run takes a schema and key prefix of its own and removes both however it ends):
 
 ```
 vp run reference-election
@@ -54,4 +54,4 @@ The fixture holds no private key (AGENTS.md, Testnets only): it sends from each 
 
 ## Tests
 
-`vp run --filter @abolishus/reference-election test`: the RLP encoder against the published examples and a round-trip property, the anchor calldata's and the one-`bytes`-argument calldata's canonical layouts, CREATE addresses, the ceremony registration record's layout with each seat's signature, the trustee nodes' ceremony (every approval verifying, the record refusing an approval of another transcript, a 5-seat run refused by every node) and their intake through each node's endpoint over TLS (the receipts the nodes' keys sign, refused until registered and past the cutoff), the nodes' electorate check, the header rebuilt to an Anvil block's hash, `CheckpointAnchored` logs decoded against `board.json's` published checkpoint hashes, the segment objects and their CARv1, and the report and control expectations. The end-to-end run itself is the `reference-election` check.
+`vp run --filter @abolishus/reference-election test`: the RLP encoder against the published examples and a round-trip property, the anchor calldata's and the one-`bytes`-argument calldata's canonical layouts, CREATE addresses, the ceremony registration record's layout with each seat's signature, the trustee nodes' ceremony (every approval verifying, the record refusing an approval of another transcript, a 5-seat run refused by every node) and their intake through each node's endpoint over TLS (the receipts the nodes' keys sign, refused until registered and past the cutoff), the operator's API and worker (an honest ballot boarded as the fixture's board holds it and returned again for the same bytes; another ballot's proof refused with `membership-proof`, an unknown election and a ballot past the close refused), the nodes' electorate check, the header rebuilt to an Anvil block's hash, `CheckpointAnchored` logs decoded against `board.json's` published checkpoint hashes, the segment objects and their CARv1, and the report and control expectations. The end-to-end run itself is the `reference-election` check.

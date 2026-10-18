@@ -644,6 +644,12 @@ importers:
 
   apps/reference-election:
     dependencies:
+      '@abolishus/api':
+        specifier: workspace:*
+        version: link:../api
+      '@abolishus/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@abolishus/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
@@ -653,12 +659,18 @@ importers:
       '@abolishus/trustee-node':
         specifier: workspace:*
         version: link:../trustee-node
+      '@abolishus/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@noble/curves':
         specifier: 'catalog:'
         version: 2.4.0
       '@noble/hashes':
         specifier: 'catalog:'
         version: 2.4.0
+      ioredis:
+        specifier: 'catalog:'
+        version: 5.11.1
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

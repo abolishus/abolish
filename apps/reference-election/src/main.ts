@@ -61,6 +61,7 @@ import {
   type RegisteredKeys,
 } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
+import { startApi } from "./api.ts";
 import { type Anvil, startAnvil } from "./anvil.ts";
 import {
   castingFor,
@@ -468,126 +469,171 @@ async function run(
     [...votes].reduce<number[]>((sum, v) => v.map((x, j) => x + (sum[j] ?? 0)), []);
   // The poll's receipts, each with the verdict its voter's later check must reach.
   const receipts: Receipted[] = [];
-  {
-    const casting = castingFor(
-      honest.definition.value,
-      honest.panel,
-      honest.transcript,
-      electorate,
-      artifacts,
-    );
-    // The checker: the voter's second device, with a context of its own from
-    // the same records (challenge.md, Client rules, the checker's).
-    const checker = castingFor(
-      honest.definition.value,
-      honest.panel,
-      honest.transcript,
-      electorate,
-      artifacts,
-    );
-    // Voter 0 challenges an attempt, checks its opening on the checker
-    // against the code it was shown, then casts.
-    const challenged = challengeVote(casting, [1, 0, 0]);
-    const opened = checkChallengeOpening(checker.election, decodeOpening(challenged.opening, 1));
-    if (
-      !opened.ok ||
-      hex(opened.coreHash) !== hex(challenged.shown) ||
-      opened.votes.join() !== "1,0,0" ||
-      !opened.withinRules
-    )
-      throw new Error("an honest challenge failed its check");
-    const [v0, v1, v2] = voters;
-    if (v0 === undefined || v1 === undefined || v2 === undefined) throw new Error("too few voters");
-    // Voter 1 re-votes under a later block; voter 3 never votes. Every seat
-    // takes each ballot in, and its share receipts are boarded after the
-    // window's ballots, in the same segment: their delivery (5.9).
-    const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
-    const receipts: Uint8Array[] = [];
-    const ballots = [
-      [v0, [1, 0, 0], refs[0]],
-      [v1, [0, 1, 0], refs[0]],
-      [v2, [0, 0, 0], refs[0]],
-      [v1, [0, 0, 1], refs[1]],
-    ] as const;
-    // Each seat's node takes every ballot in and signs its receipt. The
-    // fixture opens the same shares with the node's keys for the tally, which
-    // no node runs yet (STUBS, seats), and must reach the very receipts the
-    // nodes signed (RFC 6979), so it tallies what the nodes hold.
-    l1Time = timing.opensAt + 240n;
-    let lastBallot:
-      | { readonly bytes: Uint8Array; readonly ciphertexts: readonly Uint8Array[] }
-      | undefined;
-    // Each ballot reaches every seat at its node's intake endpoint, over TLS
-    // with the hybrid group, as the client's direct route delivers it.
-    const served = await serveSeats(stores, nodes);
-    try {
-      for (const [voter, votes, ref] of ballots) {
-        const ballot = await castVote(casting, voter, votes, ref);
-        board(honest, ballot.bytes);
-        const signed = await nodeIntake(
-          served.endpoints,
-          honest.definition.value,
-          honest.transcript,
-          ballot.bytes,
-          ballot.ciphertexts,
-        );
-        const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
-        if (
-          signed.length !== taken.receipts.length ||
-          signed.some((r, i) => hex(r) !== hex(taken.receipts[i] ?? new Uint8Array()))
-        )
-          throw new Error("the nodes' share receipts aren't the ones their keys sign");
-        receipts.push(...signed);
-        last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
-        lastBallot = ballot;
-      }
-      // A control: by the delivery deadline `t_D` the intake cutoff has
-      // passed, and every node refuses the same ballot again (T-54).
-      if (lastBallot === undefined) throw new Error("no ballot was cast");
-      l1Time = deliveryDeadlines(timing.closesAt, BigInt(timing.inclusionBound)).delivery;
-      for (const e of served.endpoints) {
-        const late = await deliver(e, {
-          stub: stubOf(honest.definition.value),
-          transcript: honest.transcript,
-          record: lastBallot.bytes,
-          ciphertext: lastBallot.ciphertexts[e.index - 1] ?? new Uint8Array(),
-        });
-        if (late.ok || late.code !== "intake-closed")
-          throw new Error(`seat ${e.index}'s node took a ballot past the intake cutoff`);
-      }
-    } finally {
-      await served.close();
+  // The elections of one question take their ballots through the operator's
+  // API, its worker judging each by the verifier's admission before boarding
+  // it (P2-3; T-17, T-38, T-52): what it answers must be the very entry the
+  // fixture's board holds at that position, so the verifier's judgement of
+  // that board is a judgement of what the API boarded.
+  const api = await startApi({
+    panels: [trustees.panel],
+    clock: { epoch, period: PERIOD },
+    now: () => l1Time,
+  });
+  // Both elections' ballots are cast at the same L1 time, in the window.
+  l1Time = timing.opensAt + 240n;
+  try {
+    for (const e of [honest, rejected])
+      await api.open(
+        definitionBytes(e.definition),
+        e.definition.value.election_id,
+        first,
+        e.transcript,
+      );
+    /** Casts `payload` through the API, which must board it as `e`'s next entry. */
+    const submitted = async (e: Election, payload: Uint8Array) => {
+      const r = await api.submit(e.definition.value.election_id, payload);
+      if (!r.ok) throw new Error(`the API refused ${e.name}'s ballot: ${r.code} (${r.admission})`);
+      board(e, payload);
+      if (hex(r.entry) !== hex(e.entries.at(-1) ?? new Uint8Array()))
+        throw new Error(`the API boarded ${e.name}'s ballot as another entry than the fixture's`);
+    };
+    {
+      // A control: one honest ballot, then the same ballot naming the later
+      // block with the proof unchanged, so its M is another and its proof
+      // fails (T-38, T-45).
+      const casting = castingFor(
+        rejected.definition.value,
+        rejected.panel,
+        rejected.transcript,
+        electorate,
+        artifacts,
+      );
+      const [v0] = voters;
+      if (v0 === undefined) throw new Error("too few voters");
+      const ballot = await castVote(casting, v0, [0, 1, 0], refs[0]);
+      await submitted(rejected, ballot.bytes);
+      // The API refuses the forged one with the code the verifier's report
+      // must give it; the fixture boards it anyway, as an operator that skipped
+      // admission would.
+      const forged = encodeBallot({
+        ...ballot.record,
+        l1_ref_number: refs[1].number,
+        l1_ref_hash: refs[1].hash,
+      });
+      const refused = await api.submit(rejected.definition.value.election_id, forged);
+      if (
+        refused.ok ||
+        refused.code !== "BALLOT_REJECTED" ||
+        refused.admission !== "membership-proof"
+      )
+        throw new Error("the API didn't refuse a ballot whose proof is another ballot's");
+      board(rejected, forged);
+      log(
+        `stage 4 (rejected-ballot): an honest ballot cast through the API, then one whose proof is another ballot's, which the API refuses with membership-proof and the fixture boards anyway`,
+      );
     }
-    for (const r of receipts) board(honest, r);
-    counted.set(honest, {
-      ballots: [...last.values()],
-      registered: casting.registered,
-      counts: countsOf([...last.values()].map((b) => b.votes)),
-    });
-    log(
-      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each delivered to every seat's intake endpoint and receipted by its trustee node, and every node's endpoint refusing intake past the cutoff; one challenged attempt checked`,
-    );
-  }
-  {
-    // A control: one honest ballot, then the same ballot naming the later
-    // block with the proof unchanged, so its M is another and its proof
-    // fails (T-38, T-45).
-    const casting = castingFor(
-      rejected.definition.value,
-      rejected.panel,
-      rejected.transcript,
-      electorate,
-      artifacts,
-    );
-    const [v0] = voters;
-    if (v0 === undefined) throw new Error("too few voters");
-    const ballot = await castVote(casting, v0, [0, 1, 0], refs[0]);
-    board(rejected, ballot.bytes);
-    board(
-      rejected,
-      encodeBallot({ ...ballot.record, l1_ref_number: refs[1].number, l1_ref_hash: refs[1].hash }),
-    );
-    log(`stage 4 (rejected-ballot): an honest ballot, then one whose proof is another ballot's`);
+    {
+      const casting = castingFor(
+        honest.definition.value,
+        honest.panel,
+        honest.transcript,
+        electorate,
+        artifacts,
+      );
+      // The checker: the voter's second device, with a context of its own from
+      // the same records (challenge.md, Client rules, the checker's).
+      const checker = castingFor(
+        honest.definition.value,
+        honest.panel,
+        honest.transcript,
+        electorate,
+        artifacts,
+      );
+      // Voter 0 challenges an attempt, checks its opening on the checker
+      // against the code it was shown, then casts.
+      const challenged = challengeVote(casting, [1, 0, 0]);
+      const opened = checkChallengeOpening(checker.election, decodeOpening(challenged.opening, 1));
+      if (
+        !opened.ok ||
+        hex(opened.coreHash) !== hex(challenged.shown) ||
+        opened.votes.join() !== "1,0,0" ||
+        !opened.withinRules
+      )
+        throw new Error("an honest challenge failed its check");
+      const [v0, v1, v2] = voters;
+      if (v0 === undefined || v1 === undefined || v2 === undefined)
+        throw new Error("too few voters");
+      // Voter 1 re-votes under a later block; voter 3 never votes. Every seat
+      // takes each ballot in, and its share receipts are boarded after the
+      // window's ballots, in the same segment: their delivery (5.9).
+      const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
+      const receipts: Uint8Array[] = [];
+      const ballots = [
+        [v0, [1, 0, 0], refs[0]],
+        [v1, [0, 1, 0], refs[0]],
+        [v2, [0, 0, 0], refs[0]],
+        [v1, [0, 0, 1], refs[1]],
+      ] as const;
+      // Each seat's node takes every ballot in and signs its receipt. The
+      // fixture opens the same shares with the node's keys for the tally, which
+      // no node runs yet (STUBS, seats), and must reach the very receipts the
+      // nodes signed (RFC 6979), so it tallies what the nodes hold.
+      let lastBallot:
+        | { readonly bytes: Uint8Array; readonly ciphertexts: readonly Uint8Array[] }
+        | undefined;
+      // Each ballot reaches every seat at its node's intake endpoint, over TLS
+      // with the hybrid group, as the client's direct route delivers it.
+      const served = await serveSeats(stores, nodes);
+      try {
+        for (const [voter, votes, ref] of ballots) {
+          const ballot = await castVote(casting, voter, votes, ref);
+          await submitted(honest, ballot.bytes);
+          const signed = await nodeIntake(
+            served.endpoints,
+            honest.definition.value,
+            honest.transcript,
+            ballot.bytes,
+            ballot.ciphertexts,
+          );
+          const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
+          if (
+            signed.length !== taken.receipts.length ||
+            signed.some((r, i) => hex(r) !== hex(taken.receipts[i] ?? new Uint8Array()))
+          )
+            throw new Error("the nodes' share receipts aren't the ones their keys sign");
+          receipts.push(...signed);
+          last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
+          lastBallot = ballot;
+        }
+        // A control: by the delivery deadline `t_D` the intake cutoff has
+        // passed, and every node refuses the same ballot again (T-54).
+        if (lastBallot === undefined) throw new Error("no ballot was cast");
+        l1Time = deliveryDeadlines(timing.closesAt, BigInt(timing.inclusionBound)).delivery;
+        for (const e of served.endpoints) {
+          const late = await deliver(e, {
+            stub: stubOf(honest.definition.value),
+            transcript: honest.transcript,
+            record: lastBallot.bytes,
+            ciphertext: lastBallot.ciphertexts[e.index - 1] ?? new Uint8Array(),
+          });
+          if (late.ok || late.code !== "intake-closed")
+            throw new Error(`seat ${e.index}'s node took a ballot past the intake cutoff`);
+        }
+      } finally {
+        await served.close();
+      }
+      for (const r of receipts) board(honest, r);
+      counted.set(honest, {
+        ballots: [...last.values()],
+        registered: casting.registered,
+        counts: countsOf([...last.values()].map((b) => b.votes)),
+      });
+      log(
+        `stage 4 (honest): ${ballots.length} ballots with real membership proofs cast through the API and boarded by its worker in segment ${cast}, one a re-vote, each delivered to every seat's intake endpoint and receipted by its trustee node, and every node's endpoint refusing intake past the cutoff; one challenged attempt checked`,
+      );
+    }
+  } finally {
+    await api.close();
   }
   {
     // The poll of questions, as the honest election: voter 0 challenges an

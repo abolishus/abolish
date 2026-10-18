@@ -36,6 +36,7 @@ import {
   sumShares,
   tallyRules,
   type VoteSharing,
+  type WholeOpeningVersion,
   aggregateHash,
 } from "@abolishus/crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -243,6 +244,7 @@ function election(
     counted: readonly Cast[],
     signer: number,
     tamper?: (o: Share[]) => Share[],
+    openingVersion: WholeOpeningVersion = 1,
   ) => {
     const vss = counted.map((b) => b.vote.vss);
     const summed = new Map(
@@ -265,6 +267,7 @@ function election(
         signer,
         opening: tamper === undefined ? shares : tamper(shares),
       }),
+      openingVersion,
     );
   };
   const destruction = (signer: number, definitionHash = hash) =>
@@ -1411,8 +1414,33 @@ describe("the gates", () => {
       });
   });
 
-  test("under another tally-opening pin, delivery runs and the tally and 8.5 are unsupported", () => {
-    const e = election(definitionOf(caseOf(tallies, "tally-v2")));
+  test("under tally-opening version 2, a live poll's, the tally and 8.5 run as under version 1", () => {
+    const e = election(definitionOf(caseOf(tallies, "tally-v2")), [1, 2, 3, 4], 5);
+    const a = e.cast({ tier: 0 }, [1, 0, 0], 11n);
+    const c = e.cast({ tier: 2 }, [0, 0, 1], 13n);
+    e.deliver([a, c], 200);
+    // A version-1 opening is a rejected entry under pin 2 and opens no cell.
+    e.board(300, e.opening(0, [a], 1));
+    e.board(300, e.opening(1, [c], 2, undefined, 2));
+    const missing = countedChecks(e.inputs([a, c]));
+    expect(missing.rows.get("7.2")).toEqual({
+      status: "fail",
+      code: "tally-missing",
+      at: { cell: 0 },
+    });
+    e.board(300, e.opening(0, [a], 3, undefined, 2));
+    for (const seat of [1, 2, 3, 4]) e.board(301, e.destruction(seat));
+    const r = countedChecks(e.inputs([a, c]));
+    for (const id of ["5.9", "7.1", "7.2", "7.3", "8.5"])
+      expect(r.rows.get(id)).toEqual({ status: "pass" });
+    expect(r.cells).toEqual([
+      { cell: 0, tier: 0, counted: 1, counts: ["1", "0", "0"], signers: [3] },
+      { cell: 1, tier: 2, counted: 1, counts: ["0", "0", "1"], signers: [2] },
+    ]);
+  });
+
+  test("under a tally-opening pin this release doesn't read, delivery runs and the tally and 8.5 are unsupported", () => {
+    const e = election(definitionOf(caseOf(tallies, "tally-v255")));
     const r = countedChecks(e.inputs([]));
     expect(r.rows.get("5.9")).toEqual({ status: "pass" });
     for (const id of ["7.1", "7.2", "7.3", "8.5"])

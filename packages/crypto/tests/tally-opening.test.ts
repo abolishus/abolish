@@ -92,6 +92,15 @@ interface Vectors {
       readonly rejected: readonly { readonly at: number; readonly error: string }[];
     };
   }[];
+  /** Tally-opening version 2, a live poll's: version 1's record byte for byte apart from the header. */
+  readonly version2: {
+    readonly openings: readonly { readonly id: string; readonly encoding: string }[];
+    readonly decodeErrors: Vectors["decodeErrors"];
+    readonly elections: readonly Omit<
+      Vectors["elections"][number],
+      "boardedAfter" | "electionFailure"
+    >[];
+  };
 }
 
 const vectors = JSON.parse(
@@ -175,6 +184,49 @@ describe("tally-opening.json", () => {
     for (const [i, extra] of v.boardedAfter.entries())
       if (extra.length > 0)
         expect(r.cells[i]?.failing.every((f) => f.code === "tally-aggregate")).toBe(true);
+  });
+});
+
+describe("tally-opening.json, version 2 (docs/spec/tally.md, Tally-opening version 2)", () => {
+  const byId = new Map(vectors.openings.map((o) => [o.id, o]));
+
+  test.each(vectors.version2.openings)("$id decodes to version 1's fields and re-encodes", (v) => {
+    const one = byId.get(v.id);
+    if (one === undefined) throw new Error(`no version-1 vector ${v.id}`);
+    const opening = decodeTallyOpening(hex(v.encoding), 2);
+    expect(opening).toEqual(decodeTallyOpening(hex(one.encoding), 1));
+    expect(toHex(encodeTallyOpening(opening, 2))).toBe(v.encoding);
+    // The signature doesn't sign the header, so it is the same statement's.
+    expect(toHex(tallyOpeningStatement(opening))).toBe(one.message);
+  });
+
+  test.each(vectors.version2.decodeErrors)("$id is rejected with $error at $offset", (v) => {
+    let caught: unknown;
+    try {
+      decodeTallyOpening(hex(v.encoding), 2);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DecodeError);
+    expect((caught as DecodeError).code).toBe(v.error);
+    expect((caught as DecodeError).offset).toBe(v.offset);
+  });
+
+  test.each(vectors.version2.elections)("election $id", (v) => {
+    const cells = v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]));
+    const payloads = v.openings.map((b) => hex(b));
+    expect(asVector(checkTally(election, cells, payloads, 2))).toEqual(v.result);
+  });
+
+  test("every version-1 election's openings are rejected entries under pin 2, and its version-2 ones under pin 1", () => {
+    for (const v of vectors.version2.elections) {
+      const payloads = v.openings.map((b) => hex(b));
+      const cells = v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]));
+      const asOne = checkTally(election, cells, payloads, 1);
+      // A version-2 payload never opens a cell of a poll pinning version 1 (T-31).
+      for (const [at, b] of payloads.entries())
+        if (b[2] === 2) expect(asOne.rejected).toContainEqual({ at, error: "profile-mismatch" });
+    }
   });
 });
 
@@ -270,6 +322,23 @@ describe("properties", () => {
         });
         expect(r.stray).toEqual([]);
         expect(r.rejected).toEqual([]);
+      }),
+      { numRuns: Math.max(10, numRuns / 20) },
+    );
+  });
+
+  test("under pin 2 the same openings labelled version 2 give version 1's verdict, and version-1 ones open nothing", () => {
+    fc.assert(
+      fc.property(arbElection, (input) => {
+        const { el, cells, records } = honestTally(input);
+        const ballots = cells.map((c) => c.ballots);
+        const two = records.map((r) => encodeTallyOpening(decodeTallyOpening(r, 1), 2));
+        expect(checkTally(el, ballots, two, 2)).toEqual(checkTally(el, ballots, records, 1));
+        const crossed = checkTally(el, ballots, records, 2);
+        expect(crossed.ok).toBe(false);
+        expect(crossed.rejected).toEqual(
+          records.map((_, at) => ({ at, error: "profile-mismatch" })),
+        );
       }),
       { numRuns: Math.max(10, numRuns / 20) },
     );

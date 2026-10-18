@@ -935,6 +935,7 @@ export {
   type TallyOpening,
   tallyOpeningStatement,
   type TallyOpeningStatement,
+  type WholeOpeningVersion,
 } from "./tally-opening.ts";
 export {
   chooseReleases,

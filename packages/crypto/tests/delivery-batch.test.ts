@@ -277,7 +277,7 @@ describe("share-receipt batch vectors (docs/spec/vectors/delivery-batch.json)", 
     expect(asJson(run(v))).toEqual(v.result);
   });
 
-  test("under ballot version 4 every batch is a rejected entry (profile-mismatch)", () => {
+  test("under ballot version 4 a version-1 batch is a rejected entry (profile-mismatch)", () => {
     const v = V.elections.find((e) => e.id === "batches-deliver");
     if (v === undefined) throw new Error("no election");
     const r = checkDeliveryV2(

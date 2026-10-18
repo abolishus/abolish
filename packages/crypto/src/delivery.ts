@@ -270,12 +270,38 @@ export type ShareReceiptBatchStatement = CodecValue<typeof batchStatementV1>;
 /** A share-receipt batch (`0x0016`, version 1). */
 export type ShareReceiptBatchRecord = CodecValue<typeof batchV1>;
 
+// Version 2, which ballot versions 4 and 5 fix: version 1's fields with the
+// seat's panel before the seat, under a tag of its own, so a batch for one
+// panel's seat `i` never reads as the other's and no version-1 signature
+// verifies over it (docs/spec/delivery.md, Records (version 2); T-37, T-31).
+const BATCH_TAG_V2 = "abolish/v1/sig/share-receipt-batch-2";
+
+const batchFieldsV2 = [
+  ["definition_hash", bytesFixed(32)],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["receipts", receiptPairs],
+] as const;
+
+const batchStatementV2 = struct(batchFieldsV2);
+
+const batchV2 = struct([...batchFieldsV2, ["signature", p256Sig]] as const);
+
+/** The version-2 batch's signed fields: `definition_hash ‖ u8(panel) ‖ u8(seat) ‖ u32(c) ‖ (ballot_hash ‖ share_hash) × c`. */
+export type ShareReceiptBatchStatementV2 = CodecValue<typeof batchStatementV2>;
+
+/** A share-receipt batch (`0x0016`, version 2), naming the seat's panel. */
+export type ShareReceiptBatchRecordV2 = CodecValue<typeof batchV2>;
+
 /**
- * Record type `0x0016`. Ballot versions 1 to 3 fix it at version 1; versions
- * 4 and 5 fix none yet; it is never pinned, and travels only through the
+ * Record type `0x0016`. Ballot versions 1 to 3 fix it at version 1, versions
+ * 4 and 5 at version 2; it is never pinned, and travels only through the
  * contract path.
  */
-export const SHARE_RECEIPT_BATCH = recordType(RECORD_TYPES.shareReceiptBatch, { 1: batchV1 });
+export const SHARE_RECEIPT_BATCH = recordType(RECORD_TYPES.shareReceiptBatch, {
+  1: batchV1,
+  2: batchV2,
+});
 
 // --- Share-complaint batch (docs/spec/delivery.md, Share-complaint batch) ----------
 
@@ -345,13 +371,35 @@ export type ShareComplaintBatchStatement = CodecValue<typeof complaintBatchState
 /** A share-complaint batch (`0x0017`, version 1). */
 export type ShareComplaintBatchRecord = CodecValue<typeof complaintBatchV1>;
 
+// Version 2, as the receipt batch's: the seat's panel before the seat, under
+// a tag of its own, each proof under Complaints (ballot version 4).
+const COMPLAINT_BATCH_TAG_V2 = "abolish/v1/sig/share-complaint-batch-2";
+
+const complaintBatchFieldsV2 = [
+  ["definition_hash", bytesFixed(32)],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["complaints", complaintEntries],
+] as const;
+
+const complaintBatchStatementV2 = struct(complaintBatchFieldsV2);
+
+const complaintBatchV2 = struct([...complaintBatchFieldsV2, ["signature", p256Sig]] as const);
+
+/** The version-2 complaint batch's signed fields: `definition_hash ‖ u8(panel) ‖ u8(seat) ‖ u32(c) ‖ (ballot_hash ‖ encode(proof)) × c`. */
+export type ShareComplaintBatchStatementV2 = CodecValue<typeof complaintBatchStatementV2>;
+
+/** A share-complaint batch (`0x0017`, version 2), naming the seat's panel. */
+export type ShareComplaintBatchRecordV2 = CodecValue<typeof complaintBatchV2>;
+
 /**
- * Record type `0x0017`. Ballot versions 1 to 3 fix it at version 1; versions
- * 4 and 5 fix none yet; it is never pinned, and travels only through the
+ * Record type `0x0017`. Ballot versions 1 to 3 fix it at version 1, versions
+ * 4 and 5 at version 2; it is never pinned, and travels only through the
  * contract path.
  */
 export const SHARE_COMPLAINT_BATCH = recordType(RECORD_TYPES.shareComplaintBatch, {
   1: complaintBatchV1,
+  2: complaintBatchV2,
 });
 
 // --- Obligation root (docs/spec/delivery.md, Obligation root) ----------------------
@@ -401,51 +449,76 @@ const rootKind = enum8<ObligationRootKind>([
 ]);
 const cid36 = bytesFixed(36);
 
+/** An obligation root's version-2 signed fields: version 1's, with the seat's panel, 107 bytes. */
+export interface ObligationRootStatementV2 extends ObligationRootStatement {
+  readonly panel: SeatPanel;
+}
+
+/** An obligation root (`0x001a`, version 2), naming the seat's panel. */
+export interface ObligationRootRecordV2 extends ObligationRootStatementV2 {
+  readonly signature: Uint8Array;
+}
+
 /** An obligation root's length: its header, 106 signed bytes and the signature. */
 export const OBLIGATION_ROOT_LENGTH = 173;
 
+/** A version-2 obligation root's length: one byte more, its panel. */
+export const OBLIGATION_ROOT_LENGTH_V2 = 174;
+
 // Read in field order, every field present before the CID's framing is
 // judged and that before the signature's, so each rejection has one code at
-// one offset (delivery-root.json, decode). The leaves are never read here.
-const obligationRootV1: Codec<ObligationRootRecord> = {
-  minLength: 170,
-  write(w, value) {
-    const { count, kind } = value;
-    if (!Number.isInteger(count) || count < 1 || count > 0xffffffff)
-      throw new EncodeError("obligation root: count is 1 to 2³² − 1");
-    hash32.write(w, value.definition_hash);
-    u8.write(w, value.seat);
-    rootKind.write(w, kind);
-    u32.write(w, count);
-    hash32.write(w, value.root);
-    cid36.write(w, value.leaves_cid);
-    if (!leavesCidPrefix(kind, count).every((b, i) => value.leaves_cid[i] === b))
-      throw new EncodeError("obligation root: leaves_cid isn't the CID its kind and count frame");
-    p256Sig.write(w, value.signature);
-  },
-  read(r) {
-    const definition_hash = hash32.read(r);
-    const seat = u8.read(r);
-    const kind = rootKind.read(r);
-    const countAt = r.offset;
-    const count = u32.read(r);
-    if (count === 0) throw new DecodeError("non-canonical", countAt);
-    const root = hash32.read(r);
-    const cidAt = r.offset;
-    const leaves_cid = cid36.read(r);
-    if (r.remaining < 64) throw new DecodeError("truncated", r.offset);
-    if (!leavesCidPrefix(kind, count).every((b, i) => leaves_cid[i] === b))
-      throw new DecodeError("non-canonical", cidAt);
-    return { definition_hash, seat, kind, count, root, leaves_cid, signature: p256Sig.read(r) };
-  },
-};
+// one offset (delivery-root.json and delivery-batch-v2.json, decode). The
+// leaves are never read here. Version 2 reads its panel before the seat,
+// every later field one byte on (docs/spec/delivery.md, Records (version 2)).
+function obligationRootCodec(panel: false): Codec<ObligationRootRecord>;
+function obligationRootCodec(panel: true): Codec<ObligationRootRecordV2>;
+function obligationRootCodec(panel: boolean): Codec<ObligationRootRecord | ObligationRootRecordV2> {
+  return {
+    minLength: panel ? 171 : 170,
+    write(w, value) {
+      const { count, kind } = value;
+      if (!Number.isInteger(count) || count < 1 || count > 0xffffffff)
+        throw new EncodeError("obligation root: count is 1 to 2³² − 1");
+      hash32.write(w, value.definition_hash);
+      if (panel) SEAT_PANEL.write(w, (value as ObligationRootRecordV2).panel);
+      u8.write(w, value.seat);
+      rootKind.write(w, kind);
+      u32.write(w, count);
+      hash32.write(w, value.root);
+      cid36.write(w, value.leaves_cid);
+      if (!leavesCidPrefix(kind, count).every((b, i) => value.leaves_cid[i] === b))
+        throw new EncodeError("obligation root: leaves_cid isn't the CID its kind and count frame");
+      p256Sig.write(w, value.signature);
+    },
+    read(r) {
+      const definition_hash = hash32.read(r);
+      const named = panel ? { panel: SEAT_PANEL.read(r) } : {};
+      const seat = u8.read(r);
+      const kind = rootKind.read(r);
+      const countAt = r.offset;
+      const count = u32.read(r);
+      if (count === 0) throw new DecodeError("non-canonical", countAt);
+      const root = hash32.read(r);
+      const cidAt = r.offset;
+      const leaves_cid = cid36.read(r);
+      if (r.remaining < 64) throw new DecodeError("truncated", r.offset);
+      if (!leavesCidPrefix(kind, count).every((b, i) => leaves_cid[i] === b))
+        throw new DecodeError("non-canonical", cidAt);
+      const signature = p256Sig.read(r);
+      return { definition_hash, ...named, seat, kind, count, root, leaves_cid, signature };
+    },
+  };
+}
 
 /**
- * Record type `0x001a`. Ballot versions 1 to 3 fix it at version 1; versions
- * 4 and 5 fix none yet; it is never pinned, and travels only through the
+ * Record type `0x001a`. Ballot versions 1 to 3 fix it at version 1, versions
+ * 4 and 5 at version 2; it is never pinned, and travels only through the
  * contract path.
  */
-export const OBLIGATION_ROOT = recordType(RECORD_TYPES.obligationRoot, { 1: obligationRootV1 });
+export const OBLIGATION_ROOT = recordType(RECORD_TYPES.obligationRoot, {
+  1: obligationRootCodec(false),
+  2: obligationRootCodec(true),
+});
 
 const SCHEMA = new RecordSchema([
   SHARE_RECEIPT,
@@ -465,11 +538,25 @@ export function encodeObligationRoot(record: ObligationRootRecord): Uint8Array {
  * versions 1 to 3 fix: its kind, a non-zero count and the CID framing they
  * give, and a canonical low-`s` signature. Its leaves are never read.
  */
-export function decodeObligationRoot(bytes: Uint8Array, pinned: 1): ObligationRootRecord {
+export function decodeObligationRoot(bytes: Uint8Array, pinned: 1): ObligationRootRecord;
+/** Strictly decodes an obligation root against version 2, the version ballot versions 4 and 5 fix. */
+export function decodeObligationRoot(bytes: Uint8Array, pinned: 2): ObligationRootRecordV2;
+export function decodeObligationRoot(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): ObligationRootRecord | ObligationRootRecordV2 {
   return SCHEMA.decode(OBLIGATION_ROOT, bytes, pinned).value;
 }
 
+export function encodeObligationRootV2(record: ObligationRootRecordV2): Uint8Array {
+  return SCHEMA.encode(OBLIGATION_ROOT, 2, record);
+}
+
 const ROOT_TAG = "abolish/v1/sig/obligation-root";
+
+// Version 2's tag: its 107-byte statement names no version, so under one tag
+// it and version 1's 106 bytes would be two layouts (T-31).
+const ROOT_TAG_V2 = "abolish/v1/sig/obligation-root-2";
 
 const obligationRootStatementV1 = struct([
   ["definition_hash", hash32],
@@ -480,9 +567,18 @@ const obligationRootStatementV1 = struct([
   ["leaves_cid", cid36],
 ] as const);
 
-/** `m`, the root's signed statement: its fields without header or signature, 106 bytes. */
-export function obligationRootStatement(statement: ObligationRootStatement): Uint8Array {
-  const { kind, count, leaves_cid } = statement;
+const obligationRootStatementV2Codec = struct([
+  ["definition_hash", hash32],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["kind", rootKind],
+  ["count", u32],
+  ["root", hash32],
+  ["leaves_cid", cid36],
+] as const);
+
+// A count and CID the decoder would refuse never make a statement either.
+function checkRootFraming({ kind, count, leaves_cid }: ObligationRootStatement): void {
   if (!Number.isInteger(count) || count < 1 || count > 0xffffffff)
     throw new EncodeError("obligation root: count is 1 to 2³² − 1");
   if (
@@ -490,13 +586,32 @@ export function obligationRootStatement(statement: ObligationRootStatement): Uin
     !leavesCidPrefix(kind, count).every((b, i) => leaves_cid[i] === b)
   )
     throw new EncodeError("obligation root: leaves_cid isn't the CID its kind and count frame");
+}
+
+/** `m`, the root's signed statement: its fields without header or signature, 106 bytes. */
+export function obligationRootStatement(statement: ObligationRootStatement): Uint8Array {
+  checkRootFraming(statement);
   return encode(obligationRootStatementV1, {
     definition_hash: statement.definition_hash,
     seat: statement.seat,
-    kind,
-    count,
+    kind: statement.kind,
+    count: statement.count,
     root: statement.root,
-    leaves_cid,
+    leaves_cid: statement.leaves_cid,
+  });
+}
+
+/** `m`, the version-2 root's signed statement: its fields without header or signature, 107 bytes. */
+export function obligationRootStatementV2(statement: ObligationRootStatementV2): Uint8Array {
+  checkRootFraming(statement);
+  return encode(obligationRootStatementV2Codec, {
+    definition_hash: statement.definition_hash,
+    panel: statement.panel,
+    seat: statement.seat,
+    kind: statement.kind,
+    count: statement.count,
+    root: statement.root,
+    leaves_cid: statement.leaves_cid,
   });
 }
 
@@ -598,16 +713,67 @@ export function buildObligationRoot(
   signingSecret: Uint8Array,
   definitionHash: Uint8Array,
   seat: number,
-  owed:
-    | { readonly kind: 1; readonly leaves: readonly ReceiptPair[] }
-    | { readonly kind: 2; readonly leaves: readonly ComplaintEntry[] },
+  owed: OwedLeaves,
 ): ObligationRootBuild {
+  const { leafObject, ...tree } = owedTree("buildObligationRoot", owed);
+  const statement: ObligationRootStatement = {
+    definition_hash: Uint8Array.from(definitionHash),
+    seat,
+    ...tree,
+  };
+  const m = obligationRootStatement(statement);
+  return {
+    record: { ...statement, signature: signStatement(signingSecret, ROOT_TAG, m) },
+    leafObject,
+  };
+}
+
+/** A version-2 obligation root as a seat of either panel submits it, with its leaf object. */
+export interface ObligationRootBuildV2 {
+  readonly record: ObligationRootRecordV2;
+  readonly leafObject: Uint8Array;
+}
+
+/**
+ * `buildObligationRoot` under ballot versions 4 and 5: the same leaves,
+ * object and tree, signed as version 2 with the seat's panel named
+ * (docs/spec/delivery.md, Records (version 2)).
+ */
+export function buildObligationRootV2(
+  signingSecret: Uint8Array,
+  definitionHash: Uint8Array,
+  panel: SeatPanel,
+  seat: number,
+  owed: OwedLeaves,
+): ObligationRootBuildV2 {
+  const { leafObject, ...tree } = owedTree("buildObligationRootV2", owed);
+  const statement: ObligationRootStatementV2 = {
+    definition_hash: Uint8Array.from(definitionHash),
+    panel,
+    seat,
+    ...tree,
+  };
+  const m = obligationRootStatementV2(statement);
+  return {
+    record: { ...statement, signature: signStatement(signingSecret, ROOT_TAG_V2, m) },
+    leafObject,
+  };
+}
+
+/** What a seat owes as one root: its receipts (kind 1) or its complaints (kind 2). */
+export type OwedLeaves =
+  | { readonly kind: 1; readonly leaves: readonly ReceiptPair[] }
+  | { readonly kind: 2; readonly leaves: readonly ComplaintEntry[] };
+
+// The leaves sorted by ballot hash, their object, its CID and the tree's root,
+// the same under either version.
+function owedTree(name: string, owed: OwedLeaves) {
   const { kind } = owed;
   const sorted: readonly (ReceiptPair | ComplaintEntry)[] = [...owed.leaves].sort((a, b) =>
     compareBytes(a.ballot_hash, b.ballot_hash),
   );
   if (sorted.length < 1 || sorted.length > 0xffffffff)
-    throw new RangeError("buildObligationRoot: a root has 1 to 2³² − 1 leaves");
+    throw new RangeError(`${name}: a root has 1 to 2³² − 1 leaves`);
   for (let i = 1; i < sorted.length; i++)
     if (
       compareBytes(
@@ -615,21 +781,15 @@ export function buildObligationRoot(
         (sorted[i - 1] as ReceiptPair).ballot_hash,
       ) === 0
     )
-      throw new RangeError("buildObligationRoot: a ballot hash is listed twice");
+      throw new RangeError(`${name}: a ballot hash is listed twice`);
   const leaves = sorted.map((l) => leafBytes(kind, l));
   const leafObject = new Uint8Array(ROOT_LEAF_LENGTH[kind] * leaves.length);
   leaves.forEach((l, j) => leafObject.set(l, ROOT_LEAF_LENGTH[kind] * j));
-  const statement: ObligationRootStatement = {
-    definition_hash: Uint8Array.from(definitionHash),
-    seat,
+  return {
     kind,
     count: leaves.length,
     root: merkleRoot(OBLIGATION_TREE, leaves),
     leaves_cid: objectCid(leafObject),
-  };
-  const m = obligationRootStatement(statement);
-  return {
-    record: { ...statement, signature: signStatement(signingSecret, ROOT_TAG, m) },
     leafObject,
   };
 }
@@ -683,8 +843,21 @@ export function encodeShareComplaintBatch(record: ShareComplaintBatchRecord): Ui
   return SCHEMA.encode(SHARE_COMPLAINT_BATCH, 1, record);
 }
 
+export function encodeShareComplaintBatchV2(record: ShareComplaintBatchRecordV2): Uint8Array {
+  return SCHEMA.encode(SHARE_COMPLAINT_BATCH, 2, record);
+}
+
 /** Strictly decodes a share-complaint batch against version 1, the version ballot versions 1 to 3 fix. */
-export function decodeShareComplaintBatch(bytes: Uint8Array, pinned: 1): ShareComplaintBatchRecord {
+export function decodeShareComplaintBatch(bytes: Uint8Array, pinned: 1): ShareComplaintBatchRecord;
+/** Strictly decodes a share-complaint batch against version 2, the version ballot versions 4 and 5 fix. */
+export function decodeShareComplaintBatch(
+  bytes: Uint8Array,
+  pinned: 2,
+): ShareComplaintBatchRecordV2;
+export function decodeShareComplaintBatch(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): ShareComplaintBatchRecord | ShareComplaintBatchRecordV2 {
   return SCHEMA.decode(SHARE_COMPLAINT_BATCH, bytes, pinned).value;
 }
 
@@ -696,6 +869,45 @@ export function shareComplaintBatchStatement(statement: ShareComplaintBatchState
     complaints: statement.complaints,
   });
 }
+
+/** `m`, the version-2 complaint batch's signed statement, `38 + 128·c` bytes. */
+export function shareComplaintBatchStatementV2(
+  statement: ShareComplaintBatchStatementV2,
+): Uint8Array {
+  return encode(complaintBatchStatementV2, {
+    definition_hash: statement.definition_hash,
+    panel: statement.panel,
+    seat: statement.seat,
+    complaints: statement.complaints,
+  });
+}
+
+// Copied, sorted by ballot hash and cut into batches of at most `max`, one
+// entry per ballot hash: a set of entries has one batching (T-31).
+function batchesOf<E extends { readonly ballot_hash: Uint8Array }>(
+  name: string,
+  entries: readonly E[],
+  copy: (e: E) => E,
+  max: number,
+): E[][] {
+  const sorted = entries.map(copy).sort((a, b) => compareBytes(a.ballot_hash, b.ballot_hash));
+  for (let i = 1; i < sorted.length; i++)
+    if (compareBytes((sorted[i] as E).ballot_hash, (sorted[i - 1] as E).ballot_hash) === 0)
+      throw new RangeError(`${name}: a ballot hash is listed twice`);
+  const batches: E[][] = [];
+  for (let i = 0; i < sorted.length; i += max) batches.push(sorted.slice(i, i + max));
+  return batches;
+}
+
+const copyEntry = (e: ComplaintEntry): ComplaintEntry => ({
+  ballot_hash: Uint8Array.from(e.ballot_hash),
+  proof: e.proof,
+});
+
+const copyPair = (p: ReceiptPair): ReceiptPair => ({
+  ballot_hash: Uint8Array.from(p.ballot_hash),
+  share_hash: Uint8Array.from(p.share_hash),
+});
 
 /**
  * A trustee node's batches of the complaints it owes for one election, one
@@ -710,36 +922,60 @@ export function batchShareComplaints(
   seat: number,
   complaints: readonly ComplaintEntry[],
 ): ShareComplaintBatchRecord[] {
-  const sorted = complaints
-    .map((e) => ({ ballot_hash: Uint8Array.from(e.ballot_hash), proof: e.proof }))
-    .sort((a, b) => compareBytes(a.ballot_hash, b.ballot_hash));
-  for (let i = 1; i < sorted.length; i++)
-    if (
-      compareBytes(
-        (sorted[i] as ComplaintEntry).ballot_hash,
-        (sorted[i - 1] as ComplaintEntry).ballot_hash,
-      ) === 0
-    )
-      throw new RangeError("batchShareComplaints: a ballot hash is listed twice");
-  const batches: ShareComplaintBatchRecord[] = [];
-  for (let i = 0; i < sorted.length; i += COMPLAINT_BATCH_MAX) {
-    const statement = {
-      definition_hash: Uint8Array.from(definitionHash),
-      seat,
-      complaints: sorted.slice(i, i + COMPLAINT_BATCH_MAX),
-    };
-    const m = shareComplaintBatchStatement(statement);
-    batches.push({ ...statement, signature: signStatement(signingSecret, COMPLAINT_BATCH_TAG, m) });
-  }
-  return batches;
+  return batchesOf("batchShareComplaints", complaints, copyEntry, COMPLAINT_BATCH_MAX).map(
+    (entries) => {
+      const statement = {
+        definition_hash: Uint8Array.from(definitionHash),
+        seat,
+        complaints: entries,
+      };
+      const m = shareComplaintBatchStatement(statement);
+      return { ...statement, signature: signStatement(signingSecret, COMPLAINT_BATCH_TAG, m) };
+    },
+  );
+}
+
+/**
+ * `batchShareComplaints` under ballot versions 4 and 5: version-2 batches
+ * naming the seat's panel, each proof from `proveComplaintV4`.
+ */
+export function batchShareComplaintsV2(
+  signingSecret: Uint8Array,
+  definitionHash: Uint8Array,
+  panel: SeatPanel,
+  seat: number,
+  complaints: readonly ComplaintEntry[],
+): ShareComplaintBatchRecordV2[] {
+  return batchesOf("batchShareComplaintsV2", complaints, copyEntry, COMPLAINT_BATCH_MAX).map(
+    (entries) => {
+      const statement = {
+        definition_hash: Uint8Array.from(definitionHash),
+        panel,
+        seat,
+        complaints: entries,
+      };
+      const m = shareComplaintBatchStatementV2(statement);
+      return { ...statement, signature: signStatement(signingSecret, COMPLAINT_BATCH_TAG_V2, m) };
+    },
+  );
 }
 
 export function encodeShareReceiptBatch(record: ShareReceiptBatchRecord): Uint8Array {
   return SCHEMA.encode(SHARE_RECEIPT_BATCH, 1, record);
 }
 
+export function encodeShareReceiptBatchV2(record: ShareReceiptBatchRecordV2): Uint8Array {
+  return SCHEMA.encode(SHARE_RECEIPT_BATCH, 2, record);
+}
+
 /** Strictly decodes a share-receipt batch against version 1, the version ballot versions 1 to 3 fix. */
-export function decodeShareReceiptBatch(bytes: Uint8Array, pinned: 1): ShareReceiptBatchRecord {
+export function decodeShareReceiptBatch(bytes: Uint8Array, pinned: 1): ShareReceiptBatchRecord;
+/** Strictly decodes a share-receipt batch against version 2, the version ballot versions 4 and 5 fix. */
+export function decodeShareReceiptBatch(bytes: Uint8Array, pinned: 2): ShareReceiptBatchRecordV2;
+export function decodeShareReceiptBatch(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): ShareReceiptBatchRecord | ShareReceiptBatchRecordV2 {
   return SCHEMA.decode(SHARE_RECEIPT_BATCH, bytes, pinned).value;
 }
 
@@ -747,6 +983,16 @@ export function decodeShareReceiptBatch(bytes: Uint8Array, pinned: 1): ShareRece
 export function shareReceiptBatchStatement(statement: ShareReceiptBatchStatement): Uint8Array {
   return encode(batchStatementV1, {
     definition_hash: statement.definition_hash,
+    seat: statement.seat,
+    receipts: statement.receipts,
+  });
+}
+
+/** `m`, the version-2 batch's signed statement, `38 + 64·c` bytes. */
+export function shareReceiptBatchStatementV2(statement: ShareReceiptBatchStatementV2): Uint8Array {
+  return encode(batchStatementV2, {
+    definition_hash: statement.definition_hash,
+    panel: statement.panel,
     seat: statement.seat,
     receipts: statement.receipts,
   });
@@ -767,31 +1013,36 @@ export function batchShareReceipts(
   seat: number,
   receipts: readonly ReceiptPair[],
 ): ShareReceiptBatchRecord[] {
-  const sorted = receipts
-    .map((p) => ({
-      ballot_hash: Uint8Array.from(p.ballot_hash),
-      share_hash: Uint8Array.from(p.share_hash),
-    }))
-    .sort((a, b) => compareBytes(a.ballot_hash, b.ballot_hash));
-  for (let i = 1; i < sorted.length; i++)
-    if (
-      compareBytes(
-        (sorted[i] as ReceiptPair).ballot_hash,
-        (sorted[i - 1] as ReceiptPair).ballot_hash,
-      ) === 0
-    )
-      throw new RangeError("batchShareReceipts: a ballot hash is listed twice");
-  const batches: ShareReceiptBatchRecord[] = [];
-  for (let i = 0; i < sorted.length; i += RECEIPT_BATCH_MAX) {
+  return batchesOf("batchShareReceipts", receipts, copyPair, RECEIPT_BATCH_MAX).map((pairs) => {
+    const statement = { definition_hash: Uint8Array.from(definitionHash), seat, receipts: pairs };
+    const m = shareReceiptBatchStatement(statement);
+    return { ...statement, signature: signStatement(signingSecret, BATCH_TAG, m) };
+  });
+}
+
+/**
+ * `batchShareReceipts` under ballot versions 4 and 5: version-2 batches
+ * naming the seat's panel, so a seat of either panel batches what it
+ * receipted at intake (docs/spec/delivery.md, Boarding, direct submit and client
+ * rules (version 2), What a node owes).
+ */
+export function batchShareReceiptsV2(
+  signingSecret: Uint8Array,
+  definitionHash: Uint8Array,
+  panel: SeatPanel,
+  seat: number,
+  receipts: readonly ReceiptPair[],
+): ShareReceiptBatchRecordV2[] {
+  return batchesOf("batchShareReceiptsV2", receipts, copyPair, RECEIPT_BATCH_MAX).map((pairs) => {
     const statement = {
       definition_hash: Uint8Array.from(definitionHash),
+      panel,
       seat,
-      receipts: sorted.slice(i, i + RECEIPT_BATCH_MAX),
+      receipts: pairs,
     };
-    const m = shareReceiptBatchStatement(statement);
-    batches.push({ ...statement, signature: signStatement(signingSecret, BATCH_TAG, m) });
-  }
-  return batches;
+    const m = shareReceiptBatchStatementV2(statement);
+    return { ...statement, signature: signStatement(signingSecret, BATCH_TAG_V2, m) };
+  });
 }
 
 export function encodeShareReceipt(record: ShareReceiptRecord): Uint8Array {
@@ -1657,8 +1908,11 @@ interface DeliveryRules {
   decodeComplaintBatch(payload: Uint8Array): ComplaintBatchItem;
   /** The same for a contract-path obligation root. */
   decodeRoot(payload: Uint8Array): RootItem;
-  /** The tag a complaint's signature is under. */
+  /** The tags a complaint's, a receipt batch's, a complaint batch's and a root's signature are under. */
   readonly complaintTag: SignatureTag;
+  readonly batchTag: SignatureTag;
+  readonly complaintBatchTag: SignatureTag;
+  readonly rootTag: SignatureTag;
   /** The seat's registered keys in its own panel's key set. */
   keys(seat: PanelSeat): RegisteredKeys | undefined;
   /** The selected ballot's share hash for the seat, from its own panel's list. */
@@ -1698,8 +1952,15 @@ interface SeatCheck {
 /** `DeliveryRoots` once checked against the registered key set. */
 interface RootReader {
   readonly bound: bigint;
-  /** Who named a root's record hash, who attested without naming it, and whether that makes it available. */
-  availability(recordHash: Uint8Array): {
+  /**
+   * Who of `panel`'s seats named a root's record hash, who of them attested
+   * without naming it, and whether that makes it available: a root is judged
+   * by its own panel's attestations only.
+   */
+  availability(
+    recordHash: Uint8Array,
+    panel: SeatPanel,
+  ): {
     readonly available: boolean;
     readonly namedBy: readonly number[];
     readonly attestedWithout: readonly number[];
@@ -1827,7 +2088,8 @@ function deliveryCheck(
     const key = rules.keys(seat);
     // T-29: only the seat's registered signing key, never its identity key.
     const signed =
-      key !== undefined && verifyStatement(key.signingKey, BATCH_TAG, d.statement, d.signature);
+      key !== undefined &&
+      verifyStatement(key.signingKey, rules.batchTag, d.statement, d.signature);
     d.pairs.forEach((p, pair) => {
       const ballot = byHash.get(hex(p.ballot_hash));
       if (ballot === undefined) return;
@@ -1857,7 +2119,7 @@ function deliveryCheck(
     // T-29: only the seat's registered signing key, never its identity key.
     const signed =
       key !== undefined &&
-      verifyStatement(key.signingKey, COMPLAINT_BATCH_TAG, d.statement, d.signature);
+      verifyStatement(key.signingKey, rules.complaintBatchTag, d.statement, d.signature);
     d.entries.forEach((e, pair) => {
       const ballot = byHash.get(hex(e.ballot_hash));
       if (ballot === undefined) return;
@@ -1898,7 +2160,7 @@ function deliveryCheck(
     }
     // T-29: only the seat's registered signing key, never its identity key;
     // an unsigned root is no one's and fills no slot.
-    if (!verifyStatement(key.signingKey, ROOT_TAG, d.statement, record.signature)) {
+    if (!verifyStatement(key.signingKey, rules.rootTag, d.statement, record.signature)) {
       records.push({ at, code: "root-signature", signer: null, ...seat });
       return;
     }
@@ -1925,7 +2187,7 @@ function deliveryCheck(
       records.push({ at, code: "root-count", signer: d.seat, ...seat });
       return;
     }
-    const named = roots.availability(obligationRootHash(payload));
+    const named = roots.availability(obligationRootHash(payload), d.panel);
     if (!named.available) {
       records.push({
         at,
@@ -2148,7 +2410,24 @@ export function checkDelivery(
   const keyOf = keySet(registered, panelSize, "checkDelivery");
   checkWindows(segments, deadlines, "checkDelivery");
   checkEntries(entries, "checkDelivery");
-  const reader = roots === undefined ? undefined : rootReader(roots, registered);
+  const reader =
+    roots === undefined
+      ? undefined
+      : rootReader(
+          "checkDelivery",
+          roots,
+          roots.attestations.map((a) => ({
+            panel: SEAT_PANELS.default,
+            seat: a.seat,
+            roots: a.roots,
+          })),
+          new Map([
+            [
+              SEAT_PANELS.default,
+              { qualified: registered.map((k) => k.index), threshold: roots.threshold },
+            ],
+          ]),
+        );
 
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)
@@ -2159,6 +2438,9 @@ export function checkDelivery(
   const ctx = { definitionHash };
   const rules: DeliveryRules = {
     complaintTag: COMPLAINT_TAG,
+    batchTag: BATCH_TAG,
+    complaintBatchTag: COMPLAINT_BATCH_TAG,
+    rootTag: ROOT_TAG,
     decodeRoot(payload) {
       const record = decodeObligationRoot(payload, pinned);
       return {
@@ -2288,41 +2570,55 @@ export function checkDelivery(
   };
 }
 
-// The attestations checked once against the registered key set: each from a
-// qualified seat, at most one per seat, each naming 32-byte record hashes. A
-// root is available with `q − k + 1` of the `q` qualified seats naming it
-// (docs/spec/delivery.md, Leaf availability): withholding an honest root then
-// takes `k` seats, and making one available that no honest seat holds takes
-// `q − k + 1` (T-25, T-54).
-function rootReader(roots: DeliveryRoots, registered: readonly RegisteredKeys[]): RootReader {
-  const name = "checkDelivery";
-  const { bound, threshold, attestations } = roots;
+// The attestations checked once against each panel's registered key set:
+// each from a qualified seat of its panel, at most one per seat, each naming
+// 32-byte record hashes. A root of panel `P` is available with `q_P − k_P +
+// 1` of `P`'s `q_P` qualified seats naming it (docs/spec/delivery.md, Leaf
+// availability; Leaf availability (version 2)): withholding an honest root
+// then takes `k_P` of its own panel's seats, and making one available that
+// no honest seat holds takes `q_P − k_P + 1`, and neither panel's
+// attestations count for the other's roots (T-25, T-54, T-37).
+function rootReader(
+  name: string,
+  roots: Pick<DeliveryRoots, "bound" | "leafBlocks">,
+  attestations: readonly (PanelSeat & { readonly roots: readonly Uint8Array[] })[],
+  panels: ReadonlyMap<
+    SeatPanel,
+    { readonly qualified: readonly number[]; readonly threshold: number }
+  >,
+): RootReader {
+  const { bound } = roots;
   if (typeof bound !== "bigint" || bound < 0n)
     throw new RangeError(`${name}: the roots' bound must be a bigint ≥ 0`);
-  const q = registered.length;
-  if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > q)
-    throw new RangeError(`${name}: the threshold must be from 1 to the qualified seats`);
+  for (const { qualified, threshold } of panels.values())
+    if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > qualified.length)
+      throw new RangeError(`${name}: the threshold must be from 1 to the qualified seats`);
   if (typeof roots.leafBlocks !== "function")
     throw new RangeError(`${name}: leafBlocks must be a function`);
-  const qualified = new Set(registered.map((k) => k.index));
-  const named = new Map<number, Set<string>>();
+  const named = new Map<string, Set<string>>();
   for (const a of attestations) {
-    if (!qualified.has(a.seat) || named.has(a.seat))
+    if (panels.get(a.panel)?.qualified.includes(a.seat) !== true || named.has(seatKey(a)))
       throw new RangeError(`${name}: one attestation per qualified seat`);
     if (!a.roots.every((h) => h instanceof Uint8Array && h.length === 32))
       throw new RangeError(`${name}: an attestation names roots by 32-byte record hashes`);
-    named.set(a.seat, new Set(a.roots.map(hex)));
+    named.set(seatKey(a), new Set(a.roots.map(hex)));
   }
-  const attesting = [...named.keys()].sort((a, b) => a - b);
   return {
     bound,
-    availability(recordHash) {
+    availability(recordHash, panel) {
       const h = hex(recordHash);
-      const namedBy = attesting.filter((s) => named.get(s)?.has(h) === true);
+      const p = panels.get(panel);
+      // Only a qualified seat's root is read, so its panel is always here.
+      if (p === undefined) throw new Error(`${name}: a root of a panel without qualified seats`);
+      const attesting = [...p.qualified]
+        .sort((x, y) => x - y)
+        .filter((seat) => named.has(seatKey({ panel, seat })));
+      const names = (seat: number) => named.get(seatKey({ panel, seat }))?.has(h) === true;
+      const namedBy = attesting.filter(names);
       return {
-        available: namedBy.length >= q - threshold + 1,
+        available: namedBy.length >= p.qualified.length - p.threshold + 1,
         namedBy,
-        attestedWithout: attesting.filter((s) => named.get(s)?.has(h) !== true),
+        attestedWithout: attesting.filter((seat) => !names(seat)),
       };
     },
     leafBlocks: (cid, limit) => roots.leafBlocks(Uint8Array.from(cid), limit),
@@ -2375,6 +2671,23 @@ export interface DeliveryCheckV2 {
   readonly ballots: readonly BallotDeliveryV2[];
   readonly records: readonly DeliveryRecordReportV2[];
   readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
+  /** As `DeliveryCheck`'s: when any root is listed, `ballots` and `records` are empty. */
+  readonly unverifiable: readonly { readonly at: number }[];
+}
+
+/**
+ * What the version-2 delivery check reads obligation roots against
+ * (docs/spec/delivery.md, Leaf availability (version 2)): `DeliveryRoots`
+ * per panel, each root judged by its own panel's threshold and attestations.
+ */
+export interface DeliveryRootsV2 {
+  /** `2M`, a seat's bound, of either panel. */
+  readonly bound: bigint;
+  /** `k` and `k_A`; the author panel's is read only beside an author key set. */
+  readonly thresholds: { readonly default: number; readonly author: number };
+  /** Each qualified seat's counted-extent attestation that counts, at most one per seat of each panel. */
+  readonly attestations: readonly (PanelSeat & { readonly roots: readonly Uint8Array[] })[];
+  leafBlocks(cid: Uint8Array, limit: number): readonly Uint8Array[];
 }
 
 /**
@@ -2399,6 +2712,7 @@ export function checkDeliveryV2(
   ballots: readonly DeliveryBallotV4[],
   entries: readonly DeliveryEntry[],
   definition?: ElectionDefinitionV6,
+  roots?: DeliveryRootsV2,
 ): DeliveryCheckV2 {
   const name = "checkDeliveryV2";
   // Read and copied once, so the election checked is the one the check runs
@@ -2413,7 +2727,7 @@ export function checkDeliveryV2(
   if (definition === undefined) {
     if (e.authorPanelSize !== 0 || e.registered.author.length !== 0)
       throw new RangeError(`${name}: an author panel's key set needs its definition`);
-    return checkDeliveryV2With(e, ballots, entries);
+    return checkDeliveryV2With(e, ballots, entries, roots);
   }
   // One decoded copy of its bytes, so every check below reads the same
   // definition, whatever the caller's object returns on a later read.
@@ -2439,7 +2753,7 @@ export function checkDeliveryV2(
         ? `${name}: the definition has no author panel`
         : `${name}: not the author panel's approved key set of this definition`,
     );
-  return checkDeliveryV2With(e, ballots, entries);
+  return checkDeliveryV2With(e, ballots, entries, roots);
 }
 
 /**
@@ -2451,6 +2765,7 @@ export function checkDeliveryV2With(
   election: DeliveryElectionV2,
   ballots: readonly DeliveryBallotV4[],
   entries: readonly DeliveryEntry[],
+  roots?: DeliveryRootsV2,
 ): DeliveryCheckV2 {
   const name = "checkDeliveryV2";
   const { definitionHash, panelSize, authorPanelSize, registered, segments, deadlines } = election;
@@ -2470,6 +2785,16 @@ export function checkDeliveryV2With(
   };
   checkWindows(segments, deadlines, name);
   checkEntries(entries, name);
+  // A panel with no qualified seat has no root to judge, so its threshold isn't read.
+  const panels = new Map<SeatPanel, { qualified: number[]; threshold: number }>();
+  if (roots !== undefined)
+    for (const [panel, keys, threshold] of [
+      [SEAT_PANELS.default, registered.default, roots.thresholds.default],
+      [SEAT_PANELS.author, registered.author, roots.thresholds.author],
+    ] as const)
+      if (keys.length > 0) panels.set(panel, { qualified: keys.map((k) => k.index), threshold });
+  const reader =
+    roots === undefined ? undefined : rootReader(name, roots, roots.attestations, panels);
 
   const hashes = ballots.map((b) => {
     const v = b.vote;
@@ -2489,17 +2814,45 @@ export function checkDeliveryV2With(
   const signers: PanelReceiptSigners = { default: registered.default, author: registered.author };
   const rules: DeliveryRules = {
     complaintTag: COMPLAINT_TAG_V2,
-    // Ballot versions 4 and 5 fix no batch version yet (P2-16 part 5 brings
-    // version 2, with the seat's panel), so every batch is a rejected entry.
-    decodeBatch() {
-      throw new DecodeError("profile-mismatch", 2);
+    batchTag: BATCH_TAG_V2,
+    complaintBatchTag: COMPLAINT_BATCH_TAG_V2,
+    rootTag: ROOT_TAG_V2,
+    // Version 2, with the seat's panel: a version-1 batch or root, which
+    // names none, is a rejected entry (profile-mismatch).
+    decodeBatch(payload) {
+      const r = decodeShareReceiptBatch(payload, 2);
+      return {
+        kind: "batch",
+        definitionHash: r.definition_hash,
+        panel: r.panel,
+        seat: r.seat,
+        pairs: r.receipts,
+        statement: shareReceiptBatchStatementV2(r),
+        signature: r.signature,
+      };
     },
-    decodeComplaintBatch() {
-      throw new DecodeError("profile-mismatch", 2);
+    decodeComplaintBatch(payload) {
+      const r = decodeShareComplaintBatch(payload, 2);
+      return {
+        kind: "complaint-batch",
+        definitionHash: r.definition_hash,
+        panel: r.panel,
+        seat: r.seat,
+        entries: r.complaints,
+        statement: shareComplaintBatchStatementV2(r),
+        signature: r.signature,
+      };
     },
-    // Nor any obligation-root version: every root is a rejected entry.
-    decodeRoot() {
-      throw new DecodeError("profile-mismatch", 2);
+    decodeRoot(payload) {
+      const record = decodeObligationRoot(payload, 2);
+      return {
+        kind: "root",
+        definitionHash: record.definition_hash,
+        panel: record.panel,
+        seat: record.seat,
+        record,
+        statement: obligationRootStatementV2(record),
+      };
     },
     decode(kind, payload) {
       if (kind === "receipt") {
@@ -2563,13 +2916,7 @@ export function checkDeliveryV2With(
     ...registered.default.map((k) => ({ panel: SEAT_PANELS.default, seat: k.index })),
     ...registered.author.map((k) => ({ panel: SEAT_PANELS.author, seat: k.index })),
   ];
-  // Every root is rejected above, so none is ever unverifiable here.
-  const {
-    ballots: checked,
-    records,
-    rejected,
-  } = deliveryCheck(election, hashes, qualified, entries, rules, undefined);
-  return { ballots: checked, records, rejected };
+  return deliveryCheck(election, hashes, qualified, entries, rules, reader);
 }
 
 /** Builds a share receipt record from an intake result, for the client and the node to board. */

@@ -14,7 +14,9 @@
 // A poll that failed in setup carries its failure's code, which the page
 // words (`pollFailure_<code>`, src/messages.ts), and whether the author can
 // retry it (back to a draft, to edit and submit again) or discard it
-// (ADR 0032, rule 14; P2-22 part 5d-2).
+// (ADR 0032, rule 14; P2-22 part 5d-2). An open poll carries its election's
+// identifier, so the author's pages link to the poll's public page (part 6d);
+// a poll in setup carries none, as the website names no step's hash (T-34).
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -46,6 +48,8 @@ import {
 } from "@abolishus/core";
 import type { Sql } from "postgres";
 import * as z from "zod";
+
+import { toHex } from "../values.ts";
 
 /** Every drafts route: `METHOD /path`. Anything else is answered 404. */
 export const DRAFT_ROUTES = [
@@ -128,6 +132,7 @@ const summary = (p: AccountPoll) => ({
   ...(p.failure === undefined
     ? {}
     : { failure: p.failure, retryable: retryableFailure(p.failure) }),
+  ...(p.state === "open" && p.electionId !== undefined ? { electionId: toHex(p.electionId) } : {}),
 });
 
 // Sequence numbers are Postgres `bigint`s, so decimal strings, as the API's log.

@@ -34,3 +34,18 @@ describe("POLL_FAILURE_MESSAGES", () => {
       }
   });
 });
+
+// "Setting up your poll" (P2-22 part 6d) words each step for the author,
+// never as the worker names its states (ADR 0032, rule 14; T-34).
+describe("setup's steps", () => {
+  test("never name a worker state, a code or a hash", () => {
+    for (const catalog of Object.values(catalogs))
+      for (const [key, words] of Object.entries(catalog))
+        if (key.startsWith("setupStep_") || key === "setupNow") {
+          if (typeof words !== "string") throw new Error(`${key} isn't plain text`);
+          expect(words).not.toMatch(
+            /rooted|ceremony|registered|stub|electorate|0x|[0-9a-f]{8}|hash/i,
+          );
+        }
+  });
+});

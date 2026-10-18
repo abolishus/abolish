@@ -203,6 +203,8 @@ export interface AccountPoll {
   readonly submittedAt: Date | undefined;
   /** Why setup failed, for a `failed` poll: apps/web words it. */
   readonly failure: PollFailure | undefined;
+  /** The election's identifier, once the creation step recorded one (32 bytes). */
+  readonly electionId: Uint8Array | undefined;
 }
 
 const poll = (r: typeof accountPolls.$inferSelect): AccountPoll => ({
@@ -215,6 +217,7 @@ const poll = (r: typeof accountPolls.$inferSelect): AccountPoll => ({
   submittedAt: r.submittedAt ?? undefined,
   // The migrations' check admits only these, and only on a failed poll.
   failure: (r.failure as PollFailure | null) ?? undefined,
+  electionId: r.electionId ?? undefined,
 });
 
 /** `accountId`'s poll `id`, or `undefined` if it has none by that ID. */

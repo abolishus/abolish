@@ -13,6 +13,7 @@ export const PAGES = [
   "/moderation",
   "/account",
   "/account/polls/:id",
+  "/account/polls/:id/setup",
   "/how-it-works",
   "other",
 ] as const;
@@ -28,6 +29,7 @@ export function pageOf(pathname: string): Page {
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";
   // An author's draft (or `new`): its ID is the account's, never kept (T-10).
   if (/^\/account\/polls\/[^/]+$/.test(pathname)) return "/account/polls/:id";
+  if (/^\/account\/polls\/[^/]+\/setup$/.test(pathname)) return "/account/polls/:id/setup";
   // A short link, in either case (a QR code carries `/P/<CODE>`): the code
   // names a poll as surely as its ID does, so it is never kept either.
   if (/^\/[pP]\/[^/]+$/.test(pathname)) return "/p/:code";

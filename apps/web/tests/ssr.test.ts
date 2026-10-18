@@ -276,6 +276,7 @@ describe("every page", () => {
     "/polls",
     "/account",
     "/account/polls/new",
+    `/account/polls/${"a".repeat(32)}/setup`,
     "/how-it-works",
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
@@ -292,7 +293,7 @@ describe("every page", () => {
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("connect-src 'self'");
       // Turnstile's origin only on the poll editor's pages (P2-22 part 6c; T-43, T-55).
-      const editor = path.startsWith("/account/polls/");
+      const editor = /^\/account\/polls\/[a-z0-9]+$/.test(path);
       expect(csp.includes("https://challenges.cloudflare.com")).toBe(editor);
       expect(csp.includes("frame-src")).toBe(editor);
       const html = await response.text();
@@ -718,6 +719,25 @@ describe("poll form", () => {
       // The site key the editor renders the widget with comes with the page.
       expect(html).toContain(SITE_KEY);
     }
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("setting up a poll", () => {
+  test("leaves setup's steps to the page's script, with no request behind it", async () => {
+    seen.length = 0;
+    const response = await get(`/account/polls/${"a".repeat(32)}/setup`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Setting up your poll");
+    expect(html).toContain("Following setup needs this page&#x27;s script.");
+    expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+    // The poll is the account's: nothing of it is server-rendered.
+    expect(html).not.toContain("Put on the public record");
+    // A submission lands here as a new document, under every other page's policy (T-55).
+    expect(response.headers.get("content-security-policy")).not.toContain(
+      "challenges.cloudflare.com",
+    );
     expect(seen).toEqual([]);
   });
 });

@@ -95,6 +95,8 @@ describe("the poll editor's policy (P2-22 part 6c)", () => {
     "/account/polls/",
     "/account/polls/new/",
     "/account/polls/new/x",
+    // Setup's page, where a submission lands (P2-22 part 6d): never Turnstile's.
+    `/account/polls/${"a1".repeat(16)}/setup`,
     "/account/polls/NEW",
     "/account/polls/%6Eew",
     "/account/polls/new.js",

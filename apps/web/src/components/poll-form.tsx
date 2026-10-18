@@ -497,8 +497,8 @@ export interface PollFormPageProps {
   readonly onCreated?: (id: string) => void;
   /** The check a submission's token comes from; none if this deployment has no site key. */
   readonly challenge?: Challenge | undefined;
-  /** Called once the draft is submitted for setup. */
-  readonly onSubmitted?: () => void;
+  /** Called once the draft is submitted for setup, with its poll's ID. */
+  readonly onSubmitted?: (id: string) => void;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
   /** The author's own time zone, for the local time beside the UTC one; the browser's by default. */
@@ -705,7 +705,7 @@ export function PollFormPage({
     try {
       await client.submit(poll, token);
       setSubmitting("sent");
-      onSubmitted?.();
+      onSubmitted?.(poll);
     } catch (e) {
       setSubmitting("idle");
       // The token is spent either way: submitting again takes a new check.

@@ -225,6 +225,20 @@ describe("l2RecordedAvailability", () => {
     }
   });
 
+  test("an author seat's record of the same seat number and point isn't the default seat's", async () => {
+    const author: Slot = { ...ballot, panel: SEAT_PANELS.author };
+    const { rpc } = l2Node([logOf(author, recordOf(author))]);
+    const r = await reader(rpc);
+    expect(await read(r, ballot)).toBeUndefined();
+    expect(await read(r, author)).toEqual(recordOf(author));
+  });
+
+  test("a node finalized below the board's deployment block has nothing recorded, unasked", async () => {
+    const { rpc, asked } = l2Node([logOf(ballot, recordOf(ballot), 3n)], { finalized: 6n });
+    expect(await read(await reader(rpc), ballot)).toBeUndefined();
+    expect(asked).toEqual([]);
+  });
+
   test("two records filling one slot, which the board never emits, are refused", async () => {
     const { rpc } = l2Node([logOf(ballot, recordOf(ballot)), logOf(ballot, recordOf(ballot, 1))]);
     const r = await reader(rpc);

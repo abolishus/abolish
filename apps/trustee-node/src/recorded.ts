@@ -103,12 +103,15 @@ export async function l2RecordedAvailability(
     const spec = EVENTS[kind];
     const seatWord = new Uint8Array(32);
     seatWord[31] = seat;
+    // A node still syncing to the board's deployment has nothing recorded.
+    const finalized = await l2Finalized(l2);
+    if (finalized < options.l2FromBlock) return undefined;
     const logs = await contractLogs(
       l2,
       board,
       [spec.topic, definitionHash, seatWord],
       options.l2FromBlock,
-      await l2Finalized(l2),
+      finalized,
     );
     const found: Uint8Array[] = [];
     // A log failing the event check, or naming another slot, is no evidence

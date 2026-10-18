@@ -187,9 +187,13 @@ interface Pending {
  * sequence's manifest: if it is unreached and the locator's transaction is
  * new, it is read there, and once reached the walk goes on from it, so a
  * source's lapse on a link isn't reported as a mismatch. Any other is read,
- * and a manifest of this deployment is `locator-mismatch`, with the CID the
- * chain names at its sequence, if any: a locator overwritten by a seized
- * authority, while the logs that carried earlier ones last (T-69). Earlier
+ * and a manifest of this deployment at a sequence the chain names, or above
+ * the latest's, is `locator-mismatch`, with the CID the chain names there,
+ * if any: a locator overwritten by a seized authority, while the logs that
+ * carried earlier ones last (T-69). One at a sequence below the latest's
+ * that the chain doesn't name is followed like the chain's own (it may sit
+ * below a link a source withheld), and is `locator-mismatch` only if the
+ * walk ends with no link unread. Earlier
  * locators are judged only if the latest's manifest was reached, since
  * otherwise there is no chain to judge them against.
  */
@@ -365,6 +369,7 @@ export async function walkArchive(
 
   if (!overBudget && latest !== undefined) {
     const seen = new Set<string>();
+    const unnamed: { locator: number; sequence: bigint; named: Uint8Array }[] = [];
     for (const [i, bytes] of (options.earlier ?? []).entries()) {
       const key = bytesToHex(bytes);
       if (seen.has(key)) continue;
@@ -397,15 +402,33 @@ export async function walkArchive(
       const m = await fetch(from, l.manifest, l.transaction);
       if (m === "unavailable")
         findings.push({ code: "unavailable", from, cid: l.manifest, transaction: l.transaction });
-      else if (m !== undefined)
-        findings.push({
-          code: "locator-mismatch",
-          locator: i,
-          sequence: m.sequence,
-          named: l.manifest,
-          chain: slots.get(m.sequence)?.cid,
-        });
+      else if (m !== undefined) {
+        const known = slots.get(m.sequence);
+        if (known !== undefined || m.sequence > latest)
+          findings.push({
+            code: "locator-mismatch",
+            locator: i,
+            sequence: m.sequence,
+            named: l.manifest,
+            chain: known?.cid,
+          });
+        else {
+          // A sequence below the latest's that the chain doesn't name: it may
+          // sit below a link a source withheld, so it is followed like the
+          // chain's own, and judged once the walk is done.
+          const slot = claim(m.sequence, l.manifest);
+          slot.tried.push(l.transaction);
+          unnamed.push({ locator: i, sequence: m.sequence, named: l.manifest });
+          if (!reach(slot, m) || !(await drain())) {
+            overBudget = true;
+            break;
+          }
+        }
+      }
     }
+    // Only a walk that left no link unread shows the chain omits them.
+    if (!overBudget && ![...slots.values()].some((s) => !s.reached && s.unavailable.length > 0))
+      for (const u of unnamed) findings.push({ code: "locator-mismatch", ...u, chain: undefined });
   }
 
   const reached = [...slots]

@@ -419,6 +419,47 @@ describe("walkArchive", () => {
     }
   });
 
+  test("earlier locators below a withheld link are followed, never mismatched", async () => {
+    const chain: Stored[] = [manifest(0n, [])];
+    for (let k = 1n; k <= 10n; k++) chain.push(manifest(k, [chain.at(-1) as Stored]));
+    const nine = chain[9] as Stored;
+    const { source } = arweave(chain.filter((m) => m !== nine));
+    const walk = await walkArchive(locatorOf(chain[10] as Stored), DEPLOYMENT, source, {
+      earlier: chain.slice(0, 10).map(locatorOf),
+    });
+    // Only 9 is missing: 8 down to 0 are reached from the earlier locators.
+    expect(walk.findings).toEqual([
+      { code: "unavailable", from: { link: 9n }, cid: nine.cid, transaction: nine.transaction },
+      { code: "archive-gap", first: 9n, last: 9n },
+    ]);
+    expect(walk.manifests.map((m) => m.sequence)).toEqual([
+      0n,
+      1n,
+      2n,
+      3n,
+      4n,
+      5n,
+      6n,
+      7n,
+      8n,
+      10n,
+    ]);
+  });
+
+  test("a manifest the whole chain omits, named by an earlier locator, is a mismatch", async () => {
+    const m0 = manifest(0n, []);
+    const m1 = manifest(1n, [m0]);
+    // 3 skips 2, which an earlier locator named, and every link was read.
+    const m2 = manifest(2n, [m1]);
+    const m3 = manifest(3n, [m1]);
+    const walk = await walkArchive(locatorOf(m3), DEPLOYMENT, arweave([m0, m1, m2, m3]).source, {
+      earlier: [locatorOf(m1), locatorOf(m2)],
+    });
+    expect(walk.findings).toEqual([
+      { code: "locator-mismatch", locator: 1, sequence: 2n, named: m2.cid, chain: undefined },
+    ]);
+  });
+
   test("a repeated earlier locator is judged once", async () => {
     const m0 = manifest(0n, []);
     const m1 = manifest(1n, [m0]);

@@ -7,6 +7,7 @@ import {
   type Anchor,
   type AnchorClock,
   availabilityWindows,
+  boardEntryHash,
   ceremonyTranscriptHash,
   checkAvailability,
   type Checkpoint,
@@ -18,6 +19,7 @@ import {
   electionDefinitionHash,
   encodeBoardEntry,
   identityKey,
+  objectCid,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import fc from "fast-check";
@@ -118,6 +120,9 @@ interface World {
   readonly store: MemoryStore;
   readonly election: ApprovedElection;
   readonly sent: Uint8Array[];
+  /** What the seat pinned, by CID, in order. */
+  readonly pinned: Array<readonly [string, Uint8Array]>;
+  failPin: boolean;
   readonly recorded: Map<AvailabilityKind, Uint8Array>;
   readonly withheld: Set<number>;
   wall: bigint;
@@ -162,6 +167,8 @@ function world(
     store: own,
     election,
     sent: [],
+    pinned: [],
+    failPin: false,
     recorded: new Map(),
     withheld: new Set(),
     wall: fixedAt,
@@ -203,6 +210,10 @@ function world(
         if (b !== undefined) return [b];
       }
       return [];
+    },
+    pin: async (cid, object) => {
+      if (w.failPin) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      w.pinned.push([key(cid), Uint8Array.from(object)]);
     },
     contract,
     clock: () => w.wall,
@@ -351,6 +362,8 @@ describe("the ballot extent", () => {
     const c = decodeAvailabilityComplaint(w.sent[0] as Uint8Array, 1);
     expect(key(c.cid)).toBe(key((w.board.checkpoints.get(24) as Checkpoint).object_cid));
     expect(key(c.checkpoint_hash)).toBe(key(checkpointHash(cA(w))));
+    // A seat that complains pins nothing: it holds no copy to serve.
+    expect(w.pinned).toEqual([]);
     // Once recorded, the seat still tries to attest; it never signs a second complaint.
     w.recorded.set("complaint", w.sent[0] as Uint8Array);
     expect(await w.seat.step()).toEqual({ state: "complained" });
@@ -457,6 +470,35 @@ describe("the ballot extent", () => {
     expect(key(a.checkpoint_hash)).toBe(
       key(checkpointHash(w.board.checkpoints.get(24) as Checkpoint)),
     );
+    expect(w.pinned.map(([cid]) => cid)).toEqual(
+      [0, 3, 24].flatMap((s) => {
+        const cp = w.board.checkpoints.get(s) as Checkpoint;
+        return [key(cp.object_cid), key(cp.hashes_cid)];
+      }),
+    );
+  });
+
+  test("pins every segment object and entry-hash list through C_A, and nothing past it, before it signs", async () => {
+    const w = world();
+    w.failPin = true;
+    await expect(w.seat.step()).rejects.toThrow("disk full");
+    // Nothing signed or sent while the extent can't be pinned.
+    expect(w.sent).toEqual([]);
+    expect(
+      await w.store.get(`availability/${key(w.election.definitionHash)}/ballot/attestation`),
+    ).toBeUndefined();
+    w.failPin = false;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    const expected = [0, 3, 10, 24, 25].flatMap((s) => {
+      const run = w.board.entries.filter((_, i) => SEGMENTS[i] === s);
+      const cp = w.board.checkpoints.get(s) as Checkpoint;
+      return [
+        [key(cp.object_cid), key(concat(run))],
+        [key(cp.hashes_cid), key(concat(run.map(boardEntryHash)))],
+      ];
+    });
+    expect(w.pinned.map(([cid, object]) => [cid, key(object)])).toEqual(expected);
+    for (const [cid, object] of w.pinned) expect(key(objectCid(object))).toBe(cid);
   });
 
   test("two steps at once send only the stored attestation", async () => {

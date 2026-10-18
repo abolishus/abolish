@@ -96,10 +96,18 @@ export function mirrorThen(mirror: Mirror, gateways: AsyncBlockSource): AsyncBlo
 
 const same = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
 
-// Writes the object's CAR as `<cid>.car`, unless the file already holds
-// exactly those bytes; through a temporary file and a rename, so `serve`
-// never reads half a file.
-async function write(dir: string, cid: Uint8Array, object: Uint8Array): Promise<"pinned" | "held"> {
+/**
+ * Writes `object`'s CAR to `dir` as `<cid>.car`, unless the file already
+ * holds exactly those bytes; through a temporary file and a rename, so
+ * `serve` never reads half a file. Throws unless `cid` is the object's own,
+ * so no file is ever named for other bytes than it holds (T-51).
+ */
+export async function pinObject(
+  dir: string,
+  cid: Uint8Array,
+  object: Uint8Array,
+): Promise<"pinned" | "held"> {
+  if (!same(objectCid(object), cid)) throw new Error("an object whose CID isn't the one named");
   const car = objectCar(object);
   const path = join(dir, `${cidText(cid)}.car`);
   try {
@@ -178,10 +186,14 @@ export async function pinElections(header: L1Header, options: PinOptions): Promi
           continue;
         }
         // The bounded reader accepts only the canonical DAG, so the object's
-        // own CAR has this root; checked, so nothing else is ever written.
-        if (!same(objectCid(read.bytes), cid)) throw new Error("a read whose root isn't its CID");
+        // own CAR has this root; `pinObject` checks it, so nothing else is
+        // ever written.
         spent += read.bytes.length;
-        report({ ...base, outcome: await write(dir, cid, read.bytes), bytes: read.bytes.length });
+        report({
+          ...base,
+          outcome: await pinObject(dir, cid, read.bytes),
+          bytes: read.bytes.length,
+        });
       }
     }
   }

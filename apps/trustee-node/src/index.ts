@@ -28,6 +28,7 @@ export {
 } from "./intake.ts";
 export { L1AnchorError, type L1AnchorOptions, type L1AnchorRefusal, l1BoardAnchors } from "./l1.ts";
 export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
+export { type ServedBlocks, servedBlocks } from "./served.ts";
 export {
   checkStub,
   type ElectorateCheck,

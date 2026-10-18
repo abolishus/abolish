@@ -3,11 +3,13 @@
 // ballot-extent checkpoint `C_A` is fixed on finalized L1, read the board
 // through it by the CIDs its counted checkpoints name, from any sources, and
 // attest it if the copy passes the board checks; complain, naming the first
-// object it couldn't read, if it can't by the intake cutoff `c_I`. Each
-// record is written once before it is sent, so the seat signs at most one
-// attestation and one complaint per point, and every retry resends the
-// stored bytes until the board contract has recorded them (T-24, T-25,
-// T-53, T-54, T-71).
+// object it couldn't read, if it can't by the intake cutoff `c_I`. Before it
+// attests, it pins every segment object and entry-hash list of the extent,
+// served from then on, so a seat never attests what it can't serve (What a
+// seat does, 4). Each record is written once before it is sent, so the seat
+// signs at most one attestation and one complaint per point, and every retry
+// resends the stored bytes until the board contract has recorded them
+// (T-24, T-25, T-49, T-53, T-54, T-71).
 //
 // The counted extent (point 2) needs `t_S`, which needs the contract-event
 // windows the verifier doesn't read yet (P1-18), and its roots need the leaf
@@ -21,11 +23,13 @@ import {
   BoardError,
   type BoardErrorCode,
   type BoardEntryVersion,
+  boardEntryHash,
   type Checkpoint,
   checkpointHash,
   countedCheckpoints,
   encodeAvailabilityAttestation,
   encodeAvailabilityComplaint,
+  objectCid,
   readBoardCopy,
   SEAT_PANELS,
   signAvailabilityAttestation,
@@ -83,6 +87,13 @@ export interface AvailabilityOptions {
   readonly l1: FinalizedBoardAnchors;
   /** Any sources of the board's blocks: IPFS, the archive, the operator, other seats. Untrusted. */
   readonly blocks: AsyncBlockSource;
+  /**
+   * Pins an object the seat is about to attest, under its CID, and serves
+   * it from then on (docs/spec/availability.md, What a seat does, 4). The
+   * seat attests only once every object of the extent is pinned, so this
+   * throws if one can't be.
+   */
+  readonly pin: (cid: Uint8Array, object: Uint8Array) => Promise<unknown>;
   readonly contract: ContractPath;
   /** The node's wall clock, in seconds. */
   readonly clock: () => bigint;
@@ -129,6 +140,15 @@ const PANEL = SEAT_PANELS.default;
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
+const concat = (parts: readonly Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+};
 
 // Failures of the board checks that say this copy, from these sources, isn't
 // the anchored board through `C_A`: a reason to keep fetching, and to name
@@ -143,6 +163,41 @@ const PAST_EXTENT: ReadonlySet<BoardErrorCode> = new Set<BoardErrorCode>([
   "unanchored",
   "unsealed",
 ]);
+
+/**
+ * Every segment object and entry-hash list the counted checkpoints through
+ * `C_A` name, with its CID, from a copy that passed the board checks through
+ * them: run `i`, entries `n_{i−1}` to `n_i − 1`, is the object a checkpoint
+ * of size `n_i` names, as `readBoardCopy` read it ([[board]], A copy from
+ * L1's CIDs). `checkpoint-cid` has already matched both CIDs; they are
+ * compared again so that nothing but what L1 names is ever pinned (T-49).
+ */
+function extentObjects(
+  electionId: Uint8Array,
+  through: readonly Anchor[],
+  clock: AnchorClock,
+  now: bigint,
+  entries: readonly Uint8Array[],
+): Array<readonly [Uint8Array, Uint8Array]> {
+  const runs = new Map<bigint, Checkpoint>();
+  for (const cp of countedCheckpoints(electionId, through, clock, now))
+    if (!runs.has(cp.size)) runs.set(cp.size, cp);
+  const objects: Array<readonly [Uint8Array, Uint8Array]> = [];
+  let previous = 0;
+  for (const size of [...runs.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const cp = runs.get(size) as Checkpoint;
+    const run = entries.slice(previous, Number(size));
+    for (const [cid, object] of [
+      [cp.object_cid, concat(run)],
+      [cp.hashes_cid, concat(run.map(boardEntryHash))],
+    ] as const) {
+      if (!equal(objectCid(object), cid)) throw new Error("an extent object whose CID isn't L1's");
+      objects.push([cid, object]);
+    }
+    previous = Number(size);
+  }
+  return objects;
+}
 
 /**
  * The ballot-extent duty of one seat of the default panel for one election
@@ -197,7 +252,10 @@ export class AvailabilitySeat {
     const extent = this.#extent(anchors, clock, now);
     if ("state" in extent) return extent;
     const held = await this.#held(extent.through, clock, now);
-    if (held === true) {
+    if ("objects" in held) {
+      // Pinned before the attestation is signed: what it says the seat held
+      // is what the seat serves.
+      for (const [cid, object] of held.objects) await o.pin(cid, object);
       const record = encodeAvailabilityAttestation(
         signAvailabilityAttestation(o.election.signingSecret, {
           definition_hash: o.election.definitionHash,
@@ -281,14 +339,19 @@ export class AvailabilitySeat {
   /**
    * Whether the seat's copy, read by the anchored CIDs, reaches `C_A` and
    * passes the board checks through it (steps 1 to 5, `checkpoint-cid`
-   * among them); if it doesn't from these sources, the CID of the first run
-   * it couldn't read, for a complaint.
+   * among them), with the extent's objects if it does; if it doesn't from
+   * these sources, the CID of the first run it couldn't read, for a
+   * complaint.
    */
   async #held(
     through: readonly Anchor[],
     clock: AnchorClock,
     now: bigint,
-  ): Promise<true | AvailabilityStatus | { readonly cid: Uint8Array }> {
+  ): Promise<
+    | AvailabilityStatus
+    | { readonly cid: Uint8Array }
+    | { readonly objects: ReadonlyArray<readonly [Uint8Array, Uint8Array]> }
+  > {
     const o = this.#o;
     const runCid = (j: number) => (through[j] as Anchor).checkpoint.object_cid;
     const copy = await readBoardCopy(
@@ -304,11 +367,12 @@ export class AvailabilitySeat {
       verifyBoard(o.election.electionId, copy.encodedEntries, o.boardVersion, through, clock, now);
     } catch (e) {
       if (!(e instanceof BoardError)) throw e;
-      if (PAST_EXTENT.has(e.code)) return true;
       if (NOT_HELD.has(e.code) && "checkpoint" in e.at) return { cid: runCid(e.at.checkpoint) };
-      return { state: "board-failed", code: e.code };
+      if (!PAST_EXTENT.has(e.code)) return { state: "board-failed", code: e.code };
     }
-    return true;
+    return {
+      objects: extentObjects(o.election.electionId, through, clock, now, copy.encodedEntries),
+    };
   }
 
   /**

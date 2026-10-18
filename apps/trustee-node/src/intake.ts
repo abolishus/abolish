@@ -32,6 +32,7 @@ import {
   keySetHash,
   membershipMessage,
   SHARES,
+  type Share,
   shareReceiptRecord,
   struct,
   u64,
@@ -371,4 +372,19 @@ export async function receiptedShareHash(
   const held = await store.get(`intake/${hex(stubHash)}/${hex(ballotHash)}`);
   if (held === undefined) throw new Error("trustee node: no receipt held for an owed ballot hash");
   return decode(TAKEN, held).share_hash;
+}
+
+/**
+ * The shares the seat opened from `ballotHash`'s ciphertext at intake under
+ * the stub, checked against the ballot's commitments before its receipt was
+ * given (docs/spec/ballot-validity.md, Shares), or `undefined` if the seat
+ * took no such ballot in. Never logged.
+ */
+export async function heldShares(
+  store: SeatStore,
+  stubHash: Uint8Array,
+  ballotHash: Uint8Array,
+): Promise<readonly Share[] | undefined> {
+  const held = await store.get(`intake/${hex(stubHash)}/${hex(ballotHash)}`);
+  return held === undefined ? undefined : decode(TAKEN, held).shares;
 }

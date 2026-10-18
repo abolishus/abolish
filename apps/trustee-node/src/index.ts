@@ -33,7 +33,16 @@ export {
   type ReceiptPath,
 } from "./delivery.ts";
 export {
+  type CellStatus,
+  type CountedSet,
+  type SummedSharePeers,
+  TallyDuty,
+  type TallyDutyOptions,
+  type TallyDutyStatus,
+} from "./tally.ts";
+export {
   type ElectionRefusal,
+  heldShares,
   type IntakeConfig,
   type IntakeOutcome,
   type IntakeRefusal,

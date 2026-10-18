@@ -381,29 +381,41 @@ async function advance(seconds: bigint) {
  * sync's accumulator check as `incomplete`. And never the latest block: Anvil
  * answers `eth_getProof` for its latest block from its current state, so a
  * block the creation worker mines meanwhile can stand in for it, and the
- * registry's proof then fails under the root as `l2-proof-missing`.
+ * registry's proof then fails under the root as `l2-proof-missing`. Under
+ * load, Anvil also keeps an older block's state now and then as another
+ * state than the one its header commits to, and answers every proof at that
+ * block from it, so a root for that block fails the same way: such a block
+ * is passed over for the one before it, as no real node serves one.
  */
 const proposer = {
   async latest() {
     const latest = await l2.client.getBlockNumber({ cacheTime: 0 });
     const finalized = await l2.client.getBlock({ blockTag: "finalized" });
     const below = [indexed, latest - 1n].reduce((a, b) => (a < b ? a : b));
-    const head =
+    let head =
       finalized.number <= below ? finalized : await l2.client.getBlock({ blockNumber: below });
-    const passer = await l2.client.getProof({
-      address: MESSAGE_PASSER,
-      storageKeys: [],
-      blockNumber: head.number,
-    });
-    const word0 = toHex(0n, { size: 32 });
-    return {
-      outputRoot: hexToBytes(
-        keccak256(concat([word0, head.stateRoot, passer.storageHash, head.hash])),
-      ),
-      l2Block: head.number,
-    };
+    for (;;) {
+      const passer = await l2.client.getProof({
+        address: MESSAGE_PASSER,
+        storageKeys: [],
+        blockNumber: head.number,
+      });
+      // The account proof's first node is the state trie's root node.
+      const proves = keccak256(passer.accountProof[0] ?? "0x") === head.stateRoot;
+      if (proves || head.number === 0n) return rootOf(head, passer.storageHash);
+      head = await l2.client.getBlock({ blockNumber: head.number - 1n });
+    }
   },
 };
+
+/** The version-0 output root of `head`, with the message passer's storage root. */
+function rootOf(head: { number: bigint; stateRoot: Hex; hash: Hex }, passerStorage: Hex) {
+  const word0 = toHex(0n, { size: 32 });
+  return {
+    outputRoot: hexToBytes(keccak256(concat([word0, head.stateRoot, passerStorage, head.hash]))),
+    l2Block: head.number,
+  };
+}
 
 beforeAll(async () => {
   db = await testDb();

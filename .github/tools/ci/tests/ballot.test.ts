@@ -244,11 +244,12 @@ describe("htmlViolations", () => {
     expect(htmlViolations(page())).toEqual([]);
   });
 
-  test("pins script-src 'self' 'wasm-unsafe-eval' and connect-src 'self' before the two origins", () => {
+  test("pins script-src 'self' 'wasm-unsafe-eval', connect-src 'self' before the two origins and frame-src the challenge origin alone", () => {
     expect(policy).toContain("; script-src 'self' 'wasm-unsafe-eval'; ");
     expect(policy).toContain(
       "; connect-src 'self' https://api-staging.abolish.us https://sepolia.base.org; ",
     );
+    expect(policy).toContain("; frame-src https://challenge-staging.up.railway.app; ");
   });
 
   test("rejects any change to the pinned policy", () => {
@@ -263,6 +264,19 @@ describe("htmlViolations", () => {
       policy.replace("connect-src 'self' ", "connect-src * "),
       policy.replace("https://sepolia.base.org", "https://sepolia.base.org.example.com"),
       policy.replace(" https://sepolia.base.org", ""),
+      policy.replace("frame-src ", "frame-src 'self' "),
+      policy.replace("frame-src ", "frame-src https: "),
+      policy.replace("frame-src ", "frame-src * "),
+      policy.replace("frame-src ", "frame-src https://challenges.cloudflare.com "),
+      policy.replace(
+        "frame-src https://challenge-staging.up.railway.app",
+        "frame-src https://up.railway.app",
+      ),
+      policy.replace(
+        "frame-src https://challenge-staging.up.railway.app",
+        "frame-src https://*.up.railway.app",
+      ),
+      policy.replace("; frame-src https://challenge-staging.up.railway.app", ""),
       policy.replace("; trusted-types ballot-worker", ""),
       policy.replace(
         "trusted-types ballot-worker",
@@ -444,6 +458,8 @@ describe("distViolations", () => {
       "https://api-staging.abolish.us",
       "https://api-staging.abolish.us/elections",
       "https://sepolia.base.org/",
+      "https://challenge-staging.up.railway.app",
+      "https://challenge-staging.up.railway.app/#origin=x",
     ])
       expect(distViolations(dist({ [page]: `fetch("${url}")` })), url).toEqual([]);
     for (const url of [
@@ -453,6 +469,9 @@ describe("distViolations", () => {
       "https://api.abolish.us/",
       "http://api-staging.abolish.us/",
       "https://sepolia.base.org.example.com",
+      "https://challenge-staging.up.railway.app.example.com/",
+      "https://ballot-staging.up.railway.app/",
+      "http://challenge-staging.up.railway.app/",
     ])
       expect(distViolations(dist({ [page]: `fetch("${url}")` })).length, url).toBeGreaterThan(0);
   });

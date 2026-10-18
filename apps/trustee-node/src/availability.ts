@@ -56,10 +56,11 @@ export interface FinalizedBoardAnchors {
 export interface ContractPath {
   /**
    * Submits a record to the board contract, through the sequencer or forced
-   * through L1 when the sequencer doesn't take it in time; resolves once it
-   * is sent, not once it is recorded. Throws if it can't be sent now.
+   * through L1 when the sequencer doesn't take it in time, and by `cutoff`
+   * (the point's, `c_I`) whatever it did; resolves once it is sent, not once
+   * it is recorded. Throws if it can't be sent now.
    */
-  send(record: Uint8Array): Promise<void>;
+  send(record: Uint8Array, cutoff: bigint): Promise<void>;
   /**
    * The record of this kind the board contract recorded for the seat and
    * point, as the seat's own L2 node derives it from finalized L1, never a
@@ -334,7 +335,7 @@ export class AvailabilitySeat {
       return kind === "attestation" ? { state: "recorded" } : { state: "complained" };
     }
     if (wall > this.deadline) return { state: "unrecorded", kind };
-    await o.contract.send(record);
+    await o.contract.send(record, this.cutoff);
     return { state: "sent", kind };
   }
 }

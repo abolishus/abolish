@@ -15,9 +15,11 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@abolishus/contracts": "workspace:*",
     "@abolishus/crypto": "workspace:*",
     "@abolishus/node": "workspace:*",
     "@abolishus/verifier": "workspace:*",
+    "viem": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

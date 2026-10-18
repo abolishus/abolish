@@ -175,7 +175,9 @@ function world(
       .ballotCutoff,
   };
   const contract: ContractPath = {
-    send: async (record) => {
+    send: async (record, cutoff) => {
+      // Every record is due by the ballot extent's cutoff, c_I.
+      expect(cutoff).toBe(w.cutoff);
       if (w.failSend) throw new Error("sequencer down and L1 unreachable");
       w.sent.push(Uint8Array.from(record));
     },

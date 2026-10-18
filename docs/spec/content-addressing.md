@@ -21,7 +21,7 @@ IPFS implementations disagree on defaults (chunk size, leaf encoding, links per 
 | Empty objects  | not allowed: nothing the protocol stores is empty                                                                                                                                                                                                                          |
 | CAR            | CARv1 with the dag-cbor header `{roots: [root], version: 1}`, exactly one root (the object's CID), blocks in depth-first pre-order from the root, each block exactly once, no other blocks                                                                                 |
 
-An object is any one encoded byte string the protocol stores: a board segment ([[board]], Segments and checkpoints), a display-text record ([[display-text]]), an archive manifest (P4-3), a release record ([[release]]) or one file of a release's site. A site, the files a release serves, is a directory of objects (Sites, below).
+An object is any one encoded byte string the protocol stores: a board segment ([[board]], Segments and checkpoints), a display-text record ([[display-text]]), an archive manifest ([[archive]]), a release record ([[release]]) or one file of a release's site. A site, the files a release serves, is a directory of objects (Sites, below).
 
 Encodings, byte for byte as both implementations write them:
 
@@ -63,5 +63,5 @@ A reader that has a site's files from a release record checks them against the r
 
 ## Still to come
 
-- Archive manifests and their Arweave layout: P4-3.
+- Archive manifests and their Arweave layout: [[archive]]; the worker's uploads are P4-3 part 4.
 - Fetching by CID over the network (P4-6 and the verifier): a fetcher MUST stop reading an answer past 1 MiB, before allocating more (Reading by CID), and check the object it reads against the L1-anchored roots (T-49, T-24). Segment objects are read within their checkpoints' bound (Reading within a bound; [[board]], A copy from L1's CIDs); the verifier reads them from a local block store, gateways over the network, or both ([[verifier]], Board by CID).

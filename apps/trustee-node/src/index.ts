@@ -50,6 +50,16 @@ export {
   type RegistrationCheck,
 } from "./intake.ts";
 export {
+  CHANNEL_RETRY_SECONDS,
+  type ChannelOptions,
+  httpPeers,
+  MAX_SUMMED_SHARE,
+  PeerError,
+  type PeersOptions,
+  type ReceiveSummedShare,
+  serveSummedShares,
+} from "./channel.ts";
+export {
   BUSY_RETRY_SECONDS,
   decodeDelivery,
   type Delivery,

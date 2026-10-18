@@ -5,6 +5,9 @@
   "description": "Abolish's Noir circuits: the shared libraries and Tier 2's nullifier query and output circuits.",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "nargo check --workspace && node scripts/artifacts.ts",
     "check": "nargo fmt --check && nargo check --workspace",

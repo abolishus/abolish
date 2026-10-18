@@ -2597,11 +2597,14 @@ function rootReader(
     throw new RangeError(`${name}: leafBlocks must be a function`);
   const named = new Map<string, Set<string>>();
   for (const a of attestations) {
-    if (panels.get(a.panel)?.qualified.includes(a.seat) !== true || named.has(seatKey(a)))
+    // Each field read once, so the seat checked is the seat whose roots count.
+    const seat: PanelSeat = { panel: a.panel, seat: a.seat };
+    const listed = [...a.roots];
+    if (panels.get(seat.panel)?.qualified.includes(seat.seat) !== true || named.has(seatKey(seat)))
       throw new RangeError(`${name}: one attestation per qualified seat`);
-    if (!a.roots.every((h) => h instanceof Uint8Array && h.length === 32))
+    if (!listed.every((h) => h instanceof Uint8Array && h.length === 32))
       throw new RangeError(`${name}: an attestation names roots by 32-byte record hashes`);
-    named.set(seatKey(a), new Set(a.roots.map(hex)));
+    named.set(seatKey(seat), new Set(listed.map(hex)));
   }
   return {
     bound,
@@ -2705,7 +2708,12 @@ export interface DeliveryRootsV2 {
  * on trust could drop a seat that withheld its share, or add one no seat
  * holds (T-37, T-17, T-25). Beside an author panel `definition` is required;
  * without one it may be omitted, the author key set must then be empty, and
- * the default set is the caller's.
+ * the default set is the caller's. A contract-path obligation root is read
+ * against `roots`, as `checkDelivery`'s are, judged available only by its own
+ * panel's threshold and attestations; given `definition`, the thresholds must
+ * be its own, since a lower or higher one would let fewer seats withhold or
+ * make available a root (T-25, T-54). Without `roots`, a root that reaches
+ * the bound leaves the counted set undecided (`unverifiable`).
  */
 export function checkDeliveryV2(
   election: DeliveryElectionV2,
@@ -2753,6 +2761,12 @@ export function checkDeliveryV2(
         ? `${name}: the definition has no author panel`
         : `${name}: not the author panel's approved key set of this definition`,
     );
+  if (
+    roots !== undefined &&
+    (roots.thresholds.default !== d.threshold ||
+      (d.author_keys.length !== 0 && roots.thresholds.author !== d.author_threshold))
+  )
+    throw new RangeError(`${name}: not the thresholds of this definition`);
   return checkDeliveryV2With(e, ballots, entries, roots);
 }
 

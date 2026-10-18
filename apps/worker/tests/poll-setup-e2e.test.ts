@@ -371,11 +371,17 @@ async function advance(seconds: bigint) {
 /**
  * The proposer stood in: the version-0 output root of the L2's finalized
  * block, from its state root, the message passer's storage root and its
- * hash, as the OP Stack defines it.
+ * hash, as the OP Stack defines it. Never past the index: a real proposer
+ * posts hours behind the head, long after Ponder has the block's logs, while
+ * here the creation worker's transactions mine L2 blocks at any moment, and
+ * a root posted for one `indexLogs` hasn't copied yet fails the registry
+ * sync's accumulator check as `incomplete`.
  */
 const proposer = {
   async latest() {
-    const head = await l2.client.getBlock({ blockTag: "finalized" });
+    const finalized = await l2.client.getBlock({ blockTag: "finalized" });
+    const head =
+      finalized.number <= indexed ? finalized : await l2.client.getBlock({ blockNumber: indexed });
     const passer = await l2.client.getProof({
       address: MESSAGE_PASSER,
       storageKeys: [],

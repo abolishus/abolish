@@ -106,6 +106,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 ## Blocked
 
 - [[P2-22]] part 7b (the staging run that creates a poll through the website) waits on staging itself: `deploy.yml` deploys only `api`, `web` and `ballot`, so staging has no creation or setup worker, no launch-panel seats and no testnet contracts. Each is a `ci:` change on Railway services and variables the owner creates by hand; the list is in its file, Part 7b. Everything up to the deployment is done (7a, #441).
+- [[P2-8]] part 3b-2c-2b-2b-2c-2 (framing the challenge page from the client) waits on the owner: review of the `ci:` PR that adds `frame-src https://challenge-staging.up.railway.app` (rule B), a Railway `challenge` service on that domain, a Turnstile site key issued for it, and the `ci:` change to `deploy.yml` that deploys `apps/challenge` once the service exists. The list is in its file, Next.
 - [[P3-4]] part 2b-3b-2b-2b (the nullifier circuits' proof checks and prover through bb.js and noir_js) waits on the owner's review of the `ci:` PR #436, which lets `packages/circuits` depend on `@aztec/bb.js`, `@noir-lang/noir_js` and `@abolishus/crypto` (rule B).
 - [[P2-21]]'s real-phone measurement (proving time and memory on a mid-range phone) needs a person with a phone: no agent session has one. How to run it is in its file, part 4b-2. The rest of the item is done (#427).
 - On 2026-10-17 the owner chose staging's origins for [[P2-8]] part 2b (`https://api-staging.abolish.us`, `https://sepolia.base.org`), and the `connect-src` change landed in #332.

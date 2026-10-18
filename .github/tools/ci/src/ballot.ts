@@ -110,6 +110,19 @@ export const CONNECT_ORIGINS: readonly string[] = [
 ];
 
 /**
+ * The origins the client may frame, and name besides CONNECT_ORIGINS: the
+ * challenge page ([[registration]], Challenge page; apps/challenge), where
+ * Turnstile runs on an origin of its own so the client never runs
+ * Cloudflare's unpinnable script (T-43, T-67). The frame gets no access to the
+ * client's document; the client takes one well-formed token from it, checked
+ * by origin and source window, and nothing else. Staging's, a Railway domain
+ * (`up.railway.app` is a public suffix, so the host is a site of its own,
+ * apart from the client's and the ballot RP ID); a release names its own
+ * (owner review, rule B).
+ */
+export const FRAME_ORIGINS: readonly string[] = ["https://challenge-staging.up.railway.app"];
+
+/**
  * The ballot client's Content Security Policy (T-43). Scripts, styles, fonts
  * and images from its own origin only, and WebAssembly compiled
  * ('wasm-unsafe-eval', which never allows JavaScript eval) for the prover's
@@ -120,7 +133,8 @@ export const CONNECT_ORIGINS: readonly string[] = [
  * where encryption and proving run; Trusted Types, with one named policy,
  * `ballot-worker`, for the two workers' script URLs (`new Worker(url)` is a
  * script-URL sink; the client creates the policy first, and a second policy
- * of that name throws); no <base> and no form posts.
+ * of that name throws); frames from FRAME_ORIGINS only, for the challenge
+ * page; no <base> and no form posts.
  */
 export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "default-src": ["'none'"],
@@ -129,6 +143,7 @@ export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "font-src": ["'self'"],
   "img-src": ["'self'"],
   "connect-src": ["'self'", ...CONNECT_ORIGINS],
+  "frame-src": [...FRAME_ORIGINS],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
@@ -156,7 +171,9 @@ export const INERT_URLS: ReadonlySet<string> = new Set([
 export function isAllowedUrl(url: string): boolean {
   return (
     INERT_URLS.has(url) ||
-    CONNECT_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`))
+    [...CONNECT_ORIGINS, ...FRAME_ORIGINS].some(
+      (origin) => url === origin || url.startsWith(`${origin}/`),
+    )
   );
 }
 

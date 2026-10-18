@@ -222,6 +222,35 @@ describe("the served ballot client", () => {
     expect(foreignResponses).toEqual([]);
   });
 
+  // The challenge page's origin is the only one it may frame (frame-src).
+  test("frames the challenge origin, and refuses a frame from any other", async () => {
+    const challenge = "https://challenge-staging.up.railway.app/";
+    await page.route(challenge, (route) =>
+      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>challenge</title>" }),
+    );
+    await page.evaluate(
+      (urls) =>
+        Promise.all(
+          urls.map(
+            (src) =>
+              new Promise<void>((resolve) => {
+                const frame = document.createElement("iframe");
+                frame.addEventListener("load", () => resolve());
+                frame.src = src;
+                document.body.append(frame);
+              }),
+          ),
+        ),
+      [challenge, "https://example.com/"],
+    );
+    await expect
+      .poll(() => violations.filter((v) => v.startsWith("frame-src")))
+      .toEqual(["frame-src https://example.com"]);
+    expect(foreignResponses).toEqual([challenge]);
+    const framed = page.frames().find((frame) => frame.url() === challenge);
+    await expect(framed?.title()).resolves.toBe("challenge");
+  });
+
   test("compiles WebAssembly, and still refuses to evaluate a string as script", async () => {
     const outcome = await page.evaluate(async () => {
       const results: string[] = [];

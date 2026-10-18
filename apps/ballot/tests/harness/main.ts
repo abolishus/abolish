@@ -13,6 +13,7 @@ import {
   readIdentity,
   recordTier0Membership,
   recordTier0Request,
+  restoreIdentity,
   saveIdentity,
 } from "../../src/identity.ts";
 import { loadElection } from "../../src/load.ts";
@@ -167,6 +168,68 @@ const harness = {
   },
   /** Keeps a new identity in no group as this device's, unless it holds one (identity.ts). */
   createIdentity: (secret: string) => createIdentity(fromHex(secret)),
+  /** Keeps a recovered identity counted in Tier 0 group `group`, unless the device holds one (identity.ts). */
+  restoreIdentity: (secret: string, group: string) =>
+    restoreIdentity(fromHex(secret), BigInt(group)),
+  /**
+   * A recovery's two worker requests, in a worker of their own as the
+   * client makes them: the locator of `prf`, then the open of `envelope`
+   * over the registry's `records`, with bigints as strings and byte arrays
+   * as hex, and whether the page's copy of the PRF output was left whole.
+   */
+  async recoverInWorker(
+    prf: string,
+    envelope: string,
+    query: {
+      readonly block: string;
+      readonly groups: readonly { readonly group_id: string; readonly region: number }[];
+      readonly records: readonly string[];
+      readonly registry: string;
+      readonly chainId: string;
+      readonly registrars: readonly string[];
+      readonly threshold: number;
+    },
+  ): Promise<string> {
+    const own = new BallotWorker();
+    try {
+      const given = fromHex(prf);
+      const located = await own.backupLocator(given);
+      const opened = await own.backupOpen({
+        envelope: fromHex(envelope),
+        block: BigInt(query.block),
+        groups: query.groups.map((g) => ({ group_id: BigInt(g.group_id), region: g.region })),
+        records: query.records.map(fromHex),
+        registry: fromHex(query.registry),
+        chainId: BigInt(query.chainId),
+        version: 8,
+        registrars: query.registrars.map(fromHex),
+        threshold: query.threshold,
+      });
+      // A second open has no PRF output left to open with.
+      const again = await own.backupOpen({
+        envelope: fromHex(envelope),
+        block: 0n,
+        groups: [],
+        records: [],
+        registry: new Uint8Array(20),
+        chainId: 0n,
+        version: 8,
+        registrars: [],
+        threshold: 0,
+      });
+      return JSON.stringify(
+        { located, opened, again, intact: given.some((b) => b !== 0) },
+        (_, v: unknown) =>
+          v instanceof Uint8Array
+            ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")
+            : typeof v === "bigint"
+              ? v.toString()
+              : v,
+      );
+    } finally {
+      own.terminate();
+    }
+  },
   /** Notes an accepted Tier 0 request beside the identity of `secret` (identity.ts). */
   recordTier0Request: (secret: string, region: number, acceptedAt: number) =>
     recordTier0Request(fromHex(secret), { region, acceptedAt }),

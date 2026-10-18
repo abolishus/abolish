@@ -387,6 +387,110 @@ describe("backup seal requests", () => {
   });
 });
 
+describe("backup locator requests", () => {
+  const locator = () => ({
+    v: PROTOCOL_VERSION,
+    id: 17,
+    kind: "backup-locator",
+    prf: new Uint8Array(32).fill(3),
+  });
+
+  test("accepts a well-formed request as it is, for any 32-byte PRF output", () => {
+    fc.assert(
+      fc.property(fc.nat(), fc.uint8Array({ minLength: 32, maxLength: 32 }), (id, prf) => {
+        const r = { ...locator(), id, prf };
+        expect(parseRequest(r)).toEqual(r);
+      }),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short PRF output", { prf: new Uint8Array(31) }],
+    ["a long PRF output", { prf: new Uint8Array(33) }],
+    ["a PRF output as an ArrayBuffer", { prf: new ArrayBuffer(32) }],
+    ["a PRF output as hex", { prf: "03".repeat(32) }],
+    ["a secret beside it", { secret: new Uint8Array(32) }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...locator(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(locator())) {
+      const r: Record<string, unknown> = locator();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
+describe("backup open requests", () => {
+  const open = () => ({
+    v: PROTOCOL_VERSION,
+    id: 18,
+    kind: "backup-open",
+    envelope: new Uint8Array(63).fill(4),
+    block: 1_000n,
+    groups: [
+      { group_id: 1n, region: 0 },
+      { group_id: 2n, region: 3 },
+    ],
+    records: [new Uint8Array([0, 8, 8])],
+    registry: new Uint8Array(20).fill(0xaa),
+    chainId: 84532n,
+    version: 8,
+    registrars: [new Uint8Array(20).fill(1)],
+    threshold: 1,
+  });
+
+  test("accepts a well-formed request as it is, for any envelope, block and records: their meaning is the session's", () => {
+    fc.assert(
+      fc.property(
+        fc.nat(),
+        fc.uint8Array(),
+        fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
+        fc.array(fc.uint8Array()),
+        fc.integer({ min: 1, max: 8 }),
+        (id, envelope, block, records, version) => {
+          const r = { ...open(), id, envelope, block, records, version };
+          expect(parseRequest(r)).toEqual(r);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["an envelope as hex", { envelope: "04".repeat(63) }],
+    ["an envelope as an ArrayBuffer", { envelope: new ArrayBuffer(63) }],
+    ["a PRF output beside it", { prf: new Uint8Array(32) }],
+    ["a negative block", { block: -1n }],
+    ["a block past u64", { block: 2n ** 64n }],
+    ["a group id as a number", { groups: [{ group_id: 1, region: 0 }] }],
+    // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
+    ["a group list with a hole", { groups: [, { group_id: 1n, region: 0 }] }],
+    ["a record as hex", { records: ["000808"] }],
+    ["a short registry", { registry: new Uint8Array(19) }],
+    ["a chain id as a number", { chainId: 84532 }],
+    ["event version 9", { version: 9 }],
+    ["a registrar as hex", { registrars: ["01".repeat(20)] }],
+    ["a fractional threshold", { threshold: 1.5 }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...open(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(open())) {
+      const r: Record<string, unknown> = open();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("registration outcome requests", () => {
   const outcome = () => ({
     v: PROTOCOL_VERSION,
@@ -471,6 +575,10 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 10, kind: "commitment", result: {} })).toBe(10);
     expect(responseId({ v: PROTOCOL_VERSION, id: 11, kind: "tier0-outcome", result: {} })).toBe(11);
     expect(responseId({ v: PROTOCOL_VERSION, id: 12, kind: "backup-seal", result: {} })).toBe(12);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 13, kind: "backup-locator", result: {} })).toBe(
+      13,
+    );
+    expect(responseId({ v: PROTOCOL_VERSION, id: 14, kind: "backup-open", result: {} })).toBe(14);
   });
 
   test("ignores another version's response or kind", () => {

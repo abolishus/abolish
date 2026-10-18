@@ -20,6 +20,8 @@ import {
   type ElectionDefinition,
   encodeDisplayText,
   encodeElectionDefinition,
+  identityBackupLocator,
+  sealIdentityBackup,
   sealingElectionV5,
 } from "@abolishus/crypto";
 import { type Browser, chromium, type Page } from "playwright";
@@ -610,6 +612,20 @@ describe("the device's voting identity", () => {
   type Harness = {
     saveIdentity(secret: string, memberships: { tier: number; group: string }[]): Promise<void>;
     createIdentity(secret: string): Promise<string>;
+    restoreIdentity(secret: string, group: string): Promise<string>;
+    recoverInWorker(
+      prf: string,
+      envelope: string,
+      query: {
+        readonly block: string;
+        readonly groups: readonly { readonly group_id: string; readonly region: number }[];
+        readonly records: readonly string[];
+        readonly registry: string;
+        readonly chainId: string;
+        readonly registrars: readonly string[];
+        readonly threshold: number;
+      },
+    ): Promise<string>;
     recordTier0Request(secret: string, region: number, acceptedAt: number): Promise<string>;
     recordTier0Membership(secret: string, group: string): Promise<string>;
     commitment(secret: string): Promise<string>;
@@ -719,6 +735,72 @@ describe("the device's voting identity", () => {
       ),
     ).resolves.toBe("exists");
     await expect(read()).resolves.toEqual({ kind: "unreadable" });
+  });
+
+  test("a recovered identity is kept with its Tier 0 group, and never over one the device holds", async () => {
+    const restore = (s: string, group: string) =>
+      page.evaluate(
+        ([x, g]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restoreIdentity(x, g),
+        [s, group] as const,
+      );
+    await expect(restore(secret, "18446744073709551615")).resolves.toBe("restored");
+    const kept = {
+      kind: "found",
+      identity: { secret, memberships: [{ tier: 0, group: "18446744073709551615" }] },
+    };
+    await expect(read()).resolves.toEqual(kept);
+    await expect(restore(other, "3")).resolves.toBe("exists");
+    await expect(read()).resolves.toEqual(kept);
+    await page.evaluate(() =>
+      (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampIdentity(1),
+    );
+    await expect(restore(other, "3")).resolves.toBe("exists");
+    await expect(read()).resolves.toEqual({ kind: "unreadable" });
+  });
+
+  test("the worker opens a backup and finds its identity in the registry's log under the client's CSP", async () => {
+    const prf = new Uint8Array(32).fill(0x5a);
+    const recover = (secretBytes: Uint8Array) =>
+      page
+        .evaluate(
+          ([p, e, q]) =>
+            (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recoverInWorker(
+              p,
+              e,
+              q,
+            ),
+          [
+            hex(prf),
+            hex(sealIdentityBackup(prf, secretBytes).envelope),
+            {
+              block: "1000",
+              groups: [
+                { group_id: String(poll.GROUP), region: 3 },
+                { group_id: String(poll.OTHER_GROUP), region: 7 },
+              ],
+              records: poll.registryWith(poll.cellLeaves).map(hex),
+              registry: hex(poll.definition.group_registry),
+              chainId: String(poll.definition.l2_chain_id),
+              registrars: poll.registrars.registrars.map(hex),
+              threshold: poll.registrars.threshold,
+            },
+          ] as const,
+        )
+        .then((json) => JSON.parse(json) as unknown);
+    const member = poll.members[0] as Uint8Array;
+    await expect(recover(member)).resolves.toEqual({
+      located: { locator: hex(identityBackupLocator(prf)) },
+      opened: { ok: true, secret: hex(member), group: String(poll.GROUP), region: 3 },
+      again: { ok: false, problem: "no-passkey" },
+      // Copied to the worker: the page's copy stays the page's to zero.
+      intact: true,
+    });
+    await expect(recover(fromHex(`01${"0b".repeat(31)}`))).resolves.toMatchObject({
+      opened: { ok: false, problem: "not-registered" },
+    });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
   });
 
   test("an accepted request is noted only beside the identity it was made for", async () => {

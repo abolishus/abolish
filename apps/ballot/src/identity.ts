@@ -255,14 +255,39 @@ export async function createIdentity(
   secret: Uint8Array,
   factory: IDBFactory = indexedDB,
 ): Promise<"created" | "exists" | "unwritable"> {
-  const record = storedIdentity({ secret, memberships: [] });
+  const added = await addIdentity({ secret, memberships: [] }, factory);
+  return added === "added" ? "created" : added;
+}
+
+/**
+ * Keeps an identity recovered from its backup (`secret`, counted in the
+ * Tier 0 group `group`) as this device's, on the same terms as
+ * `createIdentity`: never over an identity the device holds, readable or
+ * not (`exists`), which may be another registered identity whose loss
+ * can't be undone (T-18).
+ */
+export async function restoreIdentity(
+  secret: Uint8Array,
+  group: bigint,
+  factory: IDBFactory = indexedDB,
+): Promise<"restored" | "exists" | "unwritable"> {
+  const added = await addIdentity({ secret, memberships: [{ tier: 0, group }] }, factory);
+  return added === "added" ? "restored" : added;
+}
+
+/** Stores `identity` only if the device holds none; throws on one `parseStoredIdentity` would refuse. */
+async function addIdentity(
+  identity: VotingIdentity,
+  factory: IDBFactory,
+): Promise<"added" | "exists" | "unwritable"> {
+  const record = storedIdentity(identity);
   try {
     // `add`, not `put`: in the same transaction as the check that the key is free.
     await withStore(factory, "readwrite", (store) => {
       store.add(record, KEY);
       return () => undefined;
     });
-    return "created";
+    return "added";
   } catch (error) {
     return error instanceof DOMException && error.name === "ConstraintError"
       ? "exists"

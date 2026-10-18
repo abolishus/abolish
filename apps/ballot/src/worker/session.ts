@@ -6,7 +6,11 @@
 // a number to name it by and its tracking code, then either its opening
 // (challenged, and spent) or its cast: the finished record, proved through
 // the prover worker, after which the seal is never opened (T-42, T-45). A
-// poll checked anew replaces the last one, and its seals go with it.
+// poll checked anew replaces the last one, and its seals go with it. Apart
+// from the poll, a recovery's PRF output waits here between finding the
+// backup's locator and opening its envelope, so the page zeroes its copy
+// as soon as the ceremony gives it; the recovery's own worker is
+// terminated after, taking it along if no open came (T-41).
 
 import {
   BallotSealError,
@@ -18,10 +22,13 @@ import {
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   finishSealV3,
+  identityBackupLocator,
+  IdentityBackupError,
   identityCommitment,
   isForbiddenCommitment,
   isIdentitySecret,
   MembershipProverError,
+  openIdentityBackup,
   type QuestionBallotElection,
   sealBallotV3,
   type SealedBallotV3,
@@ -35,6 +42,10 @@ import {
 import { checkElection, type ElectionCheck } from "../election.ts";
 import { askProver } from "./prove.ts";
 import {
+  type BackupLocatorRequest,
+  type BackupLocatorResult,
+  type BackupOpenRequest,
+  type BackupOpenResult,
   type BackupSealRequest,
   type BackupSealResult,
   type CastRequest,
@@ -76,6 +87,13 @@ export class BallotSession {
    */
   readonly #cast = new Map<number, bigint | undefined>();
   #nextSeal = 0;
+  /**
+   * The PRF output the last `backupLocator` was given, for the one
+   * `backupOpen` after it; a recovery that stops in between leaves it here
+   * until the worker ends, so a recovery runs in a worker of its own,
+   * terminated once it is done (T-41).
+   */
+  #backupPrf: Uint8Array | undefined;
 
   /**
    * The election check (election.ts), then for a version-5 poll the check
@@ -140,6 +158,103 @@ export class BallotSession {
     } finally {
       prf.fill(0);
       secret.fill(0);
+    }
+  }
+
+  /**
+   * The locator of `request.prf` ([[identity-backup]], Keys), for the page
+   * to fetch the envelope under. The worker keeps a copy of the PRF output
+   * for the `backupOpen` that follows, in place of any earlier one, and
+   * zeroes the request's (T-41). Like `commitment`, it needs no poll.
+   */
+  backupLocator(request: BackupLocatorRequest): BackupLocatorResult {
+    const { prf } = request;
+    try {
+      this.#backupPrf?.fill(0);
+      this.#backupPrf = prf.slice();
+      return { locator: identityBackupLocator(prf) };
+    } finally {
+      prf.fill(0);
+    }
+  }
+
+  /**
+   * Opens `request.envelope` under the PRF output `backupLocator` kept,
+   * zeroed whatever the outcome so each passkey evaluation opens at most
+   * once, and finds the published Tier 0 group counting the commitment of
+   * the secret inside, from the group registry's whole log
+   * (`tier0Registration`; [[0017-identity-recovery-backup]], Option A, step
+   * 6; T-11, T-18). The secret is returned only once it is found there:
+   * a secret in no group (an old envelope, a registration that never
+   * landed) is zeroed here, never kept by the page. Like `commitment`, it
+   * needs no poll and leaves the held one, the voter and the seals as they
+   * were.
+   */
+  backupOpen(request: BackupOpenRequest): BackupOpenResult {
+    const prf = this.#backupPrf;
+    this.#backupPrf = undefined;
+    if (prf === undefined) return { ok: false, problem: "no-passkey" };
+    let secret: Uint8Array;
+    try {
+      secret = openIdentityBackup(prf, request.envelope);
+    } catch (e) {
+      if (e instanceof DecodeError) return { ok: false, problem: "envelope" };
+      if (e instanceof IdentityBackupError)
+        return { ok: false, problem: e.code === "backup-open" ? "open" : "secret" };
+      throw e;
+    } finally {
+      prf.fill(0);
+    }
+    let found = false;
+    try {
+      let commitment: bigint;
+      try {
+        commitment = identityCommitment(secret);
+      } catch (e) {
+        if (e instanceof MembershipProverError) return { ok: false, problem: "secret" };
+        throw e;
+      }
+      if (isForbiddenCommitment(commitment)) return { ok: false, problem: "secret" };
+      const { groups } = request;
+      const asked = groups.at(-1);
+      if (asked === undefined) return { ok: false, problem: "not-registered" };
+      const records: ContractEventRecord[] = [];
+      for (const bytes of request.records) {
+        try {
+          records.push(decodeContractEvent(bytes, request.version));
+        } catch (e) {
+          if (e instanceof DecodeError) return { ok: false, problem: "record" };
+          throw e;
+        }
+      }
+      // The region the identity asked for is lost with the old device, so
+      // any served region will do (the last listed group's): `registered`
+      // and `moved` alike name the one group the first-occurrence rule
+      // counts the commitment in.
+      const outcome = tier0Registration(
+        records,
+        { block: request.block, groups },
+        commitment,
+        asked.region,
+        {
+          version: request.version,
+          chainId: request.chainId,
+          registry: request.registry,
+          registrars: request.registrars,
+          threshold: request.threshold,
+        },
+      );
+      if (outcome.kind === "not-yet") return { ok: false, problem: "not-registered" };
+      const home = groups.find((g) => g.group_id === outcome.group);
+      // `tier0Registration` names only a listed group.
+      if (home === undefined) throw new Error("the counted group isn't listed");
+      found = true;
+      return { ok: true, secret, group: home.group_id, region: home.region };
+    } catch (e) {
+      if (e instanceof TierMembershipError) return { ok: false, problem: "registry", code: e.code };
+      throw e;
+    } finally {
+      if (!found) secret.fill(0);
     }
   }
 

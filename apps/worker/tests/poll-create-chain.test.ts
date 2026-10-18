@@ -378,7 +378,9 @@ describe("the startup check", () => {
         panel: { threshold: 4, keys: PANEL.keys },
       }),
     ).rejects.toThrow(PanelError);
-  });
+    // It deploys a registry and mines to finality on Anvil besides its
+    // reads, which outruns the default 5 s on a loaded runner.
+  }, 60_000);
 });
 
 describe("ViemPollCreationChain", () => {

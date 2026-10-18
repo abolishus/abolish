@@ -116,33 +116,8 @@ export interface CastRequest {
   readonly prover: MessagePort;
 }
 
-/**
- * A membership proof for `secret` in the tier (or cell) whose leaves these
- * are, under the statement's values (`MembershipStatement`, which the page
- * took from a definition the worker checked). The worker builds the witness,
- * sends it to the prover worker over `prover` (a port the page made and
- * handed the prover worker's other end), and finishes what comes back: the
- * page never sees the witness, and the prover never sees what leaves the
- * device (docs/spec/membership.md, Security notes; T-12, T-55).
- */
-export interface ProveMembershipRequest {
-  readonly v: typeof PROTOCOL_VERSION;
-  readonly id: number;
-  readonly kind: "prove-membership";
-  /** 32 bytes; the worker zeroes its copy once the witness is built. */
-  readonly secret: Uint8Array;
-  readonly leaves: readonly bigint[];
-  readonly definitionHash: Uint8Array;
-  readonly tier: number;
-  readonly root: bigint;
-  /** `M`, 32 bytes (docs/spec/revoting.md). */
-  readonly message: Uint8Array;
-  readonly prover: MessagePort;
-}
-
 export type WorkerRequest =
   | CheckElectionRequest
-  | ProveMembershipRequest
   | FindCellRequest
   | SealRequest
   | ChallengeRequest
@@ -154,10 +129,6 @@ export type WorkerRequest =
  * time. Each is a reason the client shows, never a retry.
  */
 export type MembershipProofProblem = MembershipProverErrorCode | "prover";
-
-export type MembershipProofResult =
-  | { readonly ok: true; readonly proof: Uint8Array }
-  | { readonly ok: false; readonly problem: MembershipProofProblem };
 
 /**
  * The voter's cell, `sealBallotV3`'s index, or why there is none: no
@@ -218,12 +189,6 @@ export type WorkerResponse =
   | {
       readonly v: typeof PROTOCOL_VERSION;
       readonly id: number;
-      readonly kind: "prove-membership";
-      readonly result: MembershipProofResult;
-    }
-  | {
-      readonly v: typeof PROTOCOL_VERSION;
-      readonly id: number;
       readonly kind: "find-cell";
       readonly result: FindCellResult;
     }
@@ -260,7 +225,6 @@ const isBytes = (x: unknown, length?: number): x is Uint8Array =>
 const isListOf = <T>(x: unknown, is: (e: unknown) => e is T): x is T[] =>
   Array.isArray(x) && Array.from(x as unknown[]).every(is);
 
-const isBigint = (x: unknown): x is bigint => typeof x === "bigint";
 const isVote = (x: unknown): x is 0 | 1 => x === 0 || x === 1;
 const isAnyBytes = (x: unknown): x is Uint8Array => isBytes(x);
 
@@ -301,23 +265,11 @@ const isPanel = (x: unknown): x is Panel =>
   hasKeys(x, ["keys", "threshold"]) &&
   Number.isSafeInteger(x["threshold"]) &&
   isListOf(x["keys"], isAnyBytes);
-const PROVE_KEYS = [
-  "definitionHash",
-  "id",
-  "kind",
-  "leaves",
-  "message",
-  "prover",
-  "root",
-  "secret",
-  "tier",
-  "v",
-];
 
 /**
  * A request the worker accepts, or `undefined`: exact keys and exact types.
  * Only the shapes are checked here; the values (the secret's range, the
- * tier, the leaves and root) are `membershipProverInput`'s to refuse.
+ * cell, the seal) are the session's to refuse.
  */
 export function parseRequest(data: unknown): WorkerRequest | undefined {
   if (!isRecord(data) || data["v"] !== PROTOCOL_VERSION || !isId(data["id"])) return undefined;
@@ -417,32 +369,6 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       prover,
     };
   }
-  if (data["kind"] === "prove-membership") {
-    if (!hasKeys(data, PROVE_KEYS)) return undefined;
-    const { secret, leaves, definitionHash, tier, root, message, prover } = data;
-    if (
-      !isBytes(secret, 32) ||
-      !isListOf(leaves, isBigint) ||
-      !isBytes(definitionHash, 32) ||
-      !Number.isSafeInteger(tier) ||
-      typeof root !== "bigint" ||
-      !isBytes(message, 32) ||
-      !(prover instanceof MessagePort)
-    )
-      return undefined;
-    return {
-      v,
-      id,
-      kind: "prove-membership",
-      secret,
-      leaves,
-      definitionHash,
-      tier: tier as number,
-      root,
-      message,
-      prover,
-    };
-  }
   return undefined;
 }
 
@@ -453,7 +379,6 @@ export function requestId(data: unknown): number | undefined {
 
 const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
-  "prove-membership",
   "find-cell",
   "seal",
   "challenge",

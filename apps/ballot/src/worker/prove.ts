@@ -1,60 +1,14 @@
-// The ballot worker's side of a membership proof (docs/spec/membership.md,
-// Security notes; ADR 0009, Amendment of 2026-10-17). Here, where snarkjs
-// never runs: the witness is built from the identity secret and the tier's
-// leaves, with the scope, nullifier and path computed by @abolishus/crypto and
-// the path checked against the definition's root (T-10, T-13); the prover
-// worker gets only the witness; its answer is verified under the pinned key
-// against the signals computed here, then re-randomised from this realm's
-// CSPRNG and verified again (`finishMembershipProof`). Only that result
-// leaves, so a prover that is wrong or hijacked can stop a ballot but never
-// make one carry its own randomness or a proof of another statement (T-07,
-// T-12, T-55).
-
-import {
-  finishMembershipProof,
-  membershipProverInput,
-  MembershipProverError,
-  type MembershipProverInput,
-} from "@abolishus/crypto";
+// The ballot worker's side of the channel to the prover worker (ADR 0009,
+// Amendment of 2026-10-17). Here, where snarkjs never runs, the prover
+// worker gets only the witness `castSealV3` built from a statement this
+// worker derived from the definition it checked (session.ts); what comes
+// back is an unchecked proof, which the caller verifies and re-randomises
+// (`finishSealV3`) before anything leaves, so a prover that is wrong or
+// hijacked can stop a ballot but never make one carry its own randomness or
+// a proof of another statement (T-07, T-12, T-55).
 
 import { parseAnswer, PROVER_PROTOCOL_VERSION, type ProverWitness } from "../prover/protocol.ts";
-import {
-  type MembershipProofProblem,
-  type MembershipProofResult,
-  type ProveMembershipRequest,
-  PROVER_TIMEOUT_MS,
-} from "./protocol.ts";
-
-/** The proof for `request`, or the check that refused it; never throws for a refusal. */
-export async function proveMembership(
-  request: ProveMembershipRequest,
-  timeoutMs = PROVER_TIMEOUT_MS,
-): Promise<MembershipProofResult> {
-  const { prover } = request;
-  try {
-    let input: MembershipProverInput;
-    try {
-      input = membershipProverInput(request.secret, request.leaves, {
-        definitionHash: request.definitionHash,
-        tier: request.tier,
-        root: request.root,
-        message: request.message,
-      });
-    } finally {
-      // membershipProverInput read its own copy; this realm's copy of the
-      // secret goes now (T-12). The witness's decimal string can't be wiped.
-      request.secret.fill(0);
-    }
-    const answer = await askProver(prover, input.witness, timeoutMs);
-    if (!answer.ok) return answer;
-    return { ok: true, proof: finishMembershipProof(input, answer.proof) };
-  } catch (e) {
-    if (e instanceof MembershipProverError) return { ok: false, problem: e.code };
-    throw e;
-  } finally {
-    prover.close();
-  }
-}
+import type { MembershipProofProblem } from "./protocol.ts";
 
 /**
  * The prover's unchecked proof for `witness`, or why none came: the artifact

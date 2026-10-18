@@ -11,8 +11,6 @@ import {
   type ChallengeResult,
   type FindCellRequest,
   type FindCellResult,
-  type MembershipProofResult,
-  type ProveMembershipRequest,
   PROTOCOL_VERSION,
   PROVER_TIMEOUT_MS,
   responseId,
@@ -31,9 +29,6 @@ const PROVE_TIMEOUT_MS = PROVER_TIMEOUT_MS + TIMEOUT_MS;
  * a large tier, P2-21 part 3, Known-weak), so it gets as long as a proof.
  */
 const FIND_CELL_TIMEOUT_MS = PROVE_TIMEOUT_MS;
-
-/** A proof request as the page makes it: everything but the envelope. */
-export type MembershipProofRequest = Omit<ProveMembershipRequest, "v" | "id" | "kind">;
 
 /** A cell search as the page makes it: everything but the envelope. */
 export type FindCellQuery = Omit<FindCellRequest, "v" | "id" | "kind">;
@@ -147,21 +142,6 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "challenge") throw new WorkerFailure("the ballot worker failed");
-    return response.result;
-  }
-
-  /**
-   * A membership proof, built in the worker with the prover worker at the
-   * other end of `request.prover` (prover-client.ts). The port is
-   * transferred; the secret is copied, and the worker zeroes its copy.
-   */
-  async proveMembership(request: MembershipProofRequest): Promise<MembershipProofResult> {
-    const response = await this.#request(
-      (id) => ({ v: PROTOCOL_VERSION, id, kind: "prove-membership", ...request }),
-      [request.prover],
-      PROVE_TIMEOUT_MS,
-    );
-    if (response.kind !== "prove-membership") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

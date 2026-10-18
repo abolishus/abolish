@@ -4,7 +4,6 @@
 // e2e watches it run; T-43). Errors become a bare "error" response, never a
 // message or stack, which could carry a secret.
 
-import { proveMembership } from "./prove.ts";
 import {
   parseRequest,
   PROTOCOL_VERSION,
@@ -36,8 +35,6 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "challenge", result: session.challenge(request) };
     case "cast":
       return { v, id, kind: "cast", result: await session.cast(request) };
-    case "prove-membership":
-      return { v, id, kind: "prove-membership", result: await proveMembership(request) };
   }
 }
 

@@ -4,36 +4,16 @@
 // to the ballot worker, and terminated once the ballot worker answers. The
 // witness and the prover's answer travel over the channel, so the page sees
 // neither; it hears the prover's progress and the ballot worker's finished
-// proof or ballot, or its refusal (prover/protocol.ts; T-12, T-55).
+// ballot, or its refusal (prover/protocol.ts; T-12, T-55).
 
 import type { ProverArtifacts } from "./prover-artifacts.ts";
 import { parseProgress, PROVER_PROTOCOL_VERSION, type ProverStart } from "./prover/protocol.ts";
-import type { CastResult, MembershipProofResult } from "./worker/protocol.ts";
-import {
-  type BallotWorker,
-  type CastBallotRequest,
-  type MembershipProofRequest,
-  WorkerFailure,
-} from "./worker-client.ts";
+import type { CastResult } from "./worker/protocol.ts";
+import { type BallotWorker, type CastBallotRequest, WorkerFailure } from "./worker-client.ts";
 import { proverScriptUrl } from "./worker-policy.ts";
 
 /** Called with how many of `of` proving steps are done: real progress, never time. */
 export type ProvingProgress = (done: number, of: number) => void;
-
-/**
- * The finished `membership_proof`, or the check that refused it. Throws
- * `WorkerFailure` if either worker fails or doesn't answer in time.
- */
-export function proveMembership(
-  ballot: BallotWorker,
-  request: Omit<MembershipProofRequest, "prover">,
-  artifacts: ProverArtifacts,
-  onProgress: ProvingProgress = () => {},
-): Promise<MembershipProofResult> {
-  return withProver(artifacts, onProgress, (prover) =>
-    ballot.proveMembership({ ...request, prover }),
-  );
-}
 
 /**
  * The cast of a seal the ballot worker holds: the finished record, or why

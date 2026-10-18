@@ -559,6 +559,15 @@ describe("a seat's receipt in the casts", () => {
     otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
     new DataView(otherSeal.buffer).setBigUint64(L1_AT, 11n);
     expect(withCast(once, otherSeal, erased)).toBe("unreceipted");
+    // The block and the poll come first, and a malformed share without m still throws.
+    expect(withCast([cast(11n)], naming(11n), erased)).toBe("not-newer");
+    expect(withCast([cast(10n)], otherDefinition(naming(11n)), erased)).toBe("other-election");
+    const misplaced: CastShare[] = [
+      { seat: FIRST, ciphertext: (SHARES[1] as CastShare).ciphertext },
+      ...erased.slice(1),
+    ];
+    expect(() => withCast([], naming(11n), misplaced)).toThrow(TypeError);
+    expect(() => withCast([], naming(11n), erased.slice(1))).toThrow(TypeError);
   });
 
   test("doesn't carry to another seal's cast, whose shares are its own", () => {

@@ -480,29 +480,34 @@ export function withCast(
         (held): held is Extract<KeptShare, { receipt: Uint8Array }> =>
           held.seat === seat && "receipt" in held && receiptFits(decoded, seat, held.receipt),
       )?.receipt;
-  // In the form `sharesFor` reads: a share without `m` takes its carried receipt.
-  let unreceipted = false;
-  const asStored: unknown = Array.isArray(shares)
-    ? shares.map((share: unknown) => {
-        if (!isRecord(share)) return null;
-        if (hasExactly(share, ["seat", "ciphertext", "m"])) return { ...share, receipt: null };
-        if (!hasExactly(share, ["seat", "ciphertext"]) || typeof share["seat"] !== "number")
-          return null;
-        const receipt = carried(share["seat"]);
-        if (receipt === undefined) unreceipted = true;
-        return { ...share, m: null, receipt: receipt ?? null };
-      })
-    : shares;
-  // Checked first, so its shares are judged in full only once every one has its `m` or receipt.
-  if (unreceipted) return "unreceipted";
-  const kept = sharesFor(decoded, asStored);
-  if (kept === undefined) throw new TypeError("not the ballot's qualified seats' shares");
+  // In the form `sharesFor` reads: a share without `m` takes its carried
+  // receipt, or none (`unreceipted` below); `shape` stands an `m` in its
+  // place, so the shares are judged in full before anything is read.
+  const asStored = (missing: (seat: number) => { m: unknown; receipt: unknown }): unknown =>
+    Array.isArray(shares)
+      ? shares.map((share: unknown) => {
+          if (!isRecord(share)) return null;
+          if (hasExactly(share, ["seat", "ciphertext", "m"])) return { ...share, receipt: null };
+          if (!hasExactly(share, ["seat", "ciphertext"]) || typeof share["seat"] !== "number")
+            return null;
+          return { ...share, ...missing(share["seat"]) };
+        })
+      : shares;
+  const shape = asStored(() => ({ m: new Uint8Array(M_LENGTH), receipt: null }));
+  if (sharesFor(decoded, shape) === undefined)
+    throw new TypeError("not the ballot's qualified seats' shares");
   const first = casts[0];
   if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
     return "other-election";
   const l1Number = decoded.l1_ref_number;
   const newest = newestBlock(casts);
   if (newest !== undefined && l1Number <= newest) return "not-newer";
+  // The shape passed, so only a share with no receipt to carry fails here.
+  const kept = sharesFor(
+    decoded,
+    asStored((seat) => ({ m: null, receipt: carried(seat) ?? null })),
+  );
+  if (kept === undefined) return "unreceipted";
   const receipted = kept.map((share): KeptShare => {
     if (!("m" in share)) return share;
     const receipt = carried(share.seat);

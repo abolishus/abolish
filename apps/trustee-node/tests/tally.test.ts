@@ -1,0 +1,424 @@
+// The tally duty (P2-13 part 5a), over an electorate of three whose ballots
+// carry real membership proofs, taken in by every seat's own intake: each
+// seat sums its shares of the counted set, sends its sums to the others, and
+// the seats that hold `k` passing sums sign the cell's opening. Every
+// opening is judged by crypto's own checks (`checkOpening`, the signature)
+// over the counted ballots, never by the duty.
+import {
+  aggregateCell,
+  aggregateHash,
+  ballotHash,
+  type BallotRecord,
+  checkOpening,
+  decodeBallot,
+  decodeTallyOpening,
+  type ElectionDefinition,
+  encodeBallot,
+  type RegisteredKeys,
+  sealSummedShares,
+  sumShares,
+  tallyOpeningStatement,
+  tallyRules,
+  verifyStatement,
+} from "@abolishus/crypto";
+import fc from "fast-check";
+import { beforeAll, describe, expect, test } from "vite-plus/test";
+import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
+import { heldShares } from "../src/intake.ts";
+import type { SeatStore } from "../src/store.ts";
+import {
+  type CountedSet,
+  type SummedSharePeers,
+  TallyDuty,
+  type TallyDutyStatus,
+} from "../src/tally.ts";
+import { type Cast, cast, type Setup, seatsOf, setup } from "./ballots.ts";
+import { L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
+
+// Each run seals and opens messages over ML-KEM: a tenth of the runs, as the
+// whole-ceremony properties take.
+const numRuns = Math.max(1, Math.floor(Number(process.env["FC_NUM_RUNS"] ?? 100) / 10));
+
+let s: Setup;
+let ballots: Cast[];
+let approved: ApprovedElection[];
+let secrets: IntakeSecrets[];
+
+beforeAll(async () => {
+  s = await setup();
+  // Voters 0 and 2 choose option 0, voter 1 option 1.
+  ballots = [await cast(s, 0, 0), await cast(s, 1, 1), await cast(s, 2, 0)];
+  const seats = seatsOf(s);
+  for (const b of ballots)
+    for (const [i, seat] of seats.intake.entries()) {
+      const taken = await seat.intake(
+        s.e.stubBytes,
+        s.transcript,
+        b.bytes,
+        b.ciphertexts[i] as Uint8Array,
+      );
+      if (!taken.ok) throw new Error(`intake refused an honest ballot: ${taken.code}`);
+    }
+  approved = [];
+  secrets = [];
+  for (const seat of s.e.seats) {
+    const a = await seat.approvedElection(s.e.stubHash);
+    const k = await seat.intakeSecrets(s.e.stubHash);
+    if (a === undefined || k === undefined) throw new Error("a seat holds no approval");
+    approved.push(a);
+    secrets.push(k);
+  }
+}, 120_000);
+
+const fixed = (cells: readonly (readonly Uint8Array[])[]): CountedSet => ({
+  state: "fixed",
+  cells,
+});
+const all = () => fixed([ballots.map((b) => b.bytes)]);
+
+/** A peer channel that hands each message to the recipient's duty, and records what it sent. */
+class Wire implements SummedSharePeers {
+  duties: TallyDuty[] = [];
+  readonly sent: { recipient: number; message: Uint8Array }[] = [];
+  /** Seats whose node can't be reached. */
+  down = new Set<number>();
+  /** Whether messages are delivered, or only recorded. */
+  deliver = true;
+  async send(recipient: number, message: Uint8Array): Promise<void> {
+    if (this.down.has(recipient)) throw new Error("unreachable");
+    this.sent.push({ recipient, message });
+    if (this.deliver) await (this.duties[recipient - 1] as TallyDuty).receive(message);
+  }
+}
+
+interface Options {
+  counted?: (seat: number) => CountedSet;
+  stores?: readonly SeatStore[];
+  definition?: ElectionDefinition;
+  transcript?: Uint8Array;
+}
+
+function duties(wire: Wire, o: Options = {}): TallyDuty[] {
+  wire.duties = approved.map(
+    (election, i) =>
+      new TallyDuty({
+        panel: s.e.panelists.panel,
+        l2ChainId: L2_CHAIN_ID,
+        trusteeRegistry: TRUSTEE_REGISTRY,
+        election,
+        secrets: secrets[i] as IntakeSecrets,
+        definition: o.definition ?? s.definition,
+        transcript: o.transcript ?? s.transcript,
+        store: (o.stores ?? s.stores)[i] as SeatStore,
+        counted: async () => (o.counted ?? (() => all()))(i + 1),
+        peers: wire,
+      }),
+  );
+  return wire.duties;
+}
+
+/** A store over `store` holding no new record and none written before: each test's own tally records. */
+function overlay(store: SeatStore): SeatStore {
+  const own = new Map<string, Uint8Array>();
+  return {
+    get: async (key) => own.get(key) ?? (key.startsWith("tally/") ? undefined : store.get(key)),
+    putOnce: async (key, value) => {
+      const held = own.get(key);
+      if (held !== undefined) return { created: false, value: held };
+      own.set(key, value);
+      return { created: true, value };
+    },
+    list: async (prefix) => {
+      const under = `${prefix}/`;
+      const mine = [...own.keys()]
+        .filter((k) => k.startsWith(under) && !k.slice(under.length).includes("/"))
+        .map((k) => k.slice(under.length));
+      const theirs = prefix.startsWith("tally/") ? [] : await store.list(prefix);
+      return [...new Set([...mine, ...theirs])].sort();
+    },
+  };
+}
+const fresh = () => s.stores.map(overlay);
+
+const vssOf = (bytes: Uint8Array) => decodeBallot(bytes, 1).committed_vote.vss;
+const rules = () => tallyRules({ version: 1, value: s.definition });
+
+/** Checks a signed opening as a verifier does: over the counted ballots, attributed to its signer. */
+function judge(bytes: Uint8Array, counted: readonly Uint8Array[], signer: number) {
+  const o = decodeTallyOpening(bytes, 1);
+  const vss = counted.map(vssOf);
+  expect(o.definition_hash).toEqual(s.election.definitionHash);
+  expect(o.cell).toBe(0);
+  expect(o.signer).toBe(signer);
+  expect(o.aggregate_hash).toEqual(aggregateHash(aggregateCell(rules(), vss)));
+  const key = (s.registered.find((k) => k.index === signer) as RegisteredKeys).signingKey;
+  expect(
+    verifyStatement(key, "abolish/v1/sig/tally-opening", tallyOpeningStatement(o), o.signature),
+  ).toBe(true);
+  const checked = checkOpening(rules(), vss, o.opening);
+  if (!checked.ok) expect.fail(`the opening fails ${checked.code}`);
+  return checked.counts;
+}
+
+const states = (statuses: TallyDutyStatus[]) =>
+  statuses.map((t) => (t.state === "tallying" ? t.cells.map((c) => c.state) : t.state));
+
+describe("the tally duty", () => {
+  test("every seat signs an opening of the counted set that passes the verifier's checks", async () => {
+    const wire = new Wire();
+    const d = duties(wire, { stores: fresh() });
+    // Seat 1 holds only its own sums at first; seats 2 and 3 hold seat 1's
+    // and their own, which is `k`, so they open and send nothing more.
+    const first = [];
+    for (const duty of d) first.push(await duty.step());
+    expect(first[0]).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+    });
+    expect(states(first.slice(1))).toEqual([["opened"], ["opened"]]);
+    for (const [i, duty] of d.slice(1).entries()) {
+      const opening = (await duty.openings()).get(0) as Uint8Array;
+      expect(
+        judge(
+          opening,
+          ballots.map((b) => b.bytes),
+          i + 2,
+        ),
+      ).toEqual([2n, 1n]);
+    }
+    expect((await d[0]!.openings()).size).toBe(0);
+    // Seat 1 sent to each other seat once; the others opened before sending.
+    expect(wire.sent.map((m) => m.recipient)).toEqual([2, 3]);
+  });
+
+  test("nothing is summed or sent before the counted set is fixed, or ever if the election is unavailable", async () => {
+    for (const state of ["waiting", "unavailable"] as const) {
+      const wire = new Wire();
+      const d = duties(wire, { stores: fresh(), counted: () => ({ state }) });
+      for (const duty of d) expect(await duty.step()).toEqual({ state });
+      expect(wire.sent).toEqual([]);
+      expect((await d[0]!.openings()).size).toBe(0);
+    }
+  });
+
+  test("a message that reaches a seat before its counted set is fixed is ignored", async () => {
+    const wire = new Wire();
+    let ready = false;
+    const d = duties(wire, {
+      stores: fresh(),
+      counted: (seat) => (seat === 2 && !ready ? { state: "waiting" } : all()),
+    });
+    await d[0]!.step();
+    ready = true;
+    // Seat 2 dropped seat 1's message, so it holds only its own sums.
+    expect(await d[1]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+    });
+  });
+
+  test("the signed opening is written once: a later step or a restarted node never signs another", async () => {
+    const wire = new Wire();
+    const stores = fresh();
+    const d = duties(wire, { stores });
+    for (const duty of d) await duty.step();
+    const before = await Promise.all(d.map(async (x) => (await x.openings()).get(0)));
+    const sent = wire.sent.length;
+    // A restart: new duties over the same records, holding no message.
+    const again = duties(new Wire(), { stores });
+    expect(states(await Promise.all(again.map((x) => x.step())))).toEqual([
+      ["combining"],
+      ["opened"],
+      ["opened"],
+    ]);
+    expect(await Promise.all(again.map(async (x) => (await x.openings()).get(0)))).toEqual(before);
+    expect(wire.sent.length).toBe(sent);
+  });
+
+  test("a seat lacking shares of a counted ballot sends nothing but still combines the others' sums", async () => {
+    const stores = fresh();
+    const missing = ballots[2] as Cast;
+    const hidden = Buffer.from(seatHash(missing)).toString("hex");
+    // Seat 3's store without its intake record of ballot 3.
+    const store = stores[2] as SeatStore;
+    stores[2] = {
+      ...store,
+      get: (key) => (key.endsWith(hidden) ? Promise.resolve(undefined) : store.get(key)),
+      putOnce: (key, value) => store.putOnce(key, value),
+      list: (prefix) => store.list(prefix),
+    };
+    const wire = new Wire();
+    const d = duties(wire, { stores });
+    expect(await d[2]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "missing-shares", missing: 1, held: 0 }],
+    });
+    expect(wire.sent).toEqual([]);
+    // Seats 1 and 2 each reach seat 3 alone, so neither opens first.
+    wire.down = new Set([2]);
+    await d[0]!.step();
+    expect(await d[2]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "missing-shares", missing: 1, held: 1 }],
+    });
+    wire.down = new Set([1]);
+    await d[1]!.step();
+    expect(states([await d[2]!.step()])).toEqual([["opened"]]);
+    const opening = (await d[2]!.openings()).get(0) as Uint8Array;
+    expect(
+      judge(
+        opening,
+        ballots.map((b) => b.bytes),
+        3,
+      ),
+    ).toEqual([2n, 1n]);
+  });
+
+  test("one unreachable seat doesn't hold up the others' messages", async () => {
+    const wire = new Wire();
+    wire.down.add(2);
+    const d = duties(wire, { stores: fresh() });
+    expect(await d[0]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 1 }],
+    });
+    expect(states([await d[2]!.step()])).toEqual([["opened"]]);
+  });
+
+  test("messages that fail their checks are ignored", async () => {
+    const wire = new Wire();
+    wire.deliver = false;
+    const d = duties(wire, { stores: fresh() });
+    await d[0]!.step();
+    const toSeat2 = wire.sent.find((m) => m.recipient === 2)!.message;
+    const toSeat3 = wire.sent.find((m) => m.recipient === 3)!.message;
+    // A flipped byte in the sealed sums, another recipient's message, and
+    // sums over a counted set with a ballot left out (another aggregate).
+    const flipped = Uint8Array.from(toSeat2);
+    flipped[flipped.length - 70]! ^= 1;
+    const subset = ballots.slice(0, 2).map((b) => b.bytes);
+    const own = await Promise.all(
+      ballots
+        .slice(0, 2)
+        .map(async (b) => (await heldShares(s.stores[0]!, s.e.stubHash, seatHash(b)))!),
+    );
+    const otherSet = sealSummedShares(
+      { definition: s.definition, cell: 0, aggregate: aggregateCell(rules(), subset.map(vssOf)) },
+      s.registered,
+      { index: 1, signingSecret: approved[0]!.signingSecret },
+      2,
+      sumShares(rules(), own),
+    );
+    for (const m of [flipped, toSeat3, otherSet, new Uint8Array(10)]) await d[1]!.receive(m);
+    expect(await d[1]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+    });
+    await d[1]!.receive(toSeat2);
+    expect(states([await d[1]!.step()])).toEqual([["opened"]]);
+  });
+
+  test("a property: whichever messages arrive, a seat opens exactly when it holds k passing sums, and every opening is the same", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.tuple(fc.integer({ min: 0, max: 2 }), fc.boolean()), { maxLength: 8 }),
+        async (schedule) => {
+          const wire = new Wire();
+          const d = duties(wire, { stores: fresh() });
+          const holds = [new Set([1]), new Set([2]), new Set([3])];
+          for (const [seat, delivered] of schedule) {
+            wire.deliver = delivered;
+            const opened = holds[seat]!.size >= 2;
+            const status = await d[seat]!.step();
+            expect(states([status])).toEqual([[opened ? "opened" : "combining"]]);
+            if (!opened && delivered)
+              for (const other of [0, 1, 2]) if (other !== seat) holds[other]!.add(seat + 1);
+          }
+          const openings = (
+            await Promise.all(d.map(async (x) => (await x.openings()).get(0)))
+          ).flatMap((o) => (o === undefined ? [] : [decodeTallyOpening(o, 1).opening]));
+          for (const o of openings) expect(o).toEqual(openings[0]);
+        },
+      ),
+      { numRuns },
+    );
+  });
+});
+
+describe("what the duty refuses to sum over", () => {
+  const refused = async (o: Options) => {
+    const wire = new Wire();
+    const status = await duties(wire, { stores: fresh(), ...o })[0]!.step();
+    expect(status.state).toBe("refused");
+    expect(wire.sent).toEqual([]);
+    return status;
+  };
+  const withRecord = (b: Cast, change: Partial<BallotRecord>) =>
+    encodeBallot({ ...b.record, ...change });
+
+  test("another number of cells than the partition's", async () => {
+    await refused({ counted: () => fixed([]) });
+    await refused({ counted: () => fixed([[], []]) });
+  });
+
+  test("a ballot of another election or cell, or one that doesn't decode", async () => {
+    const b = ballots[0] as Cast;
+    await refused({
+      counted: () => fixed([[withRecord(b, { definition_hash: new Uint8Array(32).fill(9) })]]),
+    });
+    await refused({ counted: () => fixed([[withRecord(b, { tier: 1 })]]) });
+    await refused({ counted: () => fixed([[b.bytes.slice(1)]]) });
+  });
+
+  test("a voter counted twice", async () => {
+    const b = ballots[0] as Cast;
+    await refused({ counted: () => fixed([[b.bytes, b.bytes]]) });
+  });
+
+  test("a counted set other than the one fixed before, after a restart", async () => {
+    const stores = fresh();
+    expect(states([await duties(new Wire(), { stores })[0]!.step()])).toEqual([["combining"]]);
+    await refused({
+      stores,
+      counted: () => fixed([ballots.slice(1).map((b) => b.bytes)]),
+    });
+  });
+
+  test("a definition, transcript or key set other than the approved one", async () => {
+    await refused({ definition: { ...s.definition, closes_at: s.definition.closes_at + 1n } });
+    await refused({ transcript: Uint8Array.from(s.transcript, (x, i) => (i === 40 ? x ^ 1 : x)) });
+  });
+
+  test("sums from a store whose shares fail the summed-share check", async () => {
+    const stores = fresh();
+    const store = stores[0] as SeatStore;
+    // The last share's `r` is followed by the tier and the nullifier (33 bytes).
+    stores[0] = {
+      ...store,
+      get: async (key) => {
+        const v = await store.get(key);
+        if (v === undefined || !key.startsWith("intake/")) return v;
+        const out = Uint8Array.from(v);
+        // Little-endian: the low byte, so the scalar stays canonical.
+        out[out.length - 65]! ^= 1;
+        return out;
+      },
+      putOnce: (key, value) => store.putOnce(key, value),
+      list: (prefix) => store.list(prefix),
+    };
+    const status = await refused({ stores });
+    expect(status).toEqual({
+      state: "refused",
+      reason: "the seat's own sums fail the summed-share check",
+    });
+  });
+});
+
+/** The ballot hash a seat stores a ballot's intake under. */
+function seatHash(b: Cast): Uint8Array {
+  const r = b.record;
+  return ballotHash(
+    { definitionHash: s.election.definitionHash, tier: r.tier, nullifier: r.nullifier },
+    r.committed_vote,
+  );
+}

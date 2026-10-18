@@ -355,3 +355,20 @@ export async function heldIntake(
   }
   return { receipts, copies };
 }
+
+/**
+ * The share hash the seat receipted for `ballotHash` under the stub: the
+ * `share_hash` of the receipt it gave, read from the record intake wrote
+ * before giving it. Throws if the seat holds no receipt for the ballot hash,
+ * since a batch may carry only receipts the seat issued
+ * (docs/spec/delivery.md, Share-receipt batch).
+ */
+export async function receiptedShareHash(
+  store: SeatStore,
+  stubHash: Uint8Array,
+  ballotHash: Uint8Array,
+): Promise<Uint8Array> {
+  const held = await store.get(`intake/${hex(stubHash)}/${hex(ballotHash)}`);
+  if (held === undefined) throw new Error("trustee node: no receipt held for an owed ballot hash");
+  return decode(TAKEN, held).share_hash;
+}

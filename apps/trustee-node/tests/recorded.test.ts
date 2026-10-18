@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import {
   AVAILABILITY_POINTS,
+  batchShareReceipts,
   encodeAvailabilityAttestation,
   encodeAvailabilityComplaint,
+  encodeShareReceiptBatch,
   SEAT_PANELS,
   signAvailabilityAttestation,
   signAvailabilityComplaint,
@@ -13,7 +15,11 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import { hex, padded, word } from "../../node/tests/anvil.ts";
 import type { AvailabilityKind } from "../src/availability.ts";
-import { l2RecordedAvailability, RecordedError } from "../src/recorded.ts";
+import {
+  l2RecordedAvailability,
+  l2RecordedReceiptBatches,
+  RecordedError,
+} from "../src/recorded.ts";
 
 // The availability duty's recorded-event read (P4-3 part 2c-4b-2a): the one
 // record the board emitted for a seat's slot, in the seat's own L2 node's
@@ -314,5 +320,84 @@ describe("l2RecordedAvailability", () => {
       ),
       { numRuns },
     );
+  });
+});
+
+describe("l2RecordedReceiptBatches", () => {
+  // The receipt duty's read (P2-13 part 4b-2b-1): every share-receipt batch
+  // the board emitted for the definition and seat in finalized history, the
+  // event's topic from contract-event-v8.json.
+  const TOPIC = topic0("ShareReceiptBatchSubmitted");
+
+  /** One batch of `seat`'s receipts for `definitionHash`, its pairs varied by `salt`. */
+  const batchOf = (definitionHash: Uint8Array, seat: number, salt = 0) => {
+    const [batch] = batchShareReceipts(SECRET, definitionHash, seat, [
+      { ballot_hash: new Uint8Array(32).fill(0x10 + salt), share_hash: new Uint8Array(32).fill(1) },
+    ]);
+    if (batch === undefined) throw new Error("one pair makes one batch");
+    return encodeShareReceiptBatch(batch);
+  };
+  const batchLog = (
+    definitionHash: Uint8Array,
+    seat: number,
+    record: Uint8Array,
+    block = FINALIZED,
+  ): Log => ({
+    address: hex(BOARD),
+    topics: [TOPIC, hex(definitionHash), hex(word(BigInt(seat)))],
+    data: hex(concatBytes(word(32n), word(BigInt(record.length)), padded(record))),
+    blockNumber: `0x${block.toString(16)}`,
+  });
+  const batches = (rpc: Rpc) =>
+    l2RecordedReceiptBatches({ l2: rpc, l2ChainId: L2_CHAIN_ID, board: BOARD, l2FromBlock: 7n });
+
+  test("gives every batch of the seat's, asked from the deployment block to the finalized block", async () => {
+    const [a, b] = [batchOf(D, 2), batchOf(D, 2, 1)];
+    const { rpc, asked } = l2Node([batchLog(D, 2, a), batchLog(D, 2, b)]);
+    expect(await (await batches(rpc))(D, 2)).toEqual([a, b]);
+    expect(asked).toEqual([
+      {
+        address: hex(BOARD),
+        fromBlock: "0x7",
+        toBlock: `0x${FINALIZED.toString(16)}`,
+        topics: [TOPIC, hex(D), hex(word(2n))],
+      },
+    ]);
+  });
+
+  test("passes over another seat's or definition's batch, a log failing the event check, and one not final", async () => {
+    const own = batchOf(D, 2);
+    const good = batchLog(D, 2, own);
+    const other = new Uint8Array(32).fill(0xd2);
+    const logs = [
+      batchLog(D, 3, batchOf(D, 3)),
+      batchLog(other, 2, batchOf(other, 2)),
+      // The batch's seat isn't the topic's.
+      { ...good, data: batchLog(D, 3, batchOf(D, 3)).data },
+      // Cut short.
+      { ...good, data: good.data.slice(0, -64) },
+      { ...good, removed: true },
+      batchLog(D, 2, own, FINALIZED + 1n),
+      batchLog(D, 2, own, 6n),
+    ];
+    const { rpc } = l2Node(logs, { honest: false });
+    expect(await (await batches(rpc))(D, 2)).toEqual([]);
+  });
+
+  test("a node finalized below the deployment block has nothing recorded, unasked", async () => {
+    const { rpc, asked } = l2Node([batchLog(D, 2, batchOf(D, 2), 3n)], { finalized: 6n });
+    expect(await (await batches(rpc))(D, 2)).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  test("a node on another chain is refused at setup, and a seat outside a u8 before asking", async () => {
+    await expect(batches(l2Node([], { chain: L2_CHAIN_ID + 1n }).rpc)).rejects.toEqual(
+      new RecordedError("chain"),
+    );
+    const { rpc, asked } = l2Node([]);
+    const read = await batches(rpc);
+    for (const seat of [256, -1, 1.5])
+      await expect(read(D, seat)).rejects.toBeInstanceOf(RangeError);
+    expect(asked).toEqual([]);
   });
 });

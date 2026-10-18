@@ -7,12 +7,16 @@ import {
   type BallotRecord,
   checkBallot,
   checkCeremonyTranscript,
+  batchShareReceipts,
   checkShareReceipt,
   decodeMembershipProof,
   decodeShareReceipt,
+  decodeShareReceiptBatch,
+  deliveryDeadlines,
   type ElectionDefinition,
   electionDefinitionHash,
   encodeBallot,
+  encodeShareReceiptBatch,
   encryptShares,
   type FinalizedL1,
   finishMembershipProof,
@@ -24,13 +28,16 @@ import {
   newIdentitySecret,
   proveValidity,
   type RegisteredKeys,
+  shareReceiptBatchStatement,
   shareVote,
   tierTreeRoot,
+  verifyStatement,
   type ViewBallot,
 } from "@abolishus/crypto";
 import { type MembershipProverArtifacts, proveMembership } from "@abolishus/membership-prover";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
+  type ApprovedElection,
   CeremonySeat,
   decideObligation,
   encodeDelivery,
@@ -38,6 +45,8 @@ import {
   IntakeSeat,
   type ObligationStatus,
   type ObligationView,
+  ReceiptDuty,
+  type ReceiptPath,
   type RegistrationCheck,
   type SeatStore,
   serveIntake,
@@ -683,5 +692,170 @@ describe("the obligation decided at the intake cutoff", () => {
       honest.ciphertexts[0] as Uint8Array,
     );
     expect(out).toEqual({ ok: false, code: "intake-closed" });
+  });
+
+  describe("the receipts it owes, sent as batches by c_D (part 4b-2b-1)", () => {
+    const BATCH_TAG = "abolish/v1/sig/share-receipt-batch";
+    const deadline = () =>
+      deliveryDeadlines(s.e.stub.closes_at, BigInt(s.e.stub.l1_inclusion_bound)).delivery;
+
+    /** A board contract path that records what `record` lets through. */
+    const contract = (record: (batch: Uint8Array) => boolean = () => false) => {
+      const sent: { batch: string; cutoff: bigint }[] = [];
+      const recorded: Uint8Array[] = [];
+      const path: ReceiptPath = {
+        send: async (batch, cutoff) => {
+          sent.push({ batch: hex(batch), cutoff });
+          if (record(batch)) recorded.push(batch);
+        },
+        recorded: async (definitionHash, seat) => {
+          expect(hex(definitionHash)).toBe(hex(s.election.definitionHash));
+          expect(seat).toBe(1);
+          return recorded;
+        },
+      };
+      return { path, sent, recorded };
+    };
+    const duty = (
+      store: SeatStore,
+      approved: ApprovedElection,
+      path: ReceiptPath,
+      view = viewOf(),
+      now = s.cutoff,
+    ) => new ReceiptDuty({ ...options(store, view, now), election: approved, contract: path });
+
+    /** The share hash seat 1's receipt of the honest ballot names. */
+    const honestShareHash = async (store: SeatStore) => {
+      const out = await seatsOf(s, { store }).intake[0]!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(out.code);
+      return hex(decodeShareReceipt(out.receipt, 1).share_hash);
+    };
+
+    it("owes nothing while intake is open, then signs the owed receipt as one batch under the seat's key and sends it by c_D", async () => {
+      const store = new MemoryStore();
+      const shareHash = await honestShareHash(store);
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      expect(await duty(store, approved, c.path, viewOf(), s.cutoff - 1n).step()).toEqual({
+        state: "open",
+        until: s.cutoff,
+      });
+      expect(c.sent).toEqual([]);
+      const d = duty(store, approved, c.path);
+      expect(d.cutoff).toBe(deadline() - RELEASE_WINDOWS.forcedInclusion);
+      expect(d.cutoff - s.cutoff).toBe(RELEASE_WINDOWS.margin);
+      expect(await d.step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
+      expect(c.sent).toHaveLength(1);
+      expect(c.sent[0]?.cutoff).toBe(d.cutoff);
+      const batch = decodeShareReceiptBatch(Buffer.from(c.sent[0]!.batch, "hex"), 1);
+      expect(batch.seat).toBe(1);
+      expect(hex(batch.definition_hash)).toBe(hex(s.election.definitionHash));
+      expect(batch.receipts.map((p) => [hex(p.ballot_hash), hex(p.share_hash)])).toEqual([
+        [honestHash(), shareHash],
+      ]);
+      const key = s.registered.find((k) => k.index === 1)?.signingKey;
+      if (key === undefined) expect.fail("seat 1 is registered");
+      expect(
+        verifyStatement(key, BATCH_TAG, shareReceiptBatchStatement(batch), batch.signature),
+      ).toBe(true);
+    });
+
+    it("resends the stored batch until it is recorded, then stops", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      let take = false;
+      const c = contract(() => take);
+      expect((await duty(store, approved, c.path).step()).state).toBe("sent");
+      expect((await duty(store, approved, c.path).step()).state).toBe("sent");
+      take = true;
+      expect(await duty(store, approved, c.path).step()).toEqual({
+        state: "sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      });
+      expect(await duty(store, approved, c.path).step()).toEqual({ state: "recorded", total: 1 });
+      expect(c.sent).toHaveLength(3);
+      expect(new Set(c.sent.map((x) => x.batch)).size).toBe(1);
+    });
+
+    it("signs once: a restart, a later view and a later clock resend the same bytes (T-52, T-54)", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      await duty(store, approved, c.path).step();
+      // A view that would owe nothing, read after the decision.
+      const later = viewOf({ board: [boardCopy(honest.record.nullifier, 110n, 0xb1)] });
+      await duty(store, approved, c.path, later, s.cutoff + 3_600n).step();
+      expect(c.sent).toHaveLength(2);
+      expect(c.sent[1]?.batch).toBe(c.sent[0]?.batch);
+    });
+
+    it("counts a batch recorded only as the stored bytes: another batch of the seat's doesn't stop it", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      const [foreign] = batchShareReceipts(approved.signingSecret, approved.definitionHash, 1, [
+        { ballot_hash: new Uint8Array(32).fill(0x55), share_hash: new Uint8Array(32) },
+      ]);
+      c.recorded.push(encodeShareReceiptBatch(foreign!));
+      expect(await duty(store, approved, c.path).step()).toEqual({
+        state: "sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      });
+    });
+
+    it("owes nothing and sends nothing when the view supersedes every receipted ballot", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      const view = viewOf({ board: [boardCopy(honest.record.nullifier, 110n, 0xb1)] });
+      expect(await duty(store, approved, c.path, view).step()).toEqual({
+        state: "recorded",
+        total: 0,
+      });
+      expect(c.sent).toEqual([]);
+    });
+
+    it("stops sending past t_D, reporting the batch it never saw recorded", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      await duty(store, approved, c.path).step();
+      expect((await duty(store, approved, c.path, viewOf(), deadline()).step()).state).toBe("sent");
+      expect(await duty(store, approved, c.path, viewOf(), deadline() + 1n).step()).toEqual({
+        state: "unrecorded",
+        missing: 1,
+        total: 1,
+      });
+      expect(c.sent).toHaveLength(2);
+    });
+
+    it("passes waiting on L1 through, storing nothing, and a send that fails leaves the batch to resend", async () => {
+      const store = new MemoryStore();
+      const { approved } = await receipted(store, honest);
+      const c = contract();
+      const early = viewOf({ l1: l1Of(s.e.stub.closes_at - 12n) });
+      expect(await duty(store, approved, c.path, early).step()).toEqual({ state: "waiting-l1" });
+      expect(await store.list("deliveries")).toEqual([]);
+      const failing: ReceiptPath = {
+        ...c.path,
+        send: () => Promise.reject(new Error("unsent")),
+      };
+      await expect(duty(store, approved, failing).step()).rejects.toThrow("unsent");
+      expect(await duty(store, approved, c.path).step()).toEqual({
+        state: "sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      });
+    });
   });
 });

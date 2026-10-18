@@ -70,4 +70,9 @@ export const PARAMETERS = Object.freeze({
   ROOT_PERIOD: 600,
   ROOT_OFFSET: 300,
   ROOT_WINDOW: 7200,
+  // L2 blocks before a Tier 2 key's deadline: a seat forces the record through
+  // the L1 portal at FORCE_LEAD, and approves only with RECORD_MARGIN left; both
+  // multiples of F, the forced path's bound (docs/spec/nullifier-key.md, Recording).
+  FORCE_LEAD: 46_800,
+  RECORD_MARGIN: 70_200,
 } as const);

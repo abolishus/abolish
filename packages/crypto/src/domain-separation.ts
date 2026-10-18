@@ -230,6 +230,21 @@ export const TAG_REGISTRY = Object.freeze(
         status: "specified",
       },
       { tag: "abolish/v1/sig/obligation-root-2", primitive: "signature", status: "specified" },
+      {
+        tag: "abolish/v1/sig/nullifier-key-approval-3",
+        primitive: "signature",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-reshare-approval-2",
+        primitive: "signature",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-reshare-consent",
+        primitive: "signature",
+        status: "specified",
+      },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

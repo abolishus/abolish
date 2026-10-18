@@ -227,7 +227,31 @@ describe("arweaveSource", () => {
       1_000,
     );
     expect(read.findings).toEqual([]);
-    expect(read.spent).toBe(3);
+    expect(read.spent).toBe(objectCar(segment).length);
     expect(requests).toEqual([`/ar/raw/${arweaveId(t)}`]);
+  });
+
+  test("an honest object too long for what is left of the budget is over budget, never unavailable", async () => {
+    // The gateway drops the answer past the limit itself, so the reader sees no answer at all.
+    const segment = new Uint8Array(2_000).fill(4);
+    const t = tx(3);
+    serve = (id) => (id === arweaveId(t) ? objectCar(segment) : undefined);
+    const ar = arweaveSource([base]);
+    const read = await readListedObjects(
+      [{ size: 1n, cid: objectCid(segment), bound: 10_000n }],
+      new Map([[bytesToHex(objectCid(segment)), [t]]]),
+      ar.source,
+      1_000,
+    );
+    expect(read.findings.map((f) => f.code)).toEqual(["objects-over-budget"]);
+    expect(ar.stats()).toEqual({ requests: 1, answers: 0 });
+    // With room for it, the same gateway serves it.
+    const roomy = await readListedObjects(
+      [{ size: 1n, cid: objectCid(segment), bound: 10_000n }],
+      new Map([[bytesToHex(objectCid(segment)), [t]]]),
+      ar.source,
+      10_000,
+    );
+    expect(roomy.findings).toEqual([]);
   });
 });

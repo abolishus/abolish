@@ -114,6 +114,7 @@ export {
   type ArchiveWalk,
   type ArchiveWalkOptions,
   DEFAULT_MANIFEST_BUDGET,
+  DEFAULT_OBJECT_READS,
   type ListedFinding,
   type ListedObjects,
   type ListedTarget,

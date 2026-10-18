@@ -205,7 +205,10 @@ describe("runSimulation", { timeout }, () => {
     expect(r.board.counted).toBe(1 + 18 + 18 * 3 + 18);
     expect(r.board.entries).toBe(1 + 18 + 18 * 3 + 18 + 3 + 9 + 3);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
-    // Publishing is the voter's choice: only those who asked.
+  });
+
+  // Its own test: two simulations in one ran past the timeout on CI's runners.
+  it("boards only the openings of voters who asked to publish them", async () => {
     const some = await runSimulation({ ...base, challenges: 1, publications: 0.5 });
     const asked = planElection({ ...base, challenges: 1, publications: 0.5 }).voters.filter(
       (v) => v.published,

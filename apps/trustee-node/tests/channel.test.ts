@@ -194,8 +194,10 @@ describe("the summed-share endpoint", () => {
     req.write(new Uint8Array(10));
     await new Promise((r) => setTimeout(r, 50));
     req.destroy();
-    await new Promise((r) => setTimeout(r, 50));
-    expect((await post(url, MESSAGE)).status).toBe(202);
+    // The place frees once the endpoint has seen the upload end.
+    let status = 503;
+    while (status === 503) status = (await post(url, MESSAGE)).status;
+    expect(status).toBe(202);
     await until(() => s.state.given.length === 1);
     expect(logged).toEqual([]);
   });
@@ -251,7 +253,7 @@ describe("httpPeers", () => {
       peers: new Map([[2, `http://127.0.0.1:${port}/v1/summed-shares`]]),
       timeoutMs: 100,
     });
-    await expect(peers.send(2, MESSAGE)).rejects.toThrow(new PeerError("timed out"));
+    await expect(peers.send(2, MESSAGE)).rejects.toThrow(new PeerError("seat 2: timed out"));
     for (const socket of sockets) socket.destroy();
     await new Promise((r) => silent.close(r));
   });

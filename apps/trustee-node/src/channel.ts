@@ -8,8 +8,10 @@
 // T-15, T-39).
 //
 // The endpoint acknowledges a message as soon as its body is read, before
-// and whatever the seat makes of it, so neither the answer nor its timing
-// tells the sender which check failed (Receiving, Notes; T-39). It bounds
+// and whatever the seat makes of it, so its answer never tells the sender
+// which check failed (Receiving, Notes; T-39). The check itself is
+// synchronous, so a registered seat's next message, acknowledged only once
+// the event loop is free, can still time it (README, Known-weak). It bounds
 // only what a message costs: the body, the messages held at once and the
 // time a peer may take to send one (T-52). The message is the spec's record
 // itself, with no envelope: every check is the seat's (`TallyDuty.receive`).
@@ -22,7 +24,7 @@ import {
 import { createServer as createHttpsServer, request as httpsRequest } from "node:https";
 import type { AddressInfo } from "node:net";
 import { PARAMETERS } from "@abolishus/crypto";
-import { type Endpoint, INTAKE_GROUPS } from "./endpoint.ts";
+import { CONNECTIONS_PER_PLACE, type Endpoint, INTAKE_GROUPS } from "./endpoint.ts";
 import type { SummedSharePeers } from "./tally.ts";
 
 /**
@@ -53,12 +55,12 @@ export interface ChannelOptions {
 
 /** Seconds a sender is told to wait when the queue is full. */
 export const CHANNEL_RETRY_SECONDS = 5;
-/** Open connections allowed for each queue place. */
-const CONNECTIONS_PER_PLACE = 4;
 const HEADERS_MS = 10_000;
 const REQUEST_MS = 30_000;
 
-const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost", "[::1]"]);
+const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
+// The same addresses as a URL's `hostname` gives them.
+const LOOPBACK_URL = new Set(["127.0.0.1", "[::1]", "localhost"]);
 const ROUTE = "/v1/summed-shares";
 
 /**
@@ -99,15 +101,18 @@ export async function serveSummedShares(
           return void res.destroy();
         }
         if (body === undefined) return end(res, 413);
-        // Acknowledged before the seat sees it: the same answer, at the same
-        // moment, for a message that passes and one that fails any check.
+        // Acknowledged before the seat sees it: the same answer for a
+        // message that passes and one that fails any check.
         end(res, 202);
         const run = () => receive(body);
         const outcome = chain.then(run, run);
         chain = outcome.catch(() => undefined);
         await outcome;
       } catch (e) {
-        options.log?.({ event: "summed-share-error", error: (e as Error).name });
+        options.log?.({
+          event: "summed-share-error",
+          error: e instanceof Error ? e.name : "unknown",
+        });
       } finally {
         held--;
       }
@@ -206,7 +211,7 @@ export function httpPeers(options: PeersOptions): SummedSharePeers {
   const urls = new Map<number, URL>();
   for (const [seat, text] of options.peers) {
     const url = new URL(text);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname)))
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_URL.has(url.hostname)))
       throw new RangeError(`summed-share peers: seat ${seat}'s endpoint must be https`);
     urls.set(seat, url);
   }
@@ -223,6 +228,9 @@ export function httpPeers(options: PeersOptions): SummedSharePeers {
             "content-length": message.length,
           },
           timeout: options.timeoutMs,
+          // A fresh connection per send: a pooled one its peer has since
+          // closed would fail a send that could have gone through.
+          agent: false,
         };
         const answer = (res: IncomingMessage) => {
           res.resume();
@@ -243,8 +251,9 @@ export function httpPeers(options: PeersOptions): SummedSharePeers {
               )
             : httpRequest(url, common, answer);
         // `timeout` covers an idle socket; the whole send is bounded too.
-        const timer = setTimeout(() => req.destroy(new PeerError("timed out")), options.timeoutMs);
-        req.on("timeout", () => req.destroy(new PeerError("timed out")));
+        const late = () => req.destroy(new PeerError(`seat ${recipient}: timed out`));
+        const timer = setTimeout(late, options.timeoutMs);
+        req.on("timeout", late);
         // The code only (`ECONNREFUSED`, a TLS alert's): never the peer's address.
         req.on("error", (e: NodeJS.ErrnoException) =>
           reject(

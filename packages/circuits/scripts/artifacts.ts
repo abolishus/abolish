@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { BB } from "./toolchain.ts";
 
 export const CIRCUITS = ["nullifier_query", "nullifier_output"] as const;
 /**
@@ -49,11 +50,9 @@ export function writeArtifacts(out: string): void {
       const acir = join(out, `${circuit}.json`);
       writeFileSync(acir, `${JSON.stringify({ noir_version, hash, abi, bytecode }, null, 2)}\n`);
       const vk = join(scratch, circuit);
-      execFileSync(
-        "bb",
-        ["write_vk", "-b", acir, "-o", vk, "-t", TARGET, "-c", join(root, "crs")],
-        { stdio: "pipe" },
-      );
+      execFileSync(BB, ["write_vk", "-b", acir, "-o", vk, "-t", TARGET, "-c", join(root, "crs")], {
+        stdio: "pipe",
+      });
       copyFileSync(join(vk, "vk"), join(out, `${circuit}.vk`));
     }
   } finally {

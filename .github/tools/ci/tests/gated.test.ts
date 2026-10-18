@@ -489,25 +489,42 @@ describe("manifestViolations: circuits", () => {
   });
 
   test("takes bb.js and noir_js only from the catalog, pinned exactly", () => {
-    for (const spec of [
-      "5.0.0-nightly.20260522",
-      "^5.0.0",
-      "npm:evil@1.0.0",
-      "github:AztecProtocol/aztec-packages",
-    ])
-      expect(
-        manifestViolations(
-          "circuits",
-          circuits({ ...CIRCUITS_DEPS, "@aztec/bb.js": spec }),
-          catalog,
-        ),
-        spec,
-      ).toHaveLength(1);
-    for (const pinned of ["^1.0.0-beta.22", "1.0", "npm:evil@1.0.0", undefined])
-      expect(
-        manifestViolations("circuits", circuits(), { ...catalog, "@noir-lang/noir_js": pinned }),
-        String(pinned),
-      ).toHaveLength(1);
+    for (const dep of ["@aztec/bb.js", "@noir-lang/noir_js"]) {
+      for (const spec of ["1.0.0", "^1.0.0", "npm:evil@1.0.0", "github:AztecProtocol/x"])
+        expect(
+          manifestViolations("circuits", circuits({ ...CIRCUITS_DEPS, [dep]: spec }), catalog),
+          `${dep}: ${spec}`,
+        ).toHaveLength(1);
+      for (const pinned of ["^1.0.0", "1.0", "npm:evil@1.0.0", undefined])
+        expect(
+          manifestViolations("circuits", circuits(), { ...catalog, [dep]: pinned }),
+          `${dep}: ${String(pinned)}`,
+        ).toHaveLength(1);
+    }
+  });
+
+  test("the verifier may not depend on circuits, so bb.js and noir_js stay out of its trust base", () => {
+    expect(
+      manifestViolations(
+        "verifier",
+        packed("verifier", {
+          dependencies: {
+            "@abolishus/crypto": "workspace:*",
+            "@abolishus/circuits": "workspace:*",
+          },
+        }),
+        catalog,
+      ),
+    ).toHaveLength(1);
+    expect(
+      referenceViolation(
+        "verifier",
+        "packages/verifier/src/a.ts",
+        "packages/verifier/src",
+        { specifier: "@abolishus/circuits", kind: "ImportDeclaration" },
+        runtimeDependencies({ dependencies: { "@abolishus/circuits": "workspace:*" } }),
+      ),
+    ).toBeTypeOf("string");
   });
 
   test("no other gated package may depend on bb.js or noir_js", () => {

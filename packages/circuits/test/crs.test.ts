@@ -13,6 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { pippenger } from "@noble/curves/abstract/curve.js";
 import { bn254 } from "@noble/curves/bn254.js";
 import { describe, expect, test } from "vite-plus/test";
+import { BB } from "../scripts/toolchain.ts";
 
 const CRS = new URL("../crs/", import.meta.url);
 const read = (f: string) => new Uint8Array(readFileSync(new URL(f, CRS)));
@@ -55,8 +56,18 @@ describe("crs/", () => {
     // bb's verifier uses its own copy of [x]_2, not bn254_g2.dat. That copy
     // equalling the file ties the vendored powers to bb's x, a second source
     // beside the S3 read: install-toolchain.sh pins bb's binary by sha256.
-    const bb = execFileSync("sh", ["-c", "command -v bb"], { encoding: "utf8" }).trim();
-    expect(readFileSync(bb).includes(Buffer.from(g2Bytes))).toBe(true);
+    expect(readFileSync(BB).includes(Buffer.from(g2Bytes))).toBe(true);
+  });
+
+  test("that bb is the toolchain's, not bb.js's shim in node_modules/.bin", () => {
+    // The catalog pins bb.js to bb's version (the toolchain check), so the
+    // pinned binary reports it; the shim is a Node script, not an ELF/Mach-O.
+    const pin = /"@aztec\/bb\.js": (\S+)/.exec(
+      readFileSync(new URL("../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
+    )?.[1];
+    expect(BB.split(/[\\/]/)).not.toContain("node_modules");
+    expect(execFileSync(BB, ["--version"], { encoding: "utf8" }).trim()).toBe(pin);
+    expect(readFileSync(BB).subarray(0, 2).toString()).not.toBe("#!");
   });
 
   test("is [x^i]_1 from the generator, for the x of [x]_2", () => {

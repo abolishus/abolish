@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, test } from "vite-plus/test";
+import { BB } from "../scripts/toolchain.ts";
 
 interface Point {
   readonly x: string;
@@ -174,7 +175,7 @@ describe("compiled circuits", () => {
     (circuit) => {
       // The circuits skill's snapshot: growth (or a change of gadget) shows up
       // here and in the reviewed diff of gates.json.
-      const out = execFileSync("bb", ["gates", "-b", compiled(circuit)], { encoding: "utf8" });
+      const out = execFileSync(BB, ["gates", "-b", compiled(circuit)], { encoding: "utf8" });
       const counts = (
         JSON.parse(out.slice(out.indexOf("{"))) as {
           functions: { acir_opcodes: number; circuit_size: number }[];

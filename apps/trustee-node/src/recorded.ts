@@ -108,7 +108,7 @@ export async function l2RecordedAvailability(
       board,
       [spec.topic, definitionHash, seatWord],
       options.l2FromBlock,
-      await l2Finalized(l2) + 1n,
+      await l2Finalized(l2),
     );
     const found: Uint8Array[] = [];
     // A log failing the event check, or naming another slot, is no evidence

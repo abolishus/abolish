@@ -17,7 +17,8 @@
 // to 5) and, for format 5, selection (6.1, once the counted extent is fixed)
 // and, once it passes, delivery (5.9), the close check (6.3), the tally
 // checks (7.1 to 7.3, and 7.4's counted-set breaks) and 8.5 (counted.ts,
-// close.ts) are implemented, and, for formats 3 to 5, 4.4's event and
+// close.ts) are implemented, under a live definition once 7.1 passes the
+// releases (7.5, 7.6; live.ts), and, for formats 3 to 5, 4.4's event and
 // L1-origin checks over the board's contract-event records, which can fail
 // 4.4 but never pass it;
 // every other check is reported unverifiable, so no run can report an
@@ -54,6 +55,7 @@ import {
   ballotChecks,
   type BallotsReport,
   type CountedCandidate,
+  isLive,
   judgeFor,
   readsEvents,
   type WindowCode,
@@ -75,6 +77,7 @@ import {
 import { eventChecks, type EventCode } from "./events.ts";
 import {
   type CellReport,
+  cellTiers,
   countedChecks,
   type CountedCode,
   countedRows,
@@ -90,6 +93,8 @@ import { admissionSettled, selectionCheck } from "./selection.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import type { CloseReport } from "./close.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
+import { releaseChecks, type ReleasesReport } from "./live.ts";
+import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
   type L1Evidence,
@@ -117,6 +122,7 @@ export type CheckCode =
   | CountedCode
   | ReceiptKeyCode
   | EventCode
+  | ReleaseRowCode
   | "decode"
   | "membership-key"
   | "profile-combination"
@@ -142,6 +148,15 @@ export type CheckAt =
   | { readonly key: number }
   /** 7.2's first failing cell, with its option or question where the code names one. */
   | { readonly cell: number; readonly option?: number; readonly question?: number }
+  /** 7.5's first failing release and cell, with its option or question where the code names one. */
+  | {
+      readonly cell: number;
+      readonly snapshot: number;
+      readonly option?: number;
+      readonly question?: number;
+    }
+  /** 7.5's and 7.6's first snapshot whose L1 head the run doesn't fix. */
+  | { readonly snapshot: number }
   /** 8.5's first registered seat that isn't `destroyed`, or isn't decided; 2.5's `default-seat`'s first author seat. */
   | { readonly seat: number }
   | Record<string, never>;
@@ -181,6 +196,8 @@ export interface Report {
   readonly destruction?: DestructionReport;
   /** A format-5 bundle's close check, once 6.3 found `L_δ`. */
   readonly close?: CloseReport;
+  /** A format-5 bundle's releases under a live definition, once 7.5 fixed its snapshots. */
+  readonly releases?: ReleasesReport;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -215,6 +232,19 @@ const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-versio
 const NOT_APPLICABLE: Outcome = { status: "unverifiable", code: "not-applicable" };
 const carriesDestruction = (v: BoardEntryVersion) =>
   boardPayloadTypes(v).includes(RECORD_TYPES.destructionStatement);
+
+/**
+ * 7.5's and 7.6's rows before the releases are read (docs/spec/verifier.md,
+ * Releases, step 1): a sealed definition has none, and no board-entry
+ * version it can pin carries a running opening, so both pass; a live one
+ * under a tally-opening pin other than 2 is a later release's (T-36), and
+ * otherwise waits on 7.1's pass, which `verifyBundle` checks next.
+ */
+function releaseGate(definition: VerifiedDefinition): Outcome {
+  if (!isLive(definition)) return PASS;
+  if (pinnedVersion(definition.value, RECORD_TYPES.tallyOpening) !== 2) return UNSUPPORTED;
+  return { status: "unverifiable", code: "not-reached", at: {} };
+}
 
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
@@ -346,6 +376,8 @@ function fromDefinition(bundle: Bundle):
   // read the board.
   const boardRows: [string, Outcome][] = [
     ["4.4", NOT_REACHED],
+    ["7.5", NOT_REACHED],
+    ["7.6", NOT_REACHED],
     ...(bundle.format === "abolish-verifier-bundle/4" ||
     bundle.format === "abolish-verifier-bundle/5"
       ? ([
@@ -576,6 +608,7 @@ export function verifyBundle(bundle: Bundle): Report {
   let openings: readonly OpeningReport[] | undefined;
   let tallies: readonly TallyReport[] | undefined;
   let counted: CountedResult | undefined;
+  let releases: ReleasesReport | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -645,6 +678,11 @@ export function verifyBundle(bundle: Bundle): Report {
       ...(carriesDestruction(definition.inputs.boardEntryVersion)
         ? []
         : [["8.5", NOT_APPLICABLE] as const]),
+      ...(definition.definition === undefined
+        ? []
+        : (["7.5", "7.6"] as const).map(
+            (id) => [id, releaseGate(definition.definition as VerifiedDefinition)] as const,
+          )),
       // 1.3 also covers the keys inside the verifier contracts the election
       // uses, which aren't read yet: it can fail here, never pass. Only
       // ballot versions 1 to 4's key (one key: a version-2 to version-4
@@ -754,6 +792,45 @@ export function verifyBundle(bundle: Bundle): Report {
         });
       }
       implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
+      // Under a live definition pinning tally-opening version 2, the
+      // releases are read once 7.1 passed: the board is then sealed and
+      // authenticated, and every snapshot fixed (docs/spec/verifier.md,
+      // Releases, step 1).
+      if (
+        isLive(definition.definition) &&
+        implemented.get("7.5")?.code === "not-reached" &&
+        implemented.get("7.1")?.status === "pass" &&
+        chosen.report !== undefined &&
+        checked.registered !== undefined &&
+        extent !== undefined &&
+        admission.candidates !== undefined &&
+        admission.live !== undefined &&
+        counted.delivery !== undefined
+      ) {
+        const byEntry = new Map(admission.candidates.map((c) => [c.entry, c]));
+        const excluded = new Set(counted.delivery.excluded.map((x) => x.entry));
+        const countedSets = cellTiers(definition.definition).map(() => new Set<string>());
+        for (const { entry } of chosen.report.selected) {
+          const c = byEntry.get(entry);
+          if (c?.tally === undefined)
+            throw new Error("verifyBundle: a selected ballot wasn't admitted");
+          if (!excluded.has(entry)) countedSets[c.tally.cell]?.add(bytesToHex(c.ballot.message));
+        }
+        const live = releaseChecks({
+          definition: definition.definition,
+          definitionHash: definition.hash,
+          registered: checked.registered,
+          copies: admission.live,
+          entries: bundle.entries,
+          boardEntryVersion: definition.inputs.boardEntryVersion,
+          extent,
+          clock: bundle.clock,
+          blocks: bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : [],
+          counted: countedSets,
+        });
+        implemented = new Map<string, Outcome>([...implemented, ...live.rows]);
+        releases = live.report;
+      }
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
       // versions 3 to 6 against their cells, beside an author panel per panel
@@ -815,6 +892,7 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(counted?.questions !== undefined && { questions: counted.questions }),
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
     ...(counted?.close !== undefined && { close: counted.close }),
+    ...(releases !== undefined && { releases }),
     board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

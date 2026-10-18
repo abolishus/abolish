@@ -35,6 +35,7 @@ import {
   type BallotCheck,
   type BallotCheckV2,
   type BallotCode,
+  type BallotMembership,
   type BallotCore,
   type CellBallotCoreV4,
   ballotElection,
@@ -52,17 +53,21 @@ import {
   type DeliveryBallot,
   type DeliveryBallotV4,
   finishBallotStep,
+  finishBallotSteps,
   membershipVkHash,
+  type PanelBallotElection,
   panelBallotElection,
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
   type RegisteredKeys,
+  RESULTS_MODES,
   selectBallots,
   stepBallot,
   stepBallotV2,
   stepBallotV3,
   stepBallotV4,
+  stepMembershipV4,
   type SeatPanel,
 } from "@abolishus/crypto";
 import type { VerifiedDefinition } from "./definition.ts";
@@ -152,6 +157,36 @@ export interface BallotTally {
   readonly vss: BallotCore["vss"];
   readonly delivery?: DeliveryBallot;
   readonly deliveryV4?: DeliveryBallotV4;
+}
+
+/**
+ * Under a live definition, one ballot copy as the running sets read it
+ * (docs/spec/verifier.md, Releases, step 3): a ballot entry of the board or
+ * ordinary path that decodes and names a cell of the partition, with its
+ * membership verdict alone and the admission results that don't depend on
+ * the L1 head.
+ */
+export interface LiveBallotCopy {
+  readonly entry: number;
+  readonly segment: number;
+  readonly tier: number;
+  readonly cell: number;
+  readonly nullifier: bigint;
+  /** `M`, recomputed: copies with the same one are one ballot (5.7). */
+  readonly message: Uint8Array;
+  /** Whether its membership proof passes, whatever its other checks find (tally.md, Running set). */
+  readonly member: boolean;
+  /**
+   * Whether it fails an admission check whose verdict doesn't depend on the
+   * head: 5.4, 5.5, 5.7, or 5.8's `l1-ref-before-open` or `l1-ref-after-close`.
+   */
+  readonly rejected: boolean;
+  /** The L1 block number its reference names. */
+  readonly reference: bigint;
+  /** Whether the run of finalized headers holds the block its reference names (5.8 found no `l1-ref-unknown`). */
+  readonly referenceKnown: boolean;
+  /** Once 5.1 to 5.4 pass: what delivery and the tally read of it. */
+  readonly tally?: BallotTally;
 }
 
 /** Every admission code: versions 2 to 4 have `ballot-cell` where version 1 has `ballot-tier`. */
@@ -251,6 +286,8 @@ export function ballotChecks(
   readonly candidates?: readonly CountedCandidate[];
   /** Every entry carrying an ordinary-path ballot, admitted or not, in copy order. */
   readonly ordinary?: readonly number[];
+  /** Under a live definition, where 5.5 runs: every copy the running sets read, in copy order. */
+  readonly live?: readonly LiveBallotCopy[];
 } {
   const judge = judgeFor(definition, registered, authorRegistered);
   if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
@@ -284,6 +321,14 @@ export function ballotChecks(
   const ordinary: number[] = [];
   // Relayed ballots that passed 5.1 to 5.4, whose stamps 4.5 doesn't prove yet.
   const relayed: number[] = [];
+  // Under a live definition, every copy the running sets read
+  // (docs/spec/verifier.md, Releases, step 3), judged against the default
+  // panel's key set alone: an author panel's poll pins no tally-opening
+  // version 2, so 7.5 and 7.6 never read its copies.
+  const live =
+    isLive(definition) && definition.value.author_keys.length === 0 && registered !== undefined
+      ? new LiveCopies(panelBallotElection(definition.value, registered, []))
+      : undefined;
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
     let path: Path;
@@ -325,6 +370,7 @@ export function ballotChecks(
       continue;
     }
     const { core, checked } = judged;
+    if (path.kind !== "relayed") live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {
       rejected.push({
         entry: at,
@@ -478,7 +524,111 @@ export function ballotChecks(
         })),
       }),
     ordinary,
+    ...(live !== undefined && windows && settled && { live: live.finish(rejected) }),
   };
+}
+
+/** Whether a definition is live: version 6 with `results_mode` 2 (this release reads no version 7). */
+export function isLive(
+  definition: VerifiedDefinition,
+): definition is Extract<VerifiedDefinition, { readonly version: 6 }> {
+  return definition.version === 6 && definition.value.results_mode === RESULTS_MODES.live;
+}
+
+/**
+ * The running sets' copies, gathered as admission judges each one. A copy
+ * that 5.1 to 5.4 admit carries its own `M`; one they reject for its shape,
+ * share hashes or validity proofs has its membership proof checked alone, by
+ * @abolishus/crypto's `stepMembershipV4`, batched, since a member's ballot
+ * counts toward the one-ballot rule whatever else rejects it
+ * (docs/spec/tally.md, Running set, condition 1; T-45). One naming another
+ * definition or cell isn't the tier's, and a `membership-proof` failure
+ * never counts under definition version 6, which has no rolling step to
+ * leave it pending: neither is read. Exported for its tests; the package
+ * entry point doesn't export it.
+ */
+export class LiveCopies {
+  readonly #election: PanelBallotElection;
+  readonly #copies: (
+    | {
+        readonly at: number;
+        readonly segment: number;
+        readonly admitted: Extract<BallotCheckV2, { readonly ok: true }>;
+        readonly tally: BallotTally;
+      }
+    | { readonly at: number; readonly segment: number; readonly step: BallotStep<BallotMembership> }
+  )[] = [];
+
+  constructor(election: PanelBallotElection) {
+    this.#election = election;
+  }
+
+  judged(
+    at: number,
+    segment: number,
+    payload: Uint8Array,
+    checked: BallotCheck | BallotCheckV2,
+    tally: BallotTally,
+  ): void {
+    if (checked.ok) {
+      // Version 4 names its cell, so its admission carries it.
+      if (!("cell" in checked)) throw new Error("LiveCopies: an admitted ballot without its cell");
+      this.#copies.push({ at, segment, admitted: checked, tally });
+      return;
+    }
+    if (
+      checked.code === "ballot-stray" ||
+      checked.code === "ballot-cell" ||
+      checked.code === "ballot-tier" ||
+      checked.code === "membership-proof"
+    )
+      return;
+    const step = stepMembershipV4(this.#election, decodeBallot(payload, 4));
+    // It named this definition and a cell of the partition, so it has a step.
+    if (step === undefined) throw new Error("LiveCopies: a judged ballot has no membership step");
+    this.#copies.push({ at, segment, step });
+  }
+
+  /** Each copy's facts, in copy order, given every entry admission rejected. */
+  finish(rejected: readonly RejectedBallot[]): LiveBallotCopy[] {
+    const code = new Map(rejected.map((r) => [r.entry, r.code]));
+    const members = finishBallotSteps(this.#copies.flatMap((c) => ("step" in c ? [c.step] : [])));
+    let next = 0;
+    return this.#copies.map((c): LiveBallotCopy => {
+      if ("step" in c) {
+        const m = members[next++] as BallotMembership;
+        return {
+          entry: c.at,
+          segment: c.segment,
+          tier: m.tier,
+          cell: m.cell,
+          nullifier: m.nullifier,
+          message: m.message,
+          member: m.member,
+          rejected: true,
+          reference: m.l1RefNumber,
+          referenceKnown: true,
+        };
+      }
+      const { admitted: a } = c;
+      const why = code.get(c.at);
+      return {
+        entry: c.at,
+        segment: c.segment,
+        tier: a.tier,
+        cell: a.cell,
+        nullifier: a.nullifier,
+        message: a.message,
+        member: true,
+        // An unknown reference is judged at each snapshot's head instead:
+        // pending while it names a block above the head (Releases, step 3).
+        rejected: why !== undefined && why !== "l1-ref-unknown",
+        reference: a.l1RefNumber,
+        referenceKnown: why !== "l1-ref-unknown",
+        tally: c.tally,
+      };
+    });
+  }
 }
 
 /** The close rule's code for an admitted copy, by its own path, or `undefined` inside the window. */

@@ -131,9 +131,9 @@ import {
 } from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import {
+  deliver,
   electorateCheck,
   nodeCeremony,
-  deliver,
   nodeIntake,
   nodeKeys,
   registrationFrom,

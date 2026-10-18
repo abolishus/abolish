@@ -97,7 +97,8 @@ class Reject(Exception):
 
 
 def decode(b, pinned=VERSION):
-    """docs/spec/notation.md, Strict decoding, for a file whose only known type is 0x0006 version 1."""
+    """docs/spec/notation.md, Strict decoding, for a file whose only known type is 0x0006, under pin 1 or 2 (one layout, tally.md, Tally-opening version 2)."""
+    assert pinned in (1, 2), pinned
     at = 0
 
     def take(n):
@@ -197,13 +198,13 @@ def check_cell(m, k, registered, ballots, openings):
     return {"ok": True, "counts": [str(s["v"]) for s in first], **out}
 
 
-def check_tally(definition_hash, m, k, registered, cells, payloads):
-    """verifier 7.2 to 7.4 over the tally-opening payloads in board order; undecodable ones are rejected entries."""
+def check_tally(definition_hash, m, k, registered, cells, payloads, pinned=VERSION):
+    """verifier 7.2 to 7.4 over the tally-opening payloads in board order, under the pinned version; undecodable ones are rejected entries."""
     by_cell = [[] for _ in cells]
     stray, rejected = [], []
     for at, b in enumerate(payloads):
         try:
-            o = decode(b)
+            o = decode(b, pinned)
         except Reject as e:
             rejected.append({"at": at, "error": e.code})
             continue
@@ -495,6 +496,58 @@ def main():
     widened = check_tally(definition_hash, m, k, registered, [tier0 + late, tier1], [encode(honest0), encode(honest1)])
     assert widened["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-aggregate"}]
 
+    # Tally-opening version 2, which every live poll pins: version 1's record,
+    # signature, decoding and opening checks, byte for byte apart from the
+    # header's version (tally.md, Tally-opening version 2). Its signature
+    # doesn't sign the header, so a version-1 record's signature verifies
+    # over the same fields labelled version 2.
+    v2_openings = []
+    for o in openings:
+        b = bytes.fromhex(o["encoding"])
+        relabelled = b[:2] + b"\x02" + b[3:]
+        assert relabelled == encode(decode(b), version=2)
+        assert decode(relabelled, 2) == decode(b)
+        v2_openings.append({"id": o["id"], "encoding": relabelled.hex()})
+    v2_errors = []
+
+    def rejected_v2(id_, desc, b, code, offset):
+        try:
+            decode(b, 2)
+        except Reject as e:
+            assert (e.code, e.offset) == (code, offset), (id_, e.code, e.offset)
+        else:
+            raise AssertionError(id_)
+        v2_errors.append({"id": id_, "description": desc, "encoding": b.hex(), "error": code, "offset": offset})
+
+    rejected_v2("version-1", "Version 1 where a live poll's profile pins version 2", honest_b, "profile-mismatch", 2)
+    rejected_v2("version-3", "Version 3's header on a version-1 body: the pin refuses it before the layout is read", honest_b[:2] + b"\x03" + honest_b[3:], "profile-mismatch", 2)
+    rejected_v2("trailing-byte", "One byte after the signature", encode(decode(honest_b), version=2) + b"\x00", "trailing-bytes", len(honest_b))
+    v2_elections = []
+
+    def election_v2(id_, desc, cells, records, expect):
+        recs = [o if isinstance(o, bytes) else encode(o, version=2) for o in records]
+        got = check_tally(definition_hash, m, k, registered, cells, recs, 2)
+        for key, want in expect.items():
+            assert got.get(key) == want, (id_, key, got.get(key), want)
+        v2_elections.append({"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got})
+
+    election_v2("signed", "Version 2: two cells, each with one opening signed by a registered seat", two, [honest0, honest1], {"ok": True})
+    election_v2(
+        "only-failing",
+        "Version 2: cell 0's only opening, signed by seat 2, has option 1's count one more: tally-opening at option 1, attributed to seat 2",
+        two,
+        [record(0, 2, bump(open0, 1)), honest1],
+        {"ok": False, "failure": {"cell": 0, "code": "tally-opening", "option": 1}},
+    )
+    election_v2(
+        "version-1-copy",
+        "Version 2: beside honest openings, a version-1 copy of cell 1's opening is a rejected entry, and the election passes",
+        two,
+        [honest0, encode(honest1), honest1],
+        {"ok": True, "rejected": [{"at": 1, "error": "profile-mismatch"}]},
+    )
+    election_v2("missing-cell", "Version 2: cell 1's only opening is version 1's, so cell 1 has none: tally-missing", two, [honest0, encode(honest1)], {"ok": False, "failure": {"cell": 1, "code": "tally-missing"}})
+
     by_id = {e["id"]: e["result"] for e in elections}
     assert by_id["failing-attributed"]["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-opening", "option": 1}]
     assert by_id["failing-unattributed"]["cells"][0]["failing"][0]["signer"] is None
@@ -527,6 +580,7 @@ def main():
         "openings": openings,
         "decodeErrors": decode_errors,
         "elections": elections,
+        "version2": {"openings": v2_openings, "decodeErrors": v2_errors, "elections": v2_elections},
     }
     with open(f"{out}/tally-opening.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

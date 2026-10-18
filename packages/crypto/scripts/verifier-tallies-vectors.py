@@ -100,11 +100,13 @@ def statement_of(o):
 def expected(d, definition_hash, registered, entries):
     """7.4 and the report's tallies, computed here from tally.md and verifier.md."""
     cells = partition_size(d)
+    # Version 2, a live poll's, is version 1's record under another header (tally.md, Tally-opening version 2).
+    pinned = dict(d["profile"]["pins"])[TALLY_TYPE]
     report = []
     first = {}
     for at, payload in tally_entries(d, entries):
         try:
-            o = tov.decode(payload)
+            o = tov.decode(payload, pinned)
         except tov.Reject as e:
             report.append({"entry": at, "code": "decode", "decodeError": e.code, "breaks": []})
             continue
@@ -173,11 +175,11 @@ def main(out_dir):
         zeros = [{"v": 0, "r": 0} for _ in range(m)]
         own = definition_hash_of(d)
 
-        def opening(cell, signer, values=zeros, key=None, definition=own, claimed=None):
+        def opening(cell, signer, values=zeros, key=None, definition=own, claimed=None, version=1):
             named = signer if claimed is None else claimed
             msg = tov.statement(definition, cell, empty, named, values)
             sig = tov.sign(secrets[signer] if key is None else key, msg)
-            return tov.encode({"definitionHash": definition, "cell": cell, "aggregateHash": empty, "signer": named, "opening": values, "signature": sig})
+            return tov.encode({"definitionHash": definition, "cell": cell, "aggregateHash": empty, "signer": named, "opening": values, "signature": sig}, version=version)
 
         return opening, zeros
 
@@ -210,7 +212,7 @@ def main(out_dir):
             entries.append(vc.entry(BOARD_VERSION, b"\xee" * 32 if p in other_election else eid, len(entries), 0, p))
         rows, _ = vc.expected(panel, defn, entries, panel, BOARD_VERSION)
         assert rows["3.2"]["status"] == ceremony, (id_, rows["3.2"])
-        if dict(defn["profile"]["pins"]).get(TALLY_TYPE) != 1:
+        if dict(defn["profile"]["pins"]).get(TALLY_TYPE) not in (1, 2):
             row, report = outcome("unverifiable", "unsupported-version", {}), None
         elif ceremony != "pass":
             row, report = vc.NOT_REACHED, None
@@ -295,9 +297,29 @@ def main(out_dir):
     dq, tq, _ = election_for("quorum", [1, 2, 3, 4], {"answers": two_bad})
     case("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so 7.4 is not reached.", [honest0], "unverifiable", defn=dq, transcript=tq, ceremony="fail")
 
+    # Tally-opening version 2, a live poll's: version 1's record under
+    # another header, read whatever 2.3 finds of the pins beside it (here a
+    # sealed version-1 definition, which 2.3 fails).
+    d2, t2, s2 = election_for("tally-v2", [1, 2, 3], tally_version=2)
+    open2, zeros2 = opener(d2, s2)
+    keys2 = dict(keys=registered_of(d2, t2, s2), defn=d2, transcript=t2)
+    case(
+        "tally-v2",
+        "The profile pins tally-opening version 2, version 1's record under another header: an honest version-2 opening of cell 0 by seat 1 (undecided), the same opening labelled version 1 (decode, profile-mismatch), a version-2 opening of cell 2 by seat 2 (stray) and seat 1's second version-2 opening of cell 0 with other values (tally-second). 7.4 is unverifiable.",
+        [open2(0, 1, version=2), open2(0, 1), open2(2, 2, version=2), open2(0, 1, values=[{"v": 1, "r": 7}] + zeros2[1:], version=2)],
+        "unverifiable",
+        **keys2,
+    )
+    case(
+        "tally-v2-settled",
+        "The profile pins tally-opening version 2 and the only opening is labelled version 1: a rejected entry, so 7.4 fails with decode and profile-mismatch.",
+        [open2(0, 1)],
+        "fail",
+        **keys2,
+    )
     # A tally-opening version this verifier doesn't read (T-36).
-    d2, t2, _ = election_for("tally-v2", [1, 2, 3], tally_version=2)
-    case("tally-v2", "The profile pins tally-opening version 2, unknown here: 7.4 is unsupported.", [honest0], "unverifiable", defn=d2, transcript=t2)
+    d255, t255, _ = election_for("tally-v255", [1, 2, 3], tally_version=255)
+    case("tally-v255", "The profile pins tally-opening version 255, unknown here: 7.4 is unsupported.", [honest0], "unverifiable", defn=d255, transcript=t255)
 
     # Definition versions 3 and 4: the partition is every tier's stated
     # cells, numbered across the tiers. TYPICAL's tier 0 has three cells and
@@ -384,8 +406,19 @@ def main(out_dir):
 
     dq3, tq3, _ = election_for("quorum-v3", [1, 2, 3, 4], {"answers": two_bad}, base=rc.TYPICAL)
     case("quorum-v3", "A version-3 definition whose seats 3 and 4 answer wrongly: no key set is registered, so 7.4 is not reached.", [open3(0, 1)], "unverifiable", defn=dq3, transcript=tq3, ceremony="fail")
-    d3t, t3t, _ = election_for("tally-v2-v3", [1, 2, 3], tally_version=2, base=rc.TYPICAL)
-    case("tally-v2-v3", "A version-3 definition pinning tally-opening version 2, unknown here: 7.4 is unsupported.", [open3(0, 1)], "unverifiable", defn=d3t, transcript=t3t)
+    d3t, t3t, s3t = election_for("tally-v2-v3", [1, 2, 3], tally_version=2, base=rc.TYPICAL)
+    open3t, _ = opener(d3t, s3t)
+    case(
+        "tally-v2-v3",
+        "A version-3 definition pinning tally-opening version 2: a version-2 opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
+        [open3t(3, 1, version=2), open3t(4, 2, version=2)],
+        "unverifiable",
+        defn=d3t,
+        transcript=t3t,
+        keys=registered_of(d3t, t3t, s3t),
+    )
+    d3u, t3u, _ = election_for("tally-v255-v3", [1, 2, 3], tally_version=255, base=rc.TYPICAL)
+    case("tally-v255-v3", "A version-3 definition pinning tally-opening version 255, unknown here: 7.4 is unsupported.", [open3(0, 1)], "unverifiable", defn=d3u, transcript=t3u)
 
     doc = {
         "format": "abolish-verifier-tallies-vectors/1",

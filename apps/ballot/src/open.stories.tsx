@@ -1161,7 +1161,10 @@ function registrar(
     if (joined === "recorded" && store.kind === "found")
       store = {
         kind: "found",
-        identity: { secret: store.identity.secret, memberships: [{ tier: 0, group }] },
+        identity: {
+          secret: store.identity.secret,
+          memberships: [{ tier: 0, group }, ...store.identity.memberships],
+        },
       };
     return Promise.resolve(joined);
   });
@@ -1205,6 +1208,13 @@ const BODY = JSON.stringify({
   region: "0",
   turnstile: "token.1",
 });
+
+/**
+ * Waits for the heading `name` to take focus: the screens focus their title
+ * in an effect, which can run after the heading is already in the page.
+ */
+const focused = (canvas: ReturnType<typeof within>, name: { level: number; name: string }) =>
+  waitFor(() => expect(canvas.getByRole("heading", name)).toHaveFocus());
 
 export const RegistersANewIdentity: Story = {
   name: "No identity: one is made, kept and registered, then the voter waits",
@@ -1252,9 +1262,7 @@ export const RegistersANewIdentity: Story = {
     // Back at the poll, the voter is told the request is on its way.
     await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
     await expect(send).toHaveBeenCalledOnce();
     await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
     // Read from the whole registry, for the region asked for.
@@ -1447,9 +1455,7 @@ export const WaitingThenRegistered: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "You're registered" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "You're registered" });
     const { join, send } = registrarMocks(args.source);
     // Kept beside the identity the outcome was read for, with the group it is counted in.
     await expect(join).toHaveBeenCalledOnce();
@@ -1471,6 +1477,34 @@ export const WaitingThenRegistered: Story = {
   },
 };
 
+export const WaitingBesideAnotherTier: Story = {
+  name: "A request beside a membership in a tier the poll doesn't admit: read once, kept beside it",
+  args: {
+    source: registering({
+      registrar: registrar(
+        {
+          kind: "found",
+          identity: {
+            secret: SECRET,
+            memberships: [{ tier: 1, group: 4n }],
+            tier0Request: REQUEST,
+          },
+        },
+        [],
+        { outcomes: [ON_THE_LIST] },
+      ),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "You're registered" });
+    // The other tier's membership doesn't end the wait or restart the read.
+    await expect(registrarMocks(args.source).registry).toHaveBeenCalledOnce();
+    await expect(registrarMocks(args.source).join).toHaveBeenCalledWith(expect.any(Uint8Array), 9n);
+  },
+};
+
 export const WaitingCheckedAgain: Story = {
   name: "A request not on the list yet: checked again in place",
   args: {
@@ -1481,15 +1515,11 @@ export const WaitingCheckedAgain: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
     // Not due yet: nothing is offered to send.
     await expect(canvas.queryByRole("button", { name: "Send it again" })).toBeNull();
     await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "You're registered" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "You're registered" });
     await expect(registrarMocks(args.source).registry).toHaveBeenCalledTimes(2);
     await registrarZeroed(args.source, 2);
   },
@@ -1506,17 +1536,13 @@ export const WaitingDueSentAgain: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", {
-        level: 1,
-        name: "Your registration hasn't appeared yet",
-      }),
-    ).toHaveFocus();
+    await focused(canvas, {
+      level: 1,
+      name: "Your registration hasn't appeared yet",
+    });
     await userEvent.dblClick(canvas.getByRole("button", { name: "Send it again" }));
     await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration was sent" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration was sent" });
     const { create, send, record } = registrarMocks(args.source);
     await expect(create).not.toHaveBeenCalled();
     await expect(send).toHaveBeenCalledOnce();
@@ -1533,9 +1559,7 @@ export const WaitingJustBeforeDue: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
   },
 };
 
@@ -1551,12 +1575,10 @@ export const WaitingMoved: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", {
-        level: 1,
-        name: "Your voting identity was put on another area's list",
-      }),
-    ).toHaveFocus();
+    await focused(canvas, {
+      level: 1,
+      name: "Your voting identity was put on another area's list",
+    });
     // Nothing is kept or sent, and nothing offered.
     await expect(registrarMocks(args.source).join).not.toHaveBeenCalled();
     await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
@@ -1578,7 +1600,7 @@ const outcomeStops = (
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(await canvas.findByRole("heading", { level: 1, name: title })).toHaveFocus();
+    await focused(canvas, { level: 1, name: title });
     await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
     const again = canvas.queryByRole("button", { name: "Try again" });
     await expect(again !== null).toBe(retry);
@@ -1630,9 +1652,7 @@ export const WaitingWithoutARegistrar: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
     await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
   },
 };

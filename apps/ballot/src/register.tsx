@@ -213,10 +213,11 @@ export function Register({
       if (!registry.ok) return { kind: "stopped", problem: UNREAD[registry.problem] };
       const read = await registrar.identity();
       if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
-      const { secret, memberships, tier0Request } = read.identity;
+      const { secret, tier0Request } = read.identity;
       try {
-        // Registered meanwhile (another tab), or no longer waiting: the poll decides anew.
-        if (memberships.length > 0 || tier0Request === undefined) return "restart";
+        // Registered meanwhile (another tab), or no longer waiting: the poll
+        // decides anew. A membership in another tier doesn't end the wait.
+        if (tier0Request === undefined) return "restart";
         // T-16: the outcome is read, and a request repeated, only for the region first asked for.
         if (tier0Request.region !== registrar.region)
           return { kind: "stopped", problem: "region-changed" };
@@ -260,7 +261,8 @@ export function Register({
     const { secret, memberships, tier0Request } = read.identity;
     let asked: Promise<CommitmentResult>;
     try {
-      if (memberships.length > 0 || due !== (tier0Request !== undefined)) return "done";
+      if (due ? tier0Request === undefined : memberships.length > 0 || tier0Request !== undefined)
+        return "done";
       if (tier0Request !== undefined && tier0Request.region !== registrar.region)
         return "region-changed";
       asked = registrar.commitment(secret);

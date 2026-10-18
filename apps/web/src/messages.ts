@@ -648,7 +648,7 @@ const enUS = {
   setupSignedOut:
     "You've been signed out. Sign in on your account page to see how your poll is doing.",
   setupGone: "That poll is no longer here. It may have been discarded in another tab.",
-  setupUnloaded: "Your poll couldn't be loaded. Try again shortly.",
+  setupUnloaded: "Your poll couldn't be loaded. This page tries again in a few seconds.",
   setupStepsLabel: "Setting up, step by step",
   setupStep_submitted: "Submitted",
   setupStep_created: "Put on the public record",

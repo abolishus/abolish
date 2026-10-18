@@ -78,6 +78,7 @@ export function PollSetupPage({ client, id, every = SETUP_REFRESH_MS }: PollSetu
         shown = true;
         setPoll(summary);
         setStale(false);
+        setUnavailable(undefined);
         // Setup has finished, one way or the other (or never began): nothing more to follow.
         if (summary.state === "open" || summary.state === "failed" || summary.state === "drafted")
           return;
@@ -85,8 +86,9 @@ export function PollSetupPage({ client, id, every = SETUP_REFRESH_MS }: PollSetu
         if (!live) return;
         const why = e instanceof DraftsError ? e.failure : "failed";
         if (why === "signedOut" || why === "gone") return setUnavailable(why);
-        if (!shown) return setUnavailable("unloaded");
-        setStale(true);
+        // Nothing shown yet, or what was shown stays: either way the next read may work.
+        if (shown) setStale(true);
+        else setUnavailable("unloaded");
       }
       timer = setTimeout(() => void read(), every);
     };
@@ -110,32 +112,10 @@ export function PollSetupPage({ client, id, every = SETUP_REFRESH_MS }: PollSetu
     </PageHeader>
   );
 
-  if (poll === undefined || unavailable !== undefined)
-    return (
-      <div className="grid gap-12">
-        {header}
-        <p
-          role={unavailable === undefined ? "status" : "alert"}
-          className="m-0 max-w-prose text-lg"
-        >
-          {unavailable === undefined
-            ? t("setupLoading")
-            : t(
-                (
-                  {
-                    signedOut: "setupSignedOut",
-                    gone: "setupGone",
-                    unloaded: "setupUnloaded",
-                  } as const
-                )[unavailable],
-              )}
-        </p>
-      </div>
-    );
-
-  const title = poll.title === "" ? t("pollsUntitled") : poll.title;
-  const state = poll.state;
-  const finished = state === "drafted" || state === "failed" ? undefined : FINISHED[state];
+  const title = poll === undefined || poll.title === "" ? t("pollsUntitled") : poll.title;
+  const state = poll?.state;
+  const finished =
+    state === undefined || state === "drafted" || state === "failed" ? undefined : FINISHED[state];
   const row = (s: Step, i: number) => {
     const where =
       finished === undefined ? "later" : i < finished ? "done" : i === finished ? "now" : "later";
@@ -155,9 +135,20 @@ export function PollSetupPage({ client, id, every = SETUP_REFRESH_MS }: PollSetu
     );
   };
 
-  return (
-    <div className="grid gap-12">
-      {header}
+  const body =
+    unavailable !== undefined ? (
+      <p role="alert" className="m-0 max-w-prose text-lg">
+        {t(
+          (
+            {
+              signedOut: "setupSignedOut",
+              gone: "setupGone",
+              unloaded: "setupUnloaded",
+            } as const
+          )[unavailable],
+        )}
+      </p>
+    ) : poll === undefined ? null : (
       <section
         aria-labelledby="poll-setup-title"
         className="grid gap-6 border-t border-border pt-12"
@@ -188,44 +179,61 @@ export function PollSetupPage({ client, id, every = SETUP_REFRESH_MS }: PollSetu
             </p>
           </div>
         ) : (
-          <>
-            <ol aria-label={t("setupStepsLabel")} className="m-0 grid max-w-2xl list-none p-0">
-              {STEPS.map(row)}
-            </ol>
-            {/* Each read's step is said again, so a screen reader hears it move. */}
-            <div role="status" className="grid max-w-prose gap-3 text-lg">
-              {state === "open" ? (
-                <>
-                  <p className="m-0 font-semibold">{t("setupOpen")}</p>
-                  <p className="m-0" suppressHydrationWarning>
-                    {t("setupOpenUntil", {
-                      when: formatUtc(locale, new Date(Number(poll.closesAt) * 1000)),
-                    })}
-                  </p>
-                </>
-              ) : (
-                <p className="m-0">
-                  {t("setupNow", { step: t(`setupStep_${STEPS[FINISHED[state]] ?? "opened"}`) })}
-                </p>
-              )}
-            </div>
-            {state === "open" && poll.electionId !== undefined ? (
-              <p className="m-0">
-                <a
-                  href={`/polls/${poll.electionId}`}
-                  className="text-lg font-semibold underline underline-offset-4"
-                >
-                  {t("setupPollPage")}
-                </a>
-              </p>
-            ) : state === "open" ? null : (
-              <p className="m-0 max-w-prose text-sm text-muted-foreground">
-                {t(stale ? "setupStale" : "setupLeave")}
-              </p>
-            )}
-          </>
+          <ol aria-label={t("setupStepsLabel")} className="m-0 grid max-w-2xl list-none p-0">
+            {STEPS.map(row)}
+          </ol>
         )}
       </section>
+    );
+
+  // One live region for the page's whole life, from loading to open: a
+  // region inserted along with its text isn't announced by every screen
+  // reader, so each read's step is said in the same one, and heard as it moves.
+  const status =
+    unavailable !== undefined || state === "drafted" || state === "failed" ? null : poll ===
+      undefined ? (
+      <p className="m-0">{t("setupLoading")}</p>
+    ) : state === "open" ? (
+      <>
+        <p className="m-0 font-semibold">{t("setupOpen")}</p>
+        <p className="m-0" suppressHydrationWarning>
+          {t("setupOpenUntil", {
+            when: formatUtc(locale, new Date(Number(poll.closesAt) * 1000)),
+          })}
+        </p>
+      </>
+    ) : (
+      <p className="m-0">
+        {t("setupNow", { step: t(`setupStep_${STEPS[finished ?? STEPS.length - 1] ?? "opened"}`) })}
+      </p>
+    );
+
+  const after =
+    unavailable !== undefined || poll === undefined ? null : state === "open" ? (
+      poll.electionId === undefined ? null : (
+        <p className="m-0">
+          <a
+            href={`/polls/${poll.electionId}`}
+            className="text-lg font-semibold underline underline-offset-4"
+          >
+            {t("setupPollPage")}
+          </a>
+        </p>
+      )
+    ) : state === "drafted" || state === "failed" ? null : (
+      <p className="m-0 max-w-prose text-sm text-muted-foreground">
+        {t(stale ? "setupStale" : "setupLeave")}
+      </p>
+    );
+
+  return (
+    <div className="grid gap-12">
+      {header}
+      {body}
+      <div role="status" className="grid max-w-prose gap-3 text-lg">
+        {status}
+      </div>
+      {after}
     </div>
   );
 }

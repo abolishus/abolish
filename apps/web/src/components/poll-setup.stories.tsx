@@ -21,15 +21,19 @@ const poll = (over: Partial<PollSummary>): PollSummary => ({
 });
 
 /**
- * The drafts handler as setup moves on: each read answers the next of
- * `answers` (an error is thrown), and the last is answered from then on.
+ * The drafts handler as setup moves on: every read answers the current one
+ * of `answers` (an error is thrown) until the story moves it to the next
+ * (`advance`), so a story never races the page's timer.
  */
-function setupDrafts(...answers: (PollSummary | DraftsError)[]): DraftsClient & { reads: number } {
+function setupDrafts(
+  ...answers: (PollSummary | DraftsError)[]
+): DraftsClient & { reads: number; at: number } {
   const refused = async (): Promise<never> => {
     throw new DraftsError("failed");
   };
   const client = {
     reads: 0,
+    at: 0,
     list: refused,
     remove: refused,
     retry: refused,
@@ -40,7 +44,7 @@ function setupDrafts(...answers: (PollSummary | DraftsError)[]): DraftsClient & 
     appeal: refused,
     submit: refused,
     read: async (id: string) => {
-      const answer = answers[Math.min(client.reads, answers.length - 1)];
+      const answer = answers[Math.min(client.at, answers.length - 1)];
       client.reads += 1;
       if (answer === undefined || answer instanceof DraftsError) throw answer;
       if (id !== answer.id) throw new DraftsError("gone");
@@ -69,6 +73,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const reads = (client: unknown) => (client as ReturnType<typeof setupDrafts>).reads;
+/** Moves setup on: the page's next read gets the next answer. */
+const advance = (client: unknown) => {
+  (client as ReturnType<typeof setupDrafts>).at += 1;
+};
+const saysNow = (canvasElement: HTMLElement, step: string) =>
+  waitFor(() =>
+    expect(within(canvasElement).getByRole("status")).toHaveTextContent(`Now: ${step}.`),
+  );
 
 /** Each step's line with what the screen reader hears after it. */
 const steps = (canvasElement: HTMLElement) =>
@@ -92,17 +104,21 @@ const followsSetupToOpen: Story["play"] = async ({ canvasElement, args }) => {
     "Checked and opened for answers (still to come)",
   ]);
   await expect(canvas.getByRole("status")).toHaveTextContent("Now: Put on the public record.");
+  advance(args.client);
+  await saysNow(canvasElement, "The people who can answer counted");
   // The key's step is under way through the worker's two states, never named.
-  await waitFor(() =>
-    expect(canvas.getByRole("status")).toHaveTextContent(
-      "Now: The trustees make the key that seals answers.",
-    ),
-  );
-  await expect(canvas.queryByText(/ceremony|rooted|registered/i)).toBeNull();
-  await expect(canvas.getByRole("listitem", { current: "step" })).toHaveTextContent(
-    "The trustees make the key that seals answers",
-  );
+  for (let i = 0; i < 2; i++) {
+    advance(args.client);
+    await saysNow(canvasElement, "The trustees make the key that seals answers");
+    await expect(canvas.queryByText(/ceremony|rooted|registered/i)).toBeNull();
+    await expect(canvas.getByRole("listitem", { current: "step" })).toHaveTextContent(
+      "The trustees make the key that seals answers",
+    );
+  }
+  advance(args.client);
+  await saysNow(canvasElement, "Checked and opened for answers");
   // Open: every step done, the link to its public page, and no more reads.
+  advance(args.client);
   await expect(await canvas.findByRole("link", { name: "Go to your poll's page" })).toHaveAttribute(
     "href",
     `/polls/${ELECTION}`,
@@ -147,6 +163,8 @@ export const Failed: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
+    await saysNow(canvasElement, "The trustees make the key that seals answers");
+    advance(args.client);
     const alert = await canvas.findByRole("alert");
     await expect(alert).toHaveTextContent("Your poll didn't open.");
     await expect(alert).toHaveTextContent(/couldn't finish preparing its keys after four tries/);
@@ -174,16 +192,15 @@ export const FailedRegistered: Story = {
 
 export const ACheckThatFails: Story = {
   args: { client: setupDrafts(poll({}), new DraftsError("failed"), poll({ state: "created" })) },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
+    await saysNow(canvasElement, "Put on the public record");
     // A read that fails keeps what was shown, says so, and the next one carries on.
+    advance(args.client);
     await expect(await canvas.findByText(/couldn't check just now/)).toBeVisible();
     await expect(canvas.getByRole("status")).toHaveTextContent("Now: Put on the public record.");
-    await waitFor(() =>
-      expect(canvas.getByRole("status")).toHaveTextContent(
-        "Now: The people who can answer counted.",
-      ),
-    );
+    advance(args.client);
+    await saysNow(canvasElement, "The people who can answer counted");
     await expect(canvas.getByText(/You can leave it/)).toBeVisible();
   },
 };
@@ -212,7 +229,9 @@ export const SignedOut: Story = {
 
 export const Gone: Story = {
   args: { client: setupDrafts(poll({}), new DraftsError("gone")) },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
+    await saysNow(canvasElement, "Put on the public record");
+    advance(args.client);
     await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
       "That poll is no longer here.",
     );
@@ -235,5 +254,17 @@ export const Unloaded: Story = {
     await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
       "Your poll couldn't be loaded.",
     );
+  },
+};
+
+export const UnloadedThenLoaded: Story = {
+  args: { client: setupDrafts(new DraftsError("failed"), poll({})) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // A first read that fails isn't the last: the next one shows the steps.
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(/tries again/);
+    advance(args.client);
+    await saysNow(canvasElement, "Put on the public record");
+    await expect(canvas.queryByRole("alert")).toBeNull();
   },
 };

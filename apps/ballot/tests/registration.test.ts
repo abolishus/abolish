@@ -2,6 +2,7 @@ import { BN254_R } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
+import { tier0Region } from "../src/deployment.ts";
 import {
   challengeFrameSrc,
   challengeToken,
@@ -26,6 +27,45 @@ const tokenChars = fc.integer({ min: 0x21, max: 0x7e }).map((c) => String.fromCh
 const token = fc.string({ unit: tokenChars, minLength: 1, maxLength: 2048 });
 const commitment = fc.bigInt({ min: 2n, max: BN254_R - 1n });
 const region = fc.nat({ max: 0xffff_ffff });
+
+describe("tier0Region", () => {
+  const groupId = fc.bigInt({ min: 0n, max: 2n ** 64n - 1n });
+
+  test("a deployment that publishes no group names no region", () => {
+    expect(tier0Region({ tier0Groups: [] })).toBeUndefined();
+  });
+
+  test("groups all of one region, signed and self-paid, name that region", () => {
+    fc.assert(
+      fc.property(region, fc.array(groupId, { minLength: 1, maxLength: 8 }), (r, ids) => {
+        const tier0Groups = ids.map((group_id) => ({ group_id, region: r }));
+        expect(tier0Region({ tier0Groups })).toBe(r);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("groups of two or more regions, in any order, name none: the build never picks one (T-16)", () => {
+    // Each of two to four distinct regions at least once, with repeats, in any order.
+    const regions = fc
+      .tuple(
+        fc.uniqueArray(region, { minLength: 2, maxLength: 4 }),
+        fc.array(fc.nat(), { maxLength: 6 }),
+      )
+      .map(([distinct, repeats]) => [
+        ...distinct,
+        ...repeats.map((i) => distinct[i % distinct.length] as number),
+      ])
+      .chain((all) => fc.shuffledSubarray(all, { minLength: all.length }));
+    fc.assert(
+      fc.property(regions, (rs) => {
+        const tier0Groups = rs.map((r, i) => ({ group_id: BigInt(i), region: r }));
+        expect(tier0Region({ tier0Groups })).toBeUndefined();
+      }),
+      { numRuns },
+    );
+  });
+});
 
 describe("challengeFrameSrc", () => {
   test("puts the client's origin and the action in the fragment, each value encoded", () => {

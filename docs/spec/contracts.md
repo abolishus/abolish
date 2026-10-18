@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2) and its Tier 1 additions (P3-3), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, its relayed-ballot call, the close statements' contract path and the window it holds ordinary ballots to, and our two contracts on L1: the board anchor (P4-1) and the relay that carries forced ballots to the board (P1-18 parts 4c-2b and 4c-3; the rule itself is [[close]]). The group registry's Tier 2 additions (P3-4) are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2) and its Tier 1 additions (P3-3), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, its relayed-ballot call, the close statements' contract path and the window it holds ordinary ballots to, and our three contracts on L1: the board anchor (P4-1), the relay that carries forced ballots to the board (P1-18 parts 4c-2b and 4c-3; the rule itself is [[close]]) and the release registry that ballot-client releases are published to (P4-4). The group registry's Tier 2 additions (P3-4) are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -1252,3 +1252,89 @@ The stamp of a matched event is then the timestamp of the L1 block the call ran 
 - **The stamp is the L1 slot's start.** A proposer can include a call made a few seconds after `closes_at` in a block stamped at or before it ([[close]], Residuals, The relay's seconds; T-35, T-45).
 - **Unmatched calls are reported only while L1 serves the relay's logs** (above); the words and the count stay in state for good.
 - **The verifier doesn't match calls yet.** Verifier 4.5 is P1-19's; until it is built, a relayed ballot's stamp is the event's word, so the verifier sets a relayed ballot aside after 5.1 to 5.4 and leaves 5.5, 5.7 and everything after admission unverifiable, never judging it by an unproven stamp ([[verifier]], 5.5; T-71).
+
+## Release registry
+
+Threats: T-41 (a client served to one voter), T-69 (a compelled or seized release key), T-64 (a deployment that isn't the release code), T-17 (chosen bytes on L1), T-36 (two verifiers reading one release two ways).
+
+The release registry is our third contract on L1, decided by [[0036-release-record]] (option B). It holds the release hash of every ballot-client release ([[release]], Release hash) in one chain, numbered from 0, and a revocation for any of them, so that a release is public on L1 before any check passes it, and [[verifier]] 1.1 and `apps/node` prove a release published and not revoked from a finalized L1 header with the storage proofs the verifier already reads for anchors. It is immutable: no owner, proxy, pause or upgrade path. Its one writer is fixed at deployment as an immutable. A verifier release pins its chain ID, address, authority and runtime code hash ([[verifier]], Pinned trust roots): the authority is its only immutable, so the release build with the pinned authority written in is its whole runtime code, and a client run compares the proven account's code hash with the pin ([[verifier]], Served client, step 2). A release record names the registry it is appended to (`l1_chain_id`, `registry`), so one record counts in one registry only.
+
+The registry never sees a record. A record is up to about 2.6 MB ([[release]], Decoding), more than it is worth decoding on L1, so the registry stores only the hash it is given, and everything that ties the hash to a record (that the record decodes and is well formed, that its `sequence`, `previous`, `registry` and `l1_chain_id` agree with the registry, that its files make its `directory`) is checked by the release Safe's signers before they sign ([[P4-4]] part 2e) and by 1.1 after ([[verifier]], Served client). A hash the Safe appends without its record, or with a record that breaks any of that, fails 1.1 for that release, publicly; it can't make a client pass.
+
+### Deployment
+
+`constructor(address authority)` stores `authority` as an immutable. Deployment reverts if `authority` has no code or only an [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702) delegation (`0xef0100 ‖ address`), as the anchor's does (Board anchor, Deployment): both are a single key. The authority is the **release Safe** of [[0020-entry-points]], the Safe that also holds `abolishus.eth`, a SafeL2 used with no module, guard or delegatecall, for the reasons the anchor's Known-weak gives; the deployment record (`packages/contracts/deployments/<chain-id>.json`) names it, its owners and its threshold. Until the owner deploys a registry on mainnet and names the Safe's signers, the registry is Sepolia's ([[0036-release-record]], Consequences).
+
+### Calls
+
+The registry has two calls, `publish` and `revoke`, both non-payable. Any other calldata, empty calldata included, reverts: the contract has no `receive`, no `fallback` and no getter (state is read by proof, State below), so nothing else can change it or be mistaken for it. A call carrying value reverts.
+
+### Publishing
+
+`publish(bytes32 releaseHash, bytes32 previous)` appends a release. It reverts, changing nothing, unless:
+
+1. the caller is `authority` (T-41: no one else can make a release count);
+2. the calldata is exactly the selector and the two words, 68 bytes, nothing after (T-17);
+3. `releaseHash` isn't 32 zero bytes, so a zero word always means no release;
+4. `previous` is the release hash at sequence `count − 1`, or 32 zero bytes when `count` is 0.
+
+Rule 4 makes the registry a chain with no forks: a Safe transaction built against a head that has since moved reverts, so two releases signed in parallel can't both take one sequence, and a signer approving a release approves its place after the release it names. The call then stores `releaseHash` and `published_at = block.timestamp` at sequence `s = count`, sets `count` to `s + 1`, and emits, through the event accumulator (above), with `chain_id` the L1's,
+
+| Event                                                                                      | Topics                               | Data                    |
+| ------------------------------------------------------------------------------------------ | ------------------------------------ | ----------------------- |
+| `ReleasePublished(uint64 indexed sequence, bytes32 indexed releaseHash, bytes32 previous)` | `s` as a 32-byte word, `releaseHash` | `previous`, ABI-encoded |
+
+`previous` repeats what the record itself binds, so the record's `previous` is the hash at `s − 1` exactly when the release Safe built the record for that place; 1.1 checks the record's, never the call's.
+
+The registry doesn't refuse a hash it already holds at another sequence: a well-formed record binds its own `sequence`, so its hash can count at that one place only, and 1.1 reads the record at the sequence it names. A second copy is the Safe's public mistake and judges nothing.
+
+### Revocation
+
+`revoke(uint64 sequence)` revokes a published release. It reverts, changing nothing, unless:
+
+1. the caller is `authority`;
+2. the calldata is exactly the selector and one word holding `sequence` with its high 192 bits zero, 36 bytes, nothing after (T-17);
+3. `sequence` is below `count`;
+4. the release at `sequence` isn't already revoked.
+
+It then sets that release's `revoked_at` to `block.timestamp` and emits
+
+| Event                                                                  | Topics                                 | Data |
+| ---------------------------------------------------------------------- | -------------------------------------- | ---- |
+| `ReleaseRevoked(uint64 indexed sequence, bytes32 indexed releaseHash)` | `sequence` as a 32-byte word, its hash | none |
+
+Nothing clears `revoked_at`, so a revocation is final, and nothing else writes a release's hash or `published_at`, so a release, once published, stays at its place for good (T-69). Revoking a release doesn't move the chain: the next release still names the latest hash as its `previous`, revoked or not, and a revoked latest release stays the latest until another is published. The Safe revokes a release that should never have run (a leaked signing session, a build that isn't its commit's, a client with a flaw that loses votes) and publishes its fix as the next release. A revocation says nothing about why; the Safe's signers say that in public, outside the chain.
+
+### State
+
+The registry keeps its state at fixed slots, so a verifier reads it from a storage proof alone and it survives L1 history expiry ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444)), as the anchor's does. The base is the [ERC-7201](https://eips.ethereum.org/EIPS/eip-7201) namespace `abolish.release-registry`:
+
+```
+R = keccak256(abi.encode(uint256(keccak256("abolish.release-registry")) − 1)) & ~0xff
+  = 0x70e6df55cd9db89509d405697815053719fd2c44a78b3358c3b14b5923208800
+```
+
+- `count`, the number of releases published, is the word at `R`, a `uint64`: its high 192 bits are zero.
+- Release `s`'s hash is the word at `keccak256(abi.encode(uint256(s), R + 1))`, and its times word is the next slot: `published_at` in its low 64 bits, `revoked_at` in the next 64, the rest zero (Solidity's `mapping(uint64 => Release)` at `R + 1`, with `struct Release { bytes32 releaseHash; uint64 publishedAt; uint64 revokedAt; }`). `revoked_at` is zero for a release never revoked.
+
+The release code writes only words that meet these rules, at a block `B` with timestamp `now`: `count` below 2⁶⁴; for each `s` below `count`, a non-zero hash, and a times word with its high 128 bits zero, `published_at` from 1 to `now`, and `revoked_at` zero or from `published_at` to `now`; and nothing at a sequence from `count` up. A word that breaks them can only come from code that isn't the release's, or from a constructor's own writes (Board anchor, Known-weak, Constructor effects aren't bound), and 1.1 fails on it (`release-registry-state`) rather than read a release from it.
+
+### Verification
+
+A verifier reads the registry from state only, never from `ReleasePublished` logs, which an RPC node can leave out, nor from an `eth_call` answer. It proves the registry's account, `count`, and the hash and times words of the sequences it judges with `eth_getProof` at one finalized L1 block `B`, walking the trie as Anchors from L1 does ([[verifier]], steps 1 to 3, with the registry's address in place of the anchor's), and `B`'s timestamp is the `now` of the rules above. Because no release is ever removed, the release at sequence `s` at `B` is the release at `s` at every later block; only `count` and the revocations grow. So a release proven published at `B` was public on L1 from its `published_at` on, to anyone reading the registry, which is the property T-41 needs: a release built for one voter is a release everyone can see.
+
+The events are for watching, not for proof: a monitoring job alerts on every `ReleasePublished` and `ReleaseRevoked` (P2-11), and `apps/node` can follow the chain from them while L1 history serves its logs, checking what it finds against the registry's accumulator (Event accumulator, Verification) or the words.
+
+### Vectors
+
+`vectors/release-registry.json` (format `abolish-release-registry-vectors/1`, see [[vectors/README|vectors]]) gives the namespace and slots (sequences 0 to 2 and 2⁶⁴ − 1), the two selectors and the two events' topic 0, a history of calls against the rules above (each refused call with the rule it breaks, each accepted one with its log) with the words it leaves, and 1.1's judgments over proven words ([[verifier]], Served client). `packages/crypto/tests/release-registry-vectors.test.ts` checks the slots, selectors, topics and the history's logs and words with `@noble/hashes`' Keccak-256; the registry's Foundry tests (part 2d) replay the history and compare every word.
+
+### Known-weak
+
+- **The Safe can publish a bad release**, or be compelled to: a record with a weaker CSP or a client that leaks votes counts once its hash is appended. The registry makes it public at once, not impossible (T-41, T-69), and the monitoring job is what turns public into seen.
+- **The Safe can revoke a good release**, which makes 1.1 fail for every client of it until a new one is published: a liveness attack on the client-integrity verdict, attributable on L1, never on an election's result (1.1 is report-only).
+- **The Safe's configuration can change after deployment**, as for the anchor (Board anchor, Known-weak): the registry pins its address only, and the Safe's own history is the check, which the release runbook (part 2e) applies before every signature and the verifier doesn't yet.
+- **The record isn't on L1.** The registry holds its hash, and the record is published to IPFS and the archive beside each release (part 2e). A record no one can produce leaves 1.1 unverifiable for that release (`release-record-missing`), never passed: the hash authenticates whatever copy turns up, from any source.
+- **Constructor effects aren't bound** (Board anchor, Known-weak): the code-hash pin proves the runtime code, not what the constructor wrote, so until deployments are bound to the release creation code, a deployer's initcode could write releases the authority never published. 1.1 reads them as published, so a passing 1.1 is as authentic as the deployment until that binding exists.
+- **Gas**, estimated until part 2d measures it: about 100,000 per publication (two new words, the count, the accumulator, a log and the transaction's base cost) and 45,000 per revocation, on L1, once per release: free on Sepolia; on mainnet a payment the owner makes.
+- **The registry isn't deployed or built yet**: its contract and tests are [[P4-4]] part 2d, its deployment a `ci:` PR after it, and the release workflow that publishes to it part 2e. Until then no release is published, and 1.1 is unverifiable with `release-none` on every client.

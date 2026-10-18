@@ -17,8 +17,8 @@ artifacts/              # generated: each circuit's ACIR and ABI (<circuit>.json
 crs/                    # the reference string bb proves and verifies under, from Ignition (Reference string)
 src/                    # the proofs through bb.js (proofs.ts) and the query and output with them (nullifier.ts)
 scripts/                # artifacts.ts writes artifacts/; crs.ts writes crs/
-vendor/                 # third-party Noir libraries, unchanged (Vendored dependencies)
-test/                   # vite-plus tests: vectors through Noir, source rules, vendored trees
+vendor/                 # third-party Noir code, unchanged: TACEO's gadgets, zkPassport's circuits and their libraries (Vendored dependencies)
+test/                   # vite-plus tests: vectors through Noir, source rules, vendored trees, the disclosure circuits' ABIs
 ```
 
 Each circuit gets its own Nargo package next to `lib/`, depending on the libraries by path, with its statement at the top of `src/main.nr` as [[nullifier-query]] states it and its soundness tests below.
@@ -51,24 +51,90 @@ An independent re-encoding (Python, in the session that vendored them) wrote the
 
 ## Vendored dependencies
 
-Copied as plain files, unchanged, from the pinned commits, with their MIT licences beside them; upstream's READMEs are left out. `test/keyed-nullifier-hashes.test.ts` recomputes the git object id of every vendored entry (what `git rev-parse <commit>:<path>` prints upstream) and fails on any file under `vendor/` that isn't pinned, so any edit shows up as a failed test and in the reviewed diff (T-55). Refreshing one means copying a new upstream tree and updating its rows here and in the test, together with the spec's review of the diff ([[keyed-nullifier-hashes]], TACEO's gadgets).
+Copied as plain files, unchanged, from the pinned commits, with their licences beside them; upstream's READMEs, tests outside `src/`, scripts and tooling are left out. `test/vendored.test.ts` recomputes the git object id of every vendored entry (what `git rev-parse <commit>:<path>` prints upstream) and fails on any file under `vendor/` that isn't pinned, so any edit shows up as a failed test and in the reviewed diff (T-55). `vp check` leaves `vendor/` unformatted (the root `vite.config.ts`), so a fix run can't change it either. Refreshing one means copying a new upstream tree and updating its rows here and in the test, together with the spec's review of the diff ([[keyed-nullifier-hashes]], TACEO's gadgets; [[identity-chain]], Circuit set, for zkPassport's).
 
-| Upstream                                     | Tag      | Commit                                     |
-| -------------------------------------------- | -------- | ------------------------------------------ |
-| `https://github.com/TaceoLabs/oprf-nr`       | `v1.0.0` | `e4984d6ca15771200875745828e8f6c5ced70186` |
-| `https://github.com/TaceoLabs/noir-poseidon` | `v0.6.1` | `23cf1f05cbebb78538c8e321ab3da306e3529923` |
+| Upstream                                     | Tag         | Commit                                     | Licence                                                     |
+| -------------------------------------------- | ----------- | ------------------------------------------ | ----------------------------------------------------------- |
+| `https://github.com/TaceoLabs/oprf-nr`       | `v1.0.0`    | `e4984d6ca15771200875745828e8f6c5ced70186` | MIT                                                         |
+| `https://github.com/TaceoLabs/noir-poseidon` | `v0.6.1`    | `23cf1f05cbebb78538c8e321ab3da306e3529923` | MIT                                                         |
+| `https://github.com/zkpassport/circuits`     | none        | `c7da41870d6223a15c38417424e01e48ab7a4cd9` | Apache-2.0                                                  |
+| `https://github.com/noir-lang/poseidon`      | `v0.3.0`    | `0880c371e88e583d39515fd3f877538657ac41eb` | Apache-2.0                                                  |
+| `https://github.com/noir-lang/sha256`        | `v0.3.0`    | `9442e5b6856f98b2ec029882d7e90199ecff91ba` | MIT, declared in its `package.json`; it has no licence file |
+| `https://github.com/zac-williamson/sha1`     | `v0.11`     | `d510f33c8546488286946ed459b26b62f5a71f91` | Apache-2.0                                                  |
+| `https://github.com/zkpassport/sha512`       | `v0.2.0`    | `e92ffb473f3264529a0793770f63a09946df50cc` | Apache-2.0                                                  |
+| `https://github.com/madztheo/noir-date`      | `v0.5.6`    | `ca9029869819c567c7b533e4b13d9ed47f2b7db3` | MIT                                                         |
+| `https://github.com/zkpassport/noir-bignum`  | `v0.10.0-2` | `a5fe5b5676e2b2589199160705a588ba779a1eb5` | Apache-2.0                                                  |
+| `https://github.com/zkpassport/noir_rsa`     | `v0.12.0`   | `516db18a732d3426d9417444e5b6c0733d2b0d1c` | Apache-2.0                                                  |
 
-| Path                                         | Upstream path           | Git object id                              |
-| -------------------------------------------- | ----------------------- | ------------------------------------------ |
-| `vendor/oprf-nr/LICENSE`                     | `LICENSE`               | `b82e0563feef75ccfd57f081fd2efb5f80b391d7` |
-| `vendor/oprf-nr/babyjubjub/src`              | `babyjubjub/src`        | `4c27dd3b30880bd23c95dd88f0c794a8c9482366` |
-| `vendor/noir-poseidon/LICENSE`               | `LICENSE`               | `3fe6670c1099f6fb152d1cde560c3495ee3f9555` |
-| `vendor/noir-poseidon/poseidon2/Nargo.toml`  | `poseidon2/Nargo.toml`  | `7bf975d0e027da52afd3887ca1ddecef5092e8f4` |
-| `vendor/noir-poseidon/poseidon2/src`         | `poseidon2/src`         | `f3a287154fe93da15680fca1398ad583fe782450` |
-| `vendor/noir-poseidon/hash_utils/Nargo.toml` | `hash_utils/Nargo.toml` | `3e8398fa4ffff7a9e20c717791ca7607610dc58c` |
-| `vendor/noir-poseidon/hash_utils/src`        | `hash_utils/src`        | `d8bc189c687d2d01419758e43a49576b2bae66ff` |
+| Path                                                                                      | Upstream path                                                       | Git object id                              |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------ |
+| `vendor/oprf-nr/LICENSE`                                                                  | `LICENSE`                                                           | `b82e0563feef75ccfd57f081fd2efb5f80b391d7` |
+| `vendor/oprf-nr/babyjubjub/Nargo.toml`                                                    | `babyjubjub/Nargo.toml` (ours, below)                               | `6b8273fbf649348b6124bef0c0ecc2470fc2ac91` |
+| `vendor/oprf-nr/babyjubjub/src`                                                           | `babyjubjub/src`                                                    | `4c27dd3b30880bd23c95dd88f0c794a8c9482366` |
+| `vendor/noir-poseidon/LICENSE`                                                            | `LICENSE`                                                           | `3fe6670c1099f6fb152d1cde560c3495ee3f9555` |
+| `vendor/noir-poseidon/poseidon2/Nargo.toml`                                               | `poseidon2/Nargo.toml`                                              | `7bf975d0e027da52afd3887ca1ddecef5092e8f4` |
+| `vendor/noir-poseidon/poseidon2/src`                                                      | `poseidon2/src`                                                     | `f3a287154fe93da15680fca1398ad583fe782450` |
+| `vendor/noir-poseidon/hash_utils/Nargo.toml`                                              | `hash_utils/Nargo.toml`                                             | `3e8398fa4ffff7a9e20c717791ca7607610dc58c` |
+| `vendor/noir-poseidon/hash_utils/src`                                                     | `hash_utils/src`                                                    | `d8bc189c687d2d01419758e43a49576b2bae66ff` |
+| `vendor/zkpassport-circuits/LICENSE`                                                      | `LICENSE`                                                           | `195d3262e75c1630565fd92cf332f8ec8ae55330` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/common/Nargo.toml`                    | `src/noir/lib/commitment/common/Nargo.toml` (ours, below)           | `bdb0a287e398aa175a32069d817bf2c2963bc8f7` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/common/src`                           | `src/noir/lib/commitment/common/src`                                | `682ede99bec8a168e487a2bebc7931666c6bf1db` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/csc-to-dsc/Nargo.toml`                | `src/noir/lib/commitment/csc-to-dsc/Nargo.toml`                     | `20460db2731deb904d734f03a6631081fe14ecc5` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/csc-to-dsc/src`                       | `src/noir/lib/commitment/csc-to-dsc/src`                            | `0f8729954e4da449f8715a545e2449f31bac212e` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/dsc-to-id/Nargo.toml`                 | `src/noir/lib/commitment/dsc-to-id/Nargo.toml`                      | `af6149d7623f4e86446aba2a9fbdc069e878ad33` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/dsc-to-id/src`                        | `src/noir/lib/commitment/dsc-to-id/src`                             | `c7747ca86979712fa1083e7e87d3f6462dff60ef` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/integrity-to-disclosure/Nargo.toml`   | `src/noir/lib/commitment/integrity-to-disclosure/Nargo.toml`        | `e67e03e45c908b32e639bc91c6b25b1bf22c3879` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/integrity-to-disclosure/src`          | `src/noir/lib/commitment/integrity-to-disclosure/src`               | `2e3c64169eb0ba613264c22ce34b33ad75fc776b` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/scoped-nullifier/Nargo.toml`          | `src/noir/lib/commitment/scoped-nullifier/Nargo.toml` (ours, below) | `2acaea8ebb79cf61d78fb671008ab63678b147e9` |
+| `vendor/zkpassport-circuits/src/noir/lib/commitment/scoped-nullifier/src`                 | `src/noir/lib/commitment/scoped-nullifier/src`                      | `f5618d5989adaad0421ce49035110dd3e04e6453` |
+| `vendor/zkpassport-circuits/src/noir/lib/compare/age/Nargo.toml`                          | `src/noir/lib/compare/age/Nargo.toml` (ours, below)                 | `ffafc8d224b95efd0531c04158e7febc9aa62a09` |
+| `vendor/zkpassport-circuits/src/noir/lib/compare/age/src`                                 | `src/noir/lib/compare/age/src`                                      | `496cfd5344432a709580159e1f45085b3c40cb9f` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/expiry/Nargo.toml`                    | `src/noir/lib/data-check/expiry/Nargo.toml` (ours, below)           | `b87a4f87b519c5c78cec6b0a6c62a3c66fd9f7f4` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/expiry/src`                           | `src/noir/lib/data-check/expiry/src`                                | `715de49176da02ec75cd5599ab8e996c814644a7` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/integrity/Nargo.toml`                 | `src/noir/lib/data-check/integrity/Nargo.toml` (ours, below)        | `6e1e43678a8028fcf7a7364b7d8e2eed839b46da` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/integrity/src`                        | `src/noir/lib/data-check/integrity/src`                             | `be5202e189a6ccb56015b28ced0902a5e9759ae3` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/tbs-pubkey/Nargo.toml`                | `src/noir/lib/data-check/tbs-pubkey/Nargo.toml`                     | `91affca7d3a25310ba78d22d969429d5ea11e0a3` |
+| `vendor/zkpassport-circuits/src/noir/lib/data-check/tbs-pubkey/src`                       | `src/noir/lib/data-check/tbs-pubkey/src`                            | `9e3637ac0e104ea50bebe0bee45be15029e57e50` |
+| `vendor/zkpassport-circuits/src/noir/lib/inclusion-check/country/Nargo.toml`              | `src/noir/lib/inclusion-check/country/Nargo.toml` (ours, below)     | `85d4f21a69d22ebb5aec0962d44623dc6231b672` |
+| `vendor/zkpassport-circuits/src/noir/lib/inclusion-check/country/src`                     | `src/noir/lib/inclusion-check/country/src`                          | `ef8897969247ab0f7e34981194ea608ca23df0e2` |
+| `vendor/zkpassport-circuits/src/noir/lib/sig-check/common/Nargo.toml`                     | `src/noir/lib/sig-check/common/Nargo.toml` (ours, below)            | `59510839cbb06d941dbeb2d9715216246ba5aee9` |
+| `vendor/zkpassport-circuits/src/noir/lib/sig-check/common/src`                            | `src/noir/lib/sig-check/common/src`                                 | `813fc5381165d25c459c63f6a4cf92c317e6ea59` |
+| `vendor/zkpassport-circuits/src/noir/lib/sig-check/rsa/Nargo.toml`                        | `src/noir/lib/sig-check/rsa/Nargo.toml` (ours, below)               | `4f7c28bb8e503eec5942dde82b794e8260d4df69` |
+| `vendor/zkpassport-circuits/src/noir/lib/sig-check/rsa/src`                               | `src/noir/lib/sig-check/rsa/src`                                    | `e501fa389366bcd6cd78d4b74d8fcc9c91c51f4b` |
+| `vendor/zkpassport-circuits/src/noir/lib/utils/Nargo.toml`                                | `src/noir/lib/utils/Nargo.toml` (ours, below)                       | `a92c03e442c9eeef43cf4a6eac3c8fa333b8f90d` |
+| `vendor/zkpassport-circuits/src/noir/lib/utils/src`                                       | `src/noir/lib/utils/src`                                            | `1a7e5fb3b842054705f6e8233aa98ac39c7ed694` |
+| `vendor/zkpassport-circuits/src/noir/bin/compare/age/standard/Nargo.toml`                 | `src/noir/bin/compare/age/standard/Nargo.toml`                      | `460f82f7719ce6e36c5cc60d22f75b34556e9f4d` |
+| `vendor/zkpassport-circuits/src/noir/bin/compare/age/standard/src`                        | `src/noir/bin/compare/age/standard/src`                             | `d9230e79130879a5483522de2b76ac29eb6451a0` |
+| `vendor/zkpassport-circuits/src/noir/bin/inclusion-check/nationality/standard/Nargo.toml` | `src/noir/bin/inclusion-check/nationality/standard/Nargo.toml`      | `6f5f28ac9bf746204e3209e6d200655abde7a3d2` |
+| `vendor/zkpassport-circuits/src/noir/bin/inclusion-check/nationality/standard/src`        | `src/noir/bin/inclusion-check/nationality/standard/src`             | `4d0138fddeb975d0c4d90d529e0992159e721d7d` |
+| `vendor/poseidon/LICENSE`                                                                 | `LICENSE`                                                           | `c61b66391a3c1545c8c274bc6d7d764bafb84993` |
+| `vendor/sha1/LICENSE`                                                                     | `LICENSE`                                                           | `c61b66391a3c1545c8c274bc6d7d764bafb84993` |
+| `vendor/sha512/LICENSE`                                                                   | `LICENSE`                                                           | `c61b66391a3c1545c8c274bc6d7d764bafb84993` |
+| `vendor/noir-date/LICENSE`                                                                | `LICENSE`                                                           | `3285316f6b59c81ed0df57f80576fdb779494e15` |
+| `vendor/noir-bignum/LICENSE`                                                              | `LICENSE`                                                           | `c61b66391a3c1545c8c274bc6d7d764bafb84993` |
+| `vendor/noir_rsa/LICENSE`                                                                 | `LICENSE`                                                           | `c61b66391a3c1545c8c274bc6d7d764bafb84993` |
+| `vendor/poseidon/Nargo.toml`                                                              | `Nargo.toml`                                                        | `bc2f9b292b57961e839865cb4d45233be62c0984` |
+| `vendor/poseidon/src`                                                                     | `src`                                                               | `8a265c8dc3e93e91a8ebbfb74ade8437ff649e25` |
+| `vendor/sha256/Nargo.toml`                                                                | `Nargo.toml`                                                        | `7afdf910a143104ecdfb37ede2b099af51aa541f` |
+| `vendor/sha256/src`                                                                       | `src`                                                               | `a29ada5689f6e213a587c2995ca67d51bdc6218d` |
+| `vendor/sha1/Nargo.toml`                                                                  | `Nargo.toml`                                                        | `c2aa756f000d98971849d5ff708b2c3bfa2efbe4` |
+| `vendor/sha1/src`                                                                         | `src`                                                               | `d9ead839874603c843e7d6865672a56b60dd5a57` |
+| `vendor/sha512/Nargo.toml`                                                                | `Nargo.toml`                                                        | `b38232d29febe9ecc379f76a12460cbfc07dda63` |
+| `vendor/sha512/src`                                                                       | `src`                                                               | `41fb8f81389367d4e376b28b08c37e73b694d2cf` |
+| `vendor/noir-date/Nargo.toml`                                                             | `Nargo.toml`                                                        | `5d0990651236dc63c21671f7712ac27e8a46c375` |
+| `vendor/noir-date/src`                                                                    | `src`                                                               | `1042c7eaa545d70d9a10e724d2b151367c5d3afb` |
+| `vendor/noir-bignum/Nargo.toml`                                                           | `Nargo.toml` (ours, below)                                          | `e381b8351892fb82428c9b4a09fa09b34b7cd6b5` |
+| `vendor/noir-bignum/src`                                                                  | `src`                                                               | `4a6958dcd47a1e96f7aac96536b7fc33c7779964` |
+| `vendor/noir_rsa/Nargo.toml`                                                              | `Nargo.toml` (ours, below)                                          | `105a48d7e821b0a81f3c34c60ceb889280e25714` |
+| `vendor/noir_rsa/src`                                                                     | `src`                                                               | `2794e852766c0c5fe024e5a4dabcd39bd923d198` |
+| `vendor/oprf-nr/oprf/Nargo.toml`                                                          | `oprf/Nargo.toml` (ours, below)                                     | `aba6597741a8e4a24340742028ff247ae1cb1d74` |
+| `vendor/oprf-nr/oprf/src`                                                                 | `oprf/src`                                                          | `f0cbcffe6ef95ca7a2c4df03aeee984019957e88` |
 
-One file differs from upstream: `vendor/oprf-nr/babyjubjub/Nargo.toml` takes `poseidon2` by path (`../../noir-poseidon/poseidon2`) instead of upstream's `{ tag = "v0.6.1", git = "https://github.com/TaceoLabs/noir-poseidon", directory = "poseidon2" }`, and the test checks the whole file. `poseidon2` is used only by TACEO's `encode`, which our circuits don't call; it is vendored because the library doesn't compile without it. `lib/keyed_nullifier/src/rational_map.nr` copies the private rational map and its helpers from `hash_to_curve.nr`, and the test checks the copy against the vendored lines. All three libraries are workspace members, so `nargo test` runs their own tests too, TACEO's `encode` known answers among them.
+**Ours, in place of upstream's.** A Nargo.toml marked "ours" replaces each git dependency line (`name = { tag = …, git = … }`) with `name = { path = … }` to the vendored copy of that repository and tag, and changes nothing else: the test puts upstream's lines back and checks the result against upstream's object id, and checks that each path names the copy the line it replaced named. The two zkPassport binaries' `Prover.toml` files are nargo's, which it writes at a binary's first check; the test checks that they hold no values.
+
+**What's here, and why.** zkPassport's libraries are those the five sub-proofs of [[identity-chain]] reach through RSA signatures, with the `age` and `nationality` binaries (`compare/age/standard`, `inclusion-check/nationality/standard`), which that page fixes; the `dsc`, `id` and `integrity` binaries are one per algorithm and size and come with the circuit list a later part pins. The ECDSA side isn't vendored: `sig-check/ecdsa` reaches `zkpassport/noir_bigcurve` (through `noir-ecdsa`), which, like `noir-lang/noir_bigcurve` it forks, has no licence in any commit, so it can't be copied here (STATUS.md, Blocked). `poseidon2` is used only by TACEO's `encode`, which our circuits don't call; it is vendored because babyjubjub doesn't compile without it. `lib/keyed_nullifier/src/rational_map.nr` copies the private rational map and its helpers from `hash_to_curve.nr`, and `test/keyed-nullifier-hashes.test.ts` checks the copy against the vendored lines.
+
+**Workspace members.** TACEO's libraries and zkPassport's libraries and binaries are workspace members, so `nargo check` compiles them and `nargo test` runs their own tests (TACEO's `encode` known answers and zkPassport's commitment, date, integrity and country tests among them). The other libraries are compiled only through zkPassport's: their own suites need an oracle server (`poseidon`, `sha256`, `sha512`) or minutes of CI (`noir-bignum`'s 330 tests), and `nargo fmt --check` would hold them to our formatter. No build or test fetches anything: every dependency is a path inside this package.
 
 ## Test
 
@@ -82,4 +148,4 @@ vp run --filter @abolishus/circuits test
 
 ## Not yet
 
-The identity chain behind `comm_in`, the transport of queries and answers, and the attestation are P3-4 part 2b-4; the trustee node's seat calls `checkQuery` and `answerQuery` with P2-13. The list and record packings come with the circuits that need them.
+The identity chain's `dsc`, `id` and `integrity` binaries, every key of its circuit list and its proof checks (zkPassport's libraries and disclosure circuits are vendored, Vendored dependencies), the transport of the chain and of the output, and the attestation are P3-4 part 2b-4; the trustee node's seat calls `checkQuery` and `answerQuery` with P2-13. The list and record packings come with the circuits that need them.

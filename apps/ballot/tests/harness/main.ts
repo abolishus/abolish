@@ -6,6 +6,7 @@
 // First, as in main.tsx.
 import "../../src/worker-policy.ts";
 
+import { CASTS_DB, readCasts, recordBoarded, recordCast } from "../../src/casts.ts";
 import { STAGING } from "../../src/deployment.ts";
 import {
   createIdentity,
@@ -301,6 +302,43 @@ const harness = {
       const store = transaction.objectStore("identity");
       const get = store.get("voter");
       get.onsuccess = () => store.put({ ...(get.result as object), v: version }, "voter");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  },
+  /** Records `ballot` as cast in `electionId` at `tier` before it is sent (casts.ts). */
+  recordCast: (electionId: string, tier: number, ballot: string) =>
+    recordCast(fromHex(electionId), tier, fromHex(ballot)),
+  /** Records the checked answer for the cast whose bytes are `ballot` (casts.ts). */
+  recordBoarded: (electionId: string, tier: number, ballot: string, entry: string, link: string) =>
+    recordBoarded(fromHex(electionId), tier, fromHex(ballot), {
+      entry: fromHex(entry),
+      link: fromHex(link),
+    }),
+  /** The casts of `electionId` at `tier`, read as the page reads them, with hex and decimal strings. */
+  async readCasts(electionId: string, tier: number): Promise<string> {
+    return JSON.stringify(await readCasts(fromHex(electionId), tier), (_, v: unknown) =>
+      v instanceof Uint8Array
+        ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")
+        : typeof v === "bigint"
+          ? v.toString()
+          : v,
+    );
+  },
+  /** Rewrites one election and tier's stored casts' version in place, as another client's would read. */
+  async restampCasts(electionId: string, tier: number, version: number): Promise<void> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open(CASTS_DB, 1);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("casts", "readwrite");
+      const store = transaction.objectStore("casts");
+      const key = `${electionId}/${tier}`;
+      const get = store.get(key);
+      get.onsuccess = () => store.put({ ...(get.result as object), v: version }, key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });

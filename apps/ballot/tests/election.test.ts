@@ -192,8 +192,8 @@ describe("the display text", () => {
         questions: [
           { minSelections: definition.min_selections, maxSelections: definition.max_selections },
         ],
-        // Version 1 has no cells, and is never sealed.
-        cells: 0,
+        // Version 1 is never sealed, so it offers no tier to cast in.
+        tiers: [],
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
       });
@@ -301,7 +301,7 @@ describe("a version-5 election, a poll of questions", () => {
           minSelections: q.min_selections,
           maxSelections: q.max_selections,
         })),
-        cells: definition.electorate.flatMap((tier) => tier.cells).length,
+        tiers: definition.electorate.map((tier) => tier.tier),
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
         translations: v.value.translations.map((t) => ({

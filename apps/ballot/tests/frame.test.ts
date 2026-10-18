@@ -84,7 +84,7 @@ describe("the frame under the client's CSP", () => {
       definitionHash: POLL.definitionHash,
       version: 1,
       questions: [{ minSelections: 0, maxSelections: 1 }],
-      cells: 0,
+      tiers: [],
       opensAt: 1_790_000_000n,
       closesAt: 1_792_000_000n,
       translations: [
@@ -111,6 +111,11 @@ describe("the frame under the client's CSP", () => {
         source: {
           seal: () => new Promise<never>(() => {}),
           challenge: () => new Promise<never>(() => {}),
+          identity: () => new Promise<never>(() => {}),
+          loadBoard: () => new Promise<never>(() => {}),
+          findCell: () => new Promise<never>(() => {}),
+          l1Block: () => new Promise<never>(() => {}),
+          cast: () => new Promise<never>(() => {}),
         },
         languages: ["en-US"],
         onRestart: () => {},
@@ -139,6 +144,7 @@ describe("the frame under the client's CSP", () => {
     const code = "9c1e77a04b2d3f60e8a5c1d27b9043fe6a18c5d2e7f04b3a96c8d1e2f3a4b5c6";
     const none = () => {};
     for (const html of [
+      render(createElement(Working, { poll: POLL, kind: "finding" })),
       render(createElement(Working, { poll: POLL, kind: "sealing" })),
       render(createElement(Working, { poll: POLL, kind: "opening" })),
       render(
@@ -158,8 +164,23 @@ describe("the frame under the client's CSP", () => {
           onAgain: none,
         }),
       ),
-      ...(["cant-seal-cells", "cant-seal-version", "seal-failed", "open-failed"] as const).map(
-        (problem) => render(createElement(SealStopped, { poll: POLL, problem, onAgain: none })),
+      ...(
+        [
+          "cant-seal-version",
+          "no-identity",
+          "identity-unreadable",
+          "not-listed",
+          "board-unavailable",
+          "no-registrars",
+          "cell-refused",
+          "seal-failed",
+          "open-failed",
+          "no-l1",
+          "cast-failed",
+          "cast-faulty",
+        ] as const
+      ).map((problem) =>
+        render(createElement(SealStopped, { poll: POLL, problem, code: "root", onAgain: none })),
       ),
     ]) {
       expect(html).toContain("<h1");

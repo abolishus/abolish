@@ -9,10 +9,13 @@ import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
 import { STAGING } from "./deployment.ts";
+import { readIdentity } from "./identity.ts";
 import { parseLink } from "./link.ts";
-import { loadElection } from "./load.ts";
+import { loadBoard, loadElection } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
+import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
+import { castBallot } from "./prover-client.ts";
 import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
@@ -46,31 +49,58 @@ const source: ElectionSource = {
       throw error;
     }
   },
-  // A seal and its opening come from the worker that checked the poll, which
-  // holds it; a stopped one fails them, and the screens check the poll anew.
-  async seal(definitionHash, cell, votes) {
-    const used = worker;
-    if (used === undefined) throw new WorkerFailure("no ballot worker");
-    try {
-      return await used.seal(definitionHash, cell, votes);
-    } catch (error) {
-      used.terminate();
-      if (worker === used) worker = undefined;
-      throw error;
-    }
+  // A seal, its opening, the voter's cell and the cast come from the worker
+  // that checked the poll, which holds it; a stopped one fails them, and the
+  // screens check the poll anew.
+  seal: (definitionHash, cell, votes) =>
+    withWorker((used) => used.seal(definitionHash, cell, votes)),
+  challenge: (seal) => withWorker((used) => used.challenge(seal)),
+  identity: () => readIdentity(),
+  loadBoard: (electionId) => loadBoard(STAGING, electionId, (url, init) => fetch(url, init)),
+  findCell(definitionHash, secret, { tier, group }, entries) {
+    const pinned = STAGING.registrars;
+    if (pinned === undefined) return Promise.resolve({ ok: false, problem: "no-registrars" });
+    return withWorker((used) =>
+      used.findCell({ definitionHash, secret, tier, group, entries, ...pinned }),
+    );
   },
-  async challenge(seal) {
-    const used = worker;
-    if (used === undefined) throw new WorkerFailure("no ballot worker");
+  // No L1 source is in the client's connect-src yet: reading L1 from several
+  // independent providers, never our API, is part 3c ([[revoting]], Client rule 1).
+  l1Block: () => Promise.resolve(undefined),
+  async cast(seal, secret, l1, onProgress) {
+    let artifacts;
     try {
-      return await used.challenge(seal);
+      artifacts = await loadProverArtifacts({
+        base: import.meta.url,
+        fetch: (url, init) => fetch(url, init),
+        caches: globalThis.caches,
+      });
     } catch (error) {
-      used.terminate();
-      if (worker === used) worker = undefined;
+      if (error instanceof ProverArtifactError) return { ok: false, problem: error.problem };
       throw error;
     }
+    return withWorker((used) =>
+      castBallot(
+        used,
+        { seal, secret, l1Number: l1.number, l1Hash: l1.hash },
+        artifacts,
+        onProgress,
+      ),
+    );
   },
 };
+
+async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {
+  const used = worker;
+  if (used === undefined) throw new WorkerFailure("no ballot worker");
+  try {
+    return await ask(used);
+  } catch (error) {
+    used.terminate();
+    if (worker === used) worker = undefined;
+    throw error;
+  }
+}
 
 // A new fragment (another link opened in this tab) opens its election.
 const subscribe = (onChange: () => void) => {

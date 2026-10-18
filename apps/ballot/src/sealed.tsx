@@ -27,14 +27,27 @@ function shortHex(hash: string): string {
   return groupHex(hash).slice(0, 2).join(" ");
 }
 
-/** While the worker seals or opens: nothing to press, and nothing is sent. */
-export function Working({ poll, kind }: { poll: FramePoll; kind: "sealing" | "opening" }) {
+const WORKING = {
+  finding: { title: "findingTitle", detail: "finding" },
+  sealing: { title: "sealingTitle", detail: "sealing" },
+  opening: { title: "openingTitle", detail: "opening" },
+} as const satisfies Record<
+  string,
+  { readonly title: keyof Messages; readonly detail: keyof Messages }
+>;
+
+/**
+ * While the page reads the board and the worker finds the voter's cell in
+ * it, seals or opens: nothing to press, and nothing is sent.
+ */
+export function Working({ poll, kind }: { poll: FramePoll; kind: keyof typeof WORKING }) {
   const t = useTranslate(catalogs);
+  const { title, detail } = WORKING[kind];
   return (
     <EverydayFrame poll={poll}>
-      <ScreenTitle title={t(kind === "sealing" ? "sealingTitle" : "openingTitle")} focus>
+      <ScreenTitle title={t(title)} focus>
         <p className="m-0" role="status">
-          {t(kind)}
+          {t(detail)}
         </p>
       </ScreenTitle>
     </EverydayFrame>
@@ -196,28 +209,51 @@ export function Opened({
 }
 
 const STOPPED: Record<
-  "cant-seal-cells" | "cant-seal-version" | "seal-failed" | "open-failed",
+  | "cant-seal-version"
+  | "no-identity"
+  | "identity-unreadable"
+  | "not-listed"
+  | "board-unavailable"
+  | "no-registrars"
+  | "cell-refused"
+  | "seal-failed"
+  | "open-failed"
+  | "no-l1"
+  | "cast-failed"
+  | "cast-faulty",
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
-  "cant-seal-cells": { title: "cantSealTitle", detail: "cantSealCells" },
   "cant-seal-version": { title: "cantSealTitle", detail: "cantSealVersion" },
+  "no-identity": { title: "noIdentityTitle", detail: "noIdentity" },
+  "identity-unreadable": { title: "identityUnreadableTitle", detail: "identityUnreadable" },
+  "not-listed": { title: "notListedTitle", detail: "notListed" },
+  "board-unavailable": { title: "boardUnavailableTitle", detail: "boardUnavailable" },
+  "no-registrars": { title: "noRegistrarsTitle", detail: "noRegistrars" },
+  "cell-refused": { title: "cellRefusedTitle", detail: "cellRefused" },
   "seal-failed": { title: "sealFailedTitle", detail: "sealFailed" },
   "open-failed": { title: "openFailedTitle", detail: "openFailed" },
+  "no-l1": { title: "noL1Title", detail: "noL1" },
+  "cast-failed": { title: "castFailedTitle", detail: "castFailed" },
+  "cast-faulty": { title: "castFaultyTitle", detail: "castFaulty" },
 };
 
 export type SealProblem = keyof typeof STOPPED;
 
 /**
- * Sealing or opening stopped: what stopped it and, where answering again
- * could help, a fresh start. A poll this client can't seal offers none.
+ * Sealing, opening or casting stopped: what stopped it, the check's own
+ * name where one refused (`code`, for whoever the voter reports it to) and,
+ * where answering again could help, a fresh start. A poll this client can't
+ * seal offers none.
  */
 export function SealStopped({
   poll,
   problem,
+  code,
   onAgain,
 }: {
   poll: FramePoll;
   problem: SealProblem;
+  code?: string | undefined;
   onAgain?: (() => void) | undefined;
 }) {
   const t = useTranslate(catalogs);
@@ -236,6 +272,16 @@ export function SealStopped({
       <ScreenTitle title={t(title)} focus>
         <p className="m-0">{t(detail)}</p>
       </ScreenTitle>
+      {code === undefined ? null : (
+        <Part title={t("proofCheckTitle")}>
+          <p className="m-0 text-sm text-muted-foreground">
+            {t("proofCheckNamed")}{" "}
+            <code translate="no" className="font-mono">
+              {code}
+            </code>
+          </p>
+        </Part>
+      )}
       <div className="mt-8">
         <Note title={t("localTitle")}>
           <p className="m-0">{t("local")}</p>

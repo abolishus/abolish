@@ -488,6 +488,11 @@ def main(root):
            "ceremony-vectors.py's make_panel over the label contract-event/v9/author-16, its signing keys over "
            "contract-event/v9/author-16-signing, its KEM-key hashes and transcript hash made up)", er,
            *author_event(reg16))
+    reg_empty = registration(panels["author-3"], h3, [], [])
+    assert len(reg_empty) == 98
+    record("author-panel-registered-empty", "AuthorPanelRegistered carrying a registration of no seat and no "
+           "approval, 98 bytes, the layout's least: the event check passes it, and the election registry never "
+           "emits it (KeySetTooSmall, quorum)", er, *author_event(reg_empty))
     reg_none = registration(panels["author-3"], h3, e3, [])
     record("author-panel-registered-no-approvals", "AuthorPanelRegistered carrying author-honest-3's key set with no "
            "approval: the layout holds, so the event check passes it; the election registry never emits it "
@@ -629,6 +634,17 @@ def main(root):
         b = with_author[:first_author_element] + value.to_bytes(32, "little") + with_author[first_author_element + 32:]
         broken(f"event-data-ballot-v4-author-element-{rid}", f"ok-cell-0 whose first author_vss element is {desc}, "
                "which the board's framing refuses as it refuses one of vss", b)
+    not_point = next(v for v in range(2, 400, 2) if b2.grp.decode(v.to_bytes(32, "little")) is None)
+    np_ballot = (with_author[:first_author_element] + not_point.to_bytes(32, "little")
+                 + with_author[first_author_element + 32:])
+    framed = frame_ballot(np_ballot)
+    assert framed
+    record("ballot-v4-author-element-not-point", f"BallotSubmitted carrying ok-cell-0 with its first author_vss "
+           f"element replaced by {not_point}, even and below 2^255 - 19 but no ristretto255 encoding: framed, never "
+           "decoded, so it passes, and the verifier rejects the ballot (T-53)", board,
+           [T["BallotSubmitted"], framed[0], framed[1]], word(32) + abi_bytes(np_ballot))
+    record("relayed-ballot-v4-author-element-not-point", "RelayedBallotSubmitted carrying the same ballot", board,
+           [T["RelayedBallotSubmitted"], framed[0], framed[1]], relayed_fields + word(160) + abi_bytes(np_ballot))
     b = with_author[:ah] + (v2.MAX_OPTIONS + 1).to_bytes(4, "big") + with_author[ah + 4:]
     broken("event-data-ballot-v4-author-options-over-max", "ok-cell-0 whose author_vss count is MAX_OPTIONS + 1",
            b)
@@ -655,6 +671,15 @@ def main(root):
         b = receipt2[:67] + bytes([value]) + receipt2[68:]
         fail(f"event-data-receipt-v2-panel-{value}", f"ShareReceiptSubmitted carrying a version-2 receipt whose panel "
              f"is {value}", board, *delivery_event("ShareReceiptSubmitted", b))
+    complaint2 = bytes.fromhex(next(r for r in d2_file["records"] if r["type"] == "share-complaint")["encoding"])
+    posting2 = bytes.fromhex(next(r for r in d2_file["records"] if r["type"] == "share-posting")["encoding"])
+    for event, short, b, at, field in (("ShareComplaintSubmitted", "complaint", complaint2, 69, "D"),
+                                       ("SharePosted", "posting", posting2, 3 + 66 + 32 + v2.MLKEM_CT_LEN, "ct_dh")):
+        changed = b[:at] + not_point.to_bytes(32, "little") + b[at + 32:]
+        assert frame_delivery(v2.COMPLAINT if short == "complaint" else v2.POSTING, changed)
+        record(f"{short}-v2-{field.lower()}-not-point", f"{event} carrying a version-2 {short} whose {field} is "
+               f"{not_point}, even and in range but no ristretto255 encoding: framed, so it passes, and the delivery "
+               "check rejects it (T-53)", board, *delivery_event(event, changed))
     fail("event-data-receipt-v2-as-v1-length", "ShareReceiptSubmitted carrying a version-2 receipt without its "
          "panel byte (164 bytes, version byte 2)", board,
          *delivery_event("ShareReceiptSubmitted", receipt2[:67] + receipt2[68:]))

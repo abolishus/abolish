@@ -13,6 +13,7 @@
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
     "@abolishus/membership-prover": "workspace:*",
+    "@abolishus/trustee-node": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:"
   },

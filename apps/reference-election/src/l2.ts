@@ -368,3 +368,45 @@ export async function registerDefinition(
   if (recorded !== (refusal === undefined ? 1n : 0n))
     throw new Error(`the trustee registry's ceremonyRecorded is ${recorded}`);
 }
+
+/** What the fixture knows of a definition it registered: where the registries hold it. */
+export interface Registered {
+  readonly electionId: Uint8Array;
+  readonly stubHash: Uint8Array;
+  readonly panelId: Uint8Array;
+}
+
+/**
+ * The nodes' registration check (apps/trustee-node, `RegistrationCheck`)
+ * from L2 state: the election registry holds the definition with this hash
+ * for its election, and the trustee registry the key set with this hash for
+ * its stub and panel. The definitions are looked up in `known`, the ones the
+ * fixture registered, by hash (lowercase hex, unprefixed): a deployment reads them from the
+ * registry's `DefinitionRegistered` events. Anvil's latest block stands in
+ * for finalized L2. A definition the fixture didn't register is `false`; a
+ * failed read throws, stopping the run rather than reading as a refusal.
+ */
+export function registrationCheck(
+  l2: L2,
+  known: ReadonlyMap<string, Registered>,
+): (definitionHash: Uint8Array, keySetHash: Uint8Array) => Promise<boolean> {
+  const view = (to: Uint8Array, data: Uint8Array) =>
+    l2.rpc.call<string>("eth_call", [{ to: hex(to), data: hex(data) }, "latest"]);
+  return async (definitionHash, setHash) => {
+    const r = known.get(bytesToHex(definitionHash));
+    if (r === undefined) return false;
+    const held = unhex(
+      await view(
+        l2.electionRegistry,
+        concatBytes(selector("definitionHashOf(bytes32)"), r.electionId),
+      ),
+    );
+    const keySet = unhex(
+      await view(
+        l2.trusteeRegistry,
+        concatBytes(selector("keySetOf(bytes32,bytes32)"), r.stubHash, r.panelId),
+      ),
+    ).slice(0, 32);
+    return equalBytes(held, definitionHash) && equalBytes(keySet, setHash);
+  };
+}

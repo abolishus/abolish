@@ -22,7 +22,6 @@ import {
   openSummedShares,
   type QuestionBallotElection,
   type RegisteredKeys,
-  type SeatSecrets,
   sealSummedShares,
   type Share,
   shareReceiptRecord,
@@ -31,7 +30,7 @@ import {
   sumShares,
   tallyRules,
 } from "@abolishus/crypto";
-import { definitionHash, type FixtureDefinition } from "./election.ts";
+import { definitionHash, type FixtureDefinition, type SeatKeys } from "./election.ts";
 
 /** A ballot as every seat took it in: its share receipts to board, and each seat's shares. */
 export interface Intake {
@@ -50,7 +49,7 @@ export interface Intake {
  */
 export function intake(
   election: BallotElection | QuestionBallotElection,
-  secrets: readonly SeatSecrets[],
+  secrets: readonly SeatKeys[],
   record: Uint8Array,
   ciphertexts: readonly Uint8Array[],
 ): Intake {
@@ -59,7 +58,7 @@ export function intake(
   for (const s of secrets) {
     const ciphertext = ciphertexts[s.index - 1];
     if (ciphertext === undefined) throw new Error(`no share ciphertext for seat ${s.index}`);
-    const keys = { seat: s.index, kemSecret: s.kem.secretKey, signingSecret: s.signingSecret };
+    const keys = { seat: s.index, kemSecret: s.kemSecret, signingSecret: s.signingSecret };
     const taken = intakeBallot(election, keys, record, ciphertext);
     if (!taken.ok) throw new Error(`seat ${s.index} refused an honest ballot: ${taken.code}`);
     receipts.push(encodeShareReceipt(shareReceiptRecord(election.definitionHash, s.index, taken)));
@@ -93,7 +92,7 @@ function vssOf(d: FixtureDefinition, payload: Uint8Array): CommittedVote["vss"] 
 export function tallyOpening(
   d: FixtureDefinition,
   registered: readonly RegisteredKeys[],
-  secrets: readonly SeatSecrets[],
+  secrets: readonly SeatKeys[],
   counted: readonly Counted[],
 ): Uint8Array {
   const rules = tallyRules(d);
@@ -128,7 +127,7 @@ export function tallyOpening(
     );
     const got = openSummedShares(
       election,
-      { index: combiner.index, secretKey: combiner.kem.secretKey },
+      { index: combiner.index, secretKey: combiner.kemSecret },
       sealed,
     );
     if (!got.ok || got.cell !== 0 || got.sender !== s.index)
@@ -158,7 +157,7 @@ export function tallyOpening(
  */
 export function destructionStatements(
   d: FixtureDefinition,
-  secrets: readonly SeatSecrets[],
+  secrets: readonly SeatKeys[],
 ): Uint8Array[] {
   const hash = definitionHash(d);
   return secrets.map((s) =>

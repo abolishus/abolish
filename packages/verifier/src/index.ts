@@ -96,6 +96,7 @@ export {
   type L1ErrorCode,
   type L1Evidence,
   type L1Header,
+  latestLocatorFromState,
   lowestSegmentSlot,
   MAX_SEGMENTS_READ,
   NodePool,
@@ -104,7 +105,21 @@ export {
   type Rlp,
   RlpError,
   type StateAnchor,
+  type StateLocator,
 } from "./l1.ts";
+export {
+  type ArchiveDeployment,
+  type ArchiveFinding,
+  type ArchiveWalk,
+  type ArchiveWalkOptions,
+  DEFAULT_MANIFEST_BUDGET,
+  type LocatorRef,
+  MANIFEST_DATA_LIMIT,
+  type ManifestOrigin,
+  type ReachedManifest,
+  type TransactionSource,
+  walkArchive,
+} from "./archive.ts";
 export {
   ACCUMULATOR_SLOT,
   accumulatorAtOutputRoot,

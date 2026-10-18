@@ -457,3 +457,54 @@ export function receiptKeyWords(
     }
   });
 }
+
+/** The board anchor's last archive locator and the number posted, as its state holds them. */
+export type StateLocator =
+  | { readonly kind: "none"; readonly count: bigint }
+  | { readonly kind: "locator"; readonly locator: Uint8Array; readonly count: bigint }
+  // A length no locator the anchor accepts has, or no Solidity `bytes`
+  // layout: only a deployer's initcode could write it (docs/spec/contracts.md,
+  // Known-weak, Constructor effects), and it is reported like any other
+  // locator the anchor's framing refuses.
+  | { readonly kind: "locator-framing"; readonly count: bigint };
+
+/** The longest locator the anchor accepts (docs/spec/contracts.md, Archive locator). */
+const MAX_LOCATOR_LENGTH = 128;
+
+const wordValue = (w: Uint8Array) => w.reduce((n, x) => (n << 8n) | BigInt(x), 0n);
+
+/**
+ * The last archive locator and the count, read from the board anchor's
+ * state at the header's block (docs/spec/contracts.md, Archive locator): a
+ * Solidity `bytes` at slot `A + 2` and the word at `A + 3`. A short value
+ * (at most 31 bytes) is left-aligned in its slot with `2·len` in the lowest
+ * byte; a longer one has `2·len + 1` there and its bytes from slot
+ * `keccak256(abi.encode(A + 2))`, 32 per slot. No more than 128 bytes'
+ * slots are ever read, whatever the length word says (T-52). This is the
+ * path that outlives L1's logs (EIP-4444).
+ */
+export function latestLocatorFromState(
+  l1: Pick<L1Evidence, "header" | "anchor" | "nodes">,
+): StateLocator {
+  const root = storageRoot(l1);
+  const read = (slot: Uint8Array) => storageWord(l1.nodes.get(root, keccak_256(slot)));
+  const count = wordValue(read(word(ANCHOR_NAMESPACE + 3n)));
+  const head = read(word(ANCHOR_NAMESPACE + 2n));
+  const low = head[31] as number;
+  if ((low & 1) === 0) {
+    const len = low >> 1;
+    if (len === 0) return { kind: "none", count };
+    if (len > 31) return { kind: "locator-framing", count };
+    return { kind: "locator", locator: head.slice(0, len), count };
+  }
+  const len = (wordValue(head) - 1n) >> 1n;
+  if (len < 32n || len > BigInt(MAX_LOCATOR_LENGTH)) return { kind: "locator-framing", count };
+  const start = wordValue(keccak_256(word(ANCHOR_NAMESPACE + 2n)));
+  const out = new Uint8Array(Number(len));
+  for (let i = 0; i * 32 < out.length; i++) {
+    // Slots wrap at 2^256, as the EVM's arithmetic does.
+    const w = read(word((start + BigInt(i)) & ((1n << 256n) - 1n)));
+    out.set(w.subarray(0, Math.min(32, out.length - i * 32)), i * 32);
+  }
+  return { kind: "locator", locator: out, count };
+}

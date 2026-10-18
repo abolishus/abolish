@@ -13581,8 +13581,8 @@
       "error": "unknown-version"
     },
     {
-      "id": "reserved-deployment-type",
-      "description": "The deployment record's reserved type",
+      "id": "deployment-type",
+      "description": "The deployment record's type, which a release decoder doesn't know",
       "type": {
         "kind": "ref",
         "name": "release"

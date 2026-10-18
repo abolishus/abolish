@@ -16,6 +16,7 @@ import { BallotQueue, startWorker } from "@abolishus/worker";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
+import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 
 /** The API's answer to one ballot: its board entry, or the refusal's code and the verifier's. */
@@ -61,8 +62,17 @@ export async function startApi({ panels, clock, now }: OperatorOptions): Promise
       connection.disconnect();
     },
   ];
+  // Every step runs whatever an earlier one threw, so the keys and the
+  // schema go however the run ends; the first error is rethrown.
   const close = async () => {
-    for (const step of closing.reverse()) await step();
+    let failed: { readonly error: unknown } | undefined;
+    for (const step of closing.reverse())
+      try {
+        await step();
+      } catch (error) {
+        failed ??= { error };
+      }
+    if (failed !== undefined) throw failed.error;
   };
   try {
     const db = await testDb();
@@ -90,12 +100,11 @@ export async function startApi({ panels, clock, now }: OperatorOptions): Promise
         await appendEntry(sql, electionId, segment, transcript);
       },
       async submit(electionId, ballot) {
-        const r = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ electionId: bytesToHex(electionId), ballot: bytesToHex(ballot) }),
-        });
-        const body = (await r.json()) as {
+        const r = await post(
+          url,
+          JSON.stringify({ electionId: bytesToHex(electionId), ballot: bytesToHex(ballot) }),
+        );
+        const body = JSON.parse(r.body) as {
           entry?: string;
           code?: string;
           data?: { code?: string };
@@ -114,4 +123,28 @@ export async function startApi({ panels, clock, now }: OperatorOptions): Promise
     await close();
     throw e;
   }
+}
+
+/**
+ * POSTs `json` to `url` on a connection of its own: a ballot's proof takes
+ * longer than the server's keep-alive timeout, and a kept-alive socket the
+ * server closes just as the next ballot is sent fails it with `ECONNRESET`.
+ */
+function post(url: string, json: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      { method: "POST", agent: false, headers: { "content-type": "application/json" } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end(json);
+  });
 }

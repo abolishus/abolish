@@ -34,10 +34,11 @@ describe("vendored code", () => {
     expect(readdirSync(new URL("vendor/", ROOT)).sort()).toEqual([
       "account-abstraction",
       "openzeppelin-contracts",
+      "safe-smart-account",
     ]);
   });
 
-  test.each(["account-abstraction", "openzeppelin-contracts"])(
+  test.each(["account-abstraction", "openzeppelin-contracts", "safe-smart-account"])(
     "%s matches its recorded sums and tree hash",
     (name) => {
       const { lines, tree } = recorded(name);

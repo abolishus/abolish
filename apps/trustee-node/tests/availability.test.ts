@@ -22,6 +22,7 @@ import {
   objectCid,
   RECORD_TYPES,
 } from "@abolishus/crypto";
+import { RpcError } from "@abolishus/node";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import {
@@ -283,6 +284,31 @@ describe("the ballot extent", () => {
     const w = world();
     w.withheld.add(26).add(27);
     expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+  });
+
+  test("holds the extent it attested for the decision at c_I, and none before attesting", async () => {
+    const w = world();
+    w.l1Now = w.fixedAt - 1n;
+    await w.seat.step();
+    expect(await w.seat.heldExtent()).toBeUndefined();
+    w.l1Now = w.fixedAt;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    // Later segments withheld change nothing: only the runs through C_A are read.
+    w.withheld.add(26).add(27);
+    const held = await w.seat.heldExtent();
+    expect(held?.boardSegment).toBe(25n);
+    expect(held?.entries.map(key)).toEqual(w.board.entries.slice(0, Number(cA(w).size)).map(key));
+  });
+
+  test("refuses to hand over an extent other than the attested one, or one it no longer holds", async () => {
+    const w = world();
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    // An L1 node hiding C_A's anchor shows an earlier checkpoint as C_A.
+    w.anchors = w.board.anchors.filter((a) => a.checkpoint.segment !== 25);
+    await expect(w.seat.heldExtent()).rejects.toBeInstanceOf(RpcError);
+    w.anchors = w.board.anchors;
+    w.withheld.add(10);
+    await expect(w.seat.heldExtent()).rejects.toThrow("isn't held any more");
   });
 
   test("a threshold of seats' attestations makes the ballot extent available", async () => {

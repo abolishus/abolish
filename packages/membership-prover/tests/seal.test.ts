@@ -1,5 +1,6 @@
 import {
   answersMessage,
+  castPostingSeatV3,
   castSealV3,
   ceremonyKeygen,
   ceremonyTranscriptHash,
@@ -168,6 +169,14 @@ describe("a sealed ballot, proved", () => {
         const flipped = Uint8Array.from(m);
         flipped[0] = (flipped[0] as number) ^ 1;
         expect(post(flipped)).toEqual({ ok: false, code: "posting-encapsulation" });
+        // The client's own check before it offers a posting agrees.
+        expect(castPostingSeatV3(election, cast.ballot, seat, { ciphertext, m })).toEqual({
+          ok: true,
+        });
+        expect(castPostingSeatV3(election, cast.ballot, seat, { ciphertext, m: flipped })).toEqual({
+          ok: false,
+          code: "posting-encapsulation",
+        });
       }
 
       // A recast under a newer block (revoting Client rule 4): the same

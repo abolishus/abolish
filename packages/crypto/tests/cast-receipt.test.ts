@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
 import {
+  castPostingSeatV3,
   castReceiptSeatV3,
   decodeElectionDefinitionV5,
   encodeShareReceipt,
@@ -36,6 +37,7 @@ interface Vectors {
     readonly ballotHash?: string;
     readonly shareHash?: string;
     readonly receipt?: string;
+    readonly ciphertext?: string;
   }[];
 }
 
@@ -59,17 +61,21 @@ const definitionOf = (name: string) => {
   return decodeElectionDefinitionV5(hex(e.definition));
 };
 
-/** The election under `seats`' registered keys, with any seat's signing key replaced by `signing`'s. */
+/**
+ * The election under `seats`' registered keys, with any seat's signing key
+ * replaced by `signing`'s and its KEM key by seat `kemOf[seat]`'s.
+ */
 function electionOf(
   name: string,
   seats: readonly number[],
   signing: Readonly<Record<number, Uint8Array>> = {},
+  kemOf: Readonly<Record<number, number>> = {},
 ): QuestionBallotElection {
   const d = definitionOf(name);
   const keys: RegisteredKeys[] = signers(seats).map((s) => ({
     ...s,
     signingKey: signing[s.index] ?? s.signingKey,
-    kemKey: kem[s.index - 1]?.publicKey as RegisteredKeys["kemKey"],
+    kemKey: kem[(kemOf[s.index] ?? s.index) - 1]?.publicKey as RegisteredKeys["kemKey"],
   }));
   return questionBallotElection(d, checkedKeySetForTests(keys, d.ceremony_transcript_hash));
 }
@@ -162,5 +168,66 @@ describe("castReceiptSeatV3", () => {
     changed[3] = (changed[3] as number) ^ 1;
     expect(() => castReceiptSeatV3(other, changed, receiptOf(c))).toThrow(TypeError);
     expect(() => castReceiptSeatV3(election, hex(c.record).subarray(1), receiptOf(c))).toThrow();
+  });
+});
+
+// The client's check of a kept `m_i` before it offers a posting ([[delivery]],
+// Client rule 4). The vectors keep no `m_i`, so a posting with a made-up one
+// can only fail at its last step, the re-encapsulation: reaching it shows the
+// ciphertext was judged against this seat's share hash and this seat's
+// registered KEM key. A kept `m_i` that passes is the membership prover's
+// test (seal.test.ts), over a ballot sealed end to end.
+describe("castPostingSeatV3", () => {
+  const c = caseOf("intake-ok-seat-2");
+  const other = caseOf("intake-ok-seat-1");
+  const posting = (m = new Uint8Array(32)) => ({ ciphertext: hex(c.ciphertext as string), m });
+
+  test("reaches the re-encapsulation only for the seat's own ciphertext under its own key", () => {
+    const election = electionOf(c.election, c.registered);
+    expect(castPostingSeatV3(election, hex(c.record), c.seat, posting())).toEqual({
+      ok: false,
+      code: "posting-encapsulation",
+    });
+    // Another seat's ciphertext of the same ballot hashes to another share hash.
+    expect(castPostingSeatV3(election, hex(c.record), other.seat, posting())).toEqual({
+      ok: false,
+      code: "posting-hash",
+    });
+  });
+
+  test("judges the ephemeral's proof under the seat's registered key, never another seat's", () => {
+    const swapped = electionOf(c.election, c.registered, {}, { [c.seat]: other.seat });
+    expect(castPostingSeatV3(swapped, hex(c.record), c.seat, posting())).toEqual({
+      ok: false,
+      code: "posting-proof",
+    });
+  });
+
+  test("refuses an m_i of another length and a seat with no registered key", () => {
+    const election = electionOf(c.election, c.registered);
+    for (const m of [new Uint8Array(31), new Uint8Array(33), new Uint8Array()])
+      expect(castPostingSeatV3(election, hex(c.record), c.seat, posting(m))).toEqual({
+        ok: false,
+        code: "posting-malformed",
+      });
+    const without = electionOf(
+      c.election,
+      c.registered.filter((seat) => seat !== c.seat),
+    );
+    expect(castPostingSeatV3(without, hex(c.record), c.seat, posting())).toEqual({
+      ok: false,
+      code: "posting-seat",
+    });
+  });
+
+  test("throws for a seat outside the panel, a ballot of another election or bytes that aren't a version-3 ballot", () => {
+    const election = electionOf(c.election, c.registered);
+    const record = hex(c.record);
+    for (const seat of [0, -1, 1.5, 17, Number.NaN])
+      expect(() => castPostingSeatV3(election, record, seat, posting())).toThrow(RangeError);
+    const changed = record.slice();
+    changed[3] = (changed[3] as number) ^ 1;
+    expect(() => castPostingSeatV3(election, changed, c.seat, posting())).toThrow(TypeError);
+    expect(() => castPostingSeatV3(election, record.subarray(1), c.seat, posting())).toThrow();
   });
 });

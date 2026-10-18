@@ -14,6 +14,7 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type PostingResult,
   type ReceiptResult,
   type CommitmentResult,
   type FindCellRequest,
@@ -277,6 +278,26 @@ export class BallotWorker {
     // The one place a `CheckedReceipt` is made: the worker passed these bytes.
     const checked = { seat: result.seat, receipt: receipt.slice() } as unknown as CheckedReceipt;
     return { ok: true, checked };
+  }
+
+  /**
+   * Whether `share`, kept for a seat of `ballot`, a version-3 record naming
+   * the poll the worker last checked, would deliver that seat if posted: checked against
+   * the poll's registered KEM key for the seat before any posting is offered
+   * (Client rule 4). The worker gets its own copy of `m` and zeroes it.
+   */
+  async posting(
+    ballot: Uint8Array,
+    share: { readonly seat: number; readonly ciphertext: Uint8Array; readonly m: Uint8Array },
+  ): Promise<PostingResult> {
+    const { seat, ciphertext, m } = share;
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "posting", ballot, seat, ciphertext, m }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "posting") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
   }
 
   async #request(

@@ -28,6 +28,7 @@ import {
   type CastResult,
   type CheckElectionRequest,
   type FindCellRequest,
+  type PostingRequest,
   PROTOCOL_VERSION,
 } from "../src/worker/protocol.ts";
 import { BallotSession } from "../src/worker/session.ts";
@@ -258,6 +259,76 @@ describe("casting a seal", () => {
       });
     },
     3 * PROOF_TIMEOUT,
+  );
+
+  test(
+    "each seat's kept m_i passes as a posting under its own registered key, and nothing else does (Client rule 4)",
+    async () => {
+      const { session, seal } = sealed();
+      const p = snarkjs();
+      const result = await session.cast(castRequest(seal, p.port));
+      p.close();
+      admitted(result);
+      if (!result.ok) throw new Error("unreachable");
+      const ask = (
+        share: { seat: number; ciphertext: Uint8Array; m: Uint8Array },
+        ballot = result.ballot,
+        on = session,
+      ) =>
+        on.posting({
+          v: PROTOCOL_VERSION,
+          id: 7,
+          kind: "posting",
+          ballot,
+          seat: share.seat,
+          ciphertext: share.ciphertext,
+          m: Uint8Array.from(share.m),
+        });
+      const kept = result.ciphertexts.map(({ seat, ciphertext, m }) => {
+        if (m === undefined) throw new Error(`seat ${seat}: no m kept before any receipt`);
+        return { seat, ciphertext, m };
+      });
+      for (const share of kept) expect(ask(share)).toEqual({ ok: true });
+      const [first, second] = kept as [(typeof kept)[number], (typeof kept)[number]];
+      const flipped = Uint8Array.from(first.m);
+      flipped[31] = (flipped[31] as number) ^ 0x80;
+      expect(ask({ ...first, m: flipped })).toEqual({
+        ok: false,
+        problem: "refused",
+        code: "posting-encapsulation",
+      });
+      // Another seat's m_i, or its ciphertext, never passes for this seat.
+      expect(ask({ ...first, m: second.m })).toEqual({
+        ok: false,
+        problem: "refused",
+        code: "posting-encapsulation",
+      });
+      expect(ask({ ...first, ciphertext: second.ciphertext })).toEqual({
+        ok: false,
+        problem: "refused",
+        code: "posting-hash",
+      });
+      // The worker's copy of m is zeroed once judged; the caller's isn't touched.
+      const request: PostingRequest = {
+        v: PROTOCOL_VERSION,
+        id: 8,
+        kind: "posting",
+        ballot: result.ballot,
+        ...first,
+        m: Uint8Array.from(first.m),
+      };
+      expect(session.posting(request)).toEqual({ ok: true });
+      expect(request.m.every((b) => b === 0)).toBe(true);
+      expect(first.m.some((b) => b !== 0)).toBe(true);
+      // A ballot that isn't a cast of the poll held, a seat outside its panel, or no poll held.
+      expect(ask(first, result.ballot.subarray(1))).toEqual({ ok: false, problem: "unknown" });
+      expect(ask({ ...first, seat: 17 })).toEqual({ ok: false, problem: "unknown" });
+      expect(ask(first, result.ballot, new BallotSession())).toEqual({
+        ok: false,
+        problem: "unknown",
+      });
+    },
+    2 * PROOF_TIMEOUT,
   );
 
   test(

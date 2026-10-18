@@ -1,12 +1,15 @@
 // The node's deployment configuration (README, Configuration): the pinned
-// panel, the seat, where the identity key and the store live, and the
-// coordinator. JSON at a transport boundary, so it is parsed with a strict
+// panel, the seat, where the identity key and the store live, the
+// coordinator, and, for the availability duty, the chains' nodes, the
+// deployment's contracts, the paying account's key and the block sources. JSON at a transport boundary, so it is parsed with a strict
 // schema; the panel's keys are protocol bytes, so they are checked by
 // `@abolishus/crypto` (`panelId`) and must hash to the `panelId` the trustee
 // compared out of band, so a mistyped key can't pin another panel (T-17).
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { panelId, PanelError, type Panel } from "@abolishus/crypto";
+import { type AnchorTiming, parseRpcUrl } from "@abolishus/node";
+import { DEFAULT_MAX_BOARD_BYTES, MAX_GATEWAYS, parseGateway } from "@abolishus/verifier";
 import { z } from "zod";
 import { coordinatorUrl } from "./client.ts";
 
@@ -15,6 +18,59 @@ const hexOf = (bytes: number) =>
     .string()
     .regex(new RegExp(`^(0x)?[0-9a-f]{${2 * bytes}}$`))
     .transform((s) => Uint8Array.from(Buffer.from(s.replace(/^0x/, ""), "hex")));
+
+// A decimal below 2^bits, as JSON carries numbers past 2^53 only as text.
+const decimal = (bits: number) =>
+  z
+    .string()
+    .regex(/^(0|[1-9][0-9]{0,77})$/)
+    .transform(BigInt)
+    .refine((v) => v < 1n << BigInt(bits), `must be below 2^${bits}`);
+
+// A week: longer than any margin a ballot extent's windows leave.
+const seconds = z
+  .number()
+  .int()
+  .min(0)
+  .max(7 * 86_400)
+  .transform(BigInt);
+
+const AVAILABILITY = z
+  .strictObject({
+    l1: z.string().min(1),
+    l1ChainId: decimal(64),
+    l2: z.string().min(1),
+    anchor: hexOf(20),
+    anchorFromBlock: decimal(64),
+    anchorClock: z.strictObject({
+      epoch: decimal(64),
+      period: decimal(64).refine((v) => v > 0n, "must be positive"),
+      deadline: decimal(64),
+    }),
+    registry: hexOf(20),
+    registryFromBlock: decimal(64),
+    board: hexOf(20),
+    boardFromBlock: decimal(64),
+    portal: hexOf(20),
+    accountKeyFile: z.string().min(1),
+    l1MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
+    l2MaxFeePerGas: decimal(256).refine((v) => v > 0n, "must be positive"),
+    forceAfterSeconds: seconds,
+    forceLeadSeconds: seconds,
+    sendMarginSeconds: seconds,
+    maxBoardBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(DEFAULT_MAX_BOARD_BYTES),
+    gateways: z.array(z.string()).max(MAX_GATEWAYS).default([]),
+    blocks: z.string().min(1).optional(),
+  })
+  .refine((a) => a.gateways.length > 0 || a.blocks !== undefined, {
+    message: "needs a gateway or a blocks directory",
+    path: ["gateways"],
+  });
 
 const CONFIG = z.strictObject({
   panel: z.strictObject({
@@ -33,7 +89,40 @@ const CONFIG = z.strictObject({
   store: z.string().min(1),
   coordinator: z.string().min(1),
   pollSeconds: z.number().min(1).max(3600).default(5),
+  availability: AVAILABILITY.optional(),
 });
+
+/**
+ * Where the availability duty reads and sends (docs/spec/availability.md,
+ * What a seat does). The node URLs may hold a provider's key, so they are
+ * never printed.
+ */
+export interface AvailabilityConfig {
+  readonly l1: URL;
+  readonly l1ChainId: bigint;
+  /** The seat's own L2 node, deriving its finalized chain from L1. */
+  readonly l2: URL;
+  readonly anchor: Uint8Array;
+  readonly anchorFromBlock: bigint;
+  /** The anchor deployment's clock, pinned: its getters are only compared with it. */
+  readonly anchorClock: AnchorTiming;
+  readonly registry: Uint8Array;
+  readonly registryFromBlock: bigint;
+  readonly board: Uint8Array;
+  readonly boardFromBlock: bigint;
+  /** The L2's `OptimismPortal` on L1, for forced inclusion. */
+  readonly portal: Uint8Array;
+  readonly accountKeyFile: string;
+  readonly l1MaxFeePerGas: bigint;
+  readonly l2MaxFeePerGas: bigint;
+  readonly forceAfter: bigint;
+  readonly forceLead: bigint;
+  readonly sendMargin: bigint;
+  readonly maxBoardBytes: number;
+  readonly gateways: readonly URL[];
+  /** A directory of CAR files read before any gateway. */
+  readonly blocks: string | undefined;
+}
 
 export interface NodeConfig {
   readonly panel: Panel;
@@ -44,6 +133,7 @@ export interface NodeConfig {
   readonly store: string;
   readonly coordinator: string;
   readonly pollSeconds: number;
+  readonly availability: AvailabilityConfig | undefined;
 }
 
 /** A configuration the node can't run with; the message says which field. */
@@ -89,6 +179,42 @@ export function parseConfig(json: string): NodeConfig {
     store: c.store,
     coordinator: c.coordinator,
     pollSeconds: c.pollSeconds,
+    availability: c.availability && availabilityOf(c.availability),
+  };
+}
+
+function availabilityOf(a: z.output<typeof AVAILABILITY>): AvailabilityConfig {
+  // Neither error quotes the URL, which may hold a provider's key.
+  const url = (field: string, parse: (text: string) => URL, text: string) => {
+    try {
+      return parse(text);
+    } catch (e) {
+      if (e instanceof RangeError)
+        throw new ConfigError(`config: availability.${field}: ${e.message}`);
+      throw e;
+    }
+  };
+  return {
+    l1: url("l1", parseRpcUrl, a.l1),
+    l1ChainId: a.l1ChainId,
+    l2: url("l2", parseRpcUrl, a.l2),
+    anchor: a.anchor,
+    anchorFromBlock: a.anchorFromBlock,
+    anchorClock: a.anchorClock,
+    registry: a.registry,
+    registryFromBlock: a.registryFromBlock,
+    board: a.board,
+    boardFromBlock: a.boardFromBlock,
+    portal: a.portal,
+    accountKeyFile: a.accountKeyFile,
+    l1MaxFeePerGas: a.l1MaxFeePerGas,
+    l2MaxFeePerGas: a.l2MaxFeePerGas,
+    forceAfter: a.forceAfterSeconds,
+    forceLead: a.forceLeadSeconds,
+    sendMargin: a.sendMarginSeconds,
+    maxBoardBytes: a.maxBoardBytes,
+    gateways: a.gateways.map((g, i) => url(`gateways.${i}`, parseGateway, g)),
+    blocks: a.blocks,
   };
 }
 
@@ -97,24 +223,36 @@ export function parseConfig(json: string): NodeConfig {
  * its owner can reach, as `FileStore` requires of its root. A key others
  * can read could sign the seat's approvals (T-37).
  */
-export async function readIdentityKey(path: string): Promise<Uint8Array> {
+export function readIdentityKey(path: string): Promise<Uint8Array> {
+  return readKeyFile(path, "identity key");
+}
+
+/**
+ * The availability duty's paying account key, held as the identity key is:
+ * it grants no authority over the board (the board takes a record for its
+ * seat's signature whoever sends it), but whoever reads it can spend the
+ * account's funds and so starve the seat's sends (T-50).
+ */
+export function readAccountKey(path: string): Promise<Uint8Array> {
+  return readKeyFile(path, "account key");
+}
+
+async function readKeyFile(path: string, what: string): Promise<Uint8Array> {
   // Opened without following a link and checked through the same handle, so
   // the file checked is the file read.
   let file;
   try {
     file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (e) {
-    throw new ConfigError(`identity key: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
+    throw new ConfigError(`${what}: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
   }
   try {
     const info = await file.stat();
-    if (!info.isFile()) throw new ConfigError("identity key: not a regular file");
+    if (!info.isFile()) throw new ConfigError(`${what}: not a regular file`);
     if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())
-      throw new ConfigError(
-        "identity key: the file must be owned by this user and mode 0600 or 0400",
-      );
+      throw new ConfigError(`${what}: the file must be owned by this user and mode 0600 or 0400`);
     const text = (await file.readFile("utf8")).replace(/\n$/, "");
-    if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError("identity key: expected 64 hex digits");
+    if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError(`${what}: expected 64 hex digits`);
     return Uint8Array.from(Buffer.from(text, "hex"));
   } finally {
     await file.close();

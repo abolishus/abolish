@@ -7,8 +7,10 @@ import {
   encodeElectionDefinition,
   type L1Origin,
   objectCid,
+  pinnedVersion,
+  RECORD_TYPES,
 } from "@abolishus/crypto";
-import { chainId, L2Error, type Rpc } from "@abolishus/node";
+import { chainId, L2Error, type Rpc, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { concatBytes, hexToBytes } from "@noble/hashes/utils.js";
@@ -364,6 +366,13 @@ describe("l1BoardAnchors", () => {
     );
   });
 
+  test("gives the board-entry version the registered definition pins", async () => {
+    const { d, election, options } = await setup("board-version", 600n);
+    const reader = await l1BoardAnchors(options, election);
+    expect(reader.boardVersion).toBe(pinnedVersion(d, RECORD_TYPES.boardEntry));
+    expect(reader.boardVersion).toBeTypeOf("number");
+  });
+
   test("an AvailabilitySeat over it waits until s_A's anchoring deadline has passed on finalized L1", async () => {
     const { f, election, options } = await setup("seat", 600n);
     await advanceTo(end(f + 1n) + 60n);
@@ -417,6 +426,17 @@ describe("l1BoardAnchors refuses an election", () => {
     await refused(s, "definition-version");
   });
 
+  test("whose definition pins a board-entry version the node doesn't read", async () => {
+    // This release reads board-entry versions 1 and 3 to 7, not 2.
+    const pins = typical.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 2 } : p,
+    );
+    await refused(
+      await setup("board-v2", 600n, { profile: { ...typical.profile, pins } }),
+      "definition-version",
+    );
+  });
+
   test("whose definition names another anchor, registry or chain", async () => {
     const other = new Uint8Array(20).fill(9);
     await refused(await setup("anchor", 600n, { l1_anchor: other }), "definition-deployment");
@@ -464,7 +484,7 @@ describe("l1BoardAnchors refuses an election", () => {
         created(id, change(o)),
         registered(id, encodeElectionDefinition(d), electionDefinitionHash(d), o),
       ]);
-    // An earlier time, which would lower `f`; another hash; a block not yet final.
+    // An earlier time, which would lower `f`; another hash.
     await refused(
       await shifted("time", (o) => ({ ...o, timestamp: o.timestamp - PERIOD })),
       "origin",
@@ -473,7 +493,9 @@ describe("l1BoardAnchors refuses an election", () => {
       await shifted("hash", (o) => ({ ...o, hash: new Uint8Array(32).fill(3) })),
       "origin",
     );
-    await refused(await shifted("unfinal", (o) => ({ ...o, number: o.number + 1000n })), "origin");
+    // A block not yet final at the L1 node is a lag to wait out, retried, never a refusal.
+    const unfinal = await shifted("unfinal", (o) => ({ ...o, number: o.number + 1000n }));
+    await expect(l1BoardAnchors(unfinal.options, unfinal.election)).rejects.toThrow(RpcError);
   });
 
   test("that closes before its creation, or whose s_A is past a u32", async () => {

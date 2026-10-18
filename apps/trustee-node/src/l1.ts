@@ -17,7 +17,15 @@
 // block of its number. The L2 node is trusted for the drift between that
 // origin and the creation, which the verifier's 4.4 bounds from the archived
 // event's L2 time and the registration's logs don't carry.
-import { type Anchor, type AnchorClock, electionDefinitionHash } from "@abolishus/crypto";
+import {
+  type Anchor,
+  type AnchorClock,
+  BOARD_ENTRY,
+  type BoardEntryVersion,
+  electionDefinitionHash,
+  pinnedVersion,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
 import {
   type AnchorTiming,
   anchorTiming,
@@ -71,7 +79,10 @@ export interface L1AnchorOptions {
 export type L1AnchorRefusal =
   /** A node is on another chain than the deployment's. */
   | "chain"
-  /** The registry registered a definition of a version this node doesn't read. */
+  /**
+   * The registry registered a definition of a version this node doesn't
+   * read, or one pinning a board-entry version it doesn't read.
+   */
   | "definition-version"
   /** The registered definition isn't the one the seat approved. */
   | "definition-hash"
@@ -79,7 +90,7 @@ export type L1AnchorRefusal =
   | "definition-deployment"
   /** The anchor's clock getters disagree with the pinned clock. */
   | "clock"
-  /** The creation's L1 origin isn't the finalized L1 block of its number. */
+  /** The creation's L1 origin isn't the finalized L1 block of its number: another hash or time. */
   | "origin"
   /** The creation's L1 origin is before the anchor's epoch, or `f` or `s_A` past a `u32`. */
   | "outside-clock";
@@ -94,6 +105,8 @@ export class L1AnchorError extends Error {
 }
 
 const U32_MAX = 0xffffffffn;
+const isBoardVersion = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
 const bytesToHex = (b: Uint8Array) =>
   Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const equal = (a: Uint8Array, b: Uint8Array) =>
@@ -106,7 +119,8 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * to be the approved one through this deployment's anchor, registry and
  * chains, requires the anchor's getters to give the pinned clock and the
  * creation's L1 origin to be a finalized L1 block, and fixes `f` from that
- * origin. Throws `L1AnchorError` for a
+ * origin. It also gives the board-entry version the definition pins, which
+ * the seat checks the board under. Throws `L1AnchorError` for a
  * refusal, the node package's `L2Error` when the creation or registration is
  * missing or repeated, and `RpcError` when a node's answer can't be read.
  *
@@ -118,7 +132,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 export async function l1BoardAnchors(
   options: L1AnchorOptions,
   election: ApprovedElection,
-): Promise<FinalizedBoardAnchors> {
+): Promise<FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion }> {
   const { l1, l2, anchor } = options;
   if ((await chainId(l1)) !== options.l1ChainId || (await chainId(l2)) !== options.l2ChainId)
     throw new L1AnchorError("chain");
@@ -142,6 +156,10 @@ export async function l1BoardAnchors(
     d.l2_chain_id !== options.l2ChainId
   )
     throw new L1AnchorError("definition-deployment");
+  // The version the seat checks the board under is the registered
+  // definition's own pin, so it is the one the verifier's 4.2 reads.
+  const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
+  if (!isBoardVersion(boardVersion)) throw new L1AnchorError("definition-version");
   const finalized = await finalizedHeader(l1);
   // A wrong clock would fix `C_A` at another moment or segment, and the
   // seat's one attestation of the point would name a checkpoint the
@@ -159,7 +177,13 @@ export async function l1BoardAnchors(
   // with it a lower `f` that would count anchors made before the election
   // existed ([[contracts]], Board anchor, Pre-creation anchors).
   const created = reg.created;
-  if (created.number > finalized.number) throw new L1AnchorError("origin");
+  // An origin past this node's finalized block may be one the seat's L2
+  // node saw finalized first: this node lagging is no refusal, and the
+  // reader is set up again once it catches up (an RpcError is retried).
+  if (created.number > finalized.number)
+    throw new RpcError(
+      "eth_getBlockByNumber: the creation's L1 origin isn't final at this node yet",
+    );
   let held;
   try {
     held = decodeHeader(
@@ -185,6 +209,7 @@ export async function l1BoardAnchors(
   const clock: AnchorClock = { ...timing, lastSegment: Number(sA) };
 
   return {
+    boardVersion,
     async read(electionId) {
       if (!equal(electionId, election.electionId))
         throw new RangeError("this reader reads only its own election's anchors");

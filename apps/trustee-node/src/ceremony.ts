@@ -435,6 +435,14 @@ export class CeremonySeat {
     return { ok: true, value: { registration, signature: approved.signature } };
   }
 
+  /** The stub hash of every stub the seat approved, in the store's order. */
+  async approvedStubs(): Promise<Uint8Array[]> {
+    return (await this.#config.store.list("approvals")).map((name) => {
+      if (!HEX64.test(name)) throw new Error(`trustee node: an approval record named ${name}`);
+      return Uint8Array.from(Buffer.from(name, "hex"));
+    });
+  }
+
   /**
    * The election an approved stub registers, with the seat's per-election
    * signing secret from the approved run, for the duties after the ceremony

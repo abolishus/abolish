@@ -18,7 +18,7 @@ import type {
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -116,8 +116,23 @@ export interface CastRequest {
   readonly prover: MessagePort;
 }
 
+/**
+ * The identity commitment of `secret`, `Poseidon2(s · B8)`
+ * ([[identity-backup]], Identity secret), which a Tier 0 registration sends
+ * ([[registration]], Request). Asked of the worker, like every use of the
+ * secret, so the page never computes with it (T-12); it needs no poll.
+ */
+export interface CommitmentRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "commitment";
+  /** 32 bytes; the worker zeroes its copy once it has the commitment. */
+  readonly secret: Uint8Array;
+}
+
 export type WorkerRequest =
   | CheckElectionRequest
+  | CommitmentRequest
   | FindCellRequest
   | SealRequest
   | ChallengeRequest
@@ -140,6 +155,11 @@ export type FindCellResult =
   | { readonly ok: true; readonly cell: number }
   | { readonly ok: false; readonly problem: "no-election" | "secret" }
   | { readonly ok: false; readonly problem: "cell"; readonly code: VoterCellCode };
+
+/** The commitment, or `secret` for bytes that aren't an identity secret. */
+export type CommitmentResult =
+  | { readonly ok: true; readonly commitment: bigint }
+  | { readonly ok: false; readonly problem: "secret" };
 
 /**
  * A seal, or why none was made: no version-5 poll checked under that
@@ -185,6 +205,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "check-election";
       readonly result: ElectionCheck;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "commitment";
+      readonly result: CommitmentResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -256,6 +282,7 @@ const FIND_CELL_KEYS = [
   "tier",
   "v",
 ];
+const COMMITMENT_KEYS = ["id", "kind", "secret", "v"];
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
@@ -298,6 +325,10 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       entries,
       panels,
     };
+  }
+  if (data["kind"] === "commitment") {
+    if (!hasKeys(data, COMMITMENT_KEYS) || !isBytes(data["secret"], 32)) return undefined;
+    return { v, id, kind: "commitment", secret: data["secret"] };
   }
   if (data["kind"] === "find-cell") {
     if (!hasKeys(data, FIND_CELL_KEYS)) return undefined;
@@ -379,6 +410,7 @@ export function requestId(data: unknown): number | undefined {
 
 const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
+  "commitment",
   "find-cell",
   "seal",
   "challenge",

@@ -14,12 +14,15 @@ import {
   type Panel,
   sealingElectionV5,
 } from "@abolishus/crypto";
+import { readFileSync } from "node:fs";
+
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
   type ChallengeRequest,
   type CheckElectionRequest,
+  type CommitmentRequest,
   type FindCellRequest,
   PROTOCOL_VERSION,
   type SealRequest,
@@ -277,5 +280,57 @@ describe("the voter's cell", () => {
       });
       expect(secret.every((b) => b === 0)).toBe(true);
     }
+  });
+});
+
+// Semaphore 4.14.3's own identities: each secret's commitment, made outside
+// the workspace (docs/spec/vectors/membership-prover.json).
+const MEMBERSHIP_VECTORS = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/spec/vectors/membership-prover.json", import.meta.url),
+    "utf8",
+  ),
+) as { members: { secret: string; commitment: string }[] };
+
+const commitmentRequest = (secret: Uint8Array): CommitmentRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 5,
+  kind: "commitment",
+  secret,
+});
+
+describe("the identity commitment", () => {
+  test("is Semaphore's for each vector's secret, and the worker zeroes the secret", () => {
+    expect(MEMBERSHIP_VECTORS.members.length).toBeGreaterThan(0);
+    for (const { secret: hex, commitment } of MEMBERSHIP_VECTORS.members) {
+      const secret = Uint8Array.from(Buffer.from(hex, "hex"));
+      expect(new BallotSession().commitment(commitmentRequest(secret))).toEqual({
+        ok: true,
+        commitment: BigInt(commitment),
+      });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("bytes that aren't an identity secret are refused and zeroed", () => {
+    for (const fill of [0x00, 0xff]) {
+      const secret = new Uint8Array(32).fill(fill);
+      expect(new BallotSession().commitment(commitmentRequest(secret))).toEqual({
+        ok: false,
+        problem: "secret",
+      });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("leaves the held poll, the voter's cell and the seals as they were", () => {
+    const session = holding();
+    const sealed = session.seal(sealRequest([1, 0, 0, 1, 0]));
+    if (!sealed.ok) throw new Error(sealed.problem);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+    session.commitment(commitmentRequest(Uint8Array.from(members[0] as Uint8Array)));
+    expect(session.seal(sealRequest([0, 1, 0, 0, 1])).ok).toBe(true);
+    expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
   });
 });

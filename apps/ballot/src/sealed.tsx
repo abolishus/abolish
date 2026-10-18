@@ -212,6 +212,7 @@ const STOPPED: Record<
   | "cant-seal-version"
   | "no-identity"
   | "identity-unreadable"
+  | "unregistered"
   | "not-listed"
   | "board-unavailable"
   | "no-registrars"
@@ -226,6 +227,7 @@ const STOPPED: Record<
   "cant-seal-version": { title: "cantSealTitle", detail: "cantSealVersion" },
   "no-identity": { title: "noIdentityTitle", detail: "noIdentity" },
   "identity-unreadable": { title: "identityUnreadableTitle", detail: "identityUnreadable" },
+  unregistered: { title: "unregisteredTitle", detail: "unregistered" },
   "not-listed": { title: "notListedTitle", detail: "notListed" },
   "board-unavailable": { title: "boardUnavailableTitle", detail: "boardUnavailable" },
   "no-registrars": { title: "noRegistrarsTitle", detail: "noRegistrars" },

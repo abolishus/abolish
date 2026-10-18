@@ -16,6 +16,8 @@ import {
   type L1Block,
   Unavailable,
 } from "./open.tsx";
+import type { Registrar } from "./register.tsx";
+import type { Tier0Answer } from "./registration.ts";
 import type { CastResult, ChallengeResult, SealResult } from "./worker/protocol.ts";
 
 // Opening a poll from its link (open.tsx), with the network and the worker
@@ -120,6 +122,8 @@ interface Voter {
   readonly cast: CastResult | "fail" | "hold";
   /** The identity read at the cast, when it isn't the first read's. */
   readonly identityAtCast?: IdentityRead;
+  /** Tier 0 registration (`registrar`), whose store then answers every identity read. */
+  readonly registrar?: Registrar;
 }
 
 const VOTER: Voter = {
@@ -177,6 +181,7 @@ function source(
     artifacts,
     cast: casts,
     identityAtCast,
+    registrar,
   } = {
     ...VOTER,
     ...voter,
@@ -210,6 +215,7 @@ function source(
     seal,
     challenge,
     identity: () => {
+      if (registrar !== undefined) return registrar.identity();
       const read = reads++ > 0 && identityAtCast !== undefined ? identityAtCast : identity;
       return Promise.resolve(
         read.kind === "found"
@@ -222,6 +228,7 @@ function source(
     findCell,
     l1Block: () => Promise.resolve(l1),
     cast,
+    registrar,
   };
   MOCKS.set(made, {
     load,
@@ -1051,4 +1058,324 @@ export const BadAnswer = unavailable(
   "bad-answer",
   "A server sent something that isn't a poll",
   true,
+);
+
+const COMMITMENT = 0x1234_5678_9abc_def0_1234_5678_9abc_def0_1234_5678_9abc_def0n;
+const NOW = 1_790_500_000_000;
+
+/** The challenge frame, standing in for Turnstile's page: one tap hands over a token. */
+function PassTheCheck({ onToken }: { onToken: (token: string) => void }) {
+  return (
+    <button type="button" onClick={() => onToken("token.1")}>
+      Pass the check
+    </button>
+  );
+}
+
+type RegistrarMocks = {
+  readonly create: Mock<Registrar["create"]>;
+  readonly commitment: Mock<Registrar["commitment"]>;
+  readonly send: Mock<Registrar["send"]>;
+  readonly record: Mock<Registrar["record"]>;
+  /** Each secret the screens handed the worker, as given, and a copy taken when it was. */
+  readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
+};
+const REGISTRARS = new WeakMap<Registrar, RegistrarMocks>();
+const registrarMocks = (of: ElectionSource) => {
+  const found = of.registrar === undefined ? undefined : REGISTRARS.get(of.registrar);
+  if (found === undefined) throw new Error("not a story's registrar");
+  return found;
+};
+
+/**
+ * A registrar for region 0 over a store that starts as `held` (none, or an
+ * identity in no group) and keeps what `create` and `record` write, whose
+ * worker commits every secret to COMMITMENT, and whose route answers
+ * `answers` in turn (the last one repeats).
+ */
+function registrar(
+  held: IdentityRead,
+  answers: readonly Tier0Answer[] = ["accepted"],
+  {
+    created = "created",
+    recorded = "recorded",
+  }: {
+    created?: Awaited<ReturnType<Registrar["create"]>>;
+    recorded?: Awaited<ReturnType<Registrar["record"]>>;
+  } = {},
+): Registrar {
+  let store = held;
+  let sent = 0;
+  const secrets: { given: Uint8Array; copy: Uint8Array }[] = [];
+  const create = fn<Registrar["create"]>(() => {
+    if (created === "created" && store.kind === "none")
+      store = { kind: "found", identity: { secret: SECRET, memberships: [] } };
+    return Promise.resolve(store.kind === "none" ? created : "exists");
+  });
+  const commitment = fn<Registrar["commitment"]>((secret) => {
+    secrets.push({ given: secret, copy: secret.slice() });
+    return Promise.resolve({ ok: true, commitment: COMMITMENT });
+  });
+  const send = fn<Registrar["send"]>(() =>
+    Promise.resolve(answers[Math.min(sent++, answers.length - 1)] as Tier0Answer),
+  );
+  const record = fn<Registrar["record"]>((_, request) => {
+    if (recorded === "recorded" && store.kind === "found")
+      store = { kind: "found", identity: { ...store.identity, tier0Request: request } };
+    return Promise.resolve(recorded);
+  });
+  const made: Registrar = {
+    region: 0,
+    Challenge: PassTheCheck,
+    create,
+    identity: () =>
+      Promise.resolve(
+        store.kind === "found"
+          ? { kind: "found", identity: { ...store.identity, secret: SECRET.slice() } }
+          : store,
+      ),
+    commitment,
+    send,
+    record,
+    now: () => NOW,
+  };
+  REGISTRARS.set(made, { create, commitment, send, record, secrets });
+  return made;
+}
+
+const registering = (voter: Partial<Voter>) =>
+  source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, voter);
+
+/** Every secret handed to the registrar's worker was the device's, and was zeroed after. */
+async function registrarZeroed(of: ElectionSource, count: number) {
+  const { secrets } = registrarMocks(of);
+  await expect(secrets).toHaveLength(count);
+  for (const { given, copy } of secrets) {
+    await expect(copy).toEqual(SECRET);
+    await expect(given.every((b) => b === 0)).toBe(true);
+  }
+}
+
+const BODY = JSON.stringify({
+  commitment: COMMITMENT.toString(16).padStart(64, "0"),
+  region: "0",
+  turnstile: "token.1",
+});
+
+export const RegistersANewIdentity: Story = {
+  name: "No identity: one is made, kept and registered, then the voter waits",
+  args: { source: registering({ registrar: registrar({ kind: "none" }) }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "Make a voting identity on this device",
+      }),
+    ).toHaveFocus();
+    // The board was read all the same, and nothing searched or sealed.
+    await expect(mocks(args.source).loadBoard).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
+    await expect(mocks(args.source).seal).not.toHaveBeenCalled();
+    const { create, commitment, send, record } = registrarMocks(args.source);
+    await expect(create).not.toHaveBeenCalled();
+    // A double tap makes one identity.
+    await userEvent.dblClick(canvas.getByRole("button", { name: "Make my voting identity" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Show you're a person" }),
+    ).toHaveFocus();
+    // Kept before anything is sent, and its commitment worked out before the solve.
+    await expect(create).toHaveBeenCalledOnce();
+    await expect(commitment).toHaveBeenCalledOnce();
+    await expect(send).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Pass the check" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your registration was sent" }),
+    ).toHaveFocus();
+    await expect(send).toHaveBeenCalledOnce();
+    await expect(send).toHaveBeenCalledWith(BODY);
+    // Noted beside the identity the request was for, checked by its commitment again.
+    await expect(commitment).toHaveBeenCalledTimes(2);
+    await expect(record).toHaveBeenCalledOnce();
+    await expect(record).toHaveBeenCalledWith(expect.any(Uint8Array), {
+      region: 0,
+      acceptedAt: NOW,
+    });
+    await registrarZeroed(args.source, 2);
+    await expect(record.mock.calls[0]?.[0].every((b) => b === 0)).toBe(true);
+    // Back at the poll, the voter is told the request is on its way.
+    await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
+    ).toHaveFocus();
+    await expect(send).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Check again" })).toBeVisible();
+  },
+};
+
+export const RegistersAKeptIdentity: Story = {
+  name: "An identity in no group: registered, never replaced",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "found", identity: { secret: SECRET, memberships: [] } }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Register it" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your registration was sent" }),
+    ).toBeVisible();
+    await expect(registrarMocks(args.source).create).not.toHaveBeenCalled();
+    await expect(registrarMocks(args.source).send).toHaveBeenCalledWith(BODY);
+  },
+};
+
+export const ChallengeRefusedThenSolvedAgain: Story = {
+  name: "A refused check is solved again in a fresh frame",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["challenge-refused", "accepted"]),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Make my voting identity" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "The check didn't pass" }),
+    ).toHaveFocus();
+    await userEvent.click(canvas.getByRole("button", { name: "Try again" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your registration was sent" }),
+    ).toBeVisible();
+    const { create, commitment, send } = registrarMocks(args.source);
+    // The same identity and commitment: only the solve is new.
+    await expect(create).toHaveBeenCalledOnce();
+    await expect(send).toHaveBeenCalledTimes(2);
+    await expect(commitment).toHaveBeenCalledTimes(2);
+  },
+};
+
+/** A story where the route answers `answer` and registration stops at `title`. */
+const routeStops = (name: string, answer: Tier0Answer, title: string, retry: boolean): Story => ({
+  name,
+  args: { source: registering({ registrar: registrar({ kind: "none" }, [answer]) }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Make my voting identity" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: title })).toHaveFocus();
+    await expect(registrarMocks(args.source).record).not.toHaveBeenCalled();
+    const again = canvas.queryByRole("button", { name: "Try again" });
+    await expect(again !== null).toBe(retry);
+  },
+});
+
+export const RegistrationBusy = routeStops(
+  "The registration service is busy",
+  "busy",
+  "Your registration couldn't be sent",
+  true,
+);
+
+export const RegistrationUnreachable = routeStops(
+  "The registration service can't be reached",
+  "unreachable",
+  "Your registration couldn't be sent",
+  true,
+);
+
+export const RegistrationMalformed = routeStops(
+  "The route says the request is malformed",
+  "malformed",
+  "The registration service refused this request",
+  false,
+);
+
+export const RegistrationUnwritable: Story = {
+  name: "The browser won't keep a new identity",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["accepted"], { created: "unwritable" }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Make my voting identity" }));
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This browser won't keep a voting identity",
+      }),
+    ).toHaveFocus();
+    await expect(registrarMocks(args.source).commitment).not.toHaveBeenCalled();
+    await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const RegistrationNotNoted: Story = {
+  name: "Accepted, but the device couldn't note the request",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["accepted"], { recorded: "changed" }),
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Make my voting identity" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "Your registration was sent, but this device couldn't note it",
+      }),
+    ).toHaveFocus();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const NoRegistrationForAPollWithoutTier0: Story = {
+  name: "No identity, on a poll that doesn't admit Tier 0",
+  args: {
+    source: source(
+      [LOADED],
+      { ok: true, election: { ...POLL_OF_QUESTIONS, tiers: [1, 2] } },
+      SEALED,
+      OPENED,
+      { registrar: registrar({ kind: "none" }) },
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    // Registering at Tier 0 wouldn't put the voter on this poll's list.
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device has no voting identity yet",
+      }),
+    ).toHaveFocus();
+    await expect(registrarMocks(args.source).create).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const UnregisteredWithoutARegistrar = stopsBeforeTheSearch(
+  "An identity in no group, on a build that can't register",
+  {
+    identity: { kind: "found", identity: { secret: SECRET, memberships: [] } },
+  },
+  "Your voting identity isn't registered yet",
 );

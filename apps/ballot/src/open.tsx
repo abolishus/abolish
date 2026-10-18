@@ -12,6 +12,7 @@ import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
 import { AnswerQuestions } from "./questions.tsx";
+import { Register, type Registrar, RegisterWaiting } from "./register.tsx";
 import { Opened, Sealed, SealStopped, type SealProblem, Working } from "./sealed.tsx";
 import type {
   CastResult,
@@ -79,6 +80,12 @@ export interface ElectionSource {
     artifacts: ProverArtifacts,
     onProgress: ProvingProgress,
   ): Promise<CastResult>;
+  /**
+   * Tier 0 registration, for a voter whose identity is in none of a poll's
+   * tiers where the poll admits Tier 0, or `undefined` while the build can't
+   * register anyone (no published region, no challenge frame).
+   */
+  readonly registrar: Registrar | undefined;
 }
 
 /** An L1 block, by number and hash, that a ballot's membership message names. */
@@ -280,6 +287,8 @@ type Step =
   | { readonly kind: "proving"; readonly steps: ProvingSteps | undefined }
   | { readonly kind: "proving-refused"; readonly problem: ProvingProblem }
   | { readonly kind: "cast" }
+  | { readonly kind: "register"; readonly registrar: Registrar; readonly made: boolean }
+  | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "stopped"; readonly problem: SealProblem; readonly code?: string };
 
 const stopped = (problem: SealProblem, code?: string): Step =>
@@ -385,15 +394,31 @@ export function Ballot({
     const board = await source.loadBoard(fromHex(election.electionId));
     if (!board.ok) return stopped("board-unavailable", board.problem);
     const read = await source.identity();
-    if (read.kind !== "found")
-      return stopped(read.kind === "none" ? "no-identity" : "identity-unreadable");
-    const { secret, memberships } = read.identity;
+    // Registering helps only where the poll admits Tier 0.
+    const registrar = election.tiers.includes(0) ? source.registrar : undefined;
+    if (read.kind === "none")
+      return registrar === undefined
+        ? stopped("no-identity")
+        : { kind: "register", registrar, made: false };
+    if (read.kind !== "found") return stopped("identity-unreadable");
+    const { secret, memberships, tier0Request } = read.identity;
     let asked: Promise<CellAnswer>;
     try {
       // One tier per cast: a voter in several of the poll's tiers casts in
       // each independently ([[revoting]], Client rule 7), the first here.
       const membership = memberships.find(({ tier }) => election.tiers.includes(tier));
-      if (membership === undefined) return stopped("not-listed");
+      if (membership === undefined) {
+        if (!election.tiers.includes(0)) return stopped("not-listed");
+        if (tier0Request !== undefined)
+          return { kind: "waiting", acceptedAt: tier0Request.acceptedAt };
+        // An identity made here whose request never went: registered now,
+        // never replaced by a new one.
+        if (memberships.length === 0)
+          return registrar === undefined
+            ? stopped("unregistered")
+            : { kind: "register", registrar, made: true };
+        return stopped("not-listed");
+      }
       asked = source.findCell(definitionHash, secret, membership, board.entries);
     } finally {
       secret.fill(0);
@@ -541,6 +566,18 @@ export function Ballot({
     case "cast":
       return (
         <NotSent definitionHash={election.definitionHash} closes={poll.closes} onAgain={again} />
+      );
+    case "register":
+      return (
+        <Register poll={poll} registrar={step.registrar} made={step.made} onDone={onRestart} />
+      );
+    case "waiting":
+      return (
+        <RegisterWaiting
+          poll={poll}
+          sentAt={formatTime(locale, BigInt(Math.floor(step.acceptedAt / 1000)))}
+          onCheck={onRestart}
+        />
       );
     case "stopped":
       return (

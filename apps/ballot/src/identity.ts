@@ -6,7 +6,7 @@
 // to zero once used (T-12, T-18). The identity is kept from the moment it is
 // made, whatever registration's outcome ([[registration]], Outcome), with the
 // Tier 0 request it is waiting on, if any. Backup and recovery, which seal it
-// for the voter's passkey, come later (P2-8 part 3b-2c-2b-2b).
+// for the voter's passkey, come later (P2-8 part 3b-2c-2b-2c).
 //
 // What is stored is checked on every read as strictly as a decoder: a record
 // of another version, a value that isn't an identity secret or a membership
@@ -145,11 +145,14 @@ export function storedIdentity(identity: VotingIdentity): Record<string, unknown
   return record;
 }
 
-/** Runs `use` on the identity store, in one transaction that ends before it resolves. */
+/**
+ * Runs `use` on the identity store, in one transaction that ends before it
+ * resolves, with what the function `use` returned gives once it has.
+ */
 async function withStore<T>(
   factory: IDBFactory,
   mode: IDBTransactionMode,
-  use: (store: IDBObjectStore) => IDBRequest,
+  use: (store: IDBObjectStore) => () => T,
 ): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const open = factory.open(IDENTITY_DB, 1);
@@ -161,11 +164,17 @@ async function withStore<T>(
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(STORE, mode);
-      const request = use(transaction.objectStore(STORE));
+      const result = use(transaction.objectStore(STORE));
       // Resolved on completion, so a write is durable before the caller goes on.
-      transaction.oncomplete = () => resolve(request.result as T);
-      transaction.onerror = () =>
-        reject(transaction.error ?? new Error("the identity store failed"));
+      transaction.oncomplete = () => resolve(result());
+      // The failed request's own error (a ConstraintError, say), which bubbles
+      // here before the transaction's is set.
+      transaction.onerror = ({ target }) =>
+        reject(
+          (target instanceof IDBRequest ? target.error : null) ??
+            transaction.error ??
+            new Error("the identity store failed"),
+        );
       transaction.onabort = () =>
         reject(transaction.error ?? new Error("the identity store failed"));
     });
@@ -183,18 +192,28 @@ async function withStore<T>(
 export async function readIdentity(factory: IDBFactory = indexedDB): Promise<IdentityRead> {
   let value: unknown;
   try {
-    value = await withStore<unknown>(factory, "readonly", (store) => store.get(KEY));
+    value = await withStore<unknown>(factory, "readonly", (store) => {
+      const get = store.get(KEY);
+      return () => get.result as unknown;
+    });
   } catch {
     return { kind: "unreadable" };
   }
   if (value === undefined) return { kind: "none" };
   const identity = parseStoredIdentity(value);
-  // The stored copy goes with the structured clone the read made.
+  wipeStored(value);
+  return identity === undefined ? { kind: "unreadable" } : { kind: "found", identity };
+}
+
+/** Zeroes the secret in a structured clone a read made of the stored record. */
+function wipeStored(value: unknown): void {
   // The whole buffer: a view's bytes may be only part of what was cloned.
   if (isRecord(value) && value["secret"] instanceof Uint8Array)
     new Uint8Array(value["secret"].buffer).fill(0);
-  return identity === undefined ? { kind: "unreadable" } : { kind: "found", identity };
 }
+
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 /** Stores `identity` as this device's, replacing any other; resolves once the write is committed. */
 export async function saveIdentity(
@@ -203,8 +222,82 @@ export async function saveIdentity(
 ): Promise<void> {
   const record = storedIdentity(identity);
   try {
-    await withStore<unknown>(factory, "readwrite", (store) => store.put(record, KEY));
+    await withStore(factory, "readwrite", (store) => {
+      store.put(record, KEY);
+      return () => undefined;
+    });
   } finally {
     (record["secret"] as Uint8Array).fill(0);
+  }
+}
+
+/**
+ * Keeps a newly made identity (`secret`, in no group and waiting on no
+ * request) as this device's, but only if the device holds none: an
+ * identity already there, readable or not, is never replaced, since it may
+ * be registered and its loss can't be undone (T-18). `exists` then, and
+ * `unwritable` for storage the browser refuses. Kept before anything is
+ * sent, so a registration is never made for an identity the device lost
+ * ([[registration]], Outcome).
+ */
+export async function createIdentity(
+  secret: Uint8Array,
+  factory: IDBFactory = indexedDB,
+): Promise<"created" | "exists" | "unwritable"> {
+  const record = storedIdentity({ secret, memberships: [] });
+  try {
+    // `add`, not `put`: in the same transaction as the check that the key is free.
+    await withStore(factory, "readwrite", (store) => {
+      store.add(record, KEY);
+      return () => undefined;
+    });
+    return "created";
+  } catch (error) {
+    return error instanceof DOMException && error.name === "ConstraintError"
+      ? "exists"
+      : "unwritable";
+  } finally {
+    (record["secret"] as Uint8Array).fill(0);
+  }
+}
+
+/**
+ * Records that the registration route accepted a Tier 0 request for the
+ * identity whose secret is `secret` ([[registration]], Outcome), in one
+ * transaction with the read that finds it still there. `changed` if the
+ * device now holds another identity, an unreadable one or one already in a
+ * Tier 0 group, which is left as it is; `unwritable` for storage the
+ * browser refuses.
+ */
+export async function recordTier0Request(
+  secret: Uint8Array,
+  request: Tier0Request,
+  factory: IDBFactory = indexedDB,
+): Promise<"recorded" | "changed" | "unwritable"> {
+  // Checked before the transaction, so a bad request throws rather than reads as a refusal.
+  const checked = storedIdentity({ secret, memberships: [], tier0Request: request });
+  (checked["secret"] as Uint8Array).fill(0);
+  try {
+    return await withStore(factory, "readwrite", (store) => {
+      let outcome: "recorded" | "changed" = "changed";
+      const get = store.get(KEY);
+      get.onsuccess = () => {
+        const value: unknown = get.result;
+        const held = parseStoredIdentity(value);
+        wipeStored(value);
+        if (held === undefined) return;
+        const same = equalBytes(held.secret, secret) && held.memberships[0]?.tier !== 0;
+        if (same) {
+          const record = storedIdentity({ ...held, tier0Request: request });
+          store.put(record, KEY);
+          (record["secret"] as Uint8Array).fill(0);
+          outcome = "recorded";
+        }
+        held.secret.fill(0);
+      };
+      return () => outcome;
+    });
+  } catch {
+    return "unwritable";
   }
 }

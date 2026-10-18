@@ -609,6 +609,9 @@ describe("casting a version-5 poll's seal", () => {
 describe("the device's voting identity", () => {
   type Harness = {
     saveIdentity(secret: string, memberships: { tier: number; group: string }[]): Promise<void>;
+    createIdentity(secret: string): Promise<string>;
+    recordTier0Request(secret: string, region: number, acceptedAt: number): Promise<string>;
+    commitment(secret: string): Promise<string>;
     readIdentity(): Promise<string>;
     restampIdentity(version: number): Promise<void>;
   };
@@ -668,5 +671,138 @@ describe("the device's voting identity", () => {
     );
     expect(refused).toBe("TypeError");
     await expect(read()).resolves.toEqual({ kind: "none" });
+  });
+
+  const other = `02${"0c".repeat(31)}`;
+
+  test("a new identity is kept in no group, and never over one the device holds", async () => {
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+        [secret] as const,
+      ),
+    ).resolves.toBe("created");
+    const kept = { kind: "found", identity: { secret, memberships: [] } };
+    await expect(read()).resolves.toEqual(kept);
+    // Another identity, readable or not, is never replaced.
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+        [other] as const,
+      ),
+    ).resolves.toBe("exists");
+    await expect(read()).resolves.toEqual(kept);
+    await page.evaluate(() =>
+      (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampIdentity(1),
+    );
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+        [other] as const,
+      ),
+    ).resolves.toBe("exists");
+    await expect(read()).resolves.toEqual({ kind: "unreadable" });
+  });
+
+  test("an accepted request is noted only beside the identity it was made for", async () => {
+    // None held: nothing to note it beside.
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+            s,
+            0,
+            1_790_000_000_000,
+          ),
+        [secret] as const,
+      ),
+    ).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "none" });
+    await page.evaluate(
+      ([s]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.createIdentity(s),
+      [secret] as const,
+    );
+    // Another identity's request leaves this one as it is.
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+            s,
+            0,
+            1_790_000_000_000,
+          ),
+        [other] as const,
+      ),
+    ).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "found", identity: { secret, memberships: [] } });
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+            s,
+            7,
+            1_790_000_000_000,
+          ),
+        [secret] as const,
+      ),
+    ).resolves.toBe("recorded");
+    await expect(read()).resolves.toEqual({
+      kind: "found",
+      identity: {
+        secret,
+        memberships: [],
+        tier0Request: { region: 7, acceptedAt: 1_790_000_000_000 },
+      },
+    });
+    // Nor beside one already in a Tier 0 group.
+    await page.evaluate(
+      ([s, m]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.saveIdentity(s, m),
+      [secret, memberships] as const,
+    );
+    await expect(
+      page.evaluate(
+        ([s]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordTier0Request(
+            s,
+            7,
+            1_790_000_000_001,
+          ),
+        [secret] as const,
+      ),
+    ).resolves.toBe("changed");
+    await expect(read()).resolves.toEqual({ kind: "found", identity: { secret, memberships } });
+  });
+
+  test("the worker commits a secret under the client's CSP, and refuses one that isn't", async () => {
+    const answer = (s: string) =>
+      page
+        .evaluate(
+          ([x]) =>
+            (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.commitment(x),
+          [s] as const,
+        )
+        .then((json) => JSON.parse(json) as unknown);
+    // The page's copy goes to the worker by copy, and stays the page's to zero.
+    // Semaphore's own commitment of its first vector identity (docs/spec/vectors/membership-prover.json).
+    await expect(
+      answer("038e85d5e2b855cd8ba658216c65bcb761cc34d0082765ddbd0334ece36b4a8d"),
+    ).resolves.toEqual({
+      result: {
+        ok: true,
+        commitment: "11762512682537715524099446441423048587560576251586398063711036406738253258307",
+      },
+      // Copied to the worker: the page's copy stays the page's to zero.
+      intact: true,
+    });
+    await expect(answer("00".repeat(32))).resolves.toMatchObject({
+      result: { ok: false, problem: "secret" },
+    });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
   });
 });

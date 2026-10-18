@@ -22,6 +22,10 @@ import {
 } from "../src/receipts.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 20);
+// Each run signs and judges up to eight receipts over a board it builds, up
+// to 67 ms a run here, so CI's 1,000 runs need far more than vitest's 5 s
+// default: room for 300 ms a run.
+const slow = { timeout: 5_000 + numRuns * 300 };
 
 // The fixture's clock: the ceremony in segment 1, ballots in 2, the seal 3.
 const PERIOD = 3600n;
@@ -77,7 +81,7 @@ const bodies = fc.uniqueArray(fc.uint8Array({ minLength: 1, maxLength: 40 }), {
   selector: (b) => Buffer.from(b).toString("hex"),
 });
 
-test("every honest receipt passes at cast and is included once its board is anchored", () => {
+test("every honest receipt passes at cast and is included once its board is anchored", slow, () => {
   fc.assert(
     fc.property(bodies, (bs) => {
       const entries = [entry(0, FIRST, ballot(Uint8Array.of(0)))];
@@ -96,50 +100,58 @@ test("every honest receipt passes at cast and is included once its board is anch
   );
 });
 
-test("a receipt for a board shown with the voter's ballot moved earlier is forked from the copy", () => {
-  fc.assert(
-    fc.property(bodies, (bs) => {
-      const payloads = bs.map(ballot);
-      const entries = [
-        entry(0, FIRST, ballot(Uint8Array.of(0))),
-        ...payloads.map((p, i) => entry(i + 1, CAST, p)),
-      ];
-      // The last ballot shown at index 1, where the anchored board has the first.
-      const last = payloads.at(-1) as Uint8Array;
-      const fork = [entries[0] as Uint8Array, entry(1, CAST, last)];
-      const receipt = operatorReceipt(secret, election, fork, CAST);
-      expect(checkAtCast(election, receipt, last, { min: CAST, max: SEAL })).toBe(true);
-      const v = judge(election, receipt, last, viewOf(entries));
-      expect(verdictIs("forked-copy", v)).toBe(true);
-      expect(verdictIs("included", v)).toBe(false);
-    }),
-    { numRuns },
-  );
-});
+test(
+  "a receipt for a board shown with the voter's ballot moved earlier is forked from the copy",
+  slow,
+  () => {
+    fc.assert(
+      fc.property(bodies, (bs) => {
+        const payloads = bs.map(ballot);
+        const entries = [
+          entry(0, FIRST, ballot(Uint8Array.of(0))),
+          ...payloads.map((p, i) => entry(i + 1, CAST, p)),
+        ];
+        // The last ballot shown at index 1, where the anchored board has the first.
+        const last = payloads.at(-1) as Uint8Array;
+        const fork = [entries[0] as Uint8Array, entry(1, CAST, last)];
+        const receipt = operatorReceipt(secret, election, fork, CAST);
+        expect(checkAtCast(election, receipt, last, { min: CAST, max: SEAL })).toBe(true);
+        const v = judge(election, receipt, last, viewOf(entries));
+        expect(verdictIs("forked-copy", v)).toBe(true);
+        expect(verdictIs("included", v)).toBe(false);
+      }),
+      { numRuns },
+    );
+  },
+);
 
-test("a receipt for a ballot shown appended but never anchored is forked from L1 alone", () => {
-  fc.assert(
-    fc.property(bodies, (bs) => {
-      const [dropped, ...kept] = bs.map(ballot);
-      const entries = [
-        entry(0, FIRST, ballot(Uint8Array.of(0))),
-        ...kept.map((p, i) => entry(i + 1, CAST, p)),
-      ];
-      const d = dropped as Uint8Array;
-      const receipt = operatorReceipt(
-        secret,
-        election,
-        [...entries, entry(entries.length, CAST, d)],
-        CAST,
-      );
-      expect(checkAtCast(election, receipt, d, { min: CAST, max: SEAL })).toBe(true);
-      // No source is needed: the anchored size already excludes the index.
-      const v = judge(election, receipt, d, { ...viewOf(entries), sources: [] });
-      expect(verdictIs("forked-l1", v)).toBe(true);
-    }),
-    { numRuns },
-  );
-});
+test(
+  "a receipt for a ballot shown appended but never anchored is forked from L1 alone",
+  slow,
+  () => {
+    fc.assert(
+      fc.property(bodies, (bs) => {
+        const [dropped, ...kept] = bs.map(ballot);
+        const entries = [
+          entry(0, FIRST, ballot(Uint8Array.of(0))),
+          ...kept.map((p, i) => entry(i + 1, CAST, p)),
+        ];
+        const d = dropped as Uint8Array;
+        const receipt = operatorReceipt(
+          secret,
+          election,
+          [...entries, entry(entries.length, CAST, d)],
+          CAST,
+        );
+        expect(checkAtCast(election, receipt, d, { min: CAST, max: SEAL })).toBe(true);
+        // No source is needed: the anchored size already excludes the index.
+        const v = judge(election, receipt, d, { ...viewOf(entries), sources: [] });
+        expect(verdictIs("forked-l1", v)).toBe(true);
+      }),
+      { numRuns },
+    );
+  },
+);
 
 test("a receipt is pending before its window closes and unresolved with no source", () => {
   const payload = ballot(Uint8Array.of(1, 2, 3));
@@ -171,7 +183,7 @@ test("a receipt is no evidence under a key the anchor never registered or a key 
   });
 });
 
-test("a forked-from-L1 verdict crosses to the verifier's process as it was", () => {
+test("a forked-from-L1 verdict crosses to the verifier's process as it was", slow, () => {
   // The verdict judgeDrops hands the verifier holds a checkpoint: integers
   // and byte strings, which plain JSON would turn into strings and objects.
   fc.assert(

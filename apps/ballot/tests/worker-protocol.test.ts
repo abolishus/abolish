@@ -342,6 +342,51 @@ describe("commitment requests", () => {
   });
 });
 
+describe("backup seal requests", () => {
+  const seal = () => ({
+    v: PROTOCOL_VERSION,
+    id: 16,
+    kind: "backup-seal",
+    prf: new Uint8Array(32).fill(3),
+    secret: new Uint8Array(32).fill(2),
+  });
+
+  test("accepts a well-formed request as it is, for any 32 bytes of each: the secret's range is the session's", () => {
+    fc.assert(
+      fc.property(
+        fc.nat(),
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
+        (id, prf, secret) => {
+          const r = { ...seal(), id, prf, secret };
+          expect(parseRequest(r)).toEqual(r);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short PRF output", { prf: new Uint8Array(31) }],
+    ["a long PRF output", { prf: new Uint8Array(33) }],
+    ["a PRF output as an ArrayBuffer", { prf: new ArrayBuffer(32) }],
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...seal(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(seal())) {
+      const r: Record<string, unknown> = seal();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("registration outcome requests", () => {
   const outcome = () => ({
     v: PROTOCOL_VERSION,
@@ -425,6 +470,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 9, kind: "find-cell", result: {} })).toBe(9);
     expect(responseId({ v: PROTOCOL_VERSION, id: 10, kind: "commitment", result: {} })).toBe(10);
     expect(responseId({ v: PROTOCOL_VERSION, id: 11, kind: "tier0-outcome", result: {} })).toBe(11);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 12, kind: "backup-seal", result: {} })).toBe(12);
   });
 
   test("ignores another version's response or kind", () => {

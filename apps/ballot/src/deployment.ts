@@ -63,6 +63,15 @@ export interface Deployment {
    * group of its choosing (T-16). Empty while none is deployed.
    */
   readonly tier0Groups: readonly { readonly group_id: bigint; readonly region: number }[];
+  /**
+   * The backup passkey's RP ID ([[0017-identity-recovery-backup]], Option
+   * A, step 1): the host that serves this client and nothing else, on a
+   * registrable domain of its own, never `apps/web`'s, so no page outside
+   * the signed client can evaluate the passkey's PRF (T-20). Every backup
+   * ceremony names it, so a page served from any other host fails in the
+   * browser rather than making a passkey bound to that host.
+   */
+  readonly backupRpId: string;
 }
 
 /**
@@ -94,4 +103,8 @@ export const STAGING: Deployment = {
   groupRegistry: undefined,
   // Nor any Tier 0 group, so a staging build registers no one.
   tier0Groups: [],
+  // Where staging serves the client (P2-8, decided 2026-10-17): a Railway
+  // host, `up.railway.app` being a public suffix, so the host is a
+  // registrable domain of its own. A release's entry points replace it.
+  backupRpId: "ballot-staging.up.railway.app",
 };

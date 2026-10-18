@@ -10,8 +10,11 @@
 // from the group registry's whole log (T-11, T-13, T-16).
 
 import {
+  BABYJUBJUB_ORDER,
   checkChallengeOpeningV2,
   decodeOpening,
+  identityBackupLocator,
+  openIdentityBackup,
   type Panel,
   sealingElectionV5,
 } from "@abolishus/crypto";
@@ -21,6 +24,7 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  type BackupSealRequest,
   type ChallengeRequest,
   type CheckElectionRequest,
   type CommitmentRequest,
@@ -335,6 +339,71 @@ describe("the identity commitment", () => {
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
     session.commitment(commitmentRequest(Uint8Array.from(members[0] as Uint8Array)));
     expect(session.seal(sealRequest([0, 1, 0, 0, 1])).ok).toBe(true);
+    expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+  });
+});
+
+const backupSealRequest = (prf: Uint8Array, secret: Uint8Array): BackupSealRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 7,
+  kind: "backup-seal",
+  prf,
+  secret,
+});
+
+describe("the backup seal", () => {
+  const prfOutput = fc.uint8Array({ minLength: 32, maxLength: 32 });
+  const secret = fc
+    .bigInt({ min: 1n, max: BABYJUBJUB_ORDER - 1n })
+    .map((n) => Uint8Array.from(Buffer.from(n.toString(16).padStart(64, "0"), "hex")));
+
+  test("is an envelope that opens to the secret under the PRF output, stored under its locator, with both inputs zeroed", () => {
+    fc.assert(
+      fc.property(prfOutput, secret, (prf, s) => {
+        const expected = toHex(s);
+        const locator = identityBackupLocator(prf);
+        const request = backupSealRequest(prf.slice(), s.slice());
+        const result = new BallotSession().backupSeal(request);
+        if (!result.ok) throw new Error(result.problem);
+        expect(toHex(result.locator)).toBe(toHex(locator));
+        expect(result.envelope).toHaveLength(63);
+        expect(toHex(openIdentityBackup(prf, result.envelope))).toBe(expected);
+        expect(request.prf.every((b) => b === 0)).toBe(true);
+        expect(request.secret.every((b) => b === 0)).toBe(true);
+      }),
+      { numRuns: Math.min(numRuns, 100) },
+    );
+  });
+
+  test("a fresh nonce for every seal", () => {
+    const session = new BallotSession();
+    const seal = () =>
+      session.backupSeal(
+        backupSealRequest(new Uint8Array(32).fill(1), Uint8Array.from(members[0] as Uint8Array)),
+      );
+    const [a, b] = [seal(), seal()];
+    if (!a.ok || !b.ok) throw new Error("not sealed");
+    expect(toHex(a.envelope)).not.toBe(toHex(b.envelope));
+  });
+
+  test("bytes that aren't an identity secret are refused, with both inputs zeroed", () => {
+    for (const fill of [0x00, 0xff]) {
+      const request = backupSealRequest(new Uint8Array(32).fill(1), new Uint8Array(32).fill(fill));
+      expect(new BallotSession().backupSeal(request)).toEqual({ ok: false, problem: "secret" });
+      expect(request.prf.every((b) => b === 0)).toBe(true);
+      expect(request.secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("leaves the held poll, the voter's cell and the seals as they were", () => {
+    const session = holding();
+    const sealed = session.seal(sealRequest([1, 0, 0, 1, 0]));
+    if (!sealed.ok) throw new Error(sealed.problem);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+    session.backupSeal(
+      backupSealRequest(new Uint8Array(32).fill(1), Uint8Array.from(members[0] as Uint8Array)),
+    );
     expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
   });

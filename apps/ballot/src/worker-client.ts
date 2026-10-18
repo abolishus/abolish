@@ -6,6 +6,7 @@ import type { Panel } from "@abolishus/crypto";
 
 import type { ElectionCheck } from "./election.ts";
 import {
+  type BackupSealResult,
   type CastRequest,
   type CastResult,
   type ChallengeResult,
@@ -118,6 +119,20 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "commitment") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * `secret` sealed for the backup passkey whose PRF output is `prf`: the
+   * envelope and its locator. Both are copied; the worker zeroes its copies.
+   */
+  async backupSeal(prf: Uint8Array, secret: Uint8Array): Promise<BackupSealResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "backup-seal", prf, secret }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "backup-seal") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

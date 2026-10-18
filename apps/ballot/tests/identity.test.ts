@@ -3,8 +3,11 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  type BackupCredential,
   type Membership,
+  parseStoredBackupCredential,
   parseStoredIdentity,
+  storedBackupCredential,
   storedIdentity,
   type VotingIdentity,
 } from "../src/identity.ts";
@@ -228,5 +231,79 @@ describe("storedIdentity", () => {
     const stored = storedIdentity({ secret: mine, memberships: [{ tier: 0, group: 1n }] });
     mine.fill(0);
     expect(stored["secret"]).toEqual(be32(7n));
+  });
+});
+
+// The backup passkey's record, kept beside the identity under its own key.
+const backupCredential = fc
+  .tuple(
+    fc.uint8Array({ minLength: 16, maxLength: 1023 }),
+    fc.boolean(),
+    fc.option(fc.nat({ max: Number.MAX_SAFE_INTEGER }), { nil: undefined }),
+  )
+  .map(([credentialId, backedUp, storedAt]): BackupCredential =>
+    storedAt === undefined ? { credentialId, backedUp } : { credentialId, backedUp, storedAt },
+  );
+
+const backupRecord = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  v: 1,
+  credentialId: new Uint8Array(16).fill(4),
+  backedUp: true,
+  storedAt: null,
+  ...over,
+});
+
+describe("parseStoredBackupCredential", () => {
+  test("reads back exactly what storedBackupCredential stores, as a copy", () => {
+    fc.assert(
+      fc.property(backupCredential, (credential) => {
+        const record = storedBackupCredential(credential);
+        const back = parseStoredBackupCredential(record);
+        expect(back).toEqual(credential);
+        (record["credentialId"] as Uint8Array).fill(0xff);
+        expect(back?.credentialId).toEqual(credential.credentialId);
+      }),
+      { numRuns },
+    );
+  });
+
+  test.each<[string, unknown]>([
+    ["another version", backupRecord({ v: 2 })],
+    ["a credential ID of 15 bytes", backupRecord({ credentialId: new Uint8Array(15) })],
+    ["a credential ID of 1,024 bytes", backupRecord({ credentialId: new Uint8Array(1024) })],
+    ["a credential ID as an ArrayBuffer", backupRecord({ credentialId: new ArrayBuffer(16) })],
+    ["a credential ID as a list", backupRecord({ credentialId: Array(16).fill(4) })],
+    ["a flag that isn't a boolean", backupRecord({ backedUp: 1 })],
+    ["a negative time", backupRecord({ storedAt: -1 })],
+    ["-0 as a time", backupRecord({ storedAt: -0 })],
+    ["a fractional time", backupRecord({ storedAt: 1.5 })],
+    ["a time past 2^53", backupRecord({ storedAt: 2 ** 53 })],
+    ["a time as a string", backupRecord({ storedAt: "1" })],
+    ["an extra key", backupRecord({ extra: true })],
+    ["a list", [backupRecord()]],
+    ["null", null],
+  ])("refuses %s", (_, value) => {
+    expect(parseStoredBackupCredential(value)).toBeUndefined();
+  });
+
+  test("refuses a record without one of its keys", () => {
+    for (const key of Object.keys(backupRecord())) {
+      const r = backupRecord();
+      delete r[key];
+      expect(parseStoredBackupCredential(r)).toBeUndefined();
+    }
+  });
+
+  test("storedBackupCredential refuses to store what it couldn't read back", () => {
+    expect(() =>
+      storedBackupCredential({ credentialId: new Uint8Array(8), backedUp: true }),
+    ).toThrow(TypeError);
+    expect(() =>
+      storedBackupCredential({
+        credentialId: new Uint8Array(16),
+        backedUp: false,
+        storedAt: -5,
+      }),
+    ).toThrow(TypeError);
   });
 });

@@ -29,6 +29,8 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "check-election", result: session.checkElection(request) };
     case "commitment":
       return { v, id, kind: "commitment", result: session.commitment(request) };
+    case "backup-seal":
+      return { v, id, kind: "backup-seal", result: session.backupSeal(request) };
     case "tier0-outcome":
       return { v, id, kind: "tier0-outcome", result: session.tier0Outcome(request) };
     case "find-cell":

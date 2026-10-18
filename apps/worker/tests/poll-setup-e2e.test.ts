@@ -792,6 +792,10 @@ test("a submitted poll is created, checked, rooted, keyed, registered, synced an
     checkElectionRecordToShow(electionId, hexToBytes(held), definition, served.displayText),
   ).toMatchObject({ ok: true });
 
-  // No step failed a job on the way.
-  expect(lines.filter((l) => "outcome" in l && l.outcome === "failed")).toEqual([]);
+  // No step failed a job on the way. A refused registry sync logs its
+  // finding on its own line, so a failure names it rather than only the job.
+  expect(
+    lines.filter((l) => "outcome" in l && l.outcome === "failed"),
+    JSON.stringify(lines.filter((l) => "finding" in l)),
+  ).toEqual([]);
 }, 180_000);

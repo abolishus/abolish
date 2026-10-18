@@ -15,7 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plu
 import { cli } from "../src/cli.ts";
 import { gateway } from "../src/gateway.ts";
 import { finalizedHeader } from "../src/l1.ts";
-import { mirrorThen, type PinReport, pinElections } from "../src/pin.ts";
+import { mirrorThen, type PinReport, pinElections, pinObject } from "../src/pin.ts";
 import { type Rpc, RpcError } from "../src/rpc.ts";
 import { openMirror } from "../src/store.ts";
 import { type Anchor, type Chain, forgedLog, hex, startChain, word } from "./anvil.ts";
@@ -116,6 +116,23 @@ async function pin(
 
 const id = (n: number) => keccak_256(text(`election ${n}`));
 const ids = (b: Uint8Array) => bytesToHex(b);
+
+describe("pinObject", () => {
+  test("writes an object's own CAR under its CID once, and refuses it under another CID", async () => {
+    const dir = await blocksDir({});
+    const object = text("an object");
+    const cid = objectCid(object);
+    expect(await pinObject(dir, cid, object)).toBe("pinned");
+    expect(await pinObject(dir, cid, object)).toBe("held");
+    expect(bytesToHex(await readFile(join(dir, `${cidText(cid)}.car`)))).toBe(
+      bytesToHex(objectCar(object)),
+    );
+    await expect(pinObject(dir, objectCid(text("another")), object)).rejects.toThrow(
+      "an object whose CID isn't the one named",
+    );
+    expect(await readdir(dir)).toEqual([`${cidText(cid)}.car`]);
+  });
+});
 
 describe("fetch and pin", () => {
   test("pins every object the anchored checkpoints name, one CAR each, and a second run fetches nothing", async () => {

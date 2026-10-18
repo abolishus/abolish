@@ -15,6 +15,7 @@ import {
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli, dutyWiring } from "../src/cli.ts";
 import { parseConfig } from "../src/config.ts";
+import { servedBlocks } from "../src/served.ts";
 import { MemoryStore } from "../src/store.ts";
 import { LocalCoordinator, serveCoordinator } from "../src/local.ts";
 import { anvil, freePort, type Node } from "./anvil.ts";
@@ -338,7 +339,7 @@ describe("run with the availability duty", () => {
     expect(run.err).toEqual([{ error: "account key: must not be the identity key" }]);
   });
 
-  test("wires the reader and each election's duty from the configuration, under the definition's own board version", () => {
+  test("wires the reader and each election's duty from the configuration, under the definition's own board version", async () => {
     const parsed = parseConfig(
       JSON.stringify({
         ...seatConfig,
@@ -354,12 +355,19 @@ describe("run with the availability duty", () => {
     );
     const a = parsed.availability;
     if (a === undefined) return expect.fail("no availability");
+    const servedDir = join(dir, "wiring-blocks");
+    await mkdir(servedDir);
+    const atStart = Uint8Array.from({ length: 30 }, (_, i) => i + 1);
+    await writeFile(join(servedDir, `${cidText(objectCid(atStart))}.car`), objectCar(atStart));
+    const remote = Uint8Array.of(9, 9, 9);
     const sources = {
       l1: { call: async () => null },
       l2: { call: async () => null },
       contract: { send: async () => {}, recorded: async () => undefined },
-      blocks: async () => [],
-      pin: async () => "pinned" as const,
+      served: await servedBlocks(servedDir),
+      // A gateway holding only `remote`'s block.
+      gateways: async (cid: Uint8Array) =>
+        hex(cid) === hex(objectCid(remote)) ? [remote] : ([] as Uint8Array[]),
       store: new MemoryStore(),
       clock: () => 7n,
     };
@@ -391,13 +399,21 @@ describe("run with the availability duty", () => {
       election,
       boardVersion: 5,
       l1: reader,
-      blocks: sources.blocks,
-      pin: sources.pin,
+      blocks: expect.any(Function),
+      pin: sources.served.pin,
       contract: sources.contract,
       clock: sources.clock,
       sendMargin: 1234n,
       maxBytes: 5678,
     });
+    // The directory, then the gateways; what the seat pins is read back from it.
+    expect(await o.blocks(objectCid(atStart), 1 << 20)).toHaveLength(1);
+    expect((await o.blocks(objectCid(remote), 1 << 20)).map(hex)).toEqual([hex(remote)]);
+    const attested = Uint8Array.from({ length: 50 }, (_, i) => 200 - i);
+    expect(await o.blocks(objectCid(attested), 1 << 20)).toEqual([]);
+    await o.pin(objectCid(attested), attested);
+    expect(await stat(join(servedDir, `${cidText(objectCid(attested))}.car`))).toBeTruthy();
+    expect(await o.blocks(objectCid(attested), 1 << 20)).toHaveLength(1);
   });
 
   test("refuses an account key others can read", async () => {

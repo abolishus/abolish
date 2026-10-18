@@ -213,18 +213,14 @@ async function availabilityDuties(
     throw e;
   }
   const served = await servedOf(a.blocks, io);
-  const remote: AsyncBlockSource =
+  const gateways: AsyncBlockSource =
     a.gateways.length > 0 ? gatewaySource(a.gateways).source : () => Promise.resolve([]);
-  // The directory first: a block it holds costs no request and tells no
-  // gateway which election the seat reads (T-11). Every block is checked
-  // against its CID by the readers, so neither source is trusted (T-49, T-53).
-  const blocks = mirrorThen(served, remote);
   const wiring = dutyWiring(config.l2ChainId, a, {
     l1,
     l2,
     contract,
-    blocks,
-    pin: served.pin,
+    served,
+    gateways,
     store,
     clock,
   });
@@ -258,8 +254,9 @@ export interface DutySources {
   readonly l1: Rpc;
   readonly l2: Rpc;
   readonly contract: ContractPath;
-  readonly blocks: AsyncBlockSource;
-  readonly pin: AvailabilityOptions["pin"];
+  /** The blocks directory, read first, where the seat pins what it attests. */
+  readonly served: ServedBlocks;
+  readonly gateways: AsyncBlockSource;
   readonly store: SeatStore;
   readonly clock: () => bigint;
 }
@@ -267,7 +264,8 @@ export interface DutySources {
 /**
  * The L1 reader's options and each election's duty options from the
  * configuration: the board is checked under the registered definition's
- * own board-entry pin, which the reader gives, never a configured one.
+ * own board-entry pin, which the reader gives, never a configured one;
+ * blocks are read from the directory the seat pins into, then the gateways.
  */
 export function dutyWiring(
   l2ChainId: bigint,
@@ -280,6 +278,10 @@ export function dutyWiring(
     reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
   ) => AvailabilityOptions;
 } {
+  // The directory first: a block it holds costs no request and tells no
+  // gateway which election the seat reads (T-11). Every block is checked
+  // against its CID by the readers, so neither source is trusted (T-49, T-53).
+  const blocks = mirrorThen(s.served, s.gateways);
   return {
     anchors: {
       l1: s.l1,
@@ -297,8 +299,8 @@ export function dutyWiring(
       election,
       boardVersion: reader.boardVersion,
       l1: reader,
-      blocks: s.blocks,
-      pin: s.pin,
+      blocks,
+      pin: s.served.pin,
       contract: s.contract,
       clock: s.clock,
       sendMargin: a.sendMargin,

@@ -501,6 +501,23 @@ describe("the ballot extent", () => {
     for (const [cid, object] of w.pinned) expect(key(objectCid(object))).toBe(cid);
   });
 
+  test("a re-anchor with no new entries names a run already pinned: pinned once, and the seat still attests", async () => {
+    const w = world();
+    // Segment 11 has no entries, so its checkpoint carries segment 10's size and CIDs.
+    const again = copyCheckpoints(w.election.electionId, w.board.entries, [11]).get(
+      11,
+    ) as Checkpoint;
+    expect(again.size).toBe((w.board.checkpoints.get(10) as Checkpoint).size);
+    w.anchors = [
+      ...w.anchors,
+      { checkpoint: again, anchoredAt: w.clock.epoch + 12n * PERIOD + 60n },
+    ];
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    const cids = w.pinned.map(([cid]) => cid);
+    expect(cids).toHaveLength(10);
+    expect(new Set(cids).size).toBe(10);
+  });
+
   test("two steps at once send only the stored attestation", async () => {
     const w = world();
     await Promise.all([w.seat.step(), w.seat.step(), w.seat.step()]);

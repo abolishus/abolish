@@ -737,7 +737,7 @@ describe("the device's voting identity", () => {
     await expect(read()).resolves.toEqual({ kind: "unreadable" });
   });
 
-  test("a recovered identity is kept with its Tier 0 group, and never over one the device holds", async () => {
+  test("a recovered identity is kept with its Tier 0 group, marked recovered, and never over one the device holds", async () => {
     const restore = (s: string, group: string) =>
       page.evaluate(
         ([x, g]) =>
@@ -747,7 +747,11 @@ describe("the device's voting identity", () => {
     await expect(restore(secret, "18446744073709551615")).resolves.toBe("restored");
     const kept = {
       kind: "found",
-      identity: { secret, memberships: [{ tier: 0, group: "18446744073709551615" }] },
+      identity: {
+        secret,
+        memberships: [{ tier: 0, group: "18446744073709551615" }],
+        recovered: true,
+      },
     };
     await expect(read()).resolves.toEqual(kept);
     await expect(restore(other, "3")).resolves.toBe("exists");

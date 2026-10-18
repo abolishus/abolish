@@ -167,6 +167,10 @@ export function OpenElection({
     case "ready":
       return (
         <Ballot
+          // Each check starts the ballot afresh, even where React renders the
+          // new check's answer without the checking screen between: a restart
+          // asked for from a promise can land in one batch with it.
+          key={attempt}
           election={state.election}
           hiddenAsThreat={state.hiddenAsThreat}
           source={source}
@@ -402,9 +406,15 @@ export function Ballot({
         ? stopped("no-identity")
         : { kind: "register", registrar, held: "none" };
     if (read.kind !== "found") return stopped("identity-unreadable");
-    const { secret, memberships, tier0Request } = read.identity;
+    const { secret, memberships, tier0Request, recovered } = read.identity;
     let asked: Promise<CellAnswer>;
     try {
+      // A recovered identity starts without this device's records of the
+      // polls it was cast in, which the cast's checks need first: showing
+      // the voter their earlier ballots and one device per poll
+      // ([[0017-identity-recovery-backup]], Consequences; T-18). Until those
+      // checks exist (part 3c), nothing is sealed for it.
+      if (recovered === true) return stopped("recovered");
       // One tier per cast: a voter in several of the poll's tiers casts in
       // each independently ([[revoting]], Client rule 7), the first here.
       const membership = memberships.find(({ tier }) => election.tiers.includes(tier));

@@ -18,12 +18,15 @@ import {
   readIdentity,
   recordTier0Membership,
   recordTier0Request,
+  restoreIdentity,
   saveBackupCredential,
 } from "./identity.ts";
 import { parseLink } from "./link.ts";
 import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
+import type { Recoverer } from "./recover.tsx";
+import { recover } from "./recovery.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
 import { castBallot } from "./prover-client.ts";
 import type { Registrar } from "./register.tsx";
@@ -85,6 +88,45 @@ const backer: Backer | undefined = !STAGING.backups
       now: () => Date.now(),
     };
 
+// Recovery from the passkey backup, where this build offers one and reads
+// the group registry the recovered identity is checked against. Each
+// recovery in a worker of its own, terminated once it settles, so a
+// recovery that stops before the open leaves no PRF output behind (T-41).
+const recoverer: Recoverer | undefined =
+  !STAGING.backups || groupRegistry === undefined || pinned === undefined
+    ? undefined
+    : {
+        async recover() {
+          const own = new BallotWorker();
+          try {
+            return await recover({
+              credentials: navigator.credentials,
+              rpId: STAGING.backupRpId,
+              identity: () => readIdentity(),
+              locate: (prf) => own.backupLocator(prf),
+              fetch: (locator) =>
+                fetchIdentityBackup(STAGING, locator, (url, init) => fetch(url, init)),
+              registry: () => loadGroupRegistry(STAGING, (url, init) => fetch(url, init)),
+              open: (envelope, { block, records }) =>
+                own.backupOpen({
+                  envelope,
+                  block,
+                  groups: STAGING.tier0Groups,
+                  records,
+                  registry: fromHex(groupRegistry.address.slice(2)),
+                  chainId: STAGING.chainId,
+                  version: groupRegistry.eventVersion,
+                  ...pinned,
+                }),
+              restore: (secret, group) => restoreIdentity(secret, group),
+              keep: (credential) => saveBackupCredential(credential),
+            });
+          } finally {
+            own.terminate();
+          }
+        },
+      };
+
 const registrar: Registrar | undefined =
   challengeFrame === undefined ||
   region === undefined ||
@@ -128,6 +170,7 @@ const registrar: Registrar | undefined =
         join: (secret, group) => recordTier0Membership(secret, group),
         now: () => Date.now(),
         backup: backer,
+        recovery: recoverer,
       };
 
 const source: ElectionSource = {

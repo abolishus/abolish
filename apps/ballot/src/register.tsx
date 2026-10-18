@@ -7,6 +7,7 @@ import { ACTION, EverydayFrame, type FramePoll, Note, Part, ScreenTitle } from "
 import type { IdentityRead, Tier0Request } from "./identity.ts";
 import type { LoadedRegistry } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
+import { Recover, type Recoverer } from "./recover.tsx";
 import { retryDue, type Tier0Answer, tier0RequestBody } from "./registration.ts";
 import { formatTime } from "./time.ts";
 import type { CommitmentResult, Tier0OutcomeResult } from "./worker/protocol.ts";
@@ -64,6 +65,12 @@ export interface Registrar {
    * the build offers none (`Deployment.backups`).
    */
   readonly backup: Backer | undefined;
+  /**
+   * Recovery from a backup passkey, offered instead of making an identity
+   * on a device that holds none, or `undefined` where the build offers no
+   * backup (`Deployment.backups`).
+   */
+  readonly recovery: Recoverer | undefined;
 }
 
 const STOPPED = {
@@ -129,6 +136,7 @@ const ANSWERS: Record<Exclude<Tier0Answer, "accepted">, RegisterProblem> = {
 
 type Step =
   | { readonly kind: "intro" }
+  | { readonly kind: "recover" }
   | { readonly kind: "reading" }
   | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "due"; readonly acceptedAt: number }
@@ -344,7 +352,29 @@ export function Register({
 
   switch (step.kind) {
     case "intro":
-      return <RegisterIntro poll={poll} made={held !== "none"} onStart={prepare} />;
+      return (
+        <RegisterIntro
+          poll={poll}
+          made={held !== "none"}
+          onStart={prepare}
+          // Only where the device holds no identity: a recovery never replaces one (T-18).
+          onRecover={
+            held !== "none" || registrar.recovery === undefined
+              ? undefined
+              : () => setStep({ kind: "recover" })
+          }
+        />
+      );
+    case "recover":
+      return registrar.recovery === undefined ? null : (
+        <Recover
+          poll={poll}
+          recoverer={registrar.recovery}
+          backer={registrar.backup}
+          onDone={onDone}
+          onBack={() => setStep({ kind: "intro" })}
+        />
+      );
     case "reading":
     case "preparing":
     case "sending":
@@ -395,15 +425,21 @@ export function Register({
   }
 }
 
-/** Why the voter is making an identity, and what stays on the device, before anything happens. */
+/**
+ * Why the voter is making an identity, and what stays on the device, before
+ * anything happens; with recovery from a backup passkey offered beside it
+ * where `onRecover` is given.
+ */
 export function RegisterIntro({
   poll,
   made,
   onStart,
+  onRecover,
 }: {
   poll: FramePoll;
   made: boolean;
   onStart: () => void;
+  onRecover?: (() => void) | undefined;
 }) {
   const t = useTranslate(catalogs);
   return (
@@ -424,6 +460,16 @@ export function RegisterIntro({
       <Part title={t("registerStepsTitle")}>
         <p className="m-0">{t("registerSteps")}</p>
       </Part>
+      {onRecover === undefined ? null : (
+        <Part title={t("recoverOfferTitle")}>
+          <p className="m-0">{t("recoverOffer")}</p>
+          <div>
+            <Button variant="outline" onClick={onRecover}>
+              {t("recoverOfferStart")}
+            </Button>
+          </div>
+        </Part>
+      )}
     </EverydayFrame>
   );
 }

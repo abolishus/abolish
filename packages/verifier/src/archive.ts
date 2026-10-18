@@ -10,12 +10,17 @@
 // bounds what the authority can make it read (T-52).
 
 import {
+  type ArchiveManifest,
+  type AsyncBlockSource,
+  CHUNK_SIZE,
+  type Checkpoint,
+  contentDag,
   DecodeError,
   decodeArchiveLocator,
   decodeArchiveManifest,
   MANIFEST_BOUND,
+  MAX_BOARD_PAYLOAD,
   readArchivedObject,
-  type ArchiveManifest,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
@@ -23,12 +28,14 @@ import { bytesToHex } from "@noble/hashes/utils.js";
  * Every answer a run's sources give for an Arweave transaction's data, each
  * at most `limit` bytes, in the order to try them. An answer is never
  * trusted: it counts only if it reads as the CID asked for, so a source can
- * withhold a manifest but never change one (T-24).
+ * withhold an object but never change one (T-24). The reader stops at the
+ * first answer that reads, so a source that fetches lazily (an async
+ * iterable, as `arweaveSource` gives) asks no gateway after it.
  */
 export type TransactionSource = (
   transaction: Uint8Array,
   limit: number,
-) => Promise<readonly Uint8Array[]>;
+) => Promise<Iterable<Uint8Array>> | AsyncIterable<Uint8Array>;
 
 /**
  * The most a manifest's transaction data can be: the CAR of a one-chunk raw
@@ -226,7 +233,7 @@ export async function walkArchive(
 
   const read = async (cid: Uint8Array, transaction: Uint8Array): Promise<Read> => {
     reads++;
-    for (const data of await source(transaction, MANIFEST_DATA_LIMIT)) {
+    for await (const data of await source(transaction, MANIFEST_DATA_LIMIT)) {
       // A source past the limit is that source's failure, never parsed (T-52).
       if (data.length > MANIFEST_DATA_LIMIT) continue;
       const got = readArchivedObject(data, cid, MANIFEST_BOUND);
@@ -489,4 +496,225 @@ export async function walkArchive(
   }
 
   return { latest, manifests: reached, listings: wanted, findings, reads };
+}
+
+// The longest a board entry encodes (docs/spec/board.md, A copy from L1's
+// CIDs): its 51 bytes of framing and the largest payload.
+const MAX_ENTRY_BYTES = 51 + MAX_BOARD_PAYLOAD;
+// An entry-hash list holds one 32-byte entry hash per entry.
+const ENTRY_HASH_BYTES = 32;
+
+/** An object a counted checkpoint names, with the most its run can hold. */
+export interface ListedTarget {
+  /** The size of the checkpoints that name it: the end of its run. */
+  readonly size: bigint;
+  readonly cid: Uint8Array;
+  /** The most a run of its entries can encode: an object over it is no run. */
+  readonly bound: bigint;
+}
+
+/**
+ * The objects the counted checkpoints name (docs/spec/archive.md, The
+ * listed objects): each distinct size ends a run, whose segment object
+ * (`object_cid`) is at most the run's entries' longest encoding and whose
+ * entry-hash list (`hashes_cid`) is 32 bytes an entry. Every segment object
+ * by ascending size, then every entry-hash list: the segment objects are what
+ * a board copy reads, so a budget that runs out spends itself on them first.
+ * One per size, since the board checks' step 2 makes counted checkpoints of
+ * one size name the same CIDs.
+ */
+export function listedTargets(checkpoints: readonly Checkpoint[]): ListedTarget[] {
+  const bySize = new Map<bigint, Checkpoint>();
+  for (const cp of checkpoints) if (!bySize.has(cp.size)) bySize.set(cp.size, cp);
+  const segments: ListedTarget[] = [];
+  const hashes: ListedTarget[] = [];
+  let previous = 0n;
+  for (const size of [...bySize.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const cp = bySize.get(size) as Checkpoint;
+    const count = size - previous;
+    previous = size;
+    // A checkpoint of size 0 ends no run: the protocol stores no empty object.
+    if (count === 0n) continue;
+    segments.push({ size, cid: cp.object_cid, bound: count * BigInt(MAX_ENTRY_BYTES) });
+    hashes.push({ size, cid: cp.hashes_cid, bound: count * BigInt(ENTRY_HASH_BYTES) });
+  }
+  return [...segments, ...hashes];
+}
+
+/**
+ * The most bytes `objectCar` of an object of `length` bytes can be: the
+ * object, the 59-byte header, and for each of at most two blocks per chunk
+ * (the leaves and every dag-pb node above them) its framing (a varint and
+ * the CID) and its share of a parent's link, blocksize and UnixFS fields,
+ * each well under 128 bytes. A transaction's data past it is no object's CAR
+ * within `length`, so it is never held (T-52).
+ */
+export function archivedDataLimit(length: number): number {
+  const chunks = Math.max(1, Math.ceil(length / CHUNK_SIZE));
+  return length + 59 + chunks * 2 * 128;
+}
+
+/**
+ * How many transactions the listed objects' reads ask of the sources when
+ * the caller sets nothing: an honest archive needs one per object, and a few
+ * more where an upload was lost and listed again.
+ */
+export const DEFAULT_OBJECT_READS = 1_024;
+
+/** One report on the listed objects. None is a verdict: the board checks judge the bytes. */
+export type ListedFinding =
+  // A CID a counted checkpoint names that no reached manifest lists.
+  | { readonly code: "not-archived"; readonly size: bigint; readonly cid: Uint8Array }
+  // Listed, but no source served data that reads as the CID from any
+  // transaction it is listed under; every transaction tried is named.
+  | {
+      readonly code: "object-unavailable";
+      readonly size: bigint;
+      readonly cid: Uint8Array;
+      readonly transactions: readonly Uint8Array[];
+    }
+  // Data that reads as the CID names an object longer than its run can be:
+  // the CID fixes that, so no other source or listing does better.
+  | { readonly code: "object-over-bound"; readonly size: bigint; readonly cid: Uint8Array }
+  // The reader's byte or read budget ran out at this object: unverifiable
+  // for this reader, and nothing after it is read.
+  | {
+      readonly code: "objects-over-budget";
+      readonly size: bigint;
+      readonly cid: Uint8Array;
+      readonly maxBytes: number;
+      readonly maxReads: number;
+    };
+
+export interface ListedObjects {
+  /** Each target read, by its CID in hex: the bytes it names. */
+  readonly objects: ReadonlyMap<string, Uint8Array>;
+  /** The blocks of every object read, served by their CIDs, for `readBoardCopy` beside other sources. */
+  readonly blocks: AsyncBlockSource;
+  readonly findings: readonly ListedFinding[];
+  /** Bytes charged against `maxBytes`: every answer the sources gave, or the object it read, if longer. */
+  readonly spent: number;
+  /** Transactions asked of the sources, against `maxReads`. */
+  readonly reads: number;
+}
+
+/**
+ * Reads the listed objects (docs/spec/archive.md, The listed objects): each
+ * target is read by the distinct transactions a reached manifest lists it
+ * under (`listings`, from `walkArchive` given the targets' CIDs as
+ * `objects`), in walk order, stopping at the first whose data reads as the
+ * CID within the target's bound and what is left of `maxBytes`, so a lost
+ * upload listed again in a later manifest is found under its second
+ * transaction. A target no manifest lists is `not-archived`; one whose every
+ * listed transaction failed is `object-unavailable`, with them; one whose
+ * CID names an object over its bound is `object-over-bound` and isn't tried
+ * again.
+ *
+ * Both budgets are the reader's (T-52). Every answer a source gives counts
+ * against `maxBytes`, read or not, and an object read counts its own length
+ * where that is more than its answer's (identical chunks make a long object
+ * of a short CAR); an answer is held only up to the CAR of what is left, so junk served for a listing spends the budget rather than the
+ * reader's bandwidth unbounded; every transaction asked counts against
+ * `maxReads`, so an authority listing a CID in every manifest under dead
+ * transactions costs at most that many asks. The reads stop
+ * (`objects-over-budget`) at a target that would need more than either has
+ * left: one within its bound but over what is left of `maxBytes`, one with
+ * no answer that reads while `maxBytes` is short of its bound (an honest
+ * answer may have been too long to hold), or one still unread when
+ * `maxReads` is spent. What a stopped read didn't reach is unverifiable for this
+ * reader, never missing. The reader holds a few times `maxBytes` at most:
+ * an answer, its copy and the CAR it is compared with while it is read, and
+ * each object read with its blocks.
+ *
+ * Nothing read is trusted beyond being the bytes its CID names: the board
+ * checks authenticate them against L1's anchors, so the archive can only
+ * leave a copy short (T-53).
+ */
+export async function readListedObjects(
+  targets: readonly ListedTarget[],
+  listings: ReadonlyMap<string, readonly Uint8Array[]>,
+  source: TransactionSource,
+  maxBytes: number,
+  maxReads: number = DEFAULT_OBJECT_READS,
+): Promise<ListedObjects> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new RangeError("maxBytes must be a positive integer");
+  if (!Number.isSafeInteger(maxReads) || maxReads < 1)
+    throw new RangeError("maxReads must be a positive integer");
+  const objects = new Map<string, Uint8Array>();
+  const blocks = new Map<string, Uint8Array>();
+  // A CID that is a target twice is tried once, whatever came of it.
+  const attempted = new Set<string>();
+  const findings: ListedFinding[] = [];
+  let spent = 0;
+  let reads = 0;
+  let stopped = false;
+  for (const { size, cid, bound } of targets) {
+    const key = bytesToHex(cid);
+    const listed = listings.get(key) ?? [];
+    if (listed.length === 0) {
+      findings.push({ code: "not-archived", size, cid });
+      continue;
+    }
+    if (stopped || attempted.has(key)) continue;
+    attempted.add(key);
+    const over = () => {
+      findings.push({ code: "objects-over-budget", size, cid, maxBytes, maxReads });
+      stopped = true;
+    };
+    // A transaction listed in several manifests is one upload, asked once.
+    const distinct = [...new Map(listed.map((t) => [bytesToHex(t), t])).values()];
+    const left = () => maxBytes - spent;
+    const tried: Uint8Array[] = [];
+    let outcome: "read" | "over-bound" | "over-budget" | undefined;
+    for (const transaction of distinct) {
+      if (left() === 0 || reads === maxReads) {
+        outcome = "over-budget";
+        break;
+      }
+      const within = Number(bound < BigInt(left()) ? bound : BigInt(left()));
+      const limit = archivedDataLimit(within);
+      tried.push(transaction);
+      reads++;
+      for await (const data of await source(transaction, limit)) {
+        // A source past the limit is that source's failure, never parsed.
+        if (data.length > limit) continue;
+        const got = readArchivedObject(data, cid, within);
+        // What is held is charged: the object read, which identical chunks
+        // can make far longer than its CAR, or else the answer (T-52). The
+        // object is at most `within`, so the total held never passes `maxBytes`.
+        spent = Math.min(maxBytes, spent + Math.max(data.length, got.ok ? got.bytes.length : 0));
+        // Data that doesn't read as the CID is that source's failure.
+        if (!got.ok && got.reason === "inconsistent") {
+          // Junk that spent the budget: the reads stop below.
+          if (left() === 0) break;
+          continue;
+        }
+        if (got.ok) {
+          objects.set(key, got.bytes);
+          for (const b of contentDag(got.bytes).blocks) blocks.set(bytesToHex(b.cid), b.bytes);
+          outcome = "read";
+        } else outcome = BigInt(got.length) > bound ? "over-bound" : "over-budget";
+        break;
+      }
+      if (outcome !== undefined) break;
+    }
+    // With the budget short of the bound, an honest answer may have been too
+    // long to hold: unverifiable for this reader, never unavailable.
+    if (outcome === undefined && BigInt(left()) < bound) outcome = "over-budget";
+    if (outcome === "over-bound") findings.push({ code: "object-over-bound", size, cid });
+    else if (outcome === "over-budget") over();
+    else if (outcome === undefined)
+      findings.push({ code: "object-unavailable", size, cid, transactions: tried });
+  }
+  return {
+    objects,
+    blocks: async (cid, limit) => {
+      const b = blocks.get(bytesToHex(cid));
+      return b === undefined || b.length > limit ? [] : [b];
+    },
+    findings,
+    spent,
+    reads,
+  };
 }

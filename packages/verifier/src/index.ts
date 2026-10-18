@@ -109,17 +109,25 @@ export {
 } from "./l1.ts";
 export {
   type ArchiveDeployment,
+  archivedDataLimit,
   type ArchiveFinding,
   type ArchiveWalk,
   type ArchiveWalkOptions,
   DEFAULT_MANIFEST_BUDGET,
+  DEFAULT_OBJECT_READS,
+  type ListedFinding,
+  type ListedObjects,
+  type ListedTarget,
+  listedTargets,
   type LocatorRef,
   MANIFEST_DATA_LIMIT,
   type ManifestOrigin,
   type ReachedManifest,
+  readListedObjects,
   type TransactionSource,
   walkArchive,
 } from "./archive.ts";
+export { type ArweaveGateways, type ArweaveStats, arweaveSource } from "./arweave.ts";
 export {
   ACCUMULATOR_SLOT,
   accumulatorAtOutputRoot,

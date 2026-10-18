@@ -1,17 +1,26 @@
 import {
   type ArchiveManifest,
+  type Checkpoint,
+  CHUNK_SIZE,
   encodeArchiveLocator,
   encodeArchiveManifest,
   MANIFEST_BOUND,
+  MAX_BOARD_PAYLOAD,
   objectCar,
   objectCid,
+  readObjectAsync,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
   type ArchiveFinding,
+  archivedDataLimit,
   decodeHeader,
+  type ListedTarget,
+  listedTargets,
+  readListedObjects,
+  DEFAULT_OBJECT_READS,
   latestLocatorFromState,
   MANIFEST_DATA_LIMIT,
   NodePool,
@@ -79,7 +88,7 @@ function arweave(
   const held = new Map<string, Uint8Array[]>();
   for (const s of stored) held.set(bytesToHex(s.transaction), [objectCar(s.bytes)]);
   const asked: string[] = [];
-  const source: TransactionSource = async (t, limit) => {
+  const source = async (t: Uint8Array, limit: number): Promise<Uint8Array[]> => {
     expect(limit).toBe(MANIFEST_DATA_LIMIT);
     asked.push(bytesToHex(t));
     return [...(extra.get(bytesToHex(t)) ?? []), ...(held.get(bytesToHex(t)) ?? [])];
@@ -728,5 +737,579 @@ describe("latestLocatorFromState", () => {
     expect(() =>
       latestLocatorFromState({ ...proof, anchor: new Uint8Array(20).fill(0xa1) }),
     ).toThrow(expect.objectContaining({ code: "l1-anchor-absent" }));
+  });
+});
+
+// The listed objects (docs/spec/archive.md, The listed objects): the objects
+// the counted checkpoints name, read by the transactions the reached
+// manifests list them under.
+describe("listed objects", () => {
+  // Only `size`, `object_cid` and `hashes_cid` are read.
+  const checkpoint = (size: bigint, o: Uint8Array, h: Uint8Array) =>
+    ({ size, object_cid: o, hashes_cid: h }) as unknown as Checkpoint;
+
+  // A source holding each object's CAR under its transaction, with any other
+  // answers given first; every request is recorded with its limit.
+  function objectSource(
+    held: readonly (readonly [Uint8Array, Uint8Array])[],
+    extra: ReadonlyMap<string, readonly Uint8Array[]> = new Map(),
+  ) {
+    const cars = new Map(held.map(([t, o]) => [bytesToHex(t), objectCar(o)]));
+    const asked: [string, number][] = [];
+    const source = async (t: Uint8Array, limit: number): Promise<Uint8Array[]> => {
+      asked.push([bytesToHex(t), limit]);
+      const car = cars.get(bytesToHex(t));
+      return [...(extra.get(bytesToHex(t)) ?? []), ...(car === undefined ? [] : [car])];
+    };
+    return { source, asked };
+  }
+
+  const target = (o: Uint8Array, size = 1n, bound = 1_000n): ListedTarget => ({
+    size,
+    cid: objectCid(o),
+    bound,
+  });
+  const listing = (...pairs: (readonly [Uint8Array, readonly Uint8Array[]])[]) =>
+    new Map(pairs.map(([o, ts]) => [bytesToHex(objectCid(o)), ts]));
+
+  test("targets are each run's segment object, then each entry-hash list, by ascending size", () => {
+    const [a, b, c, d, e] = [1, 2, 3, 4, 5].map((n) => objectCid(Uint8Array.of(n))) as [
+      Uint8Array,
+      Uint8Array,
+      Uint8Array,
+      Uint8Array,
+      Uint8Array,
+    ];
+    expect(
+      listedTargets([
+        checkpoint(7n, c, d),
+        checkpoint(3n, a, b),
+        // A second checkpoint of a size names the same CIDs (step 2): one target each.
+        checkpoint(3n, e, e),
+        checkpoint(0n, e, e),
+      ]),
+    ).toEqual([
+      // Every segment object first, then every entry-hash list.
+      { size: 3n, cid: a, bound: 3n * BigInt(51 + MAX_BOARD_PAYLOAD) },
+      { size: 7n, cid: c, bound: 4n * BigInt(51 + MAX_BOARD_PAYLOAD) },
+      { size: 3n, cid: b, bound: 3n * 32n },
+      { size: 7n, cid: d, bound: 4n * 32n },
+    ]);
+  });
+
+  test("the data limit holds every object's CAR", () => {
+    for (const n of [1, 2, 1000, CHUNK_SIZE - 1, CHUNK_SIZE, CHUNK_SIZE + 1, 3 * CHUNK_SIZE + 7])
+      expect(objectCar(new Uint8Array(n).fill(n & 0xff)).length).toBeLessThanOrEqual(
+        archivedDataLimit(n),
+      );
+    // Distinct chunks: no block is shared, so the CAR is at its longest.
+    const distinct = new Uint8Array(4 * CHUNK_SIZE + 3);
+    for (let i = 0; i < distinct.length; i += 4096) distinct[i] = (i / 4096) & 0xff;
+    distinct[4 * CHUNK_SIZE] = 1;
+    for (let k = 1; k <= 4; k++) distinct[k * CHUNK_SIZE - 1] = k;
+    expect(objectCar(distinct).length).toBeLessThanOrEqual(archivedDataLimit(distinct.length));
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 1, maxLength: 4096 }), (o) => {
+        expect(objectCar(o).length).toBeLessThanOrEqual(archivedDataLimit(o.length));
+      }),
+      { numRuns },
+    );
+  });
+
+  test("reads each listed object, and serves its blocks", async () => {
+    const big = new Uint8Array(CHUNK_SIZE + 10).fill(3);
+    big[0] = 9;
+    const small = Uint8Array.of(1, 2, 3);
+    const { source, asked } = objectSource([
+      [tx(1), big],
+      [tx(2), small],
+    ]);
+    const read = await readListedObjects(
+      [target(big, 2n, 10n * BigInt(CHUNK_SIZE)), target(small, 2n)],
+      listing([big, [tx(1)]], [small, [tx(2)]]),
+      source,
+      2 * CHUNK_SIZE,
+    );
+    expect(read.findings).toEqual([]);
+    // Every answer is charged as the sources gave it: here, each object's CAR.
+    expect(read.spent).toBe(objectCar(big).length + objectCar(small).length);
+    expect(read.reads).toBe(2);
+    // Compared as hex: toEqual on a megabyte is slow.
+    expect(bytesToHex(read.objects.get(bytesToHex(objectCid(big))) ?? new Uint8Array())).toBe(
+      bytesToHex(big),
+    );
+    expect(read.objects.get(bytesToHex(objectCid(small)))).toEqual(small);
+    // Each request's limit is the CAR of what it may read: the bound, or what is left.
+    expect(asked).toEqual([
+      [bytesToHex(tx(1)), archivedDataLimit(2 * CHUNK_SIZE)],
+      [bytesToHex(tx(2)), archivedDataLimit(1_000)],
+    ]);
+    const back = await readObjectAsync(objectCid(big), big.length, read.blocks);
+    expect(back.ok && bytesToHex(back.bytes) === bytesToHex(big)).toBe(true);
+    expect(await read.blocks(objectCid(Uint8Array.of(4)), CHUNK_SIZE)).toEqual([]);
+  });
+
+  test("a CID no manifest lists is not archived, whatever the budget", async () => {
+    const a = Uint8Array.of(1);
+    const b = Uint8Array.of(2);
+    const c = Uint8Array.of(3);
+    const { source, asked } = objectSource([[tx(1), a]]);
+    const read = await readListedObjects(
+      [target(b, 1n, 2_000n), target(a), target(c, 4n)],
+      // Listed with no transaction counts as not listed.
+      listing([a, [tx(1)]], [c, []]),
+      source,
+      // The budget stops at b, and a and c are still judged.
+      100,
+    );
+    expect(read.findings).toEqual([
+      { code: "not-archived", size: 1n, cid: objectCid(b) },
+      { code: "not-archived", size: 4n, cid: objectCid(c) },
+    ]);
+    expect(asked).toHaveLength(1);
+  });
+
+  test("a lost upload listed again is read from its second transaction", async () => {
+    const a = Uint8Array.of(7, 7);
+    const { source, asked } = objectSource([[tx(2), a]]);
+    const read = await readListedObjects(
+      [target(a)],
+      listing([a, [tx(1), tx(2), tx(3)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings).toEqual([]);
+    expect(read.objects.size).toBe(1);
+    // The third listing isn't asked for once the second reads.
+    expect(asked.map(([t]) => t)).toEqual([bytesToHex(tx(1)), bytesToHex(tx(2))]);
+  });
+
+  test("an object no listing serves is unavailable, naming every transaction tried", async () => {
+    const a = Uint8Array.of(5);
+    const other = Uint8Array.of(6);
+    // Another object's CAR, a truncated CAR and junk: none reads as a's CID.
+    const car = objectCar(a);
+    const extra = new Map([
+      [bytesToHex(tx(1)), [objectCar(other), car.subarray(0, car.length - 1), Uint8Array.of(0)]],
+    ]);
+    const { source } = objectSource([], extra);
+    const read = await readListedObjects(
+      [target(a, 3n)],
+      listing([a, [tx(1), tx(2)]]),
+      source,
+      10_000,
+    );
+    expect(read.findings).toEqual([
+      { code: "object-unavailable", size: 3n, cid: objectCid(a), transactions: [tx(1), tx(2)] },
+    ]);
+    expect(read.objects.size).toBe(0);
+    // What they served still counts against the budget.
+    expect(read.spent).toBe(objectCar(other).length + car.length - 1 + 1);
+  });
+
+  test("a later answer reads after a bad one for the same transaction", async () => {
+    const a = Uint8Array.of(8, 8, 8);
+    const extra = new Map([[bytesToHex(tx(1)), [Uint8Array.of(1, 2)]]]);
+    const { source } = objectSource([[tx(1), a]], extra);
+    const read = await readListedObjects([target(a)], listing([a, [tx(1)]]), source, 1_000);
+    expect(read.findings).toEqual([]);
+    expect(read.objects.get(bytesToHex(objectCid(a)))).toEqual(a);
+  });
+
+  test("an answer past the data limit is never parsed", async () => {
+    const a = Uint8Array.of(4, 4);
+    const long = new Uint8Array(archivedDataLimit(1_000) + 1);
+    long.set(objectCar(a));
+    const { source } = objectSource([], new Map([[bytesToHex(tx(1)), [long]]]));
+    const read = await readListedObjects([target(a)], listing([a, [tx(1)]]), source, 1_000_000);
+    // The budget covers the bound, so a long answer is that source's failure.
+    expect(read.findings.map((f) => f.code)).toEqual(["object-unavailable"]);
+  });
+
+  test("an object over its run's bound is reported once and never held", async () => {
+    const a = new Uint8Array(500).fill(1);
+    const b = Uint8Array.of(2);
+    const { source, asked } = objectSource([
+      [tx(1), a],
+      [tx(2), a],
+      [tx(3), b],
+    ]);
+    const read = await readListedObjects(
+      [target(a, 1n, 499n), target(b, 2n)],
+      listing([a, [tx(1), tx(2)]], [b, [tx(3)]]),
+      source,
+      10_000,
+    );
+    expect(read.findings).toEqual([{ code: "object-over-bound", size: 1n, cid: objectCid(a) }]);
+    // The CID fixes the length, so the second listing isn't asked; b still reads.
+    expect(asked.map(([t]) => t)).toEqual([bytesToHex(tx(1)), bytesToHex(tx(3))]);
+    expect([...read.objects.keys()]).toEqual([bytesToHex(objectCid(b))]);
+  });
+
+  test("an object within its bound but past the budget stops the reads", async () => {
+    const a = new Uint8Array(300).fill(1);
+    const b = new Uint8Array(300).fill(2);
+    const c = Uint8Array.of(3);
+    const { source, asked } = objectSource([
+      [tx(1), a],
+      [tx(2), b],
+      [tx(3), c],
+    ]);
+    const read = await readListedObjects(
+      [target(a), target(b, 2n), target(c, 3n), target(Uint8Array.of(9), 4n)],
+      listing([a, [tx(1)]], [b, [tx(2)]], [c, [tx(3)]]),
+      source,
+      500,
+    );
+    expect(read.findings).toEqual([
+      {
+        code: "objects-over-budget",
+        size: 2n,
+        cid: objectCid(b),
+        maxBytes: 500,
+        maxReads: DEFAULT_OBJECT_READS,
+      },
+      { code: "not-archived", size: 4n, cid: objectCid(Uint8Array.of(9)) },
+    ]);
+    // a's CAR, then b's up to the budget.
+    expect(read.spent).toBe(500);
+    expect(asked.map(([t]) => t)).toEqual([bytesToHex(tx(1)), bytesToHex(tx(2))]);
+  });
+
+  test("an answer past the CAR of what is left, with the budget short of the bound, is over budget", async () => {
+    // A two-chunk object's CAR is longer than the data limit of 1,000 bytes.
+    const a = new Uint8Array(2 * CHUNK_SIZE).fill(1);
+    a[0] = 0;
+    const { source } = objectSource([[tx(1), a]]);
+    const read = await readListedObjects(
+      [target(a, 1n, 3n * BigInt(CHUNK_SIZE))],
+      listing([a, [tx(1)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings).toEqual([
+      {
+        code: "objects-over-budget",
+        size: 1n,
+        cid: objectCid(a),
+        maxBytes: 1_000,
+        maxReads: DEFAULT_OBJECT_READS,
+      },
+    ]);
+  });
+
+  test("a spent budget stops before the next request", async () => {
+    const a = new Uint8Array(100).fill(1);
+    const b = Uint8Array.of(2);
+    const { source, asked } = objectSource([
+      [tx(1), a],
+      [tx(2), b],
+    ]);
+    const read = await readListedObjects(
+      [target(a), target(b, 2n)],
+      listing([a, [tx(1)]], [b, [tx(2)]]),
+      source,
+      100,
+    );
+    expect(read.findings).toEqual([
+      {
+        code: "objects-over-budget",
+        size: 2n,
+        cid: objectCid(b),
+        maxBytes: 100,
+        maxReads: DEFAULT_OBJECT_READS,
+      },
+    ]);
+    expect(asked).toHaveLength(1);
+  });
+
+  test("needs a positive budget", async () => {
+    const { source } = objectSource([]);
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      await expect(readListedObjects([], new Map(), source, bad)).rejects.toThrow(RangeError);
+      await expect(readListedObjects([], new Map(), source, 1, bad)).rejects.toThrow(RangeError);
+    }
+  });
+
+  test("a CID named twice is read once", async () => {
+    const a = Uint8Array.of(1, 1);
+    const { source, asked } = objectSource([[tx(1), a]]);
+    const read = await readListedObjects(
+      [target(a, 1n), target(a, 2n)],
+      listing([a, [tx(1)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings).toEqual([]);
+    expect(asked).toHaveLength(1);
+  });
+
+  test("a CID named twice is tried once, even when the first try failed", async () => {
+    const a = Uint8Array.of(1, 3);
+    const { source, asked } = objectSource([]);
+    const read = await readListedObjects(
+      [target(a, 1n), target(a, 2n)],
+      listing([a, [tx(1)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings.map((f) => f.code)).toEqual(["object-unavailable"]);
+    expect(asked).toHaveLength(1);
+  });
+
+  test("an object of identical chunks is charged its own length, not its short CAR's", async () => {
+    // Three identical chunks: the CAR holds one leaf, so it is about a third
+    // of the object. Charged by its CAR, b would also be read and held.
+    const a = new Uint8Array(3 * CHUNK_SIZE).fill(1);
+    const b = new Uint8Array(3 * CHUNK_SIZE).fill(2);
+    expect(objectCar(a).length).toBeLessThan(CHUNK_SIZE + 4096);
+    const { source } = objectSource([
+      [tx(1), a],
+      [tx(2), b],
+    ]);
+    const bound = 4n * BigInt(CHUNK_SIZE);
+    const read = await readListedObjects(
+      [target(a, 1n, bound), target(b, 2n, bound)],
+      listing([a, [tx(1)]], [b, [tx(2)]]),
+      source,
+      4 * CHUNK_SIZE,
+    );
+    // a, then b's answer, up to the budget.
+    expect(read.spent).toBe(4 * CHUNK_SIZE);
+    expect(read.findings.map((f) => f.code)).toEqual(["objects-over-budget"]);
+    expect([...read.objects.keys()]).toEqual([bytesToHex(objectCid(a))]);
+  });
+
+  test("a transaction listed in several manifests is asked once", async () => {
+    const a = Uint8Array.of(2, 2);
+    const { source, asked } = objectSource([]);
+    const read = await readListedObjects(
+      [target(a)],
+      listing([a, [tx(1), tx(1), tx(2), tx(1)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings).toEqual([
+      { code: "object-unavailable", size: 1n, cid: objectCid(a), transactions: [tx(1), tx(2)] },
+    ]);
+    expect(asked.map(([t]) => t)).toEqual([bytesToHex(tx(1)), bytesToHex(tx(2))]);
+  });
+
+  test("the read budget bounds the transactions asked, over every target", async () => {
+    const a = Uint8Array.of(3);
+    const b = Uint8Array.of(4);
+    const c = Uint8Array.of(5);
+    const { source, asked } = objectSource([[tx(10), b]]);
+    // a's five listings are all dead; b reads at its first; c is never asked.
+    const read = await readListedObjects(
+      [target(a), target(b, 2n), target(c, 3n)],
+      listing([a, [1, 2, 3].map(tx)], [b, [tx(10)]], [c, [tx(20)]]),
+      source,
+      1_000,
+      4,
+    );
+    expect(read.findings).toEqual([
+      { code: "object-unavailable", size: 1n, cid: objectCid(a), transactions: [1, 2, 3].map(tx) },
+      { code: "objects-over-budget", size: 3n, cid: objectCid(c), maxBytes: 1_000, maxReads: 4 },
+    ]);
+    expect(read.reads).toBe(4);
+    expect(asked).toHaveLength(4);
+    // A target whose listings outrun the reads left stops there, unread.
+    const stopped = await readListedObjects(
+      [target(a)],
+      listing([a, [1, 2, 3, 4, 5].map(tx)]),
+      source,
+      1_000,
+      2,
+    );
+    expect(stopped.findings).toEqual([
+      { code: "objects-over-budget", size: 1n, cid: objectCid(a), maxBytes: 1_000, maxReads: 2 },
+    ]);
+  });
+
+  test("junk a source serves spends the byte budget, and stops the reads", async () => {
+    const a = new Uint8Array(100).fill(6);
+    const junk = new Uint8Array(400).fill(0xee);
+    const extra = new Map([[bytesToHex(tx(1)), [junk, junk, junk, junk]]]);
+    const { source } = objectSource([[tx(2), a]], extra);
+    const read = await readListedObjects(
+      [target(a, 1n, 500n)],
+      listing([a, [tx(1), tx(2)]]),
+      source,
+      1_000,
+    );
+    expect(read.findings).toEqual([
+      {
+        code: "objects-over-budget",
+        size: 1n,
+        cid: objectCid(a),
+        maxBytes: 1_000,
+        maxReads: DEFAULT_OBJECT_READS,
+      },
+    ]);
+    expect(read.spent).toBe(1_000);
+    expect(read.reads).toBe(1);
+  });
+
+  test("an over-bound object whose CAR is past the limit is unavailable, never parsed", async () => {
+    // Bound 10, so the limit is a few hundred bytes and a's CAR is past it:
+    // only the data limit keeps this answer from being read as `object-over-bound`.
+    const a = new Uint8Array(400).fill(7);
+    expect(objectCar(a).length).toBeGreaterThan(archivedDataLimit(10));
+    const { source } = objectSource([[tx(1), a]]);
+    const read = await readListedObjects(
+      [target(a, 1n, 10n)],
+      listing([a, [tx(1)]]),
+      source,
+      1_000_000,
+    );
+    expect(read.findings.map((f) => f.code)).toEqual(["object-unavailable"]);
+    expect(read.spent).toBe(0);
+  });
+
+  test("the data limit holds the longest CAR of any length, deep trees included", () => {
+    // The CAR's length for an object of distinct chunks, computed from
+    // content-addressing's layout without building it: each leaf framed, and
+    // each dag-pb node's links, blocksizes and UnixFS fields.
+    const vlen = (n: number) => {
+      let k = 1;
+      while (n >= 0x80) {
+        n = Math.floor(n / 0x80);
+        k++;
+      }
+      return k;
+    };
+    const framed = (len: number) => vlen(36 + len) + 36 + len;
+    const carLength = (length: number) => {
+      const chunks = Math.ceil(length / CHUNK_SIZE);
+      let total = 59;
+      let level: { size: number; tsize: number }[] = [];
+      for (let i = 0; i < chunks; i++) {
+        const size = Math.min(CHUNK_SIZE, length - i * CHUNK_SIZE);
+        total += framed(size);
+        level.push({ size, tsize: size });
+      }
+      while (level.length > 1) {
+        const up: { size: number; tsize: number }[] = [];
+        for (let i = 0; i < level.length; i += 1024) {
+          const children = level.slice(i, i + 1024);
+          const size = children.reduce((t, c) => t + c.size, 0);
+          let data = 2 + 1 + vlen(size);
+          let links = 0;
+          for (const c of children) {
+            data += 1 + vlen(c.size);
+            const link = 38 + 2 + 1 + vlen(c.tsize);
+            links += 1 + vlen(link) + link;
+          }
+          const bytes = links + 1 + vlen(data) + data;
+          total += framed(bytes);
+          up.push({ size, tsize: bytes + children.reduce((t, c) => t + c.tsize, 0) });
+        }
+        level = up;
+      }
+      return total;
+    };
+    // The model is the encoder's, checked where the encoder can run.
+    for (const chunks of [1, 2, 3]) {
+      const o = new Uint8Array(chunks * CHUNK_SIZE - 5);
+      for (let k = 0; k < chunks; k++) o[k * CHUNK_SIZE] = k + 1;
+      expect(carLength(o.length)).toBe(objectCar(o).length);
+    }
+    for (const length of [
+      1,
+      1024 * CHUNK_SIZE,
+      1024 * CHUNK_SIZE + 1,
+      1025 * CHUNK_SIZE - 1,
+      2048 * CHUNK_SIZE + 3,
+      1024 * 1024 * CHUNK_SIZE,
+      1024 * 1024 * CHUNK_SIZE + 1,
+      3 * 1024 * 1024 * CHUNK_SIZE + 12_345,
+    ])
+      expect(carLength(length), String(length)).toBeLessThanOrEqual(archivedDataLimit(length));
+  });
+
+  test("the walk's listings lead to the objects it names", async () => {
+    const segment = Uint8Array.of(0x51, 0x52);
+    const hashes = new Uint8Array(32).fill(0x33);
+    const targets = listedTargets([checkpoint(1n, objectCid(segment), objectCid(hashes))]);
+    const m0 = manifest(0n, [], {
+      objects: [
+        { cid: objectCid(segment), transaction: tx(41) },
+        { cid: objectCid(hashes), transaction: tx(42) },
+      ].sort((x, y) => (bytesToHex(x.cid) < bytesToHex(y.cid) ? -1 : 1)),
+    });
+    const { source: manifests } = arweave([m0]);
+    const walk = await walkArchive(locatorOf(m0), DEPLOYMENT, manifests, {
+      objects: targets.map((t) => t.cid),
+    });
+    expect(walk.findings).toEqual([]);
+    const { source } = objectSource([
+      [tx(41), segment],
+      [tx(42), hashes],
+    ]);
+    const read = await readListedObjects(targets, walk.listings, source, 10_000);
+    expect(read.findings).toEqual([]);
+    expect(read.objects.get(bytesToHex(objectCid(segment)))).toEqual(segment);
+    expect(read.objects.get(bytesToHex(objectCid(hashes)))).toEqual(hashes);
+  });
+
+  test("an archive's honest uploads always read, and only lost ones are reported", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            bytes: fc.uint8Array({ minLength: 1, maxLength: 64 }),
+            // Per listing, whether its upload is lost.
+            lost: fc.array(fc.boolean(), { minLength: 0, maxLength: 3 }),
+          }),
+          { minLength: 1, maxLength: 8 },
+        ),
+        async (objs) => {
+          const seen = new Set<string>();
+          const unique = objs.filter((o) => {
+            const k = bytesToHex(o.bytes);
+            return !seen.has(k) && (seen.add(k), true);
+          });
+          let n = 0;
+          const held: [Uint8Array, Uint8Array][] = [];
+          const pairs: [Uint8Array, Uint8Array[]][] = [];
+          for (const o of unique) {
+            const ts = o.lost.map((lost) => {
+              const t = tx(70_000 + n++);
+              if (!lost) held.push([t, o.bytes]);
+              return t;
+            });
+            pairs.push([o.bytes, ts]);
+          }
+          const { source } = objectSource(held);
+          const read = await readListedObjects(
+            unique.map((o, i) => target(o.bytes, BigInt(i + 1), 64n)),
+            listing(...pairs),
+            source,
+            1 << 20,
+          );
+          const expected = unique.flatMap((o, i) => {
+            const cid = objectCid(o.bytes);
+            const size = BigInt(i + 1);
+            if (o.lost.length === 0) return [{ code: "not-archived", size, cid }];
+            if (o.lost.every((x) => x))
+              return [
+                {
+                  code: "object-unavailable",
+                  size,
+                  cid,
+                  transactions: (pairs[i] as [Uint8Array, Uint8Array[]])[1],
+                },
+              ];
+            return [];
+          });
+          expect(read.findings).toEqual(expected);
+          for (const o of unique)
+            if (o.lost.some((x) => !x))
+              expect(read.objects.get(bytesToHex(objectCid(o.bytes)))).toEqual(o.bytes);
+        },
+      ),
+      { numRuns },
+    );
   });
 });

@@ -105,6 +105,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- [[P3-4]] part 2b-3b-2b-2b (the nullifier circuits' proof checks and prover through bb.js and noir_js) waits on the owner's review of the `ci:` PR #436, which lets `packages/circuits` depend on `@aztec/bb.js`, `@noir-lang/noir_js` and `@abolishus/crypto` (rule B).
 - [[P2-21]]'s real-phone measurement (proving time and memory on a mid-range phone) needs a person with a phone: no agent session has one. How to run it is in its file, part 4b-2. The rest of the item is done (#427).
 - On 2026-10-17 the owner chose staging's origins for [[P2-8]] part 2b (`https://api-staging.abolish.us`, `https://sepolia.base.org`), and the `connect-src` change landed in #332.
 - On 2026-10-12 the owner answered [[0010-tier2-identity-provider]]'s two questions (Owner decision), unblocking [[P3-4]]'s verifier side and real-document registration through trustee attestation.

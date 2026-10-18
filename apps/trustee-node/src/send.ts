@@ -17,7 +17,9 @@
 // Nothing here decides whether a record is recorded: `recorded` reads that
 // from finalized L2 history, and the seat resends until it is. What a node
 // answers here only decides when to deposit, so a node that lies about a
-// receipt can delay the deposit to `c_I − forceLead`, never past it.
+// receipt can delay the deposit to `c_I − forceLead`, never past it, and
+// one that lies about nonces can make the sender sign at most
+// `MAX_SIGNED_PER_RECORD` transactions of a record on each chain.
 import { boardAbi } from "@abolishus/contracts/abi";
 import { chainId, type Rpc, RpcError } from "@abolishus/node";
 import { bytesToHex, encodeFunctionData, type Hex, hexToBytes, keccak256, parseAbi } from "viem";
@@ -144,12 +146,28 @@ interface Chain {
   readonly maxFeePerGas: bigint;
 }
 
-/** What the sender holds of one record: the signed transactions it resends. */
+/**
+ * The most transactions the sender signs for one record on one chain. Each
+ * is valid until its nonce is used, so a node answering "nonce too low" or
+ * "reverted" on every send could otherwise collect a deposit a step and
+ * broadcast them all, spending the account to `t_A` (T-52). Three covers a
+ * nonce another transaction took and a deposit the portal's metering
+ * reverted.
+ */
+export const MAX_SIGNED_PER_RECORD = 3;
+
+/** One chain's transaction for a record: the signed bytes resent, and how many were signed. */
+interface Slot {
+  tx?: Uint8Array;
+  signed: number;
+}
+
+/** What the sender holds of one record. */
 interface Pending {
   /** When the record was first offered, by the node's clock. */
   readonly since: bigint;
-  l2?: Uint8Array;
-  deposit?: Uint8Array;
+  readonly l2: Slot;
+  readonly deposit: Slot;
 }
 
 /**
@@ -161,8 +179,10 @@ interface Pending {
  * once the sequencer refuses it, once it has waited `forceAfter` outside any
  * block, and from `cutoff − forceLead` whatever the sequencer did. Throws
  * `SendError` `unsent` when neither took it now, `reverted` when the board
- * refused it on L2, and `deposit-gas` when the deposit can't be sent at all.
- * Sends run one at a time, so two never take one nonce.
+ * refused it on L2 (deposited all the same from `cutoff − forceLead`, so no
+ * node's receipt keeps the record off L1), and `deposit-gas` when the
+ * deposit can't be sent at all. Sends run one at a time, so two never take
+ * one nonce; the deployment runs one sender per account, since two would.
  */
 export async function availabilitySender(options: SendOptions): Promise<ContractPath["send"]> {
   const o = options;
@@ -200,6 +220,10 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
       await c.rpc.call("eth_getTransactionCount", [account.address, "pending"]),
       "eth_getTransactionCount",
     );
+    // viem takes a nonce as a number; EIP-2681 bounds it below 2⁶⁴ − 1, and
+    // no account reaches 2⁵³.
+    if (nonce > BigInt(Number.MAX_SAFE_INTEGER))
+      throw new RpcError("eth_getTransactionCount: a nonce no account reaches");
     const tip = quantity(
       await c.rpc.call("eth_maxPriorityFeePerGas", []),
       "eth_maxPriorityFeePerGas",
@@ -222,27 +246,35 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
   };
 
   /**
-   * Resends `signed` until it is in a block, signing anew when there is none
-   * yet, its nonce went to another transaction, or it reverted and `retry`
-   * says a new one may not. Returns the transaction and whether a block
-   * holds it.
+   * Resends the slot's transaction until it is in a block, signing anew
+   * when there is none yet, its nonce went to another transaction, or it
+   * reverted and `retry` says a new one may help, at most
+   * `MAX_SIGNED_PER_RECORD` times. Returns whether a block holds it.
    */
   const offer = async (
     c: Chain,
-    signed: Uint8Array | undefined,
+    slot: Slot,
     retry: boolean,
     build: () => Promise<Uint8Array>,
-  ): Promise<{ tx: Uint8Array; state: Inclusion }> => {
+  ): Promise<Inclusion> => {
+    const signed = slot.tx;
     if (signed !== undefined) {
       const state = await inclusion(c.rpc, txHash(signed));
-      if (state === "succeeded" || (state === "reverted" && !retry)) return { tx: signed, state };
-      if (state === "none" && (await broadcast(c.rpc, signed)) === "sent")
-        return { tx: signed, state };
+      if (state === "succeeded" || (state === "reverted" && !retry)) return state;
+      if (state === "none") {
+        if ((await broadcast(c.rpc, signed)) === "sent") return state;
+        // Mined between the receipt and the resend, rather than replaced.
+        if ((await inclusion(c.rpc, txHash(signed))) === "succeeded") return "succeeded";
+      }
     }
+    if (slot.signed >= MAX_SIGNED_PER_RECORD)
+      throw new RpcError("signed as many transactions for the record as it may");
     const tx = await build();
+    slot.signed++;
+    slot.tx = tx;
     if ((await broadcast(c.rpc, tx)) === "stale")
       throw new RpcError("eth_sendRawTransaction: the nonce moved on");
-    return { tx, state: "none" };
+    return "none";
   };
 
   const depositGas = async (data: Hex): Promise<bigint> => {
@@ -266,26 +298,30 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
       args: [bytesToHex(record)],
     });
     const key = keccak256(call);
-    const p: Pending = pending.get(key) ?? { since: now };
+    const p: Pending = pending.get(key) ?? {
+      since: now,
+      l2: { signed: 0 },
+      deposit: { signed: 0 },
+    };
     pending.set(key, p);
 
     let l2State: Inclusion | "refused";
     try {
       // The board's revert is final: the same call reverts again.
-      const sent = await offer(l2, p.l2, false, () => sign(l2, board, call, AVAILABILITY_CALL_GAS));
-      p.l2 = sent.tx;
-      l2State = sent.state;
+      l2State = await offer(l2, p.l2, false, () => sign(l2, board, call, AVAILABILITY_CALL_GAS));
     } catch (e) {
       // An unreachable node and a refusing sequencer alike leave the record
       // to the portal.
       if (!(e instanceof RpcError)) throw e;
       l2State = "refused";
     }
-    if (l2State === "reverted") throw new SendError("reverted");
+    const late = now >= cutoff - o.forceLead;
+    // Only the node says the board reverted, so from `cutoff − forceLead`
+    // the record is deposited all the same: one deposit, which an honest
+    // node's revert makes a reverted deposit on L2.
+    if (l2State === "reverted" && !late) throw new SendError("reverted");
     const force =
-      l2State === "refused" ||
-      (l2State === "none" && now - p.since >= o.forceAfter) ||
-      now >= cutoff - o.forceLead;
+      l2State === "refused" || (l2State === "none" && now - p.since >= o.forceAfter) || late;
     if (!force) return;
 
     const deposit = encodeFunctionData({
@@ -297,14 +333,14 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
       // A deposit that reverted on L1 made no deposit, and the portal's
       // metering can revert one whose gas a quiet market's estimate set: it
       // is signed again, with a fresh estimate.
-      const sent = await offer(l1, p.deposit, true, async () =>
+      await offer(l1, p.deposit, true, async () =>
         sign(l1, portal, deposit, await depositGas(deposit)),
       );
-      p.deposit = sent.tx;
     } catch (e) {
       if (!(e instanceof RpcError)) throw e;
       throw new SendError("unsent");
     }
+    if (l2State === "reverted") throw new SendError("reverted");
   };
 
   return (record, cutoff) => {

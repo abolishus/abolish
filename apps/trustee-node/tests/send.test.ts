@@ -12,6 +12,7 @@ import {
   AVAILABILITY_CALL_GAS,
   availabilitySender,
   DEPOSIT_GAS_FLOOR,
+  MAX_SIGNED_PER_RECORD,
   SendError,
   type SendOptions,
 } from "../src/send.ts";
@@ -304,15 +305,47 @@ describe("the board call through the sequencer", () => {
     );
   });
 
-  test("a call the board reverted is reported, and never deposited", async () => {
+  test("a call the board reverted is reported, and deposited only from cutoff − forceLead, once", async () => {
     await l2.rpc.call("anvil_setCode", [hex(BOARD), REVERT]);
     const send = await availabilitySender(options());
     const record = randomBytes(106);
     await send(record, CUTOFF);
     await mineL2();
-    w.now = CUTOFF;
-    await expect(send(record, CUTOFF)).rejects.toMatchObject({ code: "reverted" });
+    w.now = CUTOFF - FORCE_LEAD - 1n;
+    await expect(send(record, CUTOFF)).rejects.toEqual(new SendError("reverted"));
     expect(await txsFrom(l1.rpc, w.from)).toEqual([]);
+    // Only the node says it reverted: the record still goes through L1.
+    w.now = CUTOFF - FORCE_LEAD;
+    await expect(send(record, CUTOFF)).rejects.toEqual(new SendError("reverted"));
+    await expect(send(record, CUTOFF)).rejects.toEqual(new SendError("reverted"));
+    expect((await txsFrom(l1.rpc, w.from)).map((t) => t.nonce)).toEqual([0n]);
+    expect((await txsFrom(l2.rpc, w.from)).map((t) => t.nonce)).toEqual([0n]);
+  });
+
+  test("a nonce no account reaches is the node's refusal, and the record is deposited", async () => {
+    w.l2Hook = (m) =>
+      m === "eth_getTransactionCount" ? Promise.resolve("0x20000000000000") : undefined;
+    const send = await availabilitySender(options());
+    await send(randomBytes(106), CUTOFF);
+    expect(await txsFrom(l2.rpc, w.from)).toEqual([]);
+    expect(await txsFrom(l1.rpc, w.from)).toHaveLength(1);
+  });
+
+  test("another transaction's receipt or hash is the node's refusal, and the record is deposited", async () => {
+    const send = await availabilitySender(options());
+    const record = randomBytes(106);
+    await send(record, CUTOFF);
+    w.l2Hook = (m) =>
+      m === "eth_getTransactionReceipt"
+        ? Promise.resolve({ transactionHash: hex(randomBytes(32)), status: "0x1" })
+        : undefined;
+    await send(record, CUTOFF);
+    expect(await txsFrom(l1.rpc, w.from)).toHaveLength(1);
+    const other = randomBytes(106);
+    w.l2Hook = (m) =>
+      m === "eth_sendRawTransaction" ? Promise.resolve(hex(randomBytes(32))) : undefined;
+    await send(other, CUTOFF);
+    expect(await txsFrom(l1.rpc, w.from)).toHaveLength(2);
   });
 });
 
@@ -442,6 +475,35 @@ describe("the deposit through the portal", () => {
     await send(record, CUTOFF);
     expect(await deposited(record)).toEqual([]);
     expect((await txsFrom(l2.rpc, w.from)).map((t) => t.nonce)).toEqual([0n]);
+  });
+});
+
+describe("the transactions signed for one record", () => {
+  test("are at most MAX_SIGNED_PER_RECORD on each chain, whatever the nodes say of nonces", async () => {
+    let nonce = 0;
+    const stale = (m: string) => {
+      if (m === "eth_getTransactionCount") return Promise.resolve(`0x${(nonce++).toString(16)}`);
+      if (m === "eth_sendRawTransaction")
+        return Promise.reject(new RpcError(`${m}: nonce too low`));
+      if (m === "eth_getTransactionReceipt") return Promise.resolve(null);
+      return undefined;
+    };
+    const signed = { l1: new Set<Hex>(), l2: new Set<Hex>() };
+    const counting = (chain: "l1" | "l2") => (m: string, p: readonly unknown[]) => {
+      if (m === "eth_sendRawTransaction") signed[chain].add(p[0] as Hex);
+      return stale(m);
+    };
+    w.l2Hook = counting("l2");
+    w.l1Hook = counting("l1");
+    w.now = CUTOFF;
+    const send = await availabilitySender(options());
+    const record = randomBytes(106);
+    for (let i = 0; i < 6; i++)
+      await expect(send(record, CUTOFF)).rejects.toEqual(new SendError("unsent"));
+    expect([signed.l2.size, signed.l1.size]).toEqual([
+      MAX_SIGNED_PER_RECORD,
+      MAX_SIGNED_PER_RECORD,
+    ]);
   });
 });
 

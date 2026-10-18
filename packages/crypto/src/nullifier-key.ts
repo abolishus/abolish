@@ -68,6 +68,33 @@ const { MAX_TRUSTEES } = PARAMETERS;
 const MESSAGE_TAG = "abolish/v1/sig/nullifier-key-message";
 const SIGNING_KEY_TAG = "abolish/v1/sig/nullifier-key-signing-key";
 const APPROVAL_TAG = "abolish/v1/sig/nullifier-key-approval";
+const APPROVAL_TAG_V2 = "abolish/v1/sig/nullifier-key-approval-2";
+
+/**
+ * The longest a version-2 run's deadline may lie ahead, in L2 blocks: 7 days
+ * of 2-second blocks, as for a reshare. Without a bound a coordinator could
+ * set a deadline that never passes, and a stalled run would hold its
+ * approving seats for good (docs/spec/nullifier-key.md, Key context).
+ */
+export const MAX_KEY_WINDOW = 302_400n;
+
+/**
+ * @internal Throws unless `deadline` is still ahead of `currentL2Block` and at
+ * most `window` blocks ahead: an honest seat takes part in, and approves,
+ * only such a run. Resharing's runs too.
+ */
+export function checkRunDeadline(
+  deadline: bigint,
+  currentL2Block: bigint | undefined,
+  window: bigint,
+  name: string,
+): void {
+  if (typeof deadline !== "bigint" || typeof currentL2Block !== "bigint")
+    throw new TypeError(`${name}: the deadline and the L2 block must be bigints`);
+  if (deadline <= currentL2Block) throw new RangeError(`${name}: the run's deadline has passed`);
+  if (deadline - currentL2Block > window)
+    throw new RangeError(`${name}: the run's deadline is too far ahead`);
+}
 
 /** @internal Round 1's layout, which resharing's round 1 shares. */
 export const ROUND_1 = struct([
@@ -117,18 +144,35 @@ const transcriptV1 = struct([
   ["responses", RESPONSES],
 ] as const);
 
+const transcriptV2 = struct([
+  ["run_id", bytesFixed(32)],
+  ["deadline", u64],
+  ["keys", KEYS],
+  ["dealings", DEALINGS],
+  ["complaints", COMPLAINTS],
+  ["responses", RESPONSES],
+] as const);
+
 export type RegistrationKeysMessage = CodecValue<typeof ROUND_1>;
 export type DealingMessage = CodecValue<typeof ROUND_2>;
 export type ComplaintsMessage = CodecValue<typeof ROUND_3>;
 export type RevealedShare = CodecValue<typeof REVEALED_SHARE>;
 export type ResponsesMessage = CodecValue<typeof ROUND_4>;
 
-/** Key transcript, version 1 (docs/spec/nullifier-key.md, Transcript). */
+/**
+ * Key transcript, version 1 (docs/spec/nullifier-key.md, Transcript): retired
+ * before any registry is deployed, kept for its frozen vectors. Its key never
+ * counts, since its runs have no deadline (Approval).
+ */
 export type NullifierKeyTranscript = CodecValue<typeof transcriptV1>;
+
+/** Key transcript, version 2: version 1 with the run's deadline. */
+export type NullifierKeyTranscriptV2 = CodecValue<typeof transcriptV2>;
 
 /** Record type `0x0011`: the Tier 2 key's public transcript. */
 export const NULLIFIER_KEY_TRANSCRIPT = recordType(RECORD_TYPES.nullifierKeyTranscript, {
   1: transcriptV1,
+  2: transcriptV2,
 });
 
 /** `bjj-scalar(f_d(i)) ‖ bjj-scalar(f'_d(i))` and the AEAD tag. */
@@ -148,7 +192,7 @@ export type DealtShare = CodecValue<typeof dealtShareV1>;
 
 /**
  * Record type `0x0012`: one seat's share, sealed by its dealer. Private, and
- * never pinned by a profile: version 1 of the transcript fixes version 1.
+ * never pinned by a profile: versions 1 and 2 of the transcript fix version 1.
  */
 export const NULLIFIER_KEY_SHARE = recordType(RECORD_TYPES.nullifierKeyShare, { 1: dealtShareV1 });
 
@@ -158,9 +202,25 @@ export function encodeNullifierKeyTranscript(transcript: NullifierKeyTranscript)
   return SCHEMA.encode(NULLIFIER_KEY_TRANSCRIPT, 1, transcript);
 }
 
-/** Strictly decodes a key transcript under version 1, the only version. */
+/** Strictly decodes a key transcript under version 1. */
 export function decodeNullifierKeyTranscript(bytes: Uint8Array, pinned: 1): NullifierKeyTranscript {
-  return SCHEMA.decode(NULLIFIER_KEY_TRANSCRIPT, bytes, pinned).value;
+  const r = SCHEMA.decode(NULLIFIER_KEY_TRANSCRIPT, bytes, pinned);
+  if (r.version !== 1) throw new RangeError("nullifier key: expected version 1");
+  return r.value;
+}
+
+export function encodeNullifierKeyTranscriptV2(transcript: NullifierKeyTranscriptV2): Uint8Array {
+  return SCHEMA.encode(NULLIFIER_KEY_TRANSCRIPT, 2, transcript);
+}
+
+/** Strictly decodes a key transcript under version 2. */
+export function decodeNullifierKeyTranscriptV2(
+  bytes: Uint8Array,
+  pinned: 2,
+): NullifierKeyTranscriptV2 {
+  const r = SCHEMA.decode(NULLIFIER_KEY_TRANSCRIPT, bytes, pinned);
+  if (r.version !== 2) throw new RangeError("nullifier key: expected version 2");
+  return r.value;
 }
 
 export function encodeDealtShare(share: DealtShare): Uint8Array {
@@ -189,9 +249,14 @@ export interface NullifierKeyScope {
   readonly panel: Panel;
 }
 
-/** A scope and the run identifier of one run. */
+/**
+ * A scope and one run: its identifier and, for a version-2 run, its deadline,
+ * the L2 block by which the key's approvals must be recorded to count. A run
+ * without a deadline is a version-1 run, retired: its key never counts.
+ */
 export interface NullifierKeyParams extends NullifierKeyScope {
   readonly runId: Uint8Array;
+  readonly deadline?: bigint;
 }
 
 const CONTEXT = struct([
@@ -211,6 +276,7 @@ interface Scope {
 
 interface Run extends Scope {
   readonly context: Uint8Array;
+  readonly deadline: bigint | null;
 }
 
 // Each field read once, and the panel's identifier computed here, never taken
@@ -235,23 +301,36 @@ function scopeOf(params: NullifierKeyScope): Scope {
   };
 }
 
+const CONTEXT_V2 = struct([
+  ["l2_chain_id", u64],
+  ["group_registry", bytesFixed(20)],
+  ["panel_id", bytesFixed(32)],
+  ["run_id", bytesFixed(32)],
+  ["deadline", u64],
+] as const);
+
+// Version 2's context has its own tag, so no message of a version-1 run
+// checks in a version-2 run, or the reverse (docs/spec/domain-separation.md).
 function runOf(params: NullifierKeyParams): Run {
   const scope = scopeOf(params);
+  const { runId, deadline } = params;
+  const fields = {
+    l2_chain_id: scope.l2ChainId,
+    group_registry: scope.groupRegistry,
+    panel_id: scope.panelId,
+    run_id: runId,
+  };
+  if (deadline === undefined) {
+    const context = H(ds("abolish/v1/keyed-nullifier/key-context", encode(CONTEXT, fields)));
+    return { ...scope, context, deadline: null };
+  }
   const context = H(
-    ds(
-      "abolish/v1/keyed-nullifier/key-context",
-      encode(CONTEXT, {
-        l2_chain_id: scope.l2ChainId,
-        group_registry: scope.groupRegistry,
-        panel_id: scope.panelId,
-        run_id: params.runId,
-      }),
-    ),
+    ds("abolish/v1/keyed-nullifier/key-context-2", encode(CONTEXT_V2, { ...fields, deadline })),
   );
-  return { ...scope, context };
+  return { ...scope, context, deadline };
 }
 
-/** `key_context` (docs/spec/nullifier-key.md, Key context). */
+/** `key_context` (docs/spec/nullifier-key.md, Key context): version 2's with a deadline, version 1's without. */
 export function nullifierKeyContext(params: NullifierKeyParams): Uint8Array {
   return runOf(params).context;
 }
@@ -428,13 +507,21 @@ export function ownKeys(
     throw new RangeError("nullifier key: the seat's round-1 message doesn't carry its keys");
 }
 
-/** Round 1: the seat's registration KEM key and signing key, with the signing key's signature. */
+/**
+ * Round 1: the seat's registration KEM key and signing key, with the signing
+ * key's signature. In a version-2 run `currentL2Block` is the latest L2 block
+ * the seat's node has seen: it takes part only in a run whose deadline is
+ * ahead of it by at most `MAX_KEY_WINDOW`.
+ */
 export function registrationKeysMessage(
   params: NullifierKeyParams,
   seat: RegistrationSecrets,
+  currentL2Block?: bigint,
 ): RegistrationKeysMessage {
   const run = runOf(params);
   seatKey(run, seat);
+  if (run.deadline !== null)
+    checkRunDeadline(run.deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
   const kemKey = seat.kem.publicKey;
   const signingKey = identityKey(seat.signingSecret);
   const pop = signStatement(
@@ -960,6 +1047,10 @@ export type NullifierKeyCheck =
   | {
       readonly ok: true;
       readonly keyId: Uint8Array;
+      /** The transcript's version: only a version-2 key can count (Approval). */
+      readonly version: 1 | 2;
+      /** A version-2 run's deadline; `null` under version 1. */
+      readonly deadline: bigint | null;
       readonly seats: readonly KeySeatResult[];
       readonly qualified: readonly KeySeat[];
       /** The qualified dealers (GJKR's `QUAL`), whose polynomials make up the key. */
@@ -1082,23 +1173,36 @@ function seatResults(run: Run, t: Rounds): KeySeatResult[] {
 
 /**
  * The transcript check of docs/spec/nullifier-key.md: the context rebuilt
- * from `scope` (never from the transcript), checks 1 to 5 in order, and for
- * a valid transcript the key: `key_id`, the threshold and each qualified
- * seat's registration keys and share commitment.
+ * from `scope` and the transcript's `run_id` and, under version 2, its
+ * `deadline` (never the scope from the transcript), checks 1 to 5 in order,
+ * and for a valid transcript the key: `key_id`, the threshold and each
+ * qualified seat's registration keys and share commitment.
  */
 export function checkNullifierKeyTranscript(
   scope: NullifierKeyScope,
   bytes: Uint8Array,
-  pinned: 1,
+  pinned: 1 | 2,
 ): NullifierKeyCheck {
-  let t: NullifierKeyTranscript;
+  let t: NullifierKeyTranscript | NullifierKeyTranscriptV2;
+  let version: 1 | 2;
   try {
-    t = decodeNullifierKeyTranscript(bytes, pinned);
+    ({ version, value: t } = SCHEMA.decode(NULLIFIER_KEY_TRANSCRIPT, bytes, pinned));
   } catch (e) {
     if (e instanceof DecodeError) return { ok: false, code: e.code };
     throw e;
   }
-  const run = runOf({ ...scope, runId: t.run_id });
+  // The scope's own fields only: a caller's object carrying a `deadline` must
+  // not turn a version-1 transcript's context into version 2's.
+  const pins = {
+    l2ChainId: scope.l2ChainId,
+    groupRegistry: scope.groupRegistry,
+    panel: scope.panel,
+  };
+  const run = runOf(
+    "deadline" in t
+      ? { ...pins, runId: t.run_id, deadline: t.deadline }
+      : { ...pins, runId: t.run_id },
+  );
   const code = structureCode(run, t);
   if (code !== null) return { ok: false, code };
   const seats = seatResults(run, t);
@@ -1134,7 +1238,7 @@ export function checkNullifierKeyTranscript(
       (_, i) => qualified.find((s) => s.index === i + 1)?.commitment ?? null,
     ),
   };
-  return { ok: true, keyId, seats, dealers, qualified, key };
+  return { ok: true, keyId, version, deadline: run.deadline, seats, dealers, qualified, key };
 }
 
 /** What a seat received from one other dealer: its dealt share, or the dealer's reveal. */
@@ -1190,7 +1294,10 @@ const APPROVAL = struct([
   ["key_id", bytesFixed(32)],
 ] as const);
 
-/** The 93-byte statement `abolish/v1/sig/nullifier-key-approval` signs. */
+/**
+ * The 93-byte statement `abolish/v1/sig/nullifier-key-approval` signs under
+ * version 1, and `abolish/v1/sig/nullifier-key-approval-2` under version 2.
+ */
 export function nullifierKeyApprovalMessage(
   scope: NullifierKeyScope,
   index: number,
@@ -1209,9 +1316,9 @@ export function nullifierKeyApprovalMessage(
 }
 
 /**
- * Seat `index`'s approval of a key. The caller MUST have checked the
- * approval rules of docs/spec/nullifier-key.md first, rule 4 above all: a
- * seat approves at most one key per Tier 2 scope.
+ * Seat `index`'s approval of a version-1 key, which is retired and never
+ * counts: kept for the frozen vectors. An honest seat approves only
+ * version-2 keys (`approveNullifierKeyV2`).
  */
 export function approveNullifierKey(
   scope: NullifierKeyScope,
@@ -1230,12 +1337,8 @@ export function approveNullifierKey(
   );
 }
 
-/**
- * The distinct seats whose approval of `keyId` verifies under their pinned
- * identity key, in increasing order. Counted per seat, never per signature:
- * one seat can make any number of valid signatures (T-14, T-37).
- */
-export function approvingSeats(
+function approvingSeatsUnder(
+  tag: typeof APPROVAL_TAG | typeof APPROVAL_TAG_V2,
   scope: NullifierKeyScope,
   keyId: Uint8Array,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
@@ -1245,17 +1348,87 @@ export function approvingSeats(
   for (const a of approvals) {
     const key = Number.isSafeInteger(a.index) ? s.keys[a.index - 1] : undefined;
     if (key === undefined || a.index < 1) continue;
-    if (
-      verifyStatement(
-        key,
-        APPROVAL_TAG,
-        nullifierKeyApprovalMessage(scope, a.index, keyId),
-        a.signature,
-      )
-    )
+    if (verifyStatement(key, tag, nullifierKeyApprovalMessage(scope, a.index, keyId), a.signature))
       seats.add(a.index);
   }
   return [...seats].sort((x, y) => x - y);
+}
+
+/**
+ * The distinct seats whose version-1 approval of `keyId` verifies under their
+ * pinned identity key, in increasing order. Counted per seat, never per
+ * signature: one seat can make any number of valid signatures (T-14, T-37).
+ */
+export function approvingSeats(
+  scope: NullifierKeyScope,
+  keyId: Uint8Array,
+  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): number[] {
+  return approvingSeatsUnder(APPROVAL_TAG, scope, keyId, approvals);
+}
+
+/**
+ * Seat `index`'s approval of a version-2 key, as its check gave it (its
+ * `keyId`, `version` and `deadline` together), refused for a version-1 key,
+ * once the deadline has passed, or if it lies more than `MAX_KEY_WINDOW`
+ * ahead of `currentL2Block`; the margin for recording the approval in time is
+ * the caller's. The caller MUST have checked the approval rules of
+ * docs/spec/nullifier-key.md first, rules 4 and 6 above all: no key counts
+ * for the scope, the seat approved no successor of any key of it, and every
+ * other initial key it approved passed its deadline without counting.
+ */
+export function approveNullifierKeyV2(
+  scope: NullifierKeyScope,
+  identitySecret: Uint8Array,
+  index: number,
+  key: { readonly keyId: Uint8Array; readonly version: 1 | 2; readonly deadline: bigint | null },
+  currentL2Block: bigint,
+): Uint8Array {
+  const { keyId, version, deadline } = key;
+  if (version !== 2 || deadline === null)
+    throw new RangeError("nullifier key: only a version-2 key is approved");
+  checkRunDeadline(deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
+  const s = scopeOf(scope);
+  const pinned = s.keys[index - 1];
+  if (pinned === undefined || !equalBytes(identityKey(identitySecret), pinned))
+    throw new RangeError("nullifier key: identitySecret is not the key of seat index");
+  return signStatement(
+    identitySecret,
+    APPROVAL_TAG_V2,
+    nullifierKeyApprovalMessage(scope, index, keyId),
+  );
+}
+
+/**
+ * The distinct seats whose version-2 approval of `keyId` verifies under their
+ * pinned identity key, in increasing order, counted per seat (T-14, T-37).
+ */
+export function approvingSeatsV2(
+  scope: NullifierKeyScope,
+  keyId: Uint8Array,
+  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): number[] {
+  return approvingSeatsUnder(APPROVAL_TAG_V2, scope, keyId, approvals);
+}
+
+/**
+ * Whether an initial key counts on the approvals given (docs/spec/
+ * nullifier-key.md, Approval): its transcript is version 2, and `q`
+ * distinct seats approved it under version 2's statement. A version-1 key
+ * never counts: its runs have no deadline, so a stalled one would hold its
+ * seats for good. That every approval was recorded by the run's deadline,
+ * and that no other key counts for the scope, are the registry's to check
+ * (part 2b-4).
+ */
+export function nullifierKeyCounts(
+  scope: NullifierKeyScope,
+  check: Extract<NullifierKeyCheck, { ok: true }>,
+  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): boolean {
+  return (
+    check.version === 2 &&
+    approvingSeatsV2(scope, check.keyId, approvals).length >= nullifierKeyQuorum(scope)
+  );
 }
 
 /** `q = max(k, n − 1)`: the approvals a key needs, and the qualified seats an honest seat requires. */

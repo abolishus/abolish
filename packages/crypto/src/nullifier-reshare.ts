@@ -37,6 +37,7 @@ import {
 import {
   checkPolynomials,
   commitmentAt,
+  checkRunDeadline,
   type DealtShareResult,
   equalBytes,
   evaluatePolynomial,
@@ -91,18 +92,10 @@ const { MAX_TRUSTEES } = PARAMETERS;
  */
 export const MAX_RESHARE_WINDOW = 302_400n;
 
-/**
- * Throws unless `deadline` is still ahead of `currentL2Block` and at most
- * `MAX_RESHARE_WINDOW` blocks ahead: an honest new seat takes part in, and
- * approves, only such a run.
- */
+// An honest new seat takes part in, and approves, only a run whose deadline is
+// still ahead of its latest L2 block and at most `MAX_RESHARE_WINDOW` ahead.
 function checkDeadline(deadline: bigint, currentL2Block: bigint): void {
-  if (typeof deadline !== "bigint" || typeof currentL2Block !== "bigint")
-    throw new TypeError("nullifier reshare: the deadline and the L2 block must be bigints");
-  if (deadline <= currentL2Block)
-    throw new RangeError("nullifier reshare: the run's deadline has passed");
-  if (deadline - currentL2Block > MAX_RESHARE_WINDOW)
-    throw new RangeError("nullifier reshare: the run's deadline is too far ahead");
+  checkRunDeadline(deadline, currentL2Block, MAX_RESHARE_WINDOW, "nullifier reshare");
 }
 
 const MESSAGE_TAG = "abolish/v1/sig/nullifier-reshare-message";

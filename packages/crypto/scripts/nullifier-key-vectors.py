@@ -6,7 +6,8 @@ four rounds and their signatures, the dealt-share message (0x0012, version 1)
 with its hybrid-KEM encryption and the recipient's check, the key transcript
 (0x0011, version 1), key_id, the transcript check with every seat's reasons
 and the qualified seats' share commitments, each qualified seat's share, and
-the approval statement. It is written from the spec with Python's integers and
+the approval statement, under transcript version 1 and under version 2, which
+binds the run's deadline in its context and approves under its own tag. It is written from the spec with Python's integers and
 hashlib. Baby Jubjub and J come from keyed-nullifier-vectors.py (checked
 against EIP-2494 and RFC 9380 Appendix K.1 first); ML-KEM-768,
 ChaCha20-Poly1305 and ristretto255 from share-encryption-vectors.py and
@@ -63,6 +64,7 @@ SEALED_LEN = 80
 NONCE = bytes(12)
 
 CONTEXT_TAG = b"abolish/v1/keyed-nullifier/key-context"
+CONTEXT_TAG_2 = b"abolish/v1/keyed-nullifier/key-context-2"
 ROUND_TAG = b"abolish/v1/keyed-nullifier/key-round"
 KEY_TAG = b"abolish/v1/keyed-nullifier/key"
 SHARE_HASH_TAG = b"abolish/v1/keyed-nullifier/key-share"
@@ -71,6 +73,9 @@ AAD_TAG = b"abolish/v1/kem/nullifier-key-share-aad"
 MESSAGE_TAG = b"abolish/v1/sig/nullifier-key-message"
 SIGNING_KEY_TAG = b"abolish/v1/sig/nullifier-key-signing-key"
 APPROVAL_TAG = b"abolish/v1/sig/nullifier-key-approval"
+APPROVAL_TAG_2 = b"abolish/v1/sig/nullifier-key-approval-2"
+# A version-2 run's deadline in the vectors: an L2 block number.
+DEADLINE = 25_000_000
 PANEL_TAG = b"abolish/v1/panel"
 
 u8, u16, u32, element, ds, H = bv.u8, bv.u16, bv.u32, bv.element, bv.ds, bv.H
@@ -151,8 +156,12 @@ def make_panel(label, k, n):
     return {"label": label, "k": k, "secrets": secrets, "keys": keys}
 
 
-def context(panel, run_id, scope=SCOPE):
-    return H(ds(CONTEXT_TAG, u64(scope["l2ChainId"]) + scope["groupRegistry"] + panel_id(panel["k"], panel["keys"]) + run_id))
+def context(panel, run_id, scope=SCOPE, deadline=None):
+    """Version 1's context without a deadline, version 2's with one."""
+    m = u64(scope["l2ChainId"]) + scope["groupRegistry"] + panel_id(panel["k"], panel["keys"]) + run_id
+    if deadline is None:
+        return H(ds(CONTEXT_TAG, m))
+    return H(ds(CONTEXT_TAG_2, m + u64(deadline)))
 
 
 # --- Messages and the dealt share ------------------------------------------------------
@@ -174,8 +183,9 @@ def enc_round(msgs):
     return lst([enc_msg(m) for m in msgs])
 
 
-def enc_transcript(run_id, rounds, record_type=TRANSCRIPT_TYPE, version=VERSION):
-    return u16(record_type) + u8(version) + run_id + b"".join(enc_round(r) for r in rounds)
+def enc_transcript(run_id, rounds, record_type=TRANSCRIPT_TYPE, version=VERSION, deadline=None):
+    head = run_id if version == 1 else run_id + u64(deadline)
+    return u16(record_type) + u8(version) + head + b"".join(enc_round(r) for r in rounds)
 
 
 def enc_commitments(points):
@@ -243,12 +253,12 @@ def keys_body(ctx, s):
     return kem_key + signing_key + pop
 
 
-def run(label, panel, seats, cheat=None, scope=SCOPE):
-    """The four rounds for `seats` (indices taking part); `cheat` maps a hook name to a function."""
+def run(label, panel, seats, cheat=None, scope=SCOPE, deadline=None):
+    """The four rounds for `seats` (indices taking part); `cheat` maps a hook name to a function; a deadline makes it a version-2 run."""
     cheat = cheat or {}
     k = panel["k"]
     run_id = H(f"nullifier-key-run/{label}".encode())
-    ctx = context(panel, run_id, scope)
+    ctx = context(panel, run_id, scope, deadline)
     secrets = {i: seat_secrets(label, i, k) for i in seats}
     for i, s in secrets.items():
         if "seat" in cheat:
@@ -314,7 +324,7 @@ def run(label, panel, seats, cheat=None, scope=SCOPE):
     rounds = [r1, r2, r3, r4]
     if "rounds" in cheat:
         rounds = cheat["rounds"](rounds, ctx, d)
-    return {"runId": run_id, "context": ctx, "rounds": rounds, "secrets": secrets, "dealt": dealt, "randomness": randomness}
+    return {"runId": run_id, "deadline": deadline, "context": ctx, "rounds": rounds, "secrets": secrets, "dealt": dealt, "randomness": randomness}
 
 
 def kem_secret(s):
@@ -441,6 +451,7 @@ def decode_transcript(b, pinned=VERSION):
     if r.uint(1) != pinned:
         raise DecodeFail("profile-mismatch")
     run_id = r.take(32)
+    deadline = r.uint(8) if pinned == 2 else None
     rounds = [
         read_list(r, MAX_TRUSTEES, read_keys_msg),
         read_list(r, MAX_TRUSTEES, read_dealing_msg),
@@ -449,7 +460,7 @@ def decode_transcript(b, pinned=VERSION):
     ]
     if r.o != len(b):
         raise DecodeFail("trailing-bytes")
-    return run_id, rounds
+    return run_id, deadline, rounds
 
 
 def decode_share(b):
@@ -510,13 +521,13 @@ def check_share(ctx, recipient, secret, r1, r2, b):
     return ("ok", dd, share, blind)
 
 
-def check(panel, b, scope=SCOPE):
+def check(panel, b, scope=SCOPE, pinned=VERSION):
     try:
-        run_id, rounds = decode_transcript(b)
+        run_id, deadline, rounds = decode_transcript(b, pinned)
     except DecodeFail as e:
         return {"ok": False, "code": e.code}
     n, k = len(panel["keys"]), panel["k"]
-    ctx = context(panel, run_id, scope)
+    ctx = context(panel, run_id, scope, deadline)
     r1, r2, r3, r4 = rounds
     s1 = [m["index"] for m in r1]
     s2 = [m["index"] for m in r2]
@@ -591,9 +602,11 @@ def check(panel, b, scope=SCOPE):
     # 5. Quorum.
     if len(qualified) < k:
         return {"ok": False, "code": "key-quorum", "seats": seats}
+    out = {"ok": True, "keyId": H(ds(KEY_TAG, b)).hex()}
+    if deadline is not None:
+        out["deadline"] = str(deadline)
     return {
-        "ok": True,
-        "keyId": H(ds(KEY_TAG, b)).hex(),
+        **out,
         "seats": seats,
         "dealers": dealers,
         "qualified": [
@@ -925,7 +938,7 @@ def main(out):
 
     dec("truncated", "The honest 2-of-2 transcript without its last byte.", base[:-1])
     dec("trailing", "The honest 2-of-2 transcript with one more byte.", base + b"\x00")
-    dec("version-2", "Version 2, which doesn't exist.", base[:2] + u8(2) + base[3:])
+    dec("version-2", "Version 2 where version 1 is pinned.", base[:2] + u8(2) + base[3:])
     dec("record-type", "Record type 0x0012, the dealt share, where a transcript is expected.", u16(0x0012) + base[2:])
     dec("unknown-type", "Record type 0x0013, which this file doesn't list.", u16(0x0013) + base[2:])
     dec("keys-over-max", "Round 1 claims 17 messages.", base[:35] + u32(17) + base[39:])
@@ -944,12 +957,94 @@ def main(out):
     order2 = (0, kn.P - 1)
     dec("commitment-small-order", "Dealer 1's first coefficient commitment has order 2.", base[:at_c] + kn.enc_point(order2) + base[at_c + 64 :])
 
+    # Version 2: the same rounds with the run's deadline in the context and the transcript.
+    v2_vectors = []
+
+    def add_v2(id_, desc, seats, honest=False, expect=None, mutate=None, signed_as_v1=False):
+        panel = panels["panel-5"]
+        # signed_as_v1: every message signed under the version-1 context of the same run.
+        r = run(f"v2/{id_}", panel, seats, deadline=None if signed_as_v1 else DEADLINE)
+        b = enc_transcript(r["runId"], r["rounds"], version=2, deadline=DEADLINE)
+        if mutate is not None:
+            b = mutate(b)
+        result = check(panel, b, pinned=2)
+        got = result["code"] if not result["ok"] else [(x["index"], x["reasons"]) for x in result["seats"] if x["reasons"]]
+        assert got == expect, (id_, got, expect)
+        v = {"id": id_, "description": desc, "panel": "panel-5", "transcript": b.hex(), "result": result}
+        if result["ok"]:
+            v["shares"] = seat_shares(result, r)
+        if honest:
+            v["runId"] = r["runId"].hex()
+            v["deadline"] = str(DEADLINE)
+            v["context"] = r["context"].hex()
+            v["seats"] = [
+                {
+                    "index": i,
+                    "kemSeed": x["seed"].hex(),
+                    "kemX": str(x["x"]),
+                    "signingSecret": f"{x['signing']:064x}",
+                    "f": [str(c) for c in x["f"]],
+                    "g": [str(c) for c in x["g"]],
+                    "shareRandomness": r["randomness"].get(i, []),
+                    "dealtShares": [
+                        {"recipient": t, "bytes": dl["bytes"].hex(), "hash": share_hash(dl["bytes"]).hex(), **dl["inter"]}
+                        for (dd, t), dl in sorted(r["dealt"].items())
+                        if dd == i
+                    ],
+                }
+                for i, x in sorted(r["secrets"].items())
+            ]
+        v2_vectors.append(v)
+        return b
+
+    v2_honest = add_v2("honest-5", "Every seat of the 3-of-5 panel takes part honestly in a version-2 run; all five qualify.", [1, 2, 3, 4, 5], honest=True, expect=[])
+    add_v2("absent", "Seat 5 sends nothing in a version-2 run; the other four qualify.", [1, 2, 3, 4], expect=[(5, ["absent"])])
+    add_v2("quorum", "Only seats 1 and 2 take part: two qualified seats, below k = 3.", [1, 2], expect="key-quorum")
+
+    def other_deadline(b):
+        # The deadline follows the header and run_id.
+        return b[:35] + u64(DEADLINE + 1) + b[43:]
+
+    add_v2("signature-deadline", "The deadline is changed: every message was signed under the original deadline's context.", [1, 2, 3, 4, 5], expect="key-signature", mutate=other_deadline)
+    add_v2(
+        "signature-version-1",
+        "Every message was signed under the version-1 context of the same run, without the deadline, and the rounds are framed as a version-2 transcript.",
+        [1, 2, 3, 4, 5],
+        expect="key-signature",
+        signed_as_v1=True,
+    )
+
+    v2_key = bytes.fromhex(v2_vectors[0]["result"]["keyId"])
+    v2_approvals = []
+    for i in range(1, 6):
+        m = approval_message(panel, i, v2_key)
+        v2_approvals.append({"index": i, "message": m.hex(), "signature": sign(panel["secrets"][i - 1], APPROVAL_TAG_2, m).hex()})
+    v2_extra = [
+        {"id": "version-1-statement", "description": "Seat 1's approval of this key under version 1's statement", "index": 1, "signature": sign(panel["secrets"][0], APPROVAL_TAG, approval_message(panel, 1, v2_key)).hex(), "counts": False},
+        {"id": "other-key", "description": "Seat 2's version-2 approval of another key", "index": 2, "signature": sign(panel["secrets"][1], APPROVAL_TAG_2, approval_message(panel, 2, other_key)).hex(), "counts": False},
+    ]
+    assert not any(verify(panel["keys"][e["index"] - 1], APPROVAL_TAG_2, approval_message(panel, e["index"], v2_key), bytes.fromhex(e["signature"])) for e in v2_extra)
+
+    v2_decode = []
+
+    def dec2(id_, desc, b, pinned):
+        res = check(panels["panel-5"], b, pinned=pinned)
+        assert not res["ok"], id_
+        v2_decode.append({"id": id_, "description": desc, "pinned": pinned, "transcript": b.hex(), "error": res["code"]})
+
+    dec2("truncated", "The honest version-2 transcript without its last byte.", v2_honest[:-1], 2)
+    dec2("trailing", "The honest version-2 transcript with one more byte.", v2_honest + b"\x00", 2)
+    dec2("pinned-1", "The honest version-2 transcript where version 1 is pinned.", v2_honest, 1)
+    honest5 = bytes.fromhex(next(v for v in vectors if v["id"] == "honest-5")["transcript"])
+    dec2("version-1", "The honest version-1 transcript where version 2 is pinned.", honest5, 2)
+    dec2("deadline-truncated", "A version-2 header and run_id followed by four of the deadline's eight bytes.", v2_honest[:39], 2)
+
     doc = {
         "format": "abolish-nullifier-key-vectors/1",
         "title": "Tier 2 nullifier key: transcripts, dealt shares, their checks, key_id and approvals",
         "spec": "docs/spec/nullifier-key.md",
         "generator": "packages/crypto/scripts/nullifier-key-vectors.py: an independent Python implementation (standard library only), with keyed-nullifier-vectors.py's Baby Jubjub (checked against EIP-2494 and RFC 9380 Appendix K.1 first), share-encryption-vectors.py's ML-KEM-768 and ChaCha20-Poly1305 (checked against Go's accumulated FIPS 203 vectors and RFC 8439 first) and ristretto255, and trustee-vectors.py's P-256 ECDSA, which reproduces RFC 6979 Appendix A.2.5 first. Every value is test data, never keys",
-        "tags": {t.decode(): t.decode() for t in [CONTEXT_TAG, ROUND_TAG, KEY_TAG, SHARE_HASH_TAG, KEM_TAG, AAD_TAG, MESSAGE_TAG, SIGNING_KEY_TAG, APPROVAL_TAG]},
+        "tags": {t.decode(): t.decode() for t in [CONTEXT_TAG, ROUND_TAG, KEY_TAG, SHARE_HASH_TAG, KEM_TAG, AAD_TAG, MESSAGE_TAG, SIGNING_KEY_TAG, APPROVAL_TAG, CONTEXT_TAG_2, APPROVAL_TAG_2]},
         "recordTypes": {"transcript": TRANSCRIPT_TYPE, "dealtShare": SHARE_TYPE},
         "scope": {"l2ChainId": str(SCOPE["l2ChainId"]), "groupRegistry": SCOPE["groupRegistry"].hex()},
         "generatorJ": kn.enc_point(J).hex(),
@@ -961,6 +1056,12 @@ def main(out):
         "dealtShareChecks": shares_checks,
         "approvals": {"panel": "panel-5", "keyId": key_id.hex(), "approvals": approvals, "notCounted": extra},
         "decode": decode,
+        "version2": {
+            "description": "Transcript version 2: the run's deadline in the context and after run_id, and approvals under abolish/v1/sig/nullifier-key-approval-2; the rounds, dealt shares and checks are version 1's.",
+            "transcripts": v2_vectors,
+            "approvals": {"panel": "panel-5", "keyId": v2_key.hex(), "approvals": v2_approvals, "notCounted": v2_extra},
+            "decode": v2_decode,
+        },
     }
     pathlib.Path(out, "nullifier-key.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
 

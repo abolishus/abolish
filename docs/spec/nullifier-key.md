@@ -1,6 +1,6 @@
 # Nullifier key
 
-How the trustee panel creates the Tier 2 keyed nullifier's OPRF key `sk` ([[keyed-nullifier]]): the key context, four rounds that register each seat's registration keys and deal Pedersen VSS sharings with complaints (the first phase of GJKR's DKG, with no public key), the key transcript (record type `0x0011`, version 1), the dealt-share message that carries a share privately (record type `0x0012`, version 1), the transcript check that yields the qualified seats, their share commitments and `key_id`, and each seat's approval of the key. This is option A of [[0022-tier2-keyed-nullifier]]. Notation is from [[notation]], ristretto255 and `H` from [[group]], Baby Jubjub, `J` and the share commitments from [[keyed-nullifier]], identity keys and signatures from [[trustee-identity]], and the KEM key from [[share-encryption]]. Threats: T-03, T-13, T-14, T-15, T-29, T-31, T-37, T-39, T-40, T-54.
+How the trustee panel creates the Tier 2 keyed nullifier's OPRF key `sk` ([[keyed-nullifier]]): the key context, four rounds that register each seat's registration keys and deal Pedersen VSS sharings with complaints (the first phase of GJKR's DKG, with no public key), the key transcript (record type `0x0011`, version 2, which binds the run's deadline; version 1, without one, is retired before any registry is deployed), the dealt-share message that carries a share privately (record type `0x0012`, version 1), the transcript check that yields the qualified seats, their share commitments and `key_id`, and each seat's approval of the key. This is option A of [[0022-tier2-keyed-nullifier]]. Notation is from [[notation]], ristretto255 and `H` from [[group]], Baby Jubjub, `J` and the share commitments from [[keyed-nullifier]], identity keys and signatures from [[trustee-identity]], and the KEM key from [[share-encryption]]. Threats: T-03, T-13, T-14, T-15, T-29, T-31, T-37, T-39, T-40, T-54.
 
 What this page doesn't cover yet (P3-4 part 2b's later steps):
 
@@ -25,21 +25,24 @@ A **coordinator** relays messages and assembles the transcript, as in [[ceremony
 
 ## Key context
 
-The Tier 2 scope is one group registry on one chain ([[0010-tier2-identity-provider]]: one Tier 2 scope per deployment). The coordinator picks `run_id`, 32 bytes from the CSPRNG, fresh for every run. Every message of the run binds
+The Tier 2 scope is one group registry on one chain ([[0010-tier2-identity-provider]]: one Tier 2 scope per deployment). The coordinator picks `run_id`, 32 bytes from the CSPRNG, fresh for every run, and the run's `deadline`, an L2 block number by which the key's approvals must be recorded to count (Approval). The deadline lies at most `MAX_KEY_WINDOW = 302,400` blocks (7 days of 2-second blocks, as [[nullifier-reshare]]'s `MAX_RESHARE_WINDOW`), a constant of transcript version 2, ahead of the latest L2 block when the run starts: a seat sends its round-1 message only if the deadline is ahead of the latest block its node has seen by at least one block and at most `MAX_KEY_WINDOW`. Every message of a version-2 run binds
 
 ```
-key_context = H(DS("abolish/v1/keyed-nullifier/key-context",
-    u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ run_id))
+key_context = H(DS("abolish/v1/keyed-nullifier/key-context-2",
+    u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ run_id ‖ u64(deadline)))
 ```
 
-| Field            | Type        | Source                                                                        |
-| ---------------- | ----------- | ----------------------------------------------------------------------------- |
-| `l2_chain_id`    | `u64`       | The L2 chain ID the deployment's release pins                                 |
-| `group_registry` | `bytes[20]` | The group registry's address the release pins ([[contracts]], Group registry) |
-| `panel_id`       | `bytes[32]` | Recomputed from the pinned panel, never taken from data                       |
-| `run_id`         | `bytes[32]` | The run identifier, from the transcript                                       |
+| Field            | Type        | Source                                                                          |
+| ---------------- | ----------- | ------------------------------------------------------------------------------- |
+| `l2_chain_id`    | `u64`       | The L2 chain ID the deployment's release pins                                   |
+| `group_registry` | `bytes[20]` | The group registry's address the release pins ([[contracts]], Group registry)   |
+| `panel_id`       | `bytes[32]` | Recomputed from the pinned panel, never taken from data                         |
+| `run_id`         | `bytes[32]` | The run identifier, from the transcript                                         |
+| `deadline`       | `u64`       | The L2 block by which the key's approvals must be recorded, from the transcript |
 
-A checker rebuilds the context from its own pins and the transcript's `run_id`, so a transcript made for another chain, registry, panel or run never checks (T-37, T-34). A node refuses to take part in a run whose (`panel_id`, `run_id`) it has seen before, and never reuses a key, a polynomial, a nonce or a KEM message across runs.
+A checker rebuilds the context from its own pins and the transcript's `run_id` and `deadline`, so a transcript made for another chain, registry, panel, run or deadline never checks (T-37, T-34). A node refuses to take part in a run whose (`panel_id`, `run_id`) it has seen before, and never reuses a key, a polynomial, a nonce or a KEM message across runs.
+
+**Version 1** (retired before any registry is deployed, kept for its frozen vectors) has no deadline: its context is `H(DS("abolish/v1/keyed-nullifier/key-context", u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ run_id))`, under its own tag, so no message of a version-1 run checks in a version-2 run, or the reverse. A version-1 key never counts (Approval): with no deadline, approval rule 4 as version 1 wrote it let a seat approve one key per scope ever, so a run stalled by one corrupt seat withholding its dealt share from two honest seats under `q = n − 1` blocked the scope's initial key for good. The rest of this page holds for both versions unless it names one.
 
 ## Rounds
 
@@ -185,27 +188,28 @@ A message failing `share-malformed`, `share-context` or `share-hash` isn't `d`'s
 
 ## Transcript
 
-The key transcript is record type `0x0011`, version 1:
+The key transcript is record type `0x0011`, version 2:
 
-| Field        | Type                                  | Meaning                         |
-| ------------ | ------------------------------------- | ------------------------------- |
-| `run_id`     | `bytes[32]`                           | The run identifier              |
-| `keys`       | `list<round-1 message, MAX_TRUSTEES>` | `R_1`, in increasing seat order |
-| `dealings`   | `list<round-2 message, MAX_TRUSTEES>` | `R_2`, in increasing seat order |
-| `complaints` | `list<round-3 message, MAX_TRUSTEES>` | `R_3`, in increasing seat order |
-| `responses`  | `list<round-4 message, MAX_TRUSTEES>` | `R_4`, in increasing seat order |
+| Field        | Type                                  | Meaning                                |
+| ------------ | ------------------------------------- | -------------------------------------- |
+| `run_id`     | `bytes[32]`                           | The run identifier                     |
+| `deadline`   | `u64`                                 | The run's deadline, an L2 block number |
+| `keys`       | `list<round-1 message, MAX_TRUSTEES>` | `R_1`, in increasing seat order        |
+| `dealings`   | `list<round-2 message, MAX_TRUSTEES>` | `R_2`, in increasing seat order        |
+| `complaints` | `list<round-3 message, MAX_TRUSTEES>` | `R_3`, in increasing seat order        |
+| `responses`  | `list<round-4 message, MAX_TRUSTEES>` | `R_4`, in increasing seat order        |
 
-Each message is its table's fields in order, `index` first and `signature` last. `encode(R_r)` in the round chain is the encoding of that list field, count included. The key's identifier is
+Version 1 is the same record without `deadline`. Each message is its table's fields in order, `index` first and `signature` last. `encode(R_r)` in the round chain is the encoding of that list field, count included. The key's identifier is
 
 ```
 key_id = H(DS("abolish/v1/keyed-nullifier/key", encode(transcript)))
 ```
 
-over the record's full encoding, header included. It is the `key_id` every answer and evaluation proof binds ([[keyed-nullifier]], Evaluation), so a proof made under one key or run never verifies under another.
+over the record's full encoding, header included, under both versions: the header's version byte comes before every field that varies, so a version-1 and a version-2 transcript never hash the same input ([[domain-separation]], Rules). It is the `key_id` every answer and evaluation proof binds ([[keyed-nullifier]], Evaluation), so a proof made under one key or run never verifies under another.
 
 ## Transcript check
 
-A checker (a seat, a client, an attester, and from part 2b-4 [[verifier]] 2.4) decodes the transcript under version 1, rebuilds `key_context` from its pins and the transcript's `run_id`, and checks, in order. The first three checks, and the last, make the whole transcript invalid: each is something an honest coordinator never produces, or a property of the qualified set as a whole, and none can be attributed to a single seat.
+A checker (a seat, a client, an attester, and from part 2b-4 [[verifier]] 2.4) decodes the transcript under the version it pins (version 2; version 1 only for its frozen vectors), rebuilds `key_context` from its pins and the transcript's `run_id` and, under version 2, `deadline`, and checks, in order. The first three checks, and the last, make the whole transcript invalid: each is something an honest coordinator never produces, or a property of the qualified set as a whole, and none can be attributed to a single seat.
 
 1. **Order** (`key-order`). In each round, seats are strictly increasing and from 1 to `n`. A round-2 or round-3 message comes from a seat in `S_1`; a round-4 message from a seat in `S_2`.
 2. **Shape** (`key-shape`). Each round-2 message has exactly `k` `commitments` and one `share_hashes` entry for each seat of `S_1` other than its own. Each round-3 message's `complaints` are strictly increasing, at least one, and each a seat of `S_2` other than its own. A round-4 message comes only from a seat that some round-3 message complains about, and its `reveals` list exactly the seats whose round-3 messages complain about it, in increasing order.
@@ -233,7 +237,7 @@ C_i = Σ_{d qualified} Σ_{j=0}^{k−1} (i^j mod l) · A_{d,j}
 
 its share commitment ([[keyed-nullifier]], Share commitments), and seat `i`'s share is `(sk_i, s_i) = Σ_{d qualified dealer} (f_d(i), f'_d(i)) mod l`, with `(f_d(i), f'_d(i))` from `d`'s dealt-share message, from `d`'s reveal where `i` complained, and its own for `d = i`. The OPRF key is `sk = Σ_{d qualified dealer} a_{d,0}`, which no one holds.
 
-The check's output is the **key**: `key_id`, `k`, the qualified dealers, and for each qualified seat in increasing order its `index`, registration `kem_key`, registration `signing_key` and `C_i`. A client and an attester take every value [[keyed-nullifier]]'s answer check needs from it, never from an answer: `key_id`, `k`, the seat's `signing_key` (`answer-signature`) and `C_i` (`answer-proof`). A seat that isn't qualified has no share, and its answers fail `answer-seat`. A key is used only once its approvals are counted (Approval; where, part 2b-4): the check alone doesn't apply the participation rule.
+The check's output is the **key**: `key_id`, the transcript's version and, under version 2, its `deadline`, `k`, the qualified dealers, and for each qualified seat in increasing order its `index`, registration `kem_key`, registration `signing_key` and `C_i`. A client and an attester take every value [[keyed-nullifier]]'s answer check needs from it, never from an answer: `key_id`, `k`, the seat's `signing_key` (`answer-signature`) and `C_i` (`answer-proof`). A seat that isn't qualified has no share, and its answers fail `answer-seat`. A key is used only once its approvals are counted (Approval; where, part 2b-4): the check alone doesn't apply the participation rule.
 
 Why each rule:
 
@@ -244,7 +248,7 @@ Why each rule:
 
 ## Approval
 
-Seat `i` approves a key by signing, with its identity key under `abolish/v1/sig/nullifier-key-approval`,
+Seat `i` approves a version-2 key by signing, with its identity key under `abolish/v1/sig/nullifier-key-approval-2`,
 
 ```
 m = u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ u8(i) ‖ key_id
@@ -252,21 +256,25 @@ m = u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ u8(i) ‖ key_id
 
 (93 bytes), only if all of these hold:
 
-1. the transcript passes the check, with at least `max(k, n − 1)` qualified seats ([[0006-trustees]] rule 7, the quorum attestations use too, [[0022-tier2-keyed-nullifier]], Uniqueness across quorums);
+1. the transcript passes the check under version 2, with at least `max(k, n − 1)` qualified seats ([[0006-trustees]] rule 7, the quorum attestations use too, [[0022-tier2-keyed-nullifier]], Uniqueness across quorums);
 2. seat `i` is qualified, and the share it computed opens its `C_i`: it holds a dealt share or a reveal from every other qualified seat;
 3. the transcript holds every message `i` sent, as it sent it, so every round chain it signed over is the transcript's;
-4. `i` hasn't approved any key for this (`l2_chain_id`, `group_registry`), initial or reshared, and no key counts for the scope yet. A seat approves **at most one key per Tier 2 scope** by this statement, whatever the run; a later key is a reshare of this one ([[nullifier-reshare]]), approved under that page's own statement and rule, never a second initial key. An in-session review found that a rule allowing one initial key per seat let a later panel, whose seats had approved only reshares, make a second initial key with a fresh `sk`, and so a second nullifier for every document; the initial-panel pin above closes it as well.
+4. no key counts for this (`l2_chain_id`, `group_registry`), initial or reshared, and `i` has approved no successor of any key of it ([[nullifier-reshare]], Approval). A later key is a reshare of the one that counts, approved under that page's own statement and rule, never a second initial key. An in-session review found that a rule allowing one initial key per seat let a later panel, whose seats had approved only reshares, make a second initial key with a fresh `sk`, and so a second nullifier for every document; the initial-panel pin above closes it as well;
+5. the run's `deadline` hasn't passed, and lies at most `MAX_KEY_WINDOW` ahead: the L2 chain's latest block is below it, with margin for the approval to be recorded;
+6. every other initial key `i` approved has passed its own deadline without counting. A seat approves **at most one live initial key per Tier 2 scope**: a run that stalls releases its seats at its deadline, so a later run can count.
 
-A key counts only with approvals from `q = max(k, n − 1)` **distinct seats**, each verifying under its seat's pinned identity key; signatures are counted per seat, never per signature ([[trustee-identity]], Ceremony registration). Two such quorums share `2q − n` seats, at least one, so a second key for one scope needs a seat that broke rule 4. Where the approvals are recorded and checked is part 2b-4's.
+A key counts only if its transcript is version 2 and it has approvals from `q = max(k, n − 1)` **distinct seats** under this statement, each verifying under its seat's pinned identity key, counted per seat, never per signature ([[trustee-identity]], Ceremony registration), and each recorded at or before the run's `deadline` (the transcript fixes it, and `key_id` binds the transcript). Whether a key counts is so settled at its deadline. Two such quorums share `2q − n` seats, at least one, and at least one honest seat when `2q − n ≥ k` (as for 4-of-7), so two counted initial keys need an honest seat that approved the second before the first's deadline passed, or while the first counted, which rules 4 and 6 forbid. Where the approvals are recorded and checked is part 2b-4's, and its registry must accept at most one counted initial key per scope, which covers panels where the shared seats may all be corrupt.
 
-A run that doesn't reach a quorum is abandoned: the coordinator starts another with a fresh `run_id`, and every seat generates fresh keys and polynomials.
+A version-1 key never counts, and neither does an approval under version 1's statement, `abolish/v1/sig/nullifier-key-approval` over the same 93 bytes: version 1's rule 4 let a seat approve one key per scope ever, whatever the run, so one stalled run (Security notes, Withholding) held its approving seats for good. An earlier draft of [[nullifier-reshare]] had the same flaw for successors, found by `claude-review`; its deadline rule is what this version brings to the initial key.
+
+A run whose key hasn't counted by its deadline is abandoned, its approvals with it: the coordinator starts another with a fresh `run_id` and a later deadline, and every seat generates fresh keys and polynomials. Each seat erases what the abandoned run gave it once its deadline passes, and at once if it refuses to approve: the dealt shares and reveals it received, its share, its polynomials and the run's registration secrets. Unlike an abandoned reshare's, an abandoned run's shares are of an `sk` that never counts, so nothing answers under it; erasing them keeps a seat holding no secrets beyond the key's.
 
 ## Security notes
 
 - **Perfectly hiding transcript.** The transcript holds the coefficient commitments (perfectly hiding Pedersen commitments), the hashes of the dealt-share messages, and reveals. A dealt-share message carries `μ` and `e`, over 500 bits of fresh entropy, against a 256-bit hash, so its hash is statistically hiding in the random-oracle model ([[share-encryption]], Hiding). Reveals publish only corrupt dealers' points or corrupt complainers' own shares, at most `k − 1` points of any honest dealer's polynomial. So nothing published fixes `sk`, even to an unbounded adversary ([[0022-tier2-keyed-nullifier]], Key; T-15). The dealt-share messages themselves fall to an adversary who records them and breaks both ML-KEM-768 and discrete logs in ristretto255; they are never archived.
-- **Withholding.** The coordinator, or a dealer, can withhold a dealt-share message from a seat, which then lacks a share, can't complain, and doesn't approve. Nothing in the transcript shows it: a seat knows which dealer's message it lacks, but can't prove it. Under rule 7 two seats that don't approve stall the key, so one corrupt seat that withholds its message from one honest seat, and doesn't approve itself, stalls it alone, which under rule 7 otherwise takes two refusing trustees; nothing attributes it, since the honest seat can't prove what it lacks and the corrupt seat's refusal looks like an honest seat's (T-54). It can't learn anything by it: a missing message is never a complaint (Round 3), so withholding never makes an honest dealer reveal. Fetching the message straight from the dealer's node leaves the dealer as the only party that can withhold.
+- **Withholding.** The coordinator, or a dealer, can withhold a dealt-share message from a seat, which then lacks a share, can't complain, and doesn't approve. Nothing in the transcript shows it: a seat knows which dealer's message it lacks, but can't prove it. Under rule 7 two seats that don't approve stall the key, so one corrupt seat that withholds its message from one honest seat, and doesn't approve itself, stalls it alone, which under rule 7 otherwise takes two refusing trustees; nothing attributes it, since the honest seat can't prove what it lacks and the corrupt seat's refusal looks like an honest seat's (T-54). The stalled run's approvals expire at its deadline (Approval, rule 6), so the adversary delays the key by a run for as long as it keeps withholding, run after run, and blocks it for good only under version 1, which is why version 1 never counts. It can't learn anything by it: a missing message is never a complaint (Round 3), so withholding never makes an honest dealer reveal. Fetching the message straight from the dealer's node leaves the dealer as the only party that can withhold.
 - **Equivocation.** A dealer that sends different seats different round-2 messages, or a coordinator that shows seats different views, leaves seats that saw another view without a matching hash or chain: their round-3 messages and approvals don't check against the transcript, and they don't approve. A seat that holds two round-2 messages signed by one seat keeps both and can show them to the other seats and the panel's operators: they show that seat equivocated, since only it can sign them.
-- **Re-signing.** `key_id` hashes the transcript, signatures included, and ECDSA lets a signer make another valid signature on the same message. So a seat with a message in the transcript's last non-empty round, with the coordinator, can make a second transcript of the same sharing with another `key_id`, and split honest seats' approvals between the two. That costs liveness only: both carry the same commitments and the same `sk`, and an honest seat approves only one.
+- **Re-signing.** `key_id` hashes the transcript, signatures included, and ECDSA lets a signer make another valid signature on the same message. So a seat with a message in the transcript's last non-empty round, with the coordinator, can make a second transcript of the same sharing with another `key_id`, and split honest seats' approvals between the two. That costs liveness only: both carry the same commitments and the same `sk`, an honest seat approves only one, and once the run's deadline passes neither binds any seat.
 - **Rushing.** A dealer may choose its polynomial after seeing every other round-2 message. The commitments are perfectly hiding, so it learns nothing about the other polynomials' constant terms, and `sk` stays uniform with one honest qualified dealer (GJKR, Theorem 2; T-40). No public key is ever computed, so GJKR's bias attack on Pedersen's DKG has nothing to bias.
 - **Registration keys.** A seat's registration KEM secret and signing secret live as long as its share. A stolen registration signing key signs answers attributed to its seat: without the share, those answers fail `answer-proof` and frame the seat, and with the share the thief evaluates anyway (T-37, T-29). The identity key, needed only at this ceremony and its approval, stays offline or behind a person's approval between ceremonies, as [[0006-trustees]] rule 6 asks (T-37).
 - **The shares are long-lived.** `sk` lives for the Tier 2 scope ([[0022-tier2-keyed-nullifier]], A long-lived key). Each seat keeps `(sk_i, s_i)`, its registration secrets and its approval record; the trustee role description (P1-7) must say so before real documents register (T-14, T-40).
@@ -274,4 +282,4 @@ A run that doesn't reach a quorum is abandoned: the coordinator starts another w
 
 ## Test vectors
 
-`docs/spec/vectors/nullifier-key.json` ([[vectors/README|vectors]]): a 3-of-5 panel; key contexts and round chains; complete transcripts with each one's result (every seat's reasons, the qualified seats, `C_i`, `key_id`, and each qualified seat's share recomputed from the dealings): an honest run, a run with a corrupt dealer whose reveal checks and one whose reveal fails, an unanswered complaint, a groundless complaint, an absent seat, a seat that doesn't deal, a seat that zeroes its own share (`identity-commitment`), a bad signing-key proof, a duplicate signing key and an identity key used as a signing key, and transcripts failing each transcript-level code (round 1, 3 and 4 order, three shapes, round 1, 3 and 4 signatures and the run identifier); dealt-share messages re-made byte for byte from their randomness, and checks failing each code; approval statements and signatures. They are printed by `packages/crypto/scripts/nullifier-key-vectors.py`, which reuses only the independent Baby Jubjub code of `keyed-nullifier-vectors.py`, the ML-KEM-768, ChaCha20-Poly1305 and ristretto255 code of `share-encryption-vectors.py` and `group-vectors.py`, and `trustee-vectors.py`'s P-256 ECDSA; it shares nothing with `packages/crypto` or any `@noble` library.
+`docs/spec/vectors/nullifier-key.json` ([[vectors/README|vectors]]): a 3-of-5 panel; key contexts and round chains; complete transcripts with each one's result (every seat's reasons, the qualified seats, `C_i`, `key_id`, and each qualified seat's share recomputed from the dealings): an honest run, a run with a corrupt dealer whose reveal checks and one whose reveal fails, an unanswered complaint, a groundless complaint, an absent seat, a seat that doesn't deal, a seat that zeroes its own share (`identity-commitment`), a bad signing-key proof, a duplicate signing key and an identity key used as a signing key, and transcripts failing each transcript-level code (round 1, 3 and 4 order, three shapes, round 1, 3 and 4 signatures and the run identifier); dealt-share messages re-made byte for byte from their randomness, and checks failing each code; approval statements and signatures. Those are version 1's. Under `version2`: an honest version-2 run re-made byte for byte from its seats' secrets and its deadline, with its context, dealt shares, result and shares; an absent seat; too few seats (`key-quorum`); a changed deadline and messages signed under version 1's context of the same run (`key-signature`); version-2 approvals, with an approval of the same key under version 1's statement and one of another key, neither counting; and rejected encodings (truncated, trailing, a truncated deadline, and each version under the other's pin). They are printed by `packages/crypto/scripts/nullifier-key-vectors.py`, which reuses only the independent Baby Jubjub code of `keyed-nullifier-vectors.py`, the ML-KEM-768, ChaCha20-Poly1305 and ristretto255 code of `share-encryption-vectors.py` and `group-vectors.py`, and `trustee-vectors.py`'s P-256 ECDSA; it shares nothing with `packages/crypto` or any `@noble` library.

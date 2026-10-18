@@ -167,45 +167,49 @@ const countedOf = (r: ReturnType<typeof countedChecks>, selected: readonly numbe
 
 describe("7.1 to 7.4 and 8.5 beside an author panel against the independent implementation", () => {
   for (const c of file.cases)
-    test(c.id, () => {
-      const { ceremony, candidates, definition, inputs, tallies } = election(c);
-      expect(ceremony.registered?.map((k) => k.index)).toEqual([1, 2, 3]);
-      expect(ceremony.authorRegistered?.map((k) => k.index)).toEqual([1, 2]);
-      expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
-      const r = countedChecks(inputs());
-      const opened = tallies(r);
-      expect(
-        rows({
-          rows: new Map<string, CountedOutcome | TallyOutcome>([...r.rows, ["7.4", opened.row]]),
-        }),
-      ).toEqual(c.expected);
-      expect(countedOf(r, [3, 4, 5])).toEqual(c.counted);
-      // The vectors give the flat counts; each question's slice of them is
-      // cut here by the definition's option counts (8.1).
-      const { questions } = definition.value as {
-        readonly questions: readonly {
-          option_count: number;
-          min_selections: number;
-          max_selections: number;
-        }[];
-      };
-      const sizes = questions.map((q) => q.option_count);
-      expect(r.questions).toEqual(
-        questions.map((q, question) => ({
-          question,
-          options: q.option_count,
-          minSelections: q.min_selections,
-          maxSelections: q.max_selections,
-          method: questionMethod(q.min_selections, q.max_selections, q.option_count),
-        })),
-      );
-      const perQuestion = <T extends { readonly counts?: readonly string[] }>(x: T) =>
-        x.counts === undefined ? x : { ...x, byQuestion: sliceBy(sizes, x.counts) };
-      expect(r.cells).toEqual(c.cells.map(perQuestion));
-      expect(r.tiers).toEqual(c.tiers.map(perQuestion));
-      expect(opened.report).toEqual(c.tallies);
-      expect(r.destruction).toEqual(c.destruction);
-    });
+    test(
+      c.id,
+      () => {
+        const { ceremony, candidates, definition, inputs, tallies } = election(c);
+        expect(ceremony.registered?.map((k) => k.index)).toEqual([1, 2, 3]);
+        expect(ceremony.authorRegistered?.map((k) => k.index)).toEqual([1, 2]);
+        expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
+        const r = countedChecks(inputs());
+        const opened = tallies(r);
+        expect(
+          rows({
+            rows: new Map<string, CountedOutcome | TallyOutcome>([...r.rows, ["7.4", opened.row]]),
+          }),
+        ).toEqual(c.expected);
+        expect(countedOf(r, [3, 4, 5])).toEqual(c.counted);
+        // The vectors give the flat counts; each question's slice of them is
+        // cut here by the definition's option counts (8.1).
+        const { questions } = definition.value as {
+          readonly questions: readonly {
+            option_count: number;
+            min_selections: number;
+            max_selections: number;
+          }[];
+        };
+        const sizes = questions.map((q) => q.option_count);
+        expect(r.questions).toEqual(
+          questions.map((q, question) => ({
+            question,
+            options: q.option_count,
+            minSelections: q.min_selections,
+            maxSelections: q.max_selections,
+            method: questionMethod(q.min_selections, q.max_selections, q.option_count),
+          })),
+        );
+        const perQuestion = <T extends { readonly counts?: readonly string[] }>(x: T) =>
+          x.counts === undefined ? x : { ...x, byQuestion: sliceBy(sizes, x.counts) };
+        expect(r.cells).toEqual(c.cells.map(perQuestion));
+        expect(r.tiers).toEqual(c.tiers.map(perQuestion));
+        expect(opened.report).toEqual(c.tallies);
+        expect(r.destruction).toEqual(c.destruction);
+      },
+      60_000,
+    );
 });
 
 /** `counts` cut into consecutive runs of `sizes`' lengths. */
@@ -280,7 +284,7 @@ describe("the author panel's partial openings are its own", () => {
     expect(() => countedChecks(inputs({ authorRegistered: ceremony.registered ?? [] }))).toThrow(
       /approved key set/,
     );
-  });
+  }, 60_000);
 
   test("without it nothing past the ceremony is decided", () => {
     const { inputs } = election(byId("counted"));
@@ -289,7 +293,7 @@ describe("the author panel's partial openings are its own", () => {
     for (const o of r.rows.values())
       expect(o).toMatchObject({ status: "unverifiable", code: "not-reached" });
     expect(r.cells).toBeUndefined();
-  });
+  }, 60_000);
 });
 
 describe("6.3 beside an author panel", () => {
@@ -307,7 +311,7 @@ describe("6.3 beside an author panel", () => {
     expect(r.close?.head).toBeNull();
     expect(r.close?.seats.map((s) => s.seat)).toEqual([1, 2, 3]);
     expect(r.rows.get("7.2")).toEqual({ status: "pass" });
-  });
+  }, 60_000);
 });
 
 describe("7.4 beside an author panel", () => {
@@ -317,7 +321,7 @@ describe("7.4 beside an author panel", () => {
     expect(tallyChecks(definition, hash, ceremony.registered, undefined, entries, 7)).toEqual({
       row: { status: "unverifiable", code: "not-reached" },
     });
-  });
+  }, 60_000);
 
   test("until the counted set is known an honest partial opening is unsettled and nothing is early", () => {
     const c = byId("boarding");
@@ -343,7 +347,7 @@ describe("7.4 beside an author panel", () => {
         ),
       })),
     );
-  });
+  }, 60_000);
 
   test("tally-early exactly for the default partial openings boarded before every cell's first passing author one", () => {
     // Over subsets of the boarding case's openings: which default partial

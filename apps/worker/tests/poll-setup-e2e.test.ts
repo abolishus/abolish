@@ -338,7 +338,6 @@ async function indexLogs() {
     fromBlock: indexed + 1n,
     toBlock: head,
   });
-  indexed = head;
   for (const log of logs) {
     const block = await l2.client.getBlock({ blockNumber: log.blockNumber });
     const id = `${String(log.blockNumber).padStart(16, "0")}${String(log.logIndex).padStart(8, "0")}`;
@@ -349,6 +348,10 @@ async function indexLogs() {
         ${log.transactionHash}, ${log.logIndex})
       ON CONFLICT (id) DO NOTHING`;
   }
+  // Only once every log is in: the proposer reads `indexed` while the
+  // workers run, and a root for a block whose logs aren't all copied fails
+  // the registry sync's accumulator check as `incomplete`.
+  indexed = head;
 }
 
 /**

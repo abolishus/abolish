@@ -247,6 +247,17 @@ describe("the served ballot client", () => {
     await expect.poll(() => violations).toEqual(["require-trusted-types-for trusted-types-sink"]);
   });
 
+  // Only the challenge page's origin may be framed (apps/challenge).
+  test("refuses a frame from any origin but the challenge page's", async () => {
+    await page.evaluate(() => {
+      const frame = document.createElement("iframe");
+      frame.src = "https://example.com/";
+      document.body.append(frame);
+    });
+    await expect.poll(() => violations).toContain("frame-src https://example.com");
+    expect(foreignResponses).toEqual([]);
+  });
+
   test("refuses an image from another origin", async () => {
     await page.evaluate(() => {
       const img = document.createElement("img");

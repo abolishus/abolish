@@ -19,7 +19,10 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BALLOT_CSP, parseCsp } from "./csp.ts";
 import { PROVER_ARTIFACT_NAMES } from "../src/prover-artifacts.ts";
 
-const CONNECT_ORIGINS = (BALLOT_CSP["connect-src"] ?? []).filter((s) => s.startsWith("https://"));
+const NAMED_ORIGINS = [
+  ...(BALLOT_CSP["connect-src"] ?? []),
+  ...(BALLOT_CSP["frame-src"] ?? []),
+].filter((s) => s.startsWith("https://"));
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(root, "..", "..");
@@ -335,14 +338,14 @@ describe("bundle contents", () => {
     expect(found).toEqual([]);
   });
 
-  test("names no URL but the inert ones and the origins connect-src allows", () => {
+  test("names no URL but the inert ones and the origins connect-src and frame-src allow", () => {
     const urls = textFiles().flatMap(([name, text]) =>
       [...text.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)<>]*/g)]
         .map(([url]) => url.replace(/[.,;]+$/, ""))
         .filter(
           (url) =>
             !INERT_URLS.has(url) &&
-            !CONNECT_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`)),
+            !NAMED_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`)),
         )
         .map((url) => `${name}: ${url}`),
     );

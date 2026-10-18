@@ -12,6 +12,10 @@
 //   origin, both untrusted (the client checks every answer against the
 //   registry, T-34); and nothing else. Staging's values; a release names its
 //   own.
+// - frame-src: the challenge page's origin alone (apps/challenge), which runs
+//   Turnstile so the client never loads Cloudflare's unpinnable script; the
+//   client accepts one well-formed token posted from that frame and nothing
+//   else. Staging's value; a release names its own.
 // - worker-src 'self': the Web Workers that encrypt and prove load only from
 //   the client's own origin.
 // - Trusted Types: any write of a string into a DOM sink that parses HTML or
@@ -34,6 +38,7 @@ export const BALLOT_CSP: Csp = {
   "font-src": ["'self'"],
   "img-src": ["'self'"],
   "connect-src": ["'self'", "https://api-staging.abolish.us", "https://sepolia.base.org"],
+  "frame-src": ["https://challenge-staging.up.railway.app"],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],

@@ -110,13 +110,27 @@ export const CONNECT_ORIGINS: readonly string[] = [
 ];
 
 /**
+ * The origins the client may frame, and may name in its code (T-43, T-25):
+ * the challenge page alone (apps/challenge), which runs Cloudflare's
+ * Turnstile for the Tier 0 and Tier 1 requests so the client itself never
+ * loads a script it can't pin. The frame gets nothing from the client but its
+ * own fragment, the client's origin and the action, and the client accepts
+ * one well-formed token posted by that frame from this origin, and nothing
+ * else (apps/ballot/src/registration.ts). Its own host is a registrable
+ * domain apart from the client's (`up.railway.app` is on the Public Suffix
+ * List), so the page shares no cookie, storage or passkey RP ID with it.
+ * Staging's; a release names its own (owner review, rule B).
+ */
+export const FRAME_ORIGINS: readonly string[] = ["https://challenge-staging.up.railway.app"];
+
+/**
  * The ballot client's Content Security Policy (T-43). Scripts, styles, fonts
  * and images from its own origin only, and WebAssembly compiled
  * ('wasm-unsafe-eval', which never allows JavaScript eval) for the prover's
  * curve code and witness calculator; requests only to its own origin, for the
  * prover's key and witness calculator from its own release, and to
  * CONNECT_ORIGINS, from the main thread (a worker gets no CSP from the page,
- * so WORKER_BANNED keeps its I/O out); Web Workers from its own origin only,
+ * so WORKER_BANNED keeps its I/O out); frames from FRAME_ORIGINS only; Web Workers from its own origin only,
  * where encryption and proving run; Trusted Types, with one named policy,
  * `ballot-worker`, for the two workers' script URLs (`new Worker(url)` is a
  * script-URL sink; the client creates the policy first, and a second policy
@@ -129,6 +143,7 @@ export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "font-src": ["'self'"],
   "img-src": ["'self'"],
   "connect-src": ["'self'", ...CONNECT_ORIGINS],
+  "frame-src": [...FRAME_ORIGINS],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
@@ -156,7 +171,9 @@ export const INERT_URLS: ReadonlySet<string> = new Set([
 export function isAllowedUrl(url: string): boolean {
   return (
     INERT_URLS.has(url) ||
-    CONNECT_ORIGINS.some((origin) => url === origin || url.startsWith(`${origin}/`))
+    [...CONNECT_ORIGINS, ...FRAME_ORIGINS].some(
+      (origin) => url === origin || url.startsWith(`${origin}/`),
+    )
   );
 }
 

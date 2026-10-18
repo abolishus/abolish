@@ -342,6 +342,14 @@ describe("opening an election from staging's origins", () => {
             contentType: "application/json",
             body: JSON.stringify(textStatus === 200 ? { displayText: textHex } : {}),
           });
+        // Never moderated (docs/moderation-policy.md, Open polls).
+        if (url.pathname === "/moderation/status" && wanted)
+          return route.fulfill({
+            status: 200,
+            headers: cors,
+            contentType: "application/json",
+            body: JSON.stringify({ state: "visible" }),
+          });
         // A version-1 election's board: no transcript is looked for.
         if (url.pathname === "/board/entries" && wanted)
           return route.fulfill({

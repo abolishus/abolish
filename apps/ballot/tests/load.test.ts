@@ -414,6 +414,16 @@ const hidden = (reason: string): Answer => ({
 // ballot client under a notice, every other hide withholds it, and a state
 // the client can't read is visible, so blocking the route can't stop voting
 // (T-68).
+/** The policy's removal grounds that withhold the text (docs/moderation-policy.md, Reasons). */
+const WITHHOLDING = [
+  "illegal",
+  "personal-data",
+  "harassment",
+  "spam",
+  "impersonation",
+  "legal-notice",
+];
+
 describe("the moderation state", () => {
   test("a poll hidden as a threat comes back with its text and the notice", async () => {
     const { fetchFn } = honest({ status: hidden("threat") });
@@ -424,14 +434,7 @@ describe("the moderation state", () => {
   });
 
   test("a poll hidden on any other ground is withheld, even if its text is served", async () => {
-    for (const reason of [
-      "illegal",
-      "personal-data",
-      "harassment",
-      "spam",
-      "impersonation",
-      "legal-notice",
-    ]) {
+    for (const reason of WITHHOLDING) {
       const { fetchFn } = honest({ status: hidden(reason) });
       expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
         ok: false,
@@ -499,10 +502,7 @@ describe("the moderation state", () => {
   });
 
   test("whatever the status route answers, it never stops voting but by a withholding hide", async () => {
-    const reason = fc.oneof(
-      fc.constantFrom("threat", "illegal", "personal-data", "spam", "error"),
-      fc.string(),
-    );
+    const reason = fc.oneof(fc.constantFrom("threat", "error", ...WITHHOLDING), fc.string());
     const latest = fc.record(
       { action: fc.constantFrom("hide", "delist", "restore"), reason, seq: fc.string() },
       { requiredKeys: [] },
@@ -530,7 +530,7 @@ describe("the moderation state", () => {
             ? a.latest.reason
             : undefined;
         if (hiddenBy === "threat") expect(loaded).toMatchObject({ ok: true, hiddenAsThreat: true });
-        else if (hiddenBy === "illegal" || hiddenBy === "personal-data" || hiddenBy === "spam")
+        else if (typeof hiddenBy === "string" && WITHHOLDING.includes(hiddenBy))
           expect(loaded).toEqual({ ok: false, problem: "withheld" });
         else expect(loaded).toMatchObject({ ok: true, hiddenAsThreat: false });
       }),

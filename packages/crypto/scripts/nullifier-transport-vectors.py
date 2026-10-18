@@ -144,12 +144,12 @@ def request_hash(b):
     return H(ds(REQUEST_HASH_TAG, b))
 
 
-def make_request(key_id, seat, seat_pair, client_pair, query, label, aad_seat=None, aad_reply=None):
+def make_request(key_id, seat, seat_pair, client_pair, query, label, aad_seat=None, aad_key=None):
     """A request with every value it was sealed with; `aad_*` let a case seal under other values."""
     rng = Rng(label)
     mu, e = rng.bytes32(), rng.ristretto_scalar()
     reply_bytes = se.enc_kem_key(client_pair)
-    a = request_aad(key_id, seat if aad_seat is None else aad_seat, reply_bytes if aad_reply is None else aad_reply)
+    a = request_aad(key_id if aad_key is None else aad_key, seat if aad_seat is None else aad_seat, reply_bytes)
     ct_m, ct_dh, sealed, inter = seal(REQUEST_KEM_TAG, seat_pair, a, query, mu, e)
     b = enc_request(key_id, seat, reply_bytes, ct_m, element(ct_dh), sealed)
     return b, {"mu": mu.hex(), "e": str(e), **inter}
@@ -284,7 +284,8 @@ def check_reply(sent_hash, seat, client_secret, b):
     pt = open_sealed(REPLY_KEM_TAG, client_secret, msg, reply_aad(sent_hash, seat))
     if pt is None:
         return ("reply-decrypt", None)
-    if len(pt) != ANSWER_LEN or pt[:3] != u16(ANSWER_TYPE) + u8(VERSION):
+    # The answer's seat is at offset 67: after the header, key_id and query_hash.
+    if len(pt) != ANSWER_LEN or pt[:3] != u16(ANSWER_TYPE) + u8(VERSION) or pt[67] != seat:
         return ("reply-answer", None)
     return ("ok", pt)
 
@@ -353,11 +354,13 @@ def main(out):
     other = kem_pair("nullifier-transport-other-client")
     bad_ek = bytes([0xFF, 0xFF]) + c0["ek"][2:]
     assert not se.ek_ok(bad_ek)
-    over = enc_request(key_id, 1, se.enc_kem_key(c0), msg0["ctM"], element(msg0["ctDh"]), b"")[:-4] + u32(MAX_REQUEST_SEALED + 1)
+    over = enc_request(key_id, 1, se.enc_kem_key(c0), msg0["ctM"], element(msg0["ctDh"]), bytes(MAX_REQUEST_SEALED + 1))
     other_key = flip(key_id, 0)
     not_query, _ = make_request(key_id, 1, seats[1], c0, bytes.fromhex(qv["outputs"][0]["record"]), "nullifier-transport-case/not-query")
     wrong_key_query = q0[:3] + other_key + q0[35:]
     moved_query, _ = make_request(key_id, 1, seats[1], c0, wrong_key_query, "nullifier-transport-case/moved-query")
+    aad_seat_2, _ = make_request(key_id, 1, seats[1], c0, q0, "nullifier-transport-case/aad-seat", aad_seat=2)
+    aad_other_key, _ = make_request(key_id, 1, seats[1], c0, q0, "nullifier-transport-case/aad-key", aad_key=other_key)
     swapped = b0[:reply_key_at] + se.enc_kem_key(other) + b0[reply_key_at + KEM_KEY_LEN :]
     to_seat_2 = b0[:35] + u8(2) + b0[36:]
     rejected_requests = [
@@ -373,6 +376,8 @@ def main(out):
         request_case("A key the seat holds no share of", "request-key", b0[:3] + other_key + b0[35:]),
         request_case("Sealed to seat 1, checked by seat 2 as its own", "request-key", b0, seat=2, opener=2),
         request_case("Seat 1's request relabelled for seat 2, checked by seat 2", "request-decrypt", to_seat_2, seat=2, opener=2),
+        request_case("Sealed to seat 1's key with the aad naming seat 2", "request-decrypt", aad_seat_2),
+        request_case("Sealed to seat 1's key with the aad naming another key_id", "request-decrypt", aad_other_key),
         request_case("The reply key swapped after sealing", "request-decrypt", swapped),
         request_case("A bit flipped in sealed", "request-decrypt", flip(b0, sealed_at + 4)),
         request_case("Opened with another seat's registration secret", "request-decrypt", b0, seat=1, opener=2),
@@ -397,6 +402,7 @@ def main(out):
     _, rh2, _ = sent[("query-0", 2)]
     relabelled = u16(QUERY_TYPE) + u8(VERSION) + answers["query-0"][1][3:]
     not_answer, _ = make_reply(rh0, 1, c0, relabelled, "nullifier-transport-case/not-answer")
+    seat_2_answer, _ = make_reply(rh0, 1, c0, answers["query-0"][2], "nullifier-transport-case/seat-2-answer")
     rejected_replies = [
         reply_case("A trailing byte", "reply-malformed", rb0 + b"\x00"),
         reply_case(
@@ -409,6 +415,7 @@ def main(out):
         reply_case("The request hash rewritten to the request sent to seat 2", "reply-decrypt", rb0[:3] + rh2 + u8(2) + rb0[36:], seat=2, sent_seat=2),
         reply_case("A bit flipped in sealed", "reply-decrypt", flip(rb0, r_sealed_at)),
         reply_case("Opened with another query's client secret", "reply-decrypt", rb0, opener="query-1"),
+        reply_case("Seat 2's genuine answer sealed as the reply to the request sent to seat 1", "reply-answer", seat_2_answer),
         reply_case("The plaintext is seat 1's answer under the query's record type", "reply-answer", not_answer),
     ]
 

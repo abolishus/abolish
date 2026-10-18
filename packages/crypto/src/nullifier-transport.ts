@@ -311,6 +311,9 @@ export function openNullifierRequest(
   } catch (e) {
     if (e instanceof DecodeError) return { ok: false, code: "request-query" };
     throw e;
+  } finally {
+    // Best effort: JavaScript can't guarantee erasure (T-39).
+    plain.fill(0);
   }
   if (!equalBytes(query.key_id, request.key_id)) return { ok: false, code: "request-query" };
   return {
@@ -403,10 +406,18 @@ export function openNullifierReply(sent: SentRequest, bytes: Uint8Array): ReplyR
     reply,
   );
   if (plain === null) return { ok: false, code: "reply-decrypt" };
+  let answer: NullifierAnswer;
   try {
-    return { ok: true, answer: decodeNullifierAnswer(plain, 1) };
+    answer = decodeNullifierAnswer(plain, 1);
   } catch (e) {
     if (e instanceof DecodeError) return { ok: false, code: "reply-answer" };
     throw e;
+  } finally {
+    plain.fill(0);
   }
+  // Anyone who saw the request can seal a reply to it, a corrupt seat too:
+  // another seat's genuine answer passes the answer check, so the reply check
+  // ties the answer to the seat the request went to.
+  if (answer.seat !== sent.seat) return { ok: false, code: "reply-answer" };
+  return { ok: true, answer };
 }

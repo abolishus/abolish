@@ -11,7 +11,7 @@ export {
   type AnchorConfig,
   anchorFromEnv,
 } from "./anchor-env.ts";
-export { connectAnchorRunner, MAINNET_CHAIN_ID } from "./anchor-runner.ts";
+export { connectAnchorRunner, TESTNET_CHAIN_IDS } from "./anchor-runner.ts";
 export {
   type AnchorSafe,
   checkAnchorSafe,

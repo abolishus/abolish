@@ -658,32 +658,37 @@ describe("the runner's startup", () => {
     await runner(f, { ownerKeys: f.keys.map((k) => hexToBytes(k)) });
   });
 
-  test("refuses keys that can't sign for the Safe, before reading anything", async () => {
+  test("refuses keys that can't sign for the Safe and any chain but a testnet, before reading anything", async () => {
     const f = await fixture();
     const [a, b] = f.keys.map((k) => hexToBytes(k)) as [Uint8Array, Uint8Array];
     const stranger = hexToBytes(generatePrivateKey());
-    await expect(runner(f, { ownerKeys: [a] })).rejects.toThrow("fewer signers");
-    await expect(runner(f, { ownerKeys: [a, stranger] })).rejects.toThrow("isn't one of");
-    await expect(runner(f, { ownerKeys: [a, b], executorKey: new Uint8Array(32) })).rejects.toThrow(
-      RangeError,
-    );
-    // T-69 and rule A: one runner holds the whole threshold, so never on
-    // mainnet, refused before the node is asked anything.
-    await expect(
-      connectAnchorRunner({} as PublicClient, {
-        chainId: 1n,
+    // A node that fails every request: each refusal comes before one is made.
+    const unread = new Proxy({} as PublicClient, {
+      get: () => () => Promise.reject(new Error("the node was read")),
+    });
+    const offline = (change: Partial<Parameters<typeof connectAnchorRunner>[1]>) =>
+      connectAnchorRunner(unread, {
+        chainId,
         anchor: f.anchor,
         clock: f.clock,
         safe: f.safe,
         ownerKeys: [a, b],
         executorKey: f.executor,
-      }),
-    ).rejects.toThrow("doesn't run on Ethereum mainnet");
+        ...change,
+      });
+    await expect(offline({ ownerKeys: [a] })).rejects.toThrow("fewer signers");
+    await expect(offline({ ownerKeys: [a, stranger] })).rejects.toThrow("isn't one of");
+    await expect(offline({ executorKey: new Uint8Array(32) })).rejects.toThrow(RangeError);
+    // T-69 and rule A: one runner holds the whole threshold, so it runs
+    // only where no real funds are.
+    for (const id of [1n, 100n, 137n, 8453n, 17_000n])
+      await expect(offline({ chainId: id })).rejects.toThrow("only on Sepolia or Anvil");
+    await expect(offline({})).rejects.toThrow("the node was read");
   });
 
   test("refuses another chain, clock or authority than the anchor's", async () => {
     const f = await fixture();
-    await expect(runner(f, { chainId: chainId + 1n })).rejects.toThrow("another chain");
+    await expect(runner(f, { chainId: 11_155_111n })).rejects.toThrow("another chain");
     await expect(
       runner(f, { clock: { ...f.clock, deadline: f.clock.deadline + 1n } }),
     ).rejects.toThrow("another clock");

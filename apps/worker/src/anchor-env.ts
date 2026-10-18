@@ -97,8 +97,7 @@ const Public = z.strictObject({
     .pipe(z.array(AddressValue).min(2).max(255)),
   ANCHOR_SAFE_THRESHOLD: Uint(255n),
   ANCHOR_SAFE_FALLBACK_HANDLER: AddressValue,
-  // Within the period, so no period goes untried (T-49); at least a minute,
-  // so a run's L1 reads finish before the next.
+  // At least a minute, so a run's L1 reads finish before the next.
   ANCHOR_EVERY_MS: z
     .string()
     .regex(/^[1-9][0-9]{0,9}$/)
@@ -117,7 +116,8 @@ const key = (value: string): Uint8Array | undefined => {
  * Throws if only some are, if one is malformed, if the Safe's record isn't
  * one `checkAnchorSafeState` could pass (owners repeated, a threshold below
  * 2 or above the owners), if the owner keys repeat one, or if the schedule
- * leaves a period untried; no key's value is ever quoted.
+ * is longer than the anchor's period or deadline; no key's value is ever
+ * quoted.
  */
 export function anchorFromEnv(env: AnchorEnv): AnchorConfig | undefined {
   const set = ANCHOR_ENV.filter((name) => env[name] !== undefined && env[name] !== "");
@@ -146,8 +146,13 @@ export function anchorFromEnv(env: AnchorEnv): AnchorConfig | undefined {
   if (p.ANCHOR_SAFE_THRESHOLD > BigInt(p.ANCHOR_SAFE_OWNERS.length))
     throw new Error("ANCHOR_SAFE_THRESHOLD is above the number of owners");
   const everyMs = p.ANCHOR_EVERY_MS ?? ANCHOR_EVERY_MS;
+  // T-49: within the period, so each checkpoint is sent soon after its
+  // period ends; within the deadline, so no checkpoint's window opens and
+  // closes between two runs.
   if (BigInt(everyMs) > p.ANCHOR_PERIOD * 1000n)
     throw new Error(`${ANCHOR_EVERY_ENV} is longer than the anchor's period`);
+  if (BigInt(everyMs) > p.ANCHOR_DEADLINE * 1000n)
+    throw new Error(`${ANCHOR_EVERY_ENV} is longer than the anchor's deadline`);
   const ownerKeys = (env.ANCHOR_OWNER_KEYS as string).split(",").map(key);
   if (ownerKeys.some((k) => k === undefined))
     throw new Error("ANCHOR_OWNER_KEYS holds a malformed key");

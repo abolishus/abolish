@@ -11,16 +11,16 @@
 // runner's own keys must meet the threshold, so one runner holds the whole
 // quorum: what the Safe is there to prevent (docs/spec/contracts.md, Board
 // anchor, Known-weak). That is a testnet's arrangement only, so the runner
-// refuses Ethereum mainnet outright; anchoring there is the owner's decision
-// (AGENTS.md, rule A).
+// starts only on Sepolia or a local Anvil chain, the L1s AGENTS.md allows;
+// any chain with real funds is the owner's decision (AGENTS.md, rule A).
 
 import type { PublicClient } from "viem";
 import { checkAnchorDeployment, ViemAnchorChain } from "./anchor-chain.ts";
 import type { AnchorConfig } from "./anchor-env.ts";
 import { checkAnchorSafe, keySigner, safeSender } from "./anchor-safe.ts";
 
-/** Ethereum mainnet's chain ID, which no runner may send to. */
-export const MAINNET_CHAIN_ID = 1n;
+/** The only L1 chains a runner may send to: Sepolia and a local Anvil. */
+export const TESTNET_CHAIN_IDS: readonly bigint[] = [11_155_111n, 31_337n];
 
 /**
  * The adapter for `startWorker`'s `anchor`, once every startup check has
@@ -32,8 +32,8 @@ export async function connectAnchorRunner(
   config: Omit<AnchorConfig, "l1RpcUrl" | "everyMs">,
 ): Promise<ViemAnchorChain> {
   const { chainId, anchor, clock, safe } = config;
-  if (chainId === MAINNET_CHAIN_ID)
-    throw new Error("the anchoring runner doesn't run on Ethereum mainnet");
+  if (!TESTNET_CHAIN_IDS.includes(chainId))
+    throw new Error("the anchoring runner runs only on Sepolia or Anvil");
   // Refuses an owner key the record doesn't name, too few for the
   // threshold and a malformed executor key, before anything is read.
   const send = safeSender({

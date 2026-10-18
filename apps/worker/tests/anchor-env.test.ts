@@ -115,7 +115,7 @@ describe("the anchoring runner's configuration", () => {
     for (const [change, message] of cases) expect(refusal({ ...full, ...change })).toBe(message);
   });
 
-  test("refuses a Safe record no Safe could pass, and a schedule that skips a period", () => {
+  test("refuses a Safe record no Safe could pass, and a schedule longer than the period or deadline", () => {
     expect(refusal({ ...full, ANCHOR_SAFE_OWNERS: [address(1), address(1)].join(",") })).toBe(
       "ANCHOR_SAFE_OWNERS repeats an owner",
     );
@@ -140,6 +140,12 @@ describe("the anchoring runner's configuration", () => {
     );
     expect(anchorFromEnv({ ...full, ANCHOR_PERIOD: "60", ANCHOR_EVERY_MS: "60000" })?.everyMs).toBe(
       60_000,
+    );
+    expect(refusal({ ...full, ANCHOR_DEADLINE: "60", ANCHOR_EVERY_MS: "60001" })).toBe(
+      "ANCHOR_EVERY_MS is longer than the anchor's deadline",
+    );
+    expect(refusal({ ...full, ANCHOR_DEADLINE: "0", ANCHOR_EVERY_MS: "60000" })).toBe(
+      "ANCHOR_EVERY_MS is longer than the anchor's deadline",
     );
     // The default schedule is longer than a one-minute period.
     expect(refusal({ ...full, ANCHOR_PERIOD: "60" })).toBe(

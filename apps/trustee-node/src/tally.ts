@@ -67,7 +67,11 @@ export type CountedSet =
   /**
    * The counted set, fixed: for each cell of the registered partition, in
    * order, the ballot records (version 1) of its counted ballots, as the
-   * anchored counted extent holds them.
+   * anchored counted extent holds them. It must come from the seat's own
+   * finalized L1 and L2 nodes through packages/verifier, never a served
+   * value: sums over a set other than the anchored one, beside the
+   * published opening, let `k − 1` other trustees open the ballots the sets
+   * differ by (T-14, T-16).
    */
   | { readonly state: "fixed"; readonly cells: readonly (readonly Uint8Array[])[] };
 
@@ -75,7 +79,10 @@ export type CountedSet =
 export interface SummedSharePeers {
   /**
    * Sends a summed-share message to seat `recipient`'s node; resolves once
-   * it is sent, and throws if it can't be sent now. Never through the board,
+   * it is sent, and throws if it can't be sent now. The receiving node
+   * acknowledges a message on arrival, before and whatever `receive` makes
+   * of it, so neither its answer nor its timing tells the sender which
+   * check failed (docs/spec/tally.md, Summed-share message, Notes; T-39). Never through the board,
    * IPFS, the archive or any store that keeps it after delivery
    * ([[0015-tally-publication]]; T-15).
    */
@@ -215,12 +222,15 @@ export class TallyDuty {
   /**
    * Checks a summed-share message from another seat (Receiving) and keeps
    * the sums if they pass. A message that fails, or one that arrives before
-   * the counted set is fixed, is ignored; nothing about the result goes back
-   * to its sender, so the transport must answer every message alike (T-39).
+   * `step` has fixed the counted set, is ignored; nothing about the result
+   * goes back to its sender, so the transport acknowledges every message on
+   * arrival, before calling this (T-39).
    */
   async receive(message: Uint8Array): Promise<void> {
-    const fixed = await this.#fix();
-    if (!("rules" in fixed)) return;
+    // Only `step` reads the counted set: a message, which anyone reaching
+    // the node can send, never makes it read or sum (T-54).
+    const fixed = this.#fixed;
+    if (fixed === undefined) return;
     const { election } = this.#o;
     const result = openSummedShares(
       {
@@ -382,7 +392,13 @@ export class TallyDuty {
    */
   #checked(): { definition: ElectionDefinition; registered: readonly RegisteredKeys[] } {
     const { definition: d, transcript, election, secrets, panel } = this.#o;
-    if (!equal(electionDefinitionHash(d), election.definitionHash))
+    // Implied by the approved definition hash, which the seat computed from
+    // a stub its pins passed; checked so the transcript is read against them.
+    if (
+      d.l2_chain_id !== this.#o.l2ChainId ||
+      !equal(d.trustee_registry, this.#o.trusteeRegistry) ||
+      !equal(electionDefinitionHash(d), election.definitionHash)
+    )
       throw new Refused("the definition isn't the one the seat approved");
     const transcriptHash = ceremonyTranscriptHash(transcript);
     if (
@@ -392,8 +408,8 @@ export class TallyDuty {
       throw new Refused("the transcript isn't the one the seat approved");
     const result = checkCeremonyTranscript(
       {
-        l2ChainId: d.l2_chain_id,
-        trusteeRegistry: d.trustee_registry,
+        l2ChainId: this.#o.l2ChainId,
+        trusteeRegistry: this.#o.trusteeRegistry,
         electionId: d.election_id,
         stubHash: election.stubHash,
         panel,

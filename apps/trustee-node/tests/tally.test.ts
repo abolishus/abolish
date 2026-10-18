@@ -30,6 +30,7 @@ import {
   type CountedSet,
   type SummedSharePeers,
   TallyDuty,
+  type TallyDutyOptions,
   type TallyDutyStatus,
 } from "../src/tally.ts";
 import { type Cast, cast, type Setup, seatsOf, setup } from "./ballots.ts";
@@ -91,11 +92,25 @@ class Wire implements SummedSharePeers {
   }
 }
 
+/**
+ * Each seat steps once with nothing delivered, so every duty has fixed its
+ * counted set (a message reaching a seat before that is dropped) and none
+ * holds another's sums; then delivery starts.
+ */
+async function prime(wire: Wire): Promise<void> {
+  const deliver = wire.deliver;
+  wire.deliver = false;
+  for (const duty of wire.duties) await duty.step();
+  wire.sent.length = 0;
+  wire.deliver = deliver;
+}
+
 interface Options {
   counted?: (seat: number) => CountedSet;
   stores?: readonly SeatStore[];
   definition?: ElectionDefinition;
   transcript?: Uint8Array;
+  change?: (seat: number) => Partial<TallyDutyOptions>;
 }
 
 function duties(wire: Wire, o: Options = {}): TallyDuty[] {
@@ -112,15 +127,17 @@ function duties(wire: Wire, o: Options = {}): TallyDuty[] {
         store: (o.stores ?? s.stores)[i] as SeatStore,
         counted: async () => (o.counted ?? (() => all()))(i + 1),
         peers: wire,
+        ...o.change?.(i + 1),
       }),
   );
   return wire.duties;
 }
 
 /** A store over `store` holding no new record and none written before: each test's own tally records. */
+const written = new WeakMap<SeatStore, ReadonlyMap<string, Uint8Array>>();
 function overlay(store: SeatStore): SeatStore {
   const own = new Map<string, Uint8Array>();
-  return {
+  const over: SeatStore = {
     get: async (key) => own.get(key) ?? (key.startsWith("tally/") ? undefined : store.get(key)),
     putOnce: async (key, value) => {
       const held = own.get(key);
@@ -137,6 +154,8 @@ function overlay(store: SeatStore): SeatStore {
       return [...new Set([...mine, ...theirs])].sort();
     },
   };
+  written.set(over, own);
+  return over;
 }
 const fresh = () => s.stores.map(overlay);
 
@@ -166,7 +185,9 @@ const states = (statuses: TallyDutyStatus[]) =>
 describe("the tally duty", () => {
   test("every seat signs an opening of the counted set that passes the verifier's checks", async () => {
     const wire = new Wire();
-    const d = duties(wire, { stores: fresh() });
+    const stores = fresh();
+    const d = duties(wire, { stores });
+    await prime(wire);
     // Seat 1 holds only its own sums at first; seats 2 and 3 hold seat 1's
     // and their own, which is `k`, so they open and send nothing more.
     const first = [];
@@ -187,6 +208,11 @@ describe("the tally duty", () => {
       ).toEqual([2n, 1n]);
     }
     expect((await d[0]!.openings()).size).toBe(0);
+    // Only public values reach the store: each cell's aggregate hash and the
+    // signed openings, never a sum or a message (Destruction; T-15).
+    for (const store of stores)
+      for (const key of written.get(store)!.keys())
+        expect(key).toMatch(/^tally\/[0-9a-f]{64}\/(aggregates|openings)\/0$/);
     // Seat 1 sent to each other seat once; the others opened before sending.
     expect(wire.sent.map((m) => m.recipient)).toEqual([2, 3]);
   });
@@ -221,6 +247,7 @@ describe("the tally duty", () => {
     const wire = new Wire();
     const stores = fresh();
     const d = duties(wire, { stores });
+    await prime(wire);
     for (const duty of d) await duty.step();
     const before = await Promise.all(d.map(async (x) => (await x.openings()).get(0)));
     const sent = wire.sent.length;
@@ -278,6 +305,7 @@ describe("the tally duty", () => {
     const wire = new Wire();
     wire.down.add(2);
     const d = duties(wire, { stores: fresh() });
+    await prime(wire);
     expect(await d[0]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 1 }],
@@ -289,6 +317,7 @@ describe("the tally duty", () => {
     const wire = new Wire();
     wire.deliver = false;
     const d = duties(wire, { stores: fresh() });
+    await prime(wire);
     await d[0]!.step();
     const toSeat2 = wire.sent.find((m) => m.recipient === 2)!.message;
     const toSeat3 = wire.sent.find((m) => m.recipient === 3)!.message;
@@ -309,7 +338,10 @@ describe("the tally duty", () => {
       2,
       sumShares(rules(), own),
     );
-    for (const m of [flipped, toSeat3, otherSet, new Uint8Array(10)]) await d[1]!.receive(m);
+    const signature = Uint8Array.from(toSeat2);
+    signature[signature.length - 1]! ^= 1;
+    for (const m of [flipped, signature, toSeat3, otherSet, new Uint8Array(10)])
+      await d[1]!.receive(m);
     expect(await d[1]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 2 }],
@@ -325,6 +357,7 @@ describe("the tally duty", () => {
         async (schedule) => {
           const wire = new Wire();
           const d = duties(wire, { stores: fresh() });
+          await prime(wire);
           const holds = [new Set([1]), new Set([2]), new Set([3])];
           for (const [seat, delivered] of schedule) {
             wire.deliver = delivered;
@@ -370,9 +403,20 @@ describe("what the duty refuses to sum over", () => {
     await refused({ counted: () => fixed([[b.bytes.slice(1)]]) });
   });
 
-  test("a voter counted twice", async () => {
+  test("a voter counted twice, by the same ballot or another of theirs", async () => {
     const b = ballots[0] as Cast;
     await refused({ counted: () => fixed([[b.bytes, b.bytes]]) });
+    const revote = await cast(s, 0, 1);
+    await refused({ counted: () => fixed([[b.bytes, ballots[1]!.bytes, revote.bytes]]) });
+  }, 60_000);
+
+  test("a ballot of another shape", async () => {
+    const b = ballots[0] as Cast;
+    const vote = b.record.committed_vote;
+    await refused({
+      counted: () =>
+        fixed([[withRecord(b, { committed_vote: { ...vote, vss: vote.vss.slice(1) } })]]),
+    });
   });
 
   test("a counted set other than the one fixed before, after a restart", async () => {
@@ -387,6 +431,11 @@ describe("what the duty refuses to sum over", () => {
   test("a definition, transcript or key set other than the approved one", async () => {
     await refused({ definition: { ...s.definition, closes_at: s.definition.closes_at + 1n } });
     await refused({ transcript: Uint8Array.from(s.transcript, (x, i) => (i === 40 ? x ^ 1 : x)) });
+    await refused({
+      change: () => ({ secrets: { ...secrets[0]!, keySetHash: new Uint8Array(32).fill(1) } }),
+    });
+    // Seat 2's per-election keys under seat 1's index: not seat 1's registered keys.
+    await refused({ change: () => ({ election: { ...approved[1]!, index: 1 } }) });
   });
 
   test("sums from a store whose shares fail the summed-share check", async () => {

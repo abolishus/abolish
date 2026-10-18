@@ -551,6 +551,8 @@ export function PollFormPage({
   // Where the check is shown, and the way to take it down again.
   const checkBox = useRef<HTMLDivElement>(null);
   const solving = useRef<AbortController | undefined>(undefined);
+  // Counts the form's edits, so a save knows whether it stored what the page shows.
+  const edits = useRef(0);
   const summary = useRef<HTMLDivElement>(null);
   // After a save, focus goes to the heading, and the status line below says what happened.
   const heading = useRef<HTMLHeadingElement>(null);
@@ -607,6 +609,9 @@ export function PollFormPage({
 
   // A fixed field drops its error at once; new problems wait for the next save.
   const change = (next: PollForm) => {
+    // The draft as saved is on its way to setup: an edit now would be lost unsaid.
+    if (submitting === "sending" || submitting === "sent") return;
+    edits.current += 1;
     setForm(next);
     setSaved(false);
     setDirty(true);
@@ -634,14 +639,23 @@ export function PollFormPage({
     }
     setBusy(true);
     setSubmitFailure(undefined);
+    // A check under way would submit the draft this save replaces.
+    if (solving.current !== undefined) {
+      solving.current.abort();
+      setSubmitting("idle");
+    }
+    // Only the form as it was sent is saved: an edit during the save keeps it unsaved.
+    const sent = edits.current;
     try {
       if (savedId.current === undefined) {
         const created = await client.create(checked.draft);
         savedId.current = created;
         onCreated?.(created);
       } else await client.update(savedId.current, checked.draft);
-      setSaved(true);
-      setDirty(false);
+      if (edits.current === sent) {
+        setSaved(true);
+        setDirty(false);
+      }
     } catch (e) {
       const why = e instanceof DraftsError ? e.failure : "failed";
       if (why === "changed") setUnavailable("notDraft");

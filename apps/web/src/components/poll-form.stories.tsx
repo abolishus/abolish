@@ -65,10 +65,13 @@ function fakeDrafts({
   read,
   refuse,
   refuseSubmit,
+  hold,
 }: {
   read?: PollWithDraft;
   refuse?: DraftsError;
   refuseSubmit?: DraftsError;
+  /** Updates answer only once this settles. */
+  hold?: Promise<void>;
 } = {}): DraftsClient & {
   writes: [string, string | undefined, PollDraft][];
   submits: [string, string][];
@@ -97,6 +100,7 @@ function fakeDrafts({
     },
     update: async (id, draft) => {
       writes.push(["update", id, draft]);
+      await hold;
       if (refuse !== undefined) throw refuse;
     },
     // The form never reads moderation: the list's stories do (account-polls.stories.tsx).
@@ -617,5 +621,65 @@ export const NoSiteKey: Story = {
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "Polls can't be submitted on this site just now.",
     );
+  },
+};
+
+let release = () => {};
+const held = new Promise<void>((resolve) => (release = resolve));
+
+export const EditDuringSave: Story = {
+  args: {
+    client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED }, hold: held }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const title = await canvas.findByRole("textbox", { name: "Title" });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    // Written while the save is on its way: the stored draft won't have it.
+    await userEvent.type(title, "!");
+    release();
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    await expect(canvas.queryByText("Your draft is saved.")).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("Save your draft first");
+    await expect(solves(args.challenge)).toEqual([]);
+  },
+};
+
+export const SaveTakesTheCheckDown: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(canvas.getByRole("button", { name: "I'm a person" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "I'm a person" })).toBeNull();
+    await expect(solves(args.challenge)[0]![1].aborted).toBe(true);
+    await expect(submits(args.client)).toEqual([]);
+    await expect(args.onSubmitted).not.toHaveBeenCalled();
+  },
+};
+
+export const NoEditsWhileSending: Story = {
+  args: {
+    client: {
+      ...savedDraft(),
+      // A submission that never answers: the page stays sending.
+      submit: () => new Promise<void>(() => {}),
+    },
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const title = await canvas.findByRole("textbox", { name: "Title" });
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await expect(await canvas.findByText("Submitting your poll…")).toBeVisible();
+    await userEvent.type(title, "!");
+    await expect(title).toHaveValue("Harbor library hours");
   },
 };

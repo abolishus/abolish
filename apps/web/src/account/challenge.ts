@@ -84,8 +84,10 @@ export function turnstileChallenge(siteKey: string): Challenge {
       signal.throwIfAborted();
       return new Promise<string>((resolve, reject) => {
         let widget: string | undefined;
+        let settled = false;
         const finish = (settle: () => void) => {
           signal.removeEventListener("abort", aborted);
+          settled = true;
           if (widget !== undefined) api.remove(widget);
           widget = undefined;
           settle();
@@ -122,7 +124,11 @@ export function turnstileChallenge(siteKey: string): Challenge {
           failed();
           return;
         }
-        if (widget === undefined) failed();
+        // Settled during `render` (a callback it ran at once): its widget is ours to remove.
+        if (settled) {
+          if (widget !== undefined) api.remove(widget);
+          widget = undefined;
+        } else if (widget === undefined) failed();
       });
     },
   };

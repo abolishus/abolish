@@ -173,6 +173,22 @@ describe("turnstileChallenge", () => {
     expect(rendered).toEqual([]);
   });
 
+  test("a token given during `render` itself still takes the widget down", async () => {
+    const c = await challenge();
+    const solved = c.solve(container, "poll-create", new AbortController().signal);
+    await vi.waitFor(() => expect(scripts).toHaveLength(1));
+    (globalThis.window as { turnstile?: unknown }).turnstile = {
+      render: (_: unknown, options: Record<string, (t: string) => void>) => {
+        options["callback"]!("at-once");
+        return "widget-sync";
+      },
+      remove: (widget: string) => removed.push(widget),
+    };
+    scripts[0]!.onload?.();
+    await expect(solved).resolves.toBe("at-once");
+    expect(removed).toEqual(["widget-sync"]);
+  });
+
   test("a widget that won't render fails the solve", async () => {
     const c = await challenge();
     const solved = c.solve(container, "poll-create", new AbortController().signal);

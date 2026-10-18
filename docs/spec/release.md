@@ -6,8 +6,8 @@ A served ballot client passes [[verifier]] 1.1 only if every file it serves is t
 
 What this page doesn't cover:
 
-- **The registry:** its calls, its storage layout and how a reader proves a release published and not revoked from a finalized L1 header ([[contracts]], Release registry; [[P4-4]] part 2b-2).
-- **The served-client check:** fetching a site from an origin and comparing it with the record ([[verifier]] 1.1; [[P4-4]] part 2b-2).
+- **The registry:** its calls, its storage layout and how a reader proves a release published and not revoked from a finalized L1 header ([[contracts]], Release registry).
+- **The served-client check:** fetching a site from an origin and comparing it with the record ([[verifier]], Served client).
 - **The deployment record** (`0x0020`, reserved): the chain IDs, contract addresses, registrars, panels, API and RPC origins and prover keys the client is built for, which the release record binds by hash ([[P4-4]] part 2b-3).
 - **Building and publishing:** the release workflow that builds the record from two reproducible builds and the Safe transaction that appends it ([[P4-4]] part 2e, a `ci:` PR).
 
@@ -119,7 +119,7 @@ A host serves a site of a release, at one of its origins, by answering `GET` and
 - `/` and `/index.html` with the bytes of the file at path `index.html`;
 - `/` followed by each other `path` with that file's bytes;
 
-each with `content-type` equal to the file's `media_type` and every header the site lists, with exactly its value, and nothing at any other path. The client routes by fragment, so no other path is ever asked for ([[0020-entry-points]]). IPFS gateways also answer a directory's path (`/assets/`) with a listing page of their own at the site's origin, which is something at another path: what [[verifier]] 1.1 makes of it, and whether a gateway entry point can be listed at all, are part 2b-2's and part 3's (T-43). A header the site lists but the host doesn't send, or sends with another value, is a host that isn't serving the release; what [[verifier]] 1.1 reports for headers a host adds, and for an entry point whose host can't send headers at all (an ENS gateway, [[0036-release-record]], Consequences), is 1.1's.
+each with `content-type` equal to the file's `media_type` and every header the site lists, with exactly its value, and nothing at any other path. The client routes by fragment, so no other path is ever asked for ([[0020-entry-points]]). IPFS gateways also answer a directory's path (`/assets/`) with a listing page of their own at the site's origin, which is something at another path: [[verifier]] 1.1 asks for no path the record doesn't list, so it doesn't see such a page, and whether a gateway entry point can be listed at all is part 3's (T-43). A header the site lists but the host doesn't send, or sends with another value, is a host that isn't serving the release, and 1.1 fails it; headers a host adds are reported, never judged, so an entry point whose host can't send headers at all (an ENS gateway, [[0036-release-record]], Consequences) fails 1.1 ([[verifier]], Served client).
 
 An IPFS host serves the site's directory, `directory`, built as [[content-addressing]] (Sites) says, and anyone holding the files rebuilds it: a site whose files don't make `directory` is not the site the record lists, whatever its files hash to. So `abolishus.eth`'s `contenthash` names the ballot site's `directory` of the release the registry holds (part 3), and `apps/node` pins and serves exactly that directory.
 

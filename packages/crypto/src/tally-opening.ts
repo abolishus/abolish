@@ -92,26 +92,40 @@ export type PartialOpening = CodecValue<typeof tallyOpeningV3>;
 
 /**
  * Record type `0x0006`: one cell's opening of the tally, on the board.
- * Version 2 (live polls, P2-15) has no codec here yet.
+ * Version 2, which every live poll pins, is version 1's layout byte for byte
+ * apart from the header's version (docs/spec/tally.md, Tally-opening version
+ * 2): it also fixes the running opening, so a sealed poll's board can never
+ * carry one (T-16, T-31).
  */
 export const TALLY_OPENING = recordType(RECORD_TYPES.tallyOpening, {
   1: tallyOpeningV1,
+  2: tallyOpeningV1,
   3: tallyOpeningV3,
 });
 
+/** The tally-opening versions whose record is one cell's whole opening: 1, and a live poll's 2. */
+export type WholeOpeningVersion = 1 | 2;
+
 const SCHEMA = new RecordSchema([TALLY_OPENING]);
 
-/** Encodes a tally opening under version 1, the only version. */
-export function encodeTallyOpening(opening: TallyOpening): Uint8Array {
-  return SCHEMA.encode(TALLY_OPENING, 1, opening);
+/** Encodes a tally opening under version 1, or 2 for a live poll. */
+export function encodeTallyOpening(
+  opening: TallyOpening,
+  version: WholeOpeningVersion = 1,
+): Uint8Array {
+  // An untyped caller could name version 3, a partial opening's layout.
+  if (version !== 1 && version !== 2) throw new RangeError("encodeTallyOpening: version 1 or 2");
+  return SCHEMA.encode(TALLY_OPENING, version, opening);
 }
 
 /** Strictly decodes a tally opening against the version the election's profile pins. */
-export function decodeTallyOpening(bytes: Uint8Array, pinned: 1): TallyOpening {
+export function decodeTallyOpening(bytes: Uint8Array, pinned: WholeOpeningVersion): TallyOpening {
+  // An untyped caller could pin version 3, whose record is a partial opening.
+  if (pinned !== 1 && pinned !== 2) throw new RangeError("decodeTallyOpening: pin 1 or 2");
   const r = SCHEMA.decode(TALLY_OPENING, bytes, pinned);
   // Unreachable: the pin refused every other version.
-  if (r.version !== 1) throw new RangeError("tally opening: not version 1");
-  return r.value;
+  if (r.version !== pinned) throw new RangeError(`tally opening: not version ${pinned}`);
+  return r.value as TallyOpening;
 }
 
 /** Encodes a panel's partial opening under version 3. */
@@ -409,7 +423,7 @@ export function sortTallyOpenings(
   election: Pick<TallyElection, "definitionHash" | "registered">,
   cellCount: number,
   payloads: readonly Uint8Array[],
-  pinned: 1,
+  pinned: WholeOpeningVersion,
 ): (SortedTallyOpening | { readonly at: number; readonly error: DecodeErrorCode })[] {
   if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
     throw new RangeError("sortTallyOpenings: definitionHash must be 32 bytes");
@@ -448,7 +462,7 @@ export function checkTally(
   election: TallyElection,
   cells: readonly (readonly CommittedVote["vss"][])[],
   payloads: readonly Uint8Array[],
-  pinned: 1,
+  pinned: WholeOpeningVersion,
 ): TallyCheck {
   if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
     throw new RangeError("checkTally: definitionHash must be 32 bytes");

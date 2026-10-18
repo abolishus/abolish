@@ -514,7 +514,12 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // Destruction), so neither is read under another tally-opening pin (T-36).
   // Beside an author panel the pin is version 3, whose partial openings are
   // per panel; a version-1 opening opens one sharing, never two halves.
-  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== (author ? 3 : 1)) {
+  // Version 2, a live poll's, is version 1's opening under another header
+  // and fixes the same destruction statement, version 1 (tally.md,
+  // Tally-opening version 2).
+  const pinned = pinnedVersion(d, RECORD_TYPES.tallyOpening);
+  const whole = pinned === 1 || pinned === 2 ? pinned : undefined;
+  if (author ? pinned !== 3 : whole === undefined) {
     const unsupported: CountedOutcome = {
       status: "unverifiable",
       code: "unsupported-version",
@@ -577,12 +582,14 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       throw new Error("countedChecks: a selected ballot outside the partition");
     into.push(vss);
   });
+  // Past the guard above, without an author panel the pin is version 1 or 2.
+  if (whole === undefined) throw new Error("countedChecks: no whole-opening pin past its guard");
   const rules = tallyRules(definition);
   const tally = checkTally(
     { definitionHash, rules, registered },
     cells,
     openings.map((o) => o.payload),
-    1,
+    whole,
   );
   const tiers = cellTiers(definition);
   const cellReports: CellReport[] = tally.cells.map((c, cell) => {

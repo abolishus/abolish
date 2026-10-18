@@ -164,9 +164,18 @@ export function tallyChecks(
   const author = definition.version === 6 && definition.value.author_keys.length !== 0;
   // A tally-opening version this verifier doesn't read here, or none pinned
   // (a later tally scheme's record), may be one a later release reads:
-  // unverifiable, never failed, so releases agree (2.3; T-36).
-  const version = author ? 3 : 1;
-  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== version)
+  // unverifiable, never failed, so releases agree (2.3; T-36). Version 2, a
+  // live poll's, is version 1's record under another header (tally.md,
+  // Tally-opening version 2), read whatever 2.3 finds of the pins beside it.
+  const pinned = pinnedVersion(d, RECORD_TYPES.tallyOpening);
+  const version = author
+    ? pinned === 3
+      ? 3
+      : undefined
+    : pinned === 1 || pinned === 2
+      ? pinned
+      : undefined;
+  if (version === undefined)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
   if (registered === undefined || (author && authorRegistered === undefined))
     return { row: { status: "unverifiable", code: "not-reached" } };
@@ -199,40 +208,42 @@ export function tallyChecks(
   if (authorSet === undefined) throw new Error("tallyChecks: no author key set past its guard");
   // Each sorted opening as one shape: its cell, the panel it names under
   // version 3, its signer, its entries and the message its signature is over.
-  const sorted = author
-    ? sortPartialOpenings(
-        { definitionHash, registered: { default: registered, author: authorSet } },
-        cells,
-        found,
-      ).map((o) =>
-        "error" in o
-          ? o
-          : {
-              at: o.at,
-              cell: o.cell,
-              panel: o.opening.panel as number | undefined,
-              signer: o.signer,
-              length: o.opening.opening.length,
-              signed: partialOpeningMessage(o.opening),
-            },
-      )
-    : sortTallyOpenings(
-        { definitionHash, registered },
-        cells,
-        found.map((f) => f.payload),
-        1,
-      ).map((o) =>
-        "error" in o
-          ? o
-          : {
-              at: o.at,
-              cell: o.cell,
-              panel: undefined,
-              signer: o.signer,
-              length: o.opening.opening.length,
-              signed: tallyOpeningStatement(o.opening),
-            },
-      );
+  // Version 3 is pinned exactly when there is an author panel.
+  const sorted =
+    version === 3
+      ? sortPartialOpenings(
+          { definitionHash, registered: { default: registered, author: authorSet } },
+          cells,
+          found,
+        ).map((o) =>
+          "error" in o
+            ? o
+            : {
+                at: o.at,
+                cell: o.cell,
+                panel: o.opening.panel as number | undefined,
+                signer: o.signer,
+                length: o.opening.opening.length,
+                signed: partialOpeningMessage(o.opening),
+              },
+        )
+      : sortTallyOpenings(
+          { definitionHash, registered },
+          cells,
+          found.map((f) => f.payload),
+          version,
+        ).map((o) =>
+          "error" in o
+            ? o
+            : {
+                at: o.at,
+                cell: o.cell,
+                panel: undefined,
+                signer: o.signer,
+                length: o.opening.opening.length,
+                signed: tallyOpeningStatement(o.opening),
+              },
+        );
   // `m`, the options an opening of a cell opens: under definition versions 5
   // and 6 the total over the questions, for each panel's partial opening as
   // for a whole one (tally.md, Context). 2.1 passed, so the definition is

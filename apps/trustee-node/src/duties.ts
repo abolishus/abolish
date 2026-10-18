@@ -1,8 +1,9 @@
 // A seat's duties in a deployment: for each election the seat approved, one
 // duty, built once its sources can be set up and stepped on a schedule until
-// it settles. Two kinds run so: the availability duty (`AvailabilitySeat`,
-// docs/spec/availability.md, What a seat does; T-24, T-54) and the receipt
-// duty (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52).
+// it settles. Three kinds run so: the availability duty (`AvailabilitySeat`,
+// docs/spec/availability.md, What a seat does; T-24, T-54), the receipt duty
+// (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52) and
+// the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29).
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
@@ -12,6 +13,7 @@ import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import type { AvailabilitySeat, AvailabilityStatus } from "./availability.ts";
 import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
+import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
 import { L1AnchorError } from "./l1.ts";
 import { SendError } from "./send.ts";
@@ -41,8 +43,9 @@ export type KindEvent<K extends string, S> =
 
 export type AvailabilityEvent = KindEvent<"availability", AvailabilityStatus>;
 export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
+export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 /** What the duties report. */
-export type DutyEvent = AvailabilityEvent | ReceiptEvent;
+export type DutyEvent = AvailabilityEvent | ReceiptEvent | ComplaintEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -81,6 +84,8 @@ const FINAL = [L1AnchorError, ViewError] as const;
 export type Duty = Pick<AvailabilitySeat, "step" | "deadline">;
 /** What the schedule needs of an election's receipt duty: `ReceiptDuty`. */
 export type ReceiptStep = Pick<ReceiptDuty, "step" | "deadline">;
+/** What the schedule needs of an election's complaint duty: `ComplaintDuty`. */
+export type ComplaintStep = Pick<ComplaintDuty, "step" | "deadline">;
 
 /** What the schedule needs of any duty. */
 interface Stepped<S> {
@@ -272,6 +277,28 @@ export class ReceiptDuties extends ElectionDuties<"receipts", ReceiptDutyStatus>
         name: "receipts",
         // `t_D`, as `ReceiptDuty.deadline` computes it.
         deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery,
+        settles: (status) => status.state === "recorded" || status.state === "unrecorded",
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * The complaint duty of every election the seat approved: each one's
+ * `ComplaintDuty`, stepped from before `c_I` (it decides nothing until
+ * `t_D + W_C`) until every batch it owes is recorded, or `t_K` has passed
+ * with some never recorded (`unrecorded`, an alarm). A ballot source or view
+ * no retry can read gives the election up, reported, as the receipt duty's
+ * does (T-29, T-53).
+ */
+export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyStatus> {
+  constructor(options: DutyOptions<ComplaintStep, ComplaintEvent>) {
+    super(
+      {
+        name: "complaints",
+        // `t_K`, as `ComplaintDuty.deadline` computes it.
+        deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).complaint,
         settles: (status) => status.state === "recorded" || status.state === "unrecorded",
       },
       options,

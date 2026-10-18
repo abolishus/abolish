@@ -434,6 +434,11 @@ describe("run with the availability duty", () => {
       l2: { call: async () => null },
       contract: { send: async () => {}, recorded: async () => undefined },
       receipts: { send: async () => {}, recorded: async () => [] },
+      complaints: {
+        postings: async () => ({ finalizedAt: 0n, postings: [] }),
+        send: async () => {},
+        recorded: async () => [],
+      },
       served: await servedBlocks(servedDir),
       // A gateway holding only `remote`'s block.
       gateways: async (cid: Uint8Array) =>
@@ -509,6 +514,18 @@ describe("run with the availability duty", () => {
       contract: sources.receipts,
       now: sources.clock,
     });
+    // The complaint duty decides over the receipt duty's own view, so its
+    // scope is the decision stored at `c_I`, and reads the deployment's ballots.
+    const complaints = w.complaints(election);
+    expect(complaints).toEqual({
+      store: sources.store,
+      election,
+      view: w.receipts(election).view,
+      contract: sources.complaints,
+      ballots: expect.any(Function),
+      now: sources.clock,
+    });
+    expect(complaints.view).toBe(w.receipts(election).view);
   });
 
   test("gives the view no extent for an election the seat didn't attest, without asking its nodes", async () => {
@@ -535,6 +552,11 @@ describe("run with the availability duty", () => {
       l2: node,
       contract: { send: async () => {}, recorded: async () => undefined },
       receipts: { send: async () => {}, recorded: async () => [] },
+      complaints: {
+        postings: async () => ({ finalizedAt: 0n, postings: [] }),
+        send: async () => {},
+        recorded: async () => [],
+      },
       served: await servedBlocks(servedDir),
       gateways: async () => [],
       store: new MemoryStore(),

@@ -12,28 +12,34 @@ import { readFile } from "node:fs/promises";
 import {
   ceremonyTranscriptHash,
   type ContractEventVersion,
+  decode,
+  decodeSharePosting,
   decodeShareReceiptBatch,
+  deliveryDeadlines,
   electionDefinitionHash,
   encodeBoardEntry,
   encodeContractEvent,
   encodeElectionDefinition,
+  encodeSharePosting,
   frameBallot,
   type L1Origin,
   L1_REF_MARGIN,
   pinnedVersion,
   RECORD_TYPES,
+  SHARE_CIPHERTEXT,
 } from "@abolishus/crypto";
 import { DEFINITION_REGISTERED, ELECTION_CREATED, type Rpc, RpcError } from "@abolishus/node";
 import { concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { HeldExtent } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
+import { ComplaintDuty } from "../src/complaint.ts";
 import { ReceiptDuty } from "../src/delivery.ts";
 import { type ReceiptEvent, ReceiptDuties } from "../src/duties.ts";
 import { decideObligation } from "../src/obligation.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
-import { obligationView, ViewError, type ViewOptions } from "../src/view.ts";
+import { complaintBallots, obligationView, ViewError, type ViewOptions } from "../src/view.ts";
 import { anvil, type Node } from "./anvil.ts";
 import { type Cast, cast, castAgain, seatsOf, setup, type Setup } from "./ballots.ts";
 import { L2_CHAIN_ID } from "./fixture.ts";
@@ -630,5 +636,105 @@ describe("stepped by the receipt duties", () => {
     down = false;
     await h.duties.step();
     expect(h.sent).toHaveLength(1);
+  });
+});
+
+describe("the complaint duty's ballot source", () => {
+  const ballotsOf = async (options: ViewOptions, approved: ApprovedElection) =>
+    (await complaintBallots(options)(approved)).map(plain);
+
+  test("gives the attested extent's ballot records and the board contract's, the transcript and failing logs left out", async () => {
+    const { store, approved } = await receipted(older);
+    const garbage = Uint8Array.of(RECORD_TYPES.ballot >> 8, RECORD_TYPES.ballot & 0xff, 1, 0);
+    const logs = [
+      ...registrationLogs(),
+      submitted(newer, 50n),
+      relayed(other, s.e.stub.opens_at + 900n),
+      // The older ballot's bytes under another ballot's topic fail the event check.
+      submitted(older, 50n, ballotHashOf(newer)),
+    ];
+    const options = viewOptions(store, { held: extentOf([older], [garbage]), logs });
+    // Nothing is admitted here: the duty matches each record by the hash it recomputes.
+    expect(await ballotsOf(options, approved)).toEqual(
+      [older.bytes, garbage, newer.bytes, other.bytes].map(plain),
+    );
+  });
+
+  test("gives the contract's alone for a seat that didn't attest, or whose pinned blocks lost the extent", async () => {
+    const { store, approved } = await receipted(older);
+    const logs = [...registrationLogs(), submitted(newer, 50n)];
+    expect(await ballotsOf(viewOptions(store, { logs }), approved)).toEqual([plain(newer.bytes)]);
+    const lost = {
+      ...viewOptions(store, { logs }),
+      extent: () => Promise.reject(new ViewError("extent-lost")),
+    };
+    expect(await ballotsOf(lost, approved)).toEqual([plain(newer.bytes)]);
+    // Any other failure to read the extent is the duty's to retry or give up.
+    const failing = {
+      ...viewOptions(store, { logs }),
+      extent: () => Promise.reject(new RpcError("eth_call: status 503")),
+    };
+    await expect(complaintBallots(failing)(approved)).rejects.toBeInstanceOf(RpcError);
+  });
+
+  test("refuses as the view does: a definition that isn't the approved one, a node on another chain", async () => {
+    const { store, approved } = await receipted(older);
+    const changed = { ...s.definition, closes_at: s.definition.closes_at + 1n };
+    await expect(
+      complaintBallots(viewOptions(store, { logs: registrationLogs(changed) }))(approved),
+    ).rejects.toMatchObject({ name: "ViewError", code: "definition" });
+    await expect(
+      complaintBallots(viewOptions(store, { l2: l2Node(registrationLogs(), L2_CHAIN_ID + 1n) }))(
+        approved,
+      ),
+    ).rejects.toMatchObject({ name: "ViewError", code: "chain" });
+  });
+
+  test("lets the complaint duty check a posting against a scope ballot the seat never receipted", async () => {
+    const { store, approved } = await receipted(older);
+    const opensAt = s.e.stub.opens_at;
+    const logs = [...registrationLogs(), relayed(other, opensAt + 900n)];
+    const options = viewOptions(store, { held: extentOf([older]), logs });
+    const { delivery } = deliveryDeadlines(approved.closesAt, approved.l1InclusionBound);
+    const after = delivery + RELEASE_WINDOWS.contractEventWindow + 1n;
+    // A posting for voter 1's relayed ballot, which is in the seat's scope
+    // but not its intake, carrying an `m` that isn't the ballot's: it fails
+    // the public check, so nothing is owed, but only once its ballot is read.
+    const deliveryVectors = JSON.parse(
+      await readFile(new URL("../../../docs/spec/vectors/delivery.json", import.meta.url), "utf8"),
+    ) as { records: { id: string; encoding: string }[] };
+    const { m } = decodeSharePosting(
+      hexToBytes(deliveryVectors.records.find((r) => r.id === "posting")?.encoding ?? ""),
+      1,
+    );
+    const posting = encodeSharePosting({
+      definition_hash: approved.definitionHash,
+      ballot_hash: ballotHashOf(other),
+      seat: approved.index,
+      m,
+      ciphertext: decode(SHARE_CIPHERTEXT, other.ciphertexts[approved.index - 1] as Uint8Array),
+    });
+    const duty = (ballots: typeof complaintBallots) =>
+      new ComplaintDuty({
+        store,
+        election: approved,
+        view: obligationView(options),
+        contract: {
+          postings: async () => ({
+            finalizedAt: after,
+            postings: [{ record: posting, submittedAt: delivery }],
+          }),
+          send: async () => expect.fail("nothing is owed"),
+          recorded: async () => [],
+        },
+        ballots: ballots(options),
+        now: () => after,
+      });
+    // Without the ballot the duty waits for it; with the source it decides.
+    expect(await duty(() => async () => []).step()).toMatchObject({
+      state: "waiting-ballots",
+      missing: 1,
+    });
+    expect(await duty(complaintBallots).step()).toEqual({ state: "recorded", total: 0 });
   });
 });

@@ -3,17 +3,21 @@
 // stepped until it settles, each status and failure reported once, and
 // anything the node can't get past ending the loop; and the receipt duty's
 // on the same schedule (P2-13 part 4b-2b-2b), settling once its batches are
-// recorded or can't be, and giving up a view no retry can read.
-import { kemKeygen } from "@abolishus/crypto";
+// recorded or can't be, and giving up a view no retry can read; and the
+// complaint duty's (P2-13 part 4b-3b), the same until `t_K`.
+import { deliveryDeadlines, kemKeygen } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { AvailabilityStatus } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
+import type { ComplaintDutyStatus } from "../src/complaint.ts";
 import type { ReceiptDutyStatus } from "../src/delivery.ts";
 import {
   AvailabilityDuties,
+  ComplaintDuties,
+  type ComplaintEvent,
   type Duty,
   type DutyEvent,
   ReceiptDuties,
@@ -517,6 +521,129 @@ describe("the receipt duties", () => {
         message: "eth_chainId: TimeoutError",
       },
       { event: "receipts-abandoned", stubHash: name(1) },
+    ]);
+  });
+});
+
+describe("the complaint duties", () => {
+  type ComplaintScript = (ComplaintDutyStatus | Error)[];
+
+  function complaints(scripts: Map<number, ComplaintScript>, clock = () => 0n) {
+    const events: ComplaintEvent[] = [];
+    const stepped: string[] = [];
+    const duties = new ComplaintDuties({
+      seat: {
+        approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+        approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+      },
+      build: async (e) => {
+        const n = e.stubHash[0] as number;
+        return {
+          deadline: DEADLINE,
+          step: async () => {
+            stepped.push(name(n));
+            const script = scripts.get(n) as ComplaintScript;
+            const next = (script.length > 1 ? script.shift() : script[0]) as
+              | ComplaintDutyStatus
+              | Error;
+            if (next instanceof Error) throw next;
+            return next;
+          },
+        };
+      },
+      clock,
+      log: (e) => events.push(e),
+    });
+    return { duties, events, stepped };
+  }
+
+  test("step each election through the postings' and ballots' waits until its batches are recorded, reporting each change once", async () => {
+    const h = complaints(
+      new Map<number, ComplaintScript>([
+        [
+          1,
+          [
+            { state: "open", until: 500n },
+            { state: "waiting-postings", until: 700n },
+            { state: "waiting-postings", until: 700n },
+            { state: "waiting-ballots", missing: 1, until: 900n },
+            { state: "sent", batches: 1, recorded: 0, total: 1 },
+            { state: "recorded", total: 1 },
+          ],
+        ],
+        [2, [{ state: "recorded", total: 0 }]],
+      ]),
+    );
+    for (let i = 0; i < 8; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(6);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
+    expect(h.events).toEqual([
+      { event: "complaints", stubHash: name(1), state: "open", until: "500" },
+      { event: "complaints", stubHash: name(2), state: "recorded", total: 0 },
+      { event: "complaints", stubHash: name(1), state: "waiting-postings", until: "700" },
+      {
+        event: "complaints",
+        stubHash: name(1),
+        state: "waiting-ballots",
+        missing: 1,
+        until: "900",
+      },
+      { event: "complaints", stubHash: name(1), state: "sent", batches: 1, recorded: 0, total: 1 },
+      { event: "complaints", stubHash: name(1), state: "recorded", total: 1 },
+    ]);
+  });
+
+  test("stop at unrecorded, the alarm past t_K, and give up a ballot source no retry can read", async () => {
+    const h = complaints(
+      new Map<number, ComplaintScript>([
+        [1, [{ state: "unrecorded", missing: 1, total: 2 }]],
+        [2, [new RpcError("eth_getLogs: status 503"), new ViewError("definition")]],
+      ]),
+    );
+    for (let i = 0; i < 4; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(2);
+    expect(h.events).toEqual([
+      { event: "complaints", stubHash: name(1), state: "unrecorded", missing: 1, total: 2 },
+      {
+        event: "complaints-error",
+        stubHash: name(2),
+        error: "RpcError",
+        message: "eth_getLogs: status 503",
+      },
+      { event: "complaints-error", stubHash: name(2), error: "ViewError", message: "definition" },
+    ]);
+  });
+
+  test("keep setting up an election past t_D, and give it up only once t_K has passed", async () => {
+    const events: DutyEvent[] = [];
+    const { delivery, complaint } = deliveryDeadlines(0n, 0n);
+    let wall = delivery + 1n;
+    const duties = new ComplaintDuties({
+      seat: {
+        approvedStubs: async () => [approvedOf(1).stubHash],
+        approvedElection: async () => approvedOf(1),
+      },
+      build: async () => {
+        throw new RpcError("eth_chainId: TimeoutError");
+      },
+      clock: () => wall,
+      log: (e) => events.push(e),
+    });
+    await duties.step();
+    wall = complaint;
+    await duties.step();
+    wall = complaint + 1n;
+    await duties.step();
+    await duties.step();
+    expect(events).toEqual([
+      {
+        event: "complaints-error",
+        stubHash: name(1),
+        error: "RpcError",
+        message: "eth_chainId: TimeoutError",
+      },
+      { event: "complaints-abandoned", stubHash: name(1) },
     ]);
   });
 });

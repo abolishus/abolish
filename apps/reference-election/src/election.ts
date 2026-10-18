@@ -63,7 +63,7 @@ export const STUBS = Object.freeze({
   l1References:
     "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name, and the poll's receipt keys are read at the latest block, not the latest finalized one; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
   casting:
-    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission, trustee intake or receipts (P2-8, P2-3, P2-13)",
+    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission or trustee intake (P2-8, P2-3, P2-13); the poll's receipts are signed by the fixture as operator, not by the API's board service",
 });
 
 // Distinct, recognisable placeholder values: anyone can recompute them from

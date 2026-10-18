@@ -9,6 +9,9 @@
 //
 // Beside the honest election runs a poll of three questions under
 // definition version 5 (P2-14), which must verify as the honest one does.
+// Its ballots get receipts signed by the fixture as board operator, among
+// them one for a forked board and one for a ballot it never boards, which
+// the voter's later checks must find from L1 (P1-13b).
 // Besides these, the run holds controls the verifier must not
 // pass, each with the rows it must show, so the honest run's passes can't be
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
@@ -42,10 +45,11 @@ import {
   encodeDisplayText,
   encodeDisplayTextV2,
   identityKey,
+  isReceiptAlarm,
   type Panel,
   receiptKeysCastCheck,
 } from "@abolishus/crypto";
-import { bytesToHex } from "@noble/hashes/utils.js";
+import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { type Anvil, startAnvil } from "./anvil.ts";
 import {
   castingFor,
@@ -79,10 +83,11 @@ import {
   deployAnchor,
   evidence,
   l1RefAt,
-  latestWords,
+  loggedAnchors,
   loggedCheckpoints,
   mineAt,
   registerReceiptKey,
+  storageWords,
 } from "./l1.ts";
 import {
   ceremonyRegistration,
@@ -92,6 +97,15 @@ import {
   registerDefinition,
 } from "./l2.ts";
 import { nodeVerify, startNode } from "./node.ts";
+import {
+  checkAtCast,
+  judge,
+  type JudgeView,
+  operatorReceipt,
+  type Receipted,
+  receiptElection,
+  verdictIs,
+} from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import { STAGES } from "./stages.ts";
 import { runVerifier, type VerifierRun } from "./verify.ts";
@@ -291,8 +305,9 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   }
   // The poll of questions (P2-14): its receipt key registered with the anchor
   // before the poll opens, so 2.9 judges it from L1 (T-26, T-69), and listed
-  // in the stub; no seat signs receipts with it yet (P2-13, P1-13b).
-  const receiptKey = identityKey(crypto.getRandomValues(new Uint8Array(32)));
+  // in the stub. The fixture, as the board operator, signs its receipts.
+  const receiptSecret = crypto.getRandomValues(new Uint8Array(32));
+  const receiptKey = identityKey(receiptSecret);
   await registerReceiptKey(anvil, anchor, receiptKey);
   const questionsText = questionsDisplayText();
   const poll = runQuestionCeremony(timing, l2, trustees, questionsText, {
@@ -332,6 +347,8 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   if (honest === undefined || rejected === undefined) throw new Error("an election is missing");
   const board = (e: Election, payload: Uint8Array) =>
     e.entries.push(boardEntry(e.definition, BigInt(e.entries.length), cast, payload));
+  // The poll's receipts, each with the verdict its voter's later check must reach.
+  const receipts: Receipted[] = [];
   {
     const casting = castingFor(
       honest.definition.value,
@@ -404,7 +421,7 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
     const { value } = questions.definition;
     // The client's check before casting: every listed receipt key is
     // registered with the anchor before the poll opens (T-26, T-69).
-    const read = await latestWords(anvil, anchor.address, value.receipt_keys.map(receiptKeySlot));
+    const read = await storageWords(anvil, anchor.address, value.receipt_keys.map(receiptKeySlot));
     const keys = receiptKeysCastCheck(read.words, value.opens_at, read.timestamp);
     if (!keys.castable) throw new Error(`the poll's receipt key ${keys.key} judges nothing`);
     const pollCasting = () =>
@@ -429,15 +446,73 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
       throw new Error("an honest challenge of the poll failed its check");
     const [v0, v1, v2] = voters;
     if (v0 === undefined || v1 === undefined || v2 === undefined) throw new Error("too few voters");
+    // Each ballot gets the operator's receipt for the board as it stands
+    // once the ballot is appended, which the voter's client checks at cast.
+    const payloads: Uint8Array[] = [];
+    const receiptsOf = receiptElection(questions.definition);
     for (const [voter, votes, ref] of [
       [v0, [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0], refs[0]],
       [v1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], refs[0]],
       [v2, [0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0], refs[0]],
       [v1, [0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1], refs[1]],
-    ] as const)
-      board(questions, await castQuestions(casting, voter, votes, ref));
+    ] as const) {
+      const payload = await castQuestions(casting, voter, votes, ref);
+      payloads.push(payload);
+      board(questions, payload);
+      receipts.push({
+        name: `entry ${questions.entries.length - 1}`,
+        payload,
+        receipt: operatorReceipt(receiptSecret, receiptsOf, questions.entries, cast),
+        expected: "included",
+      });
+    }
+    // Two receipts the operator signs for boards it never anchors. A fork:
+    // voter 0's ballot shown at index 2, after voter 1's first, though the
+    // anchored board has it at 1; the ballot is on the board, so only the
+    // receipt's board is false. A drop: voter 3's ballot, never boarded,
+    // shown appended to the anchored board as index 5 (T-26).
+    const [p0, p1] = payloads;
+    const [transcript] = questions.entries;
+    if (p0 === undefined || p1 === undefined || transcript === undefined)
+      throw new Error("the poll's board is missing entries");
+    receipts.push({
+      name: "forked",
+      payload: p0,
+      receipt: operatorReceipt(
+        receiptSecret,
+        receiptsOf,
+        [
+          transcript,
+          boardEntry(questions.definition, 1n, cast, p1),
+          boardEntry(questions.definition, 2n, cast, p0),
+        ],
+        cast,
+      ),
+      expected: "forked-copy",
+    });
+    const v3 = voters[3];
+    if (v3 === undefined) throw new Error("too few voters");
+    const dropped = await castQuestions(casting, v3, [1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0], refs[1]);
+    receipts.push({
+      name: "dropped",
+      payload: dropped,
+      receipt: operatorReceipt(
+        receiptSecret,
+        receiptsOf,
+        [
+          ...questions.entries,
+          boardEntry(questions.definition, BigInt(questions.entries.length), cast, dropped),
+        ],
+        cast,
+      ),
+      expected: "forked-l1",
+    });
+    // The client can't tell any of them apart at cast: each passes.
+    for (const r of receipts)
+      if (!checkAtCast(receiptsOf, r.receipt, r.payload, { min: cast, max: seal }))
+        throw new Error(`the poll's ${r.name} receipt failed the client's check at cast`);
     log(
-      `stage 4 (questions): ${questions.entries.length - 1} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote; one challenged attempt checked`,
+      `stage 4 (questions): ${questions.entries.length - 1} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote; one challenged attempt checked; ${receipts.length} receipts signed, one for a forked board and one for a dropped ballot, each passing the client's check at cast`,
     );
   }
 
@@ -449,6 +524,57 @@ async function run(anvil: Anvil, l2Anvil: Anvil, failures: string[]): Promise<vo
   for (let i = 0n; i < 70n; i++) await mineAt(anvil, after + i * 12n);
 
   log(`stage 7: segments ${first} to ${seal} (the seal) anchored for each election`);
+
+  // Stage 4's later checks: each receipt of the poll judged as its voter's
+  // client would, from the anchors and the receipt key's record at the
+  // finalized L1 block and the operator's entry-hash lists, after every
+  // window has closed (docs/spec/receipts.md, Verdicts; T-26, T-24).
+  {
+    const { value } = questions.definition;
+    const { words, timestamp } = await storageWords(
+      anvil,
+      anchor.address,
+      value.receipt_keys.map(receiptKeySlot),
+      "finalized",
+    );
+    const view: JudgeView = {
+      words,
+      now: timestamp,
+      anchors: await loggedAnchors(anvil, anchor.address, value.election_id),
+      clock: { epoch, period: PERIOD, deadline: DEADLINE, lastSegment: seal },
+      firstSegment: first,
+      sources: [concatBytes(...segmentObjects(questions.entries).map((o) => o.hashes))],
+    };
+    const judged = receipts.map((r) => ({
+      r,
+      verdict: judge(receiptElection(questions.definition), r.receipt, r.payload, view),
+    }));
+    for (const { r, verdict } of judged)
+      if (
+        !verdictIs(r.expected, verdict) ||
+        isReceiptAlarm(verdict) !== (r.expected !== "included")
+      )
+        failures.push(
+          `receipts (questions): the ${r.name} receipt is ${verdict.verdict}${"by" in verdict ? ` by ${verdict.by}` : ""}, not ${r.expected}`,
+        );
+    writeFileSync(
+      join(OUT, "questions", "receipts.json"),
+      `${JSON.stringify(
+        judged.map(({ r, verdict }) => ({
+          name: r.name,
+          receipt: hex(r.receipt),
+          verdict: verdict.verdict,
+          ...("by" in verdict ? { by: verdict.by } : {}),
+          alarm: isReceiptAlarm(verdict),
+        })),
+        null,
+        2,
+      )}\n`,
+    );
+    log(
+      `stage 4 (questions, receipts): ${judged.filter(({ verdict }) => verdict.verdict === "included").length} included, ${judged.filter(({ verdict }) => isReceiptAlarm(verdict)).length} alarms, judged from L1 and the operator's entry-hash lists`,
+    );
+  }
 
   // Stage 8, the board: each election's segment objects and entry-hash lists
   // published as blocks to a community node, which serves them by CID from

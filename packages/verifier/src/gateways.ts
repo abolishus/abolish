@@ -90,8 +90,8 @@ const same = (a: Uint8Array, b: Uint8Array) =>
 // counted as it decompresses), so an answer costs a small multiple of
 // `limit` bytes of memory at most: the chunks held, one stream chunk past
 // them, and the joined copy (docs/spec/content-addressing.md, Reading by
-// CID; T-52).
-async function bodyWithin(res: Response, limit: number): Promise<Uint8Array | undefined> {
+// CID; T-52). Shared with the Arweave source (arweave.ts).
+export async function bodyWithin(res: Response, limit: number): Promise<Uint8Array | undefined> {
   const declared = res.headers.get("content-length");
   if (declared !== null && /^[0-9]+$/u.test(declared) && Number(declared) > limit) {
     await res.body?.cancel();

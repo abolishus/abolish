@@ -12,6 +12,7 @@
 
 import {
   type AnchorClock,
+  ballotHashV4,
   type BoardEntryVersion,
   checkDeliveryV2,
   DecodeError,
@@ -121,9 +122,11 @@ export function releaseChecks(inputs: ReleaseInputs): {
     }
     if (bytesToHex(e.election_id) !== bytesToHex(d.election_id)) continue;
     const type = ((e.payload[0] as number) << 8) | (e.payload[1] as number);
-    // Receipts reach the board by the board path only under ballot version
-    // 4: the board's events carry version-1 delivery records, which deliver
-    // nothing there ([[delivery]], Versions). A posting never lets a ballot
+    // Only board-path receipts are read: 7.1's pass means 5.9 ran with no
+    // contract-path delivery record in the anchored extent, since one leaves
+    // 5.9 unverifiable until 4.4 authenticates its time, and under ballot
+    // version 4 the board's events carry only version-1 records, which
+    // deliver nothing ([[delivery]], Versions). A posting never lets a ballot
     // enter (tally.md, Running set, condition 2).
     if (type === RECORD_TYPES.shareReceipt)
       receipts.push({ segment: e.segment, payload: e.payload });
@@ -215,13 +218,19 @@ export function releaseChecks(inputs: ReleaseInputs): {
 }
 
 /**
- * The least scheduled snapshot's `σ_r` by which each admitted ballot is
- * fully receipted: `S_r` holds, for every qualified seat, a share receipt
- * that passes the delivery check's receipt checks, each read by its entry's
- * segment ([[delivery]], Delivery check (version 2)). Running sets compare
- * it only with snapshots, and `S_r` only grows, so a ballot receipted at `r`
- * stays receipted after it. Only receipts are given to the check, so a
- * ballot it finds missing no seat holds a passing receipt from each (a
+ * The least scheduled snapshot's `σ_r` by which each admitted ballot, by
+ * `M`, is fully receipted: `S_r` holds, for every qualified seat, a share
+ * receipt that passes the delivery check's receipt checks, each read by its
+ * entry's segment ([[delivery]], Delivery check (version 2)). A receipt
+ * names the ballot hash, which doesn't bind the L1 reference, so ballots
+ * with different `M` can share one: the check runs over distinct ballot
+ * hashes, and each `M` takes its hash's segment, never a receipt counted for
+ * one `M` and not another (T-29). The receipts are given to the check in the
+ * runs between consecutive snapshots, each once, and a seat's receipt
+ * delivers whatever else the run holds, so a seat is receipted by `σ_r` if
+ * a run up to it found it not missing: no receipt is verified twice, however
+ * many snapshots there are or however long a seat withholds (T-52). Only
+ * receipts are given, so a seat a posting would deliver stays missing (a
  * posting never lets a ballot enter; T-15).
  */
 function receiptSegments(
@@ -230,29 +239,48 @@ function receiptSegments(
   receipts: readonly { readonly segment: number; readonly payload: Uint8Array }[],
   snapshots: readonly LiveSnapshot[],
 ): Map<string, number> {
-  const out = new Map<string, number>();
-  let waiting = [...ballots].map(([m, t]) => {
-    if (t.deliveryV4 === undefined)
+  const hashOf = new Map<string, string>();
+  const byHash = new Map<string, DeliveryBallotV4>();
+  for (const [m, t] of ballots) {
+    const b = t.deliveryV4;
+    if (b === undefined)
       throw new Error("releaseChecks: an admitted version-4 ballot without its delivery fields");
-    return [m, t.deliveryV4] as const;
-  });
-  for (const { segment } of snapshots) {
-    if (waiting.length === 0) break;
-    const held = receipts
-      .filter((r) => r.segment <= segment)
-      .map((r) => ({ path: "board" as const, segment: r.segment, payload: r.payload }));
-    const checked = checkDeliveryV2(
-      election,
-      waiting.map(([, b]) => b),
-      held,
+    const h = bytesToHex(
+      ballotHashV4(
+        { definitionHash: election.definitionHash, cell: b.cell, nullifier: b.nullifier },
+        b.vote,
+      ),
     );
-    const left: typeof waiting = [];
+    hashOf.set(m, h);
+    if (!byHash.has(h)) byHash.set(h, b);
+  }
+  const hashes = [...byHash.keys()];
+  const list = hashes.map((h) => byHash.get(h) as DeliveryBallotV4);
+  const seats = election.registered.default.map((k) => k.index);
+  const held = hashes.map(() => new Set<number>());
+  const at = new Map<string, number>();
+  let from = -1;
+  for (const { segment } of snapshots) {
+    if (at.size === hashes.length) break;
+    const run = receipts
+      .filter((r) => r.segment > from && r.segment <= segment)
+      .map((r) => ({ path: "board" as const, segment: r.segment, payload: r.payload }));
+    from = segment;
+    if (run.length === 0) continue;
+    const checked = checkDeliveryV2(election, list, run);
     for (const [i, b] of checked.ballots.entries()) {
-      const w = waiting[i] as (typeof waiting)[number];
-      if (b.missing.length === 0) out.set(w[0], segment);
-      else left.push(w);
+      const h = hashes[i] as string;
+      if (at.has(h)) continue;
+      const missing = new Set(b.missing.map((x) => x.seat));
+      const got = held[i] as Set<number>;
+      for (const seat of seats) if (!missing.has(seat)) got.add(seat);
+      if (got.size === seats.length) at.set(h, segment);
     }
-    waiting = left;
+  }
+  const out = new Map<string, number>();
+  for (const [m, h] of hashOf) {
+    const s = at.get(h);
+    if (s !== undefined) out.set(m, s);
   }
   return out;
 }

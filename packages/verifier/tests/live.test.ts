@@ -329,7 +329,8 @@ function election() {
     );
     return entries.length - 1;
   };
-  const ballot = (b: Cast, segment: number) => {
+  /** `b`'s copy; `message` stands in for M, one per ballot unless another L1 reference is given. */
+  const ballot = (b: Cast, segment: number, message = sha256(b.hash)) => {
     const entry = board(segment, PLACEHOLDER);
     copies.push({
       entry,
@@ -337,8 +338,7 @@ function election() {
       tier: 2,
       cell: b.cell,
       nullifier: b.nullifier,
-      // The test's own stand-in for M: one per ballot.
-      message: sha256(b.hash),
+      message,
       member: true,
       rejected: false,
       reference: REFERENCE,
@@ -529,6 +529,23 @@ describe("the releases once 7.1 passed", { timeout: 120_000 }, () => {
       discloses: false,
       blamed: 1,
     });
+  });
+
+  test("receipts name the ballot hash: a later ballot with the same vote and another L1 reference doesn't unreceipt the first", () => {
+    // The ballot hash doesn't bind the L1 reference, M does: the voter's
+    // second ballot (a new M) after snapshot 2 shares batch A's first
+    // ballot's hash and every receipt for it. The first entered R_1 alone,
+    // so release 1 is unchanged and its honest opening passes (T-29).
+    const e = honest();
+    e.board(50, e.opening(BATCH_A, 1, 1));
+    const first = BATCH_A[0] as Cast;
+    e.ballot(first, 60, sha256(Uint8Array.from([...first.hash, 1])));
+    const r = releaseChecks(e.inputs());
+    expect(Object.fromEntries(r.rows)).toEqual({
+      "7.5": { status: "pass" },
+      "7.6": { status: "pass" },
+    });
+    expect(r.report?.cells[2]?.releases[0]).toMatchObject({ snapshot: 1, size: 20, signers: [1] });
   });
 
   test("an unscheduled opening of a snapshot's running set discloses it", () => {

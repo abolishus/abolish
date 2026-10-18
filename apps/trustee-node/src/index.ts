@@ -1,5 +1,14 @@
 export {
+  type AvailabilityKind,
+  type AvailabilityOptions,
+  AvailabilitySeat,
+  type AvailabilityStatus,
+  type ContractPath,
+  type FinalizedBoardAnchors,
+} from "./availability.ts";
+export {
   type Approval,
+  type ApprovedElection,
   CeremonySeat,
   type NeverRegistered,
   type Rounds12,

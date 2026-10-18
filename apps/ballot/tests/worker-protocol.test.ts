@@ -342,6 +342,79 @@ describe("commitment requests", () => {
   });
 });
 
+describe("registration outcome requests", () => {
+  const outcome = () => ({
+    v: PROTOCOL_VERSION,
+    id: 16,
+    kind: "tier0-outcome",
+    secret: new Uint8Array(32).fill(2),
+    region: 0,
+    block: 1_000n,
+    groups: [
+      { group_id: 1n, region: 0 },
+      { group_id: 2n, region: 3 },
+    ],
+    records: [new Uint8Array([0, 8, 8])],
+    registry: new Uint8Array(20).fill(0xaa),
+    chainId: 84532n,
+    version: 8,
+    registrars: [new Uint8Array(20).fill(1)],
+    threshold: 1,
+  });
+
+  test("accepts a well-formed request as it is, for any secret, block and records: their meaning is the session's", () => {
+    fc.assert(
+      fc.property(
+        fc.nat(),
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
+        fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
+        fc.array(fc.uint8Array()),
+        fc.integer({ min: 1, max: 8 }),
+        (id, secret, block, records, version) => {
+          const r = { ...outcome(), id, secret, block, records, version };
+          expect(parseRequest(r)).toEqual(r);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["a fractional region", { region: 0.5 }],
+    ["a region as a string", { region: "0" }],
+    ["a negative block", { block: -1n }],
+    ["a block past u64", { block: 2n ** 64n }],
+    ["a block as a number", { block: 1000 }],
+    ["a group with an extra key", { groups: [{ group_id: 1n, region: 0, tier: 0 }] }],
+    ["a group id as a number", { groups: [{ group_id: 1, region: 0 }] }],
+    ["a group id past u64", { groups: [{ group_id: 2n ** 64n, region: 0 }] }],
+    // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
+    ["a group list with a hole", { groups: [, { group_id: 1n, region: 0 }] }],
+    ["a record as hex", { records: ["000808"] }],
+    ["a short registry", { registry: new Uint8Array(19) }],
+    ["a chain id as a number", { chainId: 84532 }],
+    ["event version 0", { version: 0 }],
+    ["event version 9", { version: 9 }],
+    ["a fractional event version", { version: 7.5 }],
+    ["a registrar as hex", { registrars: ["01".repeat(20)] }],
+    ["a fractional threshold", { threshold: 1.5 }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...outcome(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(outcome())) {
+      const r: Record<string, unknown> = outcome();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -351,6 +424,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 8, kind: "cast", result: {} })).toBe(8);
     expect(responseId({ v: PROTOCOL_VERSION, id: 9, kind: "find-cell", result: {} })).toBe(9);
     expect(responseId({ v: PROTOCOL_VERSION, id: 10, kind: "commitment", result: {} })).toBe(10);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 11, kind: "tier0-outcome", result: {} })).toBe(11);
   });
 
   test("ignores another version's response or kind", () => {

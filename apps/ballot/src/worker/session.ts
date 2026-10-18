@@ -12,15 +12,21 @@ import {
   BallotSealError,
   castSealV3,
   challengeSealV3,
+  type ContractEventRecord,
+  decodeContractEvent,
+  DecodeError,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   finishSealV3,
   identityCommitment,
+  isForbiddenCommitment,
   MembershipProverError,
   type QuestionBallotElection,
   sealBallotV3,
   type SealedBallotV3,
   sealingElectionV5,
+  tier0Registration,
+  TierMembershipError,
   voterCellV5,
 } from "@abolishus/crypto";
 
@@ -39,6 +45,8 @@ import {
   PROVER_TIMEOUT_MS,
   type SealRequest,
   type SealResult,
+  type Tier0OutcomeRequest,
+  type Tier0OutcomeResult,
 } from "./protocol.ts";
 
 const toHex = (bytes: Uint8Array) =>
@@ -106,6 +114,58 @@ export class BallotSession {
       return { ok: true, commitment: identityCommitment(secret) };
     } catch (e) {
       if (e instanceof MembershipProverError) return { ok: false, problem: "secret" };
+      throw e;
+    } finally {
+      secret.fill(0);
+    }
+  }
+
+  /**
+   * Where the identity commitment of `request.secret` stands among the
+   * published Tier 0 groups, from the group registry's whole log
+   * (`tier0Registration`; [[registration]], Outcome). Each record is decoded
+   * strictly under the pinned version first, so the replay reads only
+   * canonical contract-event records (T-31). Like `commitment`, it needs no
+   * poll and leaves the held one, the voter and the seals as they were.
+   */
+  tier0Outcome(request: Tier0OutcomeRequest): Tier0OutcomeResult {
+    const { secret } = request;
+    try {
+      let commitment: bigint;
+      try {
+        commitment = identityCommitment(secret);
+      } catch (e) {
+        if (e instanceof MembershipProverError) return { ok: false, problem: "secret" };
+        throw e;
+      }
+      // The commitment is all the replay needs (T-12).
+      secret.fill(0);
+      if (isForbiddenCommitment(commitment)) return { ok: false, problem: "secret" };
+      const records: ContractEventRecord[] = [];
+      for (const bytes of request.records) {
+        try {
+          records.push(decodeContractEvent(bytes, request.version));
+        } catch (e) {
+          if (e instanceof DecodeError) return { ok: false, problem: "record" };
+          throw e;
+        }
+      }
+      const outcome = tier0Registration(
+        records,
+        { block: request.block, groups: request.groups },
+        commitment,
+        request.region,
+        {
+          version: request.version,
+          chainId: request.chainId,
+          registry: request.registry,
+          registrars: request.registrars,
+          threshold: request.threshold,
+        },
+      );
+      return { ok: true, outcome };
+    } catch (e) {
+      if (e instanceof TierMembershipError) return { ok: false, problem: "registry", code: e.code };
       throw e;
     } finally {
       secret.fill(0);

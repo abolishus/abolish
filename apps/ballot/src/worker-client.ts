@@ -16,6 +16,8 @@ import {
   PROVER_TIMEOUT_MS,
   responseId,
   type SealResult,
+  type Tier0OutcomeRequest,
+  type Tier0OutcomeResult,
   type WorkerRequest,
   type WorkerResponse,
 } from "./worker/protocol.ts";
@@ -33,6 +35,9 @@ const FIND_CELL_TIMEOUT_MS = PROVE_TIMEOUT_MS;
 
 /** A cell search as the page makes it: everything but the envelope. */
 export type FindCellQuery = Omit<FindCellRequest, "v" | "id" | "kind">;
+
+/** A registration's outcome as the page asks for it: everything but the envelope. */
+export type Tier0OutcomeQuery = Omit<Tier0OutcomeRequest, "v" | "id" | "kind">;
 
 /** A cast as the page makes it: everything but the envelope. */
 export type CastBallotRequest = Omit<CastRequest, "v" | "id" | "kind">;
@@ -128,6 +133,22 @@ export class BallotWorker {
       FIND_CELL_TIMEOUT_MS,
     );
     if (response.kind !== "find-cell") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * Where the identity's commitment stands among the published Tier 0
+   * groups, from the group registry's whole log. The replay recovers a
+   * signer per registrar approval, as a cell search does, so it gets as
+   * long. The secret is copied, and the worker zeroes its copy.
+   */
+  async tier0Outcome(query: Tier0OutcomeQuery): Promise<Tier0OutcomeResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "tier0-outcome", ...query }),
+      [],
+      FIND_CELL_TIMEOUT_MS,
+    );
+    if (response.kind !== "tier0-outcome") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

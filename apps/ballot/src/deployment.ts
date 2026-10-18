@@ -7,7 +7,7 @@
 // could point at a registry of its own (T-34). The origins are the CSP's
 // `connect-src`, which the bundle check pins (T-43).
 
-import type { Panel } from "@abolishus/crypto";
+import type { ContractEventVersion, Panel } from "@abolishus/crypto";
 
 export interface Deployment {
   /** The API's origin: definitions and display text (`packages/api-contract`). */
@@ -37,6 +37,22 @@ export interface Deployment {
    */
   readonly registrars:
     | { readonly registrars: readonly Uint8Array[]; readonly threshold: number }
+    | undefined;
+  /**
+   * The group registry this build reads a Tier 0 registration's outcome
+   * from, or `undefined` while none is deployed: its address (`0x` and 40
+   * lowercase hex digits), the block it was deployed in, before which it
+   * logged nothing, and the contract-event version its logs are read under
+   * (the newest this release reads; [[registration]], Outcome). The whole
+   * registry is read from that block, never a filtered part of it, so the
+   * RPC learns nothing of which commitment the voter looks for (T-11, T-13).
+   */
+  readonly groupRegistry:
+    | {
+        readonly address: string;
+        readonly deployedAt: bigint;
+        readonly eventVersion: ContractEventVersion;
+      }
     | undefined;
   /**
    * The deployment's published Tier 0 groups, signed and self-paid, each
@@ -75,6 +91,7 @@ export const STAGING: Deployment = {
   // No group registry is deployed on staging yet (P3-2's registry deploys
   // with the others), so a staging build finds no voter's cell.
   registrars: undefined,
+  groupRegistry: undefined,
   // Nor any Tier 0 group, so a staging build registers no one.
   tier0Groups: [],
 };

@@ -24,6 +24,7 @@ type ReleaseVector = Vector & {
 type ReleaseFile = Omit<VectorFile, "vectors"> & {
   readonly tag: string;
   readonly maxReleaseFile: string;
+  readonly rules: readonly string[];
   readonly vectors: readonly ReleaseVector[];
 };
 
@@ -90,6 +91,22 @@ describe("release record (docs/spec/release.md)", () => {
       // A well-formed record names its sites; an ill-formed one its rule.
       if ("value" in v) expect("sites" in v !== "illFormed" in v, v.id).toBe(true);
     }
+  });
+
+  test("lists the spec's well-formedness rules, in its order, each with an ill-formed vector", () => {
+    // The codes of docs/spec/release.md's Well-formedness table, top to
+    // bottom: the order the first broken rule is found in. A rule the
+    // generator checks but the table lacks, or one out of place, fails here.
+    const page = readFileSync(new URL("../release.md", SPEC_VECTORS), "utf8");
+    const section = page.slice(
+      page.indexOf("\n## Well-formedness\n"),
+      page.indexOf("\n## Release hash\n"),
+    );
+    const codes = [...section.matchAll(/^\| `([a-z-]+)` +\|/gm)].map((m) => m[1]);
+    expect(codes).toEqual(file.rules);
+    expect(
+      new Set(file.vectors.flatMap((v) => (v.illFormed === undefined ? [] : [v.illFormed]))),
+    ).toEqual(new Set(file.rules));
   });
 
   const decoded = file.vectors.filter((v) => "value" in v).map((v) => [v.id, v] as const);

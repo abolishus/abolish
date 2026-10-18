@@ -423,6 +423,33 @@ def ascending(xs):
     return all(a < b for a, b in zip(xs, xs[1:]))
 
 
+# The well-formedness rules in docs/spec/release.md's order: the record's,
+# then each site's, then origin-shared. The file lists them, and a test
+# compares that list with the spec's table.
+SITE_RULES = [
+    "origin",
+    "origin-order",
+    "site-unreachable",
+    "loopback-site",
+    "challenge-origin",
+    "header-name",
+    "header-reserved",
+    "header-value",
+    "header-order",
+    "site-csp",
+    "path",
+    "path-reserved",
+    "path-order",
+    "path-conflict",
+    "site-index",
+    "empty-file",
+    "file-too-large",
+    "media-type",
+    "directory-cid",
+]
+RULES = ["release-chain", "site-order", "site-ballot", *SITE_RULES, "origin-shared"]
+
+
 def ill_formed(r):
     """The first well-formedness rule the record breaks, in the spec's order, or None."""
     if (r["sequence"] == 0) != (r["previous"] == bytes(32)):
@@ -456,6 +483,7 @@ def ill_formed(r):
             ("media-type", any(not media_ok(x["media_type"]) for x in s["files"])),
             ("directory-cid", s["directory"][:4] != bytes([0x01, 0x70, 0x12, 0x20])),
         ]
+        assert [code for code, _ in checks] == SITE_RULES
         for code, broken in checks:
             if broken:
                 return code, at
@@ -722,6 +750,7 @@ def main():
             v["illFormedAt"] = {k: str(x) for k, x in at.items()}
         out_vectors.append(v)
 
+    assert {v["illFormed"] for v in out_vectors if "illFormed" in v} == set(RULES)
     typical_enc = encode(strip(typical))
     for vid, description, enc, code in decode_cases(typical_enc, strip(first)):
         try:
@@ -744,6 +773,7 @@ def main():
         ),
         "tag": TAG.decode(),
         "maxReleaseFile": str(MAX_RELEASE_FILE),
+        "rules": RULES,
         "types": types(),
         "vectors": out_vectors,
     }

@@ -196,7 +196,7 @@ describe("the default panel beside an author panel", () => {
 type PollClass = (typeof POLL_CLASSES)[keyof typeof POLL_CLASSES];
 describe("panel-kind", () => {
   const id = Buffer.from(d.panel_id).toString("hex");
-  const pinnedAs = (kind: PinnedPanel["kind"]): PinnedPanel[] => [{ panelId: id, kind }];
+  const pinnedAs = (kind: PinnedPanel["kind"]): PinnedPanel[] => [{ panelId: id, kind, seats: [] }];
   const civic = [POLL_CLASSES.organisational, POLL_CLASSES.civicReferendum];
   const classed = (
     poll_class: PollClass,
@@ -243,7 +243,7 @@ describe("panel-kind", () => {
   });
 
   test("leaves a panel the release doesn't pin undecided, never failed", () => {
-    const other: PinnedPanel[] = [{ panelId: "00".repeat(32), kind: "transitional" }];
+    const other: PinnedPanel[] = [{ panelId: "00".repeat(32), kind: "transitional", seats: [] }];
     for (const pins of [[], other, PINNED_PANELS])
       for (const poll_class of civic) {
         const r = classed(poll_class, undefined, [...pins]);

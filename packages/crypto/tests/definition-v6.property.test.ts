@@ -352,9 +352,12 @@ describe("author panels", () => {
 // docs/spec/verifier.md 2.3 for definition version 6: display-text version
 // 2, ballot version 4 and spoiled-ballot opening version 3, which opens its
 // cores; a sealed poll without an author panel pins tally-opening version 1
-// and board-entry version 5; a live poll and an author panel fail until the
-// verifier reads them (P2-15 part 3, T-17), and nothing else may pin their
-// tally-opening versions (2, 3) or board-entry versions (6, 7).
+// and board-entry version 5; a live poll pins tally-opening version 2 and
+// board-entry version 6 and runs only under the live restriction (at least
+// `k` default seats the caller's release pins as ours, T-16, T-45); an author
+// panel fails until its transcript's channel is closed (T-17); and nothing
+// else may pin their tally-opening versions (2, 3) or board-entry versions
+// (6, 7).
 describe("2.3's profile combination under version 6", () => {
   const minimal = decodeElectionDefinitionV6(
     hex(vector("election-definition-v6.json", "definition-v6-minimal").encoding),
@@ -401,19 +404,113 @@ describe("2.3's profile combination under version 6", () => {
       expect(profileCombinationRule(v6({}, { poll_class }))).toBeUndefined();
   });
 
-  test("a live poll and an author panel fail whatever they pin", () => {
-    const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
-    expect(electionDefinitionV6Rule(v6({}, live))).toBeUndefined();
+  const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+  const livePins = { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 };
+
+  test("an author panel fails whatever it pins, live or sealed, and however many seats are ours", () => {
     expect(electionDefinitionV6Rule(v6({}, authorPanel))).toBeUndefined();
-    for (const fields of [live, authorPanel, { ...live, ...authorPanel }])
+    for (const fields of [authorPanel, { ...live, ...authorPanel }])
       for (const pins of [
         {},
-        { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 },
+        livePins,
         { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 },
         // Before a board-entry version this package reads or not.
         { [RECORD_TYPES.contractEvent]: 255 },
       ])
-        expect(profileCombinationRule(v6(pins, fields))).toBe("profile-combination");
+        for (const ours of [0, minimal.threshold, 255])
+          expect(profileCombinationRule(v6(pins, fields), ours)).toBe("profile-combination");
+  });
+
+  test("a live poll fits with its own pins under at least k seats pinned as ours", () => {
+    expect(electionDefinitionV6Rule(v6(livePins, live))).toBeUndefined();
+    for (const ours of [minimal.threshold, minimal.panel_size, 255])
+      expect(profileCombinationRule(v6(livePins, live), ours)).toBeUndefined();
+    // Every poll class: whether a live poll may be on the civic record is
+    // 2.1's and 2.5's, not this rule's.
+    for (const poll_class of Object.values(POLL_CLASSES))
+      expect(
+        profileCombinationRule(v6(livePins, { ...live, poll_class }), minimal.threshold),
+      ).toBeUndefined();
+  });
+
+  test("a live poll fails under fewer than k seats pinned as ours, and by default", () => {
+    expect(profileCombinationRule(v6(livePins, live))).toBe("profile-combination");
+    for (let ours = 0; ours < minimal.threshold; ours++)
+      expect(profileCombinationRule(v6(livePins, live), ours)).toBe("profile-combination");
+    // A count that isn't a safe integer never passes, whatever an untyped caller gives.
+    for (const ours of [Number.NaN, -1, minimal.threshold + 0.5, Infinity])
+      expect(profileCombinationRule(v6(livePins, live), ours), String(ours)).toBe(
+        "profile-combination",
+      );
+    // Before a version a later release may read: the restriction isn't one.
+    expect(
+      profileCombinationRule(v6({ ...livePins, [RECORD_TYPES.contractEvent]: 255 }, live), 0),
+    ).toBe("profile-combination");
+  });
+
+  test("the live restriction is exactly k seats pinned as ours", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 255 }),
+        fc.integer({ min: 0, max: 255 }),
+        (threshold, ours) => {
+          const d = v6(livePins, { ...live, threshold, panel_size: Math.max(threshold, 1) });
+          expect(profileCombinationRule(d, ours)).toBe(
+            ours >= threshold ? undefined : "profile-combination",
+          );
+        },
+      ),
+      opts,
+    );
+  });
+
+  test("a live poll pins tally-opening version 2 and board-entry version 6, and nothing else", () => {
+    const ours = minimal.threshold;
+    for (const pins of [
+      // A sealed poll's: no running opening, or no board for one.
+      {},
+      { [RECORD_TYPES.tallyOpening]: 2 },
+      { [RECORD_TYPES.boardEntry]: 6 },
+      // An author panel's.
+      { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 6 },
+      { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 7 },
+      // No close statement, no delivery records or no destruction.
+      ...[1, 3, 4].map((board) => ({ ...livePins, [RECORD_TYPES.boardEntry]: board })),
+      // Contract-event versions 1 to 7 miss board or registry events.
+      ...[1, 2, 3, 4, 5, 6, 7].map((events) => ({
+        ...livePins,
+        [RECORD_TYPES.contractEvent]: events,
+      })),
+      { ...livePins, [RECORD_TYPES.ballot]: 3 },
+      { ...livePins, [RECORD_TYPES.spoiledBallotOpening]: 2 },
+      { ...livePins, [RECORD_TYPES.displayText]: 1 },
+    ])
+      expect(profileCombinationRule(v6(pins, live), ours), JSON.stringify(pins)).toBe(
+        "profile-combination",
+      );
+    // Versions a later release may read stay unsupported, as for a sealed poll (T-36).
+    for (const pins of [
+      { [RECORD_TYPES.ballot]: 255 },
+      { [RECORD_TYPES.spoiledBallotOpening]: 255 },
+      { [RECORD_TYPES.contractEvent]: 255 },
+      { [RECORD_TYPES.boardEntry]: 8 },
+    ])
+      expect(
+        profileCombinationRule(v6({ ...livePins, ...pins }, live), ours),
+        JSON.stringify(pins),
+      ).toBe("unsupported-version");
+  });
+
+  test("a sealed poll never pins a live poll's versions, however many seats are ours", () => {
+    for (const pins of [
+      livePins,
+      { [RECORD_TYPES.tallyOpening]: 2 },
+      { [RECORD_TYPES.boardEntry]: 6 },
+    ])
+      for (const ours of [0, minimal.threshold, 255])
+        expect(profileCombinationRule(v6(pins), ours), JSON.stringify(pins)).toBe(
+          "profile-combination",
+        );
   });
 
   test("a board-entry version this package doesn't read is unsupported first", () => {
@@ -484,12 +581,12 @@ describe("2.3's profile combination under version 6", () => {
       "profile-combination",
     );
     // A live version-6 value pinned as version 5 is never judged by version
-    // 5's rules, which would skip its results mode.
-    const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+    // 5's rules, which would skip its results mode, however many seats are ours.
     for (const definition of [1, 3, 4, 5])
       expect(
         profileCombinationRule(
           v6({ [RECORD_TYPES.electionDefinition]: definition, [RECORD_TYPES.ballot]: 3 }, live),
+          255,
         ),
       ).toBe("profile-combination");
     expect(

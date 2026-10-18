@@ -28,6 +28,7 @@ import {
   BUNDLE_FORMAT_L1,
   type CheckResult,
   EXIT_CODES,
+  type PinnedPanel,
   parseBundle,
   type Report,
   runCli,
@@ -107,14 +108,14 @@ const l1Of = (v: L1Vector) => ({
   checkpoints: v.checkpoints,
 });
 
-function format3(definition: string, v: L1Vector): Report {
+function format3(definition: string, v: L1Vector, pins?: readonly PinnedPanel[]): Report {
   const json = JSON.stringify({
     format: BUNDLE_FORMAT_DEFINITION,
     definition,
     clock: l1File.clock,
     l1: l1Of(v),
   });
-  return verifyBundle(parseBundle(json, copyOf(v)));
+  return verifyBundle(parseBundle(json, copyOf(v)), pins);
 }
 
 function format2(v: L1Vector): Report {
@@ -886,6 +887,83 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r.verdictAgainstInputs).toBe("failed");
       expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  // The live restriction (docs/spec/verifier.md, 2.3; T-16, T-45): a live
+  // poll passes 2.3's combination only under a default panel of which the
+  // release pins at least `k` seats as ours.
+  const livePins = { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 };
+  const pinnedWith = (ours: number, panelId = toHex(minimal.panel_id)): PinnedPanel[] => [
+    {
+      panelId,
+      kind: "transitional",
+      seats: Array.from({ length: minimal.panel_size }, (_, i) => ({
+        holder: `seat ${i + 1}`,
+        ours: i < ours,
+      })),
+    },
+  ];
+  const NOT_IMPLEMENTED_23 = {
+    id: "2.3",
+    kind: "election",
+    status: "unverifiable",
+    code: "not-implemented",
+  };
+
+  test("a live poll passes 2.3's combination under k seats the release pins as ours", () => {
+    for (const ours of [minimal.threshold, minimal.panel_size]) {
+      const r = format3(v6For(closed.anchor, livePins, live), closed, pinnedWith(ours));
+      // 2.3's other checks aren't implemented, so it never passes here.
+      expect(row(r, "2.3"), String(ours)).toEqual(NOT_IMPLEMENTED_23);
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+    // The panel's kind doesn't matter: a handover step's seats can still be ours.
+    const [pin] = pinnedWith(minimal.threshold) as [PinnedPanel];
+    const r = format3(v6For(closed.anchor, livePins, live), closed, [
+      { ...pin, kind: "independent" },
+    ]);
+    expect(row(r, "2.3")).toEqual(NOT_IMPLEMENTED_23);
+  });
+
+  test("a live poll fails 2.3 under fewer than k seats pinned as ours, or a panel the release doesn't pin", () => {
+    for (const pins of [
+      ...Array.from({ length: minimal.threshold }, (_, ours) => pinnedWith(ours)),
+      pinnedWith(minimal.panel_size, "ff".repeat(32)),
+      // A pin listing more seats than the panel has counts none of them.
+      [
+        {
+          ...(pinnedWith(minimal.panel_size)[0] as PinnedPanel),
+          seats: Array.from({ length: minimal.panel_size + 1 }, (_, i) => ({
+            holder: `seat ${i + 1}`,
+            ours: true,
+          })),
+        },
+      ],
+      [],
+      undefined,
+    ]) {
+      const r = format3(v6For(closed.anchor, livePins, live), closed, pins);
+      expect(row(r, "2.3"), JSON.stringify(pins)).toEqual(COMBINATION_FAILS);
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("an author panel and a live poll's wrong pins fail 2.3 whatever seats are ours", () => {
+    for (const [fields, versions] of [
+      [live, {}],
+      [live, { [RECORD_TYPES.tallyOpening]: 2 }],
+      [live, { [RECORD_TYPES.boardEntry]: 6 }],
+      [{}, livePins],
+      [{ ...live, ...authorPanel }, livePins],
+      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+    ] as const) {
+      const r = format3(
+        v6For(closed.anchor, versions, fields),
+        closed,
+        pinnedWith(minimal.panel_size),
+      );
+      expect(row(r, "2.3"), JSON.stringify(versions)).toEqual(COMBINATION_FAILS);
     }
   });
 

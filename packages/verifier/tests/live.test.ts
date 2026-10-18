@@ -52,7 +52,9 @@ import {
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
   decodeHeader,
+  electionAdmission,
   parseBundle,
+  type PinnedPanel,
   type Report,
   splitEntries,
   verifyBundle,
@@ -687,5 +689,60 @@ describe("7.5's and 7.6's gates in verifyBundle (Releases, step 1)", { timeout: 
     const r = bundle(caseOf("admitted"), "00");
     for (const id of ["7.5", "7.6"])
       expect(row(r, id)).toEqual({ status: "unverifiable", code: "not-reached" });
+  });
+});
+
+// Admission runs 2.3's live restriction with the same pins `verifyBundle`
+// reads, so an operator boards no live poll's ballot that 2.3 would fail
+// (docs/spec/verifier.md, 2.3; T-16, T-45).
+describe("admission under the live restriction", () => {
+  const livePinned = encodeElectionDefinitionV6({
+    ...d,
+    profile: {
+      ...d.profile,
+      pins: d.profile.pins.map((p) =>
+        p.record_type === RECORD_TYPES.tallyOpening
+          ? { ...p, version: 2 }
+          : p.record_type === RECORD_TYPES.boardEntry
+            ? { ...p, version: 6 }
+            : p,
+      ),
+    },
+  });
+  const c = caseOf("admitted");
+  const parsed = parseBundle(
+    JSON.stringify({
+      format: BUNDLE_FORMAT_CEREMONY,
+      definition: c.definition,
+      clock: file.clock,
+      l1: L1,
+      panel: file.panels[c.panel],
+    }),
+    hex(c.board),
+  );
+  if (parsed.format !== BUNDLE_FORMAT_CEREMONY) throw new Error("fixture: not format 4");
+  const { panel } = parsed;
+  const pinnedWith = (ours: number): PinnedPanel[] => [
+    {
+      panelId: toHex(d.panel_id),
+      kind: "transitional",
+      seats: Array.from({ length: d.panel_size }, (_, i) => ({
+        holder: `seat ${i + 1}`,
+        ours: i < ours,
+      })),
+    },
+  ];
+
+  test("refuses a live poll under fewer than k seats pinned as ours, and by default", () => {
+    for (const pins of [undefined, [], ...[0, d.threshold - 1].map(pinnedWith)])
+      expect(electionAdmission(livePinned, panel, [], pins), JSON.stringify(pins)).toEqual({
+        ok: false,
+        code: "profile-combination",
+      });
+  });
+
+  test("passes the restriction under k seats pinned as ours, and goes on to the ceremony", () => {
+    const r = electionAdmission(livePinned, panel, [], pinnedWith(d.threshold));
+    expect(r).toEqual({ ok: false, code: "ceremony-transcript-missing" });
   });
 });

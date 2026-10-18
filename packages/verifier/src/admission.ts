@@ -23,9 +23,11 @@ import {
   RECORD_TYPES,
   type Panel,
 } from "@abolishus/crypto";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
 import { authorRunOf, decodeDefinition, isReadable, readDefinition } from "./definition.ts";
+import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 
 /** Why no ballot of an election can be admitted: the first check that stops them all. */
 export type ElectionAdmissionCode =
@@ -91,11 +93,14 @@ export interface ElectionAdmission {
  * the pinned board-entry version, whose payload hashes to the definition's
  * `ceremony_transcript_hash` counts). Every input is what the verifier
  * would read, never a ballot's or a submitter's choice (T-37, T-04).
+ * `pins` are the panels the release pins, as `verifyBundle` reads them, so
+ * admission and 2.3 judge a live poll's restriction alike.
  */
 export function electionAdmission(
   definitionBytes: Uint8Array,
   panel: Panel,
   entries: readonly Uint8Array[],
+  pins: readonly PinnedPanel[] = PINNED_PANELS,
 ): ElectionAdmission | { readonly ok: false; readonly code: ElectionAdmissionCode } {
   const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
   let record;
@@ -115,7 +120,12 @@ export function electionAdmission(
   const d = record.value;
   const boardEntryVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
   if (!isReadable(boardEntryVersion)) return refuse("unsupported-version");
-  const combination = profileCombinationRule(d);
+  // As 2.3 reads it, with the release's pins: a live poll's ballots are
+  // admitted only under the live restriction (T-16, T-45).
+  const combination = profileCombinationRule(
+    d,
+    pinnedOurs(bytesToHex(d.panel_id), d.panel_size, pins),
+  );
   if (combination !== undefined) return refuse(combination);
   const { rows, registered, authorRegistered } = ceremonyChecks(
     d,
@@ -124,6 +134,7 @@ export function electionAdmission(
     authorRunOf(record),
     entries,
     boardEntryVersion,
+    pins,
   );
   if (registered === undefined) {
     // The first failing row decides: 2.5 (another panel, a transitional one

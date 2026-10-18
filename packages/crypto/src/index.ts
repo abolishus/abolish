@@ -804,6 +804,21 @@ export {
   unblind,
 } from "./keyed-nullifier.ts";
 export {
+  type AnchorSetPin,
+  type ChainProof,
+  type ChainProofRole,
+  checkIdentityChain,
+  cscaFingerprint,
+  decodeIdentityChain,
+  encodeIdentityChain,
+  IDENTITY_CHAIN,
+  type IdentityChainCode,
+  type IdentityChainPins,
+  identityChainProofs,
+  type IdentityChainRecord,
+  type IdentityChainResult,
+} from "./identity-chain.ts";
+export {
   checkNullifierOutput,
   checkNullifierQuery,
   decodeNullifierOutput,

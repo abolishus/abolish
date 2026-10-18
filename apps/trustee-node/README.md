@@ -2,7 +2,7 @@
 
 The node each trustee runs on infrastructure it controls ([[0006-trustees]], Consequences; `docs/status/P2-13.md`). Internal and source-only; AGPL-3.0-only. It runs only what `docs/spec/` defines, calling `@abolishus/crypto` for every message and check and never reimplementing one.
 
-So far it holds the seat's part in the key ceremony (`docs/spec/ceremony.md`) and the transport that carries it to and from the coordinator. Intake, the tally and destruction come in later parts. Operating a node: [[trustee-node]] (`docs/runbooks/trustee-node.md`).
+So far it holds the seat's part in the key ceremony (`docs/spec/ceremony.md`), the transport that carries it to and from the coordinator, and the seat's availability attestation of the ballot extent (`docs/spec/availability.md`). Intake, the counted extent, the tally and destruction come in later parts. Operating a node: [[trustee-node]] (`docs/runbooks/trustee-node.md`).
 
 ## Ceremony duties
 
@@ -34,6 +34,18 @@ Bodies use [[notation]]'s encoding (`bytes` is `bytes<2^20>`), as `application/o
 
 A lost poll, post or response costs nothing: the next poll asks again and the seat answers with the message it recorded. The node settles each request once (answered, or refused for a reason a later poll can't change) and asks the seat again only for `stub-electorate`, which can change as L2 finalizes, and `no-run`, which can change once it answers an earlier round listed after it. `HttpCoordinator` takes HTTPS only (HTTP only to loopback), follows no redirect, times requests out and stops reading a body past its bound.
 
+## Availability duty
+
+`AvailabilitySeat` is a default-panel seat's duty at the ballot extent for one election it approved ([[availability]], What a seat does; [[0029-board-data-availability]]; T-24, T-25, T-53, T-54). `CeremonySeat.approvedElection(stubHash)` gives it the election and the per-election signing secret of the approved run, from an `approved-runs/` record written before the approval. Each `step()`:
+
+1. Resends a stored attestation unless the board contract has recorded it (`recorded`); a stored record is resent past `c_I` too, since one forced through L1 by `t_A` counts, but never past `t_A`, when it can't (`unrecorded`, an alarm).
+2. Past `c_I` with no attestation it signs nothing new, and resends a stored complaint (`past-cutoff`).
+3. Reads the election's anchors from finalized L1 (`FinalizedBoardAnchors`) and waits until `s_A`'s anchoring deadline has passed there (`waiting`), so `C_A`, the counted checkpoint with the largest segment at or before `s_A = period(closes_at) + 1`, is fixed. A failure of the board checks' steps 1 and 2 is `board-failed`, reported before anything else; no counted checkpoint at or before `s_A` is `no-checkpoint`.
+4. Reads the board through `C_A` by the anchored CIDs from any sources (`readBoardCopy` over the anchors at or before `C_A`'s segment) and runs `verifyBoard` over them. A copy that passes, or fails only `unanchored` or `unsealed` (which judge segments past the extent), is held: the seat signs an attestation naming `C_A`'s `checkpoint_hash` with no roots, stores it, then sends it.
+5. A copy that stops, or fails `checkpoint-missing` or `copy-mismatch`, isn't held from these sources: before `c_I − sendMargin` it is `fetching`; from then it signs a complaint naming that run's `object_cid`, stores and sends it, and keeps trying to attest by `c_I`. Any other board failure is the operator's or the anchoring authority's (`board-failed`): no record, and 4.2 fails the election.
+
+Records live under `availability/<definition hash>/ballot/` and are written once, so the seat signs at most one attestation and one complaint of the point. A recorded record that differs from the stored one is `foreign-record`, an alarm: the seat's per-election key signed bytes this node never stored. The deployment supplies the L1 reader, the block sources and the contract path (`ContractPath`: `send`, forced through L1 when the sequencer refuses, and `recorded`, read from the seat's own L2 node as finalized L1 derives it).
+
 ## Configuration and commands
 
 `vp run --filter @abolishus/trustee-node start -- <command>`:
@@ -48,6 +60,9 @@ A lost poll, post or response costs nothing: the next poll asks again and the se
 - **Identity key from a file only.** The key sits unencrypted in an owner-only file; a hardware token needs `@abolishus/crypto`'s ceremony functions to take a signer instead of a secret key.
 - **The coordinator's side is local only.** `LocalCoordinator` relays one ceremony for `local-ceremony` and the tests; the creator's coordinator, and starting a new run after a failed one, come with the services that run elections. The node doesn't tell the coordinator why it refused a request; the reason is in its own log.
 - **The transport isn't in `docs/spec/`.** The envelopes above are fixed only by this README and the code; a second node implementation (rule 6) needs them specified. Nothing in them is permanent, so changing them later costs a coordinator and node release, not a protocol version.
+- **The availability duty runs in no deployment yet.** Nothing in `run` calls `AvailabilitySeat`: the finalized L1 reader, the block sources, the board contract's call (an L2 account to send from, forced inclusion through L1) and the read of recorded events are the deployment's, P4-3 part 2c-4b. Nor does the node serve what it attested, pin it on IPFS, or follow the board while the poll runs (it reads the whole extent once `C_A` is fixed).
+- **Ballot extent only.** The counted extent's point needs `t_S`, which needs the contract-event windows (P1-18), and its roots the leaf objects the node doesn't fetch yet ([[P1-12f]] part 3c). The summed-share rule (no share before `t_A' + R` and a quorum of attestations) waits on the tally duties.
+- **Stricter than the spec on a broken board.** The spec has a seat attest a copy that passes the board checks' steps 1 to 3 and `checkpoint-cid`; `verifyBoard` checks the entries (step 4) and boundaries before the CIDs, so a board failing those gets no attestation. 4.2 fails such an election anyway.
 - **Definition version 1 only.** Stubs of versions 3 and later are refused (`stub-version`) until the node reads their electorates and, for version 6, the author panel's ceremony.
 - **The store must never be rolled back or shared.** Every duty rests on records written once. Restoring the store from a backup or snapshot, or running one seat from two hosts with their own stores, lets a coordinator get a second round-4 message, a rejoined run or a second approval. The node can't detect either; the deployment must prevent both ([[trustee-node]] says how).
 - **Secrets at rest.** `FileStore` keeps the run's KEM secret, signing key and challenge secrets in files readable only by their owner, unencrypted; nothing destroys them yet ([[tally]], Destruction, is a later part). Disk encryption and the destruction duty are the deployment's until then.
@@ -57,4 +72,4 @@ A lost poll, post or response costs nothing: the next poll asks again and the se
 
 ## Testing
 
-`vp run --filter @abolishus/trustee-node test`: whole ceremonies between nodes through a coordinator that withholds messages, through `TrusteeNode` with lost polls, posts and responses (fast-check: the ceremony still registers every seat and no seat is ever refused), over HTTP on loopback, restarts between rounds, replays, equivocation, rule 7 at its boundary, one approval per stub, every stub refusal, the configuration and identity key file checks, the HTTP client's bounds, and the store's write-once rule (fast-check, honouring `FC_NUM_RUNS`; whole-ceremony properties run a tenth of them).
+`vp run --filter @abolishus/trustee-node test`: whole ceremonies between nodes through a coordinator that withholds messages, through `TrusteeNode` with lost polls, posts and responses (fast-check: the ceremony still registers every seat and no seat is ever refused), over HTTP on loopback, restarts between rounds, replays, equivocation, rule 7 at its boundary, one approval per stub, every stub refusal, the configuration and identity key file checks, the HTTP client's bounds, the store's write-once rule, and the availability duty (waiting for `C_A`, attesting through it with later runs withheld, complaining by the cutoff about a withheld or corrupted run and then attesting, resending the stored bytes, nothing signed past the cutoff or over a board that fails from L1, and a fast-check property that over any withholding, send failures and timing the seat signs at most one record of each kind, by the cutoff, and resends it byte for byte until recorded) (fast-check, honouring `FC_NUM_RUNS`; whole-ceremony properties run a tenth of them).

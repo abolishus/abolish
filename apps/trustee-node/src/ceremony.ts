@@ -112,6 +112,19 @@ export type SeatRefusal =
   /** The node approved another transcript for this stub. */
   | "approved-other";
 
+/** An election this seat approved, as its later duties read it. */
+export interface ApprovedElection {
+  readonly index: number;
+  readonly stubHash: Uint8Array;
+  /** The definition the approval registers: the stub with the approved transcript. */
+  readonly definitionHash: Uint8Array;
+  readonly electionId: Uint8Array;
+  readonly closesAt: bigint;
+  readonly l1InclusionBound: bigint;
+  /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
+  readonly signingSecret: Uint8Array;
+}
+
 export type SeatResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly code: SeatRefusal };
@@ -148,6 +161,9 @@ const APPROVED = struct([
   ["key_set_hash", HASH],
   ["signature", p256Sig],
 ] as const);
+// The run whose keys an approved stub registers, written before the approval,
+// so the seat's later duties find its per-election keys.
+const APPROVED_RUN = struct([["run_id", HASH]] as const);
 // What stub check 4 reads of an election the seat serves, and what shows
 // it can no longer be registered: its definition hash and `opens_at`.
 const SERVED = struct([
@@ -397,6 +413,12 @@ export class CeremonySeat {
     // place: this seat keeps to the transcript it recorded first.
     if (!equal(decode(SERVED, recorded.value).definition_hash, definitionHash))
       return refuse("approved-other");
+    const approvedRun = await config.store.putOnce(
+      `approved-runs/${hex(checked.stubHash)}`,
+      encode(APPROVED_RUN, { run_id: t.run_id }),
+    );
+    if (!equal(decode(APPROVED_RUN, approvedRun.value).run_id, t.run_id))
+      return refuse("approved-other");
     const signature = signCeremonyRegistration(config.identitySecret, config.panel, registration);
     const stored = await config.store.putOnce(
       approvalKey,
@@ -411,6 +433,34 @@ export class CeremonySeat {
     // A repeat request gets the signature first recorded (ECDSA signatures
     // differ per signing; either verifies).
     return { ok: true, value: { registration, signature: approved.signature } };
+  }
+
+  /**
+   * The election an approved stub registers, with the seat's per-election
+   * signing secret from the approved run, for the duties after the ceremony
+   * (docs/spec/availability.md, What a seat does); undefined unless this seat
+   * approved the stub.
+   */
+  async approvedElection(stubHash: Uint8Array): Promise<ApprovedElection | undefined> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
+    const name = hex(stubHash);
+    if ((await this.#durable(`approvals/${name}`)) === undefined) return undefined;
+    const runRecord = await this.#durable(`approved-runs/${name}`);
+    const served = await this.#durable(`served/${name}`);
+    if (runRecord === undefined || served === undefined)
+      throw new Error(`trustee node: approval of ${name} without its run or served record`);
+    const run = await this.#run(stubHash, decode(APPROVED_RUN, runRecord).run_id);
+    if (run === undefined) throw new Error(`trustee node: the approved run of ${name} is gone`);
+    const r = decode(SERVED, served);
+    return {
+      index: this.#config.index,
+      stubHash: Uint8Array.from(stubHash),
+      definitionHash: r.definition_hash,
+      electionId: Uint8Array.from(run.params.electionId),
+      closesAt: r.closes_at,
+      l1InclusionBound: BigInt(r.l1_inclusion_bound),
+      signingSecret: Uint8Array.from(run.seat.signingSecret),
+    };
   }
 
   /** Whether the seat holds an approval for the stub these bytes decode to. */

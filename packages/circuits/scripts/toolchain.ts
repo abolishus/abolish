@@ -5,11 +5,13 @@
 // sha256 (T-55), so this looks bb up on PATH past every node_modules/.bin.
 
 import { accessSync, constants } from "node:fs";
-import { delimiter, join, sep } from "node:path";
+import { delimiter, isAbsolute, join, sep } from "node:path";
 
 function onPath(name: string): string {
   for (const dir of (process.env["PATH"] ?? "").split(delimiter)) {
-    if (dir === "" || dir.split(sep).includes("node_modules")) continue;
+    // A relative entry would hand execFileSync a bare name, which searches
+    // PATH again and can find the shim.
+    if (!isAbsolute(dir) || dir.split(sep).includes("node_modules")) continue;
     const file = join(dir, name);
     try {
       accessSync(file, constants.X_OK);

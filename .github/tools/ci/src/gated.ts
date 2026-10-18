@@ -130,17 +130,17 @@ const SCRIPT_NAME = /^(?:build|check|test|test:[a-z0-9-]+)$/;
 
 // packages/crypto runs in the ballot client, so it gets no built-ins and no
 // workspace imports. The verifier is a CLI too, and may use crypto and
-// contracts, which keep the strictest rule, so its dependencies can't leave
-// the gate. circuits checks and proves its own circuits' UltraHonk proofs
-// (docs/spec/nullifier-query.md, Keys and proofs) under the keys and
-// reference string it commits, so it may depend on the pinned bb.js and
-// noir_js (the toolchain check holds them to nargo's and bb's versions) and
-// on crypto for the records' codecs. Its own code gets no built-ins, so it
-// can run in a browser worker; bb.js's Node build still uses them (a native
-// backend it spawns, a reference string it downloads) where this check can't
-// see, so circuits' code must name the WebAssembly backend and the vendored
-// reference string, and its tests hold it to that. The verifier may not
-// depend on circuits: that would bring bb.js, noir_js and their unwalked
+// contracts, which keep the strictest rule, so its dependencies can't leave the
+// gate. circuits checks and proves its own circuits' UltraHonk proofs
+// (docs/spec/nullifier-query.md, Keys and proofs) under the keys and reference
+// string it commits, so it may depend on the pinned bb.js and noir_js (the
+// toolchain check holds them to nargo's and bb's versions) and on crypto for
+// the records' codecs. Its own code gets no built-ins, so it can run in a
+// browser worker; bb.js's Node build still uses them (a native backend it
+// spawns, a reference string it downloads) where this check can't see, so the
+// proof checks and prover P3-4 writes must name the WebAssembly backend and the
+// vendored reference string, with tests that hold them to it. The verifier may
+// not depend on circuits: that would bring bb.js, noir_js and their unwalked
 // closures into its trust base, beyond the owner's admission of bb.js alone
 // (ADR 0010), and needs its own rule when the verifier first checks a Noir
 // proof. The membership prover is snarkjs behind a thin adapter, run only in

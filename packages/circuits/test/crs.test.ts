@@ -59,9 +59,11 @@ describe("crs/", () => {
     expect(readFileSync(BB).includes(Buffer.from(g2Bytes))).toBe(true);
   });
 
-  test("that bb is the toolchain's, not bb.js's shim in node_modules/.bin", () => {
-    // The catalog pins bb.js to bb's version (the toolchain check), so the
-    // pinned binary reports it; the shim is a Node script, not an ELF/Mach-O.
+  test("that bb is found outside node_modules, is a binary and has the catalog's version", () => {
+    // What keeps bb.js's shim out is the path (scripts/toolchain.ts) and the
+    // shim being a script. The version can't tell the pinned bb from the
+    // native one inside bb.js's tarball, which reports the same; that the
+    // binary is the pinned one rests on install-toolchain.sh's sha256.
     const pin = /"@aztec\/bb\.js": (\S+)/.exec(
       readFileSync(new URL("../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
     )?.[1];

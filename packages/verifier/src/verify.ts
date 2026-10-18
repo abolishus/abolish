@@ -827,8 +827,9 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
       // Releases, step 1).
       if (
-        // 7.1 passes only where 6.1 did, which needs 5.8 and so format 5.
-        bundle.format === "abolish-verifier-bundle/5" &&
+        // 7.1 passes only where 6.1 did, which needs 5.8 and so a run of
+        // L1 headers (format 5 or 6).
+        "l1Blocks" in bundle &&
         isLive(definition.definition) &&
         implemented.get("7.5")?.code === "not-reached" &&
         implemented.get("7.1")?.status === "pass" &&

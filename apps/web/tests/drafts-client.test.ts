@@ -49,6 +49,27 @@ const FAILED = {
   retryable: true,
 };
 
+/** A draft as the handler stores and answers it. */
+const STORED = {
+  language: "en",
+  title: "Sunday hours?",
+  description: "",
+  questions: [
+    {
+      question: "Should the library open on Sundays?",
+      description: "",
+      options: [
+        { label: "Yes", description: "" },
+        { label: "No", description: "" },
+      ],
+      minSelections: 1,
+      maxSelections: 1,
+    },
+  ],
+  tiers: [0],
+  closesAt: "1793750400",
+};
+
 const refusal = (status: number, code: string) => Response.json({ code, status }, { status });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -147,6 +168,89 @@ describe("drafts client", () => {
     expect(await failure(draftsClient.retry(ID))).toBe("failed");
     expect(await failure(draftsClient.retry(ID))).toBe("failed");
     expect(await failure(draftsClient.retry(ID))).toBe("failed");
+  });
+
+  test("reads a draft as the handler stores it, and nothing else", async () => {
+    serve(Response.json({ ...DRAFT, draft: STORED }));
+    expect(await draftsClient.read(ID)).toEqual({
+      summary: {
+        id: ID,
+        state: "drafted",
+        title: "Sunday hours?",
+        closesAt: 1793750400n,
+        updatedAt: DRAFT.updatedAt,
+        submittedAt: undefined,
+        failure: undefined,
+        retryable: false,
+      },
+      draft: { ...STORED, closesAt: 1793750400n },
+    });
+    const question = STORED.questions[0]!;
+    const bad = [
+      undefined,
+      [],
+      { ...STORED, closesAt: 1793750400 },
+      { ...STORED, closesAt: "-1" },
+      { ...STORED, title: null },
+      { ...STORED, tiers: [256] },
+      { ...STORED, tiers: "0" },
+      { ...STORED, questions: [{ ...question, minSelections: 1.5 }] },
+      { ...STORED, questions: [{ ...question, maxSelections: -1 }] },
+      { ...STORED, questions: [{ ...question, options: [{ label: "Yes" }] }] },
+      { ...STORED, questions: {} },
+    ];
+    for (const draft of bad) {
+      serve(Response.json({ ...DRAFT, draft }));
+      expect(await failure(draftsClient.read(ID))).toBe("failed");
+    }
+    // Another poll's answer isn't this page's.
+    serve(Response.json({ ...DRAFT, id: "b".repeat(32), draft: STORED }));
+    expect(await failure(draftsClient.read(ID))).toBe("failed");
+  });
+
+  test("saves a draft with its closing time as the handler's decimal string", async () => {
+    const calls = serve(
+      Response.json({ id: ID }, { status: 201 }),
+      Response.json({}),
+      Response.json({ id: "not an id" }, { status: 201 }),
+      Response.json(
+        { code: "DRAFT_REFUSED", status: 422, problem: { rule: "labels" } },
+        { status: 422 },
+      ),
+      refusal(409, "NOT_EDITABLE"),
+    );
+    const draft = { ...STORED, closesAt: 1793750400n };
+    expect(await draftsClient.create(draft)).toBe(ID);
+    await draftsClient.update(ID, draft);
+    expect(await failure(draftsClient.create(draft))).toBe("failed");
+    expect(await failure(draftsClient.create(draft))).toBe("refused");
+    expect(await failure(draftsClient.update(ID, draft))).toBe("changed");
+    expect(calls.slice(0, 2).map((c) => [c.url, c.init.method, c.init.body])).toEqual([
+      ["/drafts/create", "POST", JSON.stringify({ draft: STORED })],
+      ["/drafts/update", "POST", JSON.stringify({ id: ID, draft: STORED })],
+    ]);
+  });
+
+  test("never throws anything but its own error reading a draft, whatever the handler answers", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.jsonValue(), fc.constantFrom(200, 201, 404, 422), async (j, s) => {
+        serve(
+          new Response(JSON.stringify(j), { status: s }),
+          new Response(JSON.stringify(j), { status: s }),
+        );
+        for (const run of [
+          draftsClient.read(ID),
+          draftsClient.create({ ...STORED, closesAt: 0n }),
+        ]) {
+          const e = await run.then(
+            () => undefined,
+            (x: unknown) => x,
+          );
+          if (e !== undefined) expect(e).toBeInstanceOf(DraftsError);
+        }
+      }),
+      runs,
+    );
   });
 
   test("calls stay on this origin, uncached, refusing redirects, as the handler wants them", async () => {

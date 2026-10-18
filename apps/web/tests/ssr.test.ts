@@ -247,6 +247,7 @@ describe("every page", () => {
     "/moderation",
     "/polls",
     "/account",
+    "/account/polls/new",
     "/how-it-works",
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
@@ -644,6 +645,22 @@ describe("account page", () => {
     expect(html).toContain("Your account is not your vote");
     expect(html).toContain("Accounts use passkeys, which need this page&#x27;s script.");
     expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("poll form", () => {
+  test("leaves the form to the page's script, with no request behind it", async () => {
+    seen.length = 0;
+    for (const path of ["/account/polls/new", `/account/polls/${"a".repeat(32)}`]) {
+      const response = await get(path);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("Saving a draft needs this page&#x27;s script.");
+      expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+      // A draft is the account's, and the form needs the script: neither is server-rendered.
+      expect(html).not.toContain("Save draft");
+    }
     expect(seen).toEqual([]);
   });
 });

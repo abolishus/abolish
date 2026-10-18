@@ -12,6 +12,7 @@ export const PAGES = [
   "/p/:code",
   "/moderation",
   "/account",
+  "/account/polls/:id",
   "/how-it-works",
   "other",
 ] as const;
@@ -25,6 +26,8 @@ export function pageOf(pathname: string): Page {
   // Any single segment: a malformed ID is still a poll page's 404, and the
   // segment itself is never kept.
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";
+  // An author's draft (or `new`): its ID is the account's, never kept (T-10).
+  if (/^\/account\/polls\/[^/]+$/.test(pathname)) return "/account/polls/:id";
   // A short link, in either case (a QR code carries `/P/<CODE>`): the code
   // names a poll as surely as its ID does, so it is never kept either.
   if (/^\/[pP]\/[^/]+$/.test(pathname)) return "/p/:code";

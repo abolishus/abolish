@@ -1,6 +1,6 @@
-import { Button, useI18n, useTranslate } from "@abolishus/ui";
+import { Button, buttonVariants, useI18n, useTranslate } from "@abolishus/ui";
 import type { PollState } from "@abolishus/core";
-import { CircleAlert, CircleDot, Hourglass, type LucideIcon, PencilLine } from "lucide-react";
+import { CircleAlert, CircleDot, Hourglass, type LucideIcon, PencilLine, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -156,15 +156,24 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
     const which = `poll-${p.id}-title`;
     if (p.state === "drafted")
       return (
-        <Button
-          variant="link"
-          className="px-0"
-          aria-describedby={which}
-          disabled={busy}
-          onClick={() => setConfirming({ id: p.id, action: "remove" })}
-        >
-          {t("pollsDelete")}
-        </Button>
+        <span className="flex flex-wrap gap-x-4 md:justify-end">
+          <a
+            href={`/account/polls/${p.id}`}
+            aria-describedby={which}
+            className="inline-flex h-9 items-center underline underline-offset-4"
+          >
+            {t("pollsEdit")}
+          </a>
+          <Button
+            variant="link"
+            className="px-0"
+            aria-describedby={which}
+            disabled={busy}
+            onClick={() => setConfirming({ id: p.id, action: "remove" })}
+          >
+            {t("pollsDelete")}
+          </Button>
+        </span>
       );
     if (p.state !== "failed" || !p.retryable) return null;
     return (
@@ -201,6 +210,12 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
       lede={<p className="m-0">{t("pollsLede")}</p>}
     >
       <div aria-busy={busy} className="grid gap-4">
+        <p className="m-0">
+          <a href="/account/polls/new" className={buttonVariants({ size: "lg" })}>
+            <Plus aria-hidden="true" data-icon="inline-start" />
+            {t("pollsCreate")}
+          </a>
+        </p>
         {polls === undefined ? null : polls.length === 0 ? (
           <p className="m-0 border-t-2 border-foreground pt-4 text-base">{t("pollsEmpty")}</p>
         ) : (

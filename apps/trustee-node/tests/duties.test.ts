@@ -24,8 +24,10 @@ const approvedOf = (n: number): ApprovedElection => ({
   stubHash: new Uint8Array(32).fill(n),
   definitionHash: new Uint8Array(32).fill(0x40 + n),
   electionId: new Uint8Array(32).fill(0x80 + n),
+  opensAt: 0n,
   closesAt: 0n,
   l1InclusionBound: 0n,
+  members: 0n,
   signingSecret: new Uint8Array(32).fill(0xee),
 });
 

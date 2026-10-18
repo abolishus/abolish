@@ -1,0 +1,27 @@
+{
+  "name": "@abolishus/challenge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The challenge page: Turnstile on an origin of its own, framed by the ballot client, which only its token leaves.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json && vp build",
+    "check": "vp check",
+    "test": "vp test run --project unit",
+    "test:e2e": "vp test run --project e2e"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "playwright": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": [
+      "dist"
+    ]
+  }
+}

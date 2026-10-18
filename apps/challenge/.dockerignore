@@ -1,0 +1,4 @@
+# Only the page and its server go into the image (Dockerfile).
+*
+!dist/
+!server/

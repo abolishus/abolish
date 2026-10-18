@@ -1,0 +1,14 @@
+/* The widget alone, on whatever the client's frame shows behind it. */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+}
+
+#challenge {
+  display: flex;
+  justify-content: center;
+}

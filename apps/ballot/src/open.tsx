@@ -1,3 +1,4 @@
+import type { CastShare } from "@abolishus/crypto";
 import { Button, useI18n, useTranslate } from "@abolishus/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -105,14 +106,16 @@ export interface ElectionSource {
    */
   casts(electionId: Uint8Array, tier: number): Promise<CastsRead>;
   /**
-   * Records a cast's ballot before it leaves the device (`recordCast`), only
-   * if it names exactly what the cast asked for (`castAsAsked`), and
-   * `not-asked` otherwise ([[revoting]], Client rule 3).
+   * Records a cast's ballot with its qualified seats' shares before it
+   * leaves the device (`recordCast`), only if it names exactly what the cast
+   * asked for (`castAsAsked`), and `not-asked` otherwise ([[revoting]],
+   * Client rule 3; [[delivery]], Client rule 4).
    */
   record(
     electionId: Uint8Array,
     tier: number,
     ballot: Uint8Array,
+    shares: readonly CastShare[],
     asked: CastAsked,
   ): Promise<RecordCastOutcome | "not-asked">;
   /** Sends a recorded cast's bytes to the ballot route (`sendBallot`). */
@@ -620,7 +623,7 @@ export function Ballot({
           // Recorded before it leaves the device, in one transaction with the
           // newest block's check, which another tab may have moved since the
           // read above (Client rule 3).
-          const recorded = await source.record(electionId, tier, cast.ballot, {
+          const recorded = await source.record(electionId, tier, cast.ballot, cast.ciphertexts, {
             definitionHash,
             cell,
             l1Number: l1.number,

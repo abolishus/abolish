@@ -421,6 +421,7 @@ export {
   type BallotCastingV3,
   BallotSealError,
   type CastBallotV3,
+  type CastShare,
   castSealV3,
   challengeSealV3,
   finishSealV3,

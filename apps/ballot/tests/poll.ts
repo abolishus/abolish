@@ -17,6 +17,7 @@ import {
   answersMessage,
   ceremonyKeygen,
   ceremonyTranscriptHash,
+  checkCeremonyTranscript,
   challengesMessage,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
@@ -162,6 +163,11 @@ const transcript = encodeCeremonyTranscript({
   answers,
   reveals,
 });
+const { runId: _, ...params } = run;
+const checked = checkCeremonyTranscript(params, transcript, 1);
+if (!checked.ok) throw new Error(`ceremony: ${checked.code}`);
+/** The key set the transcript registers: each seat's KEM key, for the shares' public check. */
+export const registered = checked.registered;
 export const definition: ElectionDefinitionV5 = {
   ...stub,
   ceremony_transcript_hash: ceremonyTranscriptHash(transcript),

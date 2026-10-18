@@ -1,4 +1,10 @@
-import { decodeBallot, encodeBoardEntry } from "@abolishus/crypto";
+import {
+  type CastShare,
+  decodeBallot,
+  encodeBallotV3,
+  encodeBoardEntry,
+  shareCiphertextHash,
+} from "@abolishus/crypto";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -15,7 +21,8 @@ import {
 // The record of this device's casts in one election and tier (src/casts.ts;
 // [[revoting]], Client rule 3): read back only as this client writes it, a
 // version-3 ballot record per cast in strictly ascending order of its L1
-// block, each with its checked board entry or none, so a damaged record
+// block, each with its qualified seats' shares (`ct_i` and `m_i`, [[delivery]],
+// Client rule 4) and its checked board entry or none, so a damaged record
 // can never read as fewer casts than were made (T-45, T-38). Storing them
 // in IndexedDB is tests/worker.e2e.ts's.
 
@@ -28,7 +35,31 @@ const VECTORS = JSON.parse(
   ),
 ) as { ballots: { encoding: string }[] };
 
-const BALLOT = new Uint8Array(Buffer.from(VECTORS.ballots[0]!.encoding, "hex"));
+// Ciphertexts stand in as bytes: a stored share is judged by its hash
+// against the ballot's share hash, never decrypted here.
+const vector = decodeBallot(new Uint8Array(Buffer.from(VECTORS.ballots[0]!.encoding, "hex")), 3);
+const PANEL = vector.committed_vote.share_hashes.length;
+// Every seat qualified but the second, whose share hash is zero.
+const UNQUALIFIED = 2;
+const SHARES: readonly CastShare[] = Array.from({ length: PANEL }, (_, i) => i + 1)
+  .filter((seat) => seat !== UNQUALIFIED)
+  .map((seat) => ({
+    seat,
+    ciphertext: new Uint8Array(40 + seat).fill(seat),
+    m: new Uint8Array(32).fill(0x80 + seat),
+  }));
+const BALLOT = encodeBallotV3({
+  ...vector,
+  committed_vote: {
+    ...vector.committed_vote,
+    share_hashes: vector.committed_vote.share_hashes.map((_, i) => {
+      const share = SHARES.find((s) => s.seat === i + 1);
+      return share === undefined ? new Uint8Array(32) : shareCiphertextHash(share.ciphertext);
+    }),
+  },
+});
+const shares = () =>
+  SHARES.map(({ seat, ciphertext, m }) => ({ seat, ciphertext: ciphertext.slice(), m: m.slice() }));
 
 // After the record header (3), the definition hash (32), the cell (1) and
 // the nullifier (32): `l1_ref_number`, a u64.
@@ -66,18 +97,52 @@ const casts = fc
           fc.boolean().map((boarded): CastRecord => {
             const ballot = naming(n);
             return boarded
-              ? { ballot, l1Number: n, boarded: boardedFor(ballot) }
-              : { ballot, l1Number: n };
+              ? { ballot, l1Number: n, shares: shares(), boarded: boardedFor(ballot) }
+              : { ballot, l1Number: n, shares: shares() };
           }),
         ),
     ),
   );
 
 const record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  v: 1,
-  casts: [{ ballot: naming(10n), boarded: null }],
+  v: 2,
+  casts: [{ ballot: naming(10n), shares: shares(), boarded: null }],
   ...over,
 });
+
+/** Share lists that aren't exactly the ballot's qualified seats', each with what is wrong. */
+function sharesRefused(): [string, unknown][] {
+  const with_ = (i: number, change: Record<string, unknown>) =>
+    shares().map((share, j) => (j === i ? { ...share, ...change } : share));
+  const flipped = (bytes: Uint8Array) => {
+    const b = bytes.slice();
+    b[0] = (b[0] as number) ^ 1;
+    return b;
+  };
+  const first = SHARES[0] as CastShare;
+  return [
+    ["shares that aren't a list", {}],
+    ["no shares", []],
+    ["a qualified seat's share missing", shares().slice(1)],
+    ["the shares out of seat order", shares().toReversed()],
+    ["a share for the unqualified seat", [...shares(), { ...first, seat: UNQUALIFIED }]],
+    ["a seat's share twice", [first, ...shares()]],
+    ["a share for another seat", with_(0, { seat: UNQUALIFIED })],
+    ["a seat as a string", with_(0, { seat: String(first.seat) })],
+    ["a share with a key more", with_(0, { panel: 0 })],
+    ["a share without its m", shares().map(({ seat, ciphertext }) => ({ seat, ciphertext }))],
+    [
+      "a ciphertext not hashing to its share hash",
+      with_(0, { ciphertext: flipped(first.ciphertext) }),
+    ],
+    ["another seat's ciphertext", with_(0, { ciphertext: (SHARES[1] as CastShare).ciphertext })],
+    ["a ciphertext that isn't bytes", with_(0, { ciphertext: [...first.ciphertext] })],
+    ["an m of 31 bytes", with_(0, { m: first.m.subarray(1) })],
+    ["an m of 33 bytes", with_(0, { m: Uint8Array.of(...first.m, 0) })],
+    ["an m that isn't bytes", with_(0, { m: [...first.m] })],
+    ["a list with an extra property", Object.assign(shares(), { x: 1 })],
+  ];
+}
 
 describe("the stored casts", () => {
   // Every ballot is decoded twice per run (stored, then read back): at CI's
@@ -95,7 +160,11 @@ describe("the stored casts", () => {
     const stored = record();
     const [cast] = parseStoredCasts(stored) as CastRecord[];
     cast!.ballot.fill(0);
-    expect(parseStoredCasts(stored)).toEqual([{ ballot: naming(10n), l1Number: 10n }]);
+    cast!.shares[0]!.m.fill(0);
+    cast!.shares[0]!.ciphertext.fill(0);
+    expect(parseStoredCasts(stored)).toEqual([
+      { ballot: naming(10n), l1Number: 10n, shares: shares() },
+    ]);
   });
 
   test("an empty list is no casts", () => {
@@ -117,37 +186,52 @@ describe("the stored casts", () => {
 
   const ballot = naming(10n);
   // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
-  const HOLED = [, { ballot, boarded: null }];
+  const HOLED = [, { ballot, shares: shares(), boarded: null }];
   test.each<[string, unknown]>([
     ["not an object", "casts"],
     ["a list", []],
-    ["another version", record({ v: 2 })],
-    ["version as a string", record({ v: "1" })],
-    ["a key missing", { v: 1 }],
+    ["another version", record({ v: 1 })],
+    ["version as a string", record({ v: "2" })],
+    ["a key missing", { v: 2 }],
     ["a key more", record({ tier: 0 })],
     ["casts not a list", record({ casts: {} })],
     ["a list with a hole", record({ casts: HOLED })],
     [
       "a list with an extra property",
-      record({ casts: Object.assign([{ ballot, boarded: null }], { x: 1 }) }),
+      record({ casts: Object.assign([{ ballot, shares: shares(), boarded: null }], { x: 1 }) }),
     ],
-    ["a cast without its answer", record({ casts: [{ ballot }] })],
-    ["a cast with a key more", record({ casts: [{ ballot, boarded: null, tier: 0 }] })],
-    ["a ballot that isn't bytes", record({ casts: [{ ballot: [...ballot], boarded: null }] })],
+    ["a cast without its answer", record({ casts: [{ ballot, shares: shares() }] })],
+    [
+      "a cast with a key more",
+      record({ casts: [{ ballot, shares: shares(), boarded: null, tier: 0 }] }),
+    ],
+    ["a cast without its shares", record({ casts: [{ ballot, boarded: null }] })],
+    ...sharesRefused().map(([name, list]): [string, unknown] => [
+      name,
+      record({ casts: [{ ballot, shares: list, boarded: null }] }),
+    ]),
+    [
+      "a ballot that isn't bytes",
+      record({ casts: [{ ballot: [...ballot], shares: shares(), boarded: null }] }),
+    ],
     [
       "a ballot that doesn't decode",
-      record({ casts: [{ ballot: ballot.subarray(0, -1), boarded: null }] }),
+      record({ casts: [{ ballot: ballot.subarray(0, -1), shares: shares(), boarded: null }] }),
     ],
     [
       "a ballot of another record type",
-      record({ casts: [{ ballot: Uint8Array.of(0, 4, ...ballot.subarray(2)), boarded: null }] }),
+      record({
+        casts: [
+          { ballot: Uint8Array.of(0, 4, ...ballot.subarray(2)), shares: shares(), boarded: null },
+        ],
+      }),
     ],
     [
       "two casts on the same block",
       record({
         casts: [
-          { ballot, boarded: null },
-          { ballot: naming(10n), boarded: null },
+          { ballot, shares: shares(), boarded: null },
+          { ballot: naming(10n), shares: shares(), boarded: null },
         ],
       }),
     ],
@@ -155,23 +239,38 @@ describe("the stored casts", () => {
       "casts out of order",
       record({
         casts: [
-          { ballot: naming(11n), boarded: null },
-          { ballot, boarded: null },
+          { ballot: naming(11n), shares: shares(), boarded: null },
+          { ballot, shares: shares(), boarded: null },
         ],
       }),
     ],
-    ["an answer that isn't an object", record({ casts: [{ ballot, boarded: "x" }] })],
+    [
+      "an answer that isn't an object",
+      record({ casts: [{ ballot, shares: shares(), boarded: "x" }] }),
+    ],
     [
       "an answer without its link",
-      record({ casts: [{ ballot, boarded: { entry: boardedFor(ballot).entry } }] }),
+      record({
+        casts: [{ ballot, shares: shares(), boarded: { entry: boardedFor(ballot).entry } }],
+      }),
     ],
     [
       "an answer with a key more",
-      record({ casts: [{ ballot, boarded: { ...boardedFor(ballot), index: 1n } }] }),
+      record({
+        casts: [{ ballot, shares: shares(), boarded: { ...boardedFor(ballot), index: 1n } }],
+      }),
     ],
     [
       "a link of 31 bytes",
-      record({ casts: [{ ballot, boarded: { ...boardedFor(ballot), link: new Uint8Array(31) } }] }),
+      record({
+        casts: [
+          {
+            ballot,
+            shares: shares(),
+            boarded: { ...boardedFor(ballot), link: new Uint8Array(31) },
+          },
+        ],
+      }),
     ],
     [
       "an entry of another length than the ballot fixes",
@@ -179,6 +278,7 @@ describe("the stored casts", () => {
         casts: [
           {
             ballot,
+            shares: shares(),
             boarded: {
               ...boardedFor(ballot),
               entry: new Uint8Array(ballot.length + ENTRY_OVERHEAD + 1),
@@ -189,14 +289,14 @@ describe("the stored casts", () => {
     ],
     [
       "an entry carrying other bytes than the cast's",
-      record({ casts: [{ ballot, boarded: boardedFor(naming(11n)) }] }),
+      record({ casts: [{ ballot, shares: shares(), boarded: boardedFor(naming(11n)) }] }),
     ],
     [
       "casts naming two definitions",
       record({
         casts: [
-          { ballot, boarded: null },
-          { ballot: otherDefinition(naming(11n)), boarded: null },
+          { ballot, shares: shares(), boarded: null },
+          { ballot: otherDefinition(naming(11n)), shares: shares(), boarded: null },
         ],
       }),
     ],
@@ -204,9 +304,10 @@ describe("the stored casts", () => {
       "answers naming two elections",
       record({
         casts: [
-          { ballot, boarded: boardedFor(ballot) },
+          { ballot, shares: shares(), boarded: boardedFor(ballot) },
           {
             ballot: naming(11n),
+            shares: shares(),
             boarded: boardedFor(naming(11n), new Uint8Array(32).fill(0x5f)),
           },
         ],
@@ -217,12 +318,26 @@ describe("the stored casts", () => {
   });
 
   test("storing casts it would read back otherwise throws", () => {
-    const a = { ballot: naming(10n), l1Number: 10n };
+    const a = { ballot: naming(10n), l1Number: 10n, shares: shares() };
     expect(() => storedCasts([a, a])).toThrow(TypeError);
-    expect(() => storedCasts([{ ballot: naming(11n), l1Number: 11n }, a])).toThrow(TypeError);
+    expect(() =>
+      storedCasts([{ ballot: naming(11n), l1Number: 11n, shares: shares() }, a]),
+    ).toThrow(TypeError);
     // A block that isn't the one the ballot names.
-    expect(() => storedCasts([{ ballot: naming(10n), l1Number: 9n }])).toThrow(TypeError);
-    expect(() => storedCasts([{ ballot: ballot.subarray(1), l1Number: 10n }])).toThrow(TypeError);
+    expect(() => storedCasts([{ ballot: naming(10n), l1Number: 9n, shares: shares() }])).toThrow(
+      TypeError,
+    );
+    expect(() =>
+      storedCasts([{ ballot: ballot.subarray(1), l1Number: 10n, shares: shares() }]),
+    ).toThrow(TypeError);
+    // Storing copies only the fields it writes, so an extra key or property
+    // isn't stored at all; every other refused list throws.
+    const copiedAway = new Set(["a share with a key more", "a list with an extra property"]);
+    for (const [name, list] of sharesRefused())
+      if (!copiedAway.has(name))
+        expect(() =>
+          storedCasts([{ ballot: naming(10n), l1Number: 10n, shares: list as CastShare[] }]),
+        ).toThrow(TypeError);
   });
 });
 

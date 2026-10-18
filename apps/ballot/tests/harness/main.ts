@@ -308,9 +308,26 @@ const harness = {
     });
     db.close();
   },
-  /** Records `ballot` as cast in `electionId` at `tier` before it is sent (casts.ts). */
-  recordCast: (electionId: string, tier: number, ballot: string) =>
-    recordCast(fromHex(electionId), tier, fromHex(ballot)),
+  /**
+   * Records `ballot` as cast in `electionId` at `tier`, with its qualified
+   * seats' shares (seat, `ct_i` and `m_i` in hex), before it is sent (casts.ts).
+   */
+  recordCast: (
+    electionId: string,
+    tier: number,
+    ballot: string,
+    shares: readonly { readonly seat: number; readonly ciphertext: string; readonly m: string }[],
+  ) =>
+    recordCast(
+      fromHex(electionId),
+      tier,
+      fromHex(ballot),
+      shares.map(({ seat, ciphertext, m }) => ({
+        seat,
+        ciphertext: fromHex(ciphertext),
+        m: fromHex(m),
+      })),
+    ),
   /**
    * Records `checkBoarded`'s answer for the cast whose bytes are `ballot`
    * (send.ts, casts.ts), as the page will: what it passed, position and all.

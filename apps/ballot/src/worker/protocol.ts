@@ -11,6 +11,7 @@
 
 import type {
   BallotV2Code,
+  CastShare,
   ContractEventVersion,
   MembershipProverErrorCode,
   Panel,
@@ -327,7 +328,9 @@ export type ChallengeResult =
 
 /**
  * A finished ballot: the record (`0x0002` version 3) as it is boarded, its
- * hash, and each qualified seat's share ciphertext for its intake. Or why
+ * hash, and each qualified seat's share ciphertext for its intake with its
+ * ML-KEM message `m_i`, kept for a posting the voter may choose ([[delivery]],
+ * Client rule 4) and the only randomness a cast keeps. Or why
  * there is none: a seal this worker doesn't hold or the voter challenged
  * (`unknown`), no cell found for the poll or a seal in another cell than
  * the one found (`no-cell`), a secret other than the one `find-cell` was
@@ -340,7 +343,7 @@ export type CastResult =
       readonly ok: true;
       readonly ballot: Uint8Array;
       readonly ballotHash: Uint8Array;
-      readonly ciphertexts: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+      readonly ciphertexts: readonly CastShare[];
     }
   | { readonly ok: false; readonly problem: "unknown" | "no-cell" | MembershipProofProblem }
   | { readonly ok: false; readonly problem: "ballot"; readonly code: BallotV2Code };

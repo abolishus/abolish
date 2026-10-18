@@ -6,6 +6,7 @@ import {
   challengeSealV3,
   challengesMessage,
   checkBallotV3,
+  checkPosting,
   checkCeremonyTranscript,
   decodeBallot,
   decodeElectionDefinitionV5,
@@ -145,6 +146,23 @@ describe("a sealed ballot, proved", () => {
         expect(toHex(shareCiphertextHash(ciphertext))).toBe(
           toHex(record.committed_vote.share_hashes[seat - 1] as Uint8Array),
         );
+      // Each seat's kept m_i makes a posting that passes the public check
+      // under that seat's registered key (delivery Client rule 4), and a
+      // flipped bit of it doesn't.
+      for (const { seat, ciphertext, m } of cast.ciphertexts) {
+        const key = checked.registered.find((k) => k.index === seat)?.kemKey;
+        if (key === undefined) throw new Error(`seat ${seat}: no registered key`);
+        const { vss, share_hashes } = record.committed_vote;
+        const post = (posted: Uint8Array) =>
+          checkPosting({ definitionHash: record.definition_hash }, seat, key, vss, share_hashes, {
+            ciphertext,
+            m: posted,
+          });
+        expect(post(m)).toEqual({ ok: true });
+        const flipped = Uint8Array.from(m);
+        flipped[0] = (flipped[0] as number) ^ 1;
+        expect(post(flipped)).toEqual({ ok: false, code: "posting-encapsulation" });
+      }
 
       // A recast under a newer block (revoting Client rule 4): the same
       // committed vote, so the same ballot hash and nullifier, a new message.
@@ -156,6 +174,10 @@ describe("a sealed ballot, proved", () => {
       expect(toHex(recast.ballotHash)).toBe(toHex(cast.ballotHash));
       expect(recast.nullifier).toBe(cast.nullifier);
       expect(toHex(again.message)).not.toBe(toHex(verdict.message));
+      // The recast keeps the same ciphertexts and messages: one seal, one sharing.
+      expect(recast.ciphertexts.map((c) => [c.seat, toHex(c.ciphertext), toHex(c.m)])).toEqual(
+        cast.ciphertexts.map((c) => [c.seat, toHex(c.ciphertext), toHex(c.m)]),
+      );
       expect(() => challengeSealV3(sealed)).toThrow(/never opened/);
 
       // A proof for one cast never finishes another.

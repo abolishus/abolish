@@ -71,6 +71,7 @@ import {
   encryptShares,
   kemKeygen,
   type KemPublicKey,
+  type ShareEncapsulation,
 } from "./share-encryption.ts";
 import {
   tierMembership,
@@ -334,8 +335,20 @@ export interface CastBallotV3 {
   readonly ballot: Uint8Array;
   readonly ballotHash: Uint8Array;
   readonly nullifier: bigint;
-  /** Each qualified seat's share ciphertext, for its intake (Casting step 5); no other seat has one. */
-  readonly ciphertexts: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+  /**
+   * Each qualified seat's share ciphertext, for its intake (Casting step 5),
+   * with its ML-KEM message `m`, the one secret a cast keeps: a seat that
+   * never receipts can still be posted, by the voter's choice
+   * ([[delivery]], Client rules 2 and 4). No other seat has one.
+   */
+  readonly ciphertexts: readonly CastShare[];
+}
+
+/** One qualified seat's share ciphertext `ct_i` and ML-KEM message `m_i`. */
+export interface CastShare {
+  readonly seat: number;
+  readonly ciphertext: Uint8Array;
+  readonly m: Uint8Array;
 }
 
 /**
@@ -371,8 +384,17 @@ interface Seal {
   challenged: boolean;
   /** Set when validity is first proved: the voter chose to cast, so the seal is never opened. */
   proved: boolean;
-  /** Set once a cast's witness is made: the seal is then never opened. */
-  cast?: { readonly nullifier: bigint; readonly vote: CommittedVoteV3 };
+  /**
+   * Set once a cast's witness is made: the seal is then never opened. It
+   * keeps each qualified seat's `m_i`, and nothing else of the encryption's
+   * randomness, for a posting the voter may choose ([[challenge]], Client
+   * rules, step 3; T-18).
+   */
+  cast?: {
+    readonly nullifier: bigint;
+    readonly vote: CommittedVoteV3;
+    readonly messages: readonly { readonly seat: number; readonly m: Uint8Array }[];
+  };
 }
 
 const SEALS = new WeakMap<SealedBallotV3, Seal>();
@@ -484,8 +506,8 @@ export function challengeSealV3(sealed: SealedBallotV3): {
  * the prover; finish with `finishSealV3`.
  *
  * The seal is marked cast, and its sharing and encapsulation randomness
- * dropped, only once the witness is made, so a refused secret or bad leaves
- * leave it as it was. Casting it again (a proof that failed before any
+ * dropped but for each qualified seat's `m_i` (`CastShare`), only once the
+ * witness is made, so a refused secret or bad leaves leave it as it was. Casting it again (a proof that failed before any
  * record existed, or a recast under a newer L1 block, revoting Client rule 4)
  * keeps its first validity proofs, so every record of one seal carries one
  * committed vote; a different secret is refused. A retry of a record already
@@ -550,10 +572,18 @@ export function castSealV3(
   // The same scope and secret, so the same nullifier: a mismatch is a fault here.
   if (input.signals.nullifier !== nullifier) throw new MembershipProverError("secret");
   if (seal.cast === undefined) {
-    seal.cast = { nullifier, vote };
+    const randomness = (secrets as NonNullable<typeof secrets>).encrypted.randomness;
+    // Copied before the erasure: a qualified seat's `m_i` is kept for a
+    // posting; an unqualified seat's goes with its throwaway key.
+    const messages = seal.ciphertexts.map(({ seat }) => ({
+      seat,
+      m: Uint8Array.from((randomness[seat - 1] as ShareEncapsulation).m),
+    }));
+    seal.cast = { nullifier, vote, messages };
     // Erased as far as the platform allows: the ML-KEM messages' bytes are
-    // zeroed, and the polynomials and scalars (immutable bigints) dropped.
-    for (const { m } of secrets?.encrypted.randomness ?? []) m.fill(0);
+    // zeroed, and the polynomials, the ephemerals `e_i` and the nonces `w_i`
+    // (immutable bigints) dropped.
+    for (const { m } of randomness) m.fill(0);
     delete seal.secrets;
   }
   const casting: BallotCastingV3 = Object.freeze({ witness: input.witness });
@@ -585,6 +615,8 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
   const made = CASTINGS.get(casting);
   if (made === undefined) throw new TypeError("expected a castSealV3 result");
   const { seal, input, record: unproven } = made;
+  // Set by castSealV3 before any casting exists.
+  const { messages } = seal.cast as NonNullable<Seal["cast"]>;
   const membership = finishMembershipProof(input, proof);
   const record: BallotRecordV3 = {
     ...unproven,
@@ -607,8 +639,13 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
     ballotHash: checked.ballotHash,
     nullifier: record.nullifier,
     ciphertexts: Object.freeze(
-      seal.ciphertexts.map(({ seat, ciphertext }) =>
-        Object.freeze({ seat, ciphertext: Uint8Array.from(ciphertext) }),
+      seal.ciphertexts.map(({ seat, ciphertext }, i) =>
+        Object.freeze({
+          seat,
+          ciphertext: Uint8Array.from(ciphertext),
+          // Both lists are the qualified seats in order.
+          m: Uint8Array.from((messages[i] as (typeof messages)[number]).m),
+        }),
       ),
     ),
   });

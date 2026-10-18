@@ -469,20 +469,23 @@ async function run(
     [...votes].reduce<number[]>((sum, v) => v.map((x, j) => x + (sum[j] ?? 0)), []);
   // The poll's receipts, each with the verdict its voter's later check must reach.
   const receipts: Receipted[] = [];
-  // The elections of one question take their ballots through the operator's
-  // API, its worker judging each by the verifier's admission before boarding
-  // it (P2-3; T-17, T-38, T-52): what it answers must be the very entry the
-  // fixture's board holds at that position, so the verifier's judgement of
-  // that board is a judgement of what the API boarded.
+  // Every election takes its ballots through the operator's API, its worker
+  // judging each by the verifier's admission before boarding it (P2-3; T-17,
+  // T-38, T-52), the poll of questions under definition version 5 and ballot
+  // version 3: what it answers must be the very entry the fixture's board
+  // holds at that position, so the verifier's judgement of that board is a
+  // judgement of what the API boarded.
   const api = await startApi({
     panels: [trustees.panel],
     clock: { epoch, period: PERIOD },
     now: () => l1Time,
   });
-  // Both elections' ballots are cast at the same L1 time, in the window.
+  // Every election's ballots are cast at the same L1 time, in the window,
+  // the honest election's last, since its cutoff control moves the clock
+  // past the close.
   l1Time = timing.opensAt + 240n;
   try {
-    for (const e of [honest, rejected])
+    for (const e of [honest, rejected, questions])
       await api.open(
         definitionBytes(e.definition),
         e.definition.value.election_id,
@@ -530,6 +533,143 @@ async function run(
       board(rejected, forged);
       log(
         `stage 4 (rejected-ballot): an honest ballot cast through the API, then one whose proof is another ballot's, which the API refuses with membership-proof and the fixture boards anyway`,
+      );
+    }
+    {
+      // The poll of questions, as the honest election below: voter 0 challenges an
+      // attempt and checks its opening on a second context against the code
+      // shown, voters 0 to 2 answer, voter 1 answers again under the later
+      // block, and voter 3 never does. Voter 1 first leaves the first two
+      // questions blank, which their limits allow.
+      const { value } = questions.definition;
+      // The client's check before casting: every listed receipt key is
+      // registered with the anchor before the poll opens (T-26, T-69).
+      const read = await storageWords(
+        anvil,
+        anchor.address,
+        value.receipt_keys.map(receiptKeySlot),
+      );
+      const keys = receiptKeysCastCheck(read.words, value.opens_at, read.timestamp);
+      if (!keys.castable) throw new Error(`the poll's receipt key ${keys.key} judges nothing`);
+      const pollCasting = () =>
+        questionCastingFor(
+          value,
+          questions.panel,
+          questions.transcript,
+          electorate.leaves,
+          artifacts,
+        );
+      const casting = pollCasting();
+      const checker = pollCasting();
+      const attempt = [0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0] as const;
+      const challenged = challengeQuestions(casting, attempt);
+      const opened = checkChallengeOpeningV2(
+        checker.election,
+        decodeOpening(challenged.opening, 2),
+      );
+      if (
+        !opened.ok ||
+        hex(opened.coreHash) !== hex(challenged.shown) ||
+        opened.votes.join() !== attempt.join() ||
+        !opened.withinRules
+      )
+        throw new Error("an honest challenge of the poll failed its check");
+      const [v0, v1, v2] = voters;
+      if (v0 === undefined || v1 === undefined || v2 === undefined)
+        throw new Error("too few voters");
+      // Each ballot gets the operator's receipt for the board as it stands
+      // once the ballot is appended, which the voter's client checks at cast.
+      const payloads: Uint8Array[] = [];
+      const receiptsOf = receiptElection(questions.definition);
+      // Every seat takes each ballot in, as in the honest election below.
+      const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
+      const shareReceipts: Uint8Array[] = [];
+      for (const [voter, votes, ref] of [
+        [v0, [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0], refs[0]],
+        [v1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], refs[0]],
+        [v2, [0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0], refs[0]],
+        [v1, [0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1], refs[1]],
+      ] as const) {
+        const made = await castQuestions(casting, voter, votes, ref);
+        const payload = made.ballot;
+        const taken = intake(
+          casting.election,
+          questions.secrets,
+          payload,
+          made.ciphertexts.map((c) => c.ciphertext),
+        );
+        shareReceipts.push(...taken.receipts);
+        last.set(voter, { payload, shares: taken.shares, votes });
+        payloads.push(payload);
+        await submitted(questions, payload);
+        receipts.push({
+          name: `entry ${questions.entries.length - 1}`,
+          payload,
+          receipt: operatorReceipt(receiptSecret, receiptsOf, questions.entries, cast),
+          expected: "included",
+          drop: { status: "not-alarm" },
+        });
+      }
+      // The seats' share receipts after the window's ballots, so the ballots
+      // keep the indices the receipts below name.
+      for (const r of shareReceipts) board(questions, r);
+      // Two receipts the operator signs for boards it never anchors. A fork:
+      // voter 0's ballot shown at index 2, after voter 1's first, though the
+      // anchored board has it at 1; the ballot is on the board, so only the
+      // receipt's board is false. A drop: voter 3's ballot, never boarded,
+      // shown appended to the window's anchored board, after the share
+      // receipts (T-26).
+      const [p0, p1] = payloads;
+      const [transcript] = questions.entries;
+      if (p0 === undefined || p1 === undefined || transcript === undefined)
+        throw new Error("the poll's board is missing entries");
+      receipts.push({
+        name: "forked",
+        payload: p0,
+        receipt: operatorReceipt(
+          receiptSecret,
+          receiptsOf,
+          [
+            transcript,
+            boardEntry(questions.definition, 1n, cast, p1),
+            boardEntry(questions.definition, 2n, cast, p0),
+          ],
+          cast,
+        ),
+        expected: "forked-copy",
+        // Voter 0's ballot is on the anchored board, at entry 1: no drop.
+        drop: { status: "present", entry: 1 },
+      });
+      const v3 = voters[3];
+      if (v3 === undefined) throw new Error("too few voters");
+      const dropped = (await castQuestions(casting, v3, [1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0], refs[1]))
+        .ballot;
+      receipts.push({
+        name: "dropped",
+        payload: dropped,
+        receipt: operatorReceipt(
+          receiptSecret,
+          receiptsOf,
+          [
+            ...questions.entries,
+            boardEntry(questions.definition, BigInt(questions.entries.length), cast, dropped),
+          ],
+          cast,
+        ),
+        expected: "forked-l1",
+        drop: { status: "drop" },
+      });
+      // The client can't tell any of them apart at cast: each passes.
+      for (const r of receipts)
+        if (!checkAtCast(receiptsOf, r.receipt, r.payload, { min: cast, max: closed }))
+          throw new Error(`the poll's ${r.name} receipt failed the client's check at cast`);
+      counted.set(questions, {
+        ballots: [...last.values()],
+        registered: casting.registered,
+        counts: countsOf([...last.values()].map((b) => b.votes)),
+      });
+      log(
+        `stage 4 (questions): ${payloads.length} version-3 ballots answering ${value.questions.length} questions cast through the API and boarded by its worker in segment ${cast}, one a re-vote, each with every seat's share receipt; one challenged attempt checked; ${receipts.length} receipts signed, one for a forked board and one for a dropped ballot, each passing the client's check at cast`,
       );
     }
     {
@@ -635,136 +775,6 @@ async function run(
   } finally {
     await api.close();
   }
-  {
-    // The poll of questions, as the honest election: voter 0 challenges an
-    // attempt and checks its opening on a second context against the code
-    // shown, voters 0 to 2 answer, voter 1 answers again under the later
-    // block, and voter 3 never does. Voter 1 first leaves the first two
-    // questions blank, which their limits allow.
-    const { value } = questions.definition;
-    // The client's check before casting: every listed receipt key is
-    // registered with the anchor before the poll opens (T-26, T-69).
-    const read = await storageWords(anvil, anchor.address, value.receipt_keys.map(receiptKeySlot));
-    const keys = receiptKeysCastCheck(read.words, value.opens_at, read.timestamp);
-    if (!keys.castable) throw new Error(`the poll's receipt key ${keys.key} judges nothing`);
-    const pollCasting = () =>
-      questionCastingFor(
-        value,
-        questions.panel,
-        questions.transcript,
-        electorate.leaves,
-        artifacts,
-      );
-    const casting = pollCasting();
-    const checker = pollCasting();
-    const attempt = [0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0] as const;
-    const challenged = challengeQuestions(casting, attempt);
-    const opened = checkChallengeOpeningV2(checker.election, decodeOpening(challenged.opening, 2));
-    if (
-      !opened.ok ||
-      hex(opened.coreHash) !== hex(challenged.shown) ||
-      opened.votes.join() !== attempt.join() ||
-      !opened.withinRules
-    )
-      throw new Error("an honest challenge of the poll failed its check");
-    const [v0, v1, v2] = voters;
-    if (v0 === undefined || v1 === undefined || v2 === undefined) throw new Error("too few voters");
-    // Each ballot gets the operator's receipt for the board as it stands
-    // once the ballot is appended, which the voter's client checks at cast.
-    const payloads: Uint8Array[] = [];
-    const receiptsOf = receiptElection(questions.definition);
-    // Every seat takes each ballot in, as in the honest election.
-    const last = new Map<typeof v0, Counted & { readonly votes: readonly number[] }>();
-    const shareReceipts: Uint8Array[] = [];
-    for (const [voter, votes, ref] of [
-      [v0, [1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0], refs[0]],
-      [v1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], refs[0]],
-      [v2, [0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0], refs[0]],
-      [v1, [0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1], refs[1]],
-    ] as const) {
-      const made = await castQuestions(casting, voter, votes, ref);
-      const payload = made.ballot;
-      const taken = intake(
-        casting.election,
-        questions.secrets,
-        payload,
-        made.ciphertexts.map((c) => c.ciphertext),
-      );
-      shareReceipts.push(...taken.receipts);
-      last.set(voter, { payload, shares: taken.shares, votes });
-      payloads.push(payload);
-      board(questions, payload);
-      receipts.push({
-        name: `entry ${questions.entries.length - 1}`,
-        payload,
-        receipt: operatorReceipt(receiptSecret, receiptsOf, questions.entries, cast),
-        expected: "included",
-        drop: { status: "not-alarm" },
-      });
-    }
-    // The seats' share receipts after the window's ballots, so the ballots
-    // keep the indices the receipts below name.
-    for (const r of shareReceipts) board(questions, r);
-    // Two receipts the operator signs for boards it never anchors. A fork:
-    // voter 0's ballot shown at index 2, after voter 1's first, though the
-    // anchored board has it at 1; the ballot is on the board, so only the
-    // receipt's board is false. A drop: voter 3's ballot, never boarded,
-    // shown appended to the window's anchored board, after the share
-    // receipts (T-26).
-    const [p0, p1] = payloads;
-    const [transcript] = questions.entries;
-    if (p0 === undefined || p1 === undefined || transcript === undefined)
-      throw new Error("the poll's board is missing entries");
-    receipts.push({
-      name: "forked",
-      payload: p0,
-      receipt: operatorReceipt(
-        receiptSecret,
-        receiptsOf,
-        [
-          transcript,
-          boardEntry(questions.definition, 1n, cast, p1),
-          boardEntry(questions.definition, 2n, cast, p0),
-        ],
-        cast,
-      ),
-      expected: "forked-copy",
-      // Voter 0's ballot is on the anchored board, at entry 1: no drop.
-      drop: { status: "present", entry: 1 },
-    });
-    const v3 = voters[3];
-    if (v3 === undefined) throw new Error("too few voters");
-    const dropped = (await castQuestions(casting, v3, [1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0], refs[1]))
-      .ballot;
-    receipts.push({
-      name: "dropped",
-      payload: dropped,
-      receipt: operatorReceipt(
-        receiptSecret,
-        receiptsOf,
-        [
-          ...questions.entries,
-          boardEntry(questions.definition, BigInt(questions.entries.length), cast, dropped),
-        ],
-        cast,
-      ),
-      expected: "forked-l1",
-      drop: { status: "drop" },
-    });
-    // The client can't tell any of them apart at cast: each passes.
-    for (const r of receipts)
-      if (!checkAtCast(receiptsOf, r.receipt, r.payload, { min: cast, max: closed }))
-        throw new Error(`the poll's ${r.name} receipt failed the client's check at cast`);
-    counted.set(questions, {
-      ballots: [...last.values()],
-      registered: casting.registered,
-      counts: countsOf([...last.values()].map((b) => b.votes)),
-    });
-    log(
-      `stage 4 (questions): ${payloads.length} version-3 ballots answering ${value.questions.length} questions boarded in segment ${cast}, one a re-vote, each with every seat's share receipt; one challenged attempt checked; ${receipts.length} receipts signed, one for a forked board and one for a dropped ballot, each passing the client's check at cast`,
-    );
-  }
-
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);
   await anchorAt(anvil, anchor, checkpointsAt(closed), end(closed) + ANCHOR_DELAY);
 

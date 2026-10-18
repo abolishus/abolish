@@ -226,7 +226,19 @@ describe("tally-opening.json, version 2 (docs/spec/tally.md, Tally-opening versi
       // A version-2 payload never opens a cell of a poll pinning version 1 (T-31).
       for (const [at, b] of payloads.entries())
         if (b[2] === 2) expect(asOne.rejected).toContainEqual({ at, error: "profile-mismatch" });
+      // And a version-1 payload never opens a cell of a live poll's.
+      const asTwo = checkTally(election, cells, payloads, 2);
+      for (const [at, b] of payloads.entries())
+        if (b[2] === 1) expect(asTwo.rejected).toContainEqual({ at, error: "profile-mismatch" });
     }
+  });
+
+  test("a version other than 1 or 2 is refused by the whole opening's codec, from an untyped caller too", () => {
+    const one = vectors.openings[0];
+    if (one === undefined) throw new Error("no opening vector");
+    const opening = decodeTallyOpening(hex(one.encoding), 1);
+    expect(() => encodeTallyOpening(opening, 3 as unknown as 1)).toThrow(RangeError);
+    expect(() => decodeTallyOpening(hex(one.encoding), 3 as unknown as 1)).toThrow(RangeError);
   });
 });
 

@@ -113,11 +113,15 @@ export function encodeTallyOpening(
   opening: TallyOpening,
   version: WholeOpeningVersion = 1,
 ): Uint8Array {
+  // An untyped caller could name version 3, a partial opening's layout.
+  if (version !== 1 && version !== 2) throw new RangeError("encodeTallyOpening: version 1 or 2");
   return SCHEMA.encode(TALLY_OPENING, version, opening);
 }
 
 /** Strictly decodes a tally opening against the version the election's profile pins. */
 export function decodeTallyOpening(bytes: Uint8Array, pinned: WholeOpeningVersion): TallyOpening {
+  // An untyped caller could pin version 3, whose record is a partial opening.
+  if (pinned !== 1 && pinned !== 2) throw new RangeError("decodeTallyOpening: pin 1 or 2");
   const r = SCHEMA.decode(TALLY_OPENING, bytes, pinned);
   // Unreachable: the pin refused every other version.
   if (r.version !== pinned) throw new RangeError(`tally opening: not version ${pinned}`);

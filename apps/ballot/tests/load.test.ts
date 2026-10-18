@@ -9,7 +9,7 @@
 // nothing but its address and block ranges (T-11, T-13). Whether the records may be shown is the worker's
 // check, tested in election.test.ts and packages/crypto.
 
-import { decodeContractEvent, PARAMETERS } from "@abolishus/crypto";
+import { decodeContractEvent, MAX_EVENT_DATA, PARAMETERS } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
@@ -870,6 +870,9 @@ describe("the group registry's log", () => {
     ["data with no 0x", logJson(LOG, { data: "00" })],
     ["a block number with a leading zero", logJson(LOG, { blockNumber: "0x078" })],
     ["a log with no index", logJson(LOG, { logIndex: undefined })],
+    ["an uppercase topic", logJson(LOG, { topics: [`0x${word(171).toUpperCase()}`] })],
+    ["uppercase data", logJson(LOG, { data: "0xAB" })],
+    ["data past MAX_EVENT_DATA", logJson({ ...LOG, data: "00".repeat(MAX_EVENT_DATA + 1) })],
     ["a log that isn't an object", "0x00"],
   ])("refuses %s", async (_, log) => {
     const { fetchFn } = node([], (method) => (method === "eth_getLogs" ? [log] : undefined));
@@ -922,6 +925,23 @@ describe("the group registry's log", () => {
     }
   });
 
+  test("the largest event's data is read, and a finalized block's answer past its cap refused", async () => {
+    const largest = { ...LOG, data: "00".repeat(MAX_EVENT_DATA) };
+    const loaded = await loadGroupRegistry(WITH_REGISTRY, node([largest]).fetchFn);
+    expect(loaded.ok && loaded.records.length).toBe(1);
+    // 2 MiB: a block's header with tens of thousands of transaction hashes.
+    const transactions = Array.from({ length: 32 * 1024 }, () => `0x${word(1)}`);
+    const { fetchFn } = node([], (method) =>
+      method === "eth_getBlockByNumber"
+        ? { number: quantity(HEAD), timestamp: "0x1", transactions }
+        : undefined,
+    );
+    expect(await loadGroupRegistry(WITH_REGISTRY, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+  });
+
   test("a node's error or a failed network is unreachable", async () => {
     const failing = (method: string): Fetch => {
       const { fetchFn } = node([], (m) => (m === method ? "network" : undefined));
@@ -952,7 +972,7 @@ describe("the group registry's log", () => {
   });
 
   test("a registry that never ends is refused once it runs out the budget, not read forever", async () => {
-    // Each range costs 64 KiB of the budget, and each log its bytes and 64.
+    // Each range costs 1 KiB of the budget, and each log its bytes, 32 a topic and 64.
     const MiB = 1024 * 1024;
     const kilobyte = (block: bigint, index: bigint): Log => ({
       block,
@@ -969,7 +989,7 @@ describe("the group registry's log", () => {
     });
     // One range a block, with nothing in it: the ranges' cost stops it.
     const empty = node([]);
-    expect(await loadGroupRegistry(WITH_REGISTRY, empty.fetchFn, MiB / 4, 1n)).toEqual({
+    expect(await loadGroupRegistry(WITH_REGISTRY, empty.fetchFn, 4 * 1024, 1n)).toEqual({
       ok: false,
       problem: "bad-answer",
     });

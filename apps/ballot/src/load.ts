@@ -396,7 +396,9 @@ export type LoadedRegistry =
       /**
        * Every log the group registry emitted from its deployment to `block`,
        * in log order, each as a contract-event record (`0x0008`) under the
-       * deployment's `eventVersion`, numbered `n` from 0.
+       * deployment's `eventVersion`, numbered `n` from 0. Their
+       * `l2_timestamp` is 0, not the chain's, so they are for the outcome's
+       * replay alone: never archived or checked against an accumulator.
        */
       readonly records: readonly Uint8Array[];
     }
@@ -409,6 +411,11 @@ export const LOG_RANGE = 10_000n;
 // its JSON. The whole read shares the board's budget (T-52).
 const MAX_BLOCK_ANSWER = 2 * 1024 * 1024;
 const MAX_LOGS_ANSWER = 64 * 1024 * 1024;
+// Each range's charge: small, since the number of ranges grows with the
+// chain's age, not with what the RPC chooses to serve, yet enough that a
+// node claiming a head far ahead runs the budget out (256 MiB is 262,144
+// ranges, about 166 years of Base blocks).
+const RANGE_COST = 1024;
 
 /**
  * The deployment's group registry as of the L2's finalized head: every log
@@ -456,9 +463,9 @@ export async function loadGroupRegistry(
         throw e instanceof TypeError ? new Stop("unreachable") : e;
       });
       if (!Array.isArray(logs)) throw new Stop("bad-answer");
-      // Charged before the logs, so a node that never ends the chain with
-      // empty ranges runs the budget out too.
-      budget -= PAGE_COST;
+      // Charged before the logs, so a node that claims a head far ahead,
+      // with nothing in its ranges, runs the budget out too.
+      budget -= RANGE_COST;
       if (budget < 0) throw new Stop("bad-answer");
       for (const log of logs as unknown[]) {
         const read = logOf(log, registry.address, from, to);
@@ -517,7 +524,12 @@ const quantity = (n: bigint) => `0x${n.toString(16)}`;
 const WORD = /^0x[0-9a-f]{64}$/;
 const DATA = /^0x(?:[0-9a-f]{2})*$/;
 
-/** One log of `address` in blocks `from` to `to`, as the event's fields, or `bad-answer`. */
+/**
+ * One log of `address` in blocks `from` to `to`, as the event's fields, or
+ * `bad-answer`. Topics and data are lowercase hex, as nodes serialize them
+ * and as every other answer is read; the address is compared in any case,
+ * since some nodes give its checksum spelling.
+ */
 function logOf(log: unknown, address: string, from: bigint, to: bigint) {
   if (!isRecord(log)) throw new Stop("bad-answer");
   const { address: emitter, topics, data, blockNumber, logIndex, removed } = log;
@@ -528,9 +540,9 @@ function logOf(log: unknown, address: string, from: bigint, to: bigint) {
     !Array.isArray(topics) ||
     topics.length < 1 ||
     topics.length > MAX_EVENT_TOPICS ||
-    !topics.every((t) => typeof t === "string" && WORD.test(t.toLowerCase())) ||
+    !topics.every((t) => typeof t === "string" && WORD.test(t)) ||
     typeof data !== "string" ||
-    !DATA.test(data.toLowerCase()) ||
+    !DATA.test(data) ||
     (data.length - 2) / 2 > MAX_EVENT_DATA ||
     typeof blockNumber !== "string" ||
     !QUANTITY.test(blockNumber) ||
@@ -543,8 +555,8 @@ function logOf(log: unknown, address: string, from: bigint, to: bigint) {
   return {
     block,
     index: BigInt(logIndex),
-    topics: (topics as string[]).map((t) => fromHex(t.slice(2).toLowerCase())),
-    data: fromHex(data.slice(2).toLowerCase()),
+    topics: (topics as string[]).map((t) => fromHex(t.slice(2))),
+    data: fromHex(data.slice(2)),
   };
 }
 

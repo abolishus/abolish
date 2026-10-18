@@ -140,6 +140,9 @@ export class BallotSession {
       }
       // The commitment is all the replay needs (T-12).
       secret.fill(0);
+      // No secret is known to commit to a forbidden value, but
+      // `tier0Registration` would throw for one, a worker failure rather
+      // than the refusal it is.
       if (isForbiddenCommitment(commitment)) return { ok: false, problem: "secret" };
       const records: ContractEventRecord[] = [];
       for (const bytes of request.records) {

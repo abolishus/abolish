@@ -1,3 +1,4 @@
+import { isForbiddenCommitment } from "@abolishus/crypto";
 import { Button, useTranslate } from "@abolishus/ui";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
@@ -30,8 +31,8 @@ export interface Registrar {
   identity(): Promise<IdentityRead>;
   /**
    * The worker's commitment of `secret`; rejects if the worker fails.
-   * `secret` is copied to the worker before this returns, so the caller
-   * zeroes its own at once (T-12).
+   * `secret` is copied to the worker before this returns, so the caller's
+   * copy is its own to zero as soon as it is done with it (T-12).
    */
   commitment(secret: Uint8Array): Promise<CommitmentResult>;
   /** The request (`tier0RequestBody`) sent to the registration route (`sendTier0Request`). */
@@ -114,6 +115,11 @@ export function Register({
   // the voter left; a second tap or a second token asks nothing twice.
   const asked = useRef(0);
   useEffect(() => () => void asked.current++, []);
+  // Each challenge frame's round, and the rounds a token was already sent
+  // for: checked synchronously, since a second token can arrive before the
+  // screen changes.
+  const rounds = useRef(0);
+  const sent = useRef(new Set<number>());
 
   /** Runs `steps`; `restart` checks the poll again, for an identity that needs no registering. */
   function run(steps: () => Promise<Step | "restart">) {
@@ -149,7 +155,9 @@ export function Register({
       secret.fill(0);
     }
     const result = await asked;
-    return result.ok ? result.commitment : "unreadable";
+    if (!result.ok) return "unreadable";
+    // A forbidden commitment ([[membership]]) can't be registered: no solve is spent on it.
+    return isForbiddenCommitment(result.commitment) ? "unreadable" : result.commitment;
   }
 
   // Made and kept before any request, so a request is never sent for an
@@ -164,33 +172,49 @@ export function Register({
       const commitment = await commitmentHeld();
       if (commitment === "done") return "restart";
       return typeof commitment === "bigint"
-        ? { kind: "challenge", commitment, round: 0 }
+        ? { kind: "challenge", commitment, round: ++rounds.current }
         : { kind: "stopped", problem: commitment };
     });
   }
 
-  function send(commitment: bigint, token: string) {
-    if (step.kind !== "challenge") return;
+  function send(commitment: bigint, round: number, token: string) {
+    if (sent.current.has(round)) return;
+    sent.current.add(round);
     setStep({ kind: "sending" });
     run(async () => {
       const answer = await registrar.send(tier0RequestBody(commitment, registrar.region, token));
       if (answer !== "accepted") return { kind: "stopped", problem: ANSWERS[answer], commitment };
       const acceptedAt = registrar.now();
-      // The request is noted only beside the identity it was made for: the
-      // secret read back must still commit to what was sent.
-      const read = await registrar.identity();
-      if (read.kind !== "found") return { kind: "stopped", problem: "not-noted" };
-      const { secret } = read.identity;
+      // The request went: whatever fails from here, the voter is told it was
+      // sent and not noted, never that nothing was sent.
       try {
-        const again = await registrar.commitment(secret);
-        if (!again.ok || again.commitment !== commitment)
-          return { kind: "stopped", problem: "not-noted" };
-        const noted = await registrar.record(secret, { region: registrar.region, acceptedAt });
-        return noted === "recorded" ? { kind: "sent" } : { kind: "stopped", problem: "not-noted" };
-      } finally {
-        secret.fill(0);
+        return (await note(commitment, acceptedAt))
+          ? { kind: "sent" }
+          : { kind: "stopped", problem: "not-noted" };
+      } catch {
+        return { kind: "stopped", problem: "not-noted" };
       }
     });
+  }
+
+  /**
+   * Notes the accepted request only beside the identity it was made for: the
+   * secret read back must still commit to what was sent, and the store still
+   * hold it (`recordTier0Request`). The page's copy is kept across the check
+   * for that comparison, then zeroed (T-12).
+   */
+  async function note(commitment: bigint, acceptedAt: number): Promise<boolean> {
+    const read = await registrar.identity();
+    if (read.kind !== "found") return false;
+    const { secret } = read.identity;
+    try {
+      const again = await registrar.commitment(secret);
+      if (!again.ok || again.commitment !== commitment) return false;
+      const noted = await registrar.record(secret, { region: registrar.region, acceptedAt });
+      return noted === "recorded";
+    } finally {
+      secret.fill(0);
+    }
   }
 
   switch (step.kind) {
@@ -206,7 +230,7 @@ export function Register({
           key={step.round}
           poll={poll}
           Challenge={registrar.Challenge}
-          onToken={(token) => send(step.commitment, token)}
+          onToken={(token) => send(step.commitment, step.round, token)}
         />
       );
     case "sent":
@@ -219,7 +243,7 @@ export function Register({
         ? undefined
         : commitment === undefined
           ? onDone
-          : () => setStep({ kind: "challenge", commitment, round: asked.current });
+          : () => setStep({ kind: "challenge", commitment, round: ++rounds.current });
       return <RegisterStopped poll={poll} problem={step.problem} onRetry={retry} />;
     }
   }

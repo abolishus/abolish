@@ -1189,7 +1189,8 @@ export const RegistersANewIdentity: Story = {
     await expect(create).toHaveBeenCalledOnce();
     await expect(commitment).toHaveBeenCalledOnce();
     await expect(send).not.toHaveBeenCalled();
-    await userEvent.click(canvas.getByRole("button", { name: "Pass the check" }));
+    // A second token from the same frame sends nothing.
+    await userEvent.dblClick(canvas.getByRole("button", { name: "Pass the check" }));
     await expect(
       await canvas.findByRole("heading", { level: 1, name: "Your registration was sent" }),
     ).toHaveFocus();

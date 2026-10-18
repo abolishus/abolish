@@ -163,7 +163,14 @@ async function withStore<T>(
   });
   try {
     return await new Promise<T>((resolve, reject) => {
-      const transaction = db.transaction(STORE, mode);
+      // Strict durability for writes: completion then means on disk, not
+      // only in the browser's cache, so an identity a request was sent for
+      // survives a crash right after (T-18).
+      const transaction = db.transaction(
+        STORE,
+        mode,
+        mode === "readwrite" ? { durability: "strict" } : undefined,
+      );
       const result = use(transaction.objectStore(STORE));
       // Resolved on completion, so a write is durable before the caller goes on.
       transaction.oncomplete = () => resolve(result());

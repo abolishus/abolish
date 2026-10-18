@@ -284,11 +284,20 @@ contract BoardHandler is TestBase {
         uint256 n = seed % 4 + 1;
         uint256 at = (seed >> 8) % n;
         bytes memory batch;
+        bool reframed;
         for (uint256 i; i < n; i++) {
             bytes memory r = honest.receipts[(seed >> (8 * (i + 2))) % 3];
-            batch = bytes.concat(batch, i == at ? _changed(r, position, delta) : r);
+            if (i == at) {
+                r = _changed(r, position, delta);
+                // A version byte changed to 2 frames that receipt as 165
+                // bytes, so the call refuses the framing, naming none.
+                reframed = r[2] == 0x02;
+            }
+            batch = bytes.concat(batch, r);
         }
-        _expectRefused(abi.encodeCall(Board.submitReceipts, (batch)), false, at);
+        _expectRefused(
+            abi.encodeCall(Board.submitReceipts, (batch)), false, reframed ? type(uint256).max : at
+        );
     }
 
     /// Invariants 3 and 4 by probing: an honest record not yet accepted is

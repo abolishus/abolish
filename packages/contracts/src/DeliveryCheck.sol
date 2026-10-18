@@ -20,6 +20,11 @@ interface IBoardElections is IElectionParameters {
         external
         view
         returns (bytes32 keySetHash, uint256 seats);
+
+    function authorSigningKeyOf(bytes32 definitionHash, uint256 index)
+        external
+        view
+        returns (uint256 x, uint256 y);
 }
 
 /// What the board reads from the trustee registry: a recorded key set's
@@ -52,7 +57,23 @@ interface IBoardTrustees {
 /// any number per seat and ballot are accepted (T-25, T-54). Each element is
 /// framed as the ballot check frames one (ADR 0028, 3B). Every failure
 /// reverts, naming the record's position in its call.
+/// @dev Under ballot version 4 a receipt, posting or complaint is version 2:
+/// it names its seat's panel, and is judged against that panel's key set
+/// and, for a posting, that panel's share hashes (Delivery records
+/// (version 2); T-25, T-37, T-54). Version-2 batches and roots aren't read
+/// yet, so ballot version 4 fixes none this library takes.
 library DeliveryCheckLib {
+    /// What a receipt, posting or complaint names before its own fields:
+    /// `shift` is 1 at version 2, whose `panel` byte at 67 moves every later
+    /// field one byte on, and 0 at version 1, which names the default panel.
+    struct Head {
+        bytes32 definitionHash;
+        bytes32 ballotHash;
+        uint8 panel;
+        uint8 seat;
+        uint256 shift;
+    }
+
     /// Why a decoded delivery record is refused, in checking order.
     enum Code {
         /// No definition with the record's hash is registered.
@@ -89,6 +110,13 @@ library DeliveryCheckLib {
     /// The fields every delivery record starts with, after its 3-byte header.
     uint256 internal constant BALLOT_HASH_AT = 35;
     uint256 internal constant SEAT_AT = 67;
+    /// Version 2's `panel`, where version 1 has its seat; a receipt and a
+    /// complaint are one byte longer (Delivery records (version 2)).
+    uint256 internal constant PANEL_AT = 67;
+    uint256 internal constant RECEIPT_V2_LENGTH = 165;
+    uint256 internal constant COMPLAINT_V2_LENGTH = 229;
+    uint8 internal constant DEFAULT_PANEL = 1;
+    uint8 internal constant AUTHOR_PANEL = 2;
     /// A posting's fields after the seat (docs/spec/share-encryption.md,
     /// Ciphertext): `m`, then `share_ciphertext`.
     uint256 internal constant M_AT = 68;
@@ -132,6 +160,11 @@ library DeliveryCheckLib {
     bytes internal constant DS_RECEIPT = "\x1cabolish/v1/sig/share-receipt";
     bytes internal constant DS_COMPLAINT = "\x1eabolish/v1/sig/share-complaint";
     bytes internal constant DS_CIPHERTEXT = "\x1babolish/v1/share-ciphertext";
+    /// `abolish/v1/sig/share-receipt-2` (0x1e = 30) and
+    /// `abolish/v1/sig/share-complaint-2` (0x20 = 32): new tags, so no
+    /// version-1 signature verifies on a version-2 record (T-31).
+    bytes internal constant DS_RECEIPT_2 = "\x1eabolish/v1/sig/share-receipt-2";
+    bytes internal constant DS_COMPLAINT_2 = "\x20abolish/v1/sig/share-complaint-2";
     /// `abolish/v1/sig/share-receipt-batch` (0x22 = 34).
     bytes internal constant DS_BATCH = "\x22abolish/v1/sig/share-receipt-batch";
     /// `abolish/v1/sig/share-complaint-batch` (0x24 = 36).
@@ -139,24 +172,27 @@ library DeliveryCheckLib {
     /// `abolish/v1/sig/obligation-root` (0x1e = 30).
     bytes internal constant DS_ROOT = "\x1eabolish/v1/sig/obligation-root";
 
-    /// Checks share receipt number `index` of a batch, a 164-byte slice,
-    /// and returns the definition and ballot hashes it names.
+    /// Checks share receipt number `index` of a batch, a 164-byte slice (165
+    /// at version 2), and returns the definition and ballot hashes it names.
     function checkReceipt(
         bytes calldata r,
         uint256 index,
         IBoardElections elections,
         IBoardTrustees trustees
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
-        (definitionHash, ballotHash) = _header(r, index, RECEIPT_TYPE, elections);
-        _uint(r, index, SEAT_AT, 1);
-        _uint(r, index, 68, 32);
-        _signature(r, index, 100);
-        if (r.length != RECEIPT_LENGTH) {
-            _malformed(index, ElectionDefinitionLib.DecodeError.TrailingBytes, RECEIPT_LENGTH);
+        Head memory h = _head(r, index, RECEIPT_TYPE, elections);
+        uint256 s = h.shift;
+        _uint(r, index, 68 + s, 32);
+        _signature(r, index, 100 + s);
+        if (r.length != RECEIPT_LENGTH + s) {
+            _malformed(index, ElectionDefinitionLib.DecodeError.TrailingBytes, RECEIPT_LENGTH + s);
         }
-        // The 97-byte statement the seat signed: every field before the
-        // signature (docs/spec/delivery.md, Share receipt).
-        _verify(r, index, definitionHash, uint8(r[SEAT_AT]), elections, trustees, DS_RECEIPT, 100);
+        // The 97-byte statement the seat signed (98 at version 2): every
+        // field before the signature (docs/spec/delivery.md, Share receipt,
+        // Records (version 2)).
+        (uint256 x, uint256 y) = _signingKey(h, index, elections, trustees);
+        _verify(r, index, s == 0 ? DS_RECEIPT : DS_RECEIPT_2, 100 + s, x, y);
+        return (h.definitionHash, h.ballotHash);
     }
 
     /// Checks a share-receipt batch, the record of `submitReceiptBatch`, and
@@ -169,7 +205,7 @@ library DeliveryCheckLib {
         view
         returns (bytes32 definitionHash, uint8 seat)
     {
-        definitionHash = _definition(r, 0, BATCH_TYPE, elections);
+        (definitionHash,) = _definition(r, 0, BATCH_TYPE, elections, false);
         seat = uint8(_uint(r, 0, BATCH_SEAT_AT, 1));
         uint256 count = _uint(r, 0, BATCH_COUNT_AT, 4);
         // The count is bounded before any pair is read (T-52).
@@ -197,7 +233,7 @@ library DeliveryCheckLib {
         }
         // `m`: the `37 + 64·c` bytes before the signature, verified once for
         // every pair (docs/spec/delivery.md, Share-receipt batch).
-        _verify(r, 0, definitionHash, seat, elections, trustees, DS_BATCH, sigAt);
+        _verifyDefault(r, definitionHash, seat, elections, trustees, DS_BATCH, sigAt);
     }
 
     /// Checks a share-complaint batch, the record of `submitComplaintBatch`,
@@ -210,7 +246,7 @@ library DeliveryCheckLib {
         IBoardElections elections,
         IBoardTrustees trustees
     ) internal view returns (bytes32 definitionHash, uint8 seat) {
-        definitionHash = _definition(r, 0, COMPLAINT_BATCH_TYPE, elections);
+        (definitionHash,) = _definition(r, 0, COMPLAINT_BATCH_TYPE, elections, false);
         seat = uint8(_uint(r, 0, BATCH_SEAT_AT, 1));
         uint256 count = _uint(r, 0, BATCH_COUNT_AT, 4);
         // The count is bounded before any entry is read (T-52).
@@ -238,7 +274,7 @@ library DeliveryCheckLib {
         if (r.length != sigAt + 64) {
             _malformed(0, ElectionDefinitionLib.DecodeError.TrailingBytes, sigAt + 64);
         }
-        _verify(r, 0, definitionHash, seat, elections, trustees, DS_COMPLAINT_BATCH, sigAt);
+        _verifyDefault(r, definitionHash, seat, elections, trustees, DS_COMPLAINT_BATCH, sigAt);
     }
 
     /// Checks an obligation root, the record of `submitObligationRoot`, and
@@ -254,7 +290,7 @@ library DeliveryCheckLib {
         IBoardElections elections,
         IBoardTrustees trustees
     ) internal view returns (bytes32 definitionHash, uint8 seat, uint8 kind) {
-        definitionHash = _definition(r, 0, ROOT_TYPE, elections);
+        (definitionHash,) = _definition(r, 0, ROOT_TYPE, elections, false);
         seat = uint8(_uint(r, 0, BATCH_SEAT_AT, 1));
         kind = uint8(_uint(r, 0, ROOT_KIND_AT, 1));
         if (kind != RECEIPT_ROOT && kind != COMPLAINT_ROOT) {
@@ -290,7 +326,7 @@ library DeliveryCheckLib {
         }
         // `m`: the 106 bytes before the signature (docs/spec/delivery.md,
         // Obligation root).
-        _verify(r, 0, definitionHash, seat, elections, trustees, DS_ROOT, ROOT_SIG_AT);
+        _verifyDefault(r, definitionHash, seat, elections, trustees, DS_ROOT, ROOT_SIG_AT);
     }
 
     /// Checks a share complaint and returns the hashes it names.
@@ -300,19 +336,21 @@ library DeliveryCheckLib {
         IBoardElections elections,
         IBoardTrustees trustees
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
-        (definitionHash, ballotHash) = _header(r, index, COMPLAINT_TYPE, elections);
-        _uint(r, index, SEAT_AT, 1);
+        Head memory h = _head(r, index, COMPLAINT_TYPE, elections);
+        uint256 s = h.shift;
         // `complaint_proof`: `D`, never the identity, then `c` and `z`.
-        _element(r, index, 68);
-        _scalar(r, index, 100);
-        _scalar(r, index, 132);
-        _signature(r, index, 164);
-        if (r.length != COMPLAINT_LENGTH) {
-            _malformed(index, ElectionDefinitionLib.DecodeError.TrailingBytes, COMPLAINT_LENGTH);
+        _element(r, index, 68 + s);
+        _scalar(r, index, 100 + s);
+        _scalar(r, index, 132 + s);
+        _signature(r, index, 164 + s);
+        if (r.length != COMPLAINT_LENGTH + s) {
+            _malformed(index, ElectionDefinitionLib.DecodeError.TrailingBytes, COMPLAINT_LENGTH + s);
         }
-        // `m`: the 161 bytes before the signature (docs/spec/delivery.md,
-        // Share complaint).
-        _verify(r, index, definitionHash, uint8(r[SEAT_AT]), elections, trustees, DS_COMPLAINT, 164);
+        // `m`: the 161 bytes before the signature, 162 at version 2
+        // (docs/spec/delivery.md, Share complaint, Records (version 2)).
+        (uint256 x, uint256 y) = _signingKey(h, index, elections, trustees);
+        _verify(r, index, s == 0 ? DS_COMPLAINT : DS_COMPLAINT_2, 164 + s, x, y);
+        return (h.definitionHash, h.ballotHash);
     }
 
     /// Checks a share posting against `ballot`, the record (0x0002) of the
@@ -331,49 +369,50 @@ library DeliveryCheckLib {
         BallotCheck checker,
         uint256[2] memory qualified
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
-        (definitionHash, ballotHash) = _header(r, 0, POSTING_TYPE, elections);
-        uint256 seat = _uint(r, 0, SEAT_AT, 1);
-        _uint(r, 0, M_AT, 32);
-        if (r.length < CT_DH_AT) {
-            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, CIPHERTEXT_AT);
+        Head memory h = _head(r, 0, POSTING_TYPE, elections);
+        uint256 s = h.shift;
+        _uint(r, 0, M_AT + s, 32);
+        if (r.length < CT_DH_AT + s) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, CIPHERTEXT_AT + s);
         }
-        _element(r, 0, CT_DH_AT);
-        _scalar(r, 0, CT_DH_AT + 32);
-        _scalar(r, 0, CT_DH_AT + 64);
-        uint256 sealedLength = _uint(r, 0, SEALED_AT, 4);
+        _element(r, 0, CT_DH_AT + s);
+        _scalar(r, 0, CT_DH_AT + s + 32);
+        _scalar(r, 0, CT_DH_AT + s + 64);
+        uint256 sealedAt = SEALED_AT + s;
+        uint256 sealedLength = _uint(r, 0, sealedAt, 4);
         if (sealedLength > MAX_SEALED) {
-            _malformed(0, ElectionDefinitionLib.DecodeError.LengthOverMax, SEALED_AT);
+            _malformed(0, ElectionDefinitionLib.DecodeError.LengthOverMax, sealedAt);
         }
-        if (r.length < SEALED_AT + 4 + sealedLength) {
-            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, SEALED_AT + 4);
+        if (r.length < sealedAt + 4 + sealedLength) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, sealedAt + 4);
         }
-        if (r.length > SEALED_AT + 4 + sealedLength) {
+        if (r.length > sealedAt + 4 + sealedLength) {
             _malformed(
-                0, ElectionDefinitionLib.DecodeError.TrailingBytes, SEALED_AT + 4 + sealedLength
+                0, ElectionDefinitionLib.DecodeError.TrailingBytes, sealedAt + 4 + sealedLength
             );
         }
 
-        _requireSeat(definitionHash, seat, 0, elections, trustees);
+        _requireSeat(h, 0, elections, trustees);
         // Only `m` is free in `sealed`: `encode(S_i)` has one 64-byte share
         // per option, behind a 4-byte count, then the 16-byte tag.
-        uint256 options = elections.parameters(definitionHash).optionCount;
+        uint256 options = elections.parameters(h.definitionHash).optionCount;
         if (sealedLength != 4 + 64 * options + 16) revert DeliveryRefused(0, Code.PostingLength);
 
-        _bindBallot(r, ballot, elections, checker, qualified, seat, definitionHash, ballotHash);
+        _bindBallot(r, ballot, elections, checker, qualified, h);
+        return (h.definitionHash, h.ballotHash);
     }
 
     /// A posting's ballot: it passes the whole ballot check, its ballot
-    /// hash is the posting's, and its share hash for `seat` is the hash of
-    /// the posting's ciphertext.
+    /// hash is the posting's, and its share hash for the posting's seat, in
+    /// the list of the posting's panel, is the hash of the posting's
+    /// ciphertext.
     function _bindBallot(
         bytes calldata r,
         bytes calldata ballot,
         IBoardElections elections,
         BallotCheck checker,
         uint256[2] memory qualified,
-        uint256 seat,
-        bytes32 definitionHash,
-        bytes32 ballotHash
+        Head memory h
     ) private view {
         (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) =
             checker.check(ballot, elections, qualified[0], qualified[1]);
@@ -381,18 +420,26 @@ library DeliveryCheckLib {
         // definition, never the posting's own `definition_hash`, which must
         // be the same election, or the seat, key set and length judged above
         // would be another election's than the ballot's.
-        if (a.definitionHash != definitionHash || a.ballotHash != ballotHash) {
+        if (a.definitionHash != h.definitionHash || a.ballotHash != h.ballotHash) {
             revert DeliveryRefused(0, Code.PostingBallot);
         }
-        // The ballot passed `validity-shape`, so it has `n` share hashes, and
-        // a key-set seat is at most `n`; the bound is checked anyway, so the
-        // read never depends on the trustee registry's. One SHA-256 over
-        // `ct_i` as the posting encodes it, its one encoding
-        // (docs/spec/delivery.md, Share posting).
-        uint256 at = l.shareHashesAt + 32 * (seat - 1);
+        // A posting is judged against its own panel's list only, so it never
+        // stands for a seat of the other panel (T-37, T-29).
+        uint256 at = l.shareHashesAt;
+        uint256 count = l.shareCount;
+        if (h.panel == AUTHOR_PANEL) {
+            at = l.authorShareHashesAt;
+            count = l.authorShareCount;
+        }
+        // The ballot passed `validity-shape`, so it has `n` share hashes in
+        // each panel's list, and a key-set seat is at most `n`; the bound is
+        // checked anyway, so the read never depends on either registry's.
+        // One SHA-256 over `ct_i` as the posting encodes it, its one
+        // encoding (docs/spec/delivery.md, Share posting).
+        at += 32 * (uint256(h.seat) - 1);
         if (
-            seat > l.shareCount
-                || sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT:]))
+            h.seat > count
+                || sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT + h.shift:]))
                     != bytes32(ballot[at:at + 32])
         ) {
             revert DeliveryRefused(0, Code.PostingHash);
@@ -400,26 +447,43 @@ library DeliveryCheckLib {
     }
 
     /// The header and the election: type, then the election the record
-    /// names, then its version, which ballot versions 1 to 3 fix at 1
-    /// (docs/spec/delivery.md, Versions). As in the ballot check, the
-    /// election is found before the version means anything.
-    function _header(bytes calldata r, uint256 index, uint16 expected, IBoardElections elections)
+    /// names, then its version, which ballot versions 1 to 3 fix at 1 and
+    /// ballot version 4 at 2 (docs/spec/delivery.md, Versions, Version 2);
+    /// then the ballot hash, version 2's panel and the seat. As in the ballot
+    /// check, the election is found before the version means anything.
+    function _head(bytes calldata r, uint256 index, uint16 expected, IBoardElections elections)
         private
         view
-        returns (bytes32 definitionHash, bytes32 ballotHash)
+        returns (Head memory h)
     {
-        definitionHash = _definition(r, index, expected, elections);
-        ballotHash = bytes32(_uint(r, index, BALLOT_HASH_AT, 32));
+        bool two;
+        (h.definitionHash, two) = _definition(r, index, expected, elections, true);
+        h.ballotHash = bytes32(_uint(r, index, BALLOT_HASH_AT, 32));
+        h.panel = DEFAULT_PANEL;
+        if (two) {
+            h.shift = 1;
+            h.panel = uint8(_uint(r, index, PANEL_AT, 1));
+            // Not compared with the election: an author panel's record in a
+            // poll without one is read, and refused at `delivery-seat`.
+            if (h.panel != DEFAULT_PANEL && h.panel != AUTHOR_PANEL) {
+                _malformed(index, ElectionDefinitionLib.DecodeError.InvalidEnum, PANEL_AT);
+            }
+        }
+        h.seat = uint8(_uint(r, index, SEAT_AT + h.shift, 1));
     }
 
     /// The type, the election and the version, which every delivery record
-    /// starts with; a batch names no ballot hash after them.
+    /// starts with; a batch names no ballot hash after them. `versionTwo`
+    /// says whether the caller reads version 2, which ballot version 4
+    /// fixes; for one that doesn't, ballot version 4 is as unknown as any
+    /// later one. Returns whether the record is version 2.
     function _definition(
         bytes calldata r,
         uint256 index,
         uint16 expected,
-        IBoardElections elections
-    ) private view returns (bytes32 definitionHash) {
+        IBoardElections elections,
+        bool versionTwo
+    ) private view returns (bytes32 definitionHash, bool two) {
         uint256 t = _uint(r, index, 0, 2);
         if (t != expected) {
             _malformed(
@@ -436,47 +500,84 @@ library DeliveryCheckLib {
         if (pinned == 0) revert DeliveryRefused(index, Code.DeliveryStray);
         // A ballot version the board doesn't know fixes delivery versions it
         // can't know either.
-        if (pinned > 3) _malformed(index, ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
-        if (version != 1) _malformed(index, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2);
+        if (pinned > 4 || (pinned == 4 && !versionTwo)) {
+            _malformed(index, ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
+        }
+        two = pinned == 4;
+        if (version != (two ? 2 : 1)) {
+            _malformed(index, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2);
+        }
     }
 
-    /// The seat is one of the registered key set's, which the trustee
-    /// registry recorded for the election's stub and panel, never one a
-    /// submitter names (ADR 0028, 2B; T-37). Returns the ceremony's stub
-    /// hash and panel.
+    /// The seat is one of its panel key set's, never one a submitter names
+    /// (ADR 0028, 2B; T-37): for the default panel the registered key set
+    /// the trustee registry recorded for the election's stub and panel, for
+    /// the author panel the key set the election registry recorded with the
+    /// definition (Author panel registration), empty in a poll without one.
+    /// Returns the ceremony's stub hash and panel for a default seat.
     function _requireSeat(
-        bytes32 definitionHash,
-        uint256 seat,
+        Head memory h,
         uint256 index,
         IBoardElections elections,
         IBoardTrustees trustees
     ) private view returns (bytes32 stub, bytes32 panel) {
-        (stub, panel) = elections.ceremony(definitionHash);
-        (, uint256 seats) = trustees.keySetOf(stub, panel);
+        uint256 seats;
+        if (h.panel == AUTHOR_PANEL) {
+            (, seats) = elections.authorKeySetOf(h.definitionHash);
+        } else {
+            (stub, panel) = elections.ceremony(h.definitionHash);
+            (, seats) = trustees.keySetOf(stub, panel);
+        }
         // Seat 0 never exists, whatever a key set's bit 0 says.
-        if (seat == 0 || (seats >> seat) & 1 == 0) {
+        if (h.seat == 0 || (seats >> h.seat) & 1 == 0) {
             revert DeliveryRefused(index, Code.DeliverySeat);
         }
     }
 
-    /// The seat's signature, by its registered per-election signing key,
-    /// never its identity key (docs/spec/trustee-identity.md, Which key signs
-    /// what), on `H(DS(tag, m))` with `m` the record's bytes from the
-    /// definition hash to the signature at `sigAt`, by `seat`, the seat the
-    /// record names.
-    function _verify(
-        bytes calldata r,
+    /// The registered per-election signing key of the record's seat in its
+    /// panel key set, never its identity key (docs/spec/trustee-identity.md,
+    /// Which key signs what), once the seat is found in that set.
+    function _signingKey(
+        Head memory h,
         uint256 index,
+        IBoardElections elections,
+        IBoardTrustees trustees
+    ) private view returns (uint256 x, uint256 y) {
+        (bytes32 stub, bytes32 panel) = _requireSeat(h, index, elections, trustees);
+        if (h.panel == AUTHOR_PANEL) return elections.authorSigningKeyOf(h.definitionHash, h.seat);
+        return trustees.signingKeyOf(stub, panel, h.seat);
+    }
+
+    /// A version-1 batch's or root's signature, by `seat` of the default
+    /// panel, the record's position 0.
+    function _verifyDefault(
+        bytes calldata r,
         bytes32 definitionHash,
-        uint256 seat,
+        uint8 seat,
         IBoardElections elections,
         IBoardTrustees trustees,
         bytes memory tag,
         uint256 sigAt
     ) private view {
-        (bytes32 stub, bytes32 panel) =
-            _requireSeat(definitionHash, seat, index, elections, trustees);
-        (uint256 x, uint256 y) = trustees.signingKeyOf(stub, panel, seat);
+        Head memory h;
+        h.definitionHash = definitionHash;
+        h.panel = DEFAULT_PANEL;
+        h.seat = seat;
+        (uint256 x, uint256 y) = _signingKey(h, 0, elections, trustees);
+        _verify(r, 0, tag, sigAt, x, y);
+    }
+
+    /// The signature at `sigAt` on `H(DS(tag, m))`, `m` the record's bytes
+    /// from the definition hash to the signature, under the signing key
+    /// `(x, y)` of the seat the record names.
+    function _verify(
+        bytes calldata r,
+        uint256 index,
+        bytes memory tag,
+        uint256 sigAt,
+        uint256 x,
+        uint256 y
+    ) private view {
         if (!TrusteeIdentityLib.verify(
                 sha256(bytes.concat(tag, r[3:sigAt])),
                 uint256(bytes32(r[sigAt:sigAt + 32])),

@@ -13,6 +13,7 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type ReceiptResult,
   type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
@@ -250,6 +251,20 @@ export class BallotWorker {
       PROVE_TIMEOUT_MS,
     );
     if (response.kind !== "cast") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * The seat `receipt` receipts `ballot` for, a cast of the poll the worker
+   * last checked, checked against that poll's registered signing keys.
+   */
+  async receipt(ballot: Uint8Array, receipt: Uint8Array): Promise<ReceiptResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "receipt", ballot, receipt }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "receipt") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

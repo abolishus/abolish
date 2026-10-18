@@ -9,6 +9,9 @@
 // ML-KEM message `m_i` beside its ballot, recorded before the ballot leaves,
 // so delivery to each seat's intake, and the posting a voter may choose for
 // a seat that never receipts, survive a reload ([[delivery]], Client rule 4).
+// Once a seat's receipt passes for the ballot, the receipt is kept in its
+// place and that seat's `m_i` erased from every cast it receipts, so a
+// receipted seat is never posted (Client rules 1 to 3).
 // Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
@@ -18,11 +21,14 @@
 // that election and tier until the voter decides.
 
 import {
+  ballotHashV3,
   type BallotRecordV3,
   type CastShare,
   decodeBallot,
+  decodeShareReceipt,
   MAX_BOARD_PAYLOAD,
   shareCiphertextHash,
+  type ShareReceiptRecord,
 } from "@abolishus/crypto";
 
 import { withStore } from "./store.ts";
@@ -35,6 +41,15 @@ export interface Boarded {
   readonly link: Uint8Array;
 }
 
+/**
+ * One qualified seat's share as a cast keeps it: its `ct_i`, and either its
+ * `m_i`, while no receipt for the ballot has passed, or that receipt once
+ * one has, `m_i` then erased ([[delivery]], Client rule 2).
+ */
+export type KeptShare =
+  | { readonly seat: number; readonly ciphertext: Uint8Array; readonly m: Uint8Array }
+  | { readonly seat: number; readonly ciphertext: Uint8Array; readonly receipt: Uint8Array };
+
 /** One ballot this device cast, a version-3 ballot record ([[ballot-validity]]). */
 export interface CastRecord {
   /** The record's bytes, exactly as sent and as any retry sends them again. */
@@ -42,11 +57,11 @@ export interface CastRecord {
   /** Its `l1_ref_number`, read from the bytes. */
   readonly l1Number: bigint;
   /**
-   * Each qualified seat's `ct_i` and `m_i`, in seat order: exactly the seats
-   * whose share hash in the ballot isn't zero, each ciphertext hashing to
-   * its seat's share hash.
+   * Each qualified seat's `ct_i` with its `m_i` or its receipt, in seat
+   * order: exactly the seats whose share hash in the ballot isn't zero, each
+   * ciphertext hashing to its seat's share hash.
    */
-  readonly shares: readonly CastShare[];
+  readonly shares: readonly KeptShare[];
   /** The operator's checked answer, once one passed. */
   readonly boarded?: Boarded;
 }
@@ -64,6 +79,9 @@ export type RecordCastOutcome =
   | "unreadable"
   | "unwritable";
 
+/** `recordReceipt`'s outcome. */
+export type RecordReceiptOutcome = "recorded" | "missing" | "unreadable" | "unwritable";
+
 /** `recordBoarded`'s outcome. */
 export type RecordBoardedOutcome =
   | "recorded"
@@ -78,10 +96,11 @@ const STORE = "casts";
 
 /**
  * The stored record's version: another is unreadable, never migrated by
- * guessing. Version 1 kept no shares; no build wrote one, since none records
- * a cast before it delivers (open.tsx, `delivers`).
+ * guessing. Version 1 kept no shares and version 2 no receipts; no build
+ * wrote either, since none records a cast before it delivers (open.tsx,
+ * `delivers`).
  */
-const RECORD_VERSION = 2;
+const RECORD_VERSION = 3;
 
 /** The length of an ML-KEM-768 message `m` ([[share-encryption]], Ciphertext). */
 const M_LENGTH = 32;
@@ -125,39 +144,100 @@ function decodedOf(ballot: Uint8Array): BallotRecordV3 | undefined {
 
 const isZero = (bytes: Uint8Array) => bytes.every((b) => b === 0);
 
+/** The ballot hash of a decoded version-3 record, as its receipts sign it. */
+const ballotHashOf = (record: BallotRecordV3) =>
+  ballotHashV3(
+    { definitionHash: record.definition_hash, cell: record.cell, nullifier: record.nullifier },
+    record.committed_vote,
+  );
+
 /**
- * Copies of `shares` if they are exactly the qualified seats' of `record`:
- * one per seat whose share hash isn't zero, in seat order, each a
- * ciphertext hashing to that share hash and a 32-byte `m`; `undefined`
- * otherwise. So a cast kept here carries a share for every seat its ballot
- * must be delivered to and none it doesn't name (T-25, T-38).
+ * Whether `receipt` is a share receipt record (version 1, the one ballot
+ * version 3 fixes) for `seat` naming exactly `record`'s definition, ballot
+ * hash (`hash`) and share hash for that seat. Its signature isn't checked
+ * here: the worker checked it under the poll's registered keys before the
+ * receipt was recorded (`castReceiptSeatV3`), and this storage, like the
+ * rest of the record, is trusted no further than this origin (T-18).
  */
-function sharesFor(record: BallotRecordV3, shares: unknown): CastShare[] | undefined {
+function receiptFits(
+  record: BallotRecordV3,
+  hash: Uint8Array,
+  seat: number,
+  receipt: Uint8Array,
+): boolean {
+  let decoded: ShareReceiptRecord;
+  try {
+    decoded = decodeShareReceipt(receipt, 1);
+  } catch {
+    return false;
+  }
+  const shareHash = record.committed_vote.share_hashes[seat - 1];
+  return (
+    decoded.seat === seat &&
+    shareHash !== undefined &&
+    // An unqualified seat has no share to receipt.
+    !isZero(shareHash) &&
+    equalBytes(decoded.definition_hash, record.definition_hash) &&
+    equalBytes(decoded.ballot_hash, hash) &&
+    equalBytes(decoded.share_hash, shareHash)
+  );
+}
+
+/**
+ * Copies of stored `shares` if they are exactly the qualified seats' of
+ * `record`: one per seat whose share hash isn't zero, in seat order, each a
+ * ciphertext hashing to that share hash with either a 32-byte `m` and no
+ * receipt or a receipt fitting the ballot and no `m`; `undefined`
+ * otherwise. So a cast kept here carries a share for every seat its ballot
+ * must be delivered to and none it doesn't name, and never both a seat's
+ * receipt and its `m_i` (T-25, T-38).
+ */
+function sharesFor(
+  record: BallotRecordV3,
+  hash: Uint8Array,
+  shares: unknown,
+): KeptShare[] | undefined {
   // A cloned array keeps any extra own properties: only the indices are a record's.
   if (!Array.isArray(shares) || Object.keys(shares).length !== shares.length) return undefined;
-  const seats = record.committed_vote.share_hashes.flatMap((hash, i) =>
-    isZero(hash) ? [] : [{ seat: i + 1, hash }],
+  const seats = record.committed_vote.share_hashes.flatMap((shareHash, i) =>
+    isZero(shareHash) ? [] : [{ seat: i + 1, hash: shareHash }],
   );
   if (shares.length !== seats.length) return undefined;
-  const copies: CastShare[] = [];
+  const copies: KeptShare[] = [];
   for (let i = 0; i < seats.length; i++) {
     const share: unknown = shares[i];
     const expected = seats[i] as (typeof seats)[number];
-    if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m"])) return undefined;
-    const { seat, ciphertext, m } = share;
+    if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m", "receipt"]))
+      return undefined;
+    const { seat, ciphertext, m, receipt } = share;
     if (
       seat !== expected.seat ||
       !(ciphertext instanceof Uint8Array) ||
       ciphertext.length > MAX_BOARD_PAYLOAD ||
-      !(m instanceof Uint8Array) ||
-      m.length !== M_LENGTH ||
       !equalBytes(shareCiphertextHash(ciphertext), expected.hash)
     )
       return undefined;
-    copies.push({ seat, ciphertext: ciphertext.slice(), m: m.slice() });
+    if (m instanceof Uint8Array && m.length === M_LENGTH && receipt === null)
+      copies.push({ seat, ciphertext: ciphertext.slice(), m: m.slice() });
+    else if (
+      m === null &&
+      receipt instanceof Uint8Array &&
+      receipt.length <= MAX_BOARD_PAYLOAD &&
+      receiptFits(record, hash, seat, receipt)
+    )
+      copies.push({ seat, ciphertext: ciphertext.slice(), receipt: receipt.slice() });
+    else return undefined;
   }
   return copies;
 }
+
+/** A kept share as `sharesFor` reads it back. */
+const storedShare = (share: KeptShare) => ({
+  seat: share.seat,
+  ciphertext: share.ciphertext.slice(),
+  m: "m" in share ? share.m.slice() : null,
+  receipt: "receipt" in share ? share.receipt.slice() : null,
+});
 
 // Where a board entry's fields sit (docs/spec/board.md): after the record
 // header, `election_id`, then `index` and `segment`, then the payload's
@@ -221,7 +301,7 @@ function castOf(v: unknown): CastRecord | undefined {
   if (!(ballot instanceof Uint8Array) || ballot.length > MAX_BOARD_PAYLOAD) return undefined;
   const decoded = decodedOf(ballot);
   if (decoded === undefined) return undefined;
-  const kept = sharesFor(decoded, shares);
+  const kept = sharesFor(decoded, ballotHashOf(decoded), shares);
   if (kept === undefined) return undefined;
   const cast = { ballot: ballot.slice(), l1Number: decoded.l1_ref_number, shares: kept };
   if (boarded === null) return cast;
@@ -231,9 +311,10 @@ function castOf(v: unknown): CastRecord | undefined {
 
 /**
  * The casts a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 2 and a list of version-3 ballot
+ * record this client writes: version 3 and a list of version-3 ballot
  * records naming strictly ascending L1 blocks, each with its qualified
- * seats' shares and its checked board entry or `null`. Every byte array is a copy.
+ * seats' shares, each with its `m_i` or its receipt, and its checked board
+ * entry or `null`. Every byte array is a copy.
  */
 export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
   if (!isRecord(value) || !hasExactly(value, ["v", "casts"])) return undefined;
@@ -271,11 +352,7 @@ export function storedCasts(casts: readonly CastRecord[]): Record<string, unknow
     v: RECORD_VERSION,
     casts: casts.map(({ ballot, shares, boarded }) => ({
       ballot: ballot.slice(),
-      shares: shares.map(({ seat, ciphertext, m }) => ({
-        seat,
-        ciphertext: ciphertext.slice(),
-        m: m.slice(),
-      })),
+      shares: shares.map(storedShare),
       boarded:
         boarded === undefined ? null : { entry: boarded.entry.slice(), link: boarded.link.slice() },
     })),
@@ -355,19 +432,67 @@ async function updateCasts<T extends string>(
 }
 
 /**
- * Records `ballot`, a version-3 ballot record about to be sent, as cast in
- * `electionId` at `tier` with its qualified seats' `shares`, before it
- * leaves the device ([[revoting]], Client rule 3; [[delivery]], Client rule
- * 4). Only a ballot naming a block strictly newer than every one
- * recorded there is kept, in the same transaction as the read, so two tabs
- * can't both record a cast on one block: `not-newer` otherwise, and the
- * ballot must not be sent (T-45). `unreadable` for casts this device can't
- * read, which are never replaced; `other-election` for a ballot naming
- * another definition than those recorded there, which is never kept beside
- * them; `unwritable` for storage the browser refuses. Throws on bytes that
- * aren't a version-3 ballot record, and on shares that aren't exactly its
- * qualified seats', each hashing to its share hash: the worker's own
- * output, so a mismatch is this client's fault.
+ * `casts` with `ballot`, a version-3 ballot record about to be sent, cast
+ * after them with its qualified seats' `shares` ([[revoting]], Client rule
+ * 3; [[delivery]], Client rule 4): `not-newer` unless it names a block
+ * strictly newer than every one of them (T-45), and `other-election` for a
+ * ballot naming another definition than theirs. A seat whose receipt for an
+ * earlier cast also receipts this one (a recast of the same seal, which
+ * carries its ballot hash) keeps that receipt in place of its `m_i`, so a
+ * receipted seat's `m_i` is never stored again (Client rule 2). Throws on
+ * bytes that aren't a version-3 ballot record, and on shares that aren't
+ * exactly its qualified seats', each with a 32-byte `m` and hashing to its
+ * share hash: the worker's own output, so a mismatch is this client's fault.
+ */
+export function withCast(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+  shares: readonly CastShare[],
+): CastRecord[] | "not-newer" | "other-election" {
+  const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
+  if (decoded === undefined || ballot.length > MAX_BOARD_PAYLOAD)
+    throw new TypeError("not a version-3 ballot record");
+  const hash = ballotHashOf(decoded);
+  // In the form `sharesFor` reads, with no receipt yet.
+  const asStored: unknown = Array.isArray(shares)
+    ? shares.map((share: unknown) =>
+        isRecord(share) && hasExactly(share, ["seat", "ciphertext", "m"])
+          ? { ...share, receipt: null }
+          : null,
+      )
+    : shares;
+  const kept = sharesFor(decoded, hash, asStored);
+  if (kept === undefined || kept.some((share) => !("m" in share)))
+    throw new TypeError("not the ballot's qualified seats' shares");
+  const first = casts[0];
+  if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
+    return "other-election";
+  const l1Number = decoded.l1_ref_number;
+  const newest = newestBlock(casts);
+  if (newest !== undefined && l1Number <= newest) return "not-newer";
+  const receipted = kept.map((share): KeptShare => {
+    const receipt = casts
+      .flatMap((cast) => cast.shares)
+      .find(
+        (held): held is Extract<KeptShare, { receipt: Uint8Array }> =>
+          held.seat === share.seat &&
+          "receipt" in held &&
+          receiptFits(decoded, hash, share.seat, held.receipt),
+      )?.receipt;
+    return receipt === undefined
+      ? share
+      : { seat: share.seat, ciphertext: share.ciphertext, receipt: receipt.slice() };
+  });
+  return [...casts, { ballot: ballot.slice(), l1Number, shares: receipted }];
+}
+
+/**
+ * Records `ballot` as cast in `electionId` at `tier` with its qualified
+ * seats' `shares` (`withCast`), before it leaves the device, in the same
+ * transaction as the read, so two tabs can't both record a cast on one
+ * block: only `recorded` lets the ballot leave (T-45). `unreadable` for
+ * casts this device can't read, which are never replaced; `unwritable` for
+ * storage the browser refuses. Throws as `withCast` does, before reading.
  */
 export async function recordCast(
   electionId: Uint8Array,
@@ -377,20 +502,69 @@ export async function recordCast(
   factory: IDBFactory = indexedDB,
 ): Promise<RecordCastOutcome> {
   const key = keyOf(electionId, tier);
+  withCast([], ballot, shares);
+  return updateCasts(key, factory, (casts) => withCast(casts, ballot, shares));
+}
+
+/**
+ * `casts` with `receipt`, a share receipt for `seat` that the worker passed
+ * for the cast whose bytes are exactly `ballot` (`castReceiptSeatV3`;
+ * [[delivery]], Client rule 1), kept in place of that seat's `m_i` in every
+ * cast it receipts: that cast and any recast of the same seal, which
+ * carries the same ballot hash and share (Client rule 2; T-18). A seat
+ * already receipted keeps its first receipt, which passed as well.
+ * `missing` if no cast has these bytes. Throws on a receipt that doesn't
+ * name `seat` and exactly this ballot, which the worker never passes.
+ */
+export function withReceipt(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+  seat: number,
+  receipt: Uint8Array,
+): CastRecord[] | "missing" {
   const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
-  if (decoded === undefined || ballot.length > MAX_BOARD_PAYLOAD)
-    throw new TypeError("not a version-3 ballot record");
-  const kept = sharesFor(decoded, shares);
-  if (kept === undefined) throw new TypeError("not the ballot's qualified seats' shares");
-  const l1Number = decoded.l1_ref_number;
-  const cast: CastRecord = { ballot: ballot.slice(), l1Number, shares: kept };
-  return updateCasts(key, factory, (casts) => {
-    const first = casts[0];
-    if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
-      return "other-election";
-    const newest = newestBlock(casts);
-    return newest !== undefined && l1Number <= newest ? "not-newer" : [...casts, cast];
+  if (
+    decoded === undefined ||
+    !(receipt instanceof Uint8Array) ||
+    !receiptFits(decoded, ballotHashOf(decoded), seat, receipt)
+  )
+    throw new TypeError("not a receipt for this ballot");
+  if (!casts.some((cast) => equalBytes(cast.ballot, ballot))) return "missing";
+  return casts.map((cast) => {
+    const at = cast.shares.findIndex((share) => share.seat === seat && "m" in share);
+    const share = cast.shares[at];
+    if (share === undefined) return cast;
+    // Every cast held decoded when it was read.
+    const record = decodedOf(cast.ballot) as BallotRecordV3;
+    if (!receiptFits(record, ballotHashOf(record), seat, receipt)) return cast;
+    return {
+      ...cast,
+      shares: cast.shares.with(at, {
+        seat,
+        ciphertext: share.ciphertext,
+        receipt: receipt.slice(),
+      }),
+    };
   });
+}
+
+/**
+ * Records a receipt (`withReceipt`) in `electionId` at `tier`, erasing the
+ * seat's `m_i` from what this origin's storage hands back; the browser may
+ * keep the replaced bytes on disk until it compacts them (T-18). Throws as
+ * `withReceipt` does, before reading.
+ */
+export async function recordReceipt(
+  electionId: Uint8Array,
+  tier: number,
+  ballot: Uint8Array,
+  seat: number,
+  receipt: Uint8Array,
+  factory: IDBFactory = indexedDB,
+): Promise<RecordReceiptOutcome> {
+  const key = keyOf(electionId, tier);
+  withReceipt([], ballot, seat, receipt);
+  return updateCasts(key, factory, (casts) => withReceipt(casts, ballot, seat, receipt));
 }
 
 /**

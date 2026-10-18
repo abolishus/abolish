@@ -24,6 +24,7 @@ import {
   type BallotV2Code,
   cellContextOf,
   checkBallotV3,
+  decodeBallot,
   encodeBallotV3,
   type QuestionBallotElection,
   questionBallotElection,
@@ -46,6 +47,7 @@ import {
   type ContractEventVersion,
   decodeContractEvent,
 } from "./contract-event.ts";
+import { decodeShareReceipt, type ShareReceiptRecord } from "./delivery.ts";
 import type { ElectionDefinitionV5 } from "./election-definition.ts";
 import { equalBytes } from "./nullifier-key.ts";
 import { decodeMembershipProof, membershipVkHash } from "./membership-proof.ts";
@@ -73,6 +75,7 @@ import {
   type KemPublicKey,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
+import { checkShareReceiptV3, type ReceiptSigner } from "./share-receipt.ts";
 import {
   tierMembership,
   TierMembershipError,
@@ -106,7 +109,12 @@ export type SealingElectionCode =
   | "ceremony-participation";
 
 export type SealingElection =
-  | { readonly ok: true; readonly election: QuestionBallotElection }
+  | {
+      readonly ok: true;
+      readonly election: QuestionBallotElection;
+      /** Each registered seat's signing key, which its share receipts verify under. */
+      readonly signers: readonly ReceiptSigner[];
+    }
   | {
       readonly ok: false;
       readonly code: SealingElectionCode;
@@ -187,7 +195,14 @@ export function sealingElectionV5(
   // and the tally's failure margin with it (T-54, T-40).
   if (checked.registered.length < Math.max(panel.threshold, panel.keys.length - 1))
     return refuse("ceremony-participation");
-  return { ok: true, election: questionBallotElection(definition, checked.registered) };
+  return {
+    ok: true,
+    election: questionBallotElection(definition, checked.registered),
+    signers: checked.registered.map(({ index, signingKey }) => ({
+      index,
+      signingKey: Uint8Array.from(signingKey),
+    })),
+  };
 }
 
 const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
@@ -649,4 +664,55 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
       ),
     ),
   });
+}
+
+/**
+ * `share-receipt` for a ballot this client cast ([[delivery]], Client rule
+ * 1): the seat `receipt` receipts, if it is a share receipt record (`0x000c`
+ * version 1, the version ballot version 3 fixes) naming exactly what
+ * `ballot`, a version-3 ballot record of `election`, gives: the definition,
+ * the ballot hash recomputed from the ballot and that seat's share hash,
+ * with a signature that verifies under the seat's registered signing key
+ * among `signers` (`sealingElectionV5`). `undefined` otherwise, whatever the
+ * bytes, so a seat counts as receipted, and its `m_i` may be erased, only
+ * on a receipt that counts for exactly this ballot (T-25, T-38). The ballot
+ * hash binds no L1 block, so a receipt for one cast of a seal counts for
+ * every recast of it. Throws on a `ballot` that isn't a version-3 ballot
+ * record of `election`: the client's own record.
+ */
+export function castReceiptSeatV3(
+  election: QuestionBallotElection,
+  signers: readonly ReceiptSigner[],
+  ballot: Uint8Array,
+  receipt: Uint8Array,
+): number | undefined {
+  const record = decodeBallot(ballot, 3);
+  if (!equalBytes(record.definition_hash, election.definitionHash))
+    throw new TypeError("castReceiptSeatV3: a ballot of another election");
+  let decoded: ShareReceiptRecord;
+  try {
+    decoded = decodeShareReceipt(receipt, 1);
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  const { seat } = decoded;
+  const vote = record.committed_vote;
+  const shareHash = vote.share_hashes[seat - 1];
+  if (shareHash === undefined) return undefined;
+  const ctx = {
+    definitionHash: election.definitionHash,
+    cell: record.cell,
+    nullifier: record.nullifier,
+  };
+  // The receipt's own fields are compared too: `checkShareReceiptV3` builds
+  // its statement from the ballot alone, so a record naming other hashes
+  // would otherwise pass on its signature and be kept as this ballot's.
+  if (
+    !equalBytes(decoded.definition_hash, election.definitionHash) ||
+    !equalBytes(decoded.ballot_hash, ballotHashV3(ctx, vote)) ||
+    !equalBytes(decoded.share_hash, shareHash)
+  )
+    return undefined;
+  return checkShareReceiptV3(signers, ctx, vote, seat, decoded.signature) ? seat : undefined;
 }

@@ -13,7 +13,9 @@ import { readFileSync } from "node:fs";
 import {
   checkBallotV3,
   decodeBallot,
+  encodeShareReceipt,
   identityCommitment,
+  intakeBallot,
   sealingElectionV5,
   shareCiphertextHash,
 } from "@abolishus/crypto";
@@ -42,6 +44,7 @@ import {
   panel,
   registeredHash,
   registrars,
+  seats,
 } from "./poll.ts";
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -185,6 +188,53 @@ function admitted(result: CastResult) {
 }
 
 describe("casting a seal", () => {
+  test(
+    "each seat's receipt from intake passes for the cast it receipts, and nothing else does (Client rule 1)",
+    async () => {
+      const { session, seal } = sealed();
+      const p = snarkjs();
+      const result = await session.cast(castRequest(seal, p.port));
+      p.close();
+      admitted(result);
+      if (!result.ok) throw new Error("unreachable");
+      const receipts = result.ciphertexts.map(({ seat, ciphertext }) => {
+        const secrets = seats[seat - 1];
+        if (secrets === undefined) throw new Error(`no seat ${seat}`);
+        const intake = intakeBallot(
+          election,
+          { seat, kemSecret: secrets.kem.secretKey, signingSecret: secrets.signingSecret },
+          result.ballot,
+          ciphertext,
+        );
+        if (!intake.ok) throw new Error(intake.code);
+        return encodeShareReceipt({
+          definition_hash: registeredHash,
+          ballot_hash: intake.ballotHash,
+          seat,
+          share_hash: intake.shareHash,
+          signature: intake.receipt,
+        });
+      });
+      const ask = (receipt: Uint8Array, ballot = result.ballot, on = session) =>
+        on.receipt({ v: PROTOCOL_VERSION, id: 6, kind: "receipt", ballot, receipt });
+      result.ciphertexts.forEach(({ seat }, i) =>
+        expect(ask(receipts[i] as Uint8Array)).toEqual({ ok: true, seat }),
+      );
+      // Another seat's signature under this seat's statement.
+      const [first, second] = receipts as [Uint8Array, Uint8Array];
+      const forged = Uint8Array.of(...first.subarray(0, -64), ...second.subarray(-64));
+      expect(ask(forged)).toEqual({ ok: false, problem: "refused" });
+      expect(ask(first.subarray(1))).toEqual({ ok: false, problem: "refused" });
+      // A ballot that isn't a cast of the poll held, or no poll held at all.
+      expect(ask(first, result.ballot.subarray(1))).toEqual({ ok: false, problem: "unknown" });
+      expect(ask(first, result.ballot, new BallotSession())).toEqual({
+        ok: false,
+        problem: "unknown",
+      });
+    },
+    2 * PROOF_TIMEOUT,
+  );
+
   test(
     "the record passes the admission checks, carries the seal's core, and recasts with the same vote; the seal is never opened",
     async () => {

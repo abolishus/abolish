@@ -564,6 +564,36 @@ describe("registration outcome requests", () => {
   });
 });
 
+describe("receipt requests", () => {
+  const receipt = () => ({
+    v: PROTOCOL_VERSION,
+    id: 15,
+    kind: "receipt",
+    ballot: new Uint8Array(40).fill(2),
+    receipt: new Uint8Array(30).fill(3),
+  });
+
+  test("accepts a well-formed request as it is: the bytes are the session's to judge", () => {
+    expect(parseRequest(receipt())).toEqual(receipt());
+  });
+
+  test.each([
+    ["a ballot that isn't bytes", { ballot: [2, 2] }],
+    ["a receipt that isn't bytes", { receipt: "03" }],
+    ["an extra key", { seat: 1 }],
+  ])("refuses one with %s", (_, change) => {
+    expect(parseRequest({ ...receipt(), ...change })).toBeUndefined();
+  });
+
+  test("refuses one without one of its keys", () => {
+    for (const key of ["ballot", "receipt"]) {
+      const r: Record<string, unknown> = receipt();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -579,6 +609,7 @@ describe("responses", () => {
       13,
     );
     expect(responseId({ v: PROTOCOL_VERSION, id: 14, kind: "backup-open", result: {} })).toBe(14);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 15, kind: "receipt", result: {} })).toBe(15);
   });
 
   test("ignores another version's response or kind", () => {

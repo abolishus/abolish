@@ -137,6 +137,9 @@ describe("sealingElectionV5", () => {
       Array.from({ length: base.panel_size }, (_, i) => i + 1),
     );
     expect(toHex(result.election.definitionHash)).not.toBe("");
+    // The receipts' signing keys, one per registered seat, as the transcript registered them.
+    expect(result.signers.map((s) => s.index)).toEqual([...result.election.qualified]);
+    for (const { signingKey } of result.signers) expect(signingKey).toHaveLength(33);
     expect(sealBallotV3(result.election, 0, [1, 0, 0, 0, 1, 1, 0, 0, 1]).trackingCode).toHaveLength(
       32,
     );

@@ -353,29 +353,34 @@ describe("a cast's ballot, against what the cast asked for", () => {
     for (const ballot of ballots) expect(castAsAsked(ballot, asked(ballot))).toBe(true);
   });
 
-  test("refuses another definition, cell, block number or block hash (T-45, T-38)", () => {
-    const flip = (bytes: Uint8Array, at: number) => bytes.with(at, (bytes[at] as number) ^ 1);
-    fc.assert(
-      fc.property(
-        fc.nat({ max: ballots.length - 1 }),
-        fc.nat({ max: 31 }),
-        fc.integer({ min: 1, max: 255 }),
-        fc.bigInt({ min: 1n, max: 2n ** 64n - 1n }),
-        (i, at, cellDelta, numberDelta) => {
-          const ballot = ballots[i] as Uint8Array;
-          const own = asked(ballot);
-          for (const other of [
-            { ...own, definitionHash: flip(own.definitionHash, at) },
-            { ...own, cell: (own.cell + cellDelta) % 256 },
-            { ...own, l1Number: (own.l1Number + numberDelta) % 2n ** 64n },
-            { ...own, l1Hash: flip(own.l1Hash, at) },
-          ])
-            expect(castAsAsked(ballot, other)).toBe(false);
-        },
-      ),
-      { numRuns },
-    );
-  });
+  // Five full ballot decodes a run: at CI's 1000 runs, past the 5-second default.
+  test(
+    "refuses another definition, cell, block number or block hash (T-45, T-38)",
+    { timeout: 60_000 },
+    () => {
+      const flip = (bytes: Uint8Array, at: number) => bytes.with(at, (bytes[at] as number) ^ 1);
+      fc.assert(
+        fc.property(
+          fc.nat({ max: ballots.length - 1 }),
+          fc.nat({ max: 31 }),
+          fc.integer({ min: 1, max: 255 }),
+          fc.bigInt({ min: 1n, max: 2n ** 64n - 1n }),
+          (i, at, cellDelta, numberDelta) => {
+            const ballot = ballots[i] as Uint8Array;
+            const own = asked(ballot);
+            for (const other of [
+              { ...own, definitionHash: flip(own.definitionHash, at) },
+              { ...own, cell: (own.cell + cellDelta) % 256 },
+              { ...own, l1Number: (own.l1Number + numberDelta) % 2n ** 64n },
+              { ...own, l1Hash: flip(own.l1Hash, at) },
+            ])
+              expect(castAsAsked(ballot, other)).toBe(false);
+          },
+        ),
+        { numRuns },
+      );
+    },
+  );
 
   test("refuses bytes that aren't a version-3 ballot record", () => {
     const own = asked(BALLOT);

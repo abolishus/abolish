@@ -20,10 +20,12 @@ import {
   finishSealV3,
   identityCommitment,
   isForbiddenCommitment,
+  isIdentitySecret,
   MembershipProverError,
   type QuestionBallotElection,
   sealBallotV3,
   type SealedBallotV3,
+  sealIdentityBackup,
   sealingElectionV5,
   tier0Registration,
   TierMembershipError,
@@ -33,6 +35,8 @@ import {
 import { checkElection, type ElectionCheck } from "../election.ts";
 import { askProver } from "./prove.ts";
 import {
+  type BackupSealRequest,
+  type BackupSealResult,
   type CastRequest,
   type CastResult,
   type ChallengeRequest,
@@ -116,6 +120,25 @@ export class BallotSession {
       if (e instanceof MembershipProverError) return { ok: false, problem: "secret" };
       throw e;
     } finally {
+      secret.fill(0);
+    }
+  }
+
+  /**
+   * `request.secret` sealed for the backup passkey whose PRF output is
+   * `request.prf` ([[identity-backup]], Sealing), with a fresh nonce. Both
+   * are zeroed whatever the outcome; `sealIdentityBackup` zeroes its own
+   * copies and the wrap key (T-41). Like `commitment`, it needs no poll and
+   * leaves the held one, the voter and the seals as they were.
+   */
+  backupSeal(request: BackupSealRequest): BackupSealResult {
+    const { prf, secret } = request;
+    try {
+      if (!isIdentitySecret(secret)) return { ok: false, problem: "secret" };
+      const { locator, envelope } = sealIdentityBackup(prf, secret);
+      return { ok: true, locator, envelope };
+    } finally {
+      prf.fill(0);
       secret.fill(0);
     }
   }

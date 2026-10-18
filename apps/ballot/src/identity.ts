@@ -5,8 +5,11 @@
 // which zeroes its copy, and every read hands out a fresh copy for the caller
 // to zero once used (T-12, T-18). The identity is kept from the moment it is
 // made, whatever registration's outcome ([[registration]], Outcome), with the
-// Tier 0 request it is waiting on, if any. Backup and recovery, which seal it
-// for the voter's passkey, come later (P2-8 part 3b-2c-2b-2c).
+// Tier 0 request it is waiting on, if any. Beside it, under a key of its
+// own, the backup passkey this device uses to seal it for recovery
+// ([[0017-identity-recovery-backup]], Option A): its credential ID, never
+// its PRF output or a key derived from it, which exist only for the length
+// of a ceremony (T-41).
 //
 // What is stored is checked on every read as strictly as a decoder: a record
 // of another version, a value that isn't an identity secret or a membership
@@ -53,6 +56,7 @@ export type IdentityRead =
 export const IDENTITY_DB = "abolish-voting-identity";
 const STORE = "identity";
 const KEY = "voter";
+const BACKUP_KEY = "backup";
 
 /**
  * The stored record's version: another is unreadable, never migrated by
@@ -344,6 +348,102 @@ async function updateHeld(
       };
       return () => outcome;
     });
+  } catch {
+    return "unwritable";
+  }
+}
+
+/**
+ * The backup passkey this device made or last used
+ * ([[0017-identity-recovery-backup]], Option A, steps 2 and 6). Its ID is
+ * the one credential every later ceremony allows and the one a creation
+ * excludes, so a device never makes a second backup passkey.
+ */
+export interface BackupCredential {
+  /** The credential's ID, its `rawId`: 16 to 1,023 bytes (WebAuthn Level 3, Credential ID). */
+  readonly credentialId: Uint8Array;
+  /** Whether its authenticator data last showed it backed up (BS), so it outlives this authenticator. */
+  readonly backedUp: boolean;
+  /** When an envelope was last stored with it, in milliseconds by this device's clock; none until one is. */
+  readonly storedAt?: number;
+}
+
+/** The backup credential, none, or a store this device couldn't open or a record it couldn't read. */
+export type BackupCredentialRead =
+  | { readonly kind: "found"; readonly credential: BackupCredential }
+  | { readonly kind: "none" }
+  | { readonly kind: "unreadable" };
+
+const BACKUP_RECORD_VERSION = 1;
+const MIN_CREDENTIAL_ID = 16;
+const MAX_CREDENTIAL_ID = 1023;
+
+/**
+ * The backup credential a stored value holds, or `undefined` if it isn't
+ * exactly a record this client writes: version 1, a credential ID of 16 to
+ * 1,023 bytes, a boolean and a time (`null` for none). The ID is a copy.
+ */
+export function parseStoredBackupCredential(value: unknown): BackupCredential | undefined {
+  if (!isRecord(value) || !hasExactly(value, ["v", "credentialId", "backedUp", "storedAt"]))
+    return undefined;
+  const { v, credentialId, backedUp, storedAt } = value;
+  if (v !== BACKUP_RECORD_VERSION || typeof backedUp !== "boolean") return undefined;
+  if (
+    !(credentialId instanceof Uint8Array) ||
+    credentialId.length < MIN_CREDENTIAL_ID ||
+    credentialId.length > MAX_CREDENTIAL_ID
+  )
+    return undefined;
+  if (storedAt === null) return { credentialId: credentialId.slice(), backedUp };
+  if (typeof storedAt !== "number" || !Number.isSafeInteger(storedAt) || storedAt < 0)
+    return undefined;
+  if (Object.is(storedAt, -0)) return undefined;
+  return { credentialId: credentialId.slice(), backedUp, storedAt };
+}
+
+/** The record `saveBackupCredential` stores; throws on one `parseStoredBackupCredential` would refuse. */
+export function storedBackupCredential(credential: BackupCredential): Record<string, unknown> {
+  const record = {
+    v: BACKUP_RECORD_VERSION,
+    credentialId: credential.credentialId.slice(),
+    backedUp: credential.backedUp,
+    storedAt: credential.storedAt ?? null,
+  };
+  if (parseStoredBackupCredential(record) === undefined)
+    throw new TypeError("not a backup credential this client stores");
+  return record;
+}
+
+/** The backup credential this device keeps, read afresh; storage the browser refuses is `unreadable`. */
+export async function readBackupCredential(
+  factory: IDBFactory = indexedDB,
+): Promise<BackupCredentialRead> {
+  let value: unknown;
+  try {
+    value = await withStore<unknown>(factory, "readonly", (store) => {
+      const get = store.get(BACKUP_KEY);
+      return () => get.result as unknown;
+    });
+  } catch {
+    return { kind: "unreadable" };
+  }
+  if (value === undefined) return { kind: "none" };
+  const credential = parseStoredBackupCredential(value);
+  return credential === undefined ? { kind: "unreadable" } : { kind: "found", credential };
+}
+
+/** Keeps `credential` as this device's backup credential, replacing any other; resolves once committed. */
+export async function saveBackupCredential(
+  credential: BackupCredential,
+  factory: IDBFactory = indexedDB,
+): Promise<"saved" | "unwritable"> {
+  const record = storedBackupCredential(credential);
+  try {
+    await withStore(factory, "readwrite", (store) => {
+      store.put(record, BACKUP_KEY);
+      return () => undefined;
+    });
+    return "saved";
   } catch {
     return "unwritable";
   }

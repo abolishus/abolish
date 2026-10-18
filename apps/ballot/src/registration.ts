@@ -13,6 +13,7 @@ import { isForbiddenCommitment } from "@abolishus/crypto";
 
 import type { Deployment } from "./deployment.ts";
 import type { Fetch } from "./load.ts";
+import { readJson } from "./answer.ts";
 
 /** The Turnstile action a Tier 0 registration's token is solved for (`TURNSTILE_ACTION_TIER0`). */
 export const TIER0_ACTION = "tier0-register";
@@ -141,9 +142,6 @@ const REFUSALS: Readonly<Record<string, readonly [number, Tier0Answer]>> = {
   CHALLENGE_UNAVAILABLE: [503, "challenge-unavailable"],
 };
 
-// The largest answer read: the route's error objects are a few hundred bytes (T-52).
-const MAX_ANSWER = 4096;
-
 /**
  * Sends `body` (`tier0RequestBody`) to the deployment's registration route
  * and reads the answer. Like every request the client makes, it carries no
@@ -193,35 +191,6 @@ export async function sendTier0Request(
  */
 export function retryDue(acceptedAt: number, finalizedTimestamp: bigint): boolean {
   return finalizedTimestamp * 1000n >= BigInt(acceptedAt) + BigInt(RETRY_AFTER) * 1000n;
-}
-
-/** The body as JSON, read only up to `MAX_ANSWER` bytes; `undefined` for anything else. */
-async function readJson(response: Response): Promise<unknown> {
-  const reader = response.body?.getReader();
-  if (reader === undefined) return undefined;
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.length;
-      if (length > MAX_ANSWER) {
-        await reader.cancel();
-        return undefined;
-      }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(length);
-    let at = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, at);
-      at += chunk.length;
-    }
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    return undefined;
-  }
 }
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>

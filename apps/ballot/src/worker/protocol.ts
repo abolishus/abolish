@@ -21,7 +21,7 @@ import type {
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -161,9 +161,27 @@ export interface Tier0OutcomeRequest {
   readonly threshold: number;
 }
 
+/**
+ * Seals `secret` for the backup passkey whose PRF output is `prf`
+ * (`sealIdentityBackup`; [[identity-backup]], Sealing): the envelope and the
+ * locator the page stores it under. Asked of the worker, like every use of
+ * the secret (T-12); the page holds the PRF output only between the
+ * ceremony and this request, and needs no poll.
+ */
+export interface BackupSealRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "backup-seal";
+  /** 32 bytes, the PRF's `results.first`; the worker zeroes its copy. */
+  readonly prf: Uint8Array;
+  /** 32 bytes; the worker zeroes its copy once it is sealed. */
+  readonly secret: Uint8Array;
+}
+
 export type WorkerRequest =
   | CheckElectionRequest
   | CommitmentRequest
+  | BackupSealRequest
   | Tier0OutcomeRequest
   | FindCellRequest
   | SealRequest
@@ -191,6 +209,14 @@ export type FindCellResult =
 /** The commitment, or `secret` for bytes that aren't an identity secret. */
 export type CommitmentResult =
   | { readonly ok: true; readonly commitment: bigint }
+  | { readonly ok: false; readonly problem: "secret" };
+
+/**
+ * The envelope (record `0x000a`, 63 bytes) and the 32-byte locator to store
+ * it under, or `secret` for bytes that aren't an identity secret.
+ */
+export type BackupSealResult =
+  | { readonly ok: true; readonly locator: Uint8Array; readonly envelope: Uint8Array }
   | { readonly ok: false; readonly problem: "secret" };
 
 /**
@@ -255,6 +281,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "commitment";
       readonly result: CommitmentResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "backup-seal";
+      readonly result: BackupSealResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -333,6 +365,7 @@ const FIND_CELL_KEYS = [
   "v",
 ];
 const COMMITMENT_KEYS = ["id", "kind", "secret", "v"];
+const BACKUP_SEAL_KEYS = ["id", "kind", "prf", "secret", "v"];
 const OUTCOME_KEYS = [
   "block",
   "chainId",
@@ -405,6 +438,12 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
   if (data["kind"] === "commitment") {
     if (!hasKeys(data, COMMITMENT_KEYS) || !isBytes(data["secret"], 32)) return undefined;
     return { v, id, kind: "commitment", secret: data["secret"] };
+  }
+  if (data["kind"] === "backup-seal") {
+    if (!hasKeys(data, BACKUP_SEAL_KEYS)) return undefined;
+    const { prf, secret } = data;
+    if (!isBytes(prf, 32) || !isBytes(secret, 32)) return undefined;
+    return { v, id, kind: "backup-seal", prf, secret };
   }
   if (data["kind"] === "tier0-outcome") {
     if (!hasKeys(data, OUTCOME_KEYS)) return undefined;
@@ -520,6 +559,7 @@ export function requestId(data: unknown): number | undefined {
 const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
   "commitment",
+  "backup-seal",
   "tier0-outcome",
   "find-cell",
   "seal",

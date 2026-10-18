@@ -151,6 +151,8 @@ interface Voter {
   readonly identityAtCast?: IdentityRead;
   /** Tier 0 registration (`registrar`), whose store then answers every identity read. */
   readonly registrar?: Registrar;
+  /** Whether the build delivers shares to intake (`delivers`). */
+  readonly delivers: boolean;
   /** This device's casts before the cast. */
   readonly held: CastsRead;
   /** What recording the cast answers. */
@@ -168,6 +170,7 @@ const VOTER: Voter = {
   l1: L1,
   artifacts: ARTIFACTS,
   cast: CAST,
+  delivers: true,
   held: { kind: "read", casts: [] },
   recorded: "recorded",
   answers: [BOARDED],
@@ -225,6 +228,7 @@ function source(
     cast: castResult,
     identityAtCast,
     registrar,
+    delivers,
     held,
     recorded,
     answers,
@@ -287,6 +291,7 @@ function source(
     send,
     keepBoarded,
     registrar,
+    delivers,
   };
   MOCKS.set(made, {
     load,
@@ -1115,7 +1120,22 @@ export const RefusedByTheBoard: Story = {
     const canvas = within(canvasElement);
     await castInto(canvas, "The board refused your ballot");
     await expect(canvas.getByText("ballot-l1-ref")).toBeVisible();
-    await expect(canvas.getByRole("button", { name: "Answer again" })).toBeVisible();
+    // The operator chose this answer after the proof: no retry offers it another (T-55).
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const NoDelivery: Story = {
+  name: "Cast by a build that can't deliver shares to the trustees",
+  args: { source: castsSource({ delivers: false }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This ballot can't send your ballot yet");
+    // Never boarded without delivery, which would void an earlier ballot.
+    await expect(mocks(args.source).casts).not.toHaveBeenCalled();
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
   },
 };
 

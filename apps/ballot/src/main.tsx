@@ -244,6 +244,8 @@ const source: ElectionSource = {
   keepBoarded: (electionId, tier, ballot, boarded) =>
     recordBoarded(electionId, tier, ballot, boarded),
   registrar,
+  // Delivery to the trustees' intake comes before any build sends (P2-8 part 3c).
+  delivers: false,
 };
 
 async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {

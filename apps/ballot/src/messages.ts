@@ -192,7 +192,7 @@ const enUS = {
   scan: "If you want to check this device, scan the code with another phone or computer before you choose. It keeps the code, so it can tell later whether this device opened the same ballot it showed you.",
   chooseTitle: "Two ways to go on",
   cast: "Cast this ballot",
-  castExplained: "Sends the sealed ballot to the public board, where it counts.",
+  castExplained: "Sends the sealed ballot to the public board.",
   challenge: "Check the encryption first",
   challengeExplained:
     "Opens this sealed ballot so your other device can show it holds exactly what you chose. An opened ballot can never be counted, so you then answer again and seal a fresh one.",
@@ -255,6 +255,9 @@ const enUS = {
   castFaultyTitle: "Your ballot didn't pass this device's check",
   castFaulty:
     "This device checks every ballot before it is sent, and this one was wrong, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  noDeliveryTitle: "This ballot can't send your ballot yet",
+  noDelivery:
+    "A cast ballot counts only once its parts reach the poll's trustees, and this version of the ballot can't deliver them yet. Your ballot wasn't made and nothing was sent.",
   castsUnreadableTitle: "This device's record of your ballots can't be read",
   castsUnreadable:
     "This device keeps a record of every ballot it sends, so a new one never cancels an earlier one, and that record can't be read now. Nothing was sent. Check that this browser keeps site data, then answer again.",
@@ -285,7 +288,7 @@ const enUS = {
     "It answered with something other than your ballot, so this device can't tell whether it took it. Send it again, or later open the ballot from abolishus.eth or another address Abolish lists.",
   sentTitle: "Your ballot is on the board",
   sent: "The public board took your sealed ballot, and this device checked that the board's answer carries exactly the ballot it sent.",
-  sentCopy: "The public board already holds a copy of your sealed ballot, which counts as yours.",
+  sentCopy: "The public board already holds a copy of your sealed ballot, which stands for yours.",
   sentIndex: "Entry {index} on the board",
   sentUnsignedTitle: "What this device checked",
   sentUnsigned:
@@ -294,7 +297,7 @@ const enUS = {
     "You can change your answers until the poll closes. A new ballot from this device replaces this one.",
   sendRejectedTitle: "The board refused your ballot",
   sendRejected:
-    "It named the check your ballot failed. This copy of the ballot may be faulty: answer again, or open the ballot from abolishus.eth or another address Abolish lists.",
+    "It named the check your ballot failed. This copy of the ballot may be faulty: open the ballot from abolishus.eth or another address Abolish lists.",
   sendRefusedTitle: "The board couldn't take your ballot",
   sendRefused:
     "It doesn't know this poll, or couldn't read the request. Nothing was counted. Open the ballot from abolishus.eth or another address Abolish lists.",

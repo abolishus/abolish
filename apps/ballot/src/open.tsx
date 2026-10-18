@@ -130,6 +130,14 @@ export interface ElectionSource {
    * register anyone (no published region, no challenge frame).
    */
   readonly registrar: Registrar | undefined;
+  /**
+   * Whether this build delivers each seat's share ciphertext to its intake
+   * before a cast is shown as cast ([[0002-everlasting-privacy]], Synchronous
+   * intake). Until one does, no cast is sent: a boarded ballot whose shares
+   * never reach the trustees outranks the voter's earlier ballot and then
+   * fails delivery, voiding their vote ([[revoting]], Selection).
+   */
+  readonly delivers: boolean;
 }
 
 /** An L1 block, by number and hash, that a ballot's membership message names. */
@@ -380,8 +388,11 @@ const isProofProblem = (problem: string): problem is keyof typeof PROOF_PROBLEMS
   Object.hasOwn(PROOF_PROBLEMS, problem);
 
 // What answering again can change: the worker and the records are fetched and
-// checked anew. Never after the prover saw the witness (proving.tsx, T-55),
-// and never for the voter's own standing.
+// checked anew. Never for an outcome the prover, or whoever sees when ballots
+// arrive, could choose after the prover saw the witness: each retry would be
+// another sample of it (proving.tsx, T-55). This device's own records may
+// stop a cast after the proof, and are no such party's choice. Never for the
+// voter's own standing.
 const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
   "seal-failed",
   "open-failed",
@@ -391,7 +402,6 @@ const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
   "casts-unreadable",
   "casts-unwritable",
   "not-newer",
-  "send-rejected",
 ]);
 
 /**
@@ -572,6 +582,7 @@ export function Ballot({
     setStep({ kind: "proving", steps: undefined });
     run(
       async (current) => {
+        if (!source.delivers) return stopped("no-delivery");
         const l1 = await source.l1Block();
         if (l1 === undefined) return stopped("no-l1");
         // This device's casts before the artifacts and the secret: a ballot

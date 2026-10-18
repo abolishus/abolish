@@ -326,6 +326,7 @@ export function Sent({
 
 const STOPPED: Record<
   | "cant-seal-version"
+  | "no-delivery"
   | "no-identity"
   | "identity-unreadable"
   | "unregistered"
@@ -349,6 +350,7 @@ const STOPPED: Record<
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
   "cant-seal-version": { title: "cantSealTitle", detail: "cantSealVersion" },
+  "no-delivery": { title: "noDeliveryTitle", detail: "noDelivery" },
   "no-identity": { title: "noIdentityTitle", detail: "noIdentity" },
   "identity-unreadable": { title: "identityUnreadableTitle", detail: "identityUnreadable" },
   unregistered: { title: "unregisteredTitle", detail: "unregistered" },

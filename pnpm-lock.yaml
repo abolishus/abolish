@@ -672,6 +672,9 @@ importers:
 
   apps/trustee-node:
     dependencies:
+      '@abolishus/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@abolishus/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
@@ -681,6 +684,9 @@ importers:
       '@abolishus/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier
+      viem:
+        specifier: 'catalog:'
+        version: 2.57.3(typescript@7.0.2)(zod@4.6.5)
       zod:
         specifier: 'catalog:'
         version: 4.6.5

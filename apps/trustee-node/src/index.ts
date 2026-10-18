@@ -49,3 +49,13 @@ export {
   MAX_RECORD,
 } from "./wire.ts";
 export { l2RecordedAvailability, RecordedError, type RecordedOptions } from "./recorded.ts";
+export {
+  AVAILABILITY_CALL_GAS,
+  availabilitySender,
+  DEPOSIT_GAS_FLOOR,
+  MAX_SIGNED_PER_RECORD,
+  MAX_TRANSACTION_GAS,
+  SendError,
+  type SendErrorCode,
+  type SendOptions,
+} from "./send.ts";

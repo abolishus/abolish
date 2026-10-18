@@ -1,0 +1,1839 @@
+{
+  "format": "abolish-nullifier-key-registry-vectors/1",
+  "title": "Tier 2 nullifier keys in the group registry: approval and consent statements, the two records and the registry's checks replayed",
+  "spec": "docs/spec/contracts.md (Group registry, Nullifier keys), docs/spec/nullifier-key.md (Approval), docs/spec/nullifier-reshare.md (Approval, Consent)",
+  "generator": "packages/crypto/scripts/nullifier-key-registry-vectors.py: an independent Python implementation (standard library only) on trustee-vectors.py's P-256 ECDSA, checked against RFC 6979 Appendix A.2.5 first. Every value is test data, never keys; key identifiers are labels' hashes, since the registry checks no transcript",
+  "tags": {
+    "abolish/v1/sig/nullifier-key-approval-3": "abolish/v1/sig/nullifier-key-approval-3",
+    "abolish/v1/sig/nullifier-reshare-approval-2": "abolish/v1/sig/nullifier-reshare-approval-2",
+    "abolish/v1/sig/nullifier-reshare-consent": "abolish/v1/sig/nullifier-reshare-consent",
+    "abolish/v1/sig/nullifier-key-approval-2": "abolish/v1/sig/nullifier-key-approval-2",
+    "abolish/v1/sig/nullifier-reshare-approval": "abolish/v1/sig/nullifier-reshare-approval"
+  },
+  "parameters": {
+    "MAX_KEY_WINDOW": 302400,
+    "MAX_RESHARE_WINDOW": 302400
+  },
+  "scope": {
+    "l2ChainId": "84532",
+    "groupRegistry": "e7f1725e7734ce288f8367e1bb143e90bb3f0512"
+  },
+  "panels": {
+    "initial-5": {
+      "threshold": 3,
+      "identitySecrets": [
+        "74aecdb68ebd29cee9521a257801d7de0e9a3fffa42879a9ad95cdb54fcc709f",
+        "ab1100697ac10fc39255e81cc4429d3b7b8051f526dc44601a6675e3707d38f1",
+        "0b6d979a90daedd31d32d4b8953a6fe6e077622e7997e44598a5736cb0f27d94",
+        "9c693a9f9f933f7cba060e02d8f5dd29f121a53dae07d09a0a031ba11368d03c",
+        "c42ac84ea0362b231076b9eff6abe74c8596496b6cfc94b83acf1756aafd0750"
+      ],
+      "keys": [
+        "02cd4a63e869e696d33de31e94c7a8165564a54ed293d6defa35dc998e2c1a410c",
+        "0347d3389e6d55747fe26273bad1203a906ae5e985eb797d2f12f0e917de39cd6e",
+        "039763b2944d3e60e41cb4a1249d95f83cd20377af4535079507f6347a3bc82c66",
+        "02c1902827d831625a70961f74bb136c1b64388e08092a91c8550c08bb635fd8e4",
+        "038829c0cd44c88c6a031f3fa0dc6e7895eb4a370eca83a46e2aa08c919c50ca00"
+      ],
+      "points": [
+        {
+          "x": "cd4a63e869e696d33de31e94c7a8165564a54ed293d6defa35dc998e2c1a410c",
+          "y": "b9ff730b64cb50778efeee498600e2044fa7dd5f8f4408b1a25ef0ef48f095c0"
+        },
+        {
+          "x": "47d3389e6d55747fe26273bad1203a906ae5e985eb797d2f12f0e917de39cd6e",
+          "y": "55a70d59459bdff29f4f6169c84d7bbe275d2f2f2ab2495ba4542d548d4cec5f"
+        },
+        {
+          "x": "9763b2944d3e60e41cb4a1249d95f83cd20377af4535079507f6347a3bc82c66",
+          "y": "438e18c658cadacde8a65e57f259ada87c7ae45af0d571f4ef7c45e6fc0ac6c5"
+        },
+        {
+          "x": "c1902827d831625a70961f74bb136c1b64388e08092a91c8550c08bb635fd8e4",
+          "y": "09f206ea79ade362049579748604c4c595491fbc7405f7d67176d6cf9021cd6e"
+        },
+        {
+          "x": "8829c0cd44c88c6a031f3fa0dc6e7895eb4a370eca83a46e2aa08c919c50ca00",
+          "y": "66354c89868eaa675586d16554d651ffe74fb6f3346d6af18371e6f0d5ec603d"
+        }
+      ],
+      "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+      "quorum": 4
+    },
+    "next-4": {
+      "threshold": 3,
+      "identitySecrets": [
+        "3ee99cab9b9ac1997187e64679ba74e97866b496384351201430b074b8456c82",
+        "aed6a4f16fc8fa1d9bf0bf3c732c02183993e9a09d7dd1692b8c8d8e4d0a7889",
+        "b24f9c19e9458693b3edc136d34973be8bf4b129f9e29c8986f1fc6de3f537e3",
+        "43b4f6f89f525c143c58a613e24ed9a5266b6a132d0c85462c7bdda7d8790441"
+      ],
+      "keys": [
+        "03c68de803a4ae73044798b5a13a736ed676e81262cdc0f4208abb939b4f2c2055",
+        "038ff51245b88877ce14133875538ed998f328e3a84431e5e57458697404ea96d0",
+        "039fdbcb5f99072f75a1a43db4a9a5b256e28304ef0a8da775d6c8a535bcd3dfa2",
+        "02ab6f31f71520a47a2e1fa428f765ef8ff1002dfa51dd4cd60877d60247453e9c"
+      ],
+      "points": [
+        {
+          "x": "c68de803a4ae73044798b5a13a736ed676e81262cdc0f4208abb939b4f2c2055",
+          "y": "a84af86eef58961c435d253b697e5f94469fc28401e62ec3d7766da5db0b9133"
+        },
+        {
+          "x": "8ff51245b88877ce14133875538ed998f328e3a84431e5e57458697404ea96d0",
+          "y": "aa2fb2436eb7c06783e5ad994c56404cc2db8463f9a8d16fb47a0cd941f1cfbb"
+        },
+        {
+          "x": "9fdbcb5f99072f75a1a43db4a9a5b256e28304ef0a8da775d6c8a535bcd3dfa2",
+          "y": "2680a3661bf3038cebcf3b3865ca3280f37bb440324e4edd7da30c77910801df"
+        },
+        {
+          "x": "ab6f31f71520a47a2e1fa428f765ef8ff1002dfa51dd4cd60877d60247453e9c",
+          "y": "97b18e58bff053d325496bba3608588154227e8dd8d85bad56da13f0aae94fd8"
+        }
+      ],
+      "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+      "quorum": 3
+    },
+    "outside-3": {
+      "threshold": 2,
+      "identitySecrets": [
+        "9ffbaf1585b2d96388443647120c2f097380b3b218fe130ed344853047262006",
+        "17c4a569abcffe76f33fbd3e26856c6679aa0f5a99e53be2e4d74393742e7aac",
+        "f82655227152c13db3509be5413b311d6596ee31d62a56cd1339ddd702b67a6b"
+      ],
+      "keys": [
+        "038a7617cf462d0f446d794b5c7ec550053fd5ebde60177c8a2eb55404f101c7c1",
+        "0301395ff5bc686c02ab87e0fba65a9007ac6f3cce8df079f785bc948b260371cf",
+        "03bfbdea8254cb7c06712a0006e4a62ef67b4dab23d10cd1efa1bb980808c350e0"
+      ],
+      "points": [
+        {
+          "x": "8a7617cf462d0f446d794b5c7ec550053fd5ebde60177c8a2eb55404f101c7c1",
+          "y": "ff74dfcd238ea377b96624e96ee3221414e24fbd33b39f03c3973d19a32c2cf3"
+        },
+        {
+          "x": "01395ff5bc686c02ab87e0fba65a9007ac6f3cce8df079f785bc948b260371cf",
+          "y": "490d8580496178787d1a10a6e82cb739ed65b35525694e109732525f3a8eb2ef"
+        },
+        {
+          "x": "bfbdea8254cb7c06712a0006e4a62ef67b4dab23d10cd1efa1bb980808c350e0",
+          "y": "bae8697d9abecd247bb3b4eb7b8443398768e243e6c9ab2a5cd2b4b36818b3d1"
+        }
+      ],
+      "panelId": "6980e3f69ff5445da548dcd46bf51cb3a680de4932545da4af7c0c1b5c6f28d9",
+      "quorum": 2
+    }
+  },
+  "pinnedPanels": ["initial-5", "next-4"],
+  "initialPanel": "initial-5",
+  "statements": {
+    "keyApproval": [
+      {
+        "panel": "initial-5",
+        "index": 1,
+        "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "deadline": "1200000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca201ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0000000000124f80",
+        "digest": "c46fba78e52271d2386066b52a81da2dbad3ba63836f226224d4ea8d69c8a0eb",
+        "signature": "7654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d"
+      },
+      {
+        "panel": "initial-5",
+        "index": 2,
+        "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "deadline": "1200000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca202ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0000000000124f80",
+        "digest": "2a81a6dbfb5be6d29bf92e0c8d20222eebd635a6457359e6f49a5ec3ec95fced",
+        "signature": "64a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d"
+      },
+      {
+        "panel": "initial-5",
+        "index": 3,
+        "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "deadline": "1200000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca203ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0000000000124f80",
+        "digest": "5329a423ded19ddadbebde32e2f7a344e75e0547d6713ad8239b4459d1c17e6e",
+        "signature": "024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63"
+      },
+      {
+        "panel": "initial-5",
+        "index": 4,
+        "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "deadline": "1200000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca204ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0000000000124f80",
+        "digest": "903be6283fc5c637289e5e939fb36c328a95b8bdfb8346e87b70ac878e8d4f31",
+        "signature": "e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d"
+      },
+      {
+        "panel": "initial-5",
+        "index": 5,
+        "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "deadline": "1200000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca205ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0000000000124f80",
+        "digest": "ef5ba00903395e4ece276ae2cfcd45992ddec3604f055c75d5829a0bad287dbf",
+        "signature": "3678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+      }
+    ],
+    "reshareApproval": [
+      {
+        "panel": "next-4",
+        "index": 1,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05124f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db64801ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "57d55cb6fbc4ebf351874fd8462af68b314c94c799ca3a84852a2803b890d703",
+        "signature": "dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1"
+      },
+      {
+        "panel": "next-4",
+        "index": 2,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05124f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db64802ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "153b6af54fe5e11466b7b60c9226f16b7a32286f61acc398578e576a8a7ead6f",
+        "signature": "7c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b7839"
+      },
+      {
+        "panel": "next-4",
+        "index": 3,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05124f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db64803ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "d4c1861e070550d94f2bea2c78caec946b68265e15e945e1cd64d09d774a69d9",
+        "signature": "ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+      },
+      {
+        "panel": "next-4",
+        "index": 4,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05124f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db64804ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "8065b807204a7c7fe427c6d3378e5d76f5d53904aa44ffa4eee32a73a3517b3d",
+        "signature": "f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+      }
+    ],
+    "reshareConsent": [
+      {
+        "panel": "initial-5",
+        "index": 1,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "newPanel": "next-4",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca201ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6484adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "0449438cbce1ebaa7dd411a836dd8810b732936a19da32766249e0b873fa5edf",
+        "signature": "601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec4"
+      },
+      {
+        "panel": "initial-5",
+        "index": 2,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "newPanel": "next-4",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca202ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6484adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "ea3161c13a1fab2d5e05126a18f5ca86b898a252da37a1f66ba0ef218f4d1207",
+        "signature": "d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4"
+      },
+      {
+        "panel": "initial-5",
+        "index": 3,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "newPanel": "next-4",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca203ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6484adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "a053e03298530f8cc9a511b5d32d0a9a69cb74b2d5a11271f5d91097859a5986",
+        "signature": "7aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf14"
+      },
+      {
+        "panel": "initial-5",
+        "index": 4,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "newPanel": "next-4",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca204ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6484adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "0aa9b4905cfd943cb88b94c68bb71c85ae0ab9db0de957ade6d69a6f16195363",
+        "signature": "471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff294"
+      },
+      {
+        "panel": "initial-5",
+        "index": 5,
+        "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+        "newPanel": "next-4",
+        "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+        "deadline": "1400000",
+        "message": "0000000000014a34e7f1725e7734ce288f8367e1bb143e90bb3f05128602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca205ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6484adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40000000000155cc0",
+        "digest": "86e39b3a75554f8a6743337317e715510b21dce895d37d3191456ce96d03c8e5",
+        "signature": "fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e3"
+      }
+    ]
+  },
+  "records": {
+    "initial": {
+      "deadline": "1200000",
+      "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+      "approvals": [1, 2, 3, 5],
+      "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+    },
+    "reshare": {
+      "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+      "newPanel": "next-4",
+      "deadline": "1400000",
+      "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+      "consents": [1, 2, 3, 5],
+      "approvals": [1, 2, 4],
+      "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+    },
+    "refresh": {
+      "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+      "newPanel": "next-4",
+      "deadline": "1400000",
+      "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+      "consents": [1, 2, 3, 4],
+      "approvals": [1, 2, 3, 4],
+      "record": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d44f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b470401ab3f7bd68866b65372d7d3835990ab5ebfb8c50dce6c45c60aa3f689fb05a8cc42758629066f1991cd673d2050e77cab108bb00b322ead21ad46ed64c69926aa024d749d0ff24971fd0e95be8252f17a4b2394fcca80fd583ac2d02c7d8a3ec80500912c7b8ee1e5aaf0457965adc75c37299b950040fbe11ec3aee0f42b49b10403bb02dbe81caa1cc164e3e2075349a605b16e3f597a9424f5ecb4db776ec1a5316ee152c4f8caa6a673f3f7892ab89c64f7b28cee0c81db666009ca5b197a207e04d7122ae1639edc27b56c7c0a6349680a4805348d54d3c8a5557d1e6c5736f76079004368085be751e71bb51389806bdd3ffebabcb6ebcb52882aa6de9ecc8ee40401125bac13ab372c8e2b52f4557172805a00d30845b8537e145a60792ecaa02d3d0693401a78d7ef8a8cdd2fec51ce0177ff060fbe33d2eff2d9d64bb66bdd4b71028fd9efaa8a1ba5df228d502167b607aa89217e6246f8a67fee7e3981f3a909a17c6880a6a92f7d79d83cc62f3d7082398ee603b9565e19a3aa1985e0dc4dc05303d6d368b13dd08e9cef73d576ebe907624b5aa95829cb6fdf5836bd9353fb9d95382c897b9aceb0431ef07ae2ef3f04adebd3b9566ff4b510f9dc2ba0fe4ea600040c576e3593a05bdb7fff9ad7ad4fac3c15b7afe10e38d286469c058bee52b4e87c87a50f2c85d1019bb126051d2614c71565ca3a20d12e31b0dea333e6c5d000"
+    }
+  },
+  "replays": [
+    {
+      "id": "honest",
+      "description": "The initial key, a reshare to next-4, then a refresh of next-4",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1300000",
+          "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d44f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b470401ab3f7bd68866b65372d7d3835990ab5ebfb8c50dce6c45c60aa3f689fb05a8cc42758629066f1991cd673d2050e77cab108bb00b322ead21ad46ed64c69926aa024d749d0ff24971fd0e95be8252f17a4b2394fcca80fd583ac2d02c7d8a3ec80500912c7b8ee1e5aaf0457965adc75c37299b950040fbe11ec3aee0f42b49b10403bb02dbe81caa1cc164e3e2075349a605b16e3f597a9424f5ecb4db776ec1a5316ee152c4f8caa6a673f3f7892ab89c64f7b28cee0c81db666009ca5b197a207e04d7122ae1639edc27b56c7c0a6349680a4805348d54d3c8a5557d1e6c5736f76079004368085be751e71bb51389806bdd3ffebabcb6ebcb52882aa6de9ecc8ee40401125bac13ab372c8e2b52f4557172805a00d30845b8537e145a60792ecaa02d3d0693401a78d7ef8a8cdd2fec51ce0177ff060fbe33d2eff2d9d64bb66bdd4b71028fd9efaa8a1ba5df228d502167b607aa89217e6246f8a67fee7e3981f3a909a17c6880a6a92f7d79d83cc62f3d7082398ee603b9565e19a3aa1985e0dc4dc05303d6d368b13dd08e9cef73d576ebe907624b5aa95829cb6fdf5836bd9353fb9d95382c897b9aceb0431ef07ae2ef3f04adebd3b9566ff4b510f9dc2ba0fe4ea600040c576e3593a05bdb7fff9ad7ad4fac3c15b7afe10e38d286469c058bee52b4e87c87a50f2c85d1019bb126051d2614c71565ca3a20d12e31b0dea333e6c5d000"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1150000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          },
+          {
+            "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1300000",
+            "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "initial-only",
+      "description": "The initial key alone",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "every-approval",
+      "description": "The initial key approved by all five seats",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d05017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "deadline-same-block",
+      "description": "The initial key recorded in its deadline's own block",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1200000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1200000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "deadline-window-edge",
+      "description": "A deadline exactly MAX_KEY_WINDOW ahead",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "000000000013df80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04015e8f3d45e9ebc0bcd8de070c55ad30051807d72ded0354534be740795d325fcf3acfa0c5476f4c37c85ac6c37e85b07bcb962805855da05ecee0160a8f0fa64302f13f28c291524f7b2fc1eea04e65d4146c4f737aef91f5cdcc3d4b54b42b8ea44e846a726fdfe9008d0c998d4725e2647ea51575ed3b20f81257d56b21bc2d4603644f1c6e74b2e42b45248442d195091e928f7bb78300c6cbf0a5181e4be954a27e461903bc884383649a3d556ce8a9a666a15cf212adf41296dfc58f0995f88d0498e8a16874c56a64339f678916b4adbfe89893fa671166440cef0c48e541891e4738be83c19f5597bd0a64312e56338433606d5dbc0a6b1d3bb5e8523cd4f75a"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1302400",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-window-edge",
+      "description": "A reshare recorded in its deadline's block",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1400000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": true,
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1400000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          }
+        ]
+      }
+    },
+    {
+      "id": "initial-truncated",
+      "description": "An initial record one byte short",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "length",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-trailing",
+      "description": "An initial record with a trailing byte",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb1600"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "length",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-short",
+      "description": "40 bytes: no count",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "length",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-count",
+      "description": "A count one more than the approvals carried",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d05017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "length",
+        "keys": []
+      }
+    },
+    {
+      "id": "reshare-truncated",
+      "description": "A reshare record one byte short",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207c"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "length",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-trailing",
+      "description": "A reshare record with a trailing byte",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc800"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "length",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-short",
+      "description": "104 bytes: no consent count",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "length",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consents-overrun",
+      "description": "A consent count running past the record",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4c801601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "length",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "initial-topic",
+      "description": "NullifierKeyRecorded's key_id topic isn't the record's",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "topic",
+        "keys": []
+      }
+    },
+    {
+      "id": "reshare-topic-predecessor",
+      "description": "A reshare's predecessor topic isn't the record's",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "topic",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-topic-panel",
+      "description": "A reshare's new_panel_id topic isn't the record's",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "topic",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "second-initial",
+      "description": "A second initial key once one is recorded",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "initial",
+          "l2Block": "1150000",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "record": "0000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4040197589bbbadfc4abfb0ddaa18d1b348b6ad4f452d085bc7eb46db71aab143b4244f1d77424ce1e5a8be8e71aeffaddeb934865dc04f413776a46ae271f1e56b3002c8802d57da57a6c38033effebc05d486032717dd0aa9cc078626062490dd52f533593fcca9ec4cfd8a5ca792d1b24bf92ad7f1b008526516b9d6addb6cb1056803c78228e83ba267b2dce02841cb28db296bc9ba30b0bd8063f434f1c13b6695f97fdf9a7657d1a097ca3b48685b75d82b77e6002fd95087052269c2c9fbb03cab04d81d6ddbf259b36b0380bff744c0e8c2f89286954d298e1d706087592fca13dc16015530e4a4ea1728b415e28d97ae2a52ba7289090086be4292fd3f09788326"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "key-recorded",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "initial-after-reshare",
+      "description": "An initial key after a reshare",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        },
+        {
+          "kind": "initial",
+          "l2Block": "1300000",
+          "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "record": "0000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b4704017ea4c2d9b0d17aa17847a7b32273b1cb91cff15cd339a1858524dae0e6f38a0d1afaf27f72521e6db00247f7783c80bedf5ba861ecba7a8ac4fc869122a5000d02118fb21c9fc0c9a697ae044488a15b84e840dbcb320e27378c146adb4b0ad43463807beadd67beedebf98e32b4e13acca05a1a04a1fd4c5b7f0f601f3e4b3748039560c1152f86f730e00af7aa7d7fb7e20fd688b2bf15c90e75708221317bcb294d9e92530bc5e4d4e4f12a6ac80e0389e75f5757bac075f130ee8a7f561ee3130416499a197cc47127fc4dfd800b5e7cfff09f11f25895e5c2bae26f9e18f8987a2f73d437ee3cb78d08af28582e8ddf96f4051212deb6c6240467c92ea4769355"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 2,
+        "code": "key-recorded",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1150000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          }
+        ]
+      }
+    },
+    {
+      "id": "initial-deadline-passed",
+      "description": "Recorded one block after its deadline",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "00000000000f423fac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0401fb14f6e2eeed80b3e286fa1c936d3dc0fddb242ba6f5cf9ec3245ffd7cd6b6451c621db9f5715dbee54c9af6e58ab23646dc97604f47245e40e916159a51bea10201621a92fd1a2f06272925929eefbde051e9ec01bff0dc85f40514a54ec9e073656a06d729cbcf51e050c8d94337b868bada9acefb2cacdf846d3157781793b00328a15f6f2690eeefd15ebc597a0f2413e2a50f44a4e29539b355297e0d54189f7951093fc3c57906e636b9cd0c682db42f3ae1b09914e351ac8fc1a586fdd37e041fdd96ab3b022e72be6d28b39f13b2e1ab6f88bbbf523ac4813b4ed80f9bc63527502c4b19c9a21669428fc55c99849178cd3f8bf7966ae9418a857a403007c7"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "deadline",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-deadline-far",
+      "description": "A deadline one block beyond MAX_KEY_WINDOW",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "000000000013df81ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0401ed98ae9529f305c3a108ebfa4d15650eb724864f1b68b8efcb633451d535c8357cc2bf60265ee1aa83a91dbb0e1c5b02bbfa30b5f74e4895ea317c5615b24e4102a22c74ff52c2ae51730d6fbd545699eb87595d49796ad82e25eaf51722528e271a26c1a3116281649a73639e426f2dac0415d14137babf093357a7e009167b9e03dc31905dcc3abb8df34f2bc84e9764e8b6ad539c6c83aabd95ad1eff60d763463a9d10f66f5698b71bf9009244a0ff250f06c86184e2aaa7d62917bec3ae05c4042f8531ef6377e5a1a0d3d51b2f1d2fe9085d9ca77e56a4ab457a44a54ac6148255be5eb275eae0886beabb35d2ddc2427fa964132eaa4f627aa10cf237db2b63"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "deadline",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-zero-key",
+      "description": "key_id zero",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "0000000000000000000000000000000000000000000000000000000000000000",
+          "record": "0000000000124f80000000000000000000000000000000000000000000000000000000000000000004017d8d25e7f92f12f3afd3ad2740f1bf21916a7b2756cdec585e379cf3332975027719ce0ac4f2669e96892c7db8411bdfb8e6dc1769502108ee2fa5e62d29ada1023866f5c09d59698b2e2c9fe7a9bb5cad23592b042cfe06f4792b52d63d297e0e6286b441ffd58aa3c5bf50a5fb107944b2cd0b85610c3af91b21da73e037808c037f9f7b3218b2c9a8531dbb3b35570eda6be756cdb708aafc4834cc22b0e278bb749af6b893be5dcbdf1a3f117ab086e807f2ad9db8b1d7359d052e9d37e70573047402352da23a364006c7164b8cf4334510fa6082da24752801f6940dde9a18a078dc113494b130c5003178dedc3c4de4f2361747218f6f86bcc2d7a15d43b080"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "key-id",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-quorum",
+      "description": "Three approvals of five seats, below q = 4",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d03017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "quorum",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-repeated-seat",
+      "description": "One seat's approval twice among four",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "seat",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-seat-order",
+      "description": "Seats out of order",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d040264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "seat",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-seat-zero",
+      "description": "Seat 0",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04007654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "seat",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-seat-beyond",
+      "description": "Seat 6 of a five-seat panel",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d05017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d062b00592924cf3ef269b0a8b261b558fba53ce59578f80b2cee7de0b67086e7c77d8a54ad656d84988abbf19176312c5858141cb0ea6199a86fb9f1dfc6771dbe"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "seat",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-other-seat",
+      "description": "Seat 1's signature presented as seat 2's",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d027654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-retired-statement",
+      "description": "Seat 4 signed under the retired abolish/v1/sig/nullifier-key-approval-2",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e630417e3d561d6e36ee1bfa6d5fcda6c03c95eaa6d53f6c7199dcfa56e51d1035fac0b37ab7a75e7934640fa0247550dbafd7e00d9d9592609f51fc9dc97782f7503"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-other-deadline",
+      "description": "Seat 4 approved another deadline",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e630439b551677fcbc075a830c997bc3cad137936b9796c0a6c81ca48e32ff4aa6398292979706e88b113a6f9c9f11991b694dd09b397cdf3756a30b7e3a1e4d08a40"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-other-panel",
+      "description": "Seat 4's approval names another panel_id",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63048b2f7869ce8bb03ef4c84c9c42a3ac8ca14dfd16659cb91f565f9c9091de1ce1088bb17a6be7d3219af8bebb30f2dbe0be2cac832645a66422931bd29ee413d3"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-extra-bad",
+      "description": "Four good approvals and a fifth of another key: every approval must verify",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d05017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9e23c94e8918660dcc19530a3869a0bd64467bbbacb48415787b30f0990818334d057c06b7a4c9defa8025765ce362790d563e42363cb4233facc3789e2a594412d37b6c11293104e12bdb37e8537daed1ff0bb361194fd14fcfb6150dc2a94007f6"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "initial-high-s",
+      "description": "Seat 4's signature with s replaced by n − s",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e6304e1d15168125fe5e1bcf1064c8ab43a609cc1a319b8f00cbfad073968d8151f9edc36b175e799f234e6acf5c7965f429b766b3f00f293890c7888da29f44af204"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "signature",
+        "keys": []
+      }
+    },
+    {
+      "id": "reshare-first",
+      "description": "A reshare with no key recorded",
+      "events": [
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 0,
+        "code": "predecessor",
+        "keys": []
+      }
+    },
+    {
+      "id": "reshare-stale",
+      "description": "A second successor of a retired key",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1300000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b470401cfa543aefd838d767f77babe7aa2eb1b3dcc2b027248af304736ed04fb56e4a41e1874d2e70177a6d437bbb719fe11a79c46183c12bdeb669568cc90cb691beb02cfd73255a6d801e9fbfc732a08f1acadf0063e742057be76155587c71b4d284e3a39b405940f814ec172445706f88368c18f713b1f0e908c06d6efab2bbaad37038663d324cb385998e2aa0226f443741c7d6798b090152b4ba6a5b4cbeb3b1e447f38c5caf2323cf6b949d527d3e8c51773e746c4a999afa2a8fa4fb8b06c55cf04495a108b98ce511575cb9de8a9328f6ca1a5ecca9a477d0a27d9515fae6d31e25004a6cc8167ef973f181050173fbfac026ad93c1b89010296d12047cf16f1f903018e4445918cab45b7291e04613cc52f707c620c9a7f5439d5aec47d1cfdc075b76d4542cf6e44a423396d2c374254f29e421446b92abc4196c8ab7bc5366bd3940202b0a77911c96a945442bb2211db96fc82f1967f2ee7dc6fffed31286ce5af485cd60a8d14bcca795e4bf556264e91dcef795967ed3646888f6bb04700715ab70315ba209b3749e4fb62fa2a35cf40b4916f18d981f716f37c3c7bc7068caed0b13b9c9528f1cfaecb198c90de8309d2ca48a1d8a5f5a6c2ae15f86f4cab21ac81"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 2,
+        "code": "predecessor",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1150000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-unpinned-panel",
+      "description": "A successor panel the trustee registry doesn't pin",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "6980e3f69ff5445da548dcd46bf51cb3a680de4932545da4af7c0c1b5c6f28d9",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d6980e3f69ff5445da548dcd46bf51cb3a680de4932545da4af7c0c1b5c6f28d90000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d404014fc3e6cc042ca887547951d14d240bd9dab2c06433135dbf78656420947abbae7560e98139a7c555580432300e3c143cef49138c2368f3f55956521e250933fe02647bbcc4cfb8f80a36dc42769b16de5288b3e5078e1c8369330e548013a9e2a25ae7bcac747b0b801a7ec924c515b93da88ed8e5d067c188d8968bcc36d8398003aac3e9449463c3dfe3b1d390676192e1b16831ef89d25aee4db2c5d5a3070e7b7a5c738c4f5d617e9d16d046675e62a822c0edb384d5786ca8393eaed3847e370415fcc9643536630654bf437c31ded870ce85dfd1497366b336997801709a41df25fc1a9bd304f2f397eeb372714139229daa37ac6f4e7b46b9d802063482ff0f0301dabcc099c26908c099d8d00dd97e846bed7b0a37eeec61100b77bfb3731a9faf6c9900e4e370cd6f58e87477207cae27db8a8f3ddf58669af1ac3e717d375708027740cd075b24daf5062e07fd9893a41aecb09b6225b1d63050df459959f5fb5724eb6f52a9dabeeb31842e1607328183cbe568c564e5efb846a50be1bac5e13703cfaffd0b7d43586a3a17199d3271ef702b6af113e9f0111f4349fc1028f374292f791f3f4225a9122b925a5cf29170ef5ba29ceb152d02252ce3da8045ee1768"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "panel",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-deadline-passed",
+      "description": "Recorded one block after its deadline",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1400001",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "deadline",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-deadline-far",
+      "description": "A deadline one block beyond MAX_RESHARE_WINDOW",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db64800000000001629714adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401a7c46d0509d9dfa0d20a2da7efbeea385764ff81d683fc671e7597287d8830856844b31f685848ad4aed69a7e1581490b8a2b61c4b394cc4314ddd342c98c4b702a00013f0989690e6f259fe274ec3a52a1373eddf187f9960f6d831bf4274a4ce2e8b5ab594a23c58f55a1398ee755151fb219de686fda0b505257ef48dc8f4aa03c980c84637f68bd8af77462b4a12e72ac4f6160e4ef982cf58e97eb8db6f68f13cd2cd623d8f4eb7670c2e3737f50f9aaa975285c19b6b0fd93b914d2c5acf050482a01490e24504084a07a38862a93e7b318a98cb51fd6b70d24bb708e23bd90d3e58adcf162e85b861e60b0861217938d9a5ec731caeae4612ffe70df4f2c4fa03014b8b1f5667bf0ab9d7577d604f022434533e569eff908ac8758784d17421875e06a0600d8c9f83c62a7cb857d1d4b2b3a9318c7c965cd1c7876e2de6590ef36b0233eaa83e623591d550ea88ff74640633a2f986d6934cdd5677b08eb004fd14a9116a75581f8067086c1f5ae5056e77b07bc97ea18f278bf7f1307a8ff9474e4a03a6173b6b6de756e1a49d8994d9c84349ea243996e31bce777bb8d14b289064bf202ee63c3c544ba84903eb49941e8c1c8a5703a8378b088909c986b758974729"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "deadline",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-zero-key",
+      "description": "A successor key_id of zero",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "0000000000000000000000000000000000000000000000000000000000000000",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0000000000000000000000000000000000000000000000000000000000000000004019dd1c1124a9087990fe0400226f55ccb3ef123bacfce23bcb581ee5b91ef6c6b00bae820c9401b05051d4d43a7727648ea4df0bd3dde7fbca15d9fdbdaeac5d402ee28e2289528a4c7b7b41ed1a8a6b380a89bb39e5edfbaa73f095c68035d6471370abae14340de67fad87003f9146cc31b40a1d1f95f9d0011b0b40800fdb59b03220e4a7de275f7ee1c3dbbc9b80f1d49ec260444e736229ba7e150a3a276e53161626441cab45e5ef7efa8a5bb13ed2ba94210f9bb1915fbe8f917421b5c591e0479b31805b16e30694c7a565f972e2e076c7b195b923a61b4c9de8fca07abda5142297654642da1376989d82bbc29737a09fbb42bfd064f4ea1b5125dffbaca630301c92338a27b8faf81d85c69f4a65f7496e048fd8d4e6e4c218a799e105b95f80e38e6aaa280eb31454f1685c824847a1eda8d84b3fcdecb72b0b8daa5fa8cead702c9bf0d7c28391d10e65104e114618d0bfdfff9cb6da4a1f9402762527ff1452e58e9ccd9567d34aa67359efcf4424941db3fd7ba19241742fdfbe6a5aa3a24e3037da4e13e237d3ccc7dfbe31381c404fc333793122d7c92da43c7c5243fb8d1e55126e674b76518b784fc23e12858732c7aef938ce24c43624e23cd4c262344c7"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "key-id",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-earlier-key",
+      "description": "A successor whose key_id is the initial key's, making it current again",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1300000",
+          "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d44f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d0301a740f4c39803ec6083dd4479251c0bee67d95f18c0d6576a1f1052d7f72b80655cc4dae76f4dd70092d124ebc11673c6bb688ac67da800e7e1b9a0a30e24241002764302925d565517fa763d3621be0ee5a894a8cc4eb943d38abc21f4a72beae86a92f9bdfbf24f0921179d8cc7302aa089cd4daa48fdd9028e0f5e80f91c4b1203eebb3ffa74a284f5e753cf669b2f00d3e08cff6a0ec3cff6f2d173a0b00cd88c51982eb605a9f5cffde56436d421c64e7e7c8e8668f9c9180851f7b4d3f1e7800301d631da57084e99b6ae8bfad6397c27791e5b439ba00da428be6609f2aecc65140d4be3515e0e26c6256458dae1ff501c178ce10b0466b100c2a0dfd727a719f002a30c28c2878b7d7b097f6e63845a41f6c36d096aea6eb937f71666121d87a6110ee2ddf5946fcbedfd7c1ffa080903805e0cff0693f9ea7690c8bd80c869b30a03f6d5475d34989d2198cfca9fcd562cbd2249786fbc865c85d7448b0a9b61e32b60d4568b17f86912d116327f61ed057cec42559aa0e19daa4fa521b65a2e1be8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 2,
+        "code": "key-recorded",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1150000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-quorum",
+      "description": "Three consents of the old five-seat panel, below q = 4",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40301601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf140401dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "quorum",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-approval-quorum",
+      "description": "Two approvals of the new four-seat panel, below q' = 3",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40501601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff29405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30201dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b7839"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "quorum",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-seat",
+      "description": "A consent seat repeated",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf140301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "seat",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-beyond",
+      "description": "Consent seat 6 of a five-seat panel",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40501601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff294066b31d1da789d42f471260922e31ee47b63ec542d4a6421f0cae636b0c0a830a815fcd98003cc6742044be2f372fe69cf56e6796f94d303ab3186c7cbcdaf4cb50301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "seat",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-approval-beyond",
+      "description": "Approval seat 5 of a four-seat panel",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff2940401dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9058e44bb227b1ff047c50b5e61e861aa62db4b8ae092dd3d63de5b9f642f8004515ef4a642c170bea50475a40420d13a90153986e107b02b2a8b8a5ad3417531c0"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "seat",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-approval-seat-order",
+      "description": "Approvals out of order",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff29403027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783901dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab103ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "seat",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-new-keys",
+      "description": "Consents signed by the new panel's seats",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d404018b3fcb0eda9d1a2a2ef82a802a8bc67e7435e92dc7f0e4a9344953e2db92b6b54a06e8b892131a2af0c0b7b3b1b10e0c789d4c4d0489f0e8337cc30d4c25163b02bce8a187686d18b01b6c26c8ddeb5801fc8db29cb92f26b1ec4dc0c61d199f72441332f3540dd3e39307ad8cad4551d0e4a17bff3471c8b3fcca5dd694c5a15e0310ccd20a528bf60608ab7d702407f1af689dcb8d664a1d357bd5f25728b8e82c1768e3e896d878d18b165b36cf3ea0dd2ef8597fb2bcccc28cf6e501c043f7090453cc83e4a8344c715c7414acbe4738c06eb3b3b5fe605e22401d1cdcbc3bd63905423ed19b349247d85f9f21f16dcfc172432cc7896109a6cef3ff3932f10d2d0301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-tag",
+      "description": "The consent statement signed under the approval tag",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d404018ef07cf2902987bb7232af7e389210cd22620b7b53d7113c6c439d8f8c59f651187e88909b1fbcad272f5c8e30ce2e27c4c56b6de454ea42cf68ec496b72390a025ecbc21629029bb4aec62fa5d275d1ae8f9826b71f98a09475f7b728aa553dc75aefd95da27152a75a187a730c28e68c5477ac06e139c49be528a19b8e5adc1d031b53ac76e94e90b9b66c432eb3b0e87defaf1fd2556712792c2c9cb7786ca1756079b243f746e4438a4a539d1305b305c74d18ffab4654bde7c114cc2b83284504e5da552bc035e0803065847792f52fa0e221144840515bb29859bea9889631a203a8a97a2ff0819452515a68caf535b6d44b80e38cd5baf0ca8907b694c8ce5e0301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-consent-other-panel",
+      "description": "Consents to the same key passing to another panel",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4040173266891740282001ed2cca0ef91c272c508151ce52b69a0cdf6f297f84dbaf46a8bb08dda1f7ca16f0496a739be92cd00249cc52ada14823b8878d3ae714dd50286f768933eef6bc80df3b8e85b195d87a7e5e63476e357ddde3ef92c8156ba5b136bad35bedde84e26499840f149369c971dc88c457dc071a96701ccecf04dd7036255aec02b2221d91e2c82a609915c58806531735b419c34309b2d1c522b89fb09d325e77af53591a338bf2b89d6e28fb3156bd95a2fdf457a62db0bb406cfb6049a21f23d1cc0de7e1d0b028d816478dd236f63a6c835fe667521662a369e948c5fb843000e41ec4b08b58963a0892e0a68b865171eadae5cbe12552e82eb665b0301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783903ea06b15192e429dbc1988a8e846c479a939f681dbaa76e60de81c9e1054490c856dcb7850582f0a84ef82fac4f6487ddb5c83f4dd6953fdebe4ec258ceab66a9"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-retired-approval",
+      "description": "Approvals under the retired abolish/v1/sig/nullifier-reshare-approval",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff2940301b82840c71de5ca04f8d34fe1b4bce37ee9479f95e0e4513bb564a089348a2e3f49313177022362497fd9a48764069aa65e22433fd462485b1a8d634c30e5895402b89818fc06b575768a20d144d5ead1a8d48a35bc0d990313927c60b414b03aff7e224e09d9e861f7660efcc81bb46ec52fd9592fabbc17ba69ff9c9c9312a45303eeda1a5bc56d4ec06ba91101c314799039d692897437f984b15b88befd548b3852a8ac3d35e1a891eb196afaa3a547517a90277881c4d7257090b3fc97ba4922"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-approval-deadline",
+      "description": "An approval of another deadline",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1404471f074d7603c21b1df3f2f47cc7407218d09a8a74ab2b47e4abc2c5211648df681f3af361b54dac37ce1a1a81f5045edd22557e6a8d948bf264d4df5e7ff2940301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b7839038d143037a6d385b42459cb605b7e0c87b5708d0e83cf9cc8f925c7898cf4b1d56f112a71e5dfc928f4b7994bdafaafc459cb932fa6db751519b873054c0d36d6"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "reshare-old-consents-on-refresh",
+      "description": "A refresh of next-4 carrying the initial panel's consents",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207cc8"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1300000",
+          "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d44f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47040141227daba5679f3b62d52035f316db49e08891538381295ad9a10bf3972c000612880ad1b796a819ee51fc75a399d11dd94ea250801e72a7f86ffeea1cc33fb802af5b70c5450a733b3b36fa92bfac3dc378c3b207e728a3936b08c7f082d090bc3802b7cabb729a20876e9507363f8a4c7cddf56de5adbe1e0d4da756ee5296fc036f89bce642c4c77fd9f050e60864868f82318002378c0231ae7084773d6484043a2959d236da1975fa82afd08de6e26a2cd2443c04a0af83e692bc40e260dfc9047ebe4f642d9402454a8151242ee9a76583ef997907413c6e52b0af40eef26c3d0b56342a8cfe3adbbf7ceb5460ab31c79591b80ed3032ed5888558e29387c27e0301125bac13ab372c8e2b52f4557172805a00d30845b8537e145a60792ecaa02d3d0693401a78d7ef8a8cdd2fec51ce0177ff060fbe33d2eff2d9d64bb66bdd4b71028fd9efaa8a1ba5df228d502167b607aa89217e6246f8a67fee7e3981f3a909a17c6880a6a92f7d79d83cc62f3d7082398ee603b9565e19a3aa1985e0dc4dc05303d6d368b13dd08e9cef73d576ebe907624b5aa95829cb6fdf5836bd9353fb9d95382c897b9aceb0431ef07ae2ef3f04adebd3b9566ff4b510f9dc2ba0fe4ea600"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 2,
+        "code": "signature",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          },
+          {
+            "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+            "panelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+            "deadline": "1400000",
+            "l2Block": "1150000",
+            "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stops-at-first",
+      "description": "A failing record stops the chain: the refresh after it isn't replayed",
+      "events": [
+        {
+          "kind": "initial",
+          "l2Block": "1000000",
+          "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "record": "0000000000124f80ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d04017654ee7c58aaef2b7bf24ca8cecdfd9a457b98a89123e174b18777e5528b92337e0483f8cbeed44c9eba2f78b846b8f6377bd91281680ca9906c4aadd7c4348d0264a32ea95c015de77501e0eed1cf545c0cdc07859f9b397aeaa2ad654edb7a9072192d6e6636ea92e672239277c78ad6d3ac041575635fbf85201a1c4a2e522d03024e64f60f083fa7d6f420ce69ce3b759abd836d787bab22e1f4ed029e0e35be6c71a3cfe15d4915e619cfaed14d4674169c4687d61aaed827a2054d36a26e63053678685fb3802ddece4f8d4da3400480ba0d015c2f56d034e2b755a1201dc89f7c59ea38b449840ea720f14bba67782754344b22edb79631463564ffaf78cb16"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1150000",
+          "predecessor": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+          "keyId": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc04adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d40401601d9db9a05d5d32fb703c97fb560b65f8d77ffe3444954c8827dbe964f9b57c6ac4689d2954bba1ac65d489fc5c3778f13af5f316f171f26fcd877d3570cec402d584817e25b46baf4dec974f5d5f1e68069660780504461eab75cb6ef6b176ae2d7e05cfde5f782f0aff199a81c31c8b824c38c1d123e828dfe07989c3840ab4037aa7db351db94bd1229b290ca9b55469777e2cbf96695ba9ecbe79702397d35404c2b5b890709266a550761b8609efaa31af67366d87d0db525d2e365090bf1405fccc22c9bed9b4b4ac3ae977c700e5cedd1acab254632639b45a0621748991e9023c89e3e872b7cb0d1ae2349d9a21d87d68aa9190afd4f301078a9f3a20d5e30301dcb2e8687a1a93214b9bf755f161a050ed0845e02a95dc0abd617852666da29d5e91a39d44fa6829cff336613ca4d681ecf74f6711e5bbfc45cc7e5079dbdab1027c019287a7c9067166bd622cf07262ad4122460cd3373b79240dafd073fb5b19425cce3d13ffa0da846f643acb76f9fd3232a24f0cdccbe99ec9772d3a8b783904f31eb8a7689f011f99f956087373e8fa4b31e5147e95fc8ce7b97c1932a3238912c965f16a5978e2c10657222745ce789905faff18beb29c68840ebaa1207c"
+        },
+        {
+          "kind": "reshare",
+          "l2Block": "1300000",
+          "predecessor": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d4",
+          "keyId": "bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b47",
+          "newPanelId": "4f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db648",
+          "record": "4adc866fb0a038ed12309c18fe2425f9bcdc0c66b264e9beb9b4a2fdc93528d44f9f298874ed904c61f52392a0a08f1f2c3521667fdb8c66c75358e6c50db6480000000000155cc0bfb9ee555f5b6ba38a7bfb1acc55fb81b9bd03591665c313f24a4a0dade53b470401ab3f7bd68866b65372d7d3835990ab5ebfb8c50dce6c45c60aa3f689fb05a8cc42758629066f1991cd673d2050e77cab108bb00b322ead21ad46ed64c69926aa024d749d0ff24971fd0e95be8252f17a4b2394fcca80fd583ac2d02c7d8a3ec80500912c7b8ee1e5aaf0457965adc75c37299b950040fbe11ec3aee0f42b49b10403bb02dbe81caa1cc164e3e2075349a605b16e3f597a9424f5ecb4db776ec1a5316ee152c4f8caa6a673f3f7892ab89c64f7b28cee0c81db666009ca5b197a207e04d7122ae1639edc27b56c7c0a6349680a4805348d54d3c8a5557d1e6c5736f76079004368085be751e71bb51389806bdd3ffebabcb6ebcb52882aa6de9ecc8ee40401125bac13ab372c8e2b52f4557172805a00d30845b8537e145a60792ecaa02d3d0693401a78d7ef8a8cdd2fec51ce0177ff060fbe33d2eff2d9d64bb66bdd4b71028fd9efaa8a1ba5df228d502167b607aa89217e6246f8a67fee7e3981f3a909a17c6880a6a92f7d79d83cc62f3d7082398ee603b9565e19a3aa1985e0dc4dc05303d6d368b13dd08e9cef73d576ebe907624b5aa95829cb6fdf5836bd9353fb9d95382c897b9aceb0431ef07ae2ef3f04adebd3b9566ff4b510f9dc2ba0fe4ea600040c576e3593a05bdb7fff9ad7ad4fac3c15b7afe10e38d286469c058bee52b4e87c87a50f2c85d1019bb126051d2614c71565ca3a20d12e31b0dea333e6c5d000"
+        }
+      ],
+      "result": {
+        "ok": false,
+        "at": 1,
+        "code": "length",
+        "keys": [
+          {
+            "keyId": "ac9e714bc22e88ec63bae6e00d5cbe42799b5b07c7c85400a418bb454d27a20d",
+            "panelId": "8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2",
+            "deadline": "1200000",
+            "l2Block": "1000000",
+            "predecessor": null
+          }
+        ]
+      }
+    }
+  ]
+}

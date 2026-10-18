@@ -18,6 +18,7 @@ import { opening } from "../src/nullifier-key.ts";
 import { reshareDealingWith } from "../src/nullifier-reshare.ts";
 import {
   approveNullifierReshare,
+  consentNullifierReshare,
   checkDealtShare,
   MAX_RESHARE_WINDOW,
   checkNullifierKeyTranscript,
@@ -33,7 +34,7 @@ import {
   encodeResharedShare,
   identityKey,
   KEM_PUBLIC_KEY,
-  nullifierReshareApprovalMessage,
+  PARAMETERS,
   type NullifierReshareCheck,
   nullifierReshareContext,
   nullifierReshareCounts,
@@ -50,6 +51,7 @@ import {
   registrationKeysMessage,
   type RegistrationSecrets,
   reshareApprovingSeats,
+  reshareConsentingSeats,
   reshareComplaintsMessage,
   reshareDealing,
   resharedShareHash,
@@ -469,86 +471,124 @@ describe("nullifier-reshare.json", () => {
     60_000,
   );
 
-  test("approvals are re-made byte for byte and counted per new seat", () => {
+  test("the frozen approvals, under a retired statement, never count", () => {
     const a = V.approvals;
     const scope = scopeOf(a.newPanel);
-    const secrets = secretsOf(a.newPanel);
     const deadline = BigInt(vectorOf("honest").deadline ?? "");
-    const successor = { keyId: hex(a.keyId), deadline };
-    const now = deadline - 1000n;
-    for (const x of a.approvals) {
-      expect(toHex(nullifierReshareApprovalMessage(scope, x.index, hex(a.keyId)))).toBe(x.message);
-      expect(
-        toHex(
-          approveNullifierReshare(
-            scope,
-            secrets[x.index - 1] as Uint8Array,
-            x.index,
-            successor,
-            now,
-          ),
-        ),
-      ).toBe(x.signature);
-    }
     const all = [...a.approvals, ...a.notCounted].map((x) => ({
       index: x.index,
       signature: hex(x.signature),
     }));
-    expect(reshareApprovingSeats(scope, hex(a.keyId), all)).toEqual([1, 2, 3, 4]);
-    expect(
-      reshareApprovingSeats(
-        scope,
-        hex(a.keyId),
-        a.notCounted.map((x) => ({ index: x.index, signature: hex(x.signature) })),
-      ),
-    ).toEqual([]);
-    const one = all[0] as { index: number; signature: Uint8Array };
-    expect(reshareApprovingSeats(scope, hex(a.keyId), [one, one])).toEqual([1]);
+    // Under abolish/v1/sig/nullifier-reshare-approval, which carries no deadline.
+    expect(reshareApprovingSeats(scope, hex(a.keyId), deadline, all)).toEqual([]);
     expect(nullifierReshareQuorum(scope)).toBe(3);
-    // The old 2-of-4 panel's consent: 3 qualified dealers, as honest has and two-dealers doesn't.
-    expect(nullifierReshareDealerQuorum(scope)).toBe(3);
-    expect(vectorOf("honest").result.dealers?.length).toBe(3);
-    expect(vectorOf("two-dealers").result.dealers?.length).toBe(2);
-    // Counting applies the dealer quorum itself: honest counts with every new
-    // seat's approval, two-dealers doesn't however many approve it.
+  }, 60_000);
+
+  test("a successor counts on the old panel's consents and q' approvals, both with its deadline", () => {
+    const scope = scopeOf("new-4");
+    const secrets = secretsOf("new-4");
+    const oldSecrets = secretsOf(V.predecessor.panel);
     const honest = checkNullifierReshareTranscript(scope, hex(vectorOf("honest").transcript), 1);
     if (!honest.ok) throw new Error("expected a valid transcript");
-    expect(nullifierReshareCounts(scope, honest, all)).toBe(true);
-    expect(nullifierReshareCounts(scope, honest, all.slice(0, 2))).toBe(false);
-    const two = vectorOf("two-dealers");
-    const twoCheck = checkNullifierReshareTranscript(scope, hex(two.transcript), 1);
-    if (!twoCheck.ok) throw new Error("expected a valid transcript");
-    const twoApprovals = [1, 2, 3, 4].map((index) => ({
+    const { deadline, keyId } = honest;
+    const now = deadline - BigInt(PARAMETERS.RECORD_MARGIN);
+    const approvals = [1, 2, 3, 4].map((index) => ({
       index,
       signature: approveNullifierReshare(
         scope,
         secrets[index - 1] as Uint8Array,
         index,
-        twoCheck,
-        twoCheck.deadline - 1000n,
-      ),
-    }));
-    expect(reshareApprovingSeats(scope, twoCheck.keyId, twoApprovals)).toEqual([1, 2, 3, 4]);
-    expect(nullifierReshareCounts(scope, twoCheck, twoApprovals)).toBe(false);
-    // An old seat's key signs nothing for the new panel.
-    expect(() =>
-      approveNullifierReshare(
-        scope,
-        secretsOf(V.predecessor.panel)[0] as Uint8Array,
-        1,
-        successor,
+        honest,
         now,
       ),
-    ).toThrow(/seat/);
-    // Never once the deadline has passed, nor for a run whose deadline lies too far ahead.
-    const seat1 = secrets[0] as Uint8Array;
-    expect(() => approveNullifierReshare(scope, seat1, 1, successor, deadline)).toThrow(/passed/);
+    }));
+    // The old 2-of-4 panel's consent: 3 qualified dealers, as honest has and two-dealers doesn't.
+    expect(nullifierReshareDealerQuorum(scope)).toBe(3);
+    expect(honest.dealers).toEqual([1, 2, 3]);
+    const consents = honest.dealers.map((index) => ({
+      index,
+      signature: consentNullifierReshare(
+        scope,
+        oldSecrets[index - 1] as Uint8Array,
+        index,
+        honest,
+        now,
+      ),
+    }));
+    expect(reshareApprovingSeats(scope, keyId, deadline, approvals)).toEqual([1, 2, 3, 4]);
+    expect(reshareConsentingSeats(scope, keyId, deadline, consents)).toEqual([1, 2, 3]);
+    // Another deadline is another statement, and neither list counts as the other.
+    expect(reshareApprovingSeats(scope, keyId, deadline + 1n, approvals)).toEqual([]);
+    expect(reshareConsentingSeats(scope, keyId, deadline - 1n, consents)).toEqual([]);
+    expect(reshareApprovingSeats(scope, keyId, deadline, consents)).toEqual([]);
+    expect(reshareConsentingSeats(scope, keyId, deadline, approvals)).toEqual([]);
+    const one = approvals[0] as { index: number; signature: Uint8Array };
+    expect(reshareApprovingSeats(scope, keyId, deadline, [one, one])).toEqual([1]);
+
+    expect(nullifierReshareCounts(scope, honest, consents, approvals)).toBe(true);
+    expect(nullifierReshareCounts(scope, honest, consents, approvals.slice(0, 2))).toBe(false);
+    expect(nullifierReshareCounts(scope, honest, consents.slice(0, 2), approvals)).toBe(false);
+    const c1 = consents[0] as { index: number; signature: Uint8Array };
+    expect(nullifierReshareCounts(scope, honest, [c1, c1, c1], approvals)).toBe(false);
+
+    // two-dealers lacks the dealer quorum: no seat approves or consents, and
+    // counting refuses it however many sign.
+    const twoCheck = checkNullifierReshareTranscript(
+      scope,
+      hex(vectorOf("two-dealers").transcript),
+      1,
+    );
+    if (!twoCheck.ok) throw new Error("expected a valid transcript");
+    expect(twoCheck.dealers.length).toBe(2);
+    const twoNow = twoCheck.deadline - BigInt(PARAMETERS.RECORD_MARGIN);
     expect(() =>
-      approveNullifierReshare(scope, seat1, 1, successor, deadline - MAX_RESHARE_WINDOW - 1n),
-    ).toThrow(/too far ahead/);
-    expect(
-      approveNullifierReshare(scope, seat1, 1, successor, deadline - MAX_RESHARE_WINDOW).length,
-    ).toBe(64);
+      approveNullifierReshare(scope, secrets[0] as Uint8Array, 1, twoCheck, twoNow),
+    ).toThrow(/dealers/);
+    expect(() =>
+      consentNullifierReshare(scope, oldSecrets[0] as Uint8Array, 1, twoCheck, twoNow),
+    ).toThrow(/dealers/);
+    expect(nullifierReshareCounts(scope, twoCheck, consents, approvals)).toBe(false);
+  }, 60_000);
+
+  test("a seat approves or consents only within its role, the window and RECORD_MARGIN", () => {
+    const scope = scopeOf("new-4");
+    const secrets = secretsOf("new-4");
+    const oldSecrets = secretsOf(V.predecessor.panel);
+    const honest = checkNullifierReshareTranscript(scope, hex(vectorOf("honest").transcript), 1);
+    if (!honest.ok) throw new Error("expected a valid transcript");
+    const { deadline } = honest;
+    const margin = BigInt(PARAMETERS.RECORD_MARGIN);
+    const approve = (block: bigint) =>
+      approveNullifierReshare(scope, secrets[0] as Uint8Array, 1, honest, block);
+    const consent = (block: bigint) =>
+      consentNullifierReshare(scope, oldSecrets[0] as Uint8Array, 1, honest, block);
+    for (const sign of [approve, consent]) {
+      expect(() => sign(deadline)).toThrow(/passed/);
+      expect(() => sign(deadline - margin + 1n)).toThrow(/too close/);
+      expect(sign(deadline - margin)).toHaveLength(64);
+      expect(() => sign(deadline - MAX_RESHARE_WINDOW - 1n)).toThrow(/too far ahead/);
+      expect(sign(deadline - MAX_RESHARE_WINDOW)).toHaveLength(64);
+    }
+    const now = deadline - margin;
+    // An old seat's key signs no approval, a new seat's no consent, and old
+    // seat 4, absent from the predecessor, deals in nothing.
+    expect(() =>
+      approveNullifierReshare(scope, oldSecrets[0] as Uint8Array, 1, honest, now),
+    ).toThrow(/seat/);
+    expect(() => consentNullifierReshare(scope, secrets[0] as Uint8Array, 1, honest, now)).toThrow(
+      /seat/,
+    );
+    expect(() =>
+      consentNullifierReshare(scope, oldSecrets[3] as Uint8Array, 4, honest, now),
+    ).toThrow(/qualified dealer/);
+    // Only a check's own result: a copy is refused.
+    expect(() =>
+      approveNullifierReshare(scope, secrets[0] as Uint8Array, 1, { ...honest }, now),
+    ).toThrow(/checkNullifierReshareTranscript/);
+    expect(() => nullifierReshareCounts(scope, { ...honest }, [], [])).toThrow(
+      /checkNullifierReshareTranscript/,
+    );
+    expect(Object.isFrozen(honest) && Object.isFrozen(honest.dealers)).toBe(true);
   }, 60_000);
 
   test.each(V.decode.map((d) => [d.id, d] as const))(

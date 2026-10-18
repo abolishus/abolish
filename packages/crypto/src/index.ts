@@ -826,9 +826,7 @@ export {
 } from "./nullifier-query.ts";
 export {
   approveNullifierKey,
-  approveNullifierKeyV2,
   approvingSeats,
-  approvingSeatsV2,
   checkDealtShare,
   checkNullifierKeyTranscript,
   complaintsMessage,
@@ -875,9 +873,31 @@ export {
   seatShareOf,
 } from "./nullifier-key.ts";
 export {
+  decodeNullifierKeyRecord,
+  decodeNullifierReshareRecord,
+  encodeNullifierKeyRecord,
+  encodeNullifierReshareRecord,
+  type NullifierKeyHistoryReason,
+  type NullifierKeyLogRecord,
+  type NullifierKeyRecord,
+  type NullifierKeyReplayPins,
+  type NullifierKeyReplayResult,
+  type NullifierReshareRecord,
+  type RecordedNullifierKey,
+  replayNullifierKeyRecords,
+  type SeatSignature,
+} from "./nullifier-key-registry.ts";
+export {
+  type NullifierKeyRegistryScope,
+  nullifierKeyApprovalStatement,
+  nullifierReshareApprovalStatement,
+  nullifierReshareConsentStatement,
+} from "./nullifier-key-statements.ts";
+export {
   approveNullifierReshare,
   checkNullifierReshareTranscript,
   checkResharedShare,
+  consentNullifierReshare,
   decodeNullifierReshareTranscript,
   decodeResharedShare,
   encodeNullifierReshareTranscript,
@@ -887,6 +907,7 @@ export {
   NULLIFIER_RESHARE_TRANSCRIPT,
   nullifierReshareApprovalMessage,
   type NullifierReshareCheck,
+  nullifierReshareConsentMessage,
   nullifierReshareContext,
   nullifierReshareCounts,
   nullifierReshareDealerQuorum,
@@ -899,6 +920,7 @@ export {
   type OldSeat,
   reshareApprovingSeats,
   type ReshareComplaintsMessage,
+  reshareConsentingSeats,
   reshareComplaintsMessage,
   type ReshareDealerReason,
   type ReshareDealerResult,

@@ -36,6 +36,7 @@ import {
 } from "./keyed-nullifier.ts";
 import {
   checkPolynomials,
+  checkRecordMargin,
   checkRunDeadline,
   commitmentAt,
   type DealtShareResult,
@@ -63,6 +64,11 @@ import {
   signingPopMessage,
   signRoundMessage,
 } from "./nullifier-key.ts";
+import {
+  nullifierReshareApprovalStatement,
+  nullifierReshareConsentStatement,
+  STATEMENT_TAGS,
+} from "./nullifier-key-statements.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import {
@@ -100,7 +106,6 @@ function checkDeadline(deadline: bigint, currentL2Block: bigint): void {
 
 const MESSAGE_TAG = "abolish/v1/sig/nullifier-reshare-message";
 const SIGNING_KEY_TAG = "abolish/v1/sig/nullifier-reshare-signing-key";
-const APPROVAL_TAG = "abolish/v1/sig/nullifier-reshare-approval";
 
 // Recipients are another panel's seats, so a dealer's lists run to
 // MAX_TRUSTEES, never MAX_TRUSTEES − 1 as in the initial sharing.
@@ -804,6 +809,16 @@ function successorCommitment(
   return c;
 }
 
+// Every valid result this module's check returned, frozen, so approving,
+// consenting and counting take a successor's `key_id`, deadline, dealers and
+// qualified seats only as one check gave them together.
+const CHECKED = new WeakSet<object>();
+
+function checked(successor: object): void {
+  if (!CHECKED.has(successor))
+    throw new TypeError("nullifier reshare: expected a result of checkNullifierReshareTranscript");
+}
+
 /**
  * The transcript check of docs/spec/nullifier-reshare.md: the context
  * rebuilt from `scope` (never from the transcript), checks 1 to 8 in order,
@@ -874,17 +889,19 @@ export function checkNullifierReshareTranscript(
       (_, i) => qualified.find((s) => s.index === i + 1)?.commitment ?? null,
     ),
   };
-  return {
-    ok: true,
+  const result = Object.freeze({
+    ok: true as const,
     keyId,
     predecessor: Uint8Array.from(t.predecessor),
     deadline: t.deadline,
-    dealerResults,
-    dealers,
-    seats,
-    qualified,
+    dealerResults: Object.freeze(dealerResults),
+    dealers: Object.freeze(dealers),
+    seats: Object.freeze(seats),
+    qualified: Object.freeze(qualified),
     key,
-  };
+  });
+  CHECKED.add(result);
+  return result;
 }
 
 /**
@@ -919,91 +936,177 @@ export function reshareSeatShareOf(
   return { seat: index, sk, s };
 }
 
-const APPROVAL = struct([
-  ["l2_chain_id", u64],
-  ["group_registry", bytesFixed(20)],
-  ["new_panel_id", bytesFixed(32)],
-  ["index", u8],
-  ["predecessor", bytesFixed(32)],
-  ["key_id", bytesFixed(32)],
-] as const);
-
-/** The 125-byte statement `abolish/v1/sig/nullifier-reshare-approval` signs. */
+/**
+ * New seat `index`'s 133-byte statement approving a successor with its run's
+ * deadline, signed under `abolish/v1/sig/nullifier-reshare-approval-2`
+ * (docs/spec/nullifier-reshare.md, Approval). The statement without the
+ * deadline, `abolish/v1/sig/nullifier-reshare-approval`, is retired: approvals
+ * held back past the run's deadline could be recorded under it once the new
+ * seats had erased their shares (T-54).
+ */
 export function nullifierReshareApprovalMessage(
   scope: NullifierReshareScope,
   index: number,
   keyId: Uint8Array,
+  deadline: bigint,
 ): Uint8Array {
   const s = scopeOf(scope);
   if (!Number.isSafeInteger(index) || index < 1 || index > s.next.keys.length)
     throw new RangeError("nullifier reshare: index must be a seat of the new panel");
-  return encode(APPROVAL, {
-    l2_chain_id: s.l2ChainId,
-    group_registry: s.groupRegistry,
-    new_panel_id: s.next.id,
-    index,
-    predecessor: s.predecessorId,
-    key_id: keyId,
-  });
+  return nullifierReshareApprovalStatement(s, s.next.id, index, s.predecessorId, keyId, deadline);
 }
 
 /**
- * New seat `index`'s approval of a successor, as its check gave it (its
- * `keyId` and `deadline`), refused once the deadline has passed or if it lies
- * more than `MAX_RESHARE_WINDOW` ahead of `currentL2Block`. `successor` must be
- * one check's result, its `keyId` and `deadline` together, and the margin
- * for recording the approval in time is the caller's. The caller MUST have checked
- * the approval rules of docs/spec/nullifier-reshare.md first, rules 4 to 6
- * above all: the predecessor counts and has no counted successor, the run's
- * deadline hasn't passed, and every other successor of this predecessor the
- * seat approved passed its deadline without counting.
+ * Old seat `index`'s 165-byte statement consenting to the successor, signed
+ * under `abolish/v1/sig/nullifier-reshare-consent` (docs/spec/
+ * nullifier-reshare.md, Consent): the dealer quorum shown to the registry,
+ * which can't run the transcript check (T-37, T-40).
+ */
+export function nullifierReshareConsentMessage(
+  scope: NullifierReshareScope,
+  index: number,
+  keyId: Uint8Array,
+  deadline: bigint,
+): Uint8Array {
+  const s = scopeOf(scope);
+  if (!Number.isSafeInteger(index) || index < 1 || index > s.old.keys.length)
+    throw new RangeError("nullifier reshare: index must be a seat of the old panel");
+  return nullifierReshareConsentStatement(
+    s,
+    s.old.id,
+    index,
+    s.predecessorId,
+    s.next.id,
+    keyId,
+    deadline,
+  );
+}
+
+// Rule 1 of both the approval and the consent, and rule 5: the check's own
+// result, of this scope's predecessor, with both quorums, a deadline ahead
+// within the window, and the margin to force the record left.
+function checkSuccessor(
+  scope: NullifierReshareScope,
+  successor: Extract<NullifierReshareCheck, { ok: true }>,
+  currentL2Block: bigint,
+): void {
+  checked(successor);
+  if (!equalBytes(successor.predecessor, scopeOf(scope).predecessorId))
+    throw new RangeError("nullifier reshare: the check is of another predecessor");
+  if (successor.dealers.length < nullifierReshareDealerQuorum(scope))
+    throw new RangeError("nullifier reshare: fewer than max(k, n − 1) qualified dealers");
+  if (successor.qualified.length < nullifierReshareQuorum(scope))
+    throw new RangeError("nullifier reshare: fewer than q' qualified new seats");
+  checkDeadline(successor.deadline, currentL2Block);
+  checkRecordMargin(successor.deadline, currentL2Block, "nullifier reshare");
+}
+
+/**
+ * New seat `index`'s approval of a successor, as one check of its transcript
+ * returned it, refused without both quorums (rule 1), for a seat that isn't
+ * qualified (rule 2), or for a deadline passed, beyond `MAX_RESHARE_WINDOW`
+ * or with fewer than `RECORD_MARGIN` blocks left (rule 5). The caller MUST
+ * have checked the other approval rules of docs/spec/nullifier-reshare.md
+ * first, from its own L2 node, rules 4 and 6 above all: the predecessor is
+ * the group registry's current key, and every other successor of it the seat
+ * approved passed its deadline without being recorded.
  */
 export function approveNullifierReshare(
   scope: NullifierReshareScope,
   identitySecret: Uint8Array,
   index: number,
-  successor: { readonly keyId: Uint8Array; readonly deadline: bigint },
+  successor: Extract<NullifierReshareCheck, { ok: true }>,
   currentL2Block: bigint,
 ): Uint8Array {
-  const s = scopeOf(scope);
-  const { keyId } = successor;
-  checkDeadline(successor.deadline, currentL2Block);
-  const key = s.next.keys[index - 1];
+  checkSuccessor(scope, successor, currentL2Block);
+  if (!successor.qualified.some((q) => q.index === index))
+    throw new RangeError("nullifier reshare: the new seat isn't qualified");
+  const key = scopeOf(scope).next.keys[index - 1];
   if (key === undefined || !equalBytes(identityKey(identitySecret), key))
     throw new RangeError("nullifier reshare: identitySecret is not the key of seat index");
   return signStatement(
     identitySecret,
-    APPROVAL_TAG,
-    nullifierReshareApprovalMessage(scope, index, keyId),
+    STATEMENT_TAGS.reshareApproval,
+    nullifierReshareApprovalMessage(scope, index, successor.keyId, successor.deadline),
   );
 }
 
 /**
- * The distinct new seats whose approval of `keyId` verifies under their
- * pinned identity key, in increasing order: counted per seat, never per
- * signature (T-14, T-37).
+ * Old seat `index`'s consent to a successor, as one check of its transcript
+ * returned it, refused without both quorums (rule 1), for a seat that isn't a
+ * qualified dealer of it (rule 2), or for a deadline passed, beyond
+ * `MAX_RESHARE_WINDOW` or with fewer than `RECORD_MARGIN` blocks left
+ * (rule 5). The caller MUST have checked the other consent rules first:
+ * the transcript holds every message the seat sent (rule 3), the predecessor
+ * is the group registry's current key, read from its own L2 node (rule 4),
+ * and the new panel is one the release allows as a successor, verified out of
+ * band, with no other `key_id` of this run consented to (rule 6).
  */
+export function consentNullifierReshare(
+  scope: NullifierReshareScope,
+  identitySecret: Uint8Array,
+  index: number,
+  successor: Extract<NullifierReshareCheck, { ok: true }>,
+  currentL2Block: bigint,
+): Uint8Array {
+  checkSuccessor(scope, successor, currentL2Block);
+  if (!successor.dealers.includes(index))
+    throw new RangeError("nullifier reshare: the old seat isn't a qualified dealer");
+  const key = scopeOf(scope).old.keys[index - 1];
+  if (key === undefined || !equalBytes(identityKey(identitySecret), key))
+    throw new RangeError("nullifier reshare: identitySecret is not the key of old seat index");
+  return signStatement(
+    identitySecret,
+    STATEMENT_TAGS.consent,
+    nullifierReshareConsentMessage(scope, index, successor.keyId, successor.deadline),
+  );
+}
+
+// The distinct seats of `keys` whose signature verifies on `message(index)`,
+// in increasing order: counted per seat, never per signature (T-14, T-37).
+function signingSeats(
+  keys: readonly Uint8Array[],
+  tag: (typeof STATEMENT_TAGS)["reshareApproval" | "consent"],
+  message: (index: number) => Uint8Array,
+  signatures: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): number[] {
+  const seats = new Set<number>();
+  for (const a of signatures) {
+    const key = Number.isSafeInteger(a.index) ? keys[a.index - 1] : undefined;
+    if (key === undefined || a.index < 1) continue;
+    if (verifyStatement(key, tag, message(a.index), a.signature)) seats.add(a.index);
+  }
+  return [...seats].sort((x, y) => x - y);
+}
+
+/** The distinct new seats whose approval of `keyId` with `deadline` verifies under their pinned identity key. */
 export function reshareApprovingSeats(
   scope: NullifierReshareScope,
   keyId: Uint8Array,
+  deadline: bigint,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): number[] {
-  const s = scopeOf(scope);
-  const seats = new Set<number>();
-  for (const a of approvals) {
-    const key = Number.isSafeInteger(a.index) ? s.next.keys[a.index - 1] : undefined;
-    if (key === undefined || a.index < 1) continue;
-    if (
-      verifyStatement(
-        key,
-        APPROVAL_TAG,
-        nullifierReshareApprovalMessage(scope, a.index, keyId),
-        a.signature,
-      )
-    )
-      seats.add(a.index);
-  }
-  return [...seats].sort((x, y) => x - y);
+  return signingSeats(
+    scopeOf(scope).next.keys,
+    STATEMENT_TAGS.reshareApproval,
+    (i) => nullifierReshareApprovalMessage(scope, i, keyId, deadline),
+    approvals,
+  );
+}
+
+/** The distinct old seats whose consent to `keyId` with `deadline` verifies under their pinned identity key. */
+export function reshareConsentingSeats(
+  scope: NullifierReshareScope,
+  keyId: Uint8Array,
+  deadline: bigint,
+  consents: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): number[] {
+  return signingSeats(
+    scopeOf(scope).old.keys,
+    STATEMENT_TAGS.consent,
+    (i) => nullifierReshareConsentMessage(scope, i, keyId, deadline),
+    consents,
+  );
 }
 
 /**
@@ -1017,22 +1120,32 @@ export function nullifierReshareDealerQuorum(scope: NullifierReshareScope): numb
 }
 
 /**
- * Whether a successor counts on the approvals given (docs/spec/
- * nullifier-reshare.md, Approval): its check gave at least
- * `max(k, n − 1)` qualified dealers, the old panel's consent, and `q'`
- * distinct new seats approved it. The dealer quorum is checked here, not only
+ * Whether a successor's transcript, consents and approvals are enough for it
+ * to count (docs/spec/nullifier-reshare.md, Approval): `check` is a result of
+ * this module's check of the scope's predecessor, with at least
+ * `max(k, n − 1)` qualified dealers and `q'` qualified new seats, and
+ * `max(k, n − 1)` distinct old seats consented and `q'` distinct new seats
+ * approved it with its deadline. The dealer quorum is checked here, not only
  * by honest approvers, because a panel of an insider's own keys has no honest
- * seat to check it. That every approval was recorded by the run's deadline is
- * the registry's to check (part 2b-4).
+ * seat to check it. Whether it counts is then the group registry's record of
+ * it, by the deadline, as a successor of the current key
+ * (`replayNullifierKeyRecords`).
  */
 export function nullifierReshareCounts(
   scope: NullifierReshareScope,
   check: Extract<NullifierReshareCheck, { ok: true }>,
+  consents: readonly { readonly index: number; readonly signature: Uint8Array }[],
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): boolean {
+  checked(check);
+  const dealerQuorum = nullifierReshareDealerQuorum(scope);
+  const q = nullifierReshareQuorum(scope);
   return (
-    check.dealers.length >= nullifierReshareDealerQuorum(scope) &&
-    reshareApprovingSeats(scope, check.keyId, approvals).length >= nullifierReshareQuorum(scope)
+    equalBytes(check.predecessor, scopeOf(scope).predecessorId) &&
+    check.dealers.length >= dealerQuorum &&
+    check.qualified.length >= q &&
+    reshareConsentingSeats(scope, check.keyId, check.deadline, consents).length >= dealerQuorum &&
+    reshareApprovingSeats(scope, check.keyId, check.deadline, approvals).length >= q
   );
 }
 

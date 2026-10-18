@@ -1,13 +1,14 @@
 // The board's contract-path sending (docs/spec/availability.md, Windows and
 // Contract path; docs/spec/delivery.md, Direct submit): a seat's stored
 // record sent to the board contract (`submitAvailabilityRecord` for an
-// availability record, `submitReceiptBatch` for a share-receipt batch)
-// through the seat's L2 node, which passes it to the sequencer, and
+// availability record, `submitReceiptBatch` for a share-receipt batch,
+// `submitComplaintBatch` for a share-complaint batch) through the seat's L2 node, which passes it to the sequencer, and
 // deposited through the L2's portal on L1 when the sequencer refuses it,
 // holds it back, or the cutoff is near. The L2 must include a deposit within
 // its sequencing window `F` whatever the sequencer wants, and a record
 // counts by the time of the L2 block that emits it, so a deposit on L1 by a
-// cutoff of its deadline less `F` (`c_I` for `t_A`, `c_D` for `t_D`) lands
+// cutoff of its deadline less `F` (`c_I` for `t_A`, `c_D` for `t_D`, `c_K`
+// for `t_K`) lands
 // in time (T-25, T-50, T-71).
 //
 // One account, the deployment's, pays on both chains. It grants no
@@ -29,6 +30,7 @@ import { chainId, type Rpc, RpcError } from "@abolishus/node";
 import { bytesToHex, encodeFunctionData, type Hex, hexToBytes, keccak256, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { ContractPath } from "./availability.ts";
+import type { ComplaintPath } from "./complaint.ts";
 import type { ReceiptPath } from "./delivery.ts";
 
 /**
@@ -48,6 +50,13 @@ export const AVAILABILITY_CALL_GAS = 600_000n;
  * to carry (docs/spec/delivery.md, Capacity).
  */
 export const RECEIPT_CALL_GAS = FORCED_PATH.receiptCallGas;
+
+/**
+ * The gas limit of the complaint-batch call, sent or deposited: the
+ * release's `COMPLAINT_CALL_GAS`, for a full batch of `COMPLAINT_BATCH_MAX`
+ * complaints (docs/spec/delivery.md, Capacity).
+ */
+export const COMPLAINT_CALL_GAS = FORCED_PATH.complaintCallGas;
 
 /** EIP-7825's cap on one transaction's gas, 2²⁴: a deposit estimated past it can't be sent. */
 export const MAX_TRANSACTION_GAS = 1n << 24n;
@@ -189,6 +198,8 @@ export interface BoardSender {
   readonly availability: ContractPath["send"];
   /** `submitReceiptBatch`, by `c_D`. */
   readonly receiptBatch: ReceiptPath["send"];
+  /** `submitComplaintBatch`, by `c_K`. */
+  readonly complaintBatch: ComplaintPath["send"];
 }
 
 /**
@@ -312,7 +323,7 @@ export async function boardSender(options: SendOptions): Promise<BoardSender> {
   let queue: Promise<unknown> = Promise.resolve();
 
   const send = async (
-    functionName: "submitAvailabilityRecord" | "submitReceiptBatch",
+    functionName: "submitAvailabilityRecord" | "submitReceiptBatch" | "submitComplaintBatch",
     gasLimit: bigint,
     record: Uint8Array,
     cutoff: bigint,
@@ -375,6 +386,7 @@ export async function boardSender(options: SendOptions): Promise<BoardSender> {
   return {
     availability: queued("submitAvailabilityRecord", AVAILABILITY_CALL_GAS),
     receiptBatch: queued("submitReceiptBatch", RECEIPT_CALL_GAS),
+    complaintBatch: queued("submitComplaintBatch", COMPLAINT_CALL_GAS),
   };
 }
 

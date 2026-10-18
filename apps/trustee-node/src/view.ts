@@ -52,6 +52,7 @@ import { keccak256, toBytes } from "viem";
 import type { HeldExtent } from "./availability.ts";
 import type { ApprovedElection } from "./ceremony.ts";
 import { heldIntake } from "./intake.ts";
+import { l2BlockTime } from "./recorded.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
@@ -137,34 +138,8 @@ export function obligationView(
   options: ViewOptions,
 ): (election: ApprovedElection) => Promise<ObligationView> {
   return async (election) => {
-    const { l1, l2 } = options;
-    if ((await chainId(l1)) !== options.l1ChainId || (await chainId(l2)) !== options.l2ChainId)
-      throw new ViewError("chain");
-    const l2Head = await l2Finalized(l2);
-    const reg = await registration(
-      l2,
-      options.registry,
-      election.electionId,
-      options.registryFromBlock,
-      l2Head,
-    );
-    // The hash binds every field, the transcript's hash among them, so the
-    // definition admission reads is the one the seat approved.
-    if (
-      reg.decoded.version !== 1 ||
-      !equal(electionDefinitionHash(reg.decoded.value), election.definitionHash)
-    )
-      throw new ViewError("definition");
-    const d = reg.decoded.value;
-    // The versions the verifier reads this election's board and events under (4.2, 4.4).
-    const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
-    const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
-    if (
-      !isBoardVersion(boardVersion) ||
-      !isEventVersion(eventVersion) ||
-      !equal(d.board, options.board)
-    )
-      throw new ViewError("definition");
+    const { l2 } = options;
+    const { definition, boardVersion, eventVersion, l2Head } = await registered(options, election);
     const { l1: finalized, low } = await finalizedL1(options, election);
     const extent = await options.extent(election);
     const view = { l1: finalized, low };
@@ -178,7 +153,7 @@ export function obligationView(
         "the L2 node's finalized history doesn't reach the contract-event window's end",
       );
     const entries = extent.entries.map((e) => decodeBoardEntry(e, boardVersion));
-    const admission = electionAdmission(reg.definition, options.panel, extent.entries);
+    const admission = electionAdmission(definition, options.panel, extent.entries);
     // The seat attested this extent, so it carries the transcript it approved;
     // an election the verifier can't admit ballots of fails at 3.2 for
     // everyone, and the seat holds no copy that could count.
@@ -211,6 +186,92 @@ export function obligationView(
     const absent = held.receipts.filter((h) => !present.has(hex(h)));
     return { ...view, board, absent, boardSegment: extent.boardSegment };
   };
+}
+
+/**
+ * The deployment's ballot source for the complaint duty
+ * (`ComplaintDutyOptions.ballots`): every ballot record of the election the
+ * seat can read when it decides its complaints, the board-path ballots of
+ * the extent it attested and the board contract's ballot records in its L2
+ * node's finalized history, each passing the event check. Nothing here is
+ * admitted or trusted: the duty matches each record to its scope by the
+ * ballot hash it recomputes, so the source can withhold a ballot but never
+ * swap one (T-38). An attested extent the pinned blocks no longer hold costs
+ * only its ballots: the contract's are still given, and the duty waits for
+ * the rest until it gives them up (T-29, T-54). Refused as `obligationView`
+ * is when the nodes or the registered definition aren't the seat's.
+ */
+export function complaintBallots(
+  options: ViewOptions,
+): (election: ApprovedElection) => Promise<readonly Uint8Array[]> {
+  return async (election) => {
+    const { boardVersion, eventVersion, l2Head } = await registered(options, election);
+    let extent;
+    try {
+      extent = await options.extent(election);
+    } catch (e) {
+      if (!(e instanceof ViewError && e.code === "extent-lost")) throw e;
+    }
+    const ballots: Uint8Array[] = [];
+    for (const entry of extent?.entries ?? []) {
+      const { payload } = decodeBoardEntry(entry, boardVersion);
+      if (
+        payload.length >= 2 &&
+        (((payload[0] as number) << 8) | (payload[1] as number)) === RECORD_TYPES.ballot
+      )
+        ballots.push(payload);
+    }
+    const recorded = await contractBallots(options, election.definitionHash, l2Head, eventVersion);
+    for (const c of recorded.copies) ballots.push(c.record);
+    return ballots;
+  };
+}
+
+/**
+ * The election's registered definition from the seat's own L2 node, with
+ * the board-entry and contract-event versions it pins and the node's
+ * finalized block, after checking both nodes' chains. Refused (`ViewError`)
+ * when a node is on another chain, or the definition isn't the approved
+ * one, isn't one this node reads or names another board.
+ */
+async function registered(
+  options: ViewOptions,
+  election: ApprovedElection,
+): Promise<{
+  readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
+  readonly boardVersion: BoardEntryVersion;
+  readonly eventVersion: ContractEventVersion;
+  readonly l2Head: bigint;
+}> {
+  const { l1, l2 } = options;
+  if ((await chainId(l1)) !== options.l1ChainId || (await chainId(l2)) !== options.l2ChainId)
+    throw new ViewError("chain");
+  const l2Head = await l2Finalized(l2);
+  const reg = await registration(
+    l2,
+    options.registry,
+    election.electionId,
+    options.registryFromBlock,
+    l2Head,
+  );
+  // The hash binds every field, the transcript's hash among them, so the
+  // definition admission reads is the one the seat approved.
+  if (
+    reg.decoded.version !== 1 ||
+    !equal(electionDefinitionHash(reg.decoded.value), election.definitionHash)
+  )
+    throw new ViewError("definition");
+  const d = reg.decoded.value;
+  // The versions the verifier reads this election's board and events under (4.2, 4.4).
+  const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
+  const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  if (
+    !isBoardVersion(boardVersion) ||
+    !isEventVersion(eventVersion) ||
+    !equal(d.board, options.board)
+  )
+    throw new ViewError("definition");
+  return { definition: reg.definition, boardVersion, eventVersion, l2Head };
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {
@@ -318,21 +379,4 @@ async function contractBallots(
     }
   }
   return { copies, named };
-}
-
-async function l2BlockTime(l2: Rpc, n: bigint): Promise<bigint> {
-  const block = (await l2.call("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])) as {
-    number?: unknown;
-    timestamp?: unknown;
-  } | null;
-  const quantity = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u;
-  if (
-    typeof block?.number !== "string" ||
-    typeof block.timestamp !== "string" ||
-    !quantity.test(block.number) ||
-    !quantity.test(block.timestamp) ||
-    BigInt(block.number) !== n
-  )
-    throw new RpcError("eth_getBlockByNumber: not a block");
-  return BigInt(block.timestamp);
 }

@@ -13,6 +13,7 @@ import {
   boardSender,
   DEPOSIT_GAS_FLOOR,
   MAX_SIGNED_PER_RECORD,
+  COMPLAINT_CALL_GAS,
   RECEIPT_CALL_GAS,
   SendError,
   type SendOptions,
@@ -53,13 +54,8 @@ const boardCall = (record: Uint8Array) =>
   );
 
 /** `submitReceiptBatch(record)` in the one encoding the board takes. */
-const batchCall = (record: Uint8Array) =>
-  concatBytes(
-    selector("submitReceiptBatch(bytes)"),
-    word(32n),
-    word(BigInt(record.length)),
-    padded(record),
-  );
+const batchCall = (record: Uint8Array, signature = "submitReceiptBatch(bytes)") =>
+  concatBytes(selector(signature), word(32n), word(BigInt(record.length)), padded(record));
 
 const portalAbi = parseAbi([
   "function depositTransaction(address to, uint256 value, uint64 gasLimit, bool isCreation, bytes data) payable",
@@ -669,6 +665,44 @@ describe("the receipt-batch call (P2-13 part 4b-2b-1)", () => {
       gasLimit: RECEIPT_CALL_GAS,
       isCreation: false,
       data: hex(batchCall(record)),
+    });
+  });
+});
+
+describe("the complaint-batch call (P2-13 part 4b-3b)", () => {
+  const complaintCall = (record: Uint8Array) => batchCall(record, "submitComplaintBatch(bytes)");
+
+  test("is the batch's canonical call with COMPLAINT_CALL_GAS, on the other calls' nonces", async () => {
+    const sender = await boardSender(options());
+    const record = new Uint8Array(104 + 128 * 512).fill(0xcd);
+    const receipts = new Uint8Array(104 + 64).fill(0xab);
+    await Promise.all([
+      sender.complaintBatch(record, CUTOFF),
+      sender.receiptBatch(receipts, CUTOFF),
+    ]);
+    const txs = await txsFrom(l2.rpc, w.from);
+    expect(txs.map((t) => [t.nonce, t.input, t.gas])).toEqual([
+      [0n, hex(complaintCall(record)), COMPLAINT_CALL_GAS],
+      [1n, hex(batchCall(receipts)), RECEIPT_CALL_GAS],
+    ]);
+    expect(COMPLAINT_CALL_GAS).toBe(5_000_000n);
+  });
+
+  test("is deposited from cutoff − forceLead with COMPLAINT_CALL_GAS as the deposit's gas limit", async () => {
+    const send = (await boardSender(options())).complaintBatch;
+    const record = new Uint8Array(104 + 128 * 512).fill(0xcd);
+    w.now = CUTOFF - FORCE_LEAD;
+    await send(record, CUTOFF);
+    const [deposit, ...rest] = await txsFrom(l1.rpc, w.from);
+    expect(rest).toEqual([]);
+    if (deposit === undefined) expect.fail("the batch was deposited");
+    expect(deposit.to).toBe(hex(PORTAL));
+    expect(depositOf(deposit)).toEqual({
+      to: hex(BOARD),
+      value: 0n,
+      gasLimit: COMPLAINT_CALL_GAS,
+      isCreation: false,
+      data: hex(complaintCall(record)),
     });
   });
 });

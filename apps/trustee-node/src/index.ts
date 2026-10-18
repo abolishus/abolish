@@ -59,7 +59,13 @@ export {
   type ObligationStatus,
   type ObligationView,
 } from "./obligation.ts";
-export { obligationView, ViewError, type ViewOptions, type ViewRefusal } from "./view.ts";
+export {
+  complaintBallots,
+  obligationView,
+  ViewError,
+  type ViewOptions,
+  type ViewRefusal,
+} from "./view.ts";
 export { L1AnchorError, type L1AnchorOptions, type L1AnchorRefusal, l1BoardAnchors } from "./l1.ts";
 export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
 export { type ServedBlocks, servedBlocks } from "./served.ts";
@@ -93,7 +99,10 @@ export {
   MAX_RECORD,
 } from "./wire.ts";
 export {
+  l2BlockTime,
+  l2Postings,
   l2RecordedAvailability,
+  l2RecordedComplaintBatches,
   l2RecordedReceiptBatches,
   RecordedError,
   type RecordedOptions,
@@ -103,6 +112,7 @@ export {
   availabilitySender,
   type BoardSender,
   boardSender,
+  COMPLAINT_CALL_GAS,
   DEPOSIT_GAS_FLOOR,
   MAX_SIGNED_PER_RECORD,
   MAX_TRANSACTION_GAS,

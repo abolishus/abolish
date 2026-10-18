@@ -28,6 +28,7 @@ import {
   type FinalizedBoardAnchors,
 } from "./availability.ts";
 import { type ApprovedElection, CeremonySeat } from "./ceremony.ts";
+import { type ComplaintDutyOptions, ComplaintDuty, type ComplaintPath } from "./complaint.ts";
 import { HttpCoordinator } from "./client.ts";
 import {
   type AvailabilityConfig,
@@ -39,18 +40,24 @@ import {
   readTlsKey,
 } from "./config.ts";
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
-import { AvailabilityDuties, type DutyEvent, ReceiptDuties } from "./duties.ts";
+import { AvailabilityDuties, ComplaintDuties, type DutyEvent, ReceiptDuties } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
 import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
-import { l2RecordedAvailability, l2RecordedReceiptBatches, RecordedError } from "./recorded.ts";
+import {
+  l2Postings,
+  l2RecordedAvailability,
+  l2RecordedComplaintBatches,
+  l2RecordedReceiptBatches,
+  RecordedError,
+} from "./recorded.ts";
 import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
-import { obligationView, type ViewOptions } from "./view.ts";
+import { complaintBallots, obligationView, type ViewOptions } from "./view.ts";
 
 export interface CliIo {
   readonly out: (value: unknown) => void;
@@ -161,7 +168,11 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
   const loops = [
     node.run(signal, ms),
     ...(availability
-      ? [availability.duties.run(signal, ms), availability.receipts.run(signal, ms)]
+      ? [
+          availability.duties.run(signal, ms),
+          availability.receipts.run(signal, ms),
+          availability.complaints.run(signal, ms),
+        ]
       : []),
   ].map((loop) =>
     loop.catch((error: unknown) => {
@@ -237,16 +248,18 @@ async function intakeEndpoint(
 interface Duties {
   readonly duties: AvailabilityDuties;
   readonly receipts: ReceiptDuties;
+  readonly complaints: ComplaintDuties;
   readonly server: Server;
 }
 
 /**
- * The availability and receipt duties over the configured nodes, contracts
- * and sources (README, Availability duty and Receipt duty), with the gateway
- * serving the blocks directory and what the availability duty pins into it,
- * listening; or undefined when the configuration has no `availability`. One
- * sender for the one paying account, shared by every election and both
- * duties, so two sends never take one nonce. Its setup checks both chains
+ * The availability, receipt and complaint duties over the configured
+ * nodes, contracts and sources (README, Availability duty, Receipt duty and
+ * Complaint duty), with the gateway serving the blocks directory and what
+ * the availability duty pins into it, listening; or undefined when the
+ * configuration has no `availability`. One sender for the one paying
+ * account, shared by every election and every duty, so two sends never take
+ * one nonce. Its setup checks both chains
  * and the contracts' code: a mismatch, or an address the gateway can't
  * listen on, is the configuration's error, a node that can't be read an
  * `RpcError`.
@@ -270,6 +283,7 @@ async function availabilityDuties(
   const clock = () => BigInt(Math.floor(Date.now() / 1000));
   let contract: ContractPath;
   let receiptPath: ReceiptPath;
+  let complaintPath: ComplaintPath;
   try {
     const sender = await boardSender({
       l2,
@@ -296,6 +310,11 @@ async function availabilityDuties(
       send: sender.receiptBatch,
       recorded: await l2RecordedReceiptBatches(recorded),
     };
+    complaintPath = {
+      postings: await l2Postings(recorded),
+      send: sender.complaintBatch,
+      recorded: await l2RecordedComplaintBatches(recorded),
+    };
   } catch (e) {
     // A RangeError here is the sender's option check, which never quotes the key.
     if (e instanceof SendError || e instanceof RecordedError || e instanceof RangeError)
@@ -310,6 +329,7 @@ async function availabilityDuties(
     l2,
     contract,
     receipts: receiptPath,
+    complaints: complaintPath,
     served,
     gateways,
     store,
@@ -330,6 +350,12 @@ async function availabilityDuties(
     log: (e: DutyEvent) => io.out(e),
     build: async (election) => new ReceiptDuty(wiring.receipts(election)),
   });
+  const complaints = new ComplaintDuties({
+    seat,
+    clock,
+    log: (e: DutyEvent) => io.out(e),
+    build: async (election) => new ComplaintDuty(wiring.complaints(election)),
+  });
   const server = gateway(served);
   server.listen(a.serve.port, a.serve.host);
   try {
@@ -343,7 +369,7 @@ async function availabilityDuties(
     io.err({ error: `serve: ${e.code ?? "failed"}` }),
   );
   io.out({ event: "serving", address: server.address() });
-  return { duties, receipts, server };
+  return { duties, receipts, complaints, server };
 }
 
 /** What `run` builds the duty over, besides the configuration. */
@@ -353,6 +379,8 @@ export interface DutySources {
   readonly contract: ContractPath;
   /** The board's receipt-batch call, over the same account as `contract`. */
   readonly receipts: ReceiptPath;
+  /** The board's postings, complaint-batch call and recorded batches, over the same account. */
+  readonly complaints: ComplaintPath;
   /** The blocks directory, read first, where the seat pins what it attests. */
   readonly served: ServedBlocks;
   readonly gateways: AsyncBlockSource;
@@ -362,8 +390,8 @@ export interface DutySources {
 
 /**
  * The L1 reader's options, each election's availability duty options, the
- * decision's view and each election's receipt duty options from the
- * configuration: the board is checked under the registered definition's
+ * decision's view and each election's receipt and complaint duty options
+ * from the configuration: the board is checked under the registered definition's
  * own board-entry pin, which the reader gives, never a configured one;
  * blocks are read from the directory the seat pins into, then the gateways.
  * The view reads the extent the seat attested through a reader and an
@@ -383,6 +411,7 @@ export function dutyWiring(
   ) => AvailabilityOptions;
   readonly view: ViewOptions;
   readonly receipts: (election: ApprovedElection) => ReceiptDutyOptions;
+  readonly complaints: (election: ApprovedElection) => ComplaintDutyOptions;
 } {
   const { l2ChainId } = config;
   // The directory first: a block it holds costs no request and tells no
@@ -435,6 +464,7 @@ export function dutyWiring(
   };
   // One view for every election: it holds no state of its own.
   const decide = obligationView(view);
+  const ballots = complaintBallots(view);
   return {
     anchors,
     seat,
@@ -444,6 +474,16 @@ export function dutyWiring(
       election,
       view: decide,
       contract: s.receipts,
+      now: s.clock,
+    }),
+    // The same decision as the receipt duty's, read from the same store, so
+    // the scope the complaints come from is the one decided at `c_I`.
+    complaints: (election) => ({
+      store: s.store,
+      election,
+      view: decide,
+      contract: s.complaints,
+      ballots,
       now: s.clock,
     }),
   };

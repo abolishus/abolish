@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import {
   AVAILABILITY_POINTS,
   batchShareReceipts,
+  decodeSharePosting,
   encodeAvailabilityAttestation,
   encodeAvailabilityComplaint,
+  encodeSharePosting,
   encodeShareReceiptBatch,
   SEAT_PANELS,
   signAvailabilityAttestation,
@@ -16,7 +18,9 @@ import { describe, expect, test } from "vite-plus/test";
 import { hex, padded, word } from "../../node/tests/anvil.ts";
 import type { AvailabilityKind } from "../src/availability.ts";
 import {
+  l2Postings,
   l2RecordedAvailability,
+  l2RecordedComplaintBatches,
   l2RecordedReceiptBatches,
   RecordedError,
 } from "../src/recorded.ts";
@@ -114,11 +118,16 @@ function l2Node(
   options: { honest?: boolean; chain?: bigint; finalized?: bigint } = {},
 ) {
   const asked: unknown[] = [];
+  const blocks: bigint[] = [];
   const rpc: Rpc = {
     call: async (method, params) => {
       if (method === "eth_chainId") return `0x${(options.chain ?? L2_CHAIN_ID).toString(16)}`;
-      if (method === "eth_getBlockByNumber")
-        return { number: `0x${(options.finalized ?? FINALIZED).toString(16)}` };
+      if (method === "eth_getBlockByNumber") {
+        const [tag] = params as [string];
+        const n = tag === "finalized" ? (options.finalized ?? FINALIZED) : BigInt(tag);
+        if (tag !== "finalized") blocks.push(n);
+        return { number: `0x${n.toString(16)}`, timestamp: `0x${blockTime(n).toString(16)}` };
+      }
       if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
       const [filter] = params as [
         { address: string; fromBlock: string; toBlock: string; topics: (string | string[])[] },
@@ -136,8 +145,11 @@ function l2Node(
       );
     },
   };
-  return { rpc, asked };
+  return { rpc, asked, blocks };
 }
+
+/** The timestamp the scripted L2 node gives block `n`. */
+const blockTime = (n: bigint) => 1_000n + 2n * n;
 
 const reader = (rpc: Rpc) =>
   l2RecordedAvailability({ l2: rpc, l2ChainId: L2_CHAIN_ID, board: BOARD, l2FromBlock: 7n });
@@ -399,5 +411,182 @@ describe("l2RecordedReceiptBatches", () => {
     for (const seat of [256, -1, 1.5])
       await expect(read(D, seat)).rejects.toBeInstanceOf(RangeError);
     expect(asked).toEqual([]);
+  });
+});
+
+const batchFile = (await vector("delivery-batch.json")) as {
+  definitionHash: string;
+  complaintRecords: { id: string; encoding: string; seat: number }[];
+  records: { id: string; encoding: string }[];
+};
+const deliveryFile = (await vector("delivery.json")) as {
+  definitionHash: string;
+  records: { id: string; encoding: string }[];
+};
+
+describe("l2RecordedComplaintBatches", () => {
+  // The complaint duty's read (P2-13 part 4b-3b): every share-complaint
+  // batch the board emitted for the definition and seat in finalized
+  // history, the batches from delivery-batch.json and the event's topic from
+  // contract-event-v8.json.
+  const TOPIC = topic0("ShareComplaintBatchSubmitted");
+  const file = batchFile;
+  const DEF = hexToBytes(file.definitionHash);
+  const [one, two] = file.complaintRecords.map((r) => hexToBytes(r.encoding));
+  if (one === undefined || two === undefined)
+    throw new Error("no complaint batches in the vectors");
+  const SEAT = file.complaintRecords[0]?.seat ?? 0;
+  const batchLog = (seat: number, record: Uint8Array, block = FINALIZED, topic = TOPIC): Log => ({
+    address: hex(BOARD),
+    topics: [topic, hex(DEF), hex(word(BigInt(seat)))],
+    data: hex(concatBytes(word(32n), word(BigInt(record.length)), padded(record))),
+    blockNumber: `0x${block.toString(16)}`,
+  });
+  const batches = (rpc: Rpc) =>
+    l2RecordedComplaintBatches({ l2: rpc, l2ChainId: L2_CHAIN_ID, board: BOARD, l2FromBlock: 7n });
+
+  test("gives every complaint batch of the seat's, asked from the deployment block to the finalized block", async () => {
+    const { rpc, asked } = l2Node([batchLog(SEAT, one), batchLog(SEAT, two)]);
+    expect(await (await batches(rpc))(DEF, SEAT)).toEqual([one, two]);
+    expect(asked).toEqual([
+      {
+        address: hex(BOARD),
+        fromBlock: "0x7",
+        toBlock: `0x${FINALIZED.toString(16)}`,
+        topics: [TOPIC, hex(DEF), hex(word(BigInt(SEAT)))],
+      },
+    ]);
+  });
+
+  test("passes over a receipt batch, another seat's topic, a log failing the event check, and one not final", async () => {
+    const receiptBatch = hexToBytes(file.records[0]?.encoding ?? "");
+    const good = batchLog(SEAT, one);
+    const logs = [
+      // A receipt batch under either event is no complaint batch.
+      batchLog(SEAT, receiptBatch),
+      batchLog(SEAT, one, FINALIZED, topic0("ShareReceiptBatchSubmitted")),
+      // The batch's seat isn't the topic's.
+      batchLog(SEAT + 1, one),
+      { ...good, data: good.data.slice(0, -64) },
+      { ...good, removed: true },
+      batchLog(SEAT, one, FINALIZED + 1n),
+      batchLog(SEAT, one, 6n),
+    ];
+    const { rpc } = l2Node(logs, { honest: false });
+    expect(await (await batches(rpc))(DEF, SEAT)).toEqual([]);
+  });
+
+  test("a node on another chain is refused at setup, and one finalized below the deployment block shows nothing, unasked", async () => {
+    await expect(batches(l2Node([], { chain: L2_CHAIN_ID + 1n }).rpc)).rejects.toEqual(
+      new RecordedError("chain"),
+    );
+    const { rpc, asked } = l2Node([batchLog(SEAT, one, 3n)], { finalized: 6n });
+    expect(await (await batches(rpc))(DEF, SEAT)).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+});
+
+describe("l2Postings", () => {
+  // The complaint duty's postings (P2-13 part 4b-3b): every share posting
+  // the board emitted for the definition that names the seat, with its L2
+  // block's timestamp, and the finalized block's. The posting comes from
+  // delivery.json, varied in its seat and definition, and the event's topic
+  // from contract-event-v8.json.
+  const TOPIC = topic0("SharePosted");
+  const file = deliveryFile;
+  const DEF = hexToBytes(file.definitionHash);
+  const base = decodeSharePosting(
+    hexToBytes(file.records.find((r) => r.id === "posting")?.encoding ?? ""),
+    1,
+  );
+  const postingOf = (seat: number, definitionHash = DEF, salt = 0) =>
+    encodeSharePosting({
+      ...base,
+      definition_hash: definitionHash,
+      ballot_hash: base.ballot_hash.map((b) => b ^ salt),
+      seat,
+    });
+  const postingLog = (record: Uint8Array, block = FINALIZED, address = BOARD): Log => ({
+    address: hex(address),
+    topics: [TOPIC, hex(record.slice(3, 35)), hex(record.slice(35, 67))],
+    data: hex(concatBytes(word(32n), word(BigInt(record.length)), padded(record))),
+    blockNumber: `0x${block.toString(16)}`,
+  });
+  const postings = (rpc: Rpc) =>
+    l2Postings({ l2: rpc, l2ChainId: L2_CHAIN_ID, board: BOARD, l2FromBlock: 7n });
+
+  test("gives the seat's postings for the definition with their blocks' timestamps, and the finalized block's", async () => {
+    const [a, b, c] = [postingOf(2), postingOf(2, DEF, 1), postingOf(2, DEF, 2)];
+    const { rpc, asked, blocks } = l2Node([
+      postingLog(a, 40n),
+      postingLog(b, 40n),
+      postingLog(c, FINALIZED),
+    ]);
+    expect(await (await postings(rpc))(DEF, 2)).toEqual({
+      finalizedAt: blockTime(FINALIZED),
+      postings: [
+        { record: a, submittedAt: blockTime(40n) },
+        { record: b, submittedAt: blockTime(40n) },
+        { record: c, submittedAt: blockTime(FINALIZED) },
+      ],
+    });
+    // The board's posting event has no seat topic; each block's time is asked once.
+    expect(asked).toEqual([
+      {
+        address: hex(BOARD),
+        fromBlock: "0x7",
+        toBlock: `0x${FINALIZED.toString(16)}`,
+        topics: [TOPIC, hex(DEF)],
+      },
+    ]);
+    expect(blocks.filter((n) => n === 40n)).toHaveLength(1);
+  });
+
+  test("passes over another seat's or definition's posting, a log failing the event check, and one not final", async () => {
+    const own = postingOf(2);
+    const good = postingLog(own);
+    const other = new Uint8Array(32).fill(0xd2);
+    const logs = [
+      postingLog(postingOf(3)),
+      postingLog(postingOf(2, other)),
+      // The topic's ballot hash isn't the record's.
+      { ...good, topics: [TOPIC, hex(DEF), hex(new Uint8Array(32))] },
+      { ...good, data: good.data.slice(0, -64) },
+      { ...good, removed: true },
+      postingLog(own, FINALIZED, new Uint8Array(20).fill(0xb1)),
+      postingLog(own, FINALIZED + 1n),
+      postingLog(own, 6n),
+    ];
+    const { rpc } = l2Node(logs, { honest: false });
+    expect(await (await postings(rpc))(DEF, 2)).toEqual({
+      finalizedAt: blockTime(FINALIZED),
+      postings: [],
+    });
+  });
+
+  test("a node finalized below the deployment block gives its time and no posting, unasked for logs", async () => {
+    const { rpc, asked } = l2Node([postingLog(postingOf(2), 3n)], { finalized: 6n });
+    expect(await (await postings(rpc))(DEF, 2)).toEqual({
+      finalizedAt: blockTime(6n),
+      postings: [],
+    });
+    expect(asked).toEqual([]);
+  });
+
+  test("a node on another chain is refused at setup, and a block it can't give is an RpcError", async () => {
+    await expect(postings(l2Node([], { chain: L2_CHAIN_ID + 1n }).rpc)).rejects.toEqual(
+      new RecordedError("chain"),
+    );
+    const { rpc } = l2Node([postingLog(postingOf(2), 40n)]);
+    const lying: Rpc = {
+      call: async (method, params) => {
+        const answer = await rpc.call(method, params);
+        // Another block than the one asked for.
+        return method === "eth_getBlockByNumber" && (params as string[])[0] !== "finalized"
+          ? { ...(answer as object), number: "0x29" }
+          : answer;
+      },
+    };
+    await expect((await postings(lying))(DEF, 2)).rejects.toBeInstanceOf(RpcError);
   });
 });

@@ -1,8 +1,11 @@
-// The availability duty's recorded-event read (docs/spec/availability.md,
-// Contract path): the record the board contract recorded for a seat's slot,
-// as the seat's own L2 node shows it in finalized history, which the node
-// derives from finalized L1, never a sequencer's soft confirmation, so a
-// record the sequencer later drops is never taken as recorded (T-71).
+// The contract path's recorded-event reads: for the availability duty
+// (docs/spec/availability.md, Contract path), the record the board contract
+// recorded for a seat's slot; for the receipt and complaint duties
+// (docs/spec/delivery.md, What a node owes), the batches it recorded for a
+// seat and the postings naming it. Each is read as the seat's own L2 node
+// shows it in finalized history, which the node derives from finalized L1,
+// never a sequencer's soft confirmation, so a record the sequencer later
+// drops is never taken as recorded (T-71).
 //
 // The L2 node is trusted for which logs exist, as for the registration
 // `l1BoardAnchors` reads: no reader proves the board's logs yet (P1-19's L2
@@ -17,6 +20,8 @@ import {
   checkContractEvent,
   decodeAvailabilityAttestation,
   decodeAvailabilityComplaint,
+  DecodeError,
+  decodeSharePosting,
   type EventContracts,
 } from "@abolishus/crypto";
 import {
@@ -28,9 +33,11 @@ import {
   l2Finalized,
   READ_VERSION,
   type Rpc,
+  RpcError,
 } from "@abolishus/node";
 import { keccak256, toBytes } from "viem";
 import type { AvailabilityKind, ContractPath } from "./availability.ts";
+import type { ComplaintPath, RecordedPosting } from "./complaint.ts";
 import type { ReceiptPath } from "./delivery.ts";
 
 export interface RecordedOptions {
@@ -136,6 +143,11 @@ const SHARE_RECEIPT_BATCH_SUBMITTED = keccak256(
   toBytes("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)"),
   "bytes",
 );
+const SHARE_COMPLAINT_BATCH_SUBMITTED = keccak256(
+  toBytes("ShareComplaintBatchSubmitted(bytes32,uint8,bytes)"),
+  "bytes",
+);
+const SHARE_POSTED = keccak256(toBytes("SharePosted(bytes32,bytes32,bytes)"), "bytes");
 
 /**
  * `ReceiptPath.recorded` over the seat's own L2 node: every share-receipt
@@ -152,6 +164,25 @@ const SHARE_RECEIPT_BATCH_SUBMITTED = keccak256(
 export async function l2RecordedReceiptBatches(
   options: RecordedOptions,
 ): Promise<ReceiptPath["recorded"]> {
+  return seatBatches(options, SHARE_RECEIPT_BATCH_SUBMITTED, "ShareReceiptBatchSubmitted");
+}
+
+/**
+ * `ComplaintPath.recorded` over the seat's own L2 node: every
+ * share-complaint batch the board emitted for the definition and seat, read
+ * and trusted as `l2RecordedReceiptBatches` reads receipt batches.
+ */
+export async function l2RecordedComplaintBatches(
+  options: RecordedOptions,
+): Promise<ComplaintPath["recorded"]> {
+  return seatBatches(options, SHARE_COMPLAINT_BATCH_SUBMITTED, "ShareComplaintBatchSubmitted");
+}
+
+async function seatBatches(
+  options: RecordedOptions,
+  topic: Uint8Array,
+  name: "ShareReceiptBatchSubmitted" | "ShareComplaintBatchSubmitted",
+): Promise<(definitionHash: Uint8Array, seat: number) => Promise<readonly Uint8Array[]>> {
   const { l2, board } = options;
   if ((await chainId(l2)) !== options.l2ChainId) throw new RecordedError("chain");
   const contracts = boardOnly(board);
@@ -166,17 +197,90 @@ export async function l2RecordedReceiptBatches(
     const logs = await contractLogs(
       l2,
       board,
-      [SHARE_RECEIPT_BATCH_SUBMITTED, definitionHash, seatWord],
+      [topic, definitionHash, seatWord],
       options.l2FromBlock,
       finalized,
     );
     const found: Uint8Array[] = [];
     for (const log of logs) {
       const checked = checkContractEvent(log, contracts, READ_VERSION);
-      if (!checked.ok || checked.event.event !== "ShareReceiptBatchSubmitted") continue;
+      if (!checked.ok || checked.event.event !== name) continue;
       const e = checked.event;
       if (equal(e.definitionHash, definitionHash) && e.seat === seat) found.push(e.record);
     }
     return found;
   };
+}
+
+/**
+ * `ComplaintPath.postings` over the seat's own L2 node: every share posting
+ * the board emitted for the definition that names the seat, from the board's
+ * deployment block to the node's finalized block, each with its L2 block's
+ * timestamp, by which the delivery deadline judges it, and that block's
+ * timestamp. The node is trusted for which logs exist, as for the recorded
+ * batches: one that hides a posting in time keeps the seat from complaining
+ * about it, which only the seat's own L2 node can do (T-53). Checks the
+ * node's chain once, here (`RecordedError`); each read throws `RpcError`
+ * when the node's answer can't be read.
+ */
+export async function l2Postings(options: RecordedOptions): Promise<ComplaintPath["postings"]> {
+  const { l2, board } = options;
+  if ((await chainId(l2)) !== options.l2ChainId) throw new RecordedError("chain");
+  const contracts = boardOnly(board);
+  return async (definitionHash: Uint8Array, seat: number) => {
+    const finalized = await l2Finalized(l2);
+    const finalizedAt = await l2BlockTime(l2, finalized);
+    if (finalized < options.l2FromBlock) return { finalizedAt, postings: [] };
+    // The board's posting event has no seat topic: the seat is the record's.
+    const logs = await contractLogs(
+      l2,
+      board,
+      [SHARE_POSTED, definitionHash],
+      options.l2FromBlock,
+      finalized,
+    );
+    const postings: RecordedPosting[] = [];
+    const times = new Map<bigint, bigint>();
+    for (const log of logs) {
+      const checked = checkContractEvent(log, contracts, READ_VERSION);
+      if (!checked.ok || checked.event.event !== "SharePosted") continue;
+      const e = checked.event;
+      if (!equal(e.definitionHash, definitionHash)) continue;
+      // A posting of a version this node doesn't read names no seat it can
+      // complain for; the duty decodes it again as the definition reads it.
+      let named;
+      try {
+        named = decodeSharePosting(e.record, 1).seat;
+      } catch (err) {
+        if (err instanceof DecodeError) continue;
+        throw err;
+      }
+      if (named !== seat) continue;
+      let submittedAt = times.get(log.l2_block);
+      if (submittedAt === undefined) {
+        submittedAt = await l2BlockTime(l2, log.l2_block);
+        times.set(log.l2_block, submittedAt);
+      }
+      postings.push({ record: e.record, submittedAt });
+    }
+    return { finalizedAt, postings };
+  };
+}
+
+/** The timestamp of L2 block `n`, as the seat's own L2 node gives it. */
+export async function l2BlockTime(l2: Rpc, n: bigint): Promise<bigint> {
+  const block = (await l2.call("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])) as {
+    number?: unknown;
+    timestamp?: unknown;
+  } | null;
+  const quantity = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u;
+  if (
+    typeof block?.number !== "string" ||
+    typeof block.timestamp !== "string" ||
+    !quantity.test(block.number) ||
+    !quantity.test(block.timestamp) ||
+    BigInt(block.number) !== n
+  )
+    throw new RpcError("eth_getBlockByNumber: not a block");
+  return BigInt(block.timestamp);
 }

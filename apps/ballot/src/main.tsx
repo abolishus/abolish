@@ -12,13 +12,14 @@ import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
 import { castAsAsked, readCasts, recordBoarded, recordCast } from "./casts.ts";
 import type { Backer } from "./backup-offer.tsx";
-import { STAGING, tier0Region } from "./deployment.ts";
+import { confirming, STAGING, tier0Region } from "./deployment.ts";
 import {
   createIdentity,
   readBackupCredential,
   readIdentity,
   recordTier0Membership,
   recordTier0Request,
+  replaceMovedIdentity,
   restoreIdentity,
   saveBackupCredential,
 } from "./identity.ts";
@@ -58,6 +59,7 @@ const challengeFrame: Registrar["Challenge"] | undefined = undefined;
 const region = tier0Region(STAGING);
 const groupRegistry = STAGING.groupRegistry;
 const pinned = STAGING.registrars;
+const confirmingDeployment = confirming(STAGING);
 // The passkey backup, where this build offers one (`Deployment.backups`).
 const backer: Backer | undefined = !STAGING.backups
   ? undefined
@@ -154,6 +156,10 @@ const registrar: Registrar | undefined =
         send: (body) => sendTier0Request(STAGING, body, (url, init) => fetch(url, init)),
         record: (secret, request) => recordTier0Request(secret, request),
         registry: () => loadGroupRegistry(STAGING, (url, init) => fetch(url, init)),
+        confirmRegistry:
+          confirmingDeployment === undefined
+            ? undefined
+            : () => loadGroupRegistry(confirmingDeployment, (url, init) => fetch(url, init)),
         // As `commitment`: the secret is copied before this returns.
         outcome: (secret, asked, { block, records }) =>
           withWorker((used) =>
@@ -170,6 +176,14 @@ const registrar: Registrar | undefined =
             }),
           ),
         join: (secret, group) => recordTier0Membership(secret, group),
+        async replace(secret) {
+          const replacement = newIdentitySecret();
+          try {
+            return await replaceMovedIdentity(secret, replacement);
+          } finally {
+            replacement.fill(0);
+          }
+        },
         now: () => Date.now(),
         backup: backer,
         recovery: recoverer,

@@ -1370,6 +1370,8 @@ type RegistrarMocks = {
   readonly registry: Mock<Registrar["registry"]>;
   readonly outcome: Mock<Registrar["outcome"]>;
   readonly join: Mock<Registrar["join"]>;
+  readonly confirmRegistry: Mock<NonNullable<Registrar["confirmRegistry"]>>;
+  readonly replace: Mock<Registrar["replace"]>;
   /** Each secret the screens handed the worker, as given, and a copy taken when it was. */
   readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
 };
@@ -1386,10 +1388,11 @@ const NOT_YET: Tier0OutcomeResult = { ok: true, outcome: { kind: "not-yet" } };
 
 /**
  * A registrar for region 0 over a store that starts as `held` and keeps
- * what `create`, `record` and `join` write, whose worker commits every
- * secret to COMMITMENT, whose route answers `answers` in turn, whose
- * registry is read at `readAt` (or answers `registry`), and whose worker
- * gives `outcomes` in turn (each list's last answer repeats).
+ * what `create`, `record`, `join` and `replace` write, whose worker commits
+ * every secret to `commitments` in turn, whose route answers `answers` in
+ * turn, whose registry is read at `readAt` (or answers `registry`), whose
+ * second L2 endpoint answers `confirm` (none where it is not given), and
+ * whose worker gives `outcomes` in turn (each list's last answer repeats).
  */
 function registrar(
   held: IdentityRead,
@@ -1401,6 +1404,9 @@ function registrar(
     readAt = READ_AT,
     registry: read,
     outcomes = [NOT_YET],
+    commitments = [COMMITMENT],
+    confirm,
+    replaced = "replaced",
     backup,
     recovered,
   }: {
@@ -1410,6 +1416,9 @@ function registrar(
     readAt?: bigint;
     registry?: LoadedRegistry;
     outcomes?: readonly Tier0OutcomeResult[];
+    commitments?: readonly bigint[];
+    confirm?: LoadedRegistry;
+    replaced?: Awaited<ReturnType<Registrar["replace"]>>;
     backup?: Backer;
     /** A recovery's outcome; a restored one keeps a recovered identity in the store. */
     recovered?: RecoveryOutcome;
@@ -1418,6 +1427,7 @@ function registrar(
   let store = held;
   let sent = 0;
   let outcomesGiven = 0;
+  let committed = 0;
   const secrets: { given: Uint8Array; copy: Uint8Array }[] = [];
   const create = fn<Registrar["create"]>(() => {
     if (created === "created" && store.kind === "none")
@@ -1426,7 +1436,10 @@ function registrar(
   });
   const commitment = fn<Registrar["commitment"]>((secret) => {
     secrets.push({ given: secret, copy: secret.slice() });
-    return Promise.resolve({ ok: true, commitment: COMMITMENT });
+    return Promise.resolve({
+      ok: true,
+      commitment: commitments[Math.min(committed++, commitments.length - 1)] as bigint,
+    });
   });
   const send = fn<Registrar["send"]>(() =>
     Promise.resolve(answers[Math.min(sent++, answers.length - 1)] as Tier0Answer),
@@ -1457,6 +1470,15 @@ function registrar(
         },
       };
     return Promise.resolve(joined);
+  });
+  const confirmRegistry = fn<NonNullable<Registrar["confirmRegistry"]>>(() =>
+    Promise.resolve(confirm ?? { ok: false, problem: "no-registry" }),
+  );
+  const replace = fn<Registrar["replace"]>((secret) => {
+    secrets.push({ given: secret, copy: secret.slice() });
+    if (replaced === "replaced" && store.kind === "found")
+      store = { kind: "found", identity: { secret: SECRET, memberships: [] } };
+    return Promise.resolve(replaced);
   });
   const recovery: Recoverer | undefined =
     recovered === undefined
@@ -1489,13 +1511,26 @@ function registrar(
     send,
     record,
     registry,
+    confirmRegistry: confirm === undefined ? undefined : confirmRegistry,
     outcome,
     join,
+    replace,
     now: () => NOW,
     backup,
     recovery,
   };
-  REGISTRARS.set(made, { create, commitment, send, record, registry, outcome, join, secrets });
+  REGISTRARS.set(made, {
+    create,
+    commitment,
+    send,
+    record,
+    registry,
+    outcome,
+    join,
+    confirmRegistry,
+    replace,
+    secrets,
+  });
   return made;
 }
 
@@ -2017,29 +2052,220 @@ export const WaitingJustBeforeDue: Story = {
   },
 };
 
-export const WaitingMoved: Story = {
-  name: "A request counted in another region's group: the alarm",
+const MOVED: Tier0OutcomeResult = { ok: true, outcome: { kind: "moved", group: 3n } };
+/** Finalized time past the retry bound (RETRY_AFTER, 4,800 seconds) since the request. */
+const PAST_BOUND = READ_AT + 4800n;
+/** The second L2 endpoint's read of the registry, at its own later finalized block, past the bound. */
+const CONFIRM_READ: LoadedRegistry = {
+  ok: true,
+  block: 40_000_007n,
+  timestamp: PAST_BOUND,
+  records: [BOARD_ENTRY],
+};
+const MOVED_TITLE = { level: 1, name: "Your voting identity was put on another area's list" };
+
+/** A waiting identity whose move both endpoints show past the bound, with `options` on top. */
+const confirmedMove = (options: Parameters<typeof registrar>[2] = {}) =>
+  registering({
+    registrar: registrar(WAITING, [], {
+      outcomes: [MOVED],
+      readAt: PAST_BOUND,
+      confirm: CONFIRM_READ,
+      ...options,
+    }),
+  });
+
+/** A story where a move stays an unconfirmed alarm: nothing kept, sent or replaced, and a check again. */
+const unconfirmedMove = (name: string, options: Parameters<typeof registrar>[2]): Story => ({
+  name,
+  args: { source: registering({ registrar: registrar(WAITING, [], options) }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, MOVED_TITLE);
+    const { join, send, replace } = registrarMocks(args.source);
+    await expect(join).not.toHaveBeenCalled();
+    await expect(send).not.toHaveBeenCalled();
+    await expect(replace).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button", { name: "Make a new voting identity" })).toBeNull();
+    await expect(
+      canvas.getByText(/a second, separate source of the list shows the same/),
+    ).toBeVisible();
+    // Every secret handed out was zeroed, and a check again reads the first endpoint anew.
+    await registrarZeroed(args.source, registrarMocks(args.source).secrets.length);
+    await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
+    await focused(canvas, MOVED_TITLE);
+    await expect(registrarMocks(args.source).registry).toHaveBeenCalledTimes(2);
+  },
+});
+
+export const WaitingMoved = unconfirmedMove(
+  "A request counted in another region's group, on a build with no second endpoint: the alarm, unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND },
+);
+
+export const MovedSecondReadFails = unconfirmedMove(
+  "A move the second endpoint can't be read for: unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND, confirm: { ok: false, problem: "unreachable" } },
+);
+
+const REFUSED_LOG: Tier0OutcomeResult = { ok: false, problem: "registry", code: "group-history" };
+
+export const MovedSecondLogRefused = unconfirmedMove(
+  "A move where the second endpoint's log isn't one the worker accepts: unconfirmed, not disputed",
+  {
+    // Each read's first endpoint, then its second, for the alarm and the check again.
+    outcomes: [MOVED, REFUSED_LOG, MOVED, REFUSED_LOG],
+    readAt: PAST_BOUND,
+    confirm: CONFIRM_READ,
+  },
+);
+
+export const MovedTooSoon = unconfirmedMove(
+  "A move both endpoints show before the retry bound: unconfirmed, since the voter's own batch may still land",
+  { outcomes: [MOVED], confirm: { ...CONFIRM_READ, timestamp: READ_AT } },
+);
+
+export const MovedSecondTooSoon = unconfirmedMove(
+  "A move both show, the second endpoint's read before the bound: unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND, confirm: { ...CONFIRM_READ, timestamp: READ_AT } },
+);
+
+export const MovedRegisteredLater = unconfirmedMove(
+  "A move the second endpoint, at a later block, shows registered: unconfirmed, the first may lag",
+  { outcomes: [MOVED, ON_THE_LIST, MOVED, ON_THE_LIST], readAt: PAST_BOUND, confirm: CONFIRM_READ },
+);
+
+export const MovedConfirmedStartsAgain: Story = {
+  name: "A move both endpoints show: read afresh on the tap, a new identity in place of the moved one, then registration",
+  args: { source: confirmedMove() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, MOVED_TITLE);
+    await expect(canvas.getByText(/Two separate sources of the public list agree/)).toBeVisible();
+    const { registry, confirmRegistry, outcome, replace, send } = registrarMocks(args.source);
+    // The second read is the second endpoint's, of the same identity.
+    await expect(registry).toHaveBeenCalledOnce();
+    await expect(confirmRegistry).toHaveBeenCalledOnce();
+    await expect(outcome).toHaveBeenCalledTimes(2);
+    await expect(outcome.mock.calls[1]?.[2]).toEqual(CONFIRM_READ);
+    await expect(replace).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Make a new voting identity" }));
+    // Both endpoints read again before the replacement, then the poll
+    // checked anew, which offers the new identity's registration.
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Register your voting identity" });
+    await expect(registry).toHaveBeenCalledTimes(2);
+    await expect(confirmRegistry).toHaveBeenCalledTimes(2);
+    await expect(replace).toHaveBeenCalledOnce();
+    await expect(send).not.toHaveBeenCalled();
+    // Four outcomes, four commitments and the replacement, each zeroed.
+    await registrarZeroed(args.source, 9);
+  },
+};
+
+export const MovedOvertakenAtTheTap: Story = {
+  name: "A confirmed move the voter's own batch overtakes before the tap: registered, nothing replaced",
+  args: { source: confirmedMove({ outcomes: [MOVED, MOVED, ON_THE_LIST] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Make a new voting identity" }),
+    );
+    await focused(canvas, { level: 1, name: "You're registered" });
+    await expect(registrarMocks(args.source).replace).not.toHaveBeenCalled();
+    await expect(registrarMocks(args.source).join).toHaveBeenCalledWith(expect.any(Uint8Array), 9n);
+  },
+};
+
+/** A story where the second endpoint's outcome isn't the first's move: nothing changes. */
+const disputed = (name: string, second: Tier0OutcomeResult): Story => ({
+  name,
   args: {
-    source: registering({
-      registrar: registrar(WAITING, [], {
-        outcomes: [{ ok: true, outcome: { kind: "moved", group: 3n } }],
-      }),
+    source: confirmedMove({
+      outcomes: [MOVED, second],
+      // At the first endpoint's block, so a registered answer isn't explained by lag.
+      confirm: { ...CONFIRM_READ, block: 40_000_000n },
     }),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
-    // Nothing is kept or sent, and nothing offered.
-    await expect(registrarMocks(args.source).join).not.toHaveBeenCalled();
-    await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
-    await expect(canvas.queryByRole("button")).toBeNull();
-    await registrarZeroed(args.source, 1);
+    await focused(canvas, { level: 1, name: "Two sources of the list disagree" });
+    const { join, replace } = registrarMocks(args.source);
+    await expect(join).not.toHaveBeenCalled();
+    await expect(replace).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Try again" })).toBeVisible();
+  },
+});
+
+export const MovedDisputedNotYet = disputed(
+  "A move the second endpoint doesn't show at all",
+  NOT_YET,
+);
+export const MovedDisputedRegistered = disputed(
+  "A move where the second endpoint, at the same block, shows the voter's own region",
+  ON_THE_LIST,
+);
+export const MovedDisputedGroup = disputed(
+  "A move to another group than the first endpoint showed",
+  { ok: true, outcome: { kind: "moved", group: 4n } },
+);
+
+export const MovedOtherIdentityAtTheTap: Story = {
+  name: "A confirmed move, then another identity on the device by the tap: nothing replaced, the poll checked anew",
+  args: {
+    source: confirmedMove({
+      // The two reads', the tap's first read, then another tab's identity.
+      commitments: [COMMITMENT, COMMITMENT, COMMITMENT, COMMITMENT + 1n],
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Make a new voting identity" }),
+    );
+    await answerAndSeal(canvas);
+    await focused(canvas, MOVED_TITLE);
+    await expect(registrarMocks(args.source).replace).not.toHaveBeenCalled();
   },
 };
+
+export const MovedNotReplaced = stopsAtTheTap(
+  "A confirmed move whose identity the store no longer holds as waiting: kept",
+  "changed",
+  "Your voting identity was kept",
+);
+
+export const MovedReplaceUnwritable = stopsAtTheTap(
+  "A confirmed move the browser won't store a new identity for",
+  "unwritable",
+  "This browser won't keep a voting identity",
+);
+
+/** A confirmed move whose replacement answers `replaced`, ending at `title`. */
+function stopsAtTheTap(
+  name: string,
+  replaced: Awaited<ReturnType<Registrar["replace"]>>,
+  title: string,
+): Story {
+  return {
+    name,
+    args: { source: confirmedMove({ replaced }) },
+    play: async ({ canvasElement, args }) => {
+      const canvas = within(canvasElement);
+      await answerAndSeal(canvas);
+      await userEvent.click(
+        await canvas.findByRole("button", { name: "Make a new voting identity" }),
+      );
+      await focused(canvas, { level: 1, name: title });
+      await expect(registrarMocks(args.source).replace).toHaveBeenCalledOnce();
+    },
+  };
+}
 
 /** A story where reading a waiting request's outcome stops at `title`. */
 const outcomeStops = (

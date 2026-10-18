@@ -14,6 +14,7 @@ import {
   readIdentity,
   recordTier0Membership,
   recordTier0Request,
+  replaceMovedIdentity,
   restoreIdentity,
   saveIdentity,
 } from "../../src/identity.ts";
@@ -238,6 +239,11 @@ const harness = {
   /** Keeps a Tier 0 membership in `group` in place of the request the identity of `secret` waits on (identity.ts). */
   recordTier0Membership: (secret: string, group: string) =>
     recordTier0Membership(fromHex(secret), BigInt(group)),
+  /** Replaces the moved identity of `secret` with the one of `replacement` (identity.ts), or the error's name. */
+  replaceMovedIdentity: (secret: string, replacement: string) =>
+    replaceMovedIdentity(fromHex(secret), fromHex(replacement)).catch((e: unknown) =>
+      e instanceof Error ? e.name : "?",
+    ),
   /** The worker's commitment of `secret`, as a decimal string, and whether the page's copy was left whole. */
   async commitment(secret: string): Promise<string> {
     const given = fromHex(secret);

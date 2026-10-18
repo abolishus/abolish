@@ -421,7 +421,21 @@ const enUS = {
     "The code from your voting identity is on the public list, but for a different area than the one this device asked for, so your answers would be counted there. Don't answer polls with it, and don't clear this site's data.",
   registerMovedWhyTitle: "Why this matters",
   registerMovedWhy:
-    "Someone else added your code there before your own registration landed. That can't be undone: only a new voting identity would put you back in your own area, and this copy of the ballot can't yet replace the one you have. The list this device read could also be wrong, so open the ballot again later to check.",
+    "Someone else added your code there before your own registration landed. That can't be undone: only a new voting identity would put you back in your own area. This device offers a new one only once a second, separate source of the list shows the same, since one source could be wrong, and only once your own registration has had time to land, since it would still count first. Check again in a while.",
+  registerMovedConfirmed:
+    "Two separate sources of the public list agree: the code from your voting identity is on it for a different area than the one this device asked for, so your answers would be counted there. Don't answer polls with it.",
+  registerMovedStartAgain:
+    "That can't be undone, so this device can make you a new voting identity in place of this one, which you then register for your own area. The old one is discarded from this device. A backup you made of it still holds the old one until you back up the new one.",
+  registerStartAgain: "Make a new voting identity",
+  registerReplacingTitle: "Making your new voting identity",
+  registerReplacing:
+    "This device is reading the list again from both sources and checking that it still holds the identity that was moved, then making a new one in its place. Nothing is sent.",
+  outcomeDisputedTitle: "Two sources of the list disagree",
+  outcomeDisputed:
+    "One source showed your code on another area's list, and a second, separate source didn't show the same. One of them is wrong, so this device changed nothing, and your voting identity is kept. Try again in a few minutes.",
+  notReplacedTitle: "Your voting identity was kept",
+  notReplaced:
+    "The voting identity on this device isn't the one that was moved any more, or it's registered in a group, so it wasn't replaced. Nothing was sent. Try again to check this poll anew.",
   registryUnavailableTitle: "Your registration couldn't be checked",
   registryUnavailable:
     "The public list of registrations couldn't be read in full, or what came back wasn't it. Nothing was sent, and your voting identity is kept on this device. Try again in a few minutes.",

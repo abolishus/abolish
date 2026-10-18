@@ -364,6 +364,15 @@ describe("answers", () => {
     expect(() => answerQuery(KEY, { ...q }, shareOf(0), SIGNING_SECRETS[0] as Uint8Array)).toThrow(
       TypeError,
     );
+    // A seat holding shares of another key can't answer it under that one.
+    expect(() =>
+      answerQuery(
+        { ...KEY, keyId: new Uint8Array(32) },
+        q,
+        shareOf(0),
+        SIGNING_SECRETS[0] as Uint8Array,
+      ),
+    ).toThrow(RangeError);
     const answer = answerQuery(KEY, q, shareOf(0), SIGNING_SECRETS[0] as Uint8Array);
     expect(checkNullifierAnswer(KEY, q, encodeNullifierAnswer(answer)).ok).toBe(true);
   });
@@ -497,7 +506,7 @@ describe("verify", () => {
     expect(await proofs.verify("nullifier_query", inputs, proof)).toBe(true);
   });
 
-  test("refuses an element encoded at or above r, which bb would read modulo r", async () => {
+  test("refuses an element encoded at or above r", async () => {
     const { inputs, proof } = statement();
     // Every honest element is canonical.
     for (let i = 0; i < PROOF_LENGTH; i += 32)
@@ -516,6 +525,28 @@ describe("verify", () => {
     );
     expect(await proofs.verify("nullifier_query", inputs, tampered)).toBe(false);
   });
+
+  test("refuses lengths and non-canonical elements before Barretenberg, which a destroyed instance shows", async () => {
+    const { inputs, proof } = statement();
+    const closed = await NullifierProofs.open({ crs: CRS, keys: KEYS });
+    await closed.destroy();
+    // Anything that reaches the backend now throws.
+    await expect(closed.verify("nullifier_query", inputs, proof)).rejects.toThrow("destroyed");
+    const high = Uint8Array.from(proof);
+    high.set(
+      bytes(
+        (BigInt(`0x${Buffer.from(proof.subarray(0, 32)).toString("hex")}`) + R)
+          .toString(16)
+          .padStart(64, "0"),
+      ),
+      0,
+    );
+    expect(BigInt(`0x${Buffer.from(proof.subarray(0, 32)).toString("hex")}`) + R < 2n ** 256n).toBe(
+      true,
+    );
+    expect(await closed.verify("nullifier_query", inputs, high)).toBe(false);
+    expect(await closed.verify("nullifier_query", inputs, proof.subarray(32))).toBe(false);
+  }, 120_000);
 
   test("refuses a proof of another length without verifying", async () => {
     const { inputs, proof } = statement();

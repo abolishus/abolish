@@ -130,6 +130,7 @@ export class NullifierProofs {
   readonly #keys: Readonly<Record<NullifierCircuit, Uint8Array>>;
   readonly #programs: NullifierPrograms | undefined;
   #queue: Promise<unknown> = Promise.resolve();
+  #destroyed = false;
 
   private constructor(
     api: Barretenberg,
@@ -168,7 +169,11 @@ export class NullifierProofs {
 
   /** Runs `call` after every earlier one, so a reset never cuts a call short. */
   #serial<T>(call: () => Promise<T>): Promise<T> {
-    const result = this.#queue.then(call);
+    const result = this.#queue.then(() => {
+      // A reset after destroy would build a module nothing releases.
+      if (this.#destroyed) throw new Error("NullifierProofs: destroyed");
+      return call();
+    });
     this.#queue = result.catch(() => undefined);
     return result;
   }
@@ -213,8 +218,9 @@ export class NullifierProofs {
     const elements: Uint8Array[] = [];
     for (let i = 0; i < PROOF_LENGTH; i += 32) {
       const element = proof.slice(i, i + 32);
-      // One encoding per proof: bb would read an element at or above r
-      // modulo r.
+      // One encoding per proof. Barretenberg refuses such an element too, at
+      // the cost of an abort and a reset; refusing it here keeps that cost
+      // off the seat and the rule off bb's version.
       if (fieldValue(element) >= R) return Promise.resolve(false);
       elements.push(element);
     }
@@ -226,7 +232,7 @@ export class NullifierProofs {
           proof: elements,
           settings: PROOF_SETTINGS,
         });
-        return verified;
+        return verified === true;
       } catch (e) {
         // The inputs were checked above, so what remains is Barretenberg
         // refusing the proof's contents: a refusal of the proof.
@@ -279,6 +285,9 @@ export class NullifierProofs {
   }
 
   destroy(): Promise<void> {
-    return this.#serial(() => this.#api.destroy());
+    return this.#serial(async () => {
+      this.#destroyed = true;
+      await this.#api.destroy();
+    });
   }
 }

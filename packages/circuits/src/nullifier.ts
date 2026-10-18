@@ -211,7 +211,8 @@ export async function checkQuery(
     return { ok: false, code: "query-proof" };
   const query: CheckedQuery = Object.freeze({
     query: result.query,
-    queryHash: result.queryHash,
+    // Copies, so a caller reusing its buffers can't change what is answered.
+    queryHash: Uint8Array.from(result.queryHash),
     b: result.query.b,
     sigma: result.publicInputs[0] as bigint,
   });
@@ -219,15 +220,25 @@ export async function checkQuery(
   return { ok: true, query };
 }
 
-function assertChecked(query: CheckedQuery, what: string): void {
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+function assertChecked(key: NullifierKey, query: CheckedQuery, what: string): void {
   // Without the query proof, answers are a static Diffie–Hellman oracle
   // (docs/spec/keyed-nullifier.md, Security notes; T-21).
   if (!checkedQueries.has(query)) throw new TypeError(`${what}: the query wasn't checked here`);
+  // checkQuery held the query to one key; a seat holding shares of several
+  // must use that one.
+  if (!sameBytes(key.keyId, query.query.key_id))
+    throw new RangeError(`${what}: the key isn't the one the query was checked for`);
 }
 
 /**
  * Seat `share.seat`'s answer (docs/spec/keyed-nullifier.md, Evaluation) to a
- * query `checkQuery` passed, and nothing else.
+ * query `checkQuery` passed, and nothing else. The identity chain's checks of
+ * `comm_in` (part 2b-4) must pass first too, and nothing here enforces them
+ * yet: until they exist, a client can open a `comm_in` of its own making
+ * (T-03, T-21).
  */
 export function answerQuery(
   key: NullifierKey,
@@ -235,8 +246,13 @@ export function answerQuery(
   share: SeatShare,
   signingSecret: Uint8Array,
 ): NullifierAnswer {
-  assertChecked(query, "answerQuery");
-  return evaluate(key, query, share, signingSecret);
+  assertChecked(key, query, "answerQuery");
+  return evaluate(
+    key,
+    { queryHash: Uint8Array.from(query.queryHash), b: query.b },
+    share,
+    signingSecret,
+  );
 }
 
 export type CheckedOutputResult =
@@ -260,7 +276,7 @@ export async function checkOutput(
   query: CheckedQuery,
   bytes: Uint8Array,
 ): Promise<CheckedOutputResult> {
-  assertChecked(query, "checkOutput");
+  assertChecked(key, query, "checkOutput");
   const result = checkNullifierOutput(key, query, bytes);
   if (!result.ok) return result;
   const publicInputs = outputCircuitPublicInputs(query.sigma, query, result.z, result.output.n);

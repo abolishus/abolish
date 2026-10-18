@@ -468,6 +468,32 @@ contract BoardDeliveryV2Test is TestBase {
             );
         }
         assertEq(i, 43, "decode coverage");
+        // A version-2 root cut off inside `root` or `leaves_cid` is
+        // `truncated` at the field it ends in, every field read before any
+        // is judged.
+        bytes memory root = _byId(bj, ".records", "receipt-root-author");
+        bytes memory truncated73 = _slice(root, 0, 73);
+        bytes memory truncated109 = _slice(root, 0, 109);
+        _refuse(
+            _rootCall(truncated73),
+            abi.encodeWithSelector(
+                DeliveryCheckLib.DeliveryMalformed.selector,
+                0,
+                ElectionDefinitionLib.DecodeError.Truncated,
+                42
+            ),
+            "a root ending inside its root"
+        );
+        _refuse(
+            _rootCall(truncated109),
+            abi.encodeWithSelector(
+                DeliveryCheckLib.DeliveryMalformed.selector,
+                0,
+                ElectionDefinitionLib.DecodeError.Truncated,
+                74
+            ),
+            "a root ending inside its CID"
+        );
     }
 
     /// The root slot is kept per panel, seat and kind: author seat 1's first
@@ -541,11 +567,15 @@ contract BoardDeliveryV2Test is TestBase {
         elections.setAuthorKey(h, s, keys[1][s][0], keys[1][s][1]);
         _refuse(_batchCall(t, r), sig, string.concat(id, ": the default key"));
         vm.revertToState(snapshot);
+        // The panel is signed: relabelled as default seat `s`'s, the record
+        // fails even with that seat holding the author seat's key.
+        trustees.setKey(h, PANEL, s, keys[2][s][0], keys[2][s][1]);
         _refuse(
             _batchCall(t, _withByte(r, BATCH_PANEL_AT, 1)),
             sig,
             string.concat(id, ": relabelled the default panel")
         );
+        vm.revertToState(snapshot);
         _panelsTags(bj, id, t, kind);
     }
 

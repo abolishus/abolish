@@ -589,14 +589,12 @@ describe("casting a version-5 poll's seal", () => {
     expect(artifactRequests().slice(before)).toEqual([zkeyUrl]);
   }, 180_000);
 
-  test("finds no cell for a secret whose commitment isn't on the board, and no prover starts", async () => {
+  // That the prover then hears nothing is cast.test.ts's: the harness stops at the refusal.
+  test("finds no cell for a secret whose commitment isn't on the board", async () => {
     const outsider = new Uint8Array(32);
     outsider[0] = 1;
-    const { found, cast } = await sealAndCast(outsider);
-    expect(found?.ok).toBe(false);
-    expect(cast).toBeUndefined();
-    expect(artifactRequests()).toEqual([]);
-    expect(requests.filter((url) => /\/assets\/prover-[\w-]+\.js$/.test(url))).toEqual([]);
+    const { found } = await sealAndCast(outsider);
+    expect(found).toEqual({ ok: false, problem: "cell", code: "not-a-member" });
   }, 120_000);
 });
 

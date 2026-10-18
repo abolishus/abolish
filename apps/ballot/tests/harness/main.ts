@@ -7,7 +7,13 @@
 import "../../src/worker-policy.ts";
 
 import { STAGING } from "../../src/deployment.ts";
-import { IDENTITY_DB, readIdentity, saveIdentity } from "../../src/identity.ts";
+import {
+  createIdentity,
+  IDENTITY_DB,
+  readIdentity,
+  recordTier0Request,
+  saveIdentity,
+} from "../../src/identity.ts";
 import { loadElection } from "../../src/load.ts";
 import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
 import { castBallot } from "../../src/prover-client.ts";
@@ -157,6 +163,19 @@ const harness = {
       secret: fromHex(secret),
       memberships: memberships.map(({ tier, group }) => ({ tier, group: BigInt(group) })),
     });
+  },
+  /** Keeps a new identity in no group as this device's, unless it holds one (identity.ts). */
+  createIdentity: (secret: string) => createIdentity(fromHex(secret)),
+  /** Notes an accepted Tier 0 request beside the identity of `secret` (identity.ts). */
+  recordTier0Request: (secret: string, region: number, acceptedAt: number) =>
+    recordTier0Request(fromHex(secret), { region, acceptedAt }),
+  /** The worker's commitment of `secret`, as a decimal string, and whether the page's copy was left whole. */
+  async commitment(secret: string): Promise<string> {
+    const given = fromHex(secret);
+    const result = await worker.commitment(given);
+    return JSON.stringify({ result, intact: given.some((b) => b !== 0) }, (_, v: unknown) =>
+      typeof v === "bigint" ? v.toString() : v,
+    );
   },
   /** The identity this device holds, read as the page reads it, with hex and decimal strings. */
   async readIdentity(): Promise<string> {

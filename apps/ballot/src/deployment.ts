@@ -38,6 +38,27 @@ export interface Deployment {
   readonly registrars:
     | { readonly registrars: readonly Uint8Array[]; readonly threshold: number }
     | undefined;
+  /**
+   * The deployment's published Tier 0 groups, signed and self-paid, each
+   * with its region code (a u32), in strictly ascending `group_id`, from
+   * the deployment record ([[registration]], Groups): the regions a voter
+   * may ask to be registered in, and later the groups the outcome is read
+   * from. Never a list an API names, which could steer a registrant into a
+   * group of its choosing (T-16). Empty while none is deployed.
+   */
+  readonly tier0Groups: readonly { readonly group_id: bigint; readonly region: number }[];
+}
+
+/**
+ * The one region a voter is registered in at Tier 0, or `undefined` while
+ * the deployment publishes none, or several: choosing among regions needs
+ * their published names (P5-1), and until the group registry records a
+ * region per group the service serves region 0 alone ([[registration]],
+ * Groups).
+ */
+export function tier0Region(deployment: Pick<Deployment, "tier0Groups">): number | undefined {
+  const regions = new Set(deployment.tier0Groups.map(({ region }) => region));
+  return regions.size === 1 ? [...regions][0] : undefined;
 }
 
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
@@ -54,4 +75,6 @@ export const STAGING: Deployment = {
   // No group registry is deployed on staging yet (P3-2's registry deploys
   // with the others), so a staging build finds no voter's cell.
   registrars: undefined,
+  // Nor any Tier 0 group, so a staging build registers no one.
+  tier0Groups: [],
 };

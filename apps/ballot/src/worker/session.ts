@@ -32,6 +32,8 @@ import {
   type ChallengeRequest,
   type ChallengeResult,
   type CheckElectionRequest,
+  type CommitmentRequest,
+  type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
   PROVER_TIMEOUT_MS,
@@ -91,6 +93,23 @@ export class BallotSession {
       election: sealing.election,
     };
     return check;
+  }
+
+  /**
+   * The identity commitment of `request.secret`, for a Tier 0 registration
+   * ([[registration]], Request). It leaves the held poll, voter and seals as
+   * they were: registering needs none of them.
+   */
+  commitment(request: CommitmentRequest): CommitmentResult {
+    const { secret } = request;
+    try {
+      return { ok: true, commitment: identityCommitment(secret) };
+    } catch (e) {
+      if (e instanceof MembershipProverError) return { ok: false, problem: "secret" };
+      throw e;
+    } finally {
+      secret.fill(0);
+    }
   }
 
   /**

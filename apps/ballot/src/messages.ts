@@ -223,10 +223,13 @@ const enUS = {
     "This poll is of an older kind that this version of the ballot doesn't seal. Nothing was sealed or sent.",
   noIdentityTitle: "This device has no voting identity yet",
   noIdentity:
-    "Answering a poll needs a voting identity kept on this device, and this version of the ballot can't make one yet. Nothing was sealed or sent.",
+    "Answering this poll needs a voting identity kept on this device, and this copy of the ballot can't make and register one for it. Nothing was sealed or sent.",
   identityUnreadableTitle: "The voting identity on this device can't be read",
   identityUnreadable:
     "This browser didn't let the ballot read it, or what it keeps isn't a voting identity. Nothing was sealed or sent. Don't clear this site's data: your identity may still be there.",
+  unregisteredTitle: "Your voting identity isn't registered yet",
+  unregistered:
+    "This device keeps a voting identity that isn't on any list yet, and this copy of the ballot can't register it. Nothing was sealed or sent. Don't clear this site's data: the identity is still yours.",
   notListedTitle: "You aren't on this poll's list",
   notListed:
     "This poll is open to people verified in other ways than your voting identity was, so you can't answer it. Nothing was sealed or sent.",
@@ -296,6 +299,60 @@ const enUS = {
   proofFaultTitle: "This device made a fault while finishing the proof",
   proofFault:
     "The finished proof didn't pass this device's own check, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  // Registering at Tier 0 (register.tsx).
+  makeIdentityTitle: "Make a voting identity on this device",
+  makeIdentity:
+    "To answer this poll, this device makes a voting identity and asks for it to be added to the list of people who registered here.",
+  makeIdentityStart: "Make my voting identity",
+  registerTitle: "Register your voting identity",
+  register:
+    "This device keeps a voting identity that isn't on any list yet. To answer this poll, ask for it to be added to the list of people who registered here.",
+  registerStart: "Register it",
+  identityKeptTitle: "It stays on this device",
+  identityKept:
+    "Your voting identity is a secret number made and kept here, never sent anywhere. Only a code worked out from it goes on the list, and your answers can't be linked back to it.",
+  registerStepsTitle: "What happens next",
+  registerSteps:
+    "You show you're a person on a check page run by Cloudflare, then this device sends the code. It's added to the list in a batch with others within an hour or so, and you come back to answer.",
+  registerPreparingTitle: "Making your voting identity",
+  registerPreparing: "This device is making your voting identity and keeping it. Nothing is sent.",
+  registerSendingTitle: "Sending your registration",
+  registerSending: "This device is sending the code worked out from your voting identity.",
+  challengeStepTitle: "Show you're a person",
+  challengeStep:
+    "Solve the check below. Once it passes, this device sends your registration straight away.",
+  challengeSeesTitle: "What the check page sees",
+  challengeSees:
+    "It runs on a site of its own and hands this device only a pass. It never sees your voting identity, its code or your answers.",
+  registerSentTitle: "Your registration was sent",
+  registerSent:
+    "The code from your voting identity is waiting to be added to the list. Your identity stays on this device.",
+  registerWaitTitle: "Come back in an hour or so",
+  registerWait:
+    "Registrations are added in batches, and a batch can wait for others to join it, so yours may take an hour or more to appear. Don't clear this site's data meanwhile: your identity is kept only here.",
+  backToPoll: "Back to the poll",
+  registerWaitingTitle: "Your registration is on its way",
+  registerWaiting:
+    "This device sent your registration on {when}. Once it is on the list you can answer this poll.",
+  checkAgain: "Check again",
+  registerUnwritableTitle: "This browser won't keep a voting identity",
+  registerUnwritable:
+    "It refused to store one, perhaps in a private window or with site data blocked. Nothing was sent. Open the ballot in a normal window to register.",
+  registerWorkerFailedTitle: "This device couldn't prepare your registration",
+  registerWorkerFailed:
+    "Nothing was sent. Your voting identity, if one was made, is kept on this device. Try again.",
+  challengeRefusedTitle: "The check didn't pass",
+  challengeRefused:
+    "The registration wasn't accepted because the check's pass was refused or ran out. Nothing changed. Try the check again.",
+  registerLaterTitle: "Your registration couldn't be sent",
+  registerLater:
+    "The registration service was busy, unavailable or unreachable. Your voting identity is kept on this device. Try again in a few minutes.",
+  registerFaultyTitle: "The registration service refused this request",
+  registerFaulty:
+    "It says the request isn't one it takes, so this copy of the ballot may be faulty. Your voting identity is kept on this device. Open the ballot from abolishus.eth or another address Abolish lists.",
+  registerNotNotedTitle: "Your registration was sent, but this device couldn't note it",
+  registerNotNoted:
+    "The voting identity on this device changed or couldn't be read back, so it may be offered for registration again. Don't clear this site's data.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

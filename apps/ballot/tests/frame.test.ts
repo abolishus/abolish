@@ -9,6 +9,14 @@ import type { CheckedElection, ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
 import { Ballot, BrokenLink, Checking, NotSent, Unavailable } from "../src/open.tsx";
 import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
+import {
+  RegisterChallenge,
+  RegisterIntro,
+  RegisterSent,
+  RegisterStopped,
+  RegisterWaiting,
+  RegisterWorking,
+} from "../src/register.tsx";
 import { Opened, Sealed, SealStopped, Working } from "../src/sealed.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
@@ -117,6 +125,7 @@ describe("the frame under the client's CSP", () => {
           l1Block: () => new Promise<never>(() => {}),
           loadArtifacts: () => new Promise<never>(() => {}),
           cast: () => new Promise<never>(() => {}),
+          registrar: undefined,
         },
         languages: ["en-US"],
         onRestart: () => {},
@@ -170,6 +179,7 @@ describe("the frame under the client's CSP", () => {
           "cant-seal-version",
           "no-identity",
           "identity-unreadable",
+          "unregistered",
           "not-listed",
           "board-unavailable",
           "no-registrars",
@@ -182,6 +192,41 @@ describe("the frame under the client's CSP", () => {
         ] as const
       ).map((problem) =>
         render(createElement(SealStopped, { poll: POLL, problem, code: "root", onAgain: none })),
+      ),
+    ]) {
+      expect(html).toContain("<h1");
+      expect(html).not.toMatch(/\sstyle=/i);
+    }
+  });
+
+  test("the registration screens render no inline style", () => {
+    const none = () => {};
+    for (const html of [
+      render(createElement(RegisterIntro, { poll: POLL, made: false, onStart: none })),
+      render(createElement(RegisterIntro, { poll: POLL, made: true, onStart: none })),
+      render(createElement(RegisterWorking, { poll: POLL, kind: "preparing" })),
+      render(createElement(RegisterWorking, { poll: POLL, kind: "sending" })),
+      render(
+        createElement(RegisterChallenge, {
+          poll: POLL,
+          Challenge: () => createElement("iframe", { title: "Check" }),
+          onToken: none,
+        }),
+      ),
+      render(createElement(RegisterSent, { poll: POLL, onBack: none })),
+      render(createElement(RegisterWaiting, { poll: POLL, sentAt: "Fri 17 Oct", onCheck: none })),
+      ...(
+        [
+          "unwritable",
+          "unreadable",
+          "worker-failed",
+          "challenge-refused",
+          "later",
+          "faulty",
+          "not-noted",
+        ] as const
+      ).map((problem) =>
+        render(createElement(RegisterStopped, { poll: POLL, problem, onRetry: none })),
       ),
     ]) {
       expect(html).toContain("<h1");

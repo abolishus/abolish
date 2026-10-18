@@ -9,6 +9,7 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
   PROTOCOL_VERSION,
@@ -101,6 +102,17 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "check-election") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /** The identity commitment of `secret`, which is copied; the worker zeroes its copy. */
+  async commitment(secret: Uint8Array): Promise<CommitmentResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "commitment", secret }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "commitment") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

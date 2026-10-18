@@ -304,6 +304,44 @@ describe("find-cell requests", () => {
   });
 });
 
+describe("commitment requests", () => {
+  const commit = () => ({
+    v: PROTOCOL_VERSION,
+    id: 15,
+    kind: "commitment",
+    secret: new Uint8Array(32).fill(2),
+  });
+
+  test("accepts a well-formed request as it is, for any 32 bytes: their range is the session's", () => {
+    fc.assert(
+      fc.property(fc.nat(), fc.uint8Array({ minLength: 32, maxLength: 32 }), (id, secret) => {
+        const r = { ...commit(), id, secret };
+        expect(parseRequest(r)).toEqual(r);
+      }),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short secret", { secret: new Uint8Array(31) }],
+    ["a long secret", { secret: new Uint8Array(33) }],
+    ["a secret as hex", { secret: "02".repeat(32) }],
+    ["a secret as a list", { secret: Array(32).fill(2) }],
+    ["an extra key", { extra: true }],
+    ["another version", { v: PROTOCOL_VERSION - 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(parseRequest({ ...commit(), ...change })).toBeUndefined();
+  });
+
+  test("refuses a request without one of its keys", () => {
+    for (const key of Object.keys(commit())) {
+      const r: Record<string, unknown> = commit();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -312,6 +350,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 7, kind: "challenge", result: {} })).toBe(7);
     expect(responseId({ v: PROTOCOL_VERSION, id: 8, kind: "cast", result: {} })).toBe(8);
     expect(responseId({ v: PROTOCOL_VERSION, id: 9, kind: "find-cell", result: {} })).toBe(9);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 10, kind: "commitment", result: {} })).toBe(10);
   });
 
   test("ignores another version's response or kind", () => {

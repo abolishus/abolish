@@ -3,19 +3,22 @@
 // does nothing else, so it is safe on a path gateway too (T-43).
 import "./worker-policy.ts";
 
+import { newIdentitySecret } from "@abolishus/crypto";
 import { I18nProvider } from "@abolishus/ui";
 import { StrictMode, useMemo, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
-import { STAGING } from "./deployment.ts";
-import { readIdentity } from "./identity.ts";
+import { STAGING, tier0Region } from "./deployment.ts";
+import { createIdentity, readIdentity, recordTier0Request } from "./identity.ts";
 import { parseLink } from "./link.ts";
 import { loadBoard, loadElection } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
 import { castBallot } from "./prover-client.ts";
+import type { Registrar } from "./register.tsx";
+import { sendTier0Request } from "./registration.ts";
 import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
@@ -29,6 +32,36 @@ const locale = "en-US";
 // recover. A check that fails stops only the worker it ran on, never a newer
 // one a later check spawned.
 let worker: BallotWorker | undefined;
+
+// The challenge page's frame comes with the challenge origin, a `ci:` change
+// to the client's policy (P2-8 part 3b-2c-2b-2b-2); until then, and while
+// the deployment publishes no single Tier 0 region, no build registers anyone.
+const challengeFrame: Registrar["Challenge"] | undefined = undefined;
+const region = tier0Region(STAGING);
+const registrar: Registrar | undefined =
+  challengeFrame === undefined || region === undefined
+    ? undefined
+    : {
+        region,
+        Challenge: challengeFrame,
+        async create() {
+          const secret = newIdentitySecret();
+          try {
+            return await createIdentity(secret);
+          } finally {
+            secret.fill(0);
+          }
+        },
+        identity: () => readIdentity(),
+        // The worker that checked the poll; `withWorker` reaches its
+        // postMessage before its first await, so the secret is copied before
+        // this returns.
+        commitment: (secret) => withWorker((used) => used.commitment(secret)),
+        send: (body) => sendTier0Request(STAGING, body, (url, init) => fetch(url, init)),
+        record: (secret, request) => recordTier0Request(secret, request),
+        now: () => Date.now(),
+      };
+
 const source: ElectionSource = {
   load: (electionId, signal) =>
     loadElection(STAGING, electionId, (url, init) => fetch(url, { ...init, signal })),
@@ -90,6 +123,7 @@ const source: ElectionSource = {
         onProgress,
       ),
     ),
+  registrar,
 };
 
 async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {

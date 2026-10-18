@@ -407,7 +407,7 @@ describe("run with the availability duty", () => {
     expect(run.err).toEqual([{ error: "account key: must not be the identity key" }]);
   });
 
-  test("wires the reader and each election's duty from the configuration, under the definition's own board version", async () => {
+  test("wires the reader, each election's duties and the decision's view from the configuration, under the definition's own board version", async () => {
     const parsed = parseConfig(
       JSON.stringify({
         ...seatConfig,
@@ -432,6 +432,7 @@ describe("run with the availability duty", () => {
       l1: { call: async () => null },
       l2: { call: async () => null },
       contract: { send: async () => {}, recorded: async () => undefined },
+      receipts: { send: async () => {}, recorded: async () => [] },
       served: await servedBlocks(servedDir),
       // A gateway holding only `remote`'s block.
       gateways: async (cid: Uint8Array) =>
@@ -439,7 +440,7 @@ describe("run with the availability duty", () => {
       store: new MemoryStore(),
       clock: () => 7n,
     };
-    const w = dutyWiring(parsed.l2ChainId, a, sources);
+    const w = dutyWiring(parsed, a, sources);
     expect(w.anchors).toEqual({
       l1: sources.l1,
       l1ChainId: L2_CHAIN_ID,
@@ -484,6 +485,72 @@ describe("run with the availability duty", () => {
     await o.pin(objectCid(attested), attested);
     expect(await stat(join(servedDir, `${cidText(objectCid(attested))}.car`))).toBeTruthy();
     expect(await o.blocks(objectCid(attested), 1 << 20)).toHaveLength(1);
+    // The view reads the seat's own nodes, the deployment's registry and
+    // board, and the configured panel, over the duty's store.
+    expect(w.view).toEqual({
+      store: sources.store,
+      panel: parsed.panel,
+      l1: sources.l1,
+      l1ChainId: L2_CHAIN_ID,
+      l2: sources.l2,
+      l2ChainId: L2_CHAIN_ID,
+      registry: a.registry,
+      registryFromBlock: 22n,
+      board: a.board,
+      boardFromBlock: 33n,
+      extent: expect.any(Function),
+    });
+    expect(w.receipts(election)).toEqual({
+      store: sources.store,
+      election,
+      view: expect.any(Function),
+      contract: sources.receipts,
+      now: sources.clock,
+    });
+  });
+
+  test("gives the view no extent for an election the seat didn't attest, without asking its nodes", async () => {
+    const parsed = parseConfig(
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, "unattested-store"),
+        availability: availability(),
+      }),
+    );
+    const a = parsed.availability;
+    if (a === undefined) return expect.fail("no availability");
+    const servedDir = join(dir, "unattested-blocks");
+    await mkdir(servedDir);
+    const asked: string[] = [];
+    const node = {
+      call: async (method: string) => {
+        asked.push(method);
+        throw new Error("not asked");
+      },
+    };
+    const w = dutyWiring(parsed, a, {
+      l1: node,
+      l2: node,
+      contract: { send: async () => {}, recorded: async () => undefined },
+      receipts: { send: async () => {}, recorded: async () => [] },
+      served: await servedBlocks(servedDir),
+      gateways: async () => [],
+      store: new MemoryStore(),
+      clock: () => 7n,
+    });
+    const election = {
+      index: 1,
+      stubHash: new Uint8Array(32),
+      definitionHash: new Uint8Array(32).fill(1),
+      electionId: new Uint8Array(32),
+      opensAt: 0n,
+      closesAt: 0n,
+      l1InclusionBound: 0n,
+      members: 0n,
+      signingSecret: new Uint8Array(32),
+    };
+    expect(await w.view.extent(election)).toBeUndefined();
+    expect(asked).toEqual([]);
   });
 
   test("refuses an account key others can read", async () => {

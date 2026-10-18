@@ -1,17 +1,27 @@
-// The availability duty's schedule (P4-3 part 2c-4b-2b-2): one duty per
-// election the seat approved, built once its reader can be set up, stepped
-// until it settles, each status and failure reported once, and anything the
-// node can't get past ending the loop.
+// The duties' schedule: the availability duty's (P4-3 part 2c-4b-2b-2), one
+// duty per election the seat approved, built once its reader can be set up,
+// stepped until it settles, each status and failure reported once, and
+// anything the node can't get past ending the loop; and the receipt duty's
+// on the same schedule (P2-13 part 4b-2b-2b), settling once its batches are
+// recorded or can't be, and giving up a view no retry can read.
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { AvailabilityStatus } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
-import { AvailabilityDuties, type Duty, type DutyEvent } from "../src/duties.ts";
+import type { ReceiptDutyStatus } from "../src/delivery.ts";
+import {
+  AvailabilityDuties,
+  type Duty,
+  type DutyEvent,
+  ReceiptDuties,
+  type ReceiptEvent,
+} from "../src/duties.ts";
 import { L1AnchorError } from "../src/l1.ts";
 import { SendError } from "../src/send.ts";
 import { MemoryStore } from "../src/store.ts";
+import { ViewError } from "../src/view.ts";
 import { election, runCeremony, value } from "./fixture.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -348,5 +358,163 @@ describe("approvedStubs", () => {
     expect(stubs?.map(hex)).toEqual([hex(e.stubHash)]);
     expect(await first?.approvedElection(stubs?.[0] as Uint8Array)).toBeDefined();
     expect(await third?.approvedStubs()).toEqual([]);
+  });
+});
+
+describe("the receipt duties", () => {
+  type ReceiptScript = (ReceiptDutyStatus | Error)[];
+
+  function receipts(scripts: Map<number, ReceiptScript>) {
+    const events: ReceiptEvent[] = [];
+    const stepped: string[] = [];
+    const duties = new ReceiptDuties({
+      seat: {
+        approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+        approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+      },
+      build: async (e) => {
+        const n = e.stubHash[0] as number;
+        return {
+          deadline: DEADLINE,
+          step: async () => {
+            stepped.push(name(n));
+            const script = scripts.get(n) as ReceiptScript;
+            const next = (script.length > 1 ? script.shift() : script[0]) as
+              | ReceiptDutyStatus
+              | Error;
+            if (next instanceof Error) throw next;
+            return next;
+          },
+        };
+      },
+      clock: () => 0n,
+      log: (e) => events.push(e),
+    });
+    return { duties, events, stepped };
+  }
+
+  test("step each election through the decision until its batches are recorded, reporting each change once", async () => {
+    const h = receipts(
+      new Map<number, ReceiptScript>([
+        [
+          1,
+          [
+            { state: "open", until: 500n },
+            { state: "open", until: 500n },
+            { state: "waiting-l1" },
+            { state: "sent", batches: 2, recorded: 0, total: 2 },
+            { state: "sent", batches: 1, recorded: 1, total: 2 },
+            { state: "recorded", total: 2 },
+          ],
+        ],
+        [2, [{ state: "recorded", total: 0 }]],
+      ]),
+    );
+    for (let i = 0; i < 8; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(6);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
+    expect(h.events).toEqual([
+      { event: "receipts", stubHash: name(1), state: "open", until: "500" },
+      { event: "receipts", stubHash: name(2), state: "recorded", total: 0 },
+      { event: "receipts", stubHash: name(1), state: "waiting-l1" },
+      { event: "receipts", stubHash: name(1), state: "sent", batches: 2, recorded: 0, total: 2 },
+      { event: "receipts", stubHash: name(1), state: "sent", batches: 1, recorded: 1, total: 2 },
+      { event: "receipts", stubHash: name(1), state: "recorded", total: 2 },
+    ]);
+  });
+
+  test("stop at unrecorded, the alarm past t_D", async () => {
+    const h = receipts(
+      new Map<number, ReceiptScript>([[1, [{ state: "unrecorded", missing: 1, total: 3 }]]]),
+    );
+    for (let i = 0; i < 3; i++) await h.duties.step();
+    expect(h.stepped).toHaveLength(1);
+    expect(h.events).toEqual([
+      { event: "receipts", stubHash: name(1), state: "unrecorded", missing: 1, total: 3 },
+    ]);
+  });
+
+  test("retry a node's failures while deciding, and give up an election whose view no retry can read", async () => {
+    const h = receipts(
+      new Map<number, ReceiptScript>([
+        [
+          1,
+          [
+            new RpcError("eth_getLogs: status 503"),
+            { state: "sent", batches: 1, recorded: 0, total: 1 },
+            { state: "recorded", total: 1 },
+          ],
+        ],
+        [2, [new L2Error("l2-definition-missing"), new ViewError("l1-run-short")]],
+        [3, [new L1AnchorError("clock"), { state: "recorded", total: 0 }]],
+        [4, [new ViewError("extent-lost"), { state: "recorded", total: 0 }]],
+      ]),
+    );
+    for (let i = 0; i < 4; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(2);
+    expect(h.stepped.filter((s) => s === name(3))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(4))).toHaveLength(1);
+    expect(h.events.filter((e) => e.event === "receipts-error")).toEqual([
+      {
+        event: "receipts-error",
+        stubHash: name(1),
+        error: "RpcError",
+        message: "eth_getLogs: status 503",
+      },
+      {
+        event: "receipts-error",
+        stubHash: name(2),
+        error: "L2Error",
+        message: "l2-definition-missing",
+      },
+      {
+        event: "receipts-error",
+        stubHash: name(3),
+        error: "L1AnchorError",
+        message: "clock",
+      },
+      { event: "receipts-error", stubHash: name(4), error: "ViewError", message: "extent-lost" },
+      { event: "receipts-error", stubHash: name(2), error: "ViewError", message: "l1-run-short" },
+    ]);
+  });
+
+  test("end on a failure the node can't get past, such as a view that breaks a rule no honest source breaks", async () => {
+    const h = receipts(
+      new Map<number, ReceiptScript>([
+        [1, [new Error("trustee node: a ballot shown absent is held from the board")]],
+      ]),
+    );
+    await expect(h.duties.step()).rejects.toThrow("shown absent");
+  });
+
+  test("give up on an election whose duty can't be set up once t_D has passed", async () => {
+    const events: DutyEvent[] = [];
+    let wall = 0n;
+    const duties = new ReceiptDuties({
+      seat: {
+        approvedStubs: async () => [approvedOf(1).stubHash],
+        approvedElection: async () => approvedOf(1),
+      },
+      build: async () => {
+        throw new RpcError("eth_chainId: TimeoutError");
+      },
+      clock: () => wall,
+      log: (e) => events.push(e),
+    });
+    await duties.step();
+    // `t_D` for an election closing at 0 with no inclusion bound.
+    wall = 10n ** 12n;
+    await duties.step();
+    await duties.step();
+    expect(events).toEqual([
+      {
+        event: "receipts-error",
+        stubHash: name(1),
+        error: "RpcError",
+        message: "eth_chainId: TimeoutError",
+      },
+      { event: "receipts-abandoned", stubHash: name(1) },
+    ]);
   });
 });

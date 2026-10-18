@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import {
   ceremonyTranscriptHash,
   type ContractEventVersion,
+  decodeShareReceiptBatch,
   electionDefinitionHash,
   encodeBoardEntry,
   encodeContractEvent,
@@ -27,6 +28,8 @@ import { concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { HeldExtent } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
+import { ReceiptDuty } from "../src/delivery.ts";
+import { type ReceiptEvent, ReceiptDuties } from "../src/duties.ts";
 import { decideObligation } from "../src/obligation.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -512,5 +515,120 @@ describe("refusals", () => {
     await expect(
       obligationView(viewOptions(store, { held: extentOf([older]), l2: broken }))(approved),
     ).rejects.toBeInstanceOf(RpcError);
+  });
+});
+
+describe("stepped by the receipt duties", () => {
+  /**
+   * The deployment's schedule over one approved election, its duty built as
+   * `run` builds it over `options`, with a contract path that records what
+   * it is sent once `recording` is set.
+   */
+  function scheduled(options: ViewOptions, approved: ApprovedElection) {
+    const sent: Uint8Array[] = [];
+    const events: ReceiptEvent[] = [];
+    const path = {
+      recording: false,
+      recordedBatches: [] as Uint8Array[],
+    };
+    let wall = s.cutoff - 1n;
+    const duties = new ReceiptDuties({
+      seat: {
+        approvedStubs: async () => [approved.stubHash],
+        approvedElection: async () => approved,
+      },
+      build: async (election) =>
+        new ReceiptDuty({
+          store: options.store,
+          election,
+          view: obligationView(options),
+          contract: {
+            send: async (batch) => {
+              sent.push(batch);
+              if (path.recording) path.recordedBatches.push(batch);
+            },
+            recorded: async () => path.recordedBatches,
+          },
+          now: () => wall,
+        }),
+      clock: () => wall,
+      log: (e) => events.push(e),
+    });
+    return {
+      duties,
+      sent,
+      events,
+      path,
+      at: (t: bigint) => {
+        wall = t;
+      },
+    };
+  }
+
+  test("decide at c_I over the deployment's view and send the receipt the delivery check needs until it is recorded", async () => {
+    const { store, approved } = await receipted(older, newer);
+    const h = scheduled(viewOptions(store, { held: extentOf([older]) }), approved);
+    await h.duties.step();
+    expect(h.sent).toEqual([]);
+    h.at(s.cutoff);
+    await h.duties.step();
+    // The newer ballot never reached the board: the seat owes the older,
+    // counted one, signed as one batch.
+    expect(h.sent).toHaveLength(1);
+    const batch = decodeShareReceiptBatch(h.sent[0] as Uint8Array, 1);
+    expect(batch.receipts.map((p) => plain(p.ballot_hash))).toEqual([plain(ballotHashOf(older))]);
+    h.path.recording = true;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.sent).toHaveLength(2);
+    const name = plain(approved.stubHash);
+    expect(h.events).toEqual([
+      { event: "receipts", stubHash: name, state: "open", until: s.cutoff.toString() },
+      { event: "receipts", stubHash: name, state: "sent", batches: 1, recorded: 0, total: 1 },
+      { event: "receipts", stubHash: name, state: "recorded", total: 1 },
+    ]);
+  });
+
+  test("give up, reported, a view no retry can read, sending nothing", async () => {
+    const { store, approved } = await receipted(older);
+    const h = scheduled(
+      viewOptions(store, { l2: l2Node(registrationLogs(), L2_CHAIN_ID + 1n) }),
+      approved,
+    );
+    h.at(s.cutoff);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.sent).toEqual([]);
+    expect(h.events).toEqual([
+      {
+        event: "receipts-error",
+        stubHash: plain(approved.stubHash),
+        error: "ViewError",
+        message: "chain",
+      },
+    ]);
+  });
+
+  test("retry a view its nodes can't give yet, and decide once they can", async () => {
+    const { store, approved } = await receipted(older);
+    let down = true;
+    const node = l1.rpc;
+    const h = scheduled(
+      viewOptions(store, {
+        l1: {
+          call: (method, params) =>
+            down
+              ? Promise.reject(new RpcError(`${method}: status 503`))
+              : node.call(method, params),
+        },
+      }),
+      approved,
+    );
+    h.at(s.cutoff);
+    await h.duties.step();
+    expect(h.events.map((e) => e.event)).toEqual(["receipts-error"]);
+    down = false;
+    await h.duties.step();
+    expect(h.sent).toHaveLength(1);
   });
 });

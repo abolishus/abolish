@@ -238,6 +238,12 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
       options.pollStubs !== undefined)
   )
     throw new Error("a worker holding the creation key runs nothing else");
+  // T-69, T-62: the Safe's owner keys never share a process with the Tier 0
+  // registrar and account keys or the Tier 1 relay's key, so seizing a relay
+  // seizes its own additions and nothing more (docs/spec/contracts.md, Group
+  // registry, Deployment).
+  if (options.anchor !== undefined && (options.tier0 !== undefined || options.tier1 !== undefined))
+    throw new Error("a worker holding the anchoring keys runs no relay");
   const prefix = options.prefix ?? KEY_PREFIX;
   const handlers = options.handlers ?? HANDLERS;
   const now = options.now ?? (() => new Date());

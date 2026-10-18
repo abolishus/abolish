@@ -2,6 +2,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { boardAnchorAbi } from "@abolishus/contracts/abi";
+import type { AnchoringClock } from "@abolishus/core";
 import { type Checkpoint, checkpointHash, encodeCheckpoint } from "@abolishus/crypto";
 import {
   type Address,
@@ -29,6 +30,7 @@ import {
   checkAnchorSafe,
   checkAnchorSafeHistory,
   checkAnchorSafeState,
+  connectAnchorRunner,
   FALLBACK_HANDLER_SLOT,
   GUARD_SLOT,
   keySigner,
@@ -177,6 +179,7 @@ interface Fixture {
   readonly safe: AnchorSafe;
   readonly keys: readonly Hex[];
   readonly anchor: Address;
+  readonly clock: AnchoringClock;
   readonly executor: Uint8Array;
 }
 
@@ -228,6 +231,7 @@ async function fixture(n = 3, threshold = 2n, setupTo: Address = zeroAddress): P
     },
     keys,
     anchor,
+    clock,
     executor: hexToBytes(executor),
   };
 }
@@ -628,5 +632,79 @@ describe("the sender", () => {
       expect(() => keySigner(key)).not.toThrow(/00|ff/i);
     }
     expect(getAddress(signer(a).address)).toBe(f.safe.owners[0]);
+  });
+});
+
+describe("the runner's startup", () => {
+  const runner = (f: Fixture, change: Partial<Parameters<typeof connectAnchorRunner>[1]> = {}) =>
+    connectAnchorRunner(client, {
+      chainId,
+      anchor: f.anchor,
+      clock: f.clock,
+      safe: f.safe,
+      ownerKeys: f.keys.slice(0, 2).map((k) => hexToBytes(k)),
+      executorKey: f.executor,
+      ...change,
+    });
+
+  test("passes the deployment record and anchors through the Safe", async () => {
+    const f = await fixture();
+    const chain = await runner(f);
+    const id = election();
+    await chain.anchor([segment(id, 0)]);
+    expect(await held(f, id, 0)).toBe(toHex(checkpointHash(segment(id, 0))));
+    expect(await sent(f)).toBe(1);
+    // Every owner key it holds, beyond the threshold too.
+    await runner(f, { ownerKeys: f.keys.map((k) => hexToBytes(k)) });
+  });
+
+  test("refuses keys that can't sign for the Safe, before reading anything", async () => {
+    const f = await fixture();
+    const [a, b] = f.keys.map((k) => hexToBytes(k)) as [Uint8Array, Uint8Array];
+    const stranger = hexToBytes(generatePrivateKey());
+    await expect(runner(f, { ownerKeys: [a] })).rejects.toThrow("fewer signers");
+    await expect(runner(f, { ownerKeys: [a, stranger] })).rejects.toThrow("isn't one of");
+    await expect(runner(f, { ownerKeys: [a, b], executorKey: new Uint8Array(32) })).rejects.toThrow(
+      RangeError,
+    );
+    // T-69 and rule A: one runner holds the whole threshold, so never on
+    // mainnet, refused before the node is asked anything.
+    await expect(
+      connectAnchorRunner({} as PublicClient, {
+        chainId: 1n,
+        anchor: f.anchor,
+        clock: f.clock,
+        safe: f.safe,
+        ownerKeys: [a, b],
+        executorKey: f.executor,
+      }),
+    ).rejects.toThrow("doesn't run on Ethereum mainnet");
+  });
+
+  test("refuses another chain, clock or authority than the anchor's", async () => {
+    const f = await fixture();
+    await expect(runner(f, { chainId: chainId + 1n })).rejects.toThrow("another chain");
+    await expect(
+      runner(f, { clock: { ...f.clock, deadline: f.clock.deadline + 1n } }),
+    ).rejects.toThrow("another clock");
+    const other = await fixture();
+    await expect(
+      runner(f, { safe: other.safe, ownerKeys: other.keys.map((k) => hexToBytes(k)) }),
+    ).rejects.toThrow("another authority");
+  });
+
+  test("refuses a Safe changed since the record, before its first run", async () => {
+    const f = await fixture();
+    await as(f.safe.address, f.safe.address, encode("enableModule", [f.anchor]));
+    await mine(FINALITY_DEPTH);
+    await expect(runner(f)).rejects.toThrow("has a module");
+    const g = await fixture();
+    await expect(
+      runner(g, {
+        safe: { ...g.safe, threshold: 3n },
+        ownerKeys: g.keys.map((k) => hexToBytes(k)),
+      }),
+    ).rejects.toThrow("another threshold");
+    expect(await sent(f)).toBe(0);
   });
 });

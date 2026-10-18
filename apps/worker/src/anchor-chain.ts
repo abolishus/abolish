@@ -156,7 +156,7 @@ export interface AnchorDeployment {
  * anchor's constructor requires; that it is the Safe the deployment record
  * names, with its owners, threshold, history and no module or guard, is
  * `checkAnchorSafe`'s (`src/anchor-safe.ts`), which the sender runs before
- * every signature and part 2b-2b runs at startup. Throws naming the mismatch.
+ * every signature and `connectAnchorRunner` runs at startup. Throws naming the mismatch.
  */
 export async function checkAnchorDeployment(
   client: PublicClient,

@@ -656,7 +656,7 @@ contract BoardDeliveryV2Test is TestBase {
     /// The `.fields` key of contract-event-v9.json's record `id`.
     function _eventFields(string memory ej, string memory id)
         internal
-        view
+        pure
         returns (string memory)
     {
         string[] memory ids = abi.decode(vm.parseJson(ej, ".records[*].id"), (string[]));

@@ -111,10 +111,10 @@ library DeliveryCheckLib {
     uint256 internal constant BALLOT_HASH_AT = 35;
     uint256 internal constant SEAT_AT = 67;
     /// Version 2's `panel`, where version 1 has its seat; a receipt and a
-    /// complaint are one byte longer (Delivery records (version 2)).
+    /// complaint are one byte longer (Delivery records (version 2)), which
+    /// the board frames receipts by.
     uint256 internal constant PANEL_AT = 67;
     uint256 internal constant RECEIPT_V2_LENGTH = 165;
-    uint256 internal constant COMPLAINT_V2_LENGTH = 229;
     uint8 internal constant DEFAULT_PANEL = 1;
     uint8 internal constant AUTHOR_PANEL = 2;
     /// A posting's fields after the seat (docs/spec/share-encryption.md,
@@ -431,9 +431,10 @@ library DeliveryCheckLib {
             at = l.authorShareHashesAt;
             count = l.authorShareCount;
         }
-        // The ballot passed `validity-shape`, so it has `n` share hashes in
-        // each panel's list, and a key-set seat is at most `n`; the bound is
-        // checked anyway, so the read never depends on either registry's.
+        // The ballot passed `validity-shape`, so each panel's list has that
+        // panel's size, and a key-set seat is at most it: the bound is
+        // unreachable through honest registries and checked anyway, so the
+        // read never depends on either registry's.
         // One SHA-256 over `ct_i` as the posting encodes it, its one
         // encoding (docs/spec/delivery.md, Share posting).
         at += 32 * (uint256(h.seat) - 1);

@@ -442,12 +442,6 @@ contract Board is EventAccumulator {
         _log3(selector, t1, t2, abi.encode(record));
     }
 
-    /// The seats of the key set the trustee registry recorded for the
-    /// ceremony of the election a ballot record names, then those of the
-    /// author key set the election registry recorded with its definition (0
-    /// with no author panel), never a submitter's (ADR 0028, 2B; ADR 0035).
-    /// Both zero for a record too short to name an election, which the
-    /// ballot check's header refuses first.
     /// A share receipt's length from its version byte: 165 bytes at version
     /// 2, which names its panel, and 164 otherwise (version 1, or a version
     /// its check refuses).
@@ -456,6 +450,12 @@ contract Board is EventAccumulator {
             version == 0x02 ? DeliveryCheckLib.RECEIPT_V2_LENGTH : DeliveryCheckLib.RECEIPT_LENGTH;
     }
 
+    /// The seats of the key set the trustee registry recorded for the
+    /// ceremony of the election a ballot record names, then those of the
+    /// author key set the election registry recorded with its definition (0
+    /// with no author panel), never a submitter's (ADR 0028, 2B; ADR 0035).
+    /// Both zero for a record too short to name an election, which the
+    /// ballot check's header refuses first.
     function _qualified(bytes calldata record) private view returns (uint256[2] memory q) {
         if (record.length < BallotCheckLib.TIER_AT) return q;
         bytes32 h = bytes32(record[BallotCheckLib.DEFINITION_AT:BallotCheckLib.TIER_AT]);

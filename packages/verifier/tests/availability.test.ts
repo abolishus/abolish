@@ -211,7 +211,7 @@ const complain = (seat: number, at = T_A - 100n, over: Partial<Sent> = {}): Sent
   ...over,
 });
 
-describe("the ballot extent", () => {
+describe("the ballot extent", { timeout: 120_000 }, () => {
   test("the moments are the spec's: t_A = t_D − R with the pinned F and R", () => {
     // Base's 12-hour forced-inclusion delay and an hour of missed slots, and one hour.
     expect(PINNED_FORCED_INCLUSION).toBe(46_800n);

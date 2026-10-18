@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { BB } from "../scripts/toolchain.ts";
 import { CIRCUITS, TARGET, writeArtifacts } from "../scripts/artifacts.ts";
 
 type Circuit = (typeof CIRCUITS)[number];
@@ -150,7 +151,7 @@ const bbArgs = (circuit: Circuit) => [
 function prove(s: Statement, name: string): { proof: string; publicInputs: string } {
   const out = join(dir, `${s.id}-${name}`);
   execFileSync(
-    "bb",
+    BB,
     [
       "prove",
       "-b",
@@ -186,7 +187,7 @@ function verify(
     path = join(dir, `proof-${n}`);
     writeFileSync(path, proof);
   }
-  const run = spawnSync("bb", ["verify", "-p", path as string, "-i", inputs, ...bbArgs(circuit)], {
+  const run = spawnSync(BB, ["verify", "-p", path as string, "-i", inputs, ...bbArgs(circuit)], {
     encoding: "utf8",
   });
   const output = `${run.stdout}${run.stderr}`;

@@ -10,9 +10,12 @@
 // package's source by relative path, or a symlink that leaves the gate. Each
 // check below closes one of those paths; together they bound what code the
 // gated packages can run to the gated directories plus the audited `@noble/*`
-// libraries. The one exception is packages/membership-prover, the client's
+// libraries. The exceptions are packages/membership-prover, the client's
 // Groth16 prover adapter, which may also depend on snarkjs and ffjavascript
-// (ADR 0009, Amendment 2026-10-17): its rule names them, nothing else may.
+// (ADR 0009, Amendment 2026-10-17), and packages/circuits, whose proof checks
+// and prover run Barretenberg through @aztec/bb.js and witnesses through
+// @noir-lang/noir_js (ADR 0010; P3-4): each rule names its packages, nothing
+// else may.
 
 import { posix } from "node:path";
 import { parseAllDocuments, type Document } from "yaml";
@@ -126,19 +129,34 @@ const PACKED_MANIFEST_KEYS = new Set([
 const SCRIPT_NAME = /^(?:build|check|test|test:[a-z0-9-]+)$/;
 
 // packages/crypto runs in the ballot client, so it gets no built-ins and no
-// workspace imports. The verifier is a CLI too, and may use the other gated
-// packages. circuits and contracts get their own rule (wider if they need it)
-// in the PRs that scaffold them (P1-17, P1-18); until then the strictest one
-// applies, so a dependency of the verifier on them can't leave the gate. The
-// membership prover is snarkjs behind a thin adapter, run only in the ballot
-// client's prover worker; it isn't published, and no other gated package may
-// depend on it, so the verifier never runs snarkjs (T-36, T-55).
+// workspace imports. The verifier is a CLI too, and may use crypto and
+// contracts, which keep the strictest rule, so its dependencies can't leave the
+// gate. circuits checks and proves its own circuits' UltraHonk proofs
+// (docs/spec/nullifier-query.md, Keys and proofs) under the keys and reference
+// string it commits, so it may depend on the pinned bb.js and noir_js (the
+// toolchain check holds them to nargo's and bb's versions) and on crypto for
+// the records' codecs. Its own code gets no built-ins, so it can run in a
+// browser worker; bb.js's Node build still uses them (a native backend it
+// spawns, a reference string it downloads) where this check can't see, so the
+// proof checks and prover P3-4 writes must name the WebAssembly backend and the
+// vendored reference string, with tests that hold them to it. The verifier may
+// not depend on circuits: that would bring bb.js, noir_js and their unwalked
+// closures into its trust base, beyond the owner's admission of bb.js alone
+// (ADR 0010), and needs its own rule when the verifier first checks a Noir
+// proof. The membership prover is snarkjs behind a thin adapter, run only in
+// the ballot client's prover worker; it isn't published, and no other gated
+// package may depend on it, so the verifier never runs snarkjs (T-36, T-55).
 export const RULES: Readonly<Record<GatedName, GatedRule>> = {
   crypto: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: true },
-  circuits: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: false },
+  circuits: {
+    workspace: ["crypto"],
+    npm: ["@aztec/bb.js", "@noir-lang/noir_js"],
+    nodeBuiltins: false,
+    packed: false,
+  },
   contracts: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: false },
   verifier: {
-    workspace: ["crypto", "circuits", "contracts"],
+    workspace: ["crypto", "contracts"],
     npm: "@noble/*",
     nodeBuiltins: true,
     packed: true,

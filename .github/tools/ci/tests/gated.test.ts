@@ -30,6 +30,14 @@ const catalog = {
   evil: "1.0.0",
   snarkjs: "0.7.5",
   ffjavascript: "0.3.1",
+  "@aztec/bb.js": "5.0.0-nightly.20260522",
+  "@noir-lang/noir_js": "1.0.0-beta.22",
+};
+
+const CIRCUITS_DEPS = {
+  "@abolishus/crypto": "workspace:*",
+  "@aztec/bb.js": "catalog:",
+  "@noir-lang/noir_js": "catalog:",
 };
 
 // Shaped like the real published manifests.
@@ -397,11 +405,18 @@ describe("manifestViolations: the membership prover", () => {
         ),
         dep,
       ).toHaveLength(1);
-      for (const name of ["circuits", "contracts"] as const)
-        expect(
-          manifestViolations(name, { dependencies: { [dep]: spec } }, catalog),
-          `${name}: ${dep}`,
-        ).toHaveLength(1);
+      expect(
+        manifestViolations(
+          "circuits",
+          { dependencies: { ...CIRCUITS_DEPS, [dep]: spec } },
+          catalog,
+        ),
+        `circuits: ${dep}`,
+      ).toHaveLength(1);
+      expect(
+        manifestViolations("contracts", { dependencies: { [dep]: spec } }, catalog),
+        `contracts: ${dep}`,
+      ).toHaveLength(1);
     }
   });
 
@@ -417,6 +432,122 @@ describe("manifestViolations: the membership prover", () => {
         catalog,
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe("manifestViolations: circuits", () => {
+  const circuits = (dependencies: Record<string, string> = CIRCUITS_DEPS) => ({
+    name: "@abolishus/circuits",
+    private: true,
+    type: "module",
+    scripts: {
+      build: "nargo check --workspace",
+      test: "nargo test --workspace",
+      check: "nargo fmt --check",
+    },
+    dependencies,
+    devDependencies: { "@noble/curves": "catalog:", "fast-check": "catalog:" },
+  });
+
+  test("depends on exactly @abolishus/crypto, bb.js and noir_js", () => {
+    expect(manifestViolations("circuits", circuits(), catalog)).toEqual([]);
+  });
+
+  test("must depend on each of them", () => {
+    for (const dep of Object.keys(CIRCUITS_DEPS)) {
+      const rest = Object.fromEntries(Object.entries(CIRCUITS_DEPS).filter(([d]) => d !== dep));
+      expect(manifestViolations("circuits", circuits(rest), catalog)).toEqual([
+        `packages/circuits/package.json: must depend on ${dep}`,
+      ]);
+    }
+  });
+
+  test("rejects any other runtime dependency, @noble/* and the toolchain's own dependencies included", () => {
+    for (const dep of [
+      "@noble/curves",
+      "evil",
+      "snarkjs",
+      "msgpackr",
+      "@noir-lang/acvm_js",
+      "@noir-lang/noir_wasm",
+      "@aztec/bb.js-evil",
+      "@abolishus/verifier",
+      "@abolishus/membership-prover",
+      "@abolishus/core",
+    ])
+      expect(
+        manifestViolations(
+          "circuits",
+          circuits({
+            ...CIRCUITS_DEPS,
+            [dep]: dep.startsWith("@abolishus/") ? "workspace:*" : "catalog:",
+          }),
+          catalog,
+        ),
+        dep,
+      ).toHaveLength(1);
+  });
+
+  test("takes bb.js and noir_js only from the catalog, pinned exactly", () => {
+    for (const dep of ["@aztec/bb.js", "@noir-lang/noir_js"]) {
+      for (const spec of ["1.0.0", "^1.0.0", "npm:evil@1.0.0", "github:AztecProtocol/x"])
+        expect(
+          manifestViolations("circuits", circuits({ ...CIRCUITS_DEPS, [dep]: spec }), catalog),
+          `${dep}: ${spec}`,
+        ).toHaveLength(1);
+      for (const pinned of ["^1.0.0", "1.0", "npm:evil@1.0.0", undefined])
+        expect(
+          manifestViolations("circuits", circuits(), { ...catalog, [dep]: pinned }),
+          `${dep}: ${String(pinned)}`,
+        ).toHaveLength(1);
+    }
+  });
+
+  test("the verifier may not depend on circuits, so bb.js and noir_js stay out of its trust base", () => {
+    expect(
+      manifestViolations(
+        "verifier",
+        packed("verifier", {
+          dependencies: {
+            "@abolishus/crypto": "workspace:*",
+            "@abolishus/circuits": "workspace:*",
+          },
+        }),
+        catalog,
+      ),
+    ).toHaveLength(1);
+    expect(
+      referenceViolation(
+        "verifier",
+        "packages/verifier/src/a.ts",
+        "packages/verifier/src",
+        { specifier: "@abolishus/circuits", kind: "ImportDeclaration" },
+        runtimeDependencies({ dependencies: { "@abolishus/circuits": "workspace:*" } }),
+      ),
+    ).toBeTypeOf("string");
+  });
+
+  test("no other gated package may depend on bb.js or noir_js", () => {
+    for (const dep of ["@aztec/bb.js", "@noir-lang/noir_js"]) {
+      expect(
+        manifestViolations("crypto", crypto({ dependencies: { [dep]: "catalog:" } }), catalog),
+        dep,
+      ).toHaveLength(1);
+      expect(
+        manifestViolations(
+          "verifier",
+          packed("verifier", {
+            dependencies: { "@abolishus/crypto": "workspace:*", [dep]: "catalog:" },
+          }),
+          catalog,
+        ),
+        dep,
+      ).toHaveLength(1);
+      expect(
+        manifestViolations("contracts", { dependencies: { [dep]: "catalog:" } }, catalog),
+        dep,
+      ).toHaveLength(1);
+    }
   });
 });
 
@@ -562,6 +693,52 @@ describe("lockfileViolations: the membership prover", () => {
     ).toEqual([
       "pnpm-lock.yaml: importers['packages/membership-prover']: web-worker is locked but not declared",
     ]);
+  });
+});
+
+describe("lockfileViolations: circuits", () => {
+  const manifest = { dependencies: CIRCUITS_DEPS };
+  const graph = (locked: Record<string, string>): LockfileGraph[] => [
+    {
+      importers: {
+        "packages/circuits": {
+          dependencies: Object.fromEntries(
+            Object.entries(locked).map(([dep, version]) => [
+              dep,
+              { specifier: dep.startsWith("@abolishus/") ? "workspace:*" : "catalog:", version },
+            ]),
+          ),
+        },
+      },
+      // bb.js's own closure, which serves its CLI too: not walked.
+      packages: { "@aztec/bb.js@5.0.0-nightly.20260522": { resolution: {}, hasBin: true } },
+      snapshots: {
+        "@aztec/bb.js@5.0.0-nightly.20260522": { dependencies: { commander: "12.1.0" } },
+      },
+    },
+  ];
+  const LOCKED = {
+    "@abolishus/crypto": "link:../crypto",
+    "@aztec/bb.js": "5.0.0-nightly.20260522",
+    "@noir-lang/noir_js": "1.0.0-beta.22",
+  };
+
+  test("locks its three direct dependencies, and judges no deeper", () => {
+    expect(lockfileViolations("circuits", manifest, graph(LOCKED), catalog)).toEqual([]);
+  });
+
+  test("rejects bb.js, noir_js or crypto locked to anything else", () => {
+    for (const [dep, version] of [
+      ["@aztec/bb.js", "5.0.0-nightly.20260521"],
+      ["@aztec/bb.js", "5.0.0-nightly.20260522(x@1.0.0)"],
+      ["@noir-lang/noir_js", "link:../evil"],
+      ["@noir-lang/noir_js", "file:../x"],
+      ["@abolishus/crypto", "link:../core"],
+    ] as const)
+      expect(
+        lockfileViolations("circuits", manifest, graph({ ...LOCKED, [dep]: version }), catalog),
+        `${dep}@${version}`,
+      ).toHaveLength(1);
   });
 });
 
@@ -758,6 +935,27 @@ describe("referenceViolation", () => {
       expect(at("membership-prover", s), s).toBeTypeOf("string");
     for (const name of ["crypto", "verifier"] as const)
       for (const s of ["snarkjs", "ffjavascript", "@abolishus/membership-prover"])
+        expect(at(name, s), `${name}: ${s}`).toBeTypeOf("string");
+  });
+
+  test("only circuits may import bb.js and noir_js, with crypto and nothing else of npm", () => {
+    const deps = runtimeDependencies({
+      dependencies: { ...CIRCUITS_DEPS, "@noble/hashes": "catalog:" },
+    });
+    const at = (name: "crypto" | "circuits" | "contracts" | "verifier", specifier: string) =>
+      referenceViolation(
+        name,
+        `packages/${name}/src/a.ts`,
+        `packages/${name}/src`,
+        { specifier, kind: "ImportDeclaration" },
+        deps,
+      );
+    for (const s of ["@aztec/bb.js", "@noir-lang/noir_js", "@abolishus/crypto"])
+      expect(at("circuits", s), s).toBeUndefined();
+    for (const s of ["@noble/hashes", "node:fs", "node:worker_threads", "@aztec/bb.js/../x"])
+      expect(at("circuits", s), s).toBeTypeOf("string");
+    for (const name of ["crypto", "contracts", "verifier"] as const)
+      for (const s of ["@aztec/bb.js", "@noir-lang/noir_js"])
         expect(at(name, s), `${name}: ${s}`).toBeTypeOf("string");
   });
 

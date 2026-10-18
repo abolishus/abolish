@@ -13,6 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { pippenger } from "@noble/curves/abstract/curve.js";
 import { bn254 } from "@noble/curves/bn254.js";
 import { describe, expect, test } from "vite-plus/test";
+import { BB } from "../scripts/toolchain.ts";
 
 const CRS = new URL("../crs/", import.meta.url);
 const read = (f: string) => new Uint8Array(readFileSync(new URL(f, CRS)));
@@ -55,8 +56,20 @@ describe("crs/", () => {
     // bb's verifier uses its own copy of [x]_2, not bn254_g2.dat. That copy
     // equalling the file ties the vendored powers to bb's x, a second source
     // beside the S3 read: install-toolchain.sh pins bb's binary by sha256.
-    const bb = execFileSync("sh", ["-c", "command -v bb"], { encoding: "utf8" }).trim();
-    expect(readFileSync(bb).includes(Buffer.from(g2Bytes))).toBe(true);
+    expect(readFileSync(BB).includes(Buffer.from(g2Bytes))).toBe(true);
+  });
+
+  test("that bb is found outside node_modules, is a binary and has the catalog's version", () => {
+    // What keeps bb.js's shim out is the path (scripts/toolchain.ts) and the
+    // shim being a script. The version can't tell the pinned bb from the
+    // native one inside bb.js's tarball, which reports the same; that the
+    // binary is the pinned one rests on install-toolchain.sh's sha256.
+    const pin = /"@aztec\/bb\.js": (\S+)/.exec(
+      readFileSync(new URL("../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
+    )?.[1];
+    expect(BB.split(/[\\/]/)).not.toContain("node_modules");
+    expect(execFileSync(BB, ["--version"], { encoding: "utf8" }).trim()).toBe(pin);
+    expect(readFileSync(BB).subarray(0, 2).toString()).not.toBe("#!");
   });
 
   test("is [x^i]_1 from the generator, for the x of [x]_2", () => {

@@ -148,7 +148,8 @@ const run = {
   panel,
   runId: crypto.getRandomValues(new Uint8Array(32)),
 };
-const seats = secrets.map((s, i) => ceremonyKeygen(i + 1, s));
+/** Each seat's ceremony secrets: its KEM and signing keys, for intake's receipts. */
+export const seats = secrets.map((s, i) => ceremonyKeygen(i + 1, s));
 const keys = seats.map((s) => keysMessage(run, s));
 const challenges = seats.map((s) => challengesMessage(run, s, keys));
 const round2 = challenges.map((c) => c.message);

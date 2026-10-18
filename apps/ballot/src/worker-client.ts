@@ -4,6 +4,7 @@
 
 import type { Panel } from "@abolishus/crypto";
 
+import type { CheckedReceipt } from "./casts.ts";
 import type { ElectionCheck } from "./election.ts";
 import {
   type BackupLocatorResult,
@@ -13,6 +14,7 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type ReceiptResult,
   type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
@@ -251,6 +253,30 @@ export class BallotWorker {
     );
     if (response.kind !== "cast") throw new WorkerFailure("the ballot worker failed");
     return response.result;
+  }
+
+  /**
+   * The seat `receipt` receipts `ballot` for, a cast of the poll the worker
+   * last checked, checked against that poll's registered signing keys.
+   */
+  async receipt(
+    ballot: Uint8Array,
+    receipt: Uint8Array,
+  ): Promise<
+    | { readonly ok: true; readonly checked: CheckedReceipt }
+    | Extract<ReceiptResult, { readonly ok: false }>
+  > {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "receipt", ballot, receipt }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "receipt") throw new WorkerFailure("the ballot worker failed");
+    const { result } = response;
+    if (!result.ok) return result;
+    // The one place a `CheckedReceipt` is made: the worker passed these bytes.
+    const checked = { seat: result.seat, receipt: receipt.slice() } as unknown as CheckedReceipt;
+    return { ok: true, checked };
   }
 
   async #request(

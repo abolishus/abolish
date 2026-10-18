@@ -14,6 +14,7 @@
 
 import {
   BallotSealError,
+  castReceiptSeatV3,
   castSealV3,
   challengeSealV3,
   type ContractEventRecord,
@@ -58,6 +59,8 @@ import {
   type FindCellRequest,
   type FindCellResult,
   PROVER_TIMEOUT_MS,
+  type ReceiptRequest,
+  type ReceiptResult,
   type SealRequest,
   type SealResult,
   type Tier0OutcomeRequest,
@@ -426,5 +429,25 @@ export class BallotSession {
       secret.fill(0);
       prover.close();
     }
+  }
+
+  /**
+   * The seat `request.receipt` receipts `request.ballot` for, checked under
+   * the signing keys the held poll's ceremony registered (`castReceiptSeatV3`;
+   * [[delivery]], Client rule 1). A ballot that isn't a version-3 record of
+   * the held poll is `unknown`: the page asked about another poll's cast.
+   */
+  receipt(request: ReceiptRequest): ReceiptResult {
+    const poll = this.#poll;
+    if (poll === undefined) return { ok: false, problem: "unknown" };
+    let seat: number | undefined;
+    try {
+      seat = castReceiptSeatV3(poll.election, request.ballot, request.receipt);
+    } catch (e) {
+      if (e instanceof DecodeError || e instanceof TypeError)
+        return { ok: false, problem: "unknown" };
+      throw e;
+    }
+    return seat === undefined ? { ok: false, problem: "refused" } : { ok: true, seat };
   }
 }

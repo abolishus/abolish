@@ -121,6 +121,21 @@ export interface CastRequest {
 }
 
 /**
+ * Whether `receipt`, the answer a seat's intake gave for `ballot`, a cast of
+ * the poll the worker last checked, receipts that ballot
+ * (`castReceiptSeatV3`; [[delivery]], Client rule 1): checked here, where
+ * the poll's registered signing keys are, before the page keeps it and
+ * erases that seat's `m_i` (Client rule 2).
+ */
+export interface ReceiptRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "receipt";
+  readonly ballot: Uint8Array;
+  readonly receipt: Uint8Array;
+}
+
+/**
  * The identity commitment of `secret`, `Poseidon2(s · B8)`
  * ([[identity-backup]], Identity secret), which a Tier 0 registration sends
  * ([[registration]], Request). Asked of the worker, like every use of the
@@ -231,7 +246,8 @@ export type WorkerRequest =
   | FindCellRequest
   | SealRequest
   | ChallengeRequest
-  | CastRequest;
+  | CastRequest
+  | ReceiptRequest;
 
 /**
  * Why no proof came back: one of `MembershipProverError`'s codes, or
@@ -348,6 +364,16 @@ export type CastResult =
   | { readonly ok: false; readonly problem: "unknown" | "no-cell" | MembershipProofProblem }
   | { readonly ok: false; readonly problem: "ballot"; readonly code: BallotV2Code };
 
+/**
+ * The seat a receipt receipts the ballot for, or why it doesn't: no poll
+ * held, or a ballot that isn't a cast of it (`unknown`), or a receipt that
+ * doesn't pass for exactly that ballot (`refused`), which the client never
+ * keeps, so the seat's `m_i` stays for a posting (T-25).
+ */
+export type ReceiptResult =
+  | { readonly ok: true; readonly seat: number }
+  | { readonly ok: false; readonly problem: "unknown" | "refused" };
+
 export type WorkerResponse =
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -408,6 +434,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "cast";
       readonly result: CastResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "receipt";
+      readonly result: ReceiptResult;
     }
   /** The request was malformed or the worker failed; it names no detail, which could quote a secret. */
   | { readonly v: typeof PROTOCOL_VERSION; readonly id: number; readonly kind: "error" };
@@ -501,6 +533,7 @@ const isEventVersion = (x: unknown): x is ContractEventVersion =>
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
+const RECEIPT_KEYS = ["ballot", "id", "kind", "receipt", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
@@ -689,6 +722,12 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       prover,
     };
   }
+  if (data["kind"] === "receipt") {
+    if (!hasKeys(data, RECEIPT_KEYS)) return undefined;
+    const { ballot, receipt } = data;
+    if (!isBytes(ballot) || !isBytes(receipt)) return undefined;
+    return { v, id, kind: "receipt", ballot, receipt };
+  }
   return undefined;
 }
 
@@ -708,6 +747,7 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "seal",
   "challenge",
   "cast",
+  "receipt",
   "error",
 ]);
 

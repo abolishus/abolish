@@ -24,6 +24,7 @@ import {
   type BallotV2Code,
   cellContextOf,
   checkBallotV3,
+  decodeBallot,
   encodeBallotV3,
   type QuestionBallotElection,
   questionBallotElection,
@@ -46,6 +47,7 @@ import {
   type ContractEventVersion,
   decodeContractEvent,
 } from "./contract-event.ts";
+import { decodeShareReceipt, type ShareReceiptRecord } from "./delivery.ts";
 import type { ElectionDefinitionV5 } from "./election-definition.ts";
 import { equalBytes } from "./nullifier-key.ts";
 import { decodeMembershipProof, membershipVkHash } from "./membership-proof.ts";
@@ -73,6 +75,7 @@ import {
   type KemPublicKey,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
+import { checkShareReceiptV3 } from "./share-receipt.ts";
 import {
   tierMembership,
   TierMembershipError,
@@ -649,4 +652,58 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
       ),
     ),
   });
+}
+
+/**
+ * `share-receipt` for a ballot this client cast ([[delivery]], Client rule
+ * 1): the seat `receipt` receipts, if it is a share receipt record (`0x000c`
+ * version 1, the version ballot version 3 fixes) naming exactly what
+ * `ballot`, a version-3 ballot record of `election`, gives: the definition,
+ * the ballot hash recomputed from the ballot and that seat's share hash,
+ * with a signature that verifies under the seat's signing key in the key
+ * set `election` was made with, never keys the caller supplies (T-37).
+ * `undefined` otherwise, whatever the
+ * bytes, so a seat counts as receipted, and its `m_i` may be erased, only
+ * on a receipt that counts for exactly this ballot (T-25, T-38). The ballot
+ * hash binds no L1 block, so a receipt for one cast of a seal counts for
+ * every recast of it. Throws on an `election` `questionBallotElection`
+ * didn't make, and on a `ballot` that isn't a version-3 ballot record of
+ * it: the client's own record.
+ */
+export function castReceiptSeatV3(
+  election: QuestionBallotElection,
+  ballot: Uint8Array,
+  receipt: Uint8Array,
+): number | undefined {
+  const { ballotVersion, keys } = cellContextOf(election);
+  if (ballotVersion !== 3) throw new TypeError("castReceiptSeatV3: expected a version-3 election");
+  const record = decodeBallot(ballot, 3);
+  if (!equalBytes(record.definition_hash, election.definitionHash))
+    throw new TypeError("castReceiptSeatV3: a ballot of another election");
+  let decoded: ShareReceiptRecord;
+  try {
+    decoded = decodeShareReceipt(receipt, 1);
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  const { seat } = decoded;
+  const vote = record.committed_vote;
+  const shareHash = vote.share_hashes[seat - 1];
+  if (shareHash === undefined) return undefined;
+  const ctx = {
+    definitionHash: election.definitionHash,
+    cell: record.cell,
+    nullifier: record.nullifier,
+  };
+  // The receipt's own fields are compared too: `checkShareReceiptV3` builds
+  // its statement from the ballot alone, so a record naming other hashes
+  // would otherwise pass on its signature and be kept as this ballot's.
+  if (
+    !equalBytes(decoded.definition_hash, election.definitionHash) ||
+    !equalBytes(decoded.ballot_hash, ballotHashV3(ctx, vote)) ||
+    !equalBytes(decoded.share_hash, shareHash)
+  )
+    return undefined;
+  return checkShareReceiptV3(keys, ctx, vote, seat, decoded.signature) ? seat : undefined;
 }

@@ -736,7 +736,13 @@ export type CastPostingResult =
  * the voter a posting only for an `m_i` that would deliver the seat, never
  * one its storage altered or truncated, which the delivery check would
  * ignore after the voter gave up the seat's everlasting privacy for it
- * ([[delivery]], Client rule 4; T-18, T-15). Throws as `castReceiptSeatV3`
+ * ([[delivery]], Client rule 4; T-18, T-15). It judges the share against
+ * `ballot` as given: a stored ballot whose fields outside seat `seat`'s
+ * share hash and `vss` were altered still passes, and a posting under it
+ * would name a ballot hash no board carries while giving up the real
+ * share's ML-KEM layer, so a caller offers a posting only for a ballot it
+ * holds from a source it trusts, the seal it cast or the board's or the
+ * contract's copy the posting will name. Throws as `castReceiptSeatV3`
  * does on an election it didn't make, a ballot of another election or
  * bytes that aren't a version-3 ballot record, and on a seat outside the
  * panel.

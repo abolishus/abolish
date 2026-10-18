@@ -281,8 +281,8 @@ export class BallotWorker {
   }
 
   /**
-   * Whether `share`, kept for a seat of `ballot`, a cast of the poll the
-   * worker last checked, would deliver that seat if posted: checked against
+   * Whether `share`, kept for a seat of `ballot`, a version-3 record naming
+   * the poll the worker last checked, would deliver that seat if posted: checked against
    * the poll's registered KEM key for the seat before any posting is offered
    * (Client rule 4). The worker gets its own copy of `m` and zeroes it.
    */

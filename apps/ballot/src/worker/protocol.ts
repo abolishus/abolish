@@ -138,11 +138,14 @@ export interface ReceiptRequest {
 
 /**
  * Whether `ciphertext` and `m`, the share ciphertext and ML-KEM message the
- * page kept for `seat` of `ballot`, a cast of the poll the worker last
- * checked, make a posting that passes the public check under that seat's
+ * page kept for `seat` of `ballot`, a version-3 record naming the poll the
+ * worker last checked, make a posting that passes the public check under that seat's
  * registered KEM key (`castPostingSeatV3`; [[delivery]], Client rule 4):
  * checked here, where the poll's keys are, before the voter is ever offered
  * to post it, since the page's storage checks only `m`'s length (T-18).
+ * The ballot is taken as the page gives it: an offer must name a ballot
+ * the page holds from the board's or the contract's copy, never one read
+ * from storage alone (`castPostingSeatV3`).
  */
 export interface PostingRequest {
   readonly v: typeof PROTOCOL_VERSION;

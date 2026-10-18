@@ -24,6 +24,7 @@ import {
   encode,
   encodeShareReceipt,
   fieldBn254,
+  identityKey,
   type IntakeCode,
   intakeBallot,
   intakeCutoff,
@@ -32,6 +33,7 @@ import {
   SHARES,
   shareReceiptRecord,
   struct,
+  u64,
   u8,
 } from "@abolishus/crypto";
 import type { CeremonySeat } from "./ceremony.ts";
@@ -93,14 +95,20 @@ const HASH = bytesFixed(32);
 // The node's own storage, not protocol bytes: what the seat holds of a
 // ballot it receipted, until the tally. The tier and nullifier are what its
 // contract-path obligation is decided over (docs/spec/delivery.md, What a
-// node owes); the L1 reference is left out, since a receipt covers the public
-// part under any of them.
+// node owes). A receipt covers the public part under any L1 reference, so the
+// references each copy was delivered under are kept apart, one record each
+// (`COPY`): the decision ranks the receipted copies by them, and the operator
+// may withhold every other copy of the ballot (T-25, T-54).
 const TAKEN = struct([
   ["share_hash", HASH],
   ["ciphertext", bytesVar(MAX_RECORD)],
   ["shares", SHARES],
   ["tier", u8],
   ["nullifier", fieldBn254],
+] as const);
+const COPY = struct([
+  ["l1_ref_number", u64],
+  ["l1_ref_hash", HASH],
 ] as const);
 
 interface Opened {
@@ -152,10 +160,14 @@ export class IntakeSeat {
       return taken.option === undefined
         ? { ok: false, code: taken.code }
         : { ok: false, code: taken.code, option: taken.option };
+    // The proofs take a while: a delivery begun before `c_I` that finishes
+    // after it stores and signs nothing (What a node owes).
+    if (this.#closed(opened.value)) return { ok: false, code: "intake-closed" };
     // Held before the receipt leaves the node, so a crash after this never
     // leaves a receipt for a share the seat lost (Intake and receipts).
+    const ballot = hex(taken.ballotHash);
     const stored = await this.#config.store.putOnce(
-      `intake/${hex(stubHash)}/${hex(taken.ballotHash)}`,
+      `intake/${hex(stubHash)}/${ballot}`,
       encode(TAKEN, {
         share_hash: taken.shareHash,
         ciphertext,
@@ -167,6 +179,10 @@ export class IntakeSeat {
     // `ballot_hash` binds every share hash, so a held record names this one.
     if (!equal(decode(TAKEN, stored.value).share_hash, taken.shareHash))
       throw new Error("trustee node: a held ballot's share hash differs from its ballot hash's");
+    await this.#config.store.putOnce(
+      `copies/${hex(stubHash)}/${ballot}/${taken.l1RefNumber}-${hex(taken.l1RefHash)}`,
+      encode(COPY, { l1_ref_number: taken.l1RefNumber, l1_ref_hash: taken.l1RefHash }),
+    );
     return {
       ok: true,
       ballotHash: taken.ballotHash,
@@ -185,7 +201,6 @@ export class IntakeSeat {
     stubBytes: Uint8Array,
     transcript: Uint8Array,
   ): Promise<{ ok: true; value: Opened } | { ok: false; code: ElectionRefusal }> {
-    const config = this.#config;
     let stub: ElectionDefinition;
     try {
       const record = decodeElectionDefinitionRecord(stubBytes);
@@ -205,10 +220,14 @@ export class IntakeSeat {
       opened = checked.value;
       this.#opened.set(name, opened);
     }
-    // From `c_I` on, the seat's obligation is decided: a receipt issued later
-    // is one no decision covers (docs/spec/delivery.md, What a node owes).
-    if (config.now() >= opened.cutoff) return { ok: false, code: "intake-closed" };
+    if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
     return { ok: true, value: opened };
+  }
+
+  // From `c_I` on, the seat's obligation is decided: a receipt issued later
+  // is one no decision covers (docs/spec/delivery.md, What a node owes).
+  #closed(opened: Opened): boolean {
+    return this.#config.now() >= opened.cutoff;
   }
 
   async #check(
@@ -237,10 +256,14 @@ export class IntakeSeat {
       transcript,
       1,
     );
+    // The seat's own registered signing key must be the one its secret
+    // signs under, or every receipt it gives would fail `share-receipt`.
+    const own = result.ok ? result.registered.find((k) => k.index === config.index) : undefined;
     if (
       !result.ok ||
       !equal(keySetHash(result.registered.map(keySetEntry)), secrets.keySetHash) ||
-      !result.registered.some((k) => k.index === config.index)
+      own === undefined ||
+      !equal(own.signingKey, identityKey(secrets.signingSecret))
     )
       return { ok: false, code: "intake-transcript" };
     // 2.5's pinned panel, 2.3, 1.3 and 2.4 again, now against the roots the
@@ -254,10 +277,19 @@ export class IntakeSeat {
     const definitionHash = electionDefinitionHash(definition);
     if (!(await config.registration(definitionHash, secrets.keySetHash)))
       return { ok: false, code: "intake-unregistered" };
+    let election: BallotElection;
+    try {
+      election = ballotElection(definition, result.registered);
+    } catch (e) {
+      // A root of 0, which anyone can prove membership of (T-04), passes no
+      // correct electorate check; this refuses it whatever the deployment's does.
+      if (e instanceof RangeError) return { ok: false, code: "intake-definition" };
+      throw e;
+    }
     return {
       ok: true,
       value: {
-        election: ballotElection(definition, result.registered),
+        election,
         stubHash,
         cutoff: intakeCutoff(stub.closes_at, BigInt(stub.l1_inclusion_bound), RELEASE_WINDOWS),
         keys: {

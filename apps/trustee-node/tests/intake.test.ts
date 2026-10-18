@@ -125,7 +125,35 @@ async function cast(s: Setup, v: number, option: 0 | 1): Promise<Cast> {
     sharing,
     core.shareHashes,
   );
-  const l1Ref = { number: 100n, hash: new Uint8Array(32).fill(7) };
+  const sealed = { vote, nullifier, ciphertexts: encrypted.ciphertexts };
+  return prove(s, v, sealed, { number: 100n, hash: new Uint8Array(32).fill(7) });
+}
+
+/** The same core cast again under another L1 reference (revoting, Client rule 4): the same public part. */
+function castAgain(s: Setup, v: number, earlier: Cast, l1Ref: L1Ref): Promise<Cast> {
+  const { committed_vote: vote, nullifier } = earlier.record;
+  return prove(s, v, { vote, nullifier, ciphertexts: earlier.ciphertexts }, l1Ref);
+}
+
+interface L1Ref {
+  readonly number: bigint;
+  readonly hash: Uint8Array;
+}
+
+/** Casting steps 2 to 4 for a sealed core: `M` over `l1Ref`, the membership proof and the admission checks. */
+async function prove(
+  s: Setup,
+  v: number,
+  sealed: {
+    readonly vote: BallotRecord["committed_vote"];
+    readonly nullifier: bigint;
+    readonly ciphertexts: readonly Uint8Array[];
+  },
+  l1Ref: L1Ref,
+): Promise<Cast> {
+  const { definitionHash } = s.election;
+  const secret = secrets[v] as Uint8Array;
+  const { vote, nullifier } = sealed;
   const message = membershipMessage({
     definitionHash,
     tier: TIER,
@@ -151,7 +179,7 @@ async function cast(s: Setup, v: number, option: 0 | 1): Promise<Cast> {
   };
   const checked = checkBallot(s.election, record);
   if (!checked.ok) throw new Error(`an honest ballot fails admission: ${checked.code}`);
-  return { record, bytes: encodeBallot(record), ciphertexts: encrypted.ciphertexts };
+  return { record, bytes: encodeBallot(record), ciphertexts: sealed.ciphertexts };
 }
 
 interface Seats {
@@ -258,6 +286,49 @@ describe("intake", () => {
     expect(first.ok && again.ok).toBe(true);
     if (first.ok && again.ok) expect(hex(again.receipt)).toBe(hex(first.receipt));
     expect(await s.stores[0]!.list(`intake/${hex(s.e.stubHash)}`)).toHaveLength(1);
+  });
+
+  it("keeps every L1 reference a receipted ballot was delivered under (T-25, T-54)", async () => {
+    const store = new MemoryStore();
+    const [seat] = seatsOf(s, { store }).intake;
+    const recast = await castAgain(s, 0, honest, {
+      number: 101n,
+      hash: new Uint8Array(32).fill(8),
+    });
+    const first = await seat!.intake(
+      s.e.stubBytes,
+      s.transcript,
+      honest.bytes,
+      honest.ciphertexts[0] as Uint8Array,
+    );
+    const second = await seat!.intake(
+      s.e.stubBytes,
+      s.transcript,
+      recast.bytes,
+      recast.ciphertexts[0] as Uint8Array,
+    );
+    if (!first.ok || !second.ok) expect.fail("an honest delivery was refused");
+    // One public part: the same ballot hash and the same receipt.
+    expect(hex(second.receipt)).toBe(hex(first.receipt));
+    expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toEqual([hex(first.ballotHash)]);
+    expect(await store.list(`copies/${hex(s.e.stubHash)}/${hex(first.ballotHash)}`)).toEqual([
+      `100-${"07".repeat(32)}`,
+      `101-${"08".repeat(32)}`,
+    ]);
+  });
+
+  it("stores and signs nothing for a delivery that finishes at the cutoff (T-54)", async () => {
+    const store = new MemoryStore();
+    const times = [s.cutoff - 1n, s.cutoff];
+    const [seat] = seatsOf(s, { store, now: () => times.shift() ?? s.cutoff }).intake;
+    const out = await seat!.intake(
+      s.e.stubBytes,
+      s.transcript,
+      honest.bytes,
+      honest.ciphertexts[0] as Uint8Array,
+    );
+    expect(out).toEqual({ ok: false, code: "intake-closed" });
+    expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toEqual([]);
   });
 
   it("refuses another seat's ciphertext and a malformed record, storing nothing", async () => {

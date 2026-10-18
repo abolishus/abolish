@@ -49,6 +49,13 @@ const FAILED = {
   retryable: true,
 };
 
+const OPEN = {
+  ...DRAFT,
+  state: "open",
+  submittedAt: "2026-10-12T09:00:00.000Z",
+  electionId: "0b".repeat(32),
+};
+
 /** A draft as the handler stores and answers it. */
 const STORED = {
   language: "en",
@@ -101,6 +108,23 @@ describe("drafts client", () => {
     ]);
   });
 
+  test("reads an open poll with its election, for its page's link", async () => {
+    serve(Response.json({ polls: [OPEN] }));
+    expect(await draftsClient.list()).toEqual([
+      {
+        id: ID,
+        state: "open",
+        title: "Sunday hours?",
+        closesAt: 1793750400n,
+        updatedAt: DRAFT.updatedAt,
+        submittedAt: OPEN.submittedAt,
+        failure: undefined,
+        retryable: false,
+        electionId: OPEN.electionId,
+      },
+    ]);
+  });
+
   test("accepts every failure code core writes", async () => {
     for (const code of POLL_FAILURES) {
       serve(Response.json({ polls: [{ ...FAILED, failure: code, retryable: false }] }));
@@ -122,6 +146,16 @@ describe("drafts client", () => {
       { ...FAILED, failure: "lost" },
       { ...FAILED, failure: undefined },
       { ...FAILED, retryable: "yes" },
+      // An open poll without its election, or in another spelling (T-31), and
+      // an election on a poll that isn't open (T-34: setup names none).
+      { ...OPEN, electionId: undefined },
+      { ...OPEN, electionId: "0B".repeat(32) },
+      { ...OPEN, electionId: `0x${"0b".repeat(32)}` },
+      { ...OPEN, electionId: "0b".repeat(31) },
+      { ...OPEN, electionId: 1 },
+      { ...OPEN, state: "registered" },
+      { ...FAILED, electionId: OPEN.electionId },
+      { ...DRAFT, electionId: OPEN.electionId },
     ];
     for (const poll of bad) {
       serve(Response.json({ polls: [poll] }));

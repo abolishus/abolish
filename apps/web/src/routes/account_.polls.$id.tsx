@@ -12,8 +12,8 @@ import { fetchChallengeKey } from "../data.ts";
 // the form. Analytics keeps only the template (`/account/polls/:id`, T-67).
 //
 // These are the only pages whose policy allows Turnstile (src/security.ts):
-// a submitted poll goes back to the account page as a new document, so the
-// widget's script never runs under any other page's.
+// a submitted poll goes on to "Setting up your poll" as a new document, so
+// the widget's script never runs under any other page's.
 export const Route = createFileRoute("/account_/polls/$id")({
   loader: async () => ({ siteKey: await fetchChallengeKey() }),
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/account_/polls/$id")({
         onCreated={(created) =>
           void navigate({ to: "/account/polls/$id", params: { id: created }, replace: true })
         }
-        onSubmitted={() => window.location.assign("/account")}
+        onSubmitted={(submitted) => window.location.assign(`/account/polls/${submitted}/setup`)}
       />
     );
   },

@@ -316,15 +316,20 @@ describe("retryFailedPoll", () => {
     const submitted = await createPollDraft(app, author, draft(), NOW);
     await submit(author, submitted);
     expect(await code(retryFailedPoll(app, author, submitted, NOW))).toBe("not-failed");
+    const electionId = randomBytes(32);
     await db.admin`
       UPDATE account_polls SET state = 'open', creator_address = ${randomBytes(20)},
-        create_tx_hash = ${randomBytes(32)}, election_id = ${randomBytes(32)}, created_block = 1,
+        create_tx_hash = ${randomBytes(32)}, election_id = ${electionId}, created_block = 1,
         l1_origin_timestamp = 1, anchors_checked_block = 1, electorate = '[]',
         stub_hash = ${randomBytes(32)}, ceremony_tx_hash = ${randomBytes(32)},
         register_tx_hash = ${randomBytes(32)}, registered_block = 2
       WHERE id = ${submitted}`;
     expect(await code(retryFailedPoll(app, author, submitted, NOW))).toBe("not-failed");
-    expect((await readAccountPoll(app, author, submitted))!.state).toBe("open");
+    // An open poll is read with its election's identifier, for its page's link.
+    expect(await readAccountPoll(app, author, submitted)).toMatchObject({
+      state: "open",
+      electionId,
+    });
   });
 
   test(`refuses an account already holding ${MAX_DRAFTS} drafts, however many race`, async () => {

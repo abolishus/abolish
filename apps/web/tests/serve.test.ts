@@ -486,6 +486,44 @@ describe("poll drafts under /drafts", () => {
     });
   });
 
+  test("an open poll names its election, for its page's link; a poll in setup or failed doesn't", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const { id } = (await (await author.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    expect((await author.call("POST", "/drafts/submit", { id })).status).toBe(202);
+    const electionId = randomBytes(32);
+    const set = (state: string, failure: string | null) => db.admin`
+      UPDATE account_polls SET state = ${state}, failure = ${failure},
+        creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)},
+        election_id = ${electionId}, created_block = 1, l1_origin_timestamp = 1,
+        anchors_checked_block = 1, electorate = '[]', stub_hash = ${randomBytes(32)},
+        ceremony_tx_hash = ${randomBytes(32)}, register_tx_hash = ${randomBytes(32)},
+        registered_block = 2
+      WHERE id = ${id}`;
+    // T-34: setup names no identifier, even once it has one.
+    for (const [state, failure] of [
+      ["registered", null],
+      ["failed", "open-mismatch"],
+    ] as const) {
+      await set(state, failure);
+      const read = await (await author.call("POST", "/drafts/read", { id })).json();
+      expect(read).toMatchObject({ id, state });
+      expect(read).not.toHaveProperty("electionId");
+    }
+    await set("open", null);
+    const hex = electionId.toString("hex");
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      id,
+      state: "open",
+      electionId: hex,
+    });
+    expect(await (await author.call("GET", "/drafts")).json()).toEqual({
+      polls: [expect.objectContaining({ id, state: "open", electionId: hex })],
+    });
+  });
+
   test("needs a session, our origin and JSON, and serves only its routes", async () => {
     const signedOut = new Browser();
     expect((await signedOut.call("GET", "/drafts")).status).toBe(401);

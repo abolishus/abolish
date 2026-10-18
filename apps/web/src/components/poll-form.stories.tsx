@@ -26,6 +26,7 @@ const SUMMARY: PollSummary = {
   submittedAt: undefined,
   failure: undefined,
   retryable: false,
+  electionId: undefined,
 };
 
 const SAVED: PollDraft = {
@@ -444,10 +445,11 @@ export const SubmitADraft: Story = {
     await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeDisabled();
     await userEvent.click(within(check).getByRole("button", { name: "I'm a person" }));
     await expect(
-      await canvas.findByText("Your poll is submitted. Taking you to your polls…"),
+      await canvas.findByText("Your poll is submitted. Taking you to its setup…"),
     ).toBeVisible();
     await expect(submits(args.client)).toEqual([[ID, "token-1"]]);
     await expect(args.onSubmitted).toHaveBeenCalledOnce();
+    await expect(args.onSubmitted).toHaveBeenCalledWith(ID);
     // Nothing more is saved or sent from the page.
     await expect(canvas.getByRole("button", { name: "Save draft" })).toBeDisabled();
     await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeDisabled();
@@ -494,6 +496,7 @@ export const SubmitSavesFirst: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
     await userEvent.click(await canvas.findByRole("button", { name: "I'm a person" }));
     await waitFor(() => expect(args.onSubmitted).toHaveBeenCalledOnce());
+    await expect(args.onSubmitted).toHaveBeenCalledWith(NEW_ID);
     await expect(submits(args.client)).toEqual([[NEW_ID, "token-1"]]);
   },
 };

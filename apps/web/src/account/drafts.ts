@@ -12,6 +12,7 @@ import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
 import { TURNSTILE_HEADER } from "@abolishus/core/turnstile";
 
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
+import { isElectionId } from "../values.ts";
 
 // Every state core's table admits (`satisfies` keeps this list core's).
 const STATES: ReadonlySet<string> = new Set([
@@ -42,6 +43,8 @@ export interface PollSummary {
   readonly failure: PollFailure | undefined;
   /** Whether a failed poll can go back to a draft or be discarded. */
   readonly retryable: boolean;
+  /** An open poll's election, for its public page's link; none in any other state (T-34). */
+  readonly electionId: string | undefined;
 }
 
 /** Why a drafts action didn't happen. */
@@ -200,7 +203,7 @@ const U64 = /^(?:0|[1-9][0-9]{0,19})$/;
 
 function summary(value: unknown): PollSummary {
   if (typeof value !== "object" || value === null) throw new DraftsError("failed");
-  const { id, state, title, closesAt, updatedAt, submittedAt, failure, retryable } =
+  const { id, state, title, closesAt, updatedAt, submittedAt, failure, retryable, electionId } =
     value as Record<string, unknown>;
   if (
     typeof id !== "string" ||
@@ -219,6 +222,9 @@ function summary(value: unknown): PollSummary {
     if (typeof failure !== "string" || !FAILURES.has(failure) || typeof retryable !== "boolean")
       throw new DraftsError("failed");
   } else if (failure !== undefined || retryable !== undefined) throw new DraftsError("failed");
+  // An open poll names its election, in the one spelling its page has (T-31); no other does.
+  if (state === "open" ? !isElectionId(electionId) : electionId !== undefined)
+    throw new DraftsError("failed");
   return {
     id,
     state: state as PollState,
@@ -228,6 +234,7 @@ function summary(value: unknown): PollSummary {
     submittedAt,
     failure: failure as PollFailure | undefined,
     retryable: retryable === true,
+    electionId: electionId as string | undefined,
   };
 }
 

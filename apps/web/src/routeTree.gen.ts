@@ -18,6 +18,7 @@ import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
 import { Route as PollsElectionIdRouteImport } from "./routes/polls.$electionId.tsx";
 import { Route as AccountPollsIdRouteImport } from "./routes/account_.polls.$id.tsx";
 import { Route as PollsElectionIdPreviewDotpngRouteImport } from "./routes/polls.$electionId.preview[.]png.ts";
+import { Route as AccountPollsIdSetupRouteImport } from "./routes/account_.polls.$id_.setup.tsx";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -64,6 +65,11 @@ const PollsElectionIdPreviewDotpngRoute = PollsElectionIdPreviewDotpngRouteImpor
   path: "/preview.png",
   getParentRoute: () => PollsElectionIdRoute,
 } as any);
+const AccountPollsIdSetupRoute = AccountPollsIdSetupRouteImport.update({
+  id: "/account_/polls/$id_/setup",
+  path: "/account/polls/$id/setup",
+  getParentRoute: () => rootRouteImport,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   "/polls/": typeof PollsIndexRoute;
   "/account/polls/$id": typeof AccountPollsIdRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
+  "/account/polls/$id/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   "/polls": typeof PollsIndexRoute;
   "/account/polls/$id": typeof AccountPollsIdRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
+  "/account/polls/$id/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   "/polls/": typeof PollsIndexRoute;
   "/account_/polls/$id": typeof AccountPollsIdRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
+  "/account_/polls/$id_/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -110,7 +119,8 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls/"
     | "/account/polls/$id"
-    | "/polls/$electionId/preview.png";
+    | "/polls/$electionId/preview.png"
+    | "/account/polls/$id/setup";
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
@@ -121,7 +131,8 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls"
     | "/account/polls/$id"
-    | "/polls/$electionId/preview.png";
+    | "/polls/$electionId/preview.png"
+    | "/account/polls/$id/setup";
   id:
     | "__root__"
     | "/"
@@ -132,7 +143,8 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls/"
     | "/account_/polls/$id"
-    | "/polls/$electionId/preview.png";
+    | "/polls/$electionId/preview.png"
+    | "/account_/polls/$id_/setup";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -144,6 +156,7 @@ export interface RootRouteChildren {
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
   PollsIndexRoute: typeof PollsIndexRoute;
   AccountPollsIdRoute: typeof AccountPollsIdRoute;
+  AccountPollsIdSetupRoute: typeof AccountPollsIdSetupRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -211,6 +224,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PollsElectionIdPreviewDotpngRouteImport;
       parentRoute: typeof PollsElectionIdRoute;
     };
+    "/account_/polls/$id_/setup": {
+      id: "/account_/polls/$id_/setup";
+      path: "/account/polls/$id/setup";
+      fullPath: "/account/polls/$id/setup";
+      preLoaderRoute: typeof AccountPollsIdSetupRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -235,6 +255,7 @@ const rootRouteChildren: RootRouteChildren = {
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,
   PollsIndexRoute: PollsIndexRoute,
   AccountPollsIdRoute: AccountPollsIdRoute,
+  AccountPollsIdSetupRoute: AccountPollsIdSetupRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

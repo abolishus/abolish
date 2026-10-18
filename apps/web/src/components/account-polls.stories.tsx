@@ -92,6 +92,7 @@ const poll = (id: string, over: Partial<PollSummary>): PollSummary => ({
   submittedAt: undefined,
   failure: undefined,
   retryable: false,
+  electionId: undefined,
   ...over,
 });
 
@@ -102,7 +103,11 @@ const SETTING_UP = poll("setup", {
   title: "Which crossing should get a signal first?",
   submittedAt: "2026-10-16T18:05:00.000Z",
 });
-const OPEN = poll("open", { state: "open", title: "Name the new ferry" });
+const OPEN = poll("open", {
+  state: "open",
+  title: "Name the new ferry",
+  electionId: "0f".repeat(32),
+});
 const TIMED_OUT = poll("timeout", {
   state: "failed",
   title: "Repaint the bandstand?",
@@ -144,7 +149,16 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
       description: "Should the harbor library open on Sundays?",
     }),
   ).toHaveAttribute("href", `/account/polls/${DRAFT.id}`);
-  await expect(setup!.queryByRole("link")).toBeNull();
+  // A poll in setup links to its steps, an open one to its public page (part 6d).
+  await expect(
+    setup!.getByRole("link", {
+      name: "Follow its setup",
+      description: "Which crossing should get a signal first?",
+    }),
+  ).toHaveAttribute("href", `/account/polls/${SETTING_UP.id}/setup`);
+  await expect(
+    open!.getByRole("link", { name: "Go to its page", description: "Name the new ferry" }),
+  ).toHaveAttribute("href", `/polls/${"0f".repeat(32)}`);
   await expect(timedOut!.queryByRole("link")).toBeNull();
   await expect(untitled!.getByRole("heading", { name: "Untitled draft" })).toBeVisible();
   // Setup's steps are one state, never a step's name or a hash.

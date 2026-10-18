@@ -177,6 +177,18 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
           </Button>
         </span>
       );
+    const link = (href: string, words: "pollsFollowSetup" | "pollsPage") => (
+      <a
+        href={href}
+        aria-describedby={which}
+        className="inline-flex h-9 items-center underline underline-offset-4"
+      >
+        {t(words)}
+      </a>
+    );
+    if (SHOWN[p.state] === "setup") return link(`/account/polls/${p.id}/setup`, "pollsFollowSetup");
+    if (p.state === "open")
+      return p.electionId === undefined ? null : link(`/polls/${p.electionId}`, "pollsPage");
     if (p.state !== "failed" || !p.retryable) return null;
     return (
       <span className="flex flex-wrap gap-x-4">

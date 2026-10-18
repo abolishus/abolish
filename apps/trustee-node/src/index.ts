@@ -10,6 +10,7 @@ export {
   type Approval,
   type ApprovedElection,
   CeremonySeat,
+  type IntakeSecrets,
   type NeverRegistered,
   type Rounds12,
   type Rounds123,
@@ -17,6 +18,14 @@ export {
   type SeatRefusal,
   type SeatResult,
 } from "./ceremony.ts";
+export {
+  type ElectionRefusal,
+  type IntakeConfig,
+  type IntakeOutcome,
+  type IntakeRefusal,
+  IntakeSeat,
+  type RegistrationCheck,
+} from "./intake.ts";
 export { L1AnchorError, type L1AnchorOptions, type L1AnchorRefusal, l1BoardAnchors } from "./l1.ts";
 export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
 export {

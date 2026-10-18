@@ -48,10 +48,14 @@ export interface Election {
 export function election(
   n: number,
   k: number,
-  options: { stores?: readonly SeatStore[]; electorate?: () => Promise<boolean> } = {},
+  options: {
+    stores?: readonly SeatStore[];
+    electorate?: () => Promise<boolean>;
+    stub?: Partial<ElectionDefinition>;
+  } = {},
 ): Election {
   const panelists = panelOf(n, k);
-  const stub = stubFor(panelists.panel);
+  const stub = stubFor(panelists.panel, options.stub);
   const seats = panelists.secrets.map(
     (identitySecret, i) =>
       new CeremonySeat({

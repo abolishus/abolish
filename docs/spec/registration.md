@@ -2,7 +2,7 @@
 
 How a voter's commitment joins a Tier 0 group through our signing service, as [[0024-tier0-registration]] (option B) decides: the challenge page and how its Turnstile token reaches the ballot client, the request and its answers, the queue, the period, the batch and its order, and how the client learns the outcome. Notation is from [[notation]]; groups, records and approvals are [[contracts]], Group registry's; the commitment is [[membership]]'s. Threats: T-01, T-06, T-10, T-11, T-13, T-16, T-18, T-25, T-41, T-43, T-46, T-52, T-67, T-69.
 
-Registration is operational, never part of an election: no verifier reads the request, the queue or the service's state. What a verifier checks is the group registry's records ([[verifier]] 2.4), which the registrars' approvals authorise however the service chose them. So this page binds the service, its route and the ballot client, not the verifier. It adds no record type, hash or encoding, and `packages/crypto` gains nothing: the batch is [[contracts]]' addition record and its approvals.
+Registration is operational, never part of an election: no verifier reads the request, the queue or the service's state. What a verifier checks is the group registry's records ([[verifier]] 2.4), which the registrars' approvals authorise however the service chose them. So this page binds the service, its route and the ballot client, not the verifier. It adds no record type, hash or encoding, and `packages/crypto` gains only the client's reading of the outcome (`tier0Registration`, the same replay and first-occurrence ranking as [[membership]]'s cell tree): the batch is [[contracts]]' addition record and its approvals.
 
 What this page doesn't cover:
 

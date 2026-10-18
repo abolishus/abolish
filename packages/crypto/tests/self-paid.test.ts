@@ -23,6 +23,7 @@ import {
   SELF_PAID_RECORD_LENGTH,
   signGroupApproval,
   statedTierElectorate,
+  tier0Registration,
   type TierElectorate,
   tierMembership,
   TierMembershipError,
@@ -778,5 +779,129 @@ describe("the ballot client's and the creator's replays over self-paid groups", 
       const late = { ...selfPaid(5n, 2n, 1_000_000_009n), block: ROOT_BLOCK + 1n };
       expect(tierMembership(logs([...base, late]), electorate, commitment, 5n, pins).cell).toBe(0);
     });
+  });
+});
+
+describe("tier0Registration: a registrant's outcome over self-paid groups", () => {
+  // Region codes, not a tier's region indices: the vectors' index i is code
+  // 1000 + i here, so a mix-up of the two can't pass.
+  const code = (region: number) => 1000 + region;
+  const groupsOf = (t: Tier, block = ROOT_BLOCK) => ({
+    block,
+    groups: t.groups.map((g) => ({ group_id: decimal(g.groupId), region: code(g.region) })),
+  });
+
+  test.each(vectors.tiers.filter((t) => t.ranked !== undefined).map((t) => [t.id, t] as const))(
+    "%s: registered only in the region of the occurrence the vectors rank first",
+    (_id, t) => {
+      const records = board(t);
+      const regions = [...new Set(t.groups.map((g) => g.region))];
+      const commitments = new Set(
+        t.log.flatMap((e) => ("add" in e ? e.add : "selfPaid" in e ? [e.selfPaid] : [])),
+      );
+      for (const c of [...commitments].map(decimal)) {
+        // The vectors' ranking: the group whose ranked leaves still hold c.
+        const at = (t.ranked ?? []).findIndex((leaves) => leaves.map(decimal).includes(c));
+        for (const region of regions) {
+          const outcome = tier0Registration(records, groupsOf(t), c, code(region), pins);
+          const home = t.groups[at];
+          if (home === undefined) expect(outcome, `${c}`).toEqual({ kind: "not-yet" });
+          else
+            expect(outcome, `${c} in region ${region}`).toEqual({
+              kind: home.region === region ? "registered" : "moved",
+              group: decimal(home.groupId),
+            });
+        }
+      }
+    },
+    120_000,
+  );
+
+  test("a removed leaf counts nowhere, and a later copy is the occurrence", () => {
+    // removed-no-precedence: 1000000000 is removed from signed group 2 (region 0), then added to self-paid group 8 (region 1).
+    const t = tierOf("removed-no-precedence");
+    const records = board(t);
+    expect(tier0Registration(records, groupsOf(t), 1_000_000_000n, code(1), pins)).toEqual({
+      kind: "registered",
+      group: 8n,
+    });
+    expect(tier0Registration(records, groupsOf(t), 1_000_000_000n, code(0), pins)).toEqual({
+      kind: "moved",
+      group: 8n,
+    });
+    // Before the self-paid copy: removed, so in no group.
+    const events: Event[] = [
+      { kind: "created", groupId: 2n, tier: 0 },
+      { kind: "self-paid-created", groupId: 8n },
+      added(2n, 0n, [1_000_000_000n, 1_000_000_001n]),
+      removed(2n, 2n, [0n]),
+    ];
+    expect(tier0Registration(logs(events), groupsOf(t), 1_000_000_000n, code(0), pins)).toEqual({
+      kind: "not-yet",
+    });
+  });
+
+  test("reads the registry only up to the block given", () => {
+    const t = tierOf("chain-order"); // 1000000000 lands first in group 9 (region 1), then in group 4 (region 0)
+    const events: (Event & { block?: bigint })[] = [
+      { kind: "self-paid-created", groupId: 4n, block: 1n },
+      { kind: "self-paid-created", groupId: 9n, block: 1n },
+      { ...selfPaid(4n, 0n, 1_000_000_000n), block: 5n },
+      { ...selfPaid(9n, 0n, 1_000_000_000n), block: 6n },
+    ];
+    const at = (block: bigint, region: number) =>
+      tier0Registration(logs(events), groupsOf(t, block), 1_000_000_000n, code(region), pins);
+    expect(at(4n, 0)).toEqual({ kind: "not-yet" });
+    expect(at(5n, 0)).toEqual({ kind: "registered", group: 4n });
+    expect(at(6n, 0)).toEqual({ kind: "registered", group: 4n });
+    expect(at(6n, 1)).toEqual({ kind: "moved", group: 4n });
+  });
+
+  test("refuses a history the registry can't log, as tierMembership does", () => {
+    const t = tierOf("copy-after-signed");
+    const events: Event[] = [
+      { kind: "self-paid-created", groupId: 5n },
+      { kind: "created", groupId: 10n, tier: 0 },
+      added(10n, 0n, [1_000_000_000n]),
+      selfPaid(10n, 1n, 1_000_000_003n),
+    ];
+    expect(
+      refusal(() => tier0Registration(logs(events), groupsOf(t), 1_000_000_000n, code(0), pins)),
+    ).toBe("group-history");
+    expect(
+      refusal(() =>
+        tier0Registration(logs(events.slice(1, 3)), groupsOf(t), 1_000_000_000n, code(0), pins),
+      ),
+    ).toBe("group-created");
+  });
+
+  test("refuses arguments outside its forms", () => {
+    const t = tierOf("copy-after-signed");
+    const records = board(t);
+    const groups = groupsOf(t);
+    const ok =
+      (g: unknown, c: unknown = 1_000_000_000n, region: unknown = code(0)) =>
+      () =>
+        tier0Registration(records, g as never, c as bigint, region as number, pins);
+    expect(ok(groups)).not.toThrow();
+    for (const c of [0n, 1n, 1_000_000_000])
+      expect(ok(groups, c), `commitment ${String(c)}`).toThrow(RangeError);
+    for (const region of [code(5), -1, 2 ** 32, 0.5, "1000"])
+      expect(ok(groups, undefined, region), `region ${String(region)}`).toThrow(RangeError);
+    const [a, b] = groups.groups as [
+      { group_id: bigint; region: number },
+      { group_id: bigint; region: number },
+    ];
+    for (const bad of [
+      { ...groups, block: -1n },
+      { ...groups, block: 1n << 64n },
+      { ...groups, groups: [] },
+      { ...groups, groups: [b, a] },
+      { ...groups, groups: [a, a] },
+      { ...groups, groups: [a, { ...b, region: 2 ** 32 }] },
+      { ...groups, groups: [a, { ...b, group_id: 1n << 64n }] },
+    ])
+      expect(ok(bad)).toThrow(RangeError);
+    expect(ok(null)).toThrow(TypeError);
   });
 });

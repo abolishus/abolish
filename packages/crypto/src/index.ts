@@ -814,7 +814,6 @@ export {
   IDENTITY_CHAIN,
   type IdentityChainCode,
   type IdentityChainPins,
-  identityChainProofs,
   type IdentityChainRecord,
   type IdentityChainResult,
 } from "./identity-chain.ts";

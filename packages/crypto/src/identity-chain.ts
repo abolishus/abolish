@@ -21,7 +21,7 @@ import {
 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
-import { MAX_NULLIFIER_PROOF } from "./nullifier-query.ts";
+import { MAX_NULLIFIER_PROOF, type NullifierQueryStatement } from "./nullifier-query.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 
 const DAY = 86_400n;
@@ -144,12 +144,11 @@ const isField = (v: unknown): v is bigint => typeof v === "bigint" && v >= 0n &&
  * and `oprf_pk_hash` of 0, so no client-chosen value and no chip-recomputable
  * nullifier reaches a seat (T-13, T-17).
  */
-export function identityChainProofs(
+function chainProofs(
   pins: IdentityChainPins,
   record: IdentityChainRecord,
   commIn: bigint,
 ): readonly ChainProof[] {
-  if (!isField(commIn)) throw new RangeError("identityChainProofs: comm_in must be below r");
   const date = record.proof_date;
   const t = BigInt(pins.nullifierType);
   return [
@@ -187,22 +186,70 @@ export function identityChainProofs(
 }
 
 /**
+ * Refuses pins no release could mean: a key not 32 bytes or in two roles' lists
+ * (a key of one width has one meaning, T-05), an interval not of UTC
+ * midnights, empty, or overlapping another (the date names one set, T-06), a
+ * commitment or root not below r, or a nullifier type other than 2 or 4.
+ */
+function checkPins(pins: IdentityChainPins): void {
+  const keys = [
+    ...pins.dscKeys,
+    ...pins.idKeys,
+    ...pins.integrityKeys,
+    pins.ageKey,
+    pins.nationalityKey,
+  ];
+  const fail = (what: string) => {
+    throw new RangeError(`checkIdentityChain: ${what}`);
+  };
+  if (!keys.every((k) => k instanceof Uint8Array && k.length === 32))
+    fail("every pinned key must be 32 bytes");
+  for (let i = 0; i < keys.length; i++)
+    for (let j = 0; j < i; j++)
+      if (sameBytes(keys[i] as Uint8Array, keys[j] as Uint8Array))
+        fail("a pinned key may appear only once");
+  const sets = [...pins.anchors].sort((a, b) =>
+    a.validFrom < b.validFrom ? -1 : a.validFrom > b.validFrom ? 1 : 0,
+  );
+  for (const [i, a] of sets.entries()) {
+    if (
+      !isField(a.root) ||
+      typeof a.validFrom !== "bigint" ||
+      typeof a.validUntil !== "bigint" ||
+      a.validFrom < 0n ||
+      a.validFrom % DAY !== 0n ||
+      a.validUntil % DAY !== 0n ||
+      a.validUntil <= a.validFrom
+    )
+      fail("an anchor set must have a root below r and an interval of UTC midnights");
+    const previous = sets[i - 1];
+    if (previous !== undefined && a.validFrom < previous.validUntil)
+      fail("an issuer's anchor sets never overlap");
+  }
+  if (!isField(pins.ageCommitment) || !isField(pins.nationalityCommitment))
+    fail("the parameter commitments must be below r");
+  if (pins.nullifierType !== 2 && pins.nullifierType !== 4) fail("t must be 2 or 4");
+}
+
+/**
  * The identity-chain check (docs/spec/identity-chain.md, Identity-chain check)
  * up to `chain-dsc`, in its order, against the seat's clock (`now`, Unix
- * seconds), the release's pins and `commIn`, the `comm_in` of the query the
- * seat has already checked, proof included. `ok` means only that the five
+ * seconds), the release's pins and the query the seat has already checked,
+ * proof included, whose `comm_in` the integrity and disclosure proofs take. `ok` means only that the five
  * proofs may be checked, in the order given, each under the key it names; a
  * seat answers only once every one verifies (T-03, T-21).
  */
 export function checkIdentityChain(
   pins: IdentityChainPins,
   now: bigint,
-  commIn: bigint,
+  query: NullifierQueryStatement,
   bytes: Uint8Array,
 ): IdentityChainResult {
   if (typeof now !== "bigint" || now < 0n)
     throw new RangeError("checkIdentityChain: now must be a non-negative bigint");
+  const commIn = query.comm_in;
   if (!isField(commIn)) throw new RangeError("checkIdentityChain: comm_in must be below r");
+  checkPins(pins);
   let record: IdentityChainRecord;
   try {
     record = decodeIdentityChain(bytes, 1);
@@ -232,5 +279,5 @@ export function checkIdentityChain(
     !pinned(pins.integrityKeys, record.integrity_key)
   )
     return { ok: false, code: "chain-circuit" };
-  return { ok: true, record, proofs: identityChainProofs(pins, record, commIn) };
+  return { ok: true, record, proofs: chainProofs(pins, record, commIn) };
 }

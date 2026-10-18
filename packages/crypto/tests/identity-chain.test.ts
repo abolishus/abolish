@@ -9,9 +9,9 @@ import {
   encodeIdentityChain,
   IDENTITY_CHAIN,
   type IdentityChainPins,
-  identityChainProofs,
   type IdentityChainRecord,
   MAX_NULLIFIER_PROOF,
+  type NullifierQueryStatement,
   RECORD_TYPES,
   TAG_REGISTRY,
 } from "../src/index.ts";
@@ -136,6 +136,9 @@ if (good === undefined || good.deployment !== "USA") throw new Error("no USA rec
 const GOOD_BYTES = hex(good.encoded);
 const GOOD_NOW = BigInt(good.now);
 const GOOD_COMM_IN = BigInt(good.commIn);
+// The check reads only the checked query's comm_in.
+const queryWith = (commIn: bigint) => ({ comm_in: commIn }) as unknown as NullifierQueryStatement;
+const GOOD_QUERY = queryWith(GOOD_COMM_IN);
 const GOOD = decodeIdentityChain(GOOD_BYTES, 1);
 
 const arbField = fc.bigInt({ min: 0n, max: BN254_R - 1n });
@@ -209,7 +212,7 @@ describe("identity-chain record", () => {
     expect(encodeIdentityChain(record)).toEqual(bytes);
 
     const pins = pinsFor(v.deployment);
-    const result = checkIdentityChain(pins, BigInt(v.now), BigInt(v.commIn), bytes);
+    const result = checkIdentityChain(pins, BigInt(v.now), queryWith(BigInt(v.commIn)), bytes);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.record).toEqual(record);
@@ -272,7 +275,7 @@ describe("identity-chain check", () => {
     const result = checkIdentityChain(
       pinsFor(v.deployment),
       BigInt(v.now),
-      GOOD_COMM_IN,
+      GOOD_QUERY,
       hex(v.encoded),
     );
     expect(result).toEqual({ ok: false, code: v.code });
@@ -281,7 +284,7 @@ describe("identity-chain check", () => {
   test("arbitrary bytes are refused, never thrown on", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 800 }), (bytes) => {
-        expect(checkIdentityChain(USA, GOOD_NOW, GOOD_COMM_IN, bytes).ok).toBe(false);
+        expect(checkIdentityChain(USA, GOOD_NOW, GOOD_QUERY, bytes).ok).toBe(false);
       }),
       { numRuns },
     );
@@ -295,12 +298,13 @@ describe("identity-chain check", () => {
         (at, flip) => {
           const bytes = Uint8Array.from(GOOD_BYTES);
           bytes[at] = (bytes[at] ?? 0) ^ flip;
-          const result = checkIdentityChain(USA, GOOD_NOW, GOOD_COMM_IN, bytes);
+          const result = checkIdentityChain(USA, GOOD_NOW, GOOD_QUERY, bytes);
           if (!result.ok) return;
-          const honest = identityChainProofs(USA, GOOD, GOOD_COMM_IN);
+          const honest = checkIdentityChain(USA, GOOD_NOW, GOOD_QUERY, GOOD_BYTES);
+          if (!honest.ok) throw new Error("the honest record must pass");
           // Something the proof check is handed differs, so a changed record
           // never verifies as the honest one did.
-          expect(result.proofs).not.toEqual(honest);
+          expect(result.proofs).not.toEqual(honest.proofs);
         },
       ),
       { numRuns },
@@ -310,7 +314,7 @@ describe("identity-chain check", () => {
   test("a proof date is accepted exactly when it is a midnight within a day of the seat's day", () => {
     const set = USA.anchors[0];
     if (set === undefined) throw new Error("no USA set");
-    const pins = { ...USA, anchors: [{ ...set, validFrom: 0n, validUntil: 2n ** 64n - 1n }] };
+    const pins = { ...USA, anchors: [{ ...set, validFrom: 0n, validUntil: DAY * 2n ** 30n }] };
     fc.assert(
       fc.property(
         fc.bigInt({ min: 3n * DAY, max: 2n ** 40n }),
@@ -319,7 +323,7 @@ describe("identity-chain check", () => {
           const today = now - (now % DAY);
           const date = today + offset;
           const bytes = encodeIdentityChain({ ...GOOD, proof_date: date });
-          const result = checkIdentityChain(pins, now, GOOD_COMM_IN, bytes);
+          const result = checkIdentityChain(pins, now, GOOD_QUERY, bytes);
           const accepted = date % DAY === 0n && offset >= -DAY && offset <= DAY;
           expect(result.ok ? "ok" : result.code).toBe(accepted ? "ok" : "chain-date");
         },
@@ -339,12 +343,12 @@ describe("identity-chain check", () => {
       [set.validUntil, false],
     ] as const) {
       const bytes = encodeIdentityChain({ ...GOOD, proof_date: date, anchor_root: set.root });
-      const result = checkIdentityChain(pins, date, GOOD_COMM_IN, bytes);
+      const result = checkIdentityChain(pins, date, GOOD_QUERY, bytes);
       expect(result.ok ? "ok" : result.code).toBe(ok ? "ok" : "chain-anchor");
     }
     // Another root with the same interval is refused.
     const other = encodeIdentityChain({ ...GOOD, anchor_root: set.root ^ 1n });
-    expect(checkIdentityChain(pins, GOOD_NOW, GOOD_COMM_IN, other)).toEqual({
+    expect(checkIdentityChain(pins, GOOD_NOW, GOOD_QUERY, other)).toEqual({
       ok: false,
       code: "chain-anchor",
     });
@@ -358,7 +362,7 @@ describe("identity-chain check", () => {
       ];
       for (const key of keys) {
         const bytes = encodeIdentityChain({ ...GOOD, [field]: key });
-        const result = checkIdentityChain(USA, GOOD_NOW, GOOD_COMM_IN, bytes);
+        const result = checkIdentityChain(USA, GOOD_NOW, GOOD_QUERY, bytes);
         const ok = own.some((k) => toHex(k) === toHex(key));
         expect(result.ok ? "ok" : result.code).toBe(ok ? "ok" : "chain-circuit");
       }
@@ -366,14 +370,22 @@ describe("identity-chain check", () => {
   });
 
   test("the disclosure proofs' inputs are the pins', the query's and the record's date only", () => {
+    const zkrVector = vectors.accepted.find((v) => v.deployment === "ZKR");
+    if (zkrVector === undefined) throw new Error("no ZKR record vector");
     const zkr = pinsFor("ZKR");
-    const proofs = identityChainProofs(zkr, GOOD, 7n);
-    const age = proofs[3];
-    const nationality = proofs[4];
-    expect(age?.publicInputs).toEqual([7n, GOOD.proof_date, 0n, 0n, zkr.ageCommitment, 2n, 0n, 0n]);
+    const result = checkIdentityChain(
+      zkr,
+      BigInt(zkrVector.now),
+      queryWith(7n),
+      hex(zkrVector.encoded),
+    );
+    if (!result.ok) throw new Error("the ZKR record must pass");
+    const date = result.record.proof_date;
+    const [, , integrity, age, nationality] = result.proofs;
+    expect(age?.publicInputs).toEqual([7n, date, 0n, 0n, zkr.ageCommitment, 2n, 0n, 0n]);
     expect(nationality?.publicInputs).toEqual([
       7n,
-      GOOD.proof_date,
+      date,
       0n,
       0n,
       zkr.nationalityCommitment,
@@ -381,13 +393,40 @@ describe("identity-chain check", () => {
       0n,
       0n,
     ]);
-    expect(proofs[2]?.publicInputs).toEqual([GOOD.comm_id, 7n]);
+    expect(integrity?.publicInputs).toEqual([result.record.comm_id, 7n]);
   });
 
   test("refuses a comm_in or a clock it can't use", () => {
-    expect(() => checkIdentityChain(USA, GOOD_NOW, BN254_R, GOOD_BYTES)).toThrow(RangeError);
-    expect(() => checkIdentityChain(USA, GOOD_NOW, -1n, GOOD_BYTES)).toThrow(RangeError);
-    expect(() => checkIdentityChain(USA, -1n, GOOD_COMM_IN, GOOD_BYTES)).toThrow(RangeError);
-    expect(() => identityChainProofs(USA, GOOD, BN254_R)).toThrow(RangeError);
+    expect(() => checkIdentityChain(USA, GOOD_NOW, queryWith(BN254_R), GOOD_BYTES)).toThrow(
+      RangeError,
+    );
+    expect(() => checkIdentityChain(USA, GOOD_NOW, queryWith(-1n), GOOD_BYTES)).toThrow(RangeError);
+    expect(() => checkIdentityChain(USA, -1n, GOOD_QUERY, GOOD_BYTES)).toThrow(RangeError);
+  });
+
+  test("refuses pins no release could mean", () => {
+    const [first, second] = USA.anchors;
+    if (first === undefined || second === undefined) throw new Error("two USA sets");
+    const bad: readonly Partial<IdentityChainPins>[] = [
+      { dscKeys: [...USA.dscKeys, new Uint8Array(31)] },
+      { idKeys: [...USA.idKeys, ...USA.dscKeys.slice(0, 1)] },
+      { ageKey: USA.nationalityKey },
+      { dscKeys: [...USA.dscKeys, ...USA.dscKeys] },
+      { anchors: [{ ...first, validFrom: first.validFrom + 1n }] },
+      { anchors: [{ ...first, validUntil: first.validFrom }] },
+      { anchors: [{ ...first, root: BN254_R }] },
+      { anchors: [first, { ...second, validFrom: first.validUntil - DAY }] },
+      { ageCommitment: BN254_R },
+      { nationalityCommitment: -1n },
+      { nullifierType: 3 as 2 },
+    ];
+    for (const change of bad)
+      expect(() =>
+        checkIdentityChain({ ...USA, ...change }, GOOD_NOW, GOOD_QUERY, GOOD_BYTES),
+      ).toThrow(RangeError);
+    // Adjacent sets, in either order, are fine.
+    expect(
+      checkIdentityChain({ ...USA, anchors: [second, first] }, GOOD_NOW, GOOD_QUERY, GOOD_BYTES).ok,
+    ).toBe(true);
   });
 });

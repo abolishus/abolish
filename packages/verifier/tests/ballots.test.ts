@@ -250,7 +250,9 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
   const entries = entriesOf(window);
   const verdicts = (r: Report) =>
     new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
-  const full = verdicts(format4(window));
+  // Verified once: a whole check of the fixture takes seconds on a busy runner.
+  const report = format4(window);
+  const full = verdicts(report);
   // Entries 5 and 7 are ordinary copies inside the window of entries 1 and 6:
   // repeats only while their original is kept.
   const originals = new Map([
@@ -268,7 +270,7 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
     expect(full.get(11)).toBe("window-boarded-late");
     // The same log from an address the definition doesn't name carries no ballot.
     expect(full.has(9)).toBe(false);
-    expect(format4(window).ballots?.admitted).toBe(4);
+    expect(report.ballots?.admitted).toBe(4);
   });
 
   test("any subset of the copy gives every kept ballot its own window verdict (R4)", () => {

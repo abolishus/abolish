@@ -14,9 +14,7 @@ import {
 import { dealingMessageWith, type RegistrationSecrets } from "../src/nullifier-key.ts";
 import {
   approveNullifierKey,
-  approveNullifierKeyV2,
   approvingSeats,
-  approvingSeatsV2,
   checkDealtShare,
   checkNullifierKeyTranscript,
   complaintsMessage,
@@ -32,7 +30,6 @@ import {
   identityKey,
   KEM_PUBLIC_KEY,
   MAX_KEY_WINDOW,
-  nullifierKeyApprovalMessage,
   type NullifierKeyCheck,
   nullifierKeyContext,
   nullifierKeyCounts,
@@ -40,6 +37,7 @@ import {
   type NullifierKeyParams,
   nullifierKeyQuorum,
   type NullifierKeyScope,
+  PARAMETERS,
   type NullifierKeyTranscript,
   type Panel,
   type ReceivedShare,
@@ -401,35 +399,17 @@ describe("nullifier-key.json", () => {
     60_000,
   );
 
-  test("approvals are re-made byte for byte and counted per seat", () => {
+  test("version 1's approvals, under a retired statement, never count", () => {
     const a = V.approvals;
     const scope = scopeOf(panelOf(a.panel));
-    const secrets = V.panels[a.panel]?.identitySecrets ?? [];
-    for (const x of a.approvals) {
-      expect(toHex(nullifierKeyApprovalMessage(scope, x.index, hex(a.keyId)))).toBe(x.message);
-      expect(
-        toHex(approveNullifierKey(scope, hex(secrets[x.index - 1] ?? ""), x.index, hex(a.keyId))),
-      ).toBe(x.signature);
-    }
     const all = [...a.approvals, ...a.notCounted].map((x) => ({
       index: x.index,
       signature: hex(x.signature),
     }));
-    expect(approvingSeats(scope, hex(a.keyId), all)).toEqual([1, 2, 3, 4, 5]);
-    expect(
-      approvingSeats(
-        scope,
-        hex(a.keyId),
-        a.notCounted.map((x) => ({ index: x.index, signature: hex(x.signature) })),
-      ),
-    ).toEqual([]);
-    // One seat's signature, many times, is one approval.
-    const one = all[0] as { index: number; signature: Uint8Array };
-    expect(approvingSeats(scope, hex(a.keyId), [one, one, one])).toEqual([1]);
+    // Under the current statement, with any deadline: the bytes signed differ.
+    for (const deadline of [0n, 25_000_000n])
+      expect(approvingSeats(scope, hex(a.keyId), deadline, all)).toEqual([]);
     expect(nullifierKeyQuorum(scope)).toBe(4);
-    expect(() => approveNullifierKey(scope, hex(secrets[0] ?? ""), 2, hex(a.keyId))).toThrow(
-      /seat/,
-    );
   }, 60_000);
 
   test.each(V.decode.map((d) => [d.id, d] as const))(
@@ -868,60 +848,67 @@ describe("nullifier-key.json, version 2", () => {
     expect(got).toEqual(honest.shares);
   }, 60_000);
 
-  test("approvals are re-made byte for byte, and a key counts only under version 2", () => {
+  test("a key counts on q approvals with its deadline, and never under a retired statement", () => {
     const a = V2.approvals;
     const keyId = hex(a.keyId);
     const secrets = V.panels[a.panel]?.identitySecrets ?? [];
     const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
     if (!r.ok) throw new Error("expected a valid transcript");
     expect(r.keyId).toEqual(keyId);
-    for (const x of a.approvals) {
-      expect(toHex(nullifierKeyApprovalMessage(scope, x.index, keyId))).toBe(x.message);
-      expect(
-        toHex(
-          approveNullifierKeyV2(scope, hex(secrets[x.index - 1] ?? ""), x.index, r, deadline - 1n),
-        ),
-      ).toBe(x.signature);
-    }
     const sig = (x: { index: number; signature: string }) => ({
       index: x.index,
       signature: hex(x.signature),
     });
-    const approvals = a.approvals.map(sig);
-    expect(approvingSeatsV2(scope, keyId, [...approvals, ...a.notCounted.map(sig)])).toEqual([
-      1, 2, 3, 4, 5,
-    ]);
-    expect(approvingSeatsV2(scope, keyId, a.notCounted.map(sig))).toEqual([]);
-    // Neither statement counts for the other.
-    expect(approvingSeats(scope, keyId, approvals)).toEqual([]);
-    const v1 = V.approvals;
-    expect(approvingSeatsV2(scope, hex(v1.keyId), v1.approvals.map(sig))).toEqual([]);
+    // The frozen version-2 approvals are under the retired
+    // abolish/v1/sig/nullifier-key-approval-2, which carries no deadline.
+    expect(
+      approvingSeats(scope, keyId, deadline, [...a.approvals, ...a.notCounted].map(sig)),
+    ).toEqual([]);
+    expect(nullifierKeyCounts(scope, r, a.approvals.map(sig))).toBe(false);
+
+    const block = deadline - BigInt(PARAMETERS.RECORD_MARGIN);
+    const approvals = [1, 2, 3, 4, 5].map((index) => ({
+      index,
+      signature: approveNullifierKey(scope, hex(secrets[index - 1] ?? ""), index, r, block),
+    }));
+    expect(approvingSeats(scope, keyId, deadline, approvals)).toEqual([1, 2, 3, 4, 5]);
+    // Another deadline, or another key, is another statement.
+    expect(approvingSeats(scope, keyId, deadline + 1n, approvals)).toEqual([]);
+    expect(approvingSeats(scope, hex(V.approvals.keyId), deadline, approvals)).toEqual([]);
+    // One seat's signature, many times, is one approval; one under another
+    // seat's index is none.
+    const one = approvals[0] as { index: number; signature: Uint8Array };
+    expect(approvingSeats(scope, keyId, deadline, [one, one, one])).toEqual([1]);
+    expect(approvingSeats(scope, keyId, deadline, [{ ...one, index: 2 }])).toEqual([]);
 
     expect(nullifierKeyCounts(scope, r, approvals.slice(0, 4))).toBe(true);
     expect(nullifierKeyCounts(scope, r, approvals.slice(0, 3))).toBe(false);
-    const one = approvals[0] as { index: number; signature: Uint8Array };
     expect(nullifierKeyCounts(scope, r, [one, one, one, one])).toBe(false);
     // A version-1 key never counts, whatever approves it.
     const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
     if (!r1.ok) throw new Error("expected a valid transcript");
     expect(r1.version).toBe(1);
     expect(r1.deadline).toBeNull();
-    expect(nullifierKeyCounts(scope, r1, v1.approvals.map(sig))).toBe(false);
+    expect(nullifierKeyCounts(scope, r1, approvals)).toBe(false);
   }, 60_000);
 
-  test("a seat approves only a version-2 key whose deadline is ahead and in the window", () => {
+  test("a seat approves only a version-2 key whose deadline is in the window with RECORD_MARGIN left", () => {
     const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
     const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
     if (!r.ok || !r1.ok) throw new Error("expected valid transcripts");
     const secret = hex(V.panels["panel-5"]?.identitySecrets[0] ?? "");
     const approve = (key: typeof r, block: bigint) =>
-      approveNullifierKeyV2(scope, secret, 1, key, block);
+      approveNullifierKey(scope, secret, 1, key, block);
+    const margin = BigInt(PARAMETERS.RECORD_MARGIN);
     expect(() => approve(r1, 0n)).toThrow(/version-2/);
     expect(() => approve(r, deadline)).toThrow(/passed/);
     expect(() => approve(r, deadline + 1n)).toThrow(/passed/);
+    expect(() => approve(r, deadline - 1n)).toThrow(/too close/);
+    expect(() => approve(r, deadline - margin + 1n)).toThrow(/too close/);
+    expect(approve(r, deadline - margin)).toHaveLength(64);
     expect(() => approve(r, deadline - MAX_KEY_WINDOW - 1n)).toThrow(/too far/);
     expect(approve(r, deadline - MAX_KEY_WINDOW)).toHaveLength(64);
-    expect(() => approveNullifierKeyV2(scope, secret, 2, r, deadline - 1n)).toThrow(/seat/);
+    expect(() => approveNullifierKey(scope, secret, 2, r, deadline - margin)).toThrow(/seat/);
   }, 60_000);
 
   test("a seat takes part only in a run whose deadline is ahead and in the window", () => {
@@ -962,14 +949,26 @@ describe("nullifier-key.json, version 2", () => {
     }));
     // A copy, and a version-1 result relabelled version 2 with this deadline.
     for (const forged of [{ ...r }, { ...r1, version: 2 as const, deadline }]) {
-      expect(() => approveNullifierKeyV2(scope, secret, 1, forged, deadline - 1n)).toThrow(
-        /checkNullifierKeyTranscript/,
-      );
+      expect(() =>
+        approveNullifierKey(scope, secret, 1, forged, deadline - BigInt(PARAMETERS.RECORD_MARGIN)),
+      ).toThrow(/checkNullifierKeyTranscript/);
       expect(() => nullifierKeyCounts(scope, forged, approvals)).toThrow(
         /checkNullifierKeyTranscript/,
       );
     }
     expect(Object.isFrozen(r) && Object.isFrozen(r.qualified)).toBe(true);
+    // Only under the scope it was checked in.
+    const block = deadline - BigInt(PARAMETERS.RECORD_MARGIN);
+    const other = { ...scope, groupRegistry: new Uint8Array(20) };
+    expect(() => approveNullifierKey(other, secret, 1, r, block)).toThrow(/another scope/);
+    expect(() => nullifierKeyCounts(other, r, approvals)).toThrow(/another scope/);
+    // What is signed is what the check gave, whatever the result's bytes become.
+    const fresh = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    if (!fresh.ok) throw new Error("expected a valid transcript");
+    const keyId = Uint8Array.from(fresh.keyId);
+    fresh.keyId.set([(fresh.keyId[0] ?? 0) ^ 1], 0);
+    const signature = approveNullifierKey(scope, secret, 1, fresh, block);
+    expect(approvingSeats(scope, keyId, deadline, [{ index: 1, signature }])).toEqual([1]);
   }, 60_000);
 
   test("a dealt share of a version-2 run isn't taken in version 1's run of the same run_id", () => {

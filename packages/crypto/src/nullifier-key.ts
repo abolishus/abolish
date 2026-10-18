@@ -38,6 +38,7 @@ import {
   type NullifierKey,
   type SeatShare,
 } from "./keyed-nullifier.ts";
+import { nullifierKeyApprovalStatement, STATEMENT_TAGS } from "./nullifier-key-statements.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import {
@@ -63,12 +64,10 @@ import {
   verifyStatement,
 } from "./trustee.ts";
 
-const { MAX_TRUSTEES } = PARAMETERS;
+const { MAX_TRUSTEES, RECORD_MARGIN } = PARAMETERS;
 
 const MESSAGE_TAG = "abolish/v1/sig/nullifier-key-message";
 const SIGNING_KEY_TAG = "abolish/v1/sig/nullifier-key-signing-key";
-const APPROVAL_TAG = "abolish/v1/sig/nullifier-key-approval";
-const APPROVAL_TAG_V2 = "abolish/v1/sig/nullifier-key-approval-2";
 
 /**
  * The longest a version-2 run's deadline may lie ahead, in L2 blocks: 7 days
@@ -1172,15 +1171,34 @@ function seatResults(run: Run, t: Rounds): KeySeatResult[] {
   return Array.from(reasons, ([index, r]) => ({ index, reasons: r }));
 }
 
-// Every valid result this module's check returned, frozen, so approving and
-// counting take a key's version, deadline, `key_id` and qualified seats only
-// as one check gave them together, never as a caller assembled them: a copy,
-// or a version-1 result relabelled version 2, isn't in it.
-const CHECKED = new WeakSet<object>();
+// Every valid result this module's check returned, with private copies of
+// what approving and counting read from it, so they take a key's version,
+// deadline, `key_id` and qualified seats only as one check gave them together,
+// and only under the scope it was checked in: never as a caller assembled or
+// later changed them (a frozen result's byte arrays stay writable), and never
+// for another panel or registry, whose seats would sign a `key_id` its
+// transcript doesn't check under.
+interface Checked {
+  readonly scope: string;
+  readonly keyId: Uint8Array;
+  readonly version: 1 | 2;
+  readonly deadline: bigint | null;
+  readonly qualified: readonly number[];
+}
 
-function checked(key: object): void {
-  if (!CHECKED.has(key))
+const CHECKED = new WeakMap<object, Checked>();
+
+function scopeKey(s: Scope): string {
+  return `${s.l2ChainId}:${hex(s.groupRegistry)}:${hex(s.panelId)}`;
+}
+
+function checked(key: object, scope: NullifierKeyScope): Checked {
+  const c = CHECKED.get(key);
+  if (c === undefined)
     throw new TypeError("nullifier key: expected a result of checkNullifierKeyTranscript");
+  if (scopeKey(scopeOf(scope)) !== c.scope)
+    throw new RangeError("nullifier key: the check was made under another scope");
+  return c;
 }
 
 /**
@@ -1260,7 +1278,13 @@ export function checkNullifierKeyTranscript(
     qualified: Object.freeze(qualified),
     key,
   });
-  CHECKED.add(result);
+  CHECKED.set(result, {
+    scope: scopeKey(run),
+    keyId: Uint8Array.from(keyId),
+    version,
+    deadline: run.deadline,
+    qualified: qualified.map((q) => q.index),
+  });
   return result;
 }
 
@@ -1309,61 +1333,84 @@ export function seatShareOf(
   return { seat: index, sk, s };
 }
 
-const APPROVAL = struct([
-  ["l2_chain_id", u64],
-  ["group_registry", bytesFixed(20)],
-  ["panel_id", bytesFixed(32)],
-  ["index", u8],
-  ["key_id", bytesFixed(32)],
-] as const);
-
 /**
- * The 93-byte statement `abolish/v1/sig/nullifier-key-approval` signs under
- * version 1, and `abolish/v1/sig/nullifier-key-approval-2` under version 2.
+ * Seat `index`'s 101-byte statement approving a version-2 key with its run's
+ * deadline, signed under `abolish/v1/sig/nullifier-key-approval-3`
+ * (docs/spec/nullifier-key.md, Approval). The statements without the
+ * deadline, version 1's and `abolish/v1/sig/nullifier-key-approval-2`, are
+ * retired: a quorum's approvals held back past the run's deadline could be
+ * recorded under them once its seats had erased their shares (T-54, T-03).
  */
 export function nullifierKeyApprovalMessage(
   scope: NullifierKeyScope,
   index: number,
   keyId: Uint8Array,
+  deadline: bigint,
 ): Uint8Array {
   const s = scopeOf(scope);
   if (!Number.isSafeInteger(index) || index < 1 || index > s.keys.length)
     throw new RangeError("nullifier key: index must be a seat of the panel");
-  return encode(APPROVAL, {
-    l2_chain_id: s.l2ChainId,
-    group_registry: s.groupRegistry,
-    panel_id: s.panelId,
-    index,
-    key_id: keyId,
-  });
+  return nullifierKeyApprovalStatement(s, s.panelId, index, keyId, deadline);
 }
 
 /**
- * Seat `index`'s approval of a version-1 key, which is retired and never
- * counts: kept for the frozen vectors. An honest seat approves only
- * version-2 keys (`approveNullifierKeyV2`).
+ * @internal Throws unless at least `RECORD_MARGIN` L2 blocks are left before
+ * `deadline`: a seat approves or consents only with time to force the record
+ * through the L1 portal (docs/spec/nullifier-key.md, Approval, Recording).
+ */
+export function checkRecordMargin(deadline: bigint, currentL2Block: bigint, name: string): void {
+  if (deadline - currentL2Block < BigInt(RECORD_MARGIN))
+    throw new RangeError(`${name}: too close to the run's deadline to be recorded`);
+}
+
+/**
+ * Seat `index`'s approval of a version-2 key, as a check of its transcript
+ * returned it (its `keyId`, `version` and `deadline` together, nothing a
+ * caller assembled), refused for a version-1 key, for fewer than `q`
+ * qualified seats (rule 1), for a seat that isn't qualified (rule 2), with
+ * fewer than `RECORD_MARGIN` blocks left before the deadline, or if it lies
+ * more than `MAX_KEY_WINDOW` ahead of `currentL2Block` (rule 5). The caller
+ * MUST have checked the other approval rules of docs/spec/nullifier-key.md
+ * first, rules 4 and 6 above all, from its own L2 node: the group registry
+ * records no key for the scope, the seat approved no successor of any key of
+ * it, and every other initial key it approved passed its deadline without
+ * being recorded.
  */
 export function approveNullifierKey(
   scope: NullifierKeyScope,
   identitySecret: Uint8Array,
   index: number,
-  keyId: Uint8Array,
+  key: Extract<NullifierKeyCheck, { ok: true }>,
+  currentL2Block: bigint,
 ): Uint8Array {
+  const { keyId, version, deadline, qualified } = checked(key, scope);
+  if (version !== 2 || deadline === null)
+    throw new RangeError("nullifier key: only a version-2 key is approved");
+  if (qualified.length < nullifierKeyQuorum(scope))
+    throw new RangeError("nullifier key: fewer than q qualified seats");
+  if (!qualified.includes(index)) throw new RangeError("nullifier key: the seat isn't qualified");
+  checkRunDeadline(deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
+  checkRecordMargin(deadline, currentL2Block, "nullifier key");
   const s = scopeOf(scope);
-  const key = s.keys[index - 1];
-  if (key === undefined || !equalBytes(identityKey(identitySecret), key))
+  const pinned = s.keys[index - 1];
+  if (pinned === undefined || !equalBytes(identityKey(identitySecret), pinned))
     throw new RangeError("nullifier key: identitySecret is not the key of seat index");
   return signStatement(
     identitySecret,
-    APPROVAL_TAG,
-    nullifierKeyApprovalMessage(scope, index, keyId),
+    STATEMENT_TAGS.keyApproval,
+    nullifierKeyApprovalMessage(scope, index, keyId, deadline),
   );
 }
 
-function approvingSeatsUnder(
-  tag: typeof APPROVAL_TAG | typeof APPROVAL_TAG_V2,
+/**
+ * The distinct seats whose approval of `keyId` with `deadline` verifies under
+ * their pinned identity key, in increasing order. Counted per seat, never per
+ * signature: one seat can make any number of valid signatures (T-14, T-37).
+ */
+export function approvingSeats(
   scope: NullifierKeyScope,
   keyId: Uint8Array,
+  deadline: bigint,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): number[] {
   const s = scopeOf(scope);
@@ -1371,94 +1418,36 @@ function approvingSeatsUnder(
   for (const a of approvals) {
     const key = Number.isSafeInteger(a.index) ? s.keys[a.index - 1] : undefined;
     if (key === undefined || a.index < 1) continue;
-    if (verifyStatement(key, tag, nullifierKeyApprovalMessage(scope, a.index, keyId), a.signature))
-      seats.add(a.index);
+    const m = nullifierKeyApprovalMessage(scope, a.index, keyId, deadline);
+    if (verifyStatement(key, STATEMENT_TAGS.keyApproval, m, a.signature)) seats.add(a.index);
   }
   return [...seats].sort((x, y) => x - y);
 }
 
 /**
- * The distinct seats whose version-1 approval of `keyId` verifies under their
- * pinned identity key, in increasing order. Counted per seat, never per
- * signature: one seat can make any number of valid signatures (T-14, T-37).
- */
-export function approvingSeats(
-  scope: NullifierKeyScope,
-  keyId: Uint8Array,
-  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
-): number[] {
-  return approvingSeatsUnder(APPROVAL_TAG, scope, keyId, approvals);
-}
-
-/**
- * Seat `index`'s approval of a version-2 key, as a check of its transcript
- * returned it (its `keyId`, `version` and `deadline` together, nothing a
- * caller assembled), refused for a version-1 key, for fewer than `q`
- * qualified seats (rule 1), once the deadline has passed, or if it lies more
- * than `MAX_KEY_WINDOW` ahead of `currentL2Block`; the margin for recording
- * the approval in time is the caller's. The caller MUST have checked the approval rules of
- * docs/spec/nullifier-key.md first, rules 4 and 6 above all: no key counts
- * for the scope, the seat approved no successor of any key of it, and every
- * other initial key it approved passed its deadline without counting.
- */
-export function approveNullifierKeyV2(
-  scope: NullifierKeyScope,
-  identitySecret: Uint8Array,
-  index: number,
-  key: Extract<NullifierKeyCheck, { ok: true }>,
-  currentL2Block: bigint,
-): Uint8Array {
-  checked(key);
-  const { keyId, version, deadline } = key;
-  if (version !== 2 || deadline === null)
-    throw new RangeError("nullifier key: only a version-2 key is approved");
-  if (key.qualified.length < nullifierKeyQuorum(scope))
-    throw new RangeError("nullifier key: fewer than q qualified seats");
-  checkRunDeadline(deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
-  const s = scopeOf(scope);
-  const pinned = s.keys[index - 1];
-  if (pinned === undefined || !equalBytes(identityKey(identitySecret), pinned))
-    throw new RangeError("nullifier key: identitySecret is not the key of seat index");
-  return signStatement(
-    identitySecret,
-    APPROVAL_TAG_V2,
-    nullifierKeyApprovalMessage(scope, index, keyId),
-  );
-}
-
-/**
- * The distinct seats whose version-2 approval of `keyId` verifies under their
- * pinned identity key, in increasing order, counted per seat (T-14, T-37).
- */
-export function approvingSeatsV2(
-  scope: NullifierKeyScope,
-  keyId: Uint8Array,
-  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
-): number[] {
-  return approvingSeatsUnder(APPROVAL_TAG_V2, scope, keyId, approvals);
-}
-
-/**
- * Whether an initial key counts on the approvals given (docs/spec/
- * nullifier-key.md, Approval): `check` is a result of this module's check,
- * of a version-2 transcript with `q` qualified seats, and `q` distinct seats
- * approved it under version 2's statement. A version-1 key
- * never counts: its runs have no deadline, so a stalled one would hold its
- * seats for good. That every approval was recorded by the run's deadline,
- * and that no other key counts for the scope, are the registry's to check
- * (part 2b-4).
+ * Whether an initial key's transcript and approvals are enough for it to
+ * count (docs/spec/nullifier-key.md, Approval): `check` is a result of this
+ * module's check, of a version-2 transcript with `q` qualified seats, and `q`
+ * distinct seats approved it with its deadline. A version-1 key never counts:
+ * its runs have no deadline, so a stalled one would hold its seats for good.
+ * This is what an honest seat or the verifier needs of the transcript and of
+ * approvals it holds, not the counting rule: unlike the registry, it skips
+ * signatures that don't verify, so a key counts only once the group
+ * registry's record of it, by the deadline and while no key is recorded,
+ * passes `replayNullifierKeyRecords`.
  */
 export function nullifierKeyCounts(
   scope: NullifierKeyScope,
   check: Extract<NullifierKeyCheck, { ok: true }>,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): boolean {
-  checked(check);
+  const { keyId, version, deadline, qualified } = checked(check, scope);
   const q = nullifierKeyQuorum(scope);
   return (
-    check.version === 2 &&
-    check.qualified.length >= q &&
-    approvingSeatsV2(scope, check.keyId, approvals).length >= q
+    version === 2 &&
+    deadline !== null &&
+    qualified.length >= q &&
+    approvingSeats(scope, keyId, deadline, approvals).length >= q
   );
 }
 

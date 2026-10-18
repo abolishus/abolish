@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
+import {AvailabilityCheckLib} from "../src/AvailabilityCheck.sol";
 import {BallotCheckLib} from "../src/BallotCheck.sol";
 import {Board} from "../src/Board.sol";
 import {DeliveryCheckLib} from "../src/DeliveryCheck.sol";
@@ -19,7 +20,8 @@ import {TestBase, Vm} from "./utils/Vm.sol";
 /// (both panels' records and decode rejections), contract-event-v9.json (the
 /// events the board emits for them) and intake-v4.json (version-4 ballots
 /// with real membership proofs and each seat's ciphertext), all from
-/// independent generators. A record names its panel, and is judged only
+/// independent generators, and delivery-batch-v2.json (both panels' batches
+/// and roots). A record names its panel, and is judged only
 /// against that panel's key set, signing keys and share hashes: the default
 /// panel's from the trustee registry, the author panel's from the election
 /// registry, never from a submitter (T-25, T-37, T-54, T-31).
@@ -28,12 +30,21 @@ contract BoardDeliveryV2Test is TestBase {
     string internal constant EVENTS = "../../docs/spec/vectors/contract-event-v9.json";
     string internal constant INTAKE = "../../docs/spec/vectors/intake-v4.json";
     string internal constant BALLOTS = "../../docs/spec/vectors/ballot-v4-records.json";
+    string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch-v2.json";
 
     bytes32 internal constant RECEIPT_SUBMITTED =
         keccak256("ShareReceiptSubmitted(bytes32,bytes32,bytes)");
     bytes32 internal constant SHARE_POSTED = keccak256("SharePosted(bytes32,bytes32,bytes)");
     bytes32 internal constant COMPLAINT_SUBMITTED =
         keccak256("ShareComplaintSubmitted(bytes32,bytes32,bytes)");
+    bytes32 internal constant BATCH_SUBMITTED =
+        keccak256("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)");
+    bytes32 internal constant COMPLAINT_BATCH_SUBMITTED =
+        keccak256("ShareComplaintBatchSubmitted(bytes32,uint8,bytes)");
+    bytes32 internal constant ROOT_SUBMITTED =
+        keccak256("ObligationRootSubmitted(bytes32,uint8,bytes)");
+    bytes32 internal constant ATTESTATION_SUBMITTED =
+        keccak256("AvailabilityAttestationSubmitted(bytes32,uint8,bytes)");
 
     /// The ceremony the stubs record each election's default key set under.
     bytes32 internal constant PANEL = keccak256("panel");
@@ -44,6 +55,9 @@ contract BoardDeliveryV2Test is TestBase {
     uint256 internal constant SEAT_AT = 68;
     uint256 internal constant RECEIPT_SIG_AT = 101;
     uint256 internal constant COMPLAINT_SIG_AT = 165;
+    /// A version-2 batch's or root's `panel` and `seat`.
+    uint256 internal constant BATCH_PANEL_AT = 35;
+    uint256 internal constant BATCH_SEAT_AT = 36;
 
     ElectionsStub internal elections;
     TrusteesStub internal trustees;
@@ -392,39 +406,313 @@ contract BoardDeliveryV2Test is TestBase {
         assertTrue(!ok, "a changed record was accepted");
     }
 
-    /// Ballot version 4 fixes version-2 batches and roots, which this board
-    /// doesn't read yet: each of contract-event-v9.json's is refused as an
-    /// unknown version, and so is a version-1 one (Delivery records
-    /// (version 2), last paragraph).
-    function test_BatchesAndRootsNotYetRead() public {
+    /// Every record of delivery-batch-v2.json, both panels' batches and
+    /// roots, is accepted through its call and emitted exactly as
+    /// contract-event-v9.json records it, the seat topic the record's seat at
+    /// offset 36; a repeat emits nothing (Calls, Repeats). Seat 1 of each
+    /// panel commits a receipt root, each filling its own panel's slot.
+    function test_BatchesAndRootsWithTheirEvents() public {
+        string memory bj = vm.readFile(BATCHES);
         string memory ej = vm.readFile(EVENTS);
-        string[3] memory ids = [
-            "delivery-batch-v2-receipt-batch-default",
-            "delivery-batch-v2-complaint-batch-author",
-            "delivery-batch-v2-receipt-root-author"
+        assertTrue(_eq(_str(bj, ".format"), "abolish-delivery-batch-vectors/2"), "the batch file");
+        assertEq(_b32(bj, ".elections[0].definitionHash"), h, "the same election");
+        uint256 i;
+        for (; vm.keyExistsJson(bj, _at(".records", i, "")); i++) {
+            string memory r = _at(".records", i, "");
+            string memory id = _str(bj, string.concat(r, ".id"));
+            string memory t = _str(bj, string.concat(r, ".type"));
+            bytes memory record = _bytes(bj, string.concat(r, ".encoding"));
+            assertEq(uint8(record[2]), 2, id);
+            assertEq(
+                uint8(record[BATCH_PANEL_AT]), vm.parseJsonUint(bj, string.concat(r, ".panel")), id
+            );
+            assertEq(
+                uint8(record[BATCH_SEAT_AT]), vm.parseJsonUint(bj, string.concat(r, ".seat")), id
+            );
+            bytes memory call_ = _batchCall(t, record);
+            Vm.Log[] memory logs = _accept(call_);
+            assertEq(logs.length, 1, string.concat("one event for ", id));
+            _assertLog(
+                ej,
+                _eventFields(ej, string.concat("delivery-batch-v2-", id)),
+                logs[0],
+                _batchTopic(t),
+                id
+            );
+            assertEq(_accept(call_).length, 0, string.concat("a repeat of ", id));
+        }
+        assertEq(i, 9, "record coverage");
+    }
+
+    /// delivery-batch-v2.json's decode rejections, each refused by the call
+    /// its type names with the file's code at the file's offset (Delivery
+    /// records (version 2), Step 4), version-1 bytes under ballot version 4
+    /// as `profile-mismatch`.
+    function test_BatchDecodeVectors() public {
+        string memory bj = vm.readFile(BATCHES);
+        uint256 i;
+        for (; vm.keyExistsJson(bj, _at(".decode", i, "")); i++) {
+            string memory d = _at(".decode", i, "");
+            string memory id = _str(bj, string.concat(d, ".id"));
+            _refuse(
+                _batchCall(
+                    _str(bj, string.concat(d, ".type")), _bytes(bj, string.concat(d, ".encoding"))
+                ),
+                abi.encodeWithSelector(
+                    DeliveryCheckLib.DeliveryMalformed.selector,
+                    0,
+                    _decodeError(_str(bj, string.concat(d, ".error"))),
+                    vm.parseJsonUint(bj, string.concat(d, ".offset"))
+                ),
+                id
+            );
+        }
+        assertEq(i, 43, "decode coverage");
+    }
+
+    /// The root slot is kept per panel, seat and kind: author seat 1's first
+    /// receipt root (the file's root over 16,384 leaves) fills its slot, so
+    /// its other receipt roots are `root-repeat`, while default seat 1's
+    /// receipt root and author seat 2's complaint root fill their own slots;
+    /// a refused root fills nothing (Delivery records (version 2), Step 8;
+    /// T-17, T-52).
+    function test_RootSlotsPerPanel() public {
+        string memory bj = vm.readFile(BATCHES);
+        bytes memory repeat = _refused(DeliveryCheckLib.Code.RootRepeat);
+        bytes memory large = _bytes(bj, ".limits[0].encoding");
+        bytes memory dagPb = _bytes(bj, ".limits[1].encoding");
+        bytes memory author = _byId(bj, ".records", "receipt-root-author");
+        assertEq(uint8(large[BATCH_PANEL_AT]), 2, "an author root");
+        assertEq(uint8(large[BATCH_SEAT_AT]), 1, "of seat 1");
+        assertEq(_accept(_rootCall(large)).length, 1, "the first receipt root");
+        _refuse(_rootCall(author), repeat, "author seat 1's second receipt root");
+        _refuse(_rootCall(dagPb), repeat, "and its third");
+        assertEq(_accept(_rootCall(large)).length, 0, "the accepted root's repeat");
+        assertEq(
+            _accept(_rootCall(_byId(bj, ".records", "receipt-root-default"))).length,
+            1,
+            "default seat 1's receipt root fills its own slot"
+        );
+        assertEq(
+            _accept(_rootCall(_byId(bj, ".records", "complaint-root-author"))).length,
+            1,
+            "author seat 2's complaint root"
+        );
+        // A root refused before its slot fills nothing: a fresh board takes it.
+        Board fresh = new Board(address(elections), address(trustees), RELAY);
+        elections.setAuthorKeySet(h, 0);
+        (bool ok,) = address(fresh).call(_rootCall(author));
+        assertTrue(!ok, "no author panel");
+        elections.setAuthorKeySet(h, (1 << 1) | (1 << 2) | (1 << 3));
+        (ok,) = address(fresh).call(_rootCall(author));
+        assertTrue(ok, "the slot was left empty");
+    }
+
+    /// The panel byte decides the key set and the signing key of a batch or
+    /// root, as of a receipt: an author record is refused once the author
+    /// key set lacks its seat or holds none, whatever the default set says,
+    /// and under the default seat's key of the same index; one panel's
+    /// record relabelled as the other's is refused, since the panel is
+    /// signed; version 1's tags over version 2's statements never verify
+    /// (T-37, T-31).
+    function test_BatchesAndRootsEachPanelsKeys() public {
+        string memory bj = vm.readFile(BATCHES);
+        _panelsKeys(bj, "receipt-batch-author", "share-receipt-batch", 0);
+        _panelsKeys(bj, "complaint-batch-author", "share-complaint-batch", 1);
+        _panelsKeys(bj, "receipt-root-author", "obligation-root", 2);
+    }
+
+    /// test_BatchesAndRootsEachPanelsKeys for record `id` of type `t`, the
+    /// `kind`th of a receipt batch, a complaint batch and a root.
+    function _panelsKeys(string memory bj, string memory id, string memory t, uint256 kind)
+        internal
+    {
+        bytes memory r = _byId(bj, ".records", id);
+        uint8 s = uint8(r[BATCH_SEAT_AT]);
+        bytes memory seat = _refused(DeliveryCheckLib.Code.DeliverySeat);
+        uint256 snapshot = vm.snapshotState();
+        elections.setAuthorKeySet(h, ((1 << 1) | (1 << 2) | (1 << 3)) & ~(1 << s));
+        _refuse(_batchCall(t, r), seat, string.concat(id, ": seat unregistered"));
+        elections.setAuthorKeySet(h, 0);
+        _refuse(_batchCall(t, r), seat, string.concat(id, ": no author panel"));
+        vm.revertToState(snapshot);
+
+        bytes memory sig = _refused(DeliveryCheckLib.Code.DeliverySignature);
+        elections.setAuthorKey(h, s, keys[1][s][0], keys[1][s][1]);
+        _refuse(_batchCall(t, r), sig, string.concat(id, ": the default key"));
+        vm.revertToState(snapshot);
+        _refuse(
+            _batchCall(t, _withByte(r, BATCH_PANEL_AT, 1)),
+            sig,
+            string.concat(id, ": relabelled the default panel")
+        );
+        _panelsTags(bj, id, t, kind);
+    }
+
+    /// Record `id` re-signed by its seat under version 1's tag is refused,
+    /// and under its own tag accepted.
+    function _panelsTags(string memory bj, string memory id, string memory t, uint256 kind)
+        internal
+    {
+        bytes memory r = _byId(bj, ".records", id);
+        uint256 sk = secrets[2][uint8(r[BATCH_SEAT_AT])];
+        bytes memory body = _slice(r, 0, r.length - 64);
+        string[3] memory v1Tags = [
+            "abolish/v1/sig/share-receipt-batch",
+            "abolish/v1/sig/share-complaint-batch",
+            "abolish/v1/sig/obligation-root"
         ];
-        bytes4[3] memory selectors = [
-            Board.submitReceiptBatch.selector,
-            Board.submitComplaintBatch.selector,
-            Board.submitObligationRoot.selector
-        ];
+        _refuse(
+            _batchCall(t, _resigned(body, _ds(v1Tags[kind]), sk)),
+            _refused(DeliveryCheckLib.Code.DeliverySignature),
+            string.concat(id, ": version 1's tag")
+        );
+        bytes memory again = _resigned(body, _ds(_str(bj, _tagKey(kind))), sk);
+        assertEq(_accept(_batchCall(t, again)).length, 1, string.concat(id, ": re-signed"));
+    }
+
+    /// `body`, a record up to its signature, signed with `sk` under `ds`
+    /// over every byte after its header.
+    function _resigned(bytes memory body, bytes memory ds, uint256 sk)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        (uint256 r, uint256 s) =
+            TrusteeFixture.sign(sk, sha256(bytes.concat(ds, _slice(body, 3, body.length - 3))));
+        return abi.encodePacked(body, r, s);
+    }
+
+    /// Ballot version 4 fixes every batch and root at version 2, and the
+    /// board knows no later ballot version: under a pinned ballot version 5
+    /// each version-2 record, and its version-1 relabelling, is
+    /// `unknown-version` (Delivery records (version 2), Step 3).
+    function test_BatchesAndRootsUnderAnUnknownBallotVersion() public {
+        string memory bj = vm.readFile(BATCHES);
+        ElectionRegistry.Parameters memory p = _shape(alice);
+        p.ballotVersion = 5;
+        uint8[] memory tiers = new uint8[](1);
+        uint256[] memory roots = new uint256[](1);
+        roots[0] = 1;
+        elections.set(h, p, tiers, roots);
         bytes memory unknown = abi.encodeWithSelector(
             DeliveryCheckLib.DeliveryMalformed.selector,
             0,
             ElectionDefinitionLib.DecodeError.UnknownVersion,
             2
         );
+        string[3] memory ids =
+            ["receipt-batch-default", "complaint-batch-author", "receipt-root-author"];
+        string[3] memory types = ["share-receipt-batch", "share-complaint-batch", "obligation-root"];
         for (uint256 i; i < 3; i++) {
-            bytes memory record =
-                abi.decode(_bytes(ej, string.concat(_eventFields(ej, ids[i]), ".data")), (bytes));
-            assertEq(bytes32(_slice(record, 3, 32)), h, "the file's election");
-            _refuse(abi.encodeWithSelector(selectors[i], record), unknown, ids[i]);
-            _refuse(
-                abi.encodeWithSelector(selectors[i], _withByte(record, 2, 1)),
-                unknown,
-                "labelled version 1"
-            );
+            bytes memory r = _byId(bj, ".records", ids[i]);
+            _refuse(_batchCall(types[i], r), unknown, ids[i]);
+            _refuse(_batchCall(types[i], _withByte(r, 2, 1)), unknown, "labelled version 1");
         }
+    }
+
+    /// An attestation names only roots of its own panel: author seat 1's
+    /// counted-extent attestation naming the author roots the board holds is
+    /// accepted, and one naming default seat 1's root, which the board also
+    /// holds, is `availability-root`; so is the default seat's naming an
+    /// author root. An author seat's attestation is checked against the
+    /// author key set and signing key (docs/spec/contracts.md, Board,
+    /// Availability records, steps 3 to 5; delivery.md, Leaf availability
+    /// (version 2); T-25, T-37).
+    function test_AttestationsNameTheirOwnPanelsRoots() public {
+        string memory bj = vm.readFile(BATCHES);
+        bytes memory authorRoot = _byId(bj, ".records", "receipt-root-author");
+        bytes memory authorComplaintRoot = _byId(bj, ".records", "complaint-root-author");
+        bytes memory defaultRoot = _byId(bj, ".records", "receipt-root-default");
+        _accept(_rootCall(authorRoot));
+        _accept(_rootCall(authorComplaintRoot));
+        _accept(_rootCall(defaultRoot));
+        bytes memory rootDs = _ds(_str(bj, ".tags.recordHash"));
+        bytes32 a1 = sha256(bytes.concat(rootDs, authorRoot));
+        bytes32 a2 = sha256(bytes.concat(rootDs, authorComplaintRoot));
+        bytes32 d1 = sha256(bytes.concat(rootDs, defaultRoot));
+        bytes memory wrongRoot = abi.encodeWithSelector(
+            AvailabilityCheckLib.AvailabilityRefused.selector,
+            AvailabilityCheckLib.Code.AvailabilityRoot
+        );
+
+        _refuse(
+            _availabilityCall(_signedAttestation(2, 1, _sorted(a1, d1), secrets[2][1])),
+            wrongRoot,
+            "an author attestation naming a default root"
+        );
+        _refuse(
+            _availabilityCall(_signedAttestation(1, 1, _one(a1), secrets[1][1])),
+            wrongRoot,
+            "a default attestation naming an author root"
+        );
+        _refuse(
+            _availabilityCall(_signedAttestation(2, 1, _sorted(a1, a2), secrets[1][1])),
+            abi.encodeWithSelector(
+                AvailabilityCheckLib.AvailabilityRefused.selector,
+                AvailabilityCheckLib.Code.AvailabilitySignature
+            ),
+            "author seat 1 under default seat 1's key"
+        );
+        Vm.Log[] memory logs =
+            _accept(_availabilityCall(_signedAttestation(2, 1, _sorted(a1, a2), secrets[2][1])));
+        assertEq(logs.length, 1, "the author attestation");
+        assertEq(logs[0].topics[0], ATTESTATION_SUBMITTED, "its event");
+        assertEq(uint256(logs[0].topics[2]), 1, "its seat topic");
+        assertEq(
+            _accept(_availabilityCall(_signedAttestation(1, 1, _one(d1), secrets[1][1]))).length,
+            1,
+            "the default attestation, its own slot"
+        );
+        // Each panel's slot for the point is its own, and now filled.
+        _refuse(
+            _availabilityCall(_signedAttestation(2, 1, _one(a1), secrets[2][1])),
+            abi.encodeWithSelector(
+                AvailabilityCheckLib.AvailabilityRefused.selector,
+                AvailabilityCheckLib.Code.AvailabilityRepeat
+            ),
+            "a second author attestation"
+        );
+        elections.setAuthorKeySet(h, 0);
+        _refuse(
+            _availabilityCall(_signedAttestation(2, 2, _one(a2), secrets[2][2])),
+            abi.encodeWithSelector(
+                AvailabilityCheckLib.AvailabilityRefused.selector,
+                AvailabilityCheckLib.Code.AvailabilitySeat
+            ),
+            "no author panel"
+        );
+    }
+
+    /// Any one-byte change to a version-2 batch or root of either panel is
+    /// refused: every byte is framed or signed.
+    function testFuzz_BatchOneByteChangesRefused(uint256 which, uint256 position, uint8 delta)
+        public
+    {
+        if (delta == 0) delta = 1;
+        string memory bj = vm.readFile(BATCHES);
+        string[6] memory ids = [
+            "receipt-batch-default",
+            "receipt-batch-author",
+            "complaint-batch-author",
+            "complaint-batch-default",
+            "receipt-root-author",
+            "receipt-root-default"
+        ];
+        string[6] memory types = [
+            "share-receipt-batch",
+            "share-receipt-batch",
+            "share-complaint-batch",
+            "share-complaint-batch",
+            "obligation-root",
+            "obligation-root"
+        ];
+        uint256 k = which % 6;
+        bytes memory r = _byId(bj, ".records", ids[k]);
+        position %= r.length;
+        r[position] = bytes1(uint8(r[position]) ^ delta);
+        (bool ok,) = address(board).call(_batchCall(types[k], r));
+        assertTrue(!ok, "a changed record was accepted");
     }
 
     // --- helpers -------------------------------------------------------------
@@ -622,6 +910,73 @@ contract BoardDeliveryV2Test is TestBase {
         revert(string.concat("no offset for ", id));
     }
 
+    function _batchCall(string memory t, bytes memory record) internal pure returns (bytes memory) {
+        if (_eq(t, "share-receipt-batch")) {
+            return abi.encodeCall(Board.submitReceiptBatch, (record));
+        }
+        if (_eq(t, "share-complaint-batch")) {
+            return abi.encodeCall(Board.submitComplaintBatch, (record));
+        }
+        assertTrue(_eq(t, "obligation-root"), t);
+        return _rootCall(record);
+    }
+
+    function _batchTopic(string memory t) internal pure returns (bytes32) {
+        if (_eq(t, "share-receipt-batch")) return BATCH_SUBMITTED;
+        if (_eq(t, "share-complaint-batch")) return COMPLAINT_BATCH_SUBMITTED;
+        return ROOT_SUBMITTED;
+    }
+
+    function _rootCall(bytes memory r) internal pure returns (bytes memory) {
+        return abi.encodeCall(Board.submitObligationRoot, (r));
+    }
+
+    function _availabilityCall(bytes memory r) internal pure returns (bytes memory) {
+        return abi.encodeCall(Board.submitAvailabilityRecord, (r));
+    }
+
+    /// delivery-batch-v2.json's tag key for the `i`th of a receipt batch, a
+    /// complaint batch and a root.
+    function _tagKey(uint256 i) internal pure returns (string memory) {
+        return i == 0 ? ".tags.receiptBatch" : i == 1 ? ".tags.complaintBatch" : ".tags.root";
+    }
+
+    /// A counted-extent attestation (docs/spec/availability.md, Records) by
+    /// `seat` of `panel` for the file's election, naming `roots`, signed
+    /// with `sk` over every byte before its signature, header included.
+    function _signedAttestation(uint8 panel, uint8 seat, bytes32[] memory roots, uint256 sk)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes memory body = abi.encodePacked(
+            uint16(0x001b),
+            uint8(1),
+            h,
+            panel,
+            seat,
+            uint8(2),
+            keccak256("counted checkpoint"),
+            uint32(roots.length),
+            roots
+        );
+        (uint256 r, uint256 s) = TrusteeFixture.sign(
+            sk, sha256(bytes.concat(_ds("abolish/v1/sig/availability-attestation"), body))
+        );
+        return abi.encodePacked(body, r, s);
+    }
+
+    function _one(bytes32 a) internal pure returns (bytes32[] memory r) {
+        r = new bytes32[](1);
+        r[0] = a;
+    }
+
+    /// Two roots in the ascending order an attestation lists them.
+    function _sorted(bytes32 a, bytes32 b) internal pure returns (bytes32[] memory r) {
+        r = new bytes32[](2);
+        (r[0], r[1]) = a < b ? (a, b) : (b, a);
+    }
+
     function _call(string memory t, bytes memory record) internal view returns (bytes memory) {
         if (_eq(t, "share-receipt")) return _receiptsCall(record);
         if (_eq(t, "share-posting")) return _postingCall(record, alice);
@@ -745,6 +1100,9 @@ contract BoardDeliveryV2Test is TestBase {
         if (c == keccak256("invalid-enum")) return ElectionDefinitionLib.DecodeError.InvalidEnum;
         if (c == keccak256("unexpected-record-type")) {
             return ElectionDefinitionLib.DecodeError.UnexpectedRecordType;
+        }
+        if (c == keccak256("unknown-record-type")) {
+            return ElectionDefinitionLib.DecodeError.UnknownRecordType;
         }
         revert(string.concat("unknown decode error ", s));
     }

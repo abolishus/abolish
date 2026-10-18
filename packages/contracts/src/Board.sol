@@ -23,10 +23,11 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// only inside their election's window, and ballots forced through the L1
 /// relay only from the relay's alias, judged by the relay's stamp (ADR 0030;
 /// T-35, T-50). Each seat of the default panel may state the close here, at
-/// most twice per election, the second only with another claim, and commit
-/// one obligation root of each kind per election (T-17), and attest that
-/// the board was available to it, or complain that it wasn't, once per point
-/// and election (docs/spec/availability.md, Contract path; T-24, T-53).
+/// most twice per election, the second only with another claim; each seat of
+/// either panel may commit one obligation root of each kind per election
+/// (T-17), and attest that the board was available to it, or complain that
+/// it wasn't, once per point and election (docs/spec/availability.md,
+/// Contract path; T-24, T-53).
 /// The ballot check runs in a contract the board creates at construction,
 /// outside the board's size limit (Deployment). There is no admin, proxy,
 /// pause or upgrade path.
@@ -127,12 +128,17 @@ contract Board is EventAccumulator {
     /// statements, `statement-limit`). Zero is an empty slot.
     mapping(bytes32 definitionHash => mapping(uint8 signer => bytes32[2])) private _claims;
 
-    /// Each seat's obligation-root slots, per definition: at `kind − 1` (1
-    /// for receipts, 2 for complaints) the record hash of the root accepted
-    /// for that kind, zero while the slot is empty (docs/spec/delivery.md,
-    /// Obligation root, One per seat and kind), which an attestation's roots
-    /// are looked up in (docs/spec/contracts.md, Board, Availability records).
-    mapping(bytes32 definitionHash => mapping(uint8 seat => bytes32[2] hashes)) private _roots;
+    /// Each seat's obligation-root slots, per definition and panel (1 the
+    /// default, 2 the author panel; a version-1 root is the default
+    /// panel's): at `kind − 1` (1 for receipts, 2 for complaints) the record
+    /// hash of the root accepted for that kind, zero while the slot is empty
+    /// (docs/spec/delivery.md, Obligation root, One per seat and kind; Records
+    /// (version 2), One per panel, seat and kind), which an attestation's
+    /// roots are looked up in, in its own panel's slots only
+    /// (docs/spec/contracts.md, Board, Availability records).
+    mapping(
+        bytes32 definitionHash => mapping(uint8 panel => mapping(uint8 seat => bytes32[2] hashes))
+    ) private _roots;
 
     /// The availability slots each seat has filled, per definition: bit
     /// `4 · (panel − 1) + 2 · kind + (point − 1)`, `kind` 0 for an
@@ -317,17 +323,19 @@ contract Board is EventAccumulator {
     /// root whose leaves are published by content address, so a trustee node
     /// forcing what it owes through L1 pays for one call per kind whatever
     /// the electorate (docs/spec/delivery.md, Obligation root, Capacity;
-    /// T-25, T-52, T-54). Only the first root of each seat and kind whose
-    /// signature verifies is accepted: only the seat's signature fills its
-    /// slot, so no one else can take it, and a verifier fetches at most two
-    /// leaf objects per seat (T-17, T-52). A byte-identical repeat is a no-op.
+    /// T-25, T-52, T-54). Only the first root of each panel, seat and kind
+    /// whose signature verifies is accepted: only the seat's signature fills
+    /// its slot, so no one else can take it, and a verifier fetches at most
+    /// two leaf objects per seat (T-17, T-52). Seat `i` of the author panel
+    /// is another seat than seat `i` of the default panel, so each fills its
+    /// own slots. A byte-identical repeat is a no-op.
     function submitObligationRoot(bytes calldata record) external {
         CanonicalCalldata.requireOneBytesArgument(record);
         bytes32 key = keccak256(record);
         if (_accepted[key]) return;
-        (bytes32 definitionHash, uint8 seat, uint8 kind) =
+        (bytes32 definitionHash, uint8 panel, uint8 seat, uint8 kind) =
             DeliveryCheckLib.checkObligationRoot(record, electionRegistry, trusteeRegistry);
-        bytes32[2] storage slots = _roots[definitionHash][seat];
+        bytes32[2] storage slots = _roots[definitionHash][panel][seat];
         if (slots[kind - 1] != 0) {
             revert DeliveryCheckLib.DeliveryRefused(0, DeliveryCheckLib.Code.RootRepeat);
         }
@@ -400,9 +408,11 @@ contract Board is EventAccumulator {
     }
 
     /// `availability-root`: every root an attestation names is the record
-    /// hash of an obligation root the board accepted for its definition, as
-    /// the root slots of the key set's seats hold them, so the list carries no
-    /// byte the seat chooses beyond which roots it names (T-17).
+    /// hash of an obligation root the board accepted for its definition and
+    /// the attestation's own panel, as the root slots of that panel key set's
+    /// seats hold them, so the list carries no byte the seat chooses beyond
+    /// which roots it names, and names no root the other panel judges
+    /// (docs/spec/delivery.md, Leaf availability (version 2); T-17, T-25).
     function _requireRoots(
         bytes calldata record,
         AvailabilityCheckLib.Accepted memory a,
@@ -422,7 +432,7 @@ contract Board is EventAccumulator {
                 bool found;
                 for (uint256 seat = 1; root != 0 && !found && seats >> seat != 0; seat++) {
                     if ((seats >> seat) & 1 == 0) continue;
-                    bytes32[2] storage slots = _roots[a.definitionHash][uint8(seat)];
+                    bytes32[2] storage slots = _roots[a.definitionHash][a.panel][uint8(seat)];
                     found = slots[0] == root || slots[1] == root;
                 }
                 if (!found) {

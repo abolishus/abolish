@@ -1830,9 +1830,9 @@ contract BoardTest is TestBase {
 
     /// A root for no registered definition, for a seat outside the key set,
     /// or signed by another seat's key or under a batch's tag is refused, in
-    /// that order, and fills no slot; a ballot version the board can't read
-    /// fixes no root version (contracts.md, Board, Delivery records, steps 2
-    /// to 6).
+    /// that order, and fills no slot; ballot version 4 fixes version 2, and
+    /// a ballot version the board can't read fixes no root version
+    /// (contracts.md, Board, Delivery records, steps 2 to 6).
     function test_RootRefusals() public {
         bytes32 leaves = keccak256("refusals");
         _refuse(
@@ -1879,14 +1879,22 @@ contract BoardTest is TestBase {
             "a batch as a root"
         );
         assertEq(_accept(_rootCall(honest)).length, 1, "the honest root, its slot still empty");
-        // A ballot version above 3 fixes no root version the board reads.
+        // Ballot version 4 fixes version 2, and a ballot version above 4
+        // fixes no root version the board reads.
         ElectionRegistry.Parameters memory p = elections.parameters(h);
         p.ballotVersion = 4;
         elections.set(h, p, new uint8[](0), new uint256[](0));
         _refuse(
             _rootCall(_signedRoot(h, 2, 1, 3, leaves, signingSecrets[2])),
-            _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2),
+            _malformed(0, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2),
             "ballot version 4"
+        );
+        p.ballotVersion = 5;
+        elections.set(h, p, new uint8[](0), new uint256[](0));
+        _refuse(
+            _rootCall(_signedRoot(h, 2, 1, 3, leaves, signingSecrets[2])),
+            _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2),
+            "ballot version 5"
         );
         // Canonical calldata only.
         _refuse(

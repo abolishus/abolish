@@ -106,6 +106,20 @@ contract BoardAvailabilityTest is TestBase {
         for (uint256 seat = 1; seat <= 4; seat++) {
             assertTrue(secrets[seat] != 0, "a secret for every default seat");
         }
+        // The author seats that signed the file's author records, as the
+        // election registry records an author key set with the definition.
+        uint256 authorSeats;
+        for (uint256 i; vm.keyExistsJson(aj, _at(".records", i, "")); i++) {
+            if (vm.parseJsonUint(aj, _at(".records", i, ".fields.panel")) != 2) continue;
+            uint256 seat = vm.parseJsonUint(aj, _at(".records", i, ".fields.seat"));
+            (uint256 x, uint256 y, bool onCurve) =
+                TrusteeFixture.point(_bytes(aj, _at(".records", i, ".signingKey")));
+            assertTrue(onCurve, "author signing key");
+            elections.setAuthorKey(ah, seat, x, y);
+            authorSeats |= 1 << seat;
+        }
+        assertEq(authorSeats, (1 << 2) | (1 << 3), "author seats 2 and 3");
+        elections.setAuthorKeySet(ah, authorSeats);
         attestationDs = _ds(_str(aj, ".tags.attestation"));
         complaintDs = _ds(_str(aj, ".tags.complaint"));
 
@@ -153,12 +167,12 @@ contract BoardAvailabilityTest is TestBase {
         assertEq(found, 2, "version 8's tables name both");
     }
 
-    /// Every default seat's record of availability.json that names no root
-    /// is accepted and emitted whole, its topics its definition hash and
-    /// seat, exactly as contract-event-v8.json's record of it carries it; a
-    /// repeat emits nothing. The records naming roots are refused only for
-    /// their roots, which the board doesn't hold, and the author panel's for
-    /// their panel.
+    /// Every record of availability.json that names no root, of either
+    /// panel, is accepted and emitted whole, its topics its definition hash
+    /// and seat, exactly as contract-event-v8.json's record of it carries it;
+    /// a repeat emits nothing. The records naming roots are refused only for
+    /// their roots, which the board doesn't hold. Without an author key set
+    /// the author panel's are refused for their seat.
     function test_VectorRecords() public {
         string memory aj = vm.readFile(AVAILABILITY);
         string memory ej = vm.readFile(EVENTS);
@@ -168,8 +182,10 @@ contract BoardAvailabilityTest is TestBase {
             string memory id = _str(aj, _at(".records", i, ".id"));
             bytes memory r = _bytes(aj, _at(".records", i, ".encoding"));
             if (vm.parseJsonUint(aj, _at(".records", i, ".fields.panel")) == 2) {
+                uint256 snapshot = vm.snapshotState();
+                elections.setAuthorKeySet(ah, 0);
                 _refuse(_call(r), _refused(AvailabilityCheckLib.Code.AvailabilitySeat), id);
-                continue;
+                vm.revertToState(snapshot);
             }
             if (_u32(r, COUNT_AT) != 0 && _type(r) == 0x001b) {
                 _refuse(_call(r), _refused(AvailabilityCheckLib.Code.AvailabilityRoot), id);
@@ -196,7 +212,7 @@ contract BoardAvailabilityTest is TestBase {
             accepted++;
         }
         assertEq(i, 7, "seven records");
-        assertEq(accepted, 3, "three without roots, of default seats");
+        assertEq(accepted, 5, "five without roots, two of author seats");
     }
 
     /// Each decode rejection of availability.json is refused with its code at
@@ -268,7 +284,7 @@ contract BoardAvailabilityTest is TestBase {
     }
 
     /// Refusals in the spec's order: a definition no one registered, a seat
-    /// outside the key set or of the author panel, another seat's key,
+    /// outside its panel's key set, another seat's key,
     /// another type's tag, then roots and the slot (contracts.md, Board,
     /// Availability records, steps 2 to 6). Each refusal fills nothing.
     function test_RefusalOrder() public {
@@ -293,7 +309,10 @@ contract BoardAvailabilityTest is TestBase {
                 string.concat("seat ", vm.toString(uint256(outside[i])))
             );
         }
-        // An author seat has no key set on the board, whatever its index.
+        // Without an author panel an author seat has no key set, whatever
+        // its index.
+        (, uint256 authorSeats) = elections.authorKeySetOf(ah);
+        elections.setAuthorKeySet(ah, 0);
         for (uint8 seat = 1; seat <= 4; seat++) {
             _refuse(
                 _call(_signedAttestation(ah, 2, seat, 1, ballotCheckpoint, none, secrets[seat])),
@@ -301,6 +320,19 @@ contract BoardAvailabilityTest is TestBase {
                 "an author seat"
             );
         }
+        // With one, a seat outside it is refused, and an author seat is
+        // checked under its own key, never the default seat's of its index.
+        elections.setAuthorKeySet(ah, authorSeats);
+        _refuse(
+            _call(_signedAttestation(ah, 2, 1, 1, ballotCheckpoint, none, secrets[1])),
+            _refused(AvailabilityCheckLib.Code.AvailabilitySeat),
+            "author seat 1, outside the author key set"
+        );
+        _refuse(
+            _call(_signedAttestation(ah, 2, 2, 1, ballotCheckpoint, none, secrets[2])),
+            _refused(AvailabilityCheckLib.Code.AvailabilitySignature),
+            "author seat 2 under default seat 2's key"
+        );
         _refuse(
             _call(_signedAttestation(ah, 1, 1, 1, ballotCheckpoint, none, secrets[2])),
             _refused(AvailabilityCheckLib.Code.AvailabilitySignature),

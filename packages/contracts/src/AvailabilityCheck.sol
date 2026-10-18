@@ -12,10 +12,10 @@ import {TrusteeIdentityLib} from "./TrusteeRegistry.sol";
 /// @notice An availability attestation (0x001b) or complaint (0x001c),
 /// version 1, is accepted through the contract path only if it decodes
 /// strictly, names a registered definition, and is signed by the
-/// per-election key of a seat of that election's default panel's registered
-/// key set, so a record the board archives says only what its seat signed
-/// (T-17, T-31). An author seat's records are refused until the board has
-/// the author panel's key set (P2-16). It judges neither the checkpoint, the
+/// per-election key of a seat of the key set of the panel it names (the
+/// default panel's registered key set, or the author key set the election
+/// registry recorded with the definition), so a record the board archives
+/// says only what its seat signed (T-17, T-31). It judges neither the checkpoint, the
 /// CID nor the time: they name L1 data the L2 doesn't read, and a record is
 /// in time by its submission time, which the verifier reads (4.6). Whether an
 /// attestation's roots are ones the board holds, and the one record per
@@ -25,8 +25,8 @@ library AvailabilityCheckLib {
     enum Code {
         /// No definition with the record's hash is registered.
         AvailabilityStray,
-        /// The panel isn't the default panel, or the seat isn't a seat of
-        /// the election's registered key set.
+        /// The seat isn't a seat of the key set of the panel the record
+        /// names.
         AvailabilitySeat,
         /// The signature doesn't verify under the seat's signing key.
         AvailabilitySignature,
@@ -57,7 +57,7 @@ library AvailabilityCheckLib {
     uint256 internal constant COMPLAINT_SIG_AT = 106;
     /// `MAX_ATTESTED_ROOTS`: `2 · MAX_TRUSTEES`, one root of each kind per seat.
     uint256 internal constant MAX_ROOTS = 32;
-    uint8 internal constant DEFAULT_PANEL = 1;
+    uint8 internal constant AUTHOR_PANEL = 2;
     uint8 internal constant BALLOT_EXTENT = 1;
     /// The first four bytes of a raw block's CID and of a dag-pb root's
     /// (CIDv1, the codec, sha2-256, 32 bytes): the only CIDs a segment
@@ -71,7 +71,8 @@ library AvailabilityCheckLib {
     bytes internal constant DS_COMPLAINT = "\x25abolish/v1/sig/availability-complaint";
 
     /// What an accepted record gives the board: its slot, and the seats of
-    /// the key set it was checked against, which the roots are looked up by.
+    /// its panel's key set, which it was checked against and the roots are
+    /// looked up by.
     struct Accepted {
         bytes32 definitionHash;
         uint8 panel;
@@ -153,9 +154,9 @@ library AvailabilityCheckLib {
             _verify(r, a, elections, trustees, kind == 0 ? DS_ATTESTATION : DS_COMPLAINT, sigAt);
     }
 
-    /// Steps 2 to 4: the definition is registered, the seat is a default
-    /// seat of its registered key set, and the signature verifies under that
-    /// seat's per-election signing key over the record before it, header
+    /// Steps 2 to 4: the definition is registered, the seat is a seat of the
+    /// named panel's key set, and the signature verifies under that seat's
+    /// per-election signing key in it over the record before it, header
     /// included, so a later version can't reuse a version-1 signature
     /// (T-31). Returns the key set's seats.
     function _verify(
@@ -171,15 +172,24 @@ library AvailabilityCheckLib {
         }
         // The default panel's registered key set, which the trustee registry
         // recorded for the ceremony the election registry admitted the
-        // definition on, never a submitter's (ADR 0028, 2B; T-37). The board
-        // holds no author panel's key set, so an author seat has none.
-        (bytes32 stub, bytes32 panel) = elections.ceremony(a.definitionHash);
-        (, seats) = trustees.keySetOf(stub, panel);
+        // definition on, or the author key set the election registry recorded
+        // with the definition, empty without an author panel; never a
+        // submitter's (ADR 0028, 2B; ADR 0035; T-37).
+        bytes32 stub;
+        bytes32 panel;
+        if (a.panel == AUTHOR_PANEL) {
+            (, seats) = elections.authorKeySetOf(a.definitionHash);
+        } else {
+            (stub, panel) = elections.ceremony(a.definitionHash);
+            (, seats) = trustees.keySetOf(stub, panel);
+        }
         // Seat 0 never exists, whatever a key set's bit 0 says.
-        if (a.panel != DEFAULT_PANEL || a.seat == 0 || (seats >> a.seat) & 1 == 0) {
+        if (a.seat == 0 || (seats >> a.seat) & 1 == 0) {
             revert AvailabilityRefused(Code.AvailabilitySeat);
         }
-        (uint256 x, uint256 y) = trustees.signingKeyOf(stub, panel, a.seat);
+        (uint256 x, uint256 y) = a.panel == AUTHOR_PANEL
+            ? elections.authorSigningKeyOf(a.definitionHash, a.seat)
+            : trustees.signingKeyOf(stub, panel, a.seat);
         if (!TrusteeIdentityLib.verify(
                 sha256(bytes.concat(tag, r[0:sigAt])),
                 uint256(bytes32(r[sigAt:sigAt + 32])),

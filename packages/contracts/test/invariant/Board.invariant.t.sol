@@ -63,7 +63,7 @@ contract BoardChecks {
     function root(bytes calldata r, IBoardElections e, IBoardTrustees t)
         external
         view
-        returns (bytes32, uint8, uint8)
+        returns (bytes32, uint8, uint8, uint8)
     {
         return DeliveryCheckLib.checkObligationRoot(r, e, t);
     }

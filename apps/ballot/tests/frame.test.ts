@@ -115,6 +115,7 @@ describe("the frame under the client's CSP", () => {
           loadBoard: () => new Promise<never>(() => {}),
           findCell: () => new Promise<never>(() => {}),
           l1Block: () => new Promise<never>(() => {}),
+          loadArtifacts: () => new Promise<never>(() => {}),
           cast: () => new Promise<never>(() => {}),
         },
         languages: ["en-US"],

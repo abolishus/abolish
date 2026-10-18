@@ -110,6 +110,11 @@ describe("parseStoredIdentity", () => {
     ],
     ["a membership with a missing key", record({ memberships: [{ tier: 0 }] })],
     ["a list with a hole", record({ memberships: HOLED })],
+    ["a tier of -0", record({ memberships: [{ tier: -0, group: 1n }] })],
+    [
+      "a list with a property beside its entries",
+      record({ memberships: Object.assign([{ tier: 0, group: 1n }], { extra: 1 }) }),
+    ],
   ])("refuses %s", (_, value) => {
     expect(parseStoredIdentity(value)).toBeUndefined();
   });

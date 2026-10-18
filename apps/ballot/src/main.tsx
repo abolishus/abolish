@@ -67,10 +67,9 @@ const source: ElectionSource = {
   // No L1 source is in the client's connect-src yet: reading L1 from several
   // independent providers, never our API, is part 3c ([[revoting]], Client rule 1).
   l1Block: () => Promise.resolve(undefined),
-  async cast(seal, secret, l1, onProgress) {
-    let artifacts;
+  async loadArtifacts() {
     try {
-      artifacts = await loadProverArtifacts({
+      return await loadProverArtifacts({
         base: import.meta.url,
         fetch: (url, init) => fetch(url, init),
         caches: globalThis.caches,
@@ -79,15 +78,18 @@ const source: ElectionSource = {
       if (error instanceof ProverArtifactError) return { ok: false, problem: error.problem };
       throw error;
     }
-    return withWorker((used) =>
+  },
+  // `withWorker` and `castBallot` reach the worker's postMessage before
+  // their first await, so the secret is copied before this returns.
+  cast: (seal, secret, l1, artifacts, onProgress) =>
+    withWorker((used) =>
       castBallot(
         used,
         { seal, secret, l1Number: l1.number, l1Hash: l1.hash },
         artifacts,
         onProgress,
       ),
-    );
-  },
+    ),
 };
 
 async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {

@@ -52,7 +52,8 @@ const hasExactly = (v: Record<string, unknown>, keys: readonly string[]) =>
 function membershipOf(v: unknown): Membership | undefined {
   if (!isRecord(v) || !hasExactly(v, ["tier", "group"])) return undefined;
   const { tier, group } = v;
-  if (typeof tier !== "number" || !TIERS.includes(tier)) return undefined;
+  // `Object.is`, not `includes`: -0 would pass as 0, a second encoding of it.
+  if (typeof tier !== "number" || !TIERS.some((t) => Object.is(t, tier))) return undefined;
   if (typeof group !== "bigint" || group < 0n || group >> 64n !== 0n) return undefined;
   return { tier, group };
 }
@@ -67,7 +68,13 @@ export function parseStoredIdentity(value: unknown): VotingIdentity | undefined 
   const { v, secret, memberships } = value;
   if (v !== RECORD_VERSION) return undefined;
   if (!(secret instanceof Uint8Array) || !isIdentitySecret(secret)) return undefined;
-  if (!Array.isArray(memberships) || memberships.length < 1 || memberships.length > TIERS.length)
+  if (
+    !Array.isArray(memberships) ||
+    memberships.length < 1 ||
+    memberships.length > TIERS.length ||
+    // A cloned array keeps any extra own properties: only the indices are a record's.
+    Object.keys(memberships).length !== memberships.length
+  )
     return undefined;
   const parsed: Membership[] = [];
   // Indexed, not `every` or `map`: those skip a list's holes.
@@ -139,7 +146,9 @@ export async function readIdentity(factory: IDBFactory = indexedDB): Promise<Ide
   if (value === undefined) return { kind: "none" };
   const identity = parseStoredIdentity(value);
   // The stored copy goes with the structured clone the read made.
-  if (isRecord(value) && value["secret"] instanceof Uint8Array) value["secret"].fill(0);
+  // The whole buffer: a view's bytes may be only part of what was cloned.
+  if (isRecord(value) && value["secret"] instanceof Uint8Array)
+    new Uint8Array(value["secret"].buffer).fill(0);
   return identity === undefined ? { kind: "unreadable" } : { kind: "found", identity };
 }
 

@@ -255,8 +255,10 @@ async function apiRecord(
  * a poll hidden under any ground but `threat` as its newest decision,
  * `threat` for one hidden as a threat, `shown` otherwise. The
  * display-text route already withholds what the policy withholds (451); this
- * read gives the threat notice, and keeps a withheld poll's text from being
- * shown even if that route served it. A status that can't be read, or isn't
+ * read gives the threat notice, and keeps the text of a poll whose newest
+ * decision withholds it from being shown even if that route served it. It
+ * sees only the newest decision, so a withholding hide re-cited as `threat`
+ * is withheld by the route alone (docs/status/P2-10.md, Known-weak). A status that can't be read, or isn't
  * shaped like one, is `shown`: an outage, or someone blocking this route,
  * must not stop voting through our client (T-68). It rejects otherwise only
  * for a fault of this page (an abort).

@@ -118,7 +118,19 @@ export default defineConfig({
       router: { quoteStyle: "double", semicolons: true, addExtensions: true },
     }),
   ],
-  build: { sourcemap: false },
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      // Base UI marks its modules "use client", a React Server Components
+      // directive that Start's SSR doesn't use, and the bundler warns about
+      // every one of them: a few thousand lines per build. On CI that output,
+      // with every other task's at once, filled the runner's pipe until
+      // `vp run` failed to forward it (EAGAIN) and failed the build.
+      onwarn(warning, warn) {
+        if (warning.code !== "MODULE_LEVEL_DIRECTIVE") warn(warning);
+      },
+    },
+  },
   // The Node entry (src/node/main.ts), every dependency inlined as for the
   // Start server, beside the Vite build's output: dist/node/main.mjs loads
   // dist/server/server.js and serves dist/client/assets.

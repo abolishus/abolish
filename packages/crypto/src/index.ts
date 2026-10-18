@@ -1252,6 +1252,24 @@ export {
   readObjectWithinAsync,
 } from "./content-addressing.ts";
 export {
+  ARCHIVE_MANIFEST,
+  type ArchivedObject,
+  type ArchivedRead,
+  type ArchiveManifest,
+  arweaveId,
+  decodeArchiveLocator,
+  decodeArchiveManifest,
+  encodeArchiveLocator,
+  encodeArchiveManifest,
+  LOCATOR_V1_LENGTH,
+  type LocatorRead,
+  MANIFEST_BOUND,
+  MAX_MANIFEST_LINKS,
+  MAX_MANIFEST_OBJECTS,
+  type ManifestLink,
+  readArchivedObject,
+} from "./archive.ts";
+export {
   ALIAS_OFFSET,
   decodeRelayBallotCalldata,
   frameRelayRecord,

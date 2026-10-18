@@ -45,6 +45,7 @@ export const RECORD_TYPES = Object.freeze({
   nullifierOutput: 0x001e,
   releaseRecord: 0x001f,
   deploymentRecord: 0x0020,
+  archiveManifest: 0x0021,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

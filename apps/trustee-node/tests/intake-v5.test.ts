@@ -119,7 +119,13 @@ interface Seats {
   clock: bigint;
 }
 
-function seatsOf(change: { store?: SeatStore } = {}): Seats {
+function seatsOf(
+  change: {
+    store?: SeatStore;
+    electorate?: () => Promise<boolean>;
+    registered?: () => boolean;
+  } = {},
+): Seats {
   const seats: Seats = { intake: [], registrations: [], clock: e.stub.opens_at };
   seats.intake = e.seats.map(
     (ceremony, i) =>
@@ -129,10 +135,10 @@ function seatsOf(change: { store?: SeatStore } = {}): Seats {
         trusteeRegistry: TRUSTEE_REGISTRY,
         index: i + 1,
         ceremony,
-        electorate: () => Promise.resolve(true),
+        electorate: change.electorate ?? (() => Promise.resolve(true)),
         registration: (definitionHash) => {
           seats.registrations.push(definitionHash);
-          return Promise.resolve(true);
+          return Promise.resolve(change.registered?.() ?? true);
         },
         store: change.store ?? (stores[i] as SeatStore),
         now: () => seats.clock,
@@ -158,6 +164,38 @@ describe("a version-5 stub's ceremony", () => {
 
   it("is named by its version-5 stub hash on the coordinator's transport", () => {
     expect(hex(stubHashOf(e.stubBytes) as Uint8Array)).toBe(hex(e.stubHash));
+  });
+});
+
+describe("a version-5 election's checks before intake", () => {
+  it("refuses until the electorate check passes, then takes the ballot", async () => {
+    let decided = false;
+    const [seat] = seatsOf({
+      store: new MemoryStore(),
+      electorate: () => Promise.resolve(decided),
+    }).intake;
+    expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-definition" });
+    decided = true;
+    expect((await deliver(seat!)).ok).toBe(true);
+  });
+
+  it("refuses until finalized L2 shows the version-5 definition registered", async () => {
+    let decided = false;
+    const seats = seatsOf({ store: new MemoryStore(), registered: () => decided });
+    const [seat] = seats.intake;
+    expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-unregistered" });
+    decided = true;
+    expect((await deliver(seat!)).ok).toBe(true);
+    expect(seats.registrations.map(hex)).toEqual(Array(2).fill(hex(election.definitionHash)));
+  });
+
+  it("refuses any transcript but the one the seat approved (T-37)", async () => {
+    const [seat] = seatsOf({ store: new MemoryStore() }).intake;
+    const altered = Uint8Array.from(transcript);
+    altered[altered.length - 1]! ^= 1;
+    expect(
+      await seat!.intake(e.stubBytes, altered, honest.bytes, honest.ciphertexts[0] as Uint8Array),
+    ).toEqual({ ok: false, code: "intake-transcript" });
   });
 });
 

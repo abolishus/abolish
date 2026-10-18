@@ -1,6 +1,8 @@
 import {
   deliveryWindowFits,
   encodeElectionDefinition,
+  encodeElectionDefinitionV3,
+  encodeElectionDefinitionV4,
   encodeElectionDefinitionV5,
   encodeElectionDefinitionV6,
   type ElectionDefinition,
@@ -292,7 +294,11 @@ describe("version-5 stubs, as the website creates them", () => {
           pass,
           new Map(),
         );
-        expect(result.ok, `0x${p.record_type.toString(16)} = ${version}`).toBe(false);
+        // The definition's own pin no longer matches its layout; any other is one 2.3 refuses.
+        expect(result, `0x${p.record_type.toString(16)} = ${version}`).toEqual({
+          ok: false,
+          code: p.record_type === RECORD_TYPES.electionDefinition ? "stub-decode" : "stub-profile",
+        });
       }
   });
 
@@ -320,6 +326,43 @@ describe("version-5 stubs, as the website creates them", () => {
     };
     expect((await checkV5(sized(10_000n, 5_360n))).ok).toBe(true);
     expect(await checkV5(sized(10_000n, 5_361n))).toEqual({ ok: false, code: "stub-capacity" });
+  });
+
+  test("refuses versions 3 and 4, which decode, and a version-7 byte, as versions it doesn't read", async () => {
+    const v5 = stubV5For(panel);
+    const v1 = stubFor(panel);
+    const pinsFor = (definition: number) =>
+      v1.profile.pins.map((p) =>
+        p.record_type === RECORD_TYPES.electionDefinition
+          ? { ...p, version: definition }
+          : p.record_type === RECORD_TYPES.ballot
+            ? { ...p, version: 2 }
+            : p,
+      );
+    const { questions: _, receipt_keys, ...rest } = v5;
+    const head = {
+      ...rest,
+      election_type: v1.election_type,
+      option_count: v1.option_count,
+      min_selections: v1.min_selections,
+      max_selections: v1.max_selections,
+    };
+    const v3 = encodeElectionDefinitionV3({
+      ...head,
+      profile: { protocol_major: 1, pins: pinsFor(3) },
+    });
+    const v4 = encodeElectionDefinitionV4({
+      ...head,
+      profile: { protocol_major: 1, pins: pinsFor(4) },
+      receipt_keys,
+    });
+    const v7 = Uint8Array.from(encodeElectionDefinitionV5(v5));
+    v7[2] = 7;
+    for (const bytes of [v3, v4, v7])
+      expect(await checkStub(bytes, pinned, pass, new Map())).toEqual({
+        ok: false,
+        code: "stub-version",
+      });
   });
 
   test("refuses version 6 (an author panel) as a version it doesn't read", async () => {

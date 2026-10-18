@@ -464,3 +464,44 @@ describe("moderation", () => {
     );
   });
 });
+
+describe("submission", () => {
+  test("sends the poll's ID with the token in Turnstile's header, and nothing else of the page's", async () => {
+    const calls = serve(Response.json({}, { status: 202 }));
+    await draftsClient.submit(ID, "tok-1.x_Y");
+    expect(calls).toHaveLength(1);
+    const [{ url, init }] = calls as [(typeof calls)[number]];
+    expect([url, init.method, init.body]).toEqual([
+      "/drafts/submit",
+      "POST",
+      JSON.stringify({ id: ID }),
+    ]);
+    expect(init.headers).toEqual({
+      "x-turnstile-token": "tok-1.x_Y",
+      "content-type": "application/json",
+    });
+    expect(init.credentials).toBe("same-origin");
+    expect(init.cache).toBe("no-store");
+    expect(init.redirect).toBe("error");
+  });
+
+  test.each([
+    [403, "TURNSTILE_REFUSED", "challengeRefused"],
+    [503, "TURNSTILE_UNAVAILABLE", "challengeUnavailable"],
+    [429, "TOO_MANY_IN_SETUP", "tooManyInSetup"],
+    [429, "TOO_MANY_TODAY", "tooManyToday"],
+    [422, "DRAFT_REFUSED", "refused"],
+    [409, "NOT_EDITABLE", "changed"],
+    [404, "NOT_FOUND", "gone"],
+    [401, "SIGNED_OUT", "signedOut"],
+    [500, "INTERNAL", "failed"],
+  ] as const)("words a %i %s as %s", async (status, code, expected) => {
+    serve(refusal(status, code));
+    expect(await failure(draftsClient.submit(ID, "tok"))).toBe(expected);
+  });
+
+  test("a network failure is `failed`", async () => {
+    serve();
+    expect(await failure(draftsClient.submit(ID, "tok"))).toBe("failed");
+  });
+});

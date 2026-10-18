@@ -7,6 +7,7 @@ import { Textarea } from "@abolishus/ui/ui/textarea";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, type SyntheticEvent, useEffect, useRef, useState } from "react";
 
+import type { Challenge } from "../account/challenge.ts";
 import { DraftsError, type DraftsClient, type DraftsFailure } from "../account/drafts.ts";
 import {
   ANSWER_RULES,
@@ -473,12 +474,31 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
 
 const ID = /^[a-z0-9]{32}$/;
 
+/** Why a submission didn't go: the handler's refusal, or the page's own reason. */
+type SubmitFailure =
+  | DraftsFailure
+  /** The form has changes the saved draft doesn't, or nothing is saved yet. */
+  | "saveFirst"
+  /** This deployment names no Turnstile site key. */
+  | "noChallenge";
+
+const SUBMIT_MESSAGES: Partial<Record<SubmitFailure, keyof Messages>> = {
+  saveFirst: "pollFormSubmitSaveFirst",
+  noChallenge: "pollFormSubmitUnavailable",
+  signedOut: "pollFormSignedOut",
+  refused: "pollFormSubmitRefused",
+};
+
 export interface PollFormPageProps {
   readonly client: DraftsClient;
   /** The draft to edit; none for a new poll. */
   readonly id?: string | undefined;
   /** Called once a new draft is saved, with its ID, so the page's address can name it. */
   readonly onCreated?: (id: string) => void;
+  /** The check a submission's token comes from; none if this deployment has no site key. */
+  readonly challenge?: Challenge | undefined;
+  /** Called once the draft is submitted for setup. */
+  readonly onSubmitted?: () => void;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
   /** The author's own time zone, for the local time beside the UTC one; the browser's by default. */
@@ -492,11 +512,17 @@ export interface PollFormPageProps {
  * checked by the definition's own rules before it is sent, so the handler
  * never refuses one the page let through (T-34, T-72). Only the author's
  * own text and closing time leave the page; nothing names a voter (T-10).
+ *
+ * Submitting a saved draft for setup (part 6c) takes a Turnstile solve for
+ * `poll-create`: the check is loaded only when the author submits, and its
+ * token is spent on that one request (T-72; src/account/challenge.ts).
  */
 export function PollFormPage({
   client,
   id,
   onCreated,
+  challenge,
+  onSubmitted,
   now = () => new Date(),
   timeZone,
 }: PollFormPageProps) {
@@ -513,8 +539,20 @@ export function PollFormPage({
   const [busy, setBusy] = useState(id !== undefined);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<DraftsFailure | undefined>();
+  // Whether the form holds anything the saved draft doesn't: only a saved
+  // draft, as it is stored, can be submitted.
+  const [dirty, setDirty] = useState(false);
+  const [submitting, setSubmitting] = useState<"idle" | "checking" | "sending" | "sent">("idle");
+  const [submitFailure, setSubmitFailure] = useState<SubmitFailure | undefined>();
+  // Whether the problems listed stopped a submission rather than a save.
+  const [errorsStopped, setErrorsStopped] = useState<"save" | "submit">("save");
   // The draft this page saves to: the one it opened, or the one its first save made.
   const savedId = useRef<string | undefined>(undefined);
+  // Where the check is shown, and the way to take it down again.
+  const checkBox = useRef<HTMLDivElement>(null);
+  const solving = useRef<AbortController | undefined>(undefined);
+  // Counts the form's edits, so a save knows whether it stored what the page shows.
+  const edits = useRef(0);
   const summary = useRef<HTMLDivElement>(null);
   // After a save, focus goes to the heading, and the status line below says what happened.
   const heading = useRef<HTMLHeadingElement>(null);
@@ -524,9 +562,13 @@ export function PollFormPage({
     if (id !== undefined && id === savedId.current) return;
     // Any other address is another poll: nothing of the last one stays.
     savedId.current = undefined;
+    solving.current?.abort();
     setErrors([]);
     setSaved(false);
     setFailure(undefined);
+    setDirty(false);
+    setSubmitting("idle");
+    setSubmitFailure(undefined);
     setUnavailable(undefined);
     setForm(id === undefined ? newPollForm() : undefined);
     if (id === undefined) return setBusy(false);
@@ -560,12 +602,24 @@ export function PollFormPage({
     if (attempt > 0) summary.current?.focus();
   }, [attempt]);
 
+  // A check still showing when the page goes is taken down with it.
+  useEffect(() => () => solving.current?.abort(), []);
+
   const seconds = () => BigInt(Math.floor(now().getTime() / 1000));
 
   // A fixed field drops its error at once; new problems wait for the next save.
   const change = (next: PollForm) => {
+    // The draft as saved is on its way to setup: an edit now would be lost unsaid.
+    if (submitting === "sending" || submitting === "sent") return;
+    edits.current += 1;
     setForm(next);
     setSaved(false);
+    setDirty(true);
+    // A check under way was for the draft as saved; the author saves again first.
+    if (solving.current !== undefined) {
+      solving.current.abort();
+      setSubmitting("idle");
+    }
     if (errors.length === 0) return;
     const still = [...fieldErrors(next), ...closesErrors(next, seconds())];
     setErrors(errors.filter((e) => still.some((s) => s.id === e.id && s.problem === e.problem)));
@@ -573,23 +627,35 @@ export function PollFormPage({
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (form === undefined || busy) return;
+    if (form === undefined || busy || submitting === "sending" || submitting === "sent") return;
     setSaved(false);
     setFailure(undefined);
     const checked = checkForm(form, seconds());
     setErrors(checked.errors);
+    setErrorsStopped("save");
     if (checked.draft === undefined) {
       setAttempt((a) => a + 1);
       return;
     }
     setBusy(true);
+    setSubmitFailure(undefined);
+    // A check under way would submit the draft this save replaces.
+    if (solving.current !== undefined) {
+      solving.current.abort();
+      setSubmitting("idle");
+    }
+    // Only the form as it was sent is saved: an edit during the save keeps it unsaved.
+    const sent = edits.current;
     try {
       if (savedId.current === undefined) {
         const created = await client.create(checked.draft);
         savedId.current = created;
         onCreated?.(created);
       } else await client.update(savedId.current, checked.draft);
-      setSaved(true);
+      if (edits.current === sent) {
+        setSaved(true);
+        setDirty(false);
+      }
     } catch (e) {
       const why = e instanceof DraftsError ? e.failure : "failed";
       if (why === "changed") setUnavailable("notDraft");
@@ -598,6 +664,55 @@ export function PollFormPage({
     } finally {
       setBusy(false);
       heading.current?.focus();
+    }
+  };
+
+  const submit = async () => {
+    const poll = savedId.current;
+    if (form === undefined || busy || submitting !== "idle") return;
+    setSaved(false);
+    setFailure(undefined);
+    setSubmitFailure(undefined);
+    if (poll === undefined || dirty) return setSubmitFailure("saveFirst");
+    // The closing time is judged again now: a draft saved a while ago may no
+    // longer leave setup its time, and the handler would refuse it.
+    const checked = checkForm(form, seconds());
+    if (checked.draft === undefined) {
+      setErrors(checked.errors);
+      setErrorsStopped("submit");
+      setAttempt((a) => a + 1);
+      return;
+    }
+    if (challenge === undefined) return setSubmitFailure("noChallenge");
+    const container = checkBox.current;
+    if (container === null) return;
+    const controller = new AbortController();
+    solving.current = controller;
+    setSubmitting("checking");
+    let token: string;
+    try {
+      token = await challenge.solve(container, "poll-create", controller.signal);
+    } catch {
+      if (controller.signal.aborted) return;
+      setSubmitting("idle");
+      setSubmitFailure("challengeUnavailable");
+      return;
+    } finally {
+      if (solving.current === controller) solving.current = undefined;
+    }
+    if (controller.signal.aborted) return;
+    setSubmitting("sending");
+    try {
+      await client.submit(poll, token);
+      setSubmitting("sent");
+      onSubmitted?.();
+    } catch (e) {
+      setSubmitting("idle");
+      // The token is spent either way: submitting again takes a new check.
+      const why = e instanceof DraftsError ? e.failure : "failed";
+      if (why === "changed") setUnavailable("notDraft");
+      else if (why === "gone") setUnavailable("gone");
+      else setSubmitFailure(why);
     }
   };
 
@@ -690,7 +805,7 @@ export function PollFormPage({
               className="grid gap-2 border-2 border-destructive p-5 outline-none focus-visible:ring-3 focus-visible:ring-ring"
             >
               <h2 id="poll-form-errors" className="m-0 text-lg font-semibold">
-                {t("pollFormErrorsTitle")}
+                {t(errorsStopped === "save" ? "pollFormErrorsTitle" : "pollFormSubmitErrorsTitle")}
               </h2>
               <p className="m-0">{t("pollFormErrorsLede")}</p>
               <ul className="m-0 grid list-none p-0">
@@ -854,7 +969,11 @@ export function PollFormPage({
 
           <div className="grid gap-4 border-t border-border pt-6">
             <div className="flex flex-wrap items-center gap-4">
-              <Button type="submit" size="lg" disabled={busy}>
+              <Button
+                type="submit"
+                size="lg"
+                disabled={busy || submitting === "sending" || submitting === "sent"}
+              >
                 {t("pollFormSave")}
               </Button>
               <a href="/account" className="underline underline-offset-4">
@@ -870,6 +989,57 @@ export function PollFormPage({
               </p>
             )}
           </div>
+
+          <Section
+            index="05"
+            mark={t("pollFormSubmitMark")}
+            title={t("pollFormSubmitTitle")}
+            id="poll-form-submit"
+            lede={
+              <>
+                <p className="m-0">{t("pollFormSubmitLede")}</p>
+                <p className="m-0 text-sm text-muted-foreground">{t("pollFormSubmitCloudflare")}</p>
+              </>
+            }
+          >
+            <div className="grid gap-4">
+              <div>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="outline"
+                  disabled={busy || submitting !== "idle"}
+                  onClick={() => void submit()}
+                >
+                  {t("pollFormSubmit")}
+                </Button>
+              </div>
+              {/* Turnstile renders its frame here (src/account/challenge.ts). */}
+              <div
+                ref={checkBox}
+                role="group"
+                aria-label={t("pollFormSubmitCheckLabel")}
+                hidden={submitting !== "checking"}
+              />
+              <div role="status" className="min-h-6 text-base">
+                {submitting === "checking"
+                  ? t("pollFormSubmitChecking")
+                  : submitting === "sending"
+                    ? t("pollFormSubmitting")
+                    : submitting === "sent"
+                      ? t("pollFormSubmitted")
+                      : null}
+              </div>
+              {submitFailure === undefined ? null : (
+                <p role="alert" className="m-0 text-destructive">
+                  {t(
+                    SUBMIT_MESSAGES[submitFailure] ??
+                      `pollsFailure_${submitFailure as DraftsFailure}`,
+                  )}
+                </p>
+              )}
+            </div>
+          </Section>
         </div>
         <aside aria-labelledby="poll-form-preview" className="min-w-0 lg:col-span-5">
           <div className="grid gap-4 lg:sticky lg:top-6">

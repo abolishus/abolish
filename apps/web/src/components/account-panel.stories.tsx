@@ -90,6 +90,7 @@ const noPolls: DraftsClient = {
   appeal: async () => {
     throw new DraftsError("gone");
   },
+  submit: async () => {},
 };
 
 /** The panel's own notice; the polls list below it has its own. */

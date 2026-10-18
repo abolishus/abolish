@@ -1,6 +1,6 @@
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 
-import { imageHeaders, newNonce, securityHeaders } from "./security.ts";
+import { imageHeaders, isChallengePage, newNonce, securityHeaders } from "./security.ts";
 
 // Server functions are reachable only from our own pages: a request from
 // another origin is refused before any handler runs. Page loads are plain
@@ -10,7 +10,8 @@ const csrf = createCsrfMiddleware({ filter: ({ handlerType }) => handlerType ===
 // Every response gets the security headers, its CSP naming the nonce the
 // router stamps on the inline scripts it renders (src/router.tsx). A link
 // preview's PNG gets the image's set instead, keeping its route's caching.
-const headers = createMiddleware().server(async ({ next }) => {
+// Only the poll editor's pages may run Turnstile (src/security.ts).
+const headers = createMiddleware().server(async ({ next, request }) => {
   const nonce = newNonce();
   const result = await next({ context: { nonce } });
   // A copy: a response's own headers can be immutable (redirects, fetches).
@@ -21,7 +22,10 @@ const headers = createMiddleware().server(async ({ next }) => {
   // redirect sets none and gets `no-store` like a page.
   const redirectCaching =
     response.status >= 300 && response.status < 400 ? response.headers.get("cache-control") : null;
-  for (const [name, value] of Object.entries(image ? imageHeaders() : securityHeaders(nonce)))
+  const challenge = isChallengePage(new URL(request.url).pathname);
+  for (const [name, value] of Object.entries(
+    image ? imageHeaders() : securityHeaders(nonce, { challenge }),
+  ))
     response.headers.set(name, value);
   if (redirectCaching !== null) response.headers.set("cache-control", redirectCaching);
   if (image) response.headers.delete("set-cookie");

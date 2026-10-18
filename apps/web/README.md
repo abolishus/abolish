@@ -27,6 +27,7 @@ The public website: a TanStack Start app rendered on the server, for finding pol
 - `ACCOUNT_RP_ID`: the passkeys' RP ID; `WEB_ORIGIN`'s host by default. Never the ballot client's RP ID or same-site with it (ADR 0017).
 - `ACCOUNT_SECRET`: signs account cookies; at least 32 bytes of randomness.
 - `TURNSTILE_SECRET_KEY`: the Turnstile widget's secret key. Every passkey ceremony start (sign-up, sign-in, adding a passkey) needs a token solved on `WEB_ORIGIN`'s host, checked with Cloudflare before anything is written (packages/core, Turnstile).
+- `TURNSTILE_SITE_KEY`: the same widget's site key, which the poll editor (`/account/polls/<id>`) renders it with when an author submits a poll. Without it the editor says polls can't be submitted here; a malformed one is refused at start. Only the editor's pages allow Turnstile's script and frame in their CSP (`src/security.ts`).
 - `DATABASE_URL`: a login granted `abolish_app` only (packages/core, Database).
 - `POSTHOG_HOST`, `POSTHOG_KEY`: PostHog's ingestion origin (`https://eu.i.posthog.com`, say) and the project API key, both or neither. Without them nothing is reported.
 - `WEB_HOST`, `WEB_PORT`: where to listen; `127.0.0.1:3000` by default, behind the proxy that terminates TLS.

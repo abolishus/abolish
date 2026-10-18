@@ -19,7 +19,8 @@ const ACTION_ICON = {
 } as const satisfies Record<NonNullable<PollModerationView["latest"]>["action"], LucideIcon>;
 
 type Done = "moderationAppealFiled";
-type Failure = Exclude<DraftsFailure, "registered" | "tooManyDrafts" | "refused"> | "unloaded";
+// Only these reach the page (`failed` below); the submission's refusals never do.
+type Failure = Extract<DraftsFailure, "signedOut" | "gone" | "changed" | "failed"> | "unloaded";
 
 export interface PollModerationProps {
   readonly client: DraftsClient;

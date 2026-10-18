@@ -7,6 +7,12 @@
 // (each carrying a per-response nonce), nothing loads from or is sent to
 // another origin, and no other site can frame a page or learn which poll a
 // visitor came from (T-11, T-67).
+//
+// One exception: the poll editor's pages (P2-22 part 6c) may load Cloudflare
+// Turnstile's script and frame, whose token a poll's submission needs (T-72).
+// It is third-party code on our origin, so it is allowed only there, and the
+// page loads it only when the author submits (src/account/challenge.ts; T-43,
+// T-55).
 
 /** A fresh nonce for one response's inline scripts: 128 bits from the platform CSPRNG. */
 export function newNonce(): string {
@@ -14,13 +20,36 @@ export function newNonce(): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
+/** Where Turnstile's script and frame come from. */
+export const CHALLENGE_ORIGIN = "https://challenges.cloudflare.com";
+
+/**
+ * Whether the page at `pathname` may run Turnstile: the poll editor's,
+ * `/account/polls/<new or id>`, and no other. Its links out are plain ones
+ * that load a new document under that page's own policy.
+ */
+export function isChallengePage(pathname: string): boolean {
+  return /^\/account\/polls\/[a-z0-9]+$/.test(pathname);
+}
+
+export interface PolicyOptions {
+  /** Allow Turnstile's script and frame (`isChallengePage`). */
+  readonly challenge?: boolean;
+}
+
 /** The response's Content-Security-Policy, allowing inline scripts that carry `nonce`. */
-export function contentSecurityPolicy(nonce: string): string {
+export function contentSecurityPolicy(
+  nonce: string,
+  { challenge = false }: PolicyOptions = {},
+): string {
   if (!/^[A-Za-z0-9+/]{22}==$/.test(nonce))
     throw new RangeError("nonce must be 16 bytes of base64");
   return [
     "default-src 'none'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}'${challenge ? ` ${CHALLENGE_ORIGIN}` : ""}`,
+    // The widget is Cloudflare's frame; it talks to Cloudflare itself, so
+    // `connect-src` stays ours alone.
+    ...(challenge ? [`frame-src ${CHALLENGE_ORIGIN}`] : []),
     "style-src 'self'",
     "font-src 'self'",
     "img-src 'self'",
@@ -34,9 +63,12 @@ export function contentSecurityPolicy(nonce: string): string {
 }
 
 /** Every security header, for a response rendered with `nonce`. */
-export function securityHeaders(nonce: string): Readonly<Record<string, string>> {
+export function securityHeaders(
+  nonce: string,
+  options: PolicyOptions = {},
+): Readonly<Record<string, string>> {
   return {
-    "content-security-policy": contentSecurityPolicy(nonce),
+    "content-security-policy": contentSecurityPolicy(nonce, options),
     "x-content-type-options": "nosniff",
     // A link out of a poll page tells the next site nothing (T-11, T-67).
     "referrer-policy": "no-referrer",

@@ -9,6 +9,7 @@
 import type { AppealOutcome, ModerationState, PollState } from "@abolishus/core";
 import type { DraftQuestion, PollDraft } from "@abolishus/core/poll-draft-rules";
 import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
+import { TURNSTILE_HEADER } from "@abolishus/core/turnstile";
 
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
 
@@ -57,6 +58,14 @@ export type DraftsFailure =
   | "tooManyDrafts"
   /** The handler found the draft breaks one of the definition's rules. */
   | "refused"
+  /** The account has as many polls setting up as it may. */
+  | "tooManyInSetup"
+  /** The account has submitted as many polls in 24 hours as it may. */
+  | "tooManyToday"
+  /** Turnstile refused the submission's token (spent, expired or not solved here). */
+  | "challengeRefused"
+  /** Turnstile couldn't be asked, or its check couldn't load. */
+  | "challengeUnavailable"
   /** The server refused or failed, or the network did. */
   | "failed";
 
@@ -132,6 +141,8 @@ export interface DraftsClient {
   moderation(id: string): Promise<PollModerationView>;
   /** Appeals the poll's newest decision, which must be an unappealed removal. */
   appeal(id: string): Promise<void>;
+  /** Submits a draft for setup, with a Turnstile token solved for `poll-create`. */
+  submit(id: string, token: string): Promise<void>;
 }
 
 // The handler's refusal codes (src/node/drafts.ts), as the page tells them.
@@ -146,9 +157,17 @@ const REFUSALS: Readonly<Record<string, DraftsFailure>> = {
   // The decision was appealed or replaced since the page read it.
   NOT_APPEALABLE: "changed",
   ALREADY_APPEALED: "changed",
+  TOO_MANY_IN_SETUP: "tooManyInSetup",
+  TOO_MANY_TODAY: "tooManyToday",
+  TURNSTILE_REFUSED: "challengeRefused",
+  TURNSTILE_UNAVAILABLE: "challengeUnavailable",
 };
 
-async function call(path: string, body?: unknown): Promise<unknown> {
+async function call(
+  path: string,
+  body?: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): Promise<unknown> {
   const response = await fetch(`/drafts${path}`, {
     method: body === undefined ? "GET" : "POST",
     credentials: "same-origin",
@@ -157,7 +176,10 @@ async function call(path: string, body?: unknown): Promise<unknown> {
     // Exactly this type, with no charset: the handler refuses anything else.
     ...(body === undefined
       ? {}
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      : {
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   }).catch(() => {
     throw new DraftsError("failed");
   });
@@ -378,5 +400,8 @@ export const draftsClient: DraftsClient = {
   },
   async appeal(id) {
     await call("/appeal", { id });
+  },
+  async submit(id, token) {
+    await call("/submit", { id }, { [TURNSTILE_HEADER]: token });
   },
 };

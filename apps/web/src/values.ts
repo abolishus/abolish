@@ -51,3 +51,8 @@ export function searchText(value: unknown): string | undefined {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return undefined;
 }
+
+/** A Turnstile site key as Cloudflare issues them: letters, digits, `_` and `-`. */
+export function isSiteKey(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9A-Za-z_-]{1,100}$/.test(value);
+}

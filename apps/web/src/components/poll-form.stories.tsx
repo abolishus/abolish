@@ -2,6 +2,7 @@ import type { PollDraft } from "@abolishus/core/poll-draft-rules";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test";
 
+import { type Challenge, ChallengeError } from "../account/challenge.ts";
 import {
   type DraftsClient,
   DraftsError,
@@ -63,12 +64,27 @@ const SAVED: PollDraft = {
 function fakeDrafts({
   read,
   refuse,
-}: { read?: PollWithDraft; refuse?: DraftsError } = {}): DraftsClient & {
+  refuseSubmit,
+  hold,
+}: {
+  read?: PollWithDraft;
+  refuse?: DraftsError;
+  refuseSubmit?: DraftsError;
+  /** Updates answer only once this settles. */
+  hold?: Promise<void>;
+} = {}): DraftsClient & {
   writes: [string, string | undefined, PollDraft][];
+  submits: [string, string][];
 } {
   const writes: [string, string | undefined, PollDraft][] = [];
+  const submits: [string, string][] = [];
   return {
     writes,
+    submits,
+    submit: async (id, token) => {
+      submits.push([id, token]);
+      if (refuseSubmit !== undefined) throw refuseSubmit;
+    },
     list: async () => [],
     remove: async () => {},
     retry: async () => {},
@@ -84,6 +100,7 @@ function fakeDrafts({
     },
     update: async (id, draft) => {
       writes.push(["update", id, draft]);
+      await hold;
       if (refuse !== undefined) throw refuse;
     },
     // The form never reads moderation: the list's stories do (account-polls.stories.tsx).
@@ -97,6 +114,40 @@ function fakeDrafts({
 }
 
 const writes = (client: unknown) => (client as ReturnType<typeof fakeDrafts>).writes;
+const submits = (client: unknown) => (client as ReturnType<typeof fakeDrafts>).submits;
+
+/**
+ * Turnstile's stand-in: a button in the check's place that solves it, or a
+ * check that can't load. Each solve's action and signal are kept.
+ */
+function fakeChallenge({ unavailable = false } = {}): Challenge & {
+  solves: [string, AbortSignal][];
+} {
+  const solves: [string, AbortSignal][] = [];
+  return {
+    solves,
+    solve: (container, action, signal) => {
+      solves.push([action, signal]);
+      if (unavailable) return Promise.reject(new ChallengeError());
+      return new Promise((resolve, reject) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "I'm a person";
+        button.onclick = () => {
+          button.remove();
+          resolve(`token-${solves.length}`);
+        };
+        signal.addEventListener("abort", () => {
+          button.remove();
+          reject(signal.reason);
+        });
+        container.append(button);
+      });
+    },
+  };
+}
+
+const solves = (challenge: unknown) => (challenge as ReturnType<typeof fakeChallenge>).solves;
 
 const meta = {
   component: PollFormPage,
@@ -344,7 +395,7 @@ export const SignedOutOnSave: Story = {
     await expect(canvas.getByRole("textbox", { name: "Title" })).toHaveValue(
       "Harbor library hours",
     );
-    await expect(canvas.getByRole("status")).toBeEmptyDOMElement();
+    for (const status of canvas.getAllByRole("status")) await expect(status).toBeEmptyDOMElement();
   },
 };
 
@@ -369,5 +420,266 @@ export const TooManyDrafts: Story = {
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "You have as many drafts as an account can hold.",
     );
+  },
+};
+
+const savedDraft = () => fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } });
+
+export const SubmitADraft: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByText(
+        "Before it's sent, a check by Cloudflare confirms you're a person. Cloudflare sees your browser's address while it runs.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    // The check appears only now, for this action, and nothing is sent until it is solved.
+    const check = canvas.getByRole("group", { name: "Check that you're a person" });
+    await expect(check).toBeVisible();
+    await expect(canvas.getByText("Complete the check to submit your poll.")).toBeVisible();
+    await expect(solves(args.challenge).map(([action]) => action)).toEqual(["poll-create"]);
+    await expect(submits(args.client)).toEqual([]);
+    await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeDisabled();
+    await userEvent.click(within(check).getByRole("button", { name: "I'm a person" }));
+    await expect(
+      await canvas.findByText("Your poll is submitted. Taking you to your polls…"),
+    ).toBeVisible();
+    await expect(submits(args.client)).toEqual([[ID, "token-1"]]);
+    await expect(args.onSubmitted).toHaveBeenCalledOnce();
+    // Nothing more is saved or sent from the page.
+    await expect(canvas.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeDisabled();
+    await expect(writes(args.client)).toEqual([]);
+  },
+};
+
+export const SubmitADraftDark: Story = {
+  ...SubmitADraft,
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
+  parameters: { theme: "dark" },
+};
+
+export const SubmitSavesFirst: Story = {
+  args: { client: fakeDrafts(), challenge: fakeChallenge(), onCreated: fn(), onSubmitted: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // Nothing saved yet: nothing to submit.
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "Save your draft first: only a saved draft can be submitted.",
+    );
+    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), "Ferry name");
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "What do you want to ask?" }),
+      "What should the new ferry be called?",
+    );
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
+    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+      target: { value: "2026-11-04" },
+    });
+    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    // A change since the save: the stored draft isn't what the page shows.
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "s");
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("Save your draft first");
+    await expect(solves(args.challenge)).toEqual([]);
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "I'm a person" }));
+    await waitFor(() => expect(args.onSubmitted).toHaveBeenCalledOnce());
+    await expect(submits(args.client)).toEqual([[NEW_ID, "token-1"]]);
+  },
+};
+
+export const EditingTakesTheCheckDown: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(canvas.getByRole("button", { name: "I'm a person" })).toBeVisible();
+    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), "!");
+    await expect(canvas.queryByRole("button", { name: "I'm a person" })).toBeNull();
+    await expect(solves(args.challenge)[0]![1].aborted).toBe(true);
+    await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeEnabled();
+    await expect(submits(args.client)).toEqual([]);
+  },
+};
+
+export const SubmitClosesTooSoon: Story = {
+  args: {
+    client: fakeDrafts({
+      // 2026-10-18T13:00:00Z: an hour after the stories' clock, too soon for setup.
+      read: { summary: SUMMARY, draft: { ...SAVED, closesAt: 1792328400n } },
+    }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    const summary = await canvas.findByRole("region", { name: "Your poll wasn't submitted" });
+    await expect(summary).toHaveFocus();
+    await expect(summary).toHaveTextContent("Choose a time at least 90 minutes from now.");
+    await expect(solves(args.challenge)).toEqual([]);
+  },
+};
+
+export const CheckRefused: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: SAVED },
+      refuseSubmit: new DraftsError("challengeRefused"),
+    }),
+    id: ID,
+    challenge: fakeChallenge(),
+    onSubmitted: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "The check that you're a person didn't pass, so nothing was submitted.",
+    );
+    await expect(args.onSubmitted).not.toHaveBeenCalled();
+    // A token is spent once: submitting again takes a new check.
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await waitFor(() =>
+      expect(submits(args.client)).toEqual([
+        [ID, "token-1"],
+        [ID, "token-2"],
+      ]),
+    );
+  },
+};
+
+export const CheckUnavailable: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge({ unavailable: true }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "The check that you're a person couldn't run just now, so nothing was submitted.",
+    );
+    await expect(submits(args.client)).toEqual([]);
+    await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeEnabled();
+  },
+};
+
+export const TooManyInSetup: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: SAVED },
+      refuseSubmit: new DraftsError("tooManyInSetup"),
+    }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "You have as many polls setting up as an account can at once.",
+    );
+  },
+};
+
+export const SubmittedMeanwhile: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: SAVED },
+      refuseSubmit: new DraftsError("changed"),
+    }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "This poll was submitted for setup, so it can't be changed any more.",
+    );
+    await expect(canvas.queryByRole("button", { name: "Submit poll" })).toBeNull();
+  },
+};
+
+export const NoSiteKey: Story = {
+  args: { client: savedDraft(), id: ID },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "Polls can't be submitted on this site just now.",
+    );
+  },
+};
+
+let release = () => {};
+const held = new Promise<void>((resolve) => (release = resolve));
+
+export const EditDuringSave: Story = {
+  args: {
+    client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED }, hold: held }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const title = await canvas.findByRole("textbox", { name: "Title" });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    // Written while the save is on its way: the stored draft won't have it.
+    await userEvent.type(title, "!");
+    release();
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    await expect(canvas.queryByText("Your draft is saved.")).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("Save your draft first");
+    await expect(solves(args.challenge)).toEqual([]);
+  },
+};
+
+export const SaveTakesTheCheckDown: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
+    await expect(canvas.getByRole("button", { name: "I'm a person" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "I'm a person" })).toBeNull();
+    await expect(solves(args.challenge)[0]![1].aborted).toBe(true);
+    await expect(submits(args.client)).toEqual([]);
+    await expect(args.onSubmitted).not.toHaveBeenCalled();
+  },
+};
+
+export const NoEditsWhileSending: Story = {
+  args: {
+    client: {
+      ...savedDraft(),
+      // A submission that never answers: the page stays sending.
+      submit: () => new Promise<void>(() => {}),
+    },
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const title = await canvas.findByRole("textbox", { name: "Title" });
+    await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
+    await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
+    await expect(await canvas.findByText("Submitting your poll…")).toBeVisible();
+    await userEvent.type(title, "!");
+    await expect(title).toHaveValue("Harbor library hours");
   },
 };

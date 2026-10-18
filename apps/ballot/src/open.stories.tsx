@@ -865,6 +865,24 @@ export const IdentityGoneAtTheCast: Story = {
   },
 };
 
+export const RecoveredByTheCast: Story = {
+  name: "The identity was recovered by the time of the cast",
+  args: {
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      identityAtCast: {
+        kind: "found",
+        identity: { secret: SECRET, memberships: [{ tier: 0, group: 5n }], recovered: true },
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device can't answer with a recovered identity yet");
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
+  },
+};
+
 export const CastUnknownSeal: Story = {
   name: "Cast, and the worker doesn't hold the seal",
   args: {

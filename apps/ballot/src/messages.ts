@@ -446,13 +446,13 @@ const enUS = {
   recoverStart: "Use my passkey",
   recoverKeptTitle: "It's opened only on this device",
   recoverKept:
-    "Your voting identity comes back sealed and is opened here, never anywhere else. The public list is read in full, so no server learns which identity is yours.",
+    "Your voting identity comes back sealed and is opened here, never anywhere else. The backup service sees only a code from your passkey, and the public list is read in full, so no server learns which identity is yours.",
   recoverLeftTitle: "What doesn't come back",
   recoverLeft:
     "Receipts and the record of how you answered stay on the device you used before. A device that already has a voting identity can't recover another.",
   recoverWorkingTitle: "Recovering your voting identity",
   recoverWorking:
-    "Follow your browser's passkey prompt. This device then fetches the sealed copy, opens it and checks the public list. Nothing about you is sent.",
+    "Follow your browser's passkey prompt. This device then fetches the sealed copy, opens it and checks the public list. Nothing about your identity or your answers is sent.",
   recoveredTitle: "Your voting identity is on this device",
   recovered:
     "It opened, and the public list counts it in area {region}. This device keeps it from now on.",

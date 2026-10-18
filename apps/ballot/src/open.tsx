@@ -503,7 +503,12 @@ export function Ballot({
         const read = await source.identity();
         if (read.kind !== "found")
           return stopped(read.kind === "none" ? "no-identity" : "identity-unreadable");
-        const { secret } = read.identity;
+        const { secret, recovered } = read.identity;
+        // Recovered since the seal (another tab): refused as at the search.
+        if (recovered === true) {
+          secret.fill(0);
+          return stopped("recovered");
+        }
         // A step the prover reports after the ballot worker answered never
         // puts the voter back on the proving screen.
         let finished = false;

@@ -73,7 +73,13 @@ export class BallotWorker {
     this.#worker.onmessage = ({ data }: MessageEvent<unknown>) => {
       const id = responseId(data);
       const pending = id === undefined ? undefined : this.#pending.get(id);
-      if (id === undefined || pending === undefined) return;
+      if (id === undefined || pending === undefined) {
+        // An open answered after its timeout: no one will zero its secret but here (T-12).
+        const late = data as { kind?: unknown; result?: { secret?: unknown } } | null;
+        if (late?.kind === "backup-open" && late.result?.secret instanceof Uint8Array)
+          late.result.secret.fill(0);
+        return;
+      }
       this.#pending.delete(id);
       clearTimeout(pending.timer);
       pending.resolve(data as WorkerResponse);

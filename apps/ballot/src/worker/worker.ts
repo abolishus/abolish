@@ -58,9 +58,12 @@ scope.onmessage = ({ data }) => {
   }
   answer(request).then(
     (response) => {
-      scope.postMessage(response);
-      // The page has its own copy now; this realm's goes (T-12).
-      if (response.kind === "backup-open" && response.result.ok) response.result.secret.fill(0);
+      try {
+        scope.postMessage(response);
+      } finally {
+        // The page has its own copy now, or none; this realm's goes (T-12).
+        if (response.kind === "backup-open" && response.result.ok) response.result.secret.fill(0);
+      }
     },
     () => scope.postMessage({ v: PROTOCOL_VERSION, id: request.id, kind: "error" }),
   );

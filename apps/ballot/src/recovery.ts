@@ -32,7 +32,9 @@ export interface RecoverySteps {
   /**
    * The worker's locator for the PRF output `prf` (`BallotWorker.backupLocator`);
    * rejects if the worker fails. `prf` is copied to the worker, which keeps
-   * it for `open`, before this returns, so the caller zeroes its own.
+   * it for `open`, before this returns, so the caller zeroes its own. The
+   * worker is one of the recovery's own, terminated once `recover` settles,
+   * so a recovery that stops before `open` leaves no PRF output behind (T-41).
    */
   locate(prf: Uint8Array): Promise<BackupLocatorResult>;
   /** The envelope stored under `locator` (`fetchIdentityBackup`). */

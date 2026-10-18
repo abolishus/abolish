@@ -568,6 +568,37 @@ describe("a recovery's open", () => {
     expect(result).toEqual({ ok: true, secret: registered(), group: GROUP, region: 3 });
   });
 
+  test("names the group counting it whether the region asked of the replay is its own or another", () => {
+    // The last listed group's region is asked: OTHER_GROUP's 7 above (`moved`), GROUP's 3 here (`registered`).
+    const session = new BallotSession();
+    located(session);
+    const result = session.backupOpen(
+      openRequest(sealIdentityBackup(PRF, registered()).envelope, {
+        groups: [{ group_id: GROUP, region: 3 }],
+      }),
+    );
+    expect(result).toEqual({ ok: true, secret: registered(), group: GROUP, region: 3 });
+  });
+
+  test("an envelope that opens to bytes that aren't an identity secret is refused (the spec's vectors)", () => {
+    const vectors = (
+      JSON.parse(
+        readFileSync(
+          new URL("../../../docs/spec/vectors/identity-backup.json", import.meta.url),
+          "utf8",
+        ),
+      ) as { open: { prfOutput: string; envelope: string; code: string }[] }
+    ).open.filter((v) => v.code === "backup-secret");
+    expect(vectors.length).toBeGreaterThan(0);
+    for (const { prfOutput, envelope } of vectors) {
+      const session = new BallotSession();
+      located(session, Uint8Array.from(Buffer.from(prfOutput, "hex")));
+      expect(
+        session.backupOpen(openRequest(Uint8Array.from(Buffer.from(envelope, "hex")))),
+      ).toEqual({ ok: false, problem: "secret" });
+    }
+  });
+
   test("opens once per locator: the PRF output is gone after an open, whatever its outcome", () => {
     const session = new BallotSession();
     const { envelope } = sealIdentityBackup(PRF, registered());

@@ -9,7 +9,8 @@
 // poll checked anew replaces the last one, and its seals go with it. Apart
 // from the poll, a recovery's PRF output waits here between finding the
 // backup's locator and opening its envelope, so the page zeroes its copy
-// as soon as the ceremony gives it (T-41).
+// as soon as the ceremony gives it; the recovery's own worker is
+// terminated after, taking it along if no open came (T-41).
 
 import {
   BallotSealError,
@@ -86,7 +87,12 @@ export class BallotSession {
    */
   readonly #cast = new Map<number, bigint | undefined>();
   #nextSeal = 0;
-  /** The PRF output the last `backupLocator` was given, for the one `backupOpen` after it (T-41). */
+  /**
+   * The PRF output the last `backupLocator` was given, for the one
+   * `backupOpen` after it; a recovery that stops in between leaves it here
+   * until the worker ends, so a recovery runs in a worker of its own,
+   * terminated once it is done (T-41).
+   */
   #backupPrf: Uint8Array | undefined;
 
   /**
@@ -210,8 +216,8 @@ export class BallotSession {
       }
       if (isForbiddenCommitment(commitment)) return { ok: false, problem: "secret" };
       const { groups } = request;
-      const first = groups[0];
-      if (first === undefined) return { ok: false, problem: "not-registered" };
+      const asked = groups.at(-1);
+      if (asked === undefined) return { ok: false, problem: "not-registered" };
       const records: ContractEventRecord[] = [];
       for (const bytes of request.records) {
         try {
@@ -222,13 +228,14 @@ export class BallotSession {
         }
       }
       // The region the identity asked for is lost with the old device, so
-      // any served region will do: `registered` and `moved` alike name the
-      // one group the first-occurrence rule counts the commitment in.
+      // any served region will do (the last listed group's): `registered`
+      // and `moved` alike name the one group the first-occurrence rule
+      // counts the commitment in.
       const outcome = tier0Registration(
         records,
         { block: request.block, groups },
         commitment,
-        first.region,
+        asked.region,
         {
           version: request.version,
           chainId: request.chainId,

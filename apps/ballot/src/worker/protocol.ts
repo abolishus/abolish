@@ -11,6 +11,7 @@
 
 import type {
   BallotV2Code,
+  CastPostingResult,
   CastShare,
   ContractEventVersion,
   MembershipProverErrorCode,
@@ -136,6 +137,24 @@ export interface ReceiptRequest {
 }
 
 /**
+ * Whether `ciphertext` and `m`, the share ciphertext and ML-KEM message the
+ * page kept for `seat` of `ballot`, a cast of the poll the worker last
+ * checked, make a posting that passes the public check under that seat's
+ * registered KEM key (`castPostingSeatV3`; [[delivery]], Client rule 4):
+ * checked here, where the poll's keys are, before the voter is ever offered
+ * to post it, since the page's storage checks only `m`'s length (T-18).
+ */
+export interface PostingRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "posting";
+  readonly ballot: Uint8Array;
+  readonly seat: number;
+  readonly ciphertext: Uint8Array;
+  readonly m: Uint8Array;
+}
+
+/**
  * The identity commitment of `secret`, `Poseidon2(s · B8)`
  * ([[identity-backup]], Identity secret), which a Tier 0 registration sends
  * ([[registration]], Request). Asked of the worker, like every use of the
@@ -247,7 +266,8 @@ export type WorkerRequest =
   | SealRequest
   | ChallengeRequest
   | CastRequest
-  | ReceiptRequest;
+  | ReceiptRequest
+  | PostingRequest;
 
 /**
  * Why no proof came back: one of `MembershipProverError`'s codes, or
@@ -374,6 +394,22 @@ export type ReceiptResult =
   | { readonly ok: true; readonly seat: number }
   | { readonly ok: false; readonly problem: "unknown" | "refused" };
 
+/**
+ * Whether a kept share would deliver its seat if posted, or why not: no
+ * poll held, or a ballot that isn't a cast of it or a seat outside its panel
+ * (`unknown`), or a posting that fails the public check (`refused`, with
+ * `castPostingSeatV3`'s code), which the client treats as unreadable and
+ * never offers (T-18, T-15).
+ */
+export type PostingResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly problem: "unknown" }
+  | {
+      readonly ok: false;
+      readonly problem: "refused";
+      readonly code: Extract<CastPostingResult, { ok: false }>["code"];
+    };
+
 export type WorkerResponse =
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -440,6 +476,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "receipt";
       readonly result: ReceiptResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "posting";
+      readonly result: PostingResult;
     }
   /** The request was malformed or the worker failed; it names no detail, which could quote a secret. */
   | { readonly v: typeof PROTOCOL_VERSION; readonly id: number; readonly kind: "error" };
@@ -534,6 +576,7 @@ const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
 const RECEIPT_KEYS = ["ballot", "id", "kind", "receipt", "v"];
+const POSTING_KEYS = ["ballot", "ciphertext", "id", "kind", "m", "seat", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
@@ -728,6 +771,13 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
     if (!isBytes(ballot) || !isBytes(receipt)) return undefined;
     return { v, id, kind: "receipt", ballot, receipt };
   }
+  if (data["kind"] === "posting") {
+    if (!hasKeys(data, POSTING_KEYS)) return undefined;
+    const { ballot, seat, ciphertext, m } = data;
+    if (!isBytes(ballot) || !isId(seat) || !isBytes(ciphertext) || !isBytes(m, 32))
+      return undefined;
+    return { v, id, kind: "posting", ballot, seat, ciphertext, m };
+  }
   return undefined;
 }
 
@@ -748,6 +798,7 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "challenge",
   "cast",
   "receipt",
+  "posting",
   "error",
 ]);
 

@@ -594,6 +594,43 @@ describe("receipt requests", () => {
   });
 });
 
+describe("posting requests", () => {
+  const posting = () => ({
+    v: PROTOCOL_VERSION,
+    id: 16,
+    kind: "posting",
+    ballot: new Uint8Array(40).fill(2),
+    seat: 3,
+    ciphertext: new Uint8Array(50).fill(4),
+    m: new Uint8Array(32).fill(5),
+  });
+
+  test("accepts a well-formed request as it is: the bytes are the session's to judge", () => {
+    expect(parseRequest(posting())).toEqual(posting());
+  });
+
+  test.each([
+    ["a ballot that isn't bytes", { ballot: [2, 2] }],
+    ["a ciphertext that isn't bytes", { ciphertext: "04" }],
+    ["an m of 31 bytes", { m: new Uint8Array(31) }],
+    ["an m of 33 bytes", { m: new Uint8Array(33) }],
+    ["a seat that isn't a whole number", { seat: 1.5 }],
+    ["a negative seat", { seat: -1 }],
+    ["a seat as a string", { seat: "3" }],
+    ["an extra key", { receipt: new Uint8Array(1) }],
+  ])("refuses one with %s", (_, change) => {
+    expect(parseRequest({ ...posting(), ...change })).toBeUndefined();
+  });
+
+  test("refuses one without one of its keys", () => {
+    for (const key of ["ballot", "seat", "ciphertext", "m"]) {
+      const r: Record<string, unknown> = posting();
+      delete r[key];
+      expect(parseRequest(r)).toBeUndefined();
+    }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -610,6 +647,7 @@ describe("responses", () => {
     );
     expect(responseId({ v: PROTOCOL_VERSION, id: 14, kind: "backup-open", result: {} })).toBe(14);
     expect(responseId({ v: PROTOCOL_VERSION, id: 15, kind: "receipt", result: {} })).toBe(15);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 16, kind: "posting", result: {} })).toBe(16);
   });
 
   test("ignores another version's response or kind", () => {

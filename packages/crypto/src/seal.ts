@@ -69,10 +69,13 @@ import {
 import { RECORD_TYPES } from "./record.ts";
 import { membershipMessage } from "./revoting.ts";
 import {
+  checkPosting,
   type EncryptedShares,
   encryptShares,
   kemKeygen,
   type KemPublicKey,
+  type Posting,
+  type PostingResult,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
 import { checkShareReceiptV3 } from "./share-receipt.ts";
@@ -715,6 +718,53 @@ export function castReceiptSeatV3(
   )
     return undefined;
   return checkShareReceiptV3(keys, ctx, vote, seat, decoded.signature) ? seat : undefined;
+}
+
+/**
+ * `castPostingSeatV3`'s verdict: `checkPosting`'s, or `posting-seat` for a
+ * seat with no key in the election's registered key set.
+ */
+export type CastPostingResult =
+  | PostingResult
+  | { readonly ok: false; readonly code: "posting-seat" };
+
+/**
+ * Whether `posting`, a ciphertext and ML-KEM message the ballot client kept
+ * for `seat` of `ballot`, a version-3 ballot record it cast in `election`,
+ * passes the public check of a posting (docs/spec/share-encryption.md,
+ * Public posting) under that seat's registered KEM key: so a client offers
+ * the voter a posting only for an `m_i` that would deliver the seat, never
+ * one its storage altered or truncated, which the delivery check would
+ * ignore after the voter gave up the seat's everlasting privacy for it
+ * ([[delivery]], Client rule 4; T-18, T-15). Throws as `castReceiptSeatV3`
+ * does on an election it didn't make, a ballot of another election or
+ * bytes that aren't a version-3 ballot record, and on a seat outside the
+ * panel.
+ */
+export function castPostingSeatV3(
+  election: QuestionBallotElection,
+  ballot: Uint8Array,
+  seat: number,
+  posting: Posting,
+): CastPostingResult {
+  const { ballotVersion, keys } = cellContextOf(election);
+  if (ballotVersion !== 3) throw new TypeError("castPostingSeatV3: expected a version-3 election");
+  const record = decodeBallot(ballot, 3);
+  if (!equalBytes(record.definition_hash, election.definitionHash))
+    throw new TypeError("castPostingSeatV3: a ballot of another election");
+  const { vss, share_hashes } = record.committed_vote;
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > share_hashes.length)
+    throw new RangeError("castPostingSeatV3: no such seat");
+  const key = keys.find((k) => k.index === seat);
+  if (key === undefined) return { ok: false, code: "posting-seat" };
+  return checkPosting(
+    { definitionHash: election.definitionHash },
+    seat,
+    key.kemKey,
+    vss,
+    share_hashes,
+    posting,
+  );
 }
 
 /**

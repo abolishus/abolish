@@ -14,6 +14,8 @@
 
 import {
   BallotSealError,
+  castPostingSeatV3,
+  type CastPostingResult,
   castReceiptSeatV3,
   castSealV3,
   challengeSealV3,
@@ -59,6 +61,8 @@ import {
   type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
+  type PostingRequest,
+  type PostingResult,
   PROVER_TIMEOUT_MS,
   type ReceiptRequest,
   type ReceiptResult,
@@ -461,5 +465,33 @@ export class BallotSession {
       if (receiptSealV3(sealed, request.ballot, request.receipt) !== undefined) break;
     }
     return { ok: true, seat };
+  }
+
+  /**
+   * Whether the share the page kept for `request.seat` of `request.ballot`
+   * passes the public check of a posting under that seat's key in the held
+   * poll's registered key set (`castPostingSeatV3`; [[delivery]], Client
+   * rule 4). A ballot that isn't a version-3 record of the held poll, or a
+   * seat outside its panel, is `unknown`. This realm's copy of `m` is zeroed
+   * once judged: the page keeps its own until the seat is receipted or the
+   * voter decides (T-18).
+   */
+  posting(request: PostingRequest): PostingResult {
+    const { ballot, seat, ciphertext, m } = request;
+    try {
+      const poll = this.#poll;
+      if (poll === undefined) return { ok: false, problem: "unknown" };
+      let verdict: CastPostingResult;
+      try {
+        verdict = castPostingSeatV3(poll.election, ballot, seat, { ciphertext, m });
+      } catch (e) {
+        if (e instanceof DecodeError || e instanceof TypeError || e instanceof RangeError)
+          return { ok: false, problem: "unknown" };
+        throw e;
+      }
+      return verdict.ok ? { ok: true } : { ok: false, problem: "refused", code: verdict.code };
+    } finally {
+      m.fill(0);
+    }
   }
 }

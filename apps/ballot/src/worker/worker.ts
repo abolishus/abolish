@@ -47,6 +47,8 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "cast", result: await session.cast(request) };
     case "receipt":
       return { v, id, kind: "receipt", result: session.receipt(request) };
+    case "posting":
+      return { v, id, kind: "posting", result: session.posting(request) };
   }
 }
 

@@ -161,8 +161,8 @@ export interface BallotTally {
 
 /**
  * Under a live definition, one ballot copy as the running sets read it
- * (docs/spec/verifier.md, Releases, step 3): a ballot entry of the board or
- * ordinary path that decodes and names a cell of the partition, with its
+ * (docs/spec/verifier.md, Releases, step 3): a ballot entry of any path
+ * (board, ordinary or relayed) that decodes and names a cell of the partition, with its
  * membership verdict alone and the admission results that don't depend on
  * the L1 head.
  */
@@ -370,7 +370,11 @@ export function ballotChecks(
       continue;
     }
     const { core, checked } = judged;
-    if (path.kind !== "relayed") live?.judged(at, path.segment, payload, checked, judged.tally);
+    // Every path's copy, the relayed one's too: a member's ballot 5.4
+    // rejects counts toward the one-ballot rule whichever path boarded it,
+    // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
+    // window (T-45, T-71).
+    live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {
       rejected.push({
         entry: at,

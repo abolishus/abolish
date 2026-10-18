@@ -534,25 +534,31 @@ describe("the read-back", () => {
     expect(encodeDisplayTextV2(draftDisplayText(DRAFT, text.salt))).toEqual(base.poll.displayText);
   });
 
-  test("any single changed byte of the registered definition is refused", () => {
-    fc.assert(
-      fc.property(
-        fc.nat({ max: base.poll.definition.length - 1 }),
-        fc.integer({ min: 1, max: 255 }),
-        (at, x) => {
-          const definition = base.poll.definition.slice();
-          definition[at]! ^= x;
-          let registeredHash;
-          try {
-            registeredHash = electionDefinitionV5Hash(decodeElectionDefinitionV5(definition));
-          } catch {
-            registeredHash = base.poll.registeredHash;
-          }
-          // Even with the registry's hash of the changed bytes.
-          expect(pollReadBack({ ...base.poll, definition, registeredHash })).toBeDefined();
-        },
-      ),
-      { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) },
-    );
-  });
+  // A definition decoded and hashed, and the read-back run, each run: at CI's
+  // 1000 runs, past the 5-second default.
+  test(
+    "any single changed byte of the registered definition is refused",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.nat({ max: base.poll.definition.length - 1 }),
+          fc.integer({ min: 1, max: 255 }),
+          (at, x) => {
+            const definition = base.poll.definition.slice();
+            definition[at]! ^= x;
+            let registeredHash;
+            try {
+              registeredHash = electionDefinitionV5Hash(decodeElectionDefinitionV5(definition));
+            } catch {
+              registeredHash = base.poll.registeredHash;
+            }
+            // Even with the registry's hash of the changed bytes.
+            expect(pollReadBack({ ...base.poll, definition, registeredHash })).toBeDefined();
+          },
+        ),
+        { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) },
+      );
+    },
+  );
 });

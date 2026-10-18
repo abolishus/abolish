@@ -222,7 +222,9 @@ export type ArchivedRead =
  * one transaction's data has one reading. Every outcome is a function of the
  * data, `cid` and `maxLength`: a source serving other data is a failed fetch,
  * and the caller tries another (T-24). The caller fetches the data within its
- * own limit; nothing here is longer than the data (T-52).
+ * own limit, but data of a few distinct blocks can name an object of up to
+ * `maxLength` bytes (identical chunks), which is read and hashed again: so
+ * `maxLength` is the reader's bound, set to what it can spend (T-52).
  */
 export function readArchivedObject(
   data: Uint8Array,

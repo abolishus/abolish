@@ -204,22 +204,20 @@ def minimal_varint(b, at):
 
 
 def unixfs_filesize(node):
-    """The filesize a dag-pb root claims, or None; the final CAR comparison judges the rest."""
+    """The filesize a dag-pb root claims where canonical form puts it (content-addressing.md,
+    Reading within a bound): after the links, Data opens with Type = File (08 02) then field 3.
+    None otherwise; the final CAR comparison judges every other byte."""
     at = 0
-    while at < len(node):
-        key, at = ca.read_varint(node, at)
-        length, at = ca.read_varint(node, at)
-        body = node[at : at + length]
+    while at < len(node) and node[at] == 0x12:
+        length, at = ca.read_varint(node, at + 1)
         at += length
-        if key == (1 << 3 | 2):
-            j = 0
-            while j < len(body):
-                k, j = ca.read_varint(body, j)
-                v, j = ca.read_varint(body, j)
-                if k == (3 << 3):
-                    return v
-            return None
-    return None
+    if at >= len(node) or node[at] != 0x0A:
+        return None
+    _, at = ca.read_varint(node, at + 1)
+    if node[at : at + 3] != b"\x08\x02\x18":
+        return None
+    size, _ = ca.read_varint(node, at + 3)
+    return size
 
 
 def read_archived(data, root, bound):
@@ -249,7 +247,7 @@ def read_archived(data, root, bound):
     top = blocks[root]
     if root[1] == 0x55:
         length = len(top)
-        if length > CHUNK:
+        if length < 1 or length > CHUNK:
             return inconsistent
     else:
         length = unixfs_filesize(top)
@@ -488,6 +486,17 @@ def main():
     tampered[-1] ^= 1
     add_read("block-flipped", "The block's last byte flipped", bytes(tampered), small_root, CHUNK, None)
     add_read("extra-block", "Another object's block after this one", small_car + other_car[hdr:], small_root, CHUNK, None)
+    # dag-pb roots whose filesize isn't where canonical form puts it: inconsistent, never over-bound.
+    for rid, desc, data_field in [
+        ("root-no-type", "A dag-pb root whose Data has a filesize of 2^30 and no Type", b"\x18" + ca.varint(1 << 30)),
+        ("root-directory", "A dag-pb root of Type Directory claiming 2^30 bytes", b"\x08\x01\x18" + ca.varint(1 << 30)),
+    ]:
+        node = ca.pb_bytes(1, data_field)
+        root = bytes([0x01, 0x70, 0x12, 0x20]) + sha256(node)
+        add_read(rid, desc, car_header(root) + ca.varint(36 + len(node)) + root + node, root, CHUNK, None)
+    empty_root = raw_cid(b"")
+    add_read("empty-block", "A raw CID with no data: a 36-byte block", car_header(empty_root) + ca.varint(36) + empty_root, empty_root, CHUNK, None)
+    add_read("varint-9-bytes", "The block's length as a nine-byte varint", small_car[:hdr] + b"\x80" * 8 + b"\x01", small_root, CHUNK, None)
     add_read("manifest", "The first manifest's CAR, read within one chunk", object_car(first_enc)[0], first_cid, CHUNK, None)
 
     big = obj_bytes("archive/big", CHUNK + 1)

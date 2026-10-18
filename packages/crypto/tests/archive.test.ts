@@ -401,6 +401,16 @@ describe("archive manifest properties", () => {
   });
 });
 
+describe("argument checks", () => {
+  test("the locator reader takes only bytes, and the encoder only a 32-byte transaction", () => {
+    expect(() => decodeArchiveLocator("0001" as unknown as Uint8Array)).toThrow(TypeError);
+    const cid = prefixed(0x55, new Uint8Array(32));
+    expect(() => encodeArchiveLocator(cid, new Uint8Array(31))).toThrow(EncodeError);
+    expect(() => encodeArchiveLocator(cid, new Uint8Array(33))).toThrow(EncodeError);
+    expect(encodeArchiveLocator(cid, new Uint8Array(32)).length).toBe(LOCATOR_V1_LENGTH);
+  });
+});
+
 describe("transaction IDs", () => {
   test("arweaveId is 43 characters of unpadded base64url", () => {
     expect(arweaveId(new Uint8Array(32))).toBe("A".repeat(43));

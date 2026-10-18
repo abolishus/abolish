@@ -444,6 +444,50 @@
       "data": "3aa265726f6f747381d82a5825000155122056c38bc3b50675ac6a482e69b8eae7113cabf94a437420ac183800129c1525c26776657273696f6e0188010155122056c38bc3b50675ac6a482e69b8eae7113cabf94a437420ac183800129c1525c2b825a44447b41fde03ee1e6275fea14c39b5986d9ffc4f178a665f06231753e6117cc3da1bc549392029c4e10fed2f813ce7d858c765a18ebf5d0ab14bd269be4c756f3656e267f3b41a5eb98b59fb78a92dc90f993a3af3f4db9bd72c4181cc03ba80088801015512201eb2810a5126203cfc4d1aa22c3d3d1ad0ae22e53cdb675fca1e89ec6a308d621ec9779ea606908fe2092c831625674a79fe4c1fd0365931a06e9f0426e415510be2b541b75e6c6561cea447e080421d8463d06ff0c85f48a54e800d693a01573e4e6a9fcea7b557b60c28a4c7a08e3b9e935ff00ba2be4045ee0632763153a6ea1d2f75"
     },
     {
+      "id": "root-no-type",
+      "description": "A dag-pb root whose Data has a filesize of 2^30 and no Type",
+      "cid": "01701220f2862c823dfd69fe35c588b46254ee41a5553da42d8ed14ba6e4751303eadd17",
+      "maxLength": 1048576,
+      "result": {
+        "ok": false,
+        "reason": "inconsistent"
+      },
+      "data": "3aa265726f6f747381d82a58250001701220f2862c823dfd69fe35c588b46254ee41a5553da42d8ed14ba6e4751303eadd176776657273696f6e012c01701220f2862c823dfd69fe35c588b46254ee41a5553da42d8ed14ba6e4751303eadd170a06188080808004"
+    },
+    {
+      "id": "root-directory",
+      "description": "A dag-pb root of Type Directory claiming 2^30 bytes",
+      "cid": "0170122073f16d20d3ceddb482dbf9993ed2807f7089ab48eb5a65810fa10ec8c6034127",
+      "maxLength": 1048576,
+      "result": {
+        "ok": false,
+        "reason": "inconsistent"
+      },
+      "data": "3aa265726f6f747381d82a5825000170122073f16d20d3ceddb482dbf9993ed2807f7089ab48eb5a65810fa10ec8c60341276776657273696f6e012e0170122073f16d20d3ceddb482dbf9993ed2807f7089ab48eb5a65810fa10ec8c60341270a080801188080808004"
+    },
+    {
+      "id": "empty-block",
+      "description": "A raw CID with no data: a 36-byte block",
+      "cid": "01551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "maxLength": 1048576,
+      "result": {
+        "ok": false,
+        "reason": "inconsistent"
+      },
+      "data": "3aa265726f6f747381d82a58250001551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8556776657273696f6e012401551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "varint-9-bytes",
+      "description": "The block's length as a nine-byte varint",
+      "cid": "0155122056c38bc3b50675ac6a482e69b8eae7113cabf94a437420ac183800129c1525c2",
+      "maxLength": 1048576,
+      "result": {
+        "ok": false,
+        "reason": "inconsistent"
+      },
+      "data": "3aa265726f6f747381d82a5825000155122056c38bc3b50675ac6a482e69b8eae7113cabf94a437420ac183800129c1525c26776657273696f6e01808080808080808001"
+    },
+    {
       "id": "manifest",
       "description": "The first manifest's CAR, read within one chunk",
       "cid": "01551220c55021fd1b0f2d3d4e06c095fc6d97aaec4a36100954195d802dd70c6ad5bc94",

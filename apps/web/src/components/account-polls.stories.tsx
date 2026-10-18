@@ -64,6 +64,7 @@ function fakeDrafts(
           ],
         });
       }),
+    submit: async () => {},
     retry: async (id) =>
       act("retry", id, () => {
         list = list.map((p) =>

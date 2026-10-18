@@ -611,6 +611,14 @@ const enUS = {
     "That decision changed or was already appealed since this page read it. This shows how it stands now.",
   moderationFailure_failed: "The appeal didn't go through. Nothing changed; try again shortly.",
   moderationFailure_unloaded: "This poll's moderation couldn't be loaded. Try again shortly.",
+  pollsFailure_tooManyInSetup:
+    "You have as many polls setting up as an account can at once. Submit this one when one of them has opened.",
+  pollsFailure_tooManyToday:
+    "You've submitted as many polls in the last 24 hours as an account can. Try again later.",
+  pollsFailure_challengeRefused:
+    "The check that you're a person didn't pass, so nothing was submitted. Submit again to take a new one.",
+  pollsFailure_challengeUnavailable:
+    "The check that you're a person couldn't run just now, so nothing was submitted. Try again shortly.",
   pollsCreate: "Create a poll",
   pollsEdit: "Edit draft",
   pollFormEyebrow: "Your polls",
@@ -689,7 +697,23 @@ const enUS = {
   pollFormPreviewOptional: "You can leave this question blank.",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",
+  pollFormSubmitMark: "Submit",
+  pollFormSubmitTitle: "Ready to ask?",
+  pollFormSubmitLede:
+    "Submitting sets your poll up on the public record, and it opens for answers when that's done. You can't change it after you submit.",
+  pollFormSubmitCloudflare:
+    "Before it's sent, a check by Cloudflare confirms you're a person. Cloudflare sees your browser's address while it runs.",
+  pollFormSubmit: "Submit poll",
+  pollFormSubmitCheckLabel: "Check that you're a person",
+  pollFormSubmitChecking: "Complete the check to submit your poll.",
+  pollFormSubmitting: "Submitting your poll…",
+  pollFormSubmitted: "Your poll is submitted. Taking you to your polls…",
+  pollFormSubmitSaveFirst: "Save your draft first: only a saved draft can be submitted.",
+  pollFormSubmitUnavailable: "Polls can't be submitted on this site just now.",
+  pollFormSubmitRefused:
+    "The server found a problem with this draft, so it wasn't submitted. Check when it closes, save it and try again.",
   pollFormErrorsTitle: "Your draft wasn't saved",
+  pollFormSubmitErrorsTitle: "Your poll wasn't submitted",
   pollFormErrorsLede: "Fix these and save again:",
   pollFormInQuestion: "Question {n}: {problem}",
   pollForm_titleMissing: "Give your poll a title.",

@@ -11,7 +11,7 @@ import {
   loadPollList,
   resolveShortLink,
 } from "./server/load.ts";
-import { isCanonicalU64, isElectionId, isShortCode } from "./values.ts";
+import { isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
 
 /**
  * Runs `load`, replacing any failure with one fixed error. A server
@@ -67,3 +67,13 @@ export const fetchShortLink = createServerFn({ method: "GET" })
     return code;
   })
   .handler(({ data }) => opaque(() => resolveShortLink(api(), data)));
+
+/**
+ * This deployment's Turnstile site key (`TURNSTILE_SITE_KEY`), which the poll
+ * editor needs to submit; `null` if none is set. Public by design: the
+ * widget's secret is the server's alone (src/node/main.ts).
+ */
+export const fetchChallengeKey = createServerFn({ method: "GET" }).handler((): string | null => {
+  const key = process.env["TURNSTILE_SITE_KEY"];
+  return isSiteKey(key) ? key : null;
+});

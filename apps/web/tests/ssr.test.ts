@@ -219,6 +219,8 @@ function stubApi(): Server {
   });
 }
 
+const SITE_KEY = "1x00000000000000000000AA";
+
 let api: Server;
 let handler: { fetch(request: Request): Promise<Response> };
 
@@ -226,6 +228,8 @@ beforeAll(async () => {
   api = stubApi();
   await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
   process.env["API_URL"] = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+  // Cloudflare's published test key, which always passes.
+  process.env["TURNSTILE_SITE_KEY"] = SITE_KEY;
   const builder = await createBuilder({ root, logLevel: "warn" });
   await builder.buildApp();
   const server = (await import(pathToFileURL(`${root}dist/server/server.js`).href)) as {
@@ -255,7 +259,11 @@ async function follow(path: string): Promise<Response> {
 /** The nonce the CSP allows, checking the rest of the policy along the way. */
 function cspNonce(response: Response): string {
   const csp = response.headers.get("content-security-policy") ?? "";
-  const match = /script-src 'self' 'nonce-([A-Za-z0-9+/]{22}==)'(?:;|$)/.exec(csp);
+  // The poll editor's adds Turnstile's origin (src/security.ts), and nothing else.
+  const match =
+    /script-src 'self' 'nonce-([A-Za-z0-9+/]{22}==)'(?: https:\/\/challenges\.cloudflare\.com)?(?:;|$)/.exec(
+      csp,
+    );
   if (match?.[1] === undefined) throw new Error(`unexpected CSP: ${csp}`);
   return match[1];
 }
@@ -283,6 +291,10 @@ describe("every page", () => {
       expect(csp).toContain("default-src 'none'");
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("connect-src 'self'");
+      // Turnstile's origin only on the poll editor's pages (P2-22 part 6c; T-43, T-55).
+      const editor = path.startsWith("/account/polls/");
+      expect(csp.includes("https://challenges.cloudflare.com")).toBe(editor);
+      expect(csp.includes("frame-src")).toBe(editor);
       const html = await response.text();
       const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1] ?? "");
       expect(scripts.length).toBeGreaterThan(0);
@@ -700,6 +712,11 @@ describe("poll form", () => {
       expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
       // A draft is the account's, and the form needs the script: neither is server-rendered.
       expect(html).not.toContain("Save draft");
+      // Turnstile isn't loaded with the page: only a submission loads it.
+      expect(html).not.toContain("challenges.cloudflare.com");
+      expect(html).not.toContain("api.js");
+      // The site key the editor renders the widget with comes with the page.
+      expect(html).toContain(SITE_KEY);
     }
     expect(seen).toEqual([]);
   });
@@ -713,7 +730,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(5);
+    expect(ids.length).toBe(6);
     return ids;
   }
 
@@ -736,7 +753,10 @@ describe("server functions", () => {
       });
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
-        /expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size/,
+        // The site key's takes no input, and answers the key.
+        new RegExp(
+          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|${SITE_KEY}`,
+        ),
       );
     }
   });

@@ -81,6 +81,9 @@ function database(): string {
   return u.href;
 }
 
+// Cloudflare's published test key, which always passes.
+const SITE_KEY = "1x00000000000000000000AA";
+
 describe("dist/node/main.mjs", () => {
   test("serves pages, their assets and the account handler, from the bundle alone", async () => {
     const port = await freePort();
@@ -92,6 +95,7 @@ describe("dist/node/main.mjs", () => {
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
       TURNSTILE_SECRET_KEY: "turnstile-secret",
+      TURNSTILE_SITE_KEY: SITE_KEY,
       WEB_PORT: String(port),
     });
     try {
@@ -121,6 +125,14 @@ describe("dist/node/main.mjs", () => {
       const account = await fetch(`${at}/account`);
       expect(account.status).toBe(200);
       expect(await account.text()).toContain('<meta name="robots" content="noindex"');
+      // The poll editor gets Turnstile's origin in its policy and the site key in its page.
+      const editor = await fetch(`${at}/account/polls/new`);
+      expect(editor.status).toBe(200);
+      expect(editor.headers.get("content-security-policy")).toContain(
+        "frame-src https://challenges.cloudflare.com",
+      );
+      expect(account.headers.get("content-security-policy")).not.toContain("challenges");
+      expect(await editor.text()).toContain(SITE_KEY);
       // A query that reached the session table as abolish_app: a missing
       // table or grant would be a 500.
       const session = await fetch(`${at}/auth/get-session`, {
@@ -154,6 +166,7 @@ describe("dist/node/main.mjs", () => {
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: "short",
       TURNSTILE_SECRET_KEY: "turnstile-secret",
+      TURNSTILE_SITE_KEY: SITE_KEY,
     });
     const [code] = (await once(web.child, "exit")) as [number];
     expect(code).not.toBe(0);
@@ -167,12 +180,32 @@ describe("dist/node/main.mjs", () => {
       API_URL: "http://127.0.0.1:9",
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SITE_KEY: SITE_KEY,
     });
     const [code] = (await once(web.child, "exit")) as [number];
     expect(code).not.toBe(0);
     expect(web.err()).toContain("TURNSTILE_SECRET_KEY");
     expect(web.err()).not.toContain(SECRET);
   }, 30_000);
+
+  test.each(["not a key", "0x4AAA/AAA", "k".repeat(101)])(
+    "refuses to start with %j as its Turnstile site key",
+    async (siteKey) => {
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        TURNSTILE_SITE_KEY: siteKey,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain("TURNSTILE_SITE_KEY");
+      expect(web.err()).not.toContain(SECRET);
+    },
+    30_000,
+  );
 
   test("refuses half a PostHog configuration, quoting none of it", async () => {
     const web = run({
@@ -181,6 +214,7 @@ describe("dist/node/main.mjs", () => {
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
       TURNSTILE_SECRET_KEY: "turnstile-secret",
+      TURNSTILE_SITE_KEY: SITE_KEY,
       POSTHOG_KEY: "phc_unpaired",
     });
     const [code] = (await once(web.child, "exit")) as [number];
@@ -231,6 +265,7 @@ describe("link previews from the bundle", () => {
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
       TURNSTILE_SECRET_KEY: "turnstile-secret",
+      TURNSTILE_SITE_KEY: SITE_KEY,
       WEB_PORT: String(port),
     });
     try {

@@ -8,10 +8,12 @@
 //   prover compile its WebAssembly (curve code and witness calculator); it
 //   never allows JavaScript eval.
 // - connect-src: the client's own origin, for the prover's key and witness
-//   calculator from its own release; the API's origin and one L2 JSON-RPC
-//   origin, both untrusted (the client checks every answer against the
-//   registry, T-34); and nothing else. Staging's values; a release names its
-//   own.
+//   calculator from its own release; the API's origin, two L2 JSON-RPC
+//   origins of different operators (the second confirms a `moved` outcome
+//   before the client offers a new identity, T-16) and one L1 JSON-RPC origin
+//   (the block a ballot names, and chain time), all untrusted (the client
+//   checks every answer against the registry or the chain, T-34); and nothing
+//   else. Staging's values; a release names its own.
 // - frame-src: the challenge page's origin alone (apps/challenge), where
 //   Turnstile runs instead of in the client; staging's, as above.
 // - worker-src 'self': the Web Workers that encrypt and prove load only from
@@ -35,7 +37,13 @@ export const BALLOT_CSP: Csp = {
   "style-src": ["'self'"],
   "font-src": ["'self'"],
   "img-src": ["'self'"],
-  "connect-src": ["'self'", "https://api-staging.abolish.us", "https://sepolia.base.org"],
+  "connect-src": [
+    "'self'",
+    "https://api-staging.abolish.us",
+    "https://sepolia.base.org",
+    "https://base-sepolia-rpc.publicnode.com",
+    "https://ethereum-sepolia-rpc.publicnode.com",
+  ],
   "frame-src": ["https://challenge-staging.up.railway.app"],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],

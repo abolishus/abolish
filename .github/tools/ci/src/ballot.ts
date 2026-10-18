@@ -96,17 +96,24 @@ export const PROVER_ARTIFACTS: Readonly<Record<string, string>> = {
 
 /**
  * The origins besides its own the client may make requests to, and the only
- * ones its code may name (T-34, T-43):the API that serves definitions, display text and the
- * board, and one L2 JSON-RPC endpoint the election registry is read through
- * (ADR 0004: Base Sepolia while there is no mainnet). Both are
- * untrusted: the client checks every answer against the registry before
- * showing anything, so a hostile one can refuse service but not change a
+ * ones its code may name (T-34, T-43): the API that serves definitions,
+ * display text and the board; the L2 JSON-RPC endpoint the election and group
+ * registries are read through (ADR 0004: Base Sepolia while there is no
+ * mainnet); a second L2 endpoint of another operator, which must agree before
+ * the client treats a `moved` registration as real and offers a new identity
+ * (T-16, T-11), so one lying endpoint can't make a voter give theirs up; and
+ * one L1 JSON-RPC endpoint (Sepolia), for the L1 block a ballot names and the
+ * voting window by chain time (docs/spec/revoting.md, Client rules). All are
+ * untrusted: the client checks every answer against the registry or the chain
+ * before acting on it, so a hostile one can refuse service but not change a
  * ballot. These are staging's. A release names its own, and a release build
  * naming a staging origin is a policy failure (owner review, rule B).
  */
 export const CONNECT_ORIGINS: readonly string[] = [
   "https://api-staging.abolish.us",
   "https://sepolia.base.org",
+  "https://base-sepolia-rpc.publicnode.com",
+  "https://ethereum-sepolia-rpc.publicnode.com",
 ];
 
 /**

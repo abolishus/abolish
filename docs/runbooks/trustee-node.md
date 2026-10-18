@@ -26,6 +26,18 @@ The store (`store` in the configuration) holds the write-once records every cere
 
 The JSON file the README describes, with the panel copied from the registered panel and its `panelId` compared out of band with the other trustees: the node refuses a panel whose keys don't hash to that identifier. The coordinator URL must be HTTPS.
 
+## Availability duty
+
+With an `availability` section the node also attests, or complains about, each approved election's ballot extent ([[availability]], What a seat does; T-24, T-54). What it needs:
+
+- **Your own nodes.** An L2 node you run, deriving its chain from L1 (its finalized head is what the seat trusts for recorded records, T-71), and an L1 node. A provider's URL may hold its key; the node never prints either URL. An L1 and an L2 URL at one provider trust that provider for everything the seat reads.
+- **The deployment's pins**, copied from the release record and compared out of band with the other trustees like the panel: the board anchor with its deployment block and clock (`epoch`, `period`, `deadline`), the election registry and the board with their deployment blocks, and the L2's `OptimismPortal`. A wrong clock or contract makes the seat refuse the election (`availability-error`, `L1AnchorError`) or spend its one attestation on a checkpoint the verifier doesn't count.
+- **A paying account.** Its secp256k1 key in its own file, held as the identity key is (owner-only, never a link). It grants no authority over the board, but whoever reads it can drain it and so keep the seat's records off chain (T-50). Fund it on both chains, enough for one call and one deposit per election at the fee caps; a transaction pays at most `l1MaxFeePerGas` or `l2MaxFeePerGas` a unit of gas, and a pending one's fee is never raised. Run one node per account.
+- **Block sources.** Gateways (IPFS, the archive, other seats' `apps/node` mirrors) and, if you hold a copy, a directory of CAR files read once at start. Every block is checked against its CID, so a source can only withhold. Each gateway sees which election's objects the seat asks for (T-11).
+- **The margins.** `sendMarginSeconds` before `c_I` the seat complains if it can't read the extent; `forceAfterSeconds` a record may wait outside an L2 block before it is deposited through L1; from `forceLeadSeconds` before `c_I` every unrecorded record is deposited. The deposit must reach an L1 block by `c_I`, so `forceLeadSeconds` must cover L1's inclusion time at your fee cap, with room to spare.
+
+At start the node checks both nodes' chains and that the board and portal have code, and exits 2 on a mismatch or 1 when a node can't be read; a supervisor restarting it covers a node that was briefly down. Events: `availability` (each election's state when it changes: `waiting`, `fetching`, `sent`, `complained`, `recorded`, `past-cutoff`, and the alarms `board-failed`, `no-checkpoint`, `unrecorded`, `foreign-record`) and `availability-error` (a node's failure, retried each poll, or a refusal for good). `unrecorded` means a record that can no longer count was never recorded, and `foreign-record` that the seat's per-election key signed bytes this node never stored: tell the panel at once.
+
 ## Releases
 
 Rule 6 of [[0006-trustees]] applies in full (T-61):
@@ -36,4 +48,4 @@ Rule 6 of [[0006-trustees]] applies in full (T-61):
 
 ## Logs
 
-The node writes one JSON event per line to stdout: `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`) and `transport` failures. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).
+The node writes one JSON event per line to stdout: `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`), `transport` failures, and the availability duty's events above. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).

@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodeElectionDefinition, identityKey, panelId } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli } from "../src/cli.ts";
 import { LocalCoordinator, serveCoordinator } from "../src/local.ts";
+import { anvil, freePort, type Node } from "./anvil.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -159,4 +160,130 @@ describe("run's configuration", () => {
       expect(t.out).toEqual([]);
     }
   });
+});
+
+describe("run with the availability duty", () => {
+  const BOARD = `0x${"b0".repeat(20)}`;
+  const PORTAL = `0x${"90".repeat(20)}`;
+  const ACCEPT = "0x00";
+  // One Anvil node stands in for both chains: what is checked here is the
+  // duty's setup over the configuration, not either chain's behaviour.
+  let chain: Node;
+  let seatConfig: Record<string, unknown>;
+  let accountKeyFile: string;
+  beforeAll(async () => {
+    chain = await anvil(L2_CHAIN_ID, true);
+    for (const address of [BOARD, PORTAL]) await chain.rpc.call("anvil_setCode", [address, ACCEPT]);
+    const { panel, secrets } = panelOf(3, 2);
+    const identityKeyFile = join(dir, "availability-identity");
+    await writeFile(identityKeyFile, hex(secrets[0] as Uint8Array), { mode: 0o600 });
+    accountKeyFile = join(dir, "availability-account");
+    await writeFile(accountKeyFile, hex(crypto.getRandomValues(new Uint8Array(32))), {
+      mode: 0o600,
+    });
+    seatConfig = {
+      panel: { threshold: 2, keys: panel.keys.map(hex) },
+      panelId: hex(panelId(panel)),
+      l2ChainId: L2_CHAIN_ID.toString(),
+      trusteeRegistry: hex(TRUSTEE_REGISTRY),
+      seat: 1,
+      identityKeyFile,
+      // Nothing listens there: the ceremony's polls fail as transport errors.
+      coordinator: `http://127.0.0.1:${await freePort()}/`,
+      pollSeconds: 3600,
+    };
+  });
+  afterAll(() => chain?.process.kill());
+
+  const availability = (change: Record<string, unknown> = {}) => ({
+    l1: chain.url.href,
+    l1ChainId: L2_CHAIN_ID.toString(),
+    l2: chain.url.href,
+    anchor: `0x${"a1".repeat(20)}`,
+    anchorFromBlock: "0",
+    anchorClock: { epoch: "0", period: "3600", deadline: "43200" },
+    registry: `0x${"e1".repeat(20)}`,
+    registryFromBlock: "0",
+    board: BOARD,
+    boardFromBlock: "0",
+    portal: PORTAL,
+    accountKeyFile,
+    l1MaxFeePerGas: "300000000000",
+    l2MaxFeePerGas: "10000000000",
+    forceAfterSeconds: 1800,
+    forceLeadSeconds: 3600,
+    sendMarginSeconds: 1800,
+    gateways: ["http://127.0.0.1:1/"],
+    ...change,
+  });
+
+  async function runWith(name: string, change: Record<string, unknown>, abortOn?: string) {
+    const configFile = join(dir, `${name}.json`);
+    await writeFile(
+      configFile,
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, `${name}-store`),
+        availability: availability(change),
+      }),
+    );
+    const stop = new AbortController();
+    const t = io(stop.signal);
+    const code = await cli(["run", "--config", configFile], {
+      ...t.io,
+      out: (v) => {
+        t.out.push(v);
+        if ((v as { event?: string }).event === abortOn) stop.abort();
+      },
+    });
+    return { code, out: t.out, err: t.err };
+  }
+
+  test("sets the duty up over the configured nodes, contracts and sources, and stops when aborted", async () => {
+    const blocks = join(dir, "blocks");
+    await mkdir(blocks);
+    await writeFile(join(blocks, "broken.car"), "not a car");
+    const run = await runWith("availability", { blocks }, "started");
+    expect(run.code).toBe(0);
+    expect(run.out).toEqual([
+      { event: "blocks", file: "broken.car", error: "not-a-car" },
+      { event: "started", seat: 1, availability: true },
+    ]);
+  }, 60_000);
+
+  test.each<[string, Record<string, unknown>, string]>([
+    ["a board without code", { board: `0x${"b1".repeat(20)}` }, "availability: no-code"],
+    ["a node on another chain", { l1ChainId: "1" }, "availability: chain"],
+    [
+      "a blocks directory that isn't there",
+      { blocks: "/nonexistent" },
+      "availability.blocks: ENOENT",
+    ],
+  ])(
+    "refuses %s as bad configuration",
+    async (name, change, error) => {
+      const run = await runWith(name.replaceAll(" ", "-"), change);
+      expect(run.code).toBe(2);
+      expect(run.err).toEqual([{ error }]);
+      expect(run.out).toEqual([]);
+    },
+    60_000,
+  );
+
+  test("refuses an account key others can read", async () => {
+    const loose = join(dir, "loose-account");
+    await writeFile(loose, "22".repeat(32), { mode: 0o644 });
+    const run = await runWith("loose", { accountKeyFile: loose });
+    expect(run.code).toBe(2);
+    expect(run.err).toMatchObject([{ error: expect.stringMatching(/^account key: /) }]);
+  });
+
+  test("exits 1 when a chain's node can't be read at start, never naming its URL", async () => {
+    const l1 = `http://user:key@127.0.0.1:${await freePort()}/secret`;
+    const run = await runWith("unreachable", { l1 });
+    expect(run.code).toBe(1);
+    expect(run.err).toEqual([{ error: expect.stringMatching(/^availability: eth_chainId: /) }]);
+    expect(JSON.stringify(run.err)).not.toContain("key@");
+    expect(run.out).toEqual([]);
+  }, 60_000);
 });

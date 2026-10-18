@@ -7,6 +7,8 @@ import {
   encodeElectionDefinition,
   type L1Origin,
   objectCid,
+  pinnedVersion,
+  RECORD_TYPES,
 } from "@abolishus/crypto";
 import { chainId, L2Error, type Rpc } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
@@ -364,6 +366,13 @@ describe("l1BoardAnchors", () => {
     );
   });
 
+  test("gives the board-entry version the registered definition pins", async () => {
+    const { d, election, options } = await setup("board-version", 600n);
+    const reader = await l1BoardAnchors(options, election);
+    expect(reader.boardVersion).toBe(pinnedVersion(d, RECORD_TYPES.boardEntry));
+    expect(reader.boardVersion).toBeTypeOf("number");
+  });
+
   test("an AvailabilitySeat over it waits until s_A's anchoring deadline has passed on finalized L1", async () => {
     const { f, election, options } = await setup("seat", 600n);
     await advanceTo(end(f + 1n) + 60n);
@@ -415,6 +424,17 @@ describe("l1BoardAnchors refuses an election", () => {
       registered(id, encoding, hexToBytes(v3.hash as string), o),
     ]);
     await refused(s, "definition-version");
+  });
+
+  test("whose definition pins a board-entry version the node doesn't read", async () => {
+    // This release reads board-entry versions 1 and 3 to 7, not 2.
+    const pins = typical.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 2 } : p,
+    );
+    await refused(
+      await setup("board-v2", 600n, { profile: { ...typical.profile, pins } }),
+      "definition-version",
+    );
   });
 
   test("whose definition names another anchor, registry or chain", async () => {

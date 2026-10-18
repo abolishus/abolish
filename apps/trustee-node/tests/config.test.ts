@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { panelId } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { ConfigError, parseConfig, readIdentityKey } from "../src/config.ts";
+import { DEFAULT_MAX_BOARD_BYTES } from "@abolishus/verifier";
+import { ConfigError, parseConfig, readAccountKey, readIdentityKey } from "../src/config.ts";
 import { panelOf } from "./fixture.ts";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -57,6 +58,109 @@ describe("the configuration", () => {
   });
 });
 
+function availability(change: Record<string, unknown> = {}) {
+  return {
+    l1: "https://user:key@l1.example/v1/secret",
+    l1ChainId: "11155111",
+    l2: "http://127.0.0.1:8545",
+    anchor: `0x${"a1".repeat(20)}`,
+    anchorFromBlock: "100",
+    anchorClock: { epoch: "1760000000", period: "3600", deadline: "43200" },
+    registry: "e1".repeat(20),
+    registryFromBlock: "200",
+    board: "b0".repeat(20),
+    boardFromBlock: "201",
+    portal: "90".repeat(20),
+    accountKeyFile: "/etc/trustee-node/account",
+    l1MaxFeePerGas: "300000000000",
+    l2MaxFeePerGas: "10000000000",
+    forceAfterSeconds: 1800,
+    forceLeadSeconds: 3600,
+    sendMarginSeconds: 1800,
+    gateways: ["https://ipfs.example/", "https://archive.example/gateway"],
+    ...change,
+  };
+}
+
+describe("the availability configuration", () => {
+  test("is optional: a node without it runs only the ceremony", () => {
+    expect(parseConfig(JSON.stringify(config())).availability).toBeUndefined();
+  });
+
+  test("pins the chains' nodes, the deployment's contracts and clock, the fee caps, the margins and the sources", () => {
+    const a = parseConfig(JSON.stringify(config({ availability: availability() }))).availability;
+    if (a === undefined) return expect.fail("no availability");
+    expect(a.l1.href).toBe("https://user:key@l1.example/v1/secret");
+    expect(a.l1ChainId).toBe(11155111n);
+    expect(hex(a.anchor)).toBe("a1".repeat(20));
+    expect(a.anchorFromBlock).toBe(100n);
+    expect(a.anchorClock).toEqual({ epoch: 1760000000n, period: 3600n, deadline: 43200n });
+    expect([hex(a.registry), hex(a.board), hex(a.portal)]).toEqual([
+      "e1".repeat(20),
+      "b0".repeat(20),
+      "90".repeat(20),
+    ]);
+    expect([a.registryFromBlock, a.boardFromBlock]).toEqual([200n, 201n]);
+    expect([a.l1MaxFeePerGas, a.l2MaxFeePerGas]).toEqual([300000000000n, 10000000000n]);
+    expect([a.forceAfter, a.forceLead, a.sendMargin]).toEqual([1800n, 3600n, 1800n]);
+    expect(a.maxBoardBytes).toBe(DEFAULT_MAX_BOARD_BYTES);
+    expect(a.gateways.map((g) => g.href)).toEqual([
+      "https://ipfs.example/",
+      "https://archive.example/gateway",
+    ]);
+    expect(a.blocks).toBeUndefined();
+  });
+
+  test("takes a directory of CAR files in place of gateways", () => {
+    const a = parseConfig(
+      JSON.stringify(
+        config({ availability: availability({ gateways: [], blocks: "/srv/blocks" }) }),
+      ),
+    ).availability;
+    expect(a?.gateways).toEqual([]);
+    expect(a?.blocks).toBe("/srv/blocks");
+  });
+
+  test.each([
+    ["an unknown field", { extra: 1 }],
+    ["no block source", { gateways: [] }],
+    [
+      "seventeen gateways",
+      { gateways: Array.from({ length: 17 }, (_, i) => `https://g${i}.example/`) },
+    ],
+    ["a gateway with a query", { gateways: ["https://ipfs.example/?key=1"] }],
+    ["an L1 node that isn't HTTP", { l1: "ws://l1.example/" }],
+    ["an L2 node that isn't a URL", { l2: "localhost:8545" }],
+    ["a short board", { board: "b0".repeat(19) }],
+    ["a missing portal", { portal: undefined }],
+    ["a zero period", { anchorClock: { epoch: "0", period: "0", deadline: "0" } }],
+    ["a clock as numbers", { anchorClock: { epoch: 1, period: 3600, deadline: 43200 } }],
+    ["a block past u64", { boardFromBlock: "18446744073709551616" }],
+    ["a zero fee cap", { l1MaxFeePerGas: "0" }],
+    ["a negative margin", { sendMarginSeconds: -1 }],
+    ["a margin past a week", { forceLeadSeconds: 7 * 86_400 + 1 }],
+    ["a fractional margin", { forceAfterSeconds: 1.5 }],
+    ["a zero board budget", { maxBoardBytes: 0 }],
+  ])("refuses %s", (_, change) => {
+    const c = config({ availability: availability(change) });
+    expect(() => parseConfig(JSON.stringify(c))).toThrow(ConfigError);
+  });
+
+  test("never quotes a node's URL, which may hold a provider's key", () => {
+    for (const change of [
+      { l1: "ftp://user:key@l1.example/" },
+      { l2: "ftp://user:key@l2.example/" },
+      { gateways: ["https://user:key@ipfs.example/"] },
+    ]) {
+      const c = config({ availability: availability(change) });
+      expect(() => parseConfig(JSON.stringify(c))).toThrow(
+        /^config: availability\.(l1|l2|gateways\.0): /,
+      );
+      expect(() => parseConfig(JSON.stringify(c))).not.toThrow("key@");
+    }
+  });
+});
+
 describe("the identity key file", () => {
   let dir: string;
   beforeAll(async () => {
@@ -95,5 +199,22 @@ describe("the identity key file", () => {
       await writeFile(path, text as string, { mode: 0o600 });
       await expect(readIdentityKey(path)).rejects.toThrow(ConfigError);
     }
+  });
+});
+
+describe("the account key file", () => {
+  let dir: string;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "trustee-node-account-"));
+  });
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  test("is held as the identity key is, and named as the account key", async () => {
+    const path = join(dir, "account");
+    await writeFile(path, "22".repeat(32), { mode: 0o600 });
+    expect(hex(await readAccountKey(path))).toBe("22".repeat(32));
+    await chmod(path, 0o644);
+    await expect(readAccountKey(path)).rejects.toThrow("account key:");
+    await expect(readAccountKey(join(dir, "missing"))).rejects.toThrow("account key: ENOENT");
   });
 });

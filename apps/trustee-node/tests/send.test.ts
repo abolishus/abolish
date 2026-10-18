@@ -1,6 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { createServer } from "node:net";
-import { type Rpc, rpcClient, RpcError } from "@abolishus/node";
+import { type Rpc, RpcError } from "@abolishus/node";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, randomBytes } from "@noble/hashes/utils.js";
 import fc from "fast-check";
@@ -8,6 +6,7 @@ import { decodeFunctionData, type Hex, keccak256, parseAbi, parseTransaction } f
 import { privateKeyToAccount, privateKeyToAddress } from "viem/accounts";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import { padded, word } from "../../node/tests/anvil.ts";
+import { anvil, type Node } from "./anvil.ts";
 import {
   AVAILABILITY_CALL_GAS,
   availabilitySender,
@@ -54,45 +53,6 @@ const boardCall = (record: Uint8Array) =>
 const portalAbi = parseAbi([
   "function depositTransaction(address to, uint256 value, uint64 gasLimit, bool isCreation, bytes data) payable",
 ]);
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("no port")),
-      );
-    });
-  });
-}
-
-interface Node {
-  readonly rpc: Rpc;
-  readonly process: ChildProcess;
-}
-
-async function anvil(id: bigint, automine: boolean): Promise<Node> {
-  const port = await freePort();
-  const args = ["--host", "127.0.0.1", "--port", String(port), "--chain-id", String(id)];
-  if (!automine) args.push("--no-mining");
-  const child = spawn("anvil", [...args, "--silent"], { stdio: ["ignore", "ignore", "inherit"] });
-  const rpc = rpcClient(new URL(`http://127.0.0.1:${port}`));
-  const end = Date.now() + 20_000;
-  for (;;) {
-    if (child.exitCode !== null) throw new Error("anvil exited (is the toolchain installed?)");
-    try {
-      await rpc.call("eth_chainId", []);
-      return { rpc, process: child };
-    } catch (e) {
-      if (Date.now() > end) throw e;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-}
 
 let l1: Node;
 let l2: Node;

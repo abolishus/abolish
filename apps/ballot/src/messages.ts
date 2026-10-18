@@ -52,6 +52,9 @@ const enUS = {
   withheldTitle: "This poll's wording is withheld",
   withheld:
     "Its questions are withheld under Abolish's moderation policy, so this device can't show them. Nothing was sent.",
+  hiddenAsThreatTitle: "Hidden on Abolish's website as a threat",
+  hiddenAsThreat:
+    "A moderator hid this poll's wording on Abolish's website, citing a threat of violence. While the poll is open, this ballot still shows it, checked against the poll's registered fingerprint, so that hiding it doesn't stop anyone voting. Moderation never touches ballots or results.",
   unreachableTitle: "This device couldn't reach the servers",
   unreachable: "Check your connection and try again. Nothing was sent.",
   badAnswerTitle: "A server sent something that isn't a poll",

@@ -105,7 +105,11 @@ type State =
       readonly check: Extract<ElectionCheck, { ok: false }>;
       readonly registeredHash: string;
     }
-  | { readonly kind: "ready"; readonly election: CheckedElection };
+  | {
+      readonly kind: "ready";
+      readonly election: CheckedElection;
+      readonly hiddenAsThreat: boolean;
+    };
 
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -156,6 +160,7 @@ export function OpenElection({
       return (
         <Ballot
           election={state.election}
+          hiddenAsThreat={state.hiddenAsThreat}
           source={source}
           languages={languages}
           // A failed seal or opening checks the poll anew, in a fresh worker
@@ -193,7 +198,7 @@ async function open(
     return { kind: "unavailable", problem: "worker-failed" };
   }
   return check.ok
-    ? { kind: "ready", election: check.election }
+    ? { kind: "ready", election: check.election, hiddenAsThreat: loaded.hiddenAsThreat }
     : { kind: "refused", check, registeredHash: toHex(loaded.registeredHash) };
 }
 
@@ -317,16 +322,20 @@ const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
  */
 export function Ballot({
   election,
+  hiddenAsThreat = false,
   source,
   languages,
   onRestart,
 }: {
   election: CheckedElection;
+  /** Our web pages withhold the text as a threat while the poll is open: shown here under a notice (docs/moderation-policy.md, Open polls). */
+  hiddenAsThreat?: boolean;
   source: Omit<ElectionSource, "load" | "check">;
   languages: readonly string[];
   /** Check the poll again from the start. */
   onRestart: () => void;
 }) {
+  const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [round, setRound] = useState(0);
   const [step, setStep] = useState<Step>({ kind: "answering" });
@@ -489,7 +498,16 @@ export function Ballot({
           key={`${election.definitionHash}/${round}`}
           poll={poll}
           questions={questions}
-          arrival={<ArrivalCheck definitionHash={election.definitionHash} />}
+          arrival={
+            <div className="grid gap-4">
+              {hiddenAsThreat ? (
+                <Note tone="warn" title={t("hiddenAsThreatTitle")}>
+                  <p className="m-0">{t("hiddenAsThreat")}</p>
+                </Note>
+              ) : null}
+              <ArrivalCheck definitionHash={election.definitionHash} />
+            </div>
+          }
           onSeal={seal}
         />
       );

@@ -85,6 +85,7 @@ const LOADED: Loaded = {
   definition: new Uint8Array(8),
   displayText: new Uint8Array(8),
   entries: [],
+  hiddenAsThreat: false,
 };
 
 const SEALED: SealResult = { ok: true, seal: 7, trackingCode: fromHex(CODE) };
@@ -255,6 +256,7 @@ const opens: Story["play"] = async ({ canvasElement }) => {
   await expect(await canvas.findByRole("heading", { level: 1, name: QUESTION })).toBeVisible();
   // The checked poll's seal, in the frame and in the arrival line.
   await expect(canvas.getByText("This is the real poll, checked")).toBeVisible();
+  await expect(canvas.queryByText("Hidden on Abolish's website as a threat")).toBeNull();
   await expect(
     canvas.getAllByRole("img", { name: "Seal of this poll, 3f8a 0c51" })[0],
   ).toBeVisible();
@@ -274,6 +276,19 @@ const opens: Story["play"] = async ({ canvasElement }) => {
 };
 
 export const Opens: Story = { name: "A checked poll opens", play: opens };
+
+export const OpensHiddenAsThreat: Story = {
+  name: "A poll hidden on the website as a threat opens under a notice",
+  args: { source: source([{ ...LOADED, hiddenAsThreat: true }], { ok: true, election: ELECTION }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The text is shown, checked, under the notice (docs/moderation-policy.md, Open polls).
+    await expect(await canvas.findByRole("heading", { level: 1, name: QUESTION })).toBeVisible();
+    await expect(canvas.getByText("Hidden on Abolish's website as a threat")).toBeVisible();
+    await expect(canvas.getByText(/doesn't stop anyone voting/)).toBeVisible();
+    await expect(canvas.getByText("This is the real poll, checked")).toBeVisible();
+  },
+};
 
 const FIRST = "Should the park stay open late?";
 const SECOND = "Should the library open on Sundays?";

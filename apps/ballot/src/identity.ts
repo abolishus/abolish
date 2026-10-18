@@ -44,6 +44,14 @@ export interface VotingIdentity {
   readonly memberships: readonly Membership[];
   /** The Tier 0 request waiting on the board, never beside a Tier 0 membership. */
   readonly tier0Request?: Tier0Request;
+  /**
+   * Set on an identity recovered from its backup (`restoreIdentity`), which
+   * starts without this device's records of the polls it was cast in, so
+   * the cast refuses it until the recovered client's checks exist
+   * ([[0017-identity-recovery-backup]], Consequences; T-18). Only beside a
+   * Tier 0 membership, the one a recovery keeps.
+   */
+  readonly recovered?: true;
 }
 
 /** The identity, none, or a store this device couldn't open or a record it couldn't read. */
@@ -61,9 +69,10 @@ const BACKUP_KEY = "backup";
 /**
  * The stored record's version: another is unreadable, never migrated by
  * guessing. Version 1, which had no request and at least one membership,
- * was never written outside the tests.
+ * and version 2, which had no recovered flag, were never written outside
+ * the tests.
  */
-const RECORD_VERSION = 2;
+const RECORD_VERSION = 3;
 
 const TIERS = [0, 1, 2];
 
@@ -98,16 +107,20 @@ function tier0RequestOf(v: unknown): Tier0Request | undefined {
 
 /**
  * The identity a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 2, an identity secret, none to three
- * memberships in strictly ascending order of tier, and a Tier 0 request
- * (`null` for none) only while there is no Tier 0 membership. The secret is
- * a copy.
+ * record this client writes: version 3, an identity secret, none to three
+ * memberships in strictly ascending order of tier, a Tier 0 request (`null`
+ * for none) only while there is no Tier 0 membership, and the recovered
+ * flag, set only beside a Tier 0 membership. The secret is a copy.
  */
 export function parseStoredIdentity(value: unknown): VotingIdentity | undefined {
-  if (!isRecord(value) || !hasExactly(value, ["v", "secret", "memberships", "tier0Request"]))
+  if (
+    !isRecord(value) ||
+    !hasExactly(value, ["v", "secret", "memberships", "tier0Request", "recovered"])
+  )
     return undefined;
-  const { v, secret, memberships, tier0Request } = value;
+  const { v, secret, memberships, tier0Request, recovered } = value;
   if (v !== RECORD_VERSION) return undefined;
+  if (typeof recovered !== "boolean") return undefined;
   if (!(secret instanceof Uint8Array) || !isIdentitySecret(secret)) return undefined;
   if (
     !Array.isArray(memberships) ||
@@ -125,10 +138,15 @@ export function parseStoredIdentity(value: unknown): VotingIdentity | undefined 
       return undefined;
     parsed.push(membership);
   }
-  if (tier0Request === null) return { secret: secret.slice(), memberships: parsed };
+  if (tier0Request === null) {
+    if (!recovered) return { secret: secret.slice(), memberships: parsed };
+    // A recovery keeps only an identity a Tier 0 group counts.
+    if (parsed[0]?.tier !== 0) return undefined;
+    return { secret: secret.slice(), memberships: parsed, recovered: true };
+  }
   const request = tier0RequestOf(tier0Request);
   // Registered at Tier 0, the client has no request left to wait on.
-  if (request === undefined || parsed[0]?.tier === 0) return undefined;
+  if (request === undefined || parsed[0]?.tier === 0 || recovered) return undefined;
   return { secret: secret.slice(), memberships: parsed, tier0Request: request };
 }
 
@@ -142,6 +160,7 @@ export function storedIdentity(identity: VotingIdentity): Record<string, unknown
       identity.tier0Request === undefined
         ? null
         : { region: identity.tier0Request.region, acceptedAt: identity.tier0Request.acceptedAt },
+    recovered: identity.recovered === true,
   };
   const back = parseStoredIdentity(record);
   if (back === undefined) throw new TypeError("not a voting identity this client stores");
@@ -261,17 +280,20 @@ export async function createIdentity(
 
 /**
  * Keeps an identity recovered from its backup (`secret`, counted in the
- * Tier 0 group `group`) as this device's, on the same terms as
- * `createIdentity`: never over an identity the device holds, readable or
- * not (`exists`), which may be another registered identity whose loss
- * can't be undone (T-18).
+ * Tier 0 group `group`) as this device's, marked recovered, on the same
+ * terms as `createIdentity`: never over an identity the device holds,
+ * readable or not (`exists`), which may be another registered identity
+ * whose loss can't be undone (T-18).
  */
 export async function restoreIdentity(
   secret: Uint8Array,
   group: bigint,
   factory: IDBFactory = indexedDB,
 ): Promise<"restored" | "exists" | "unwritable"> {
-  const added = await addIdentity({ secret, memberships: [{ tier: 0, group }] }, factory);
+  const added = await addIdentity(
+    { secret, memberships: [{ tier: 0, group }], recovered: true },
+    factory,
+  );
   return added === "added" ? "restored" : added;
 }
 

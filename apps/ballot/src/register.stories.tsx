@@ -51,6 +51,20 @@ export const MakeAnIdentityDark: Story = {
   parameters: { layout: "fullscreen", theme: "dark" },
 };
 
+export const MakeAnIdentityOrRecover: Story = {
+  name: "Making an identity, with recovery from a backup offered",
+  args: { onRecover: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { name: "Made one on another device?" }),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Recover it with a passkey" }));
+    await expect(args.onRecover).toHaveBeenCalledOnce();
+    await expect(args.onStart).not.toHaveBeenCalled();
+  },
+};
+
 export const RegisterAKeptIdentity: Story = {
   name: "Registering an identity already on the device",
   args: { made: true },

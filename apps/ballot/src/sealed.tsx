@@ -213,6 +213,7 @@ const STOPPED: Record<
   | "no-identity"
   | "identity-unreadable"
   | "unregistered"
+  | "recovered"
   | "not-listed"
   | "board-unavailable"
   | "no-registrars"
@@ -228,6 +229,7 @@ const STOPPED: Record<
   "no-identity": { title: "noIdentityTitle", detail: "noIdentity" },
   "identity-unreadable": { title: "identityUnreadableTitle", detail: "identityUnreadable" },
   unregistered: { title: "unregisteredTitle", detail: "unregistered" },
+  recovered: { title: "recoveredCastTitle", detail: "recoveredCast" },
   "not-listed": { title: "notListedTitle", detail: "notListed" },
   "board-unavailable": { title: "boardUnavailableTitle", detail: "boardUnavailable" },
   "no-registrars": { title: "noRegistrarsTitle", detail: "noRegistrars" },

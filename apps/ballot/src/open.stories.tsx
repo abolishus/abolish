@@ -17,6 +17,8 @@ import {
   type L1Block,
   Unavailable,
 } from "./open.tsx";
+import type { Recoverer } from "./recover.tsx";
+import type { RecoveryOutcome } from "./recovery.ts";
 import type { Registrar } from "./register.tsx";
 import type { Tier0Answer } from "./registration.ts";
 import type {
@@ -624,6 +626,17 @@ export const NotInThePollsTiers = stopsBeforeTheSearch(
   "You aren't on this poll's list",
 );
 
+export const ARecoveredIdentity = stopsBeforeTheSearch(
+  "A recovered identity: nothing sealed until the recovered client's checks exist",
+  {
+    identity: {
+      kind: "found",
+      identity: { secret: SECRET, memberships: [{ tier: 0, group: 5n }], recovered: true },
+    },
+  },
+  "This device can't answer with a recovered identity yet",
+);
+
 /** A story where the worker's search answers `cell`, which stops at `title`. */
 const searchStops = (name: string, cell: CellAnswer, title: string, retry: boolean): Story => ({
   name,
@@ -847,6 +860,24 @@ export const IdentityGoneAtTheCast: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await castInto(canvas, "This device has no voting identity yet");
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
+  },
+};
+
+export const RecoveredByTheCast: Story = {
+  name: "The identity was recovered by the time of the cast",
+  args: {
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      identityAtCast: {
+        kind: "found",
+        identity: { secret: SECRET, memberships: [{ tier: 0, group: 5n }], recovered: true },
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device can't answer with a recovered identity yet");
     await expect(mocks(args.source).cast).not.toHaveBeenCalled();
     await expect(mocks(args.source).challenge).not.toHaveBeenCalled();
   },
@@ -1118,6 +1149,7 @@ function registrar(
     registry: read,
     outcomes = [NOT_YET],
     backup,
+    recovered,
   }: {
     created?: Awaited<ReturnType<Registrar["create"]>>;
     recorded?: Awaited<ReturnType<Registrar["record"]>>;
@@ -1126,6 +1158,8 @@ function registrar(
     registry?: LoadedRegistry;
     outcomes?: readonly Tier0OutcomeResult[];
     backup?: Backer;
+    /** A recovery's outcome; a restored one keeps a recovered identity in the store. */
+    recovered?: RecoveryOutcome;
   } = {},
 ): Registrar {
   let store = held;
@@ -1171,6 +1205,23 @@ function registrar(
       };
     return Promise.resolve(joined);
   });
+  const recovery: Recoverer | undefined =
+    recovered === undefined
+      ? undefined
+      : {
+          recover: fn<Recoverer["recover"]>(() => {
+            if (recovered.kind === "restored" && store.kind === "none")
+              store = {
+                kind: "found",
+                identity: {
+                  secret: SECRET,
+                  memberships: [{ tier: 0, group: recovered.group }],
+                  recovered: true,
+                },
+              };
+            return Promise.resolve(recovered);
+          }),
+        };
   const made: Registrar = {
     region: 0,
     Challenge: PassTheCheck,
@@ -1189,6 +1240,7 @@ function registrar(
     join,
     now: () => NOW,
     backup,
+    recovery,
   };
   REGISTRARS.set(made, { create, commitment, send, record, registry, outcome, join, secrets });
   return made;
@@ -1317,6 +1369,113 @@ export const BacksUpOnceSent: Story = {
     await expect(backup?.backUp).toHaveBeenCalledOnce();
     // Focus follows the pressed button to the outcome, never to the page.
     await expect(canvas.getByRole("status")).toHaveFocus();
+  },
+};
+
+export const RecoversAnIdentity: Story = {
+  name: "No identity: one recovered from its backup passkey, then no seal from it",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["accepted"], {
+        recovered: { kind: "restored", group: 5n, region: 3, syncable: true, backedUp: false },
+      }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Make a voting identity on this device" });
+    const recovery = args.source.registrar?.recovery;
+    await userEvent.click(canvas.getByRole("button", { name: "Recover it with a passkey" }));
+    await focused(canvas, { level: 1, name: "Recover your voting identity" });
+    // Nothing is asked of the passkey before the voter chooses to.
+    await expect(recovery?.recover).not.toHaveBeenCalled();
+    // Back goes to making a new identity, and the offer is there again.
+    await userEvent.click(canvas.getByRole("button", { name: "Back" }));
+    await focused(canvas, { level: 1, name: "Make a voting identity on this device" });
+    await userEvent.click(canvas.getByRole("button", { name: "Recover it with a passkey" }));
+    // A double tap runs one recovery.
+    await userEvent.dblClick(await canvas.findByRole("button", { name: "Use my passkey" }));
+    await focused(canvas, { level: 1, name: "Your voting identity is on this device" });
+    await expect(recovery?.recover).toHaveBeenCalledOnce();
+    // The area found, one device per poll, and a passkey not yet synced.
+    await expect(canvas.getByText(/counts it in area 3/)).toBeVisible();
+    await expect(canvas.getByText("Answer each poll from one device")).toBeVisible();
+    await expect(canvas.getByText("Your passkey isn't on your other devices yet")).toBeVisible();
+    // Nothing was made or sent on the way.
+    const { create, send } = registrarMocks(args.source);
+    await expect(create).not.toHaveBeenCalled();
+    await expect(send).not.toHaveBeenCalled();
+    // Back at the poll, a recovered identity seals nothing yet.
+    await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
+    await answerAndSeal(canvas);
+    await focused(canvas, {
+      level: 1,
+      name: "This device can't answer with a recovered identity yet",
+    });
+    await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
+    await expect(mocks(args.source).seal).not.toHaveBeenCalled();
+  },
+};
+
+export const RecoveryWithNoBackup: Story = {
+  name: "Recovery: no backup for the passkey, another one asked for",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["accepted"], {
+        recovered: { kind: "stopped", problem: "no-backup" },
+      }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Recover it with a passkey" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Use my passkey" }));
+    await focused(canvas, { level: 1, name: "There's no backup for this passkey" });
+    const recovery = args.source.registrar?.recovery;
+    await userEvent.click(canvas.getByRole("button", { name: "Try another passkey" }));
+    await focused(canvas, { level: 1, name: "There's no backup for this passkey" });
+    await expect(recovery?.recover).toHaveBeenCalledTimes(2);
+    await userEvent.click(canvas.getByRole("button", { name: "Back" }));
+    await focused(canvas, { level: 1, name: "Make a voting identity on this device" });
+  },
+};
+
+export const RecoveryFindsAnIdentityMeanwhile: Story = {
+  name: "Recovery: an identity appeared meanwhile, and the poll decides anew",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "none" }, ["accepted"], {
+        recovered: { kind: "stopped", problem: "exists" },
+      }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Recover it with a passkey" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Use my passkey" }));
+    await waitFor(() => expect(args.source.registrar?.recovery?.recover).toHaveBeenCalledOnce());
+    // Checked again from the start: answering anew, nothing replaced.
+    await expect(await canvas.findByText("Yes")).toBeVisible();
+  },
+};
+
+export const NoRecoveryForAKeptIdentity: Story = {
+  name: "An identity kept but not registered: no recovery offered over it",
+  args: {
+    source: registering({
+      registrar: registrar({ kind: "found", identity: { secret: SECRET, memberships: [] } }, [], {
+        recovered: { kind: "stopped", problem: "exists" },
+      }),
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Register your voting identity" });
+    await expect(canvas.queryByRole("button", { name: "Recover it with a passkey" })).toBeNull();
   },
 };
 

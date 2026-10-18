@@ -230,6 +230,9 @@ const enUS = {
   unregisteredTitle: "Your voting identity isn't registered yet",
   unregistered:
     "This device keeps a voting identity that isn't on any list yet, and this copy of the ballot can't register it. Nothing was sealed or sent. Don't clear this site's data: the identity is still yours.",
+  recoveredCastTitle: "This device can't answer with a recovered identity yet",
+  recoveredCast:
+    "Your voting identity came back to this device from its backup. Before it answers a poll, this device must show you any ballot you cast from another device, and this version of the ballot can't yet. Nothing was sealed or sent. Answer from the device you voted on before, or wait for a later version.",
   notListedTitle: "You aren't on this poll's list",
   notListed:
     "This poll is open to people verified in other ways than your voting identity was, so you can't answer it. Nothing was sealed or sent.",
@@ -432,6 +435,70 @@ const enUS = {
   backupNotKeptTitle: "The backup service didn't keep the backup",
   backupNotKept:
     "It accepted the sealed copy but didn't give it back when this device checked, so it isn't counted as backed up. Try again.",
+  // Recovering the voting identity on a new device (recover.tsx).
+  recoverOfferTitle: "Made one on another device?",
+  recoverOffer:
+    "If you backed up your voting identity with a passkey, bring it back here instead of making a new one.",
+  recoverOfferStart: "Recover it with a passkey",
+  recoverTitle: "Recover your voting identity",
+  recover:
+    "Your browser asks for the passkey you backed up with. This device fetches the sealed copy, opens it with the passkey and checks your identity is on a public list before keeping it.",
+  recoverStart: "Use my passkey",
+  recoverKeptTitle: "It's opened only on this device",
+  recoverKept:
+    "Your voting identity comes back sealed and is opened here, never anywhere else. The backup service sees only a code from your passkey, and the public list is read in full, so no server learns which identity is yours.",
+  recoverLeftTitle: "What doesn't come back",
+  recoverLeft:
+    "Receipts and the record of how you answered stay on the device you used before. A device that already has a voting identity can't recover another.",
+  recoverWorkingTitle: "Recovering your voting identity",
+  recoverWorking:
+    "Follow your browser's passkey prompt. This device then fetches the sealed copy, opens it and checks the public list. Nothing about your identity or your answers is sent.",
+  recoveredTitle: "Your voting identity is on this device",
+  recovered:
+    "It opened, and the public list counts it in area {region}. This device keeps it from now on.",
+  recoveredAreaTitle: "Check the area",
+  recoveredArea:
+    "If area {region} isn't where you registered, someone may have moved your identity before you recovered it. Don't answer polls with it, and don't clear this site's data.",
+  recoveredOneDeviceTitle: "Answer each poll from one device",
+  recoveredOneDevice:
+    "Your passkey can bring this identity to more than one device. Two devices that answer the same poll without each other's records can cancel your vote, so use just one per poll.",
+  recoveredNoSync:
+    "Your identity is back, but the passkey that opens its backup lives only on this device or security key, so the backup is lost with it.",
+  recoveredNotSynced:
+    "Your identity is back, but until your passkey app copies the passkey, losing this device would lose the backup too.",
+  recoverOther: "Try another passkey",
+  recoverUnreadable:
+    "This browser didn't let the ballot read what it keeps, so nothing was recovered over it. Don't clear this site's data: your identity may still be there.",
+  recoverCancelledTitle: "The passkey prompt was closed",
+  recoverCancelled: "Nothing was recovered. Try again when you're ready.",
+  recoverUnsupportedTitle: "This passkey can't open a backup",
+  recoverUnsupported:
+    "Your browser or passkey app doesn't support what the backup needs. Try the passkey from another passkey app, or another browser.",
+  recoverNoUv:
+    "Opening a backup needs your passkey to ask for your fingerprint, face, PIN or screen lock, and this one didn't, so nothing was recovered. Try again.",
+  recoverFailedTitle: "The recovery didn't finish",
+  recoverFailed: "Something on this device stopped it, and nothing was recovered. Try again.",
+  recoverUnreachableTitle: "The backup couldn't be fetched",
+  recoverUnreachable:
+    "The backup service was unavailable or unreachable, and nothing was recovered. Try again in a few minutes.",
+  recoverNoBackupTitle: "There's no backup for this passkey",
+  recoverNoBackup:
+    "The backup service holds nothing for the passkey you chose. If you have another passkey for this ballot, try that one.",
+  recoverDamagedTitle: "This backup can't be opened",
+  recoverDamaged:
+    "What the backup service gave back doesn't open with this passkey, so nothing was recovered. If you have another passkey for this ballot, try that one.",
+  recoverRegistryTitle: "Your identity couldn't be checked",
+  recoverRegistry:
+    "The public list of registrations couldn't be read in full, or what came back wasn't it, so nothing was kept. Try again in a few minutes.",
+  recoverNoGroupRegistryTitle: "This copy of the ballot can't check registrations",
+  recoverNoGroupRegistry:
+    "It doesn't know where the public list of registrations is kept, so it can't recover an identity. Open the ballot from abolishus.eth or another address Abolish lists.",
+  recoverNotRegisteredTitle: "Your identity isn't on a list yet",
+  recoverNotRegistered:
+    "The backup opened, but no list this ballot reads counts its identity, so nothing was kept. A registration sent in the last few hours may not be added yet: try again later.",
+  recoverUnwritableTitle: "This browser won't keep a voting identity",
+  recoverUnwritable:
+    "It refused to store one, perhaps in a private window or with site data blocked, so nothing was recovered. Open the ballot in a normal window to recover.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

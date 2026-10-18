@@ -35,20 +35,26 @@ const tier0Request = fc.record({
   acceptedAt: fc.nat({ max: Number.MAX_SAFE_INTEGER }),
 });
 
-// A Tier 0 request only while there is no Tier 0 membership.
+// A Tier 0 request only while there is no Tier 0 membership, and the
+// recovered flag only beside one.
 const identity = fc
-  .tuple(secret, memberships, fc.option(tier0Request, { nil: undefined }))
-  .map(([secret, memberships, request]): VotingIdentity =>
-    request === undefined || memberships[0]?.tier === 0
-      ? { secret, memberships }
-      : { secret, memberships, tier0Request: request },
+  .tuple(secret, memberships, fc.option(tier0Request, { nil: undefined }), fc.boolean())
+  .map(([secret, memberships, request, recovered]): VotingIdentity =>
+    memberships[0]?.tier === 0
+      ? recovered
+        ? { secret, memberships, recovered: true }
+        : { secret, memberships }
+      : request === undefined
+        ? { secret, memberships }
+        : { secret, memberships, tier0Request: request },
   );
 
 const record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  v: 2,
+  v: 3,
   secret: be32(7n),
   memberships: [{ tier: 0, group: 5n }],
   tier0Request: null,
+  recovered: false,
   ...over,
 });
 
@@ -77,6 +83,23 @@ describe("parseStoredIdentity", () => {
     ).toEqual({ secret: be32(7n), memberships: [{ tier: 1, group: 2n }], tier0Request });
   });
 
+  test("reads a recovered identity beside its Tier 0 membership, with its other tiers", () => {
+    expect(parseStoredIdentity(record({ recovered: true }))).toEqual({
+      secret: be32(7n),
+      memberships: [{ tier: 0, group: 5n }],
+      recovered: true,
+    });
+    const memberships = [
+      { tier: 0, group: 5n },
+      { tier: 2, group: 1n },
+    ];
+    expect(parseStoredIdentity(record({ memberships, recovered: true }))).toEqual({
+      secret: be32(7n),
+      memberships,
+      recovered: true,
+    });
+  });
+
   test("hands out a copy of the secret, so zeroing it leaves the stored value whole", () => {
     const stored = record();
     const back = parseStoredIdentity(stored);
@@ -90,11 +113,30 @@ describe("parseStoredIdentity", () => {
     ["an array", [1, be32(7n), []]],
     ["version 1", { v: 1, secret: be32(7n), memberships: [{ tier: 0, group: 5n }] }],
     ["version 1 with this version's keys", record({ v: 1 })],
-    ["another version", record({ v: 3 })],
-    ["a version as a string", record({ v: "2" })],
+    ["version 2", { v: 2, secret: be32(7n), memberships: [], tier0Request: null }],
+    ["version 2 with this version's keys", record({ v: 2 })],
+    ["another version", record({ v: 4 })],
+    ["a version as a string", record({ v: "3" })],
     ["an extra key", record({ receipts: [] })],
-    ["a missing key", { v: 2, secret: be32(7n), memberships: [] }],
-    ["no request key", { v: 2, secret: be32(7n), memberships: [] }],
+    ["a missing key", { v: 3, secret: be32(7n), memberships: [] }],
+    ["no request key", { v: 3, secret: be32(7n), memberships: [], recovered: false }],
+    ["no recovered key", { v: 3, secret: be32(7n), memberships: [], tier0Request: null }],
+    ["a recovered flag as a number", record({ recovered: 1 })],
+    ["a recovered flag as a string", record({ recovered: "true" })],
+    ["a recovered flag as null", record({ recovered: null })],
+    ["recovered with no membership", record({ memberships: [], recovered: true })],
+    [
+      "recovered with no Tier 0 membership",
+      record({ memberships: [{ tier: 1, group: 2n }], recovered: true }),
+    ],
+    [
+      "recovered beside a Tier 0 request",
+      record({
+        memberships: [{ tier: 1, group: 2n }],
+        tier0Request: { region: 0, acceptedAt: 0 },
+        recovered: true,
+      }),
+    ],
     ["a secret of 0", record({ secret: be32(0n) })],
     ["a secret of l", record({ secret: be32(BABYJUBJUB_ORDER) })],
     ["a secret above l", record({ secret: be32(2n ** 256n - 1n) })],
@@ -223,6 +265,9 @@ describe("storedIdentity", () => {
         memberships: [],
         tier0Request: { region: 2 ** 32, acceptedAt: 0 },
       }),
+    ).toThrow(TypeError);
+    expect(() =>
+      storedIdentity({ secret: be32(7n), memberships: [{ tier: 1, group: 1n }], recovered: true }),
     ).toThrow(TypeError);
   });
 

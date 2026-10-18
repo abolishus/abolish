@@ -14,13 +14,14 @@ import { ACTION, EverydayFrame, type FramePoll, Note, Part, ScreenTitle } from "
 import { catalogs, type Messages } from "./messages.ts";
 import { openingFileName, trackingCodeText } from "./tracking.ts";
 
-// The screens between "Seal my answers" and sending (P2-8 part 3b-2c): the
-// sealed ballot's tracking code, shown before the voter chooses to cast or
-// to challenge ([[challenge]], Client rule 1), and a challenged ballot's
-// opening, handed to the voter's other device as a file (Client rule 2).
-// The casting device never says whether its own opening checks: it drew the
-// screen, so only the checker that recorded the code before the choice can
-// (T-42, T-44). Nothing here goes through a server.
+// The screens between "Seal my answers" and the board (P2-8 parts 3b-2c and
+// 3c): the sealed ballot's tracking code, shown before the voter chooses to
+// cast or to challenge ([[challenge]], Client rule 1), a challenged ballot's
+// opening, handed to the voter's other device as a file (Client rule 2), and
+// a cast ballot's sending. The casting device never says whether its own
+// opening checks: it drew the screen, so only the checker that recorded the
+// code before the choice can (T-42, T-44). Only a cast ballot's bytes, which
+// are public, go through a server.
 
 /** A hash's first two groups of four hex digits, as a label reads it aloud. */
 function shortHex(hash: string): string {
@@ -31,6 +32,7 @@ const WORKING = {
   finding: { title: "findingTitle", detail: "finding" },
   sealing: { title: "sealingTitle", detail: "sealing" },
   opening: { title: "openingTitle", detail: "opening" },
+  sending: { title: "sendingTitle", detail: "sending" },
 } as const satisfies Record<
   string,
   { readonly title: keyof Messages; readonly detail: keyof Messages }
@@ -38,7 +40,7 @@ const WORKING = {
 
 /**
  * While the page reads the board and the worker finds the voter's cell in
- * it, seals or opens: nothing to press, and nothing is sent.
+ * it, seals or opens, or while a cast ballot is sent: nothing to press.
  */
 export function Working({ poll, kind }: { poll: FramePoll; kind: keyof typeof WORKING }) {
   const t = useTranslate(catalogs);
@@ -208,6 +210,120 @@ export function Opened({
   );
 }
 
+/** Why a recorded cast isn't confirmed on the board yet: each one is answered by sending the same bytes again. */
+export type UnsentReason = "busy" | "unavailable" | "unreachable" | "unconfirmed";
+
+const UNSENT: Record<
+  UnsentReason,
+  { readonly title: keyof Messages; readonly detail: keyof Messages }
+> = {
+  busy: { title: "unsentBusyTitle", detail: "unsentBusy" },
+  unavailable: { title: "unsentUnavailableTitle", detail: "unsentUnavailable" },
+  unreachable: { title: "unsentUnreachableTitle", detail: "unsentUnreachable" },
+  unconfirmed: { title: "unsentUnconfirmedTitle", detail: "unsentUnconfirmed" },
+};
+
+/**
+ * A cast ballot this device recorded but the board hasn't confirmed: "Send
+ * again" sends the same sealed ballot, never a new one, so at worst the
+ * board holds it twice and counts it once ([[revoting]], Client rule 3;
+ * T-25, T-45).
+ */
+export function Unsent({
+  poll,
+  trackingCode,
+  reason,
+  onSend,
+}: {
+  poll: FramePoll;
+  trackingCode: string;
+  reason: UnsentReason;
+  onSend: () => void;
+}) {
+  const t = useTranslate(catalogs);
+  const { title, detail } = UNSENT[reason];
+  return (
+    <EverydayFrame
+      poll={poll}
+      primary={
+        <Button size="lg" className={ACTION} onClick={onSend}>
+          {t("sendAgain")}
+        </Button>
+      }
+    >
+      <ScreenTitle title={t(title)} focus>
+        <p className="m-0">{t(detail)}</p>
+      </ScreenTitle>
+      <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
+        <Fingerprint
+          value={trackingCode}
+          label={t("trackingCodeFingerprint", { hash: shortHex(trackingCode) })}
+          size={56}
+        />
+        <Hash value={trackingCode} label={t("trackingCodeLabel")} />
+      </div>
+      <Part title={t("sendAgainTitle")}>
+        <p className="m-0">{t("sendAgainExplained")}</p>
+      </Part>
+    </EverydayFrame>
+  );
+}
+
+/**
+ * The board holds the cast ballot: at `index`, by the operator's answer this
+ * device checked, or, without one, as a copy the board already had (a
+ * `repeat`, which counts as this ballot: [[revoting]], Keyed by content).
+ * Nothing is signed yet, so this is the operator's word, and the screen
+ * says no more than that (T-26). Answering again casts a new ballot that
+ * replaces this one.
+ */
+export function Sent({
+  poll,
+  trackingCode,
+  index,
+  onAgain,
+}: {
+  poll: FramePoll;
+  trackingCode: string;
+  index?: bigint | undefined;
+  onAgain: () => void;
+}) {
+  const t = useTranslate(catalogs);
+  return (
+    <EverydayFrame
+      poll={poll}
+      secondary={
+        <Button size="lg" variant="outline" className={ACTION} onClick={onAgain}>
+          {t("answerAgain")}
+        </Button>
+      }
+    >
+      <ScreenTitle title={t("sentTitle")} focus>
+        <p className="m-0">{index === undefined ? t("sentCopy") : t("sent")}</p>
+      </ScreenTitle>
+      <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
+        <Fingerprint
+          value={trackingCode}
+          label={t("trackingCodeFingerprint", { hash: shortHex(trackingCode) })}
+          size={56}
+        />
+        <Hash value={trackingCode} label={t("trackingCodeLabel")} />
+        {index === undefined ? null : (
+          <p className="m-0 text-sm text-muted-foreground">
+            {t("sentIndex", { index: index.toString() })}
+          </p>
+        )}
+      </div>
+      <Part title={t("sentUnsignedTitle")}>
+        <p className="m-0">{t("sentUnsigned")}</p>
+      </Part>
+      <Part title={t("answerAgain")}>
+        <p className="m-0">{t("revoteExplained")}</p>
+      </Part>
+    </EverydayFrame>
+  );
+}
+
 const STOPPED: Record<
   | "cant-seal-version"
   | "no-identity"
@@ -222,7 +338,14 @@ const STOPPED: Record<
   | "open-failed"
   | "no-l1"
   | "cast-failed"
-  | "cast-faulty",
+  | "cast-faulty"
+  | "casts-unreadable"
+  | "casts-unwritable"
+  | "not-newer"
+  | "send-rejected"
+  | "send-refused"
+  | "not-open"
+  | "answer-conflict",
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
   "cant-seal-version": { title: "cantSealTitle", detail: "cantSealVersion" },
@@ -239,6 +362,13 @@ const STOPPED: Record<
   "no-l1": { title: "noL1Title", detail: "noL1" },
   "cast-failed": { title: "castFailedTitle", detail: "castFailed" },
   "cast-faulty": { title: "castFaultyTitle", detail: "castFaulty" },
+  "casts-unreadable": { title: "castsUnreadableTitle", detail: "castsUnreadable" },
+  "casts-unwritable": { title: "castsUnwritableTitle", detail: "castsUnwritable" },
+  "not-newer": { title: "notNewerTitle", detail: "notNewer" },
+  "send-rejected": { title: "sendRejectedTitle", detail: "sendRejected" },
+  "send-refused": { title: "sendRefusedTitle", detail: "sendRefused" },
+  "not-open": { title: "notOpenTitle", detail: "notOpen" },
+  "answer-conflict": { title: "answerConflictTitle", detail: "answerConflict" },
 };
 
 export type SealProblem = keyof typeof STOPPED;

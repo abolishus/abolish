@@ -243,6 +243,7 @@ describe("the questions of a checked election", () => {
       { minSelections: 1, maxSelections: 1 },
     ],
     tiers: [0],
+    boardEntryVersion: 5,
     opensAt: 0n,
     closesAt: 1n,
     translations: [

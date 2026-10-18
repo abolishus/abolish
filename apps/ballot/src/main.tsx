@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
+import { castAsAsked, readCasts, recordBoarded, recordCast } from "./casts.ts";
 import type { Backer } from "./backup-offer.tsx";
 import { STAGING, tier0Region } from "./deployment.ts";
 import {
@@ -31,6 +32,7 @@ import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts"
 import { castBallot } from "./prover-client.ts";
 import type { Registrar } from "./register.tsx";
 import { sendTier0Request } from "./registration.ts";
+import { sendBallot } from "./send.ts";
 import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
@@ -234,6 +236,13 @@ const source: ElectionSource = {
         onProgress,
       ),
     ),
+  casts: (electionId, tier) => readCasts(electionId, tier),
+  record: async (electionId, tier, ballot, asked) =>
+    castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot) : "not-asked",
+  send: (electionId, ballot) =>
+    sendBallot(STAGING, electionId, ballot, (url, init) => fetch(url, init)),
+  keepBoarded: (electionId, tier, ballot, boarded) =>
+    recordBoarded(electionId, tier, ballot, boarded),
   registrar,
 };
 

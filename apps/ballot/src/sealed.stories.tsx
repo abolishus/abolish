@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 
-import { Opened, Sealed, SealStopped, Working } from "./sealed.tsx";
+import { Opened, Sealed, SealStopped, Sent, Unsent, Working } from "./sealed.tsx";
 
-// The screens between sealing and sending (sealed.tsx), with the worker left
-// out: each story is one screen as the voter meets it.
+// The screens between sealing and the board (sealed.tsx), with the worker
+// and the network left out: each story is one screen as the voter meets it.
 
 const POLL = {
   definitionHash: "3f8a0c51d2e4b69788a1c0d3e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718",
@@ -192,6 +192,106 @@ export const NoL1: Story = {
       "This ballot can't read Ethereum yet",
     );
     await expect(canvas.getByText(/Your ballot wasn't made/)).toBeVisible();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const Sending: Story = {
+  name: "Sending a cast ballot",
+  render: () => <Working poll={POLL} kind="sending" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Sending your ballot",
+    );
+    await expect(canvas.getByRole("status")).toHaveTextContent(/recorded your sealed ballot/);
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+const onSend = fn();
+
+export const UnsentBusy: Story = {
+  name: "The board is busy: send the same ballot again",
+  render: () => <Unsent poll={POLL} trackingCode={CODE} reason="busy" onSend={onSend} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("The board is busy");
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await expect(
+      canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+    ).toHaveTextContent(CODE);
+    // The same ballot, never a new one (T-25).
+    await expect(canvas.getByText(/never a new one/)).toBeVisible();
+    onSend.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(onSend).toHaveBeenCalledOnce();
+  },
+};
+
+export const UnsentUnconfirmed: Story = {
+  name: "The board's answer doesn't carry the ballot",
+  render: () => <Unsent poll={POLL} trackingCode={CODE} reason="unconfirmed" onSend={onSend} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "The board's answer doesn't show your ballot",
+    );
+    await expect(canvas.getByRole("button", { name: "Send again" })).toBeVisible();
+  },
+};
+
+const sent: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+    "Your ballot is on the board",
+  );
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+  await expect(canvas.getByText("Entry 41 on the board")).toBeVisible();
+  await expect(
+    canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+  ).toHaveTextContent(CODE);
+  // Unsigned: the board's word, and said so (T-26).
+  await expect(canvas.getByText(/it is the board's word/)).toBeVisible();
+  onAgain.mockClear();
+  await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+  await expect(onAgain).toHaveBeenCalledOnce();
+};
+
+export const OnTheBoard: Story = {
+  name: "The cast ballot is on the board",
+  render: () => <Sent poll={POLL} trackingCode={CODE} index={41n} onAgain={onAgain} />,
+  play: sent,
+};
+
+export const OnTheBoardDark: Story = {
+  name: "The cast ballot is on the board, dark",
+  parameters: { layout: "fullscreen", theme: "dark" },
+  render: () => <Sent poll={POLL} trackingCode={CODE} index={41n} onAgain={onAgain} />,
+  play: sent,
+};
+
+export const OnTheBoardAsACopy: Story = {
+  name: "A copy of the cast ballot was already on the board",
+  render: () => <Sent poll={POLL} trackingCode={CODE} onAgain={onAgain} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your ballot is on the board",
+    );
+    await expect(canvas.getByText(/already holds a copy/)).toBeVisible();
+    await expect(canvas.queryByText(/^Entry/)).toBeNull();
+  },
+};
+
+export const AnswerConflict: Story = {
+  name: "The board gave two answers for one ballot",
+  render: () => <SealStopped poll={POLL} problem="answer-conflict" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "The board gave two answers for one ballot",
+    );
     await expect(canvas.queryByRole("button")).toBeNull();
   },
 };

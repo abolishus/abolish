@@ -2,6 +2,14 @@ import { Button, useI18n, useTranslate } from "@abolishus/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type Answers, pickLanguage, questionsOf, votesOf } from "./answers.ts";
+import {
+  type Boarded,
+  type CastAsked,
+  type CastsRead,
+  newestBlock,
+  type RecordBoardedOutcome,
+  type RecordCastOutcome,
+} from "./casts.ts";
 import { ArrivalCheck, ElectionRefused } from "./check.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
@@ -13,7 +21,17 @@ import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
 import { AnswerQuestions } from "./questions.tsx";
 import { type Held, Register, type Registrar, RegisterWaiting } from "./register.tsx";
-import { Opened, Sealed, SealStopped, type SealProblem, Working } from "./sealed.tsx";
+import {
+  Opened,
+  Sealed,
+  SealStopped,
+  type SealProblem,
+  Sent,
+  Unsent,
+  type UnsentReason,
+  Working,
+} from "./sealed.tsx";
+import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
 import type {
   CastResult,
@@ -81,6 +99,31 @@ export interface ElectionSource {
     artifacts: ProverArtifacts,
     onProgress: ProvingProgress,
   ): Promise<CastResult>;
+  /**
+   * This device's casts in `electionId` at `tier` (`readCasts`), read afresh
+   * before each cast is proved.
+   */
+  casts(electionId: Uint8Array, tier: number): Promise<CastsRead>;
+  /**
+   * Records a cast's ballot before it leaves the device (`recordCast`), only
+   * if it names exactly what the cast asked for (`castAsAsked`), and
+   * `not-asked` otherwise ([[revoting]], Client rule 3).
+   */
+  record(
+    electionId: Uint8Array,
+    tier: number,
+    ballot: Uint8Array,
+    asked: CastAsked,
+  ): Promise<RecordCastOutcome | "not-asked">;
+  /** Sends a recorded cast's bytes to the ballot route (`sendBallot`). */
+  send(electionId: Uint8Array, ballot: Uint8Array): Promise<SendAnswer>;
+  /** Keeps the operator's checked answer for a recorded cast (`recordBoarded`). */
+  keepBoarded(
+    electionId: Uint8Array,
+    tier: number,
+    ballot: Uint8Array,
+    boarded: Boarded,
+  ): Promise<RecordBoardedOutcome>;
   /**
    * Tier 0 registration, for a voter whose identity is in none of a poll's
    * tiers where the poll admits Tier 0, or `undefined` while the build can't
@@ -286,15 +329,35 @@ type Step =
   | { readonly kind: "answering" }
   | { readonly kind: "finding" }
   | { readonly kind: "sealing" }
-  | { readonly kind: "sealed"; readonly seal: number; readonly trackingCode: string }
+  | {
+      readonly kind: "sealed";
+      readonly seal: number;
+      readonly trackingCode: string;
+      /** The voter's cell, and the tier it is in, that the seal was made for. */
+      readonly cell: number;
+      readonly tier: number;
+    }
   | { readonly kind: "opening" }
   | { readonly kind: "opened"; readonly trackingCode: string; readonly opening: Uint8Array }
   | { readonly kind: "proving"; readonly steps: ProvingSteps | undefined }
   | { readonly kind: "proving-refused"; readonly problem: ProvingProblem }
-  | { readonly kind: "cast" }
+  | { readonly kind: "sending" }
+  | {
+      readonly kind: "unsent";
+      readonly reason: UnsentReason;
+      readonly sending: Sending;
+    }
+  | { readonly kind: "sent"; readonly trackingCode: string; readonly index?: bigint }
   | { readonly kind: "register"; readonly registrar: Registrar; readonly held: Held }
   | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "stopped"; readonly problem: SealProblem; readonly code?: string };
+
+/** A recorded cast, as every send of it sends it: the same bytes each time. */
+interface Sending {
+  readonly ballot: Uint8Array;
+  readonly tier: number;
+  readonly trackingCode: string;
+}
 
 const stopped = (problem: SealProblem, code?: string): Step =>
   code === undefined ? { kind: "stopped", problem } : { kind: "stopped", problem, code };
@@ -325,6 +388,10 @@ const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
   "board-unavailable",
   "cell-refused",
   "cast-failed",
+  "casts-unreadable",
+  "casts-unwritable",
+  "not-newer",
+  "send-rejected",
 ]);
 
 /**
@@ -367,6 +434,7 @@ export function Ballot({
     closes: formatTime(locale, election.closesAt),
   };
   const definitionHash = fromHex(election.definitionHash);
+  const electionId = fromHex(election.electionId);
 
   function again() {
     setStep({ kind: "answering" });
@@ -393,10 +461,10 @@ export function Ballot({
    * that says why there is none. The page's copy of the secret is zeroed as
    * soon as the worker has its own (T-12).
    */
-  async function findCell(): Promise<number | Step> {
+  async function findCell(): Promise<{ readonly cell: number; readonly tier: number } | Step> {
     // The board first, whatever this device holds: the fetch says nothing
     // of whether the voter has an identity in the poll's tiers (T-10).
-    const board = await source.loadBoard(fromHex(election.electionId));
+    const board = await source.loadBoard(electionId);
     if (!board.ok) return stopped("board-unavailable", board.problem);
     const read = await source.identity();
     // Registering helps only where the poll admits Tier 0.
@@ -408,6 +476,7 @@ export function Ballot({
     if (read.kind !== "found") return stopped("identity-unreadable");
     const { secret, memberships, tier0Request, recovered } = read.identity;
     let asked: Promise<CellAnswer>;
+    let tier: number;
     try {
       // A recovered identity starts without this device's records of the
       // polls it was cast in, which the cast's checks need first: showing
@@ -434,12 +503,13 @@ export function Ballot({
             : { kind: "register", registrar, held: "made" };
         return stopped("not-listed");
       }
+      tier = membership.tier;
       asked = source.findCell(definitionHash, secret, membership, board.entries);
     } finally {
       secret.fill(0);
     }
     const found = await asked;
-    if (found.ok) return found.cell;
+    if (found.ok) return { cell: found.cell, tier };
     switch (found.problem) {
       case "no-registrars":
         return stopped("no-registrars");
@@ -457,13 +527,20 @@ export function Ballot({
     const votes = votesOf(questions, answers);
     setStep({ kind: "finding" });
     run(async (current) => {
-      const cell = await findCell();
-      if (typeof cell !== "number") return cell;
+      const found = await findCell();
+      if ("kind" in found) return found;
+      const { cell, tier } = found;
       if (current()) setStep({ kind: "sealing" });
       const sealed = await source.seal(definitionHash, cell, votes);
       // A code of any other length is the worker's fault, shown as one.
       return sealed.ok && sealed.trackingCode.length === 32
-        ? { kind: "sealed", seal: sealed.seal, trackingCode: toHex(sealed.trackingCode) }
+        ? {
+            kind: "sealed",
+            seal: sealed.seal,
+            trackingCode: toHex(sealed.trackingCode),
+            cell,
+            tier,
+          }
         : stopped("seal-failed");
     }, stopped("seal-failed"));
   }
@@ -490,13 +567,20 @@ export function Ballot({
   // The proof is made only now, once the voter chose to cast ([[revoting]],
   // Client rule 6), and the page never asks to open this seal again, so a
   // ballot the voter chose to cast is never challenged (T-45).
-  function cast(seal: number) {
+  function cast({ seal, cell, tier, trackingCode }: Extract<Step, { kind: "sealed" }>) {
     if (!choose(seal)) return;
     setStep({ kind: "proving", steps: undefined });
     run(
       async (current) => {
         const l1 = await source.l1Block();
         if (l1 === undefined) return stopped("no-l1");
+        // This device's casts before the artifacts and the secret: a ballot
+        // on a block not newer than one it sent would tie that one or lose
+        // to it, so it is never made ([[revoting]], Client rule 3; T-45).
+        const held = await source.casts(electionId, tier);
+        if (held.kind === "unreadable") return stopped("casts-unreadable");
+        const newest = newestBlock(held.casts);
+        if (newest !== undefined && l1.number <= newest) return stopped("not-newer");
         const artifacts = await source.loadArtifacts();
         if ("ok" in artifacts) return { kind: "proving-refused", problem: artifacts.problem };
         // Read only now, so the page holds the secret for no download.
@@ -521,7 +605,35 @@ export function Ballot({
           secret.fill(0);
         }
         const cast = await asked.finally(() => (finished = true));
-        if (cast.ok) return { kind: "cast" };
+        if (cast.ok) {
+          // Recorded before it leaves the device, in one transaction with the
+          // newest block's check, which another tab may have moved since the
+          // read above (Client rule 3).
+          const recorded = await source.record(electionId, tier, cast.ballot, {
+            definitionHash,
+            cell,
+            l1Number: l1.number,
+            l1Hash: l1.hash,
+          });
+          switch (recorded) {
+            case "recorded":
+              break;
+            case "not-newer":
+              return stopped("not-newer");
+            case "unreadable":
+              return stopped("casts-unreadable");
+            case "unwritable":
+              return stopped("casts-unwritable");
+            // A ballot naming anything but what was asked, or a poll other
+            // than the one recorded here, is this client's fault: never sent.
+            case "not-asked":
+            case "other-election":
+              return stopped("cast-faulty");
+          }
+          const sending = { ballot: cast.ballot, tier, trackingCode };
+          if (current()) setStep({ kind: "sending" });
+          return send(sending);
+        }
         if (isProofProblem(cast.problem)) return { kind: "proving-refused", problem: cast.problem };
         // A record that fails this device's own admission checks was made
         // after the prover saw the witness: shown, never retried (T-55).
@@ -533,6 +645,62 @@ export function Ballot({
       // the worker's failure, without a retry, which is the safe side.
       { kind: "proving-refused", problem: "worker-failed" },
     );
+  }
+
+  /**
+   * Sends a recorded cast and turns the answer into the next screen. The
+   * same bytes go every time, so a retry is at worst a copy the board
+   * already holds (T-25). Only a boarded answer that passes `checkBoarded`
+   * says the ballot is on the board; any other is sent again or shown.
+   */
+  async function send(sending: Sending): Promise<Step> {
+    const { ballot, tier, trackingCode } = sending;
+    const unsent = (reason: UnsentReason): Step => ({ kind: "unsent", reason, sending });
+    let answer: SendAnswer;
+    try {
+      answer = await source.send(electionId, ballot);
+    } catch {
+      return unsent("unreachable");
+    }
+    switch (answer.kind) {
+      case "boarded": {
+        const { boardEntryVersion } = election;
+        const checked =
+          boardEntryVersion === undefined
+            ? undefined
+            : checkBoarded(answer, { electionId, ballot, boardEntryVersion });
+        if (checked === undefined) return unsent("unconfirmed");
+        // The first checked answer for these bytes is kept; a different one
+        // for the same ballot is the operator contradicting itself (T-38).
+        const kept = await source
+          .keepBoarded(electionId, tier, ballot, checked)
+          .catch(() => "unwritable" as const);
+        return kept === "conflict"
+          ? stopped("answer-conflict")
+          : { kind: "sent", trackingCode, index: checked.index };
+      }
+      // A copy of this ballot is already on the board: it counts as this
+      // one, never as a failed cast that needs a new ballot ([[revoting]],
+      // Keyed by content).
+      case "rejected":
+        return answer.code === "repeat"
+          ? { kind: "sent", trackingCode }
+          : stopped("send-rejected", answer.code);
+      case "not-open":
+        return stopped("not-open");
+      case "malformed":
+      case "not-found":
+        return stopped("send-refused", answer.kind);
+      case "busy":
+      case "unavailable":
+      case "unreachable":
+        return unsent(answer.kind);
+    }
+  }
+
+  function sendAgain(sending: Sending) {
+    setStep({ kind: "sending" });
+    run(() => send(sending), { kind: "unsent", reason: "unreachable", sending });
   }
 
   switch (step.kind) {
@@ -559,6 +727,7 @@ export function Ballot({
     case "finding":
     case "sealing":
     case "opening":
+    case "sending":
       return <Working poll={poll} kind={step.kind} />;
     case "sealed":
       return (
@@ -566,7 +735,7 @@ export function Ballot({
           poll={poll}
           electionId={election.electionId}
           trackingCode={step.trackingCode}
-          onCast={() => cast(step.seal)}
+          onCast={() => cast(step)}
           onChallenge={() => challenge(step.seal, step.trackingCode)}
         />
       );
@@ -583,9 +752,18 @@ export function Ballot({
       return <Proving steps={step.steps} />;
     case "proving-refused":
       return <ProvingRefused problem={step.problem} onRetry={onRestart} />;
-    case "cast":
+    case "unsent":
       return (
-        <NotSent definitionHash={election.definitionHash} closes={poll.closes} onAgain={again} />
+        <Unsent
+          poll={poll}
+          trackingCode={step.sending.trackingCode}
+          reason={step.reason}
+          onSend={() => sendAgain(step.sending)}
+        />
+      );
+    case "sent":
+      return (
+        <Sent poll={poll} trackingCode={step.trackingCode} index={step.index} onAgain={again} />
       );
     case "register":
       return (
@@ -609,36 +787,4 @@ export function Ballot({
         />
       );
   }
-}
-
-/** A cast, until part 3c sends it: says plainly that nothing was sent. */
-export function NotSent({
-  definitionHash,
-  closes,
-  onAgain,
-}: {
-  definitionHash: string;
-  closes: string;
-  onAgain: () => void;
-}) {
-  const t = useTranslate(catalogs);
-  return (
-    <EverydayFrame
-      poll={{ definitionHash, closes }}
-      primary={
-        <Button className={ACTION} onClick={onAgain}>
-          {t("answerAgain")}
-        </Button>
-      }
-    >
-      <ScreenTitle title={t("notSentTitle")} focus>
-        <p className="m-0">{t("notSent")}</p>
-      </ScreenTitle>
-      <div className="mt-8">
-        <Note title={t("localTitle")}>
-          <p className="m-0">{t("local")}</p>
-        </Note>
-      </div>
-    </EverydayFrame>
-  );
 }

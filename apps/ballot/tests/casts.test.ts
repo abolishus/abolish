@@ -1,9 +1,16 @@
-import { encodeBoardEntry } from "@abolishus/crypto";
+import { decodeBallot, encodeBoardEntry } from "@abolishus/crypto";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 
-import { type CastRecord, newestBlock, parseStoredCasts, storedCasts } from "../src/casts.ts";
+import {
+  type CastAsked,
+  castAsAsked,
+  type CastRecord,
+  newestBlock,
+  parseStoredCasts,
+  storedCasts,
+} from "../src/casts.ts";
 
 // The record of this device's casts in one election and tier (src/casts.ts;
 // [[revoting]], Client rule 3): read back only as this client writes it, a
@@ -216,5 +223,53 @@ describe("the stored casts", () => {
     // A block that isn't the one the ballot names.
     expect(() => storedCasts([{ ballot: naming(10n), l1Number: 9n }])).toThrow(TypeError);
     expect(() => storedCasts([{ ballot: ballot.subarray(1), l1Number: 10n }])).toThrow(TypeError);
+  });
+});
+
+describe("a cast's ballot, against what the cast asked for", () => {
+  // Each vector ballot's own fields, read by the crypto package's decoder.
+  const asked = (ballot: Uint8Array): CastAsked => {
+    const { definition_hash, cell, l1_ref_number, l1_ref_hash } = decodeBallot(ballot, 3);
+    return { definitionHash: definition_hash, cell, l1Number: l1_ref_number, l1Hash: l1_ref_hash };
+  };
+  const ballots = VECTORS.ballots.map((b) => new Uint8Array(Buffer.from(b.encoding, "hex")));
+
+  test("passes a ballot naming exactly the poll, the cell and the L1 block asked for", () => {
+    for (const ballot of ballots) expect(castAsAsked(ballot, asked(ballot))).toBe(true);
+  });
+
+  test("refuses another definition, cell, block number or block hash (T-45, T-38)", () => {
+    const flip = (bytes: Uint8Array, at: number) => bytes.with(at, (bytes[at] as number) ^ 1);
+    fc.assert(
+      fc.property(
+        fc.nat({ max: ballots.length - 1 }),
+        fc.nat({ max: 31 }),
+        fc.integer({ min: 1, max: 255 }),
+        fc.bigInt({ min: 1n, max: 2n ** 64n - 1n }),
+        (i, at, cellDelta, numberDelta) => {
+          const ballot = ballots[i] as Uint8Array;
+          const own = asked(ballot);
+          for (const other of [
+            { ...own, definitionHash: flip(own.definitionHash, at) },
+            { ...own, cell: (own.cell + cellDelta) % 256 },
+            { ...own, l1Number: (own.l1Number + numberDelta) % 2n ** 64n },
+            { ...own, l1Hash: flip(own.l1Hash, at) },
+          ])
+            expect(castAsAsked(ballot, other)).toBe(false);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("refuses bytes that aren't a version-3 ballot record", () => {
+    const own = asked(BALLOT);
+    for (const bytes of [
+      new Uint8Array(),
+      BALLOT.subarray(0, -1),
+      Uint8Array.of(...BALLOT, 0),
+      BALLOT.with(2, (BALLOT[2] as number) ^ 1),
+    ])
+      expect(castAsAsked(bytes, own)).toBe(false);
   });
 });

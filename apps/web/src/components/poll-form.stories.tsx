@@ -106,7 +106,7 @@ export const NewPoll: Story = {
     await expect(canvas.getByRole("heading", { level: 1, name: "Create a poll" })).toBeVisible();
     // Saving an empty form names every problem, linked to its field, and sends nothing.
     await userEvent.click(await canvas.findByRole("button", { name: "Save draft" }));
-    const summary = await canvas.findByRole("alert");
+    const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
     await expect(summary).toHaveFocus();
     const links = within(summary).getAllByRole("link");
     await expect(links.map((l) => l.textContent)).toEqual([
@@ -261,7 +261,7 @@ export const ProblemsInAQuestion: Story = {
     await userEvent.clear(exactly);
     await userEvent.type(exactly, "4");
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
-    const summary = await canvas.findByRole("alert");
+    const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
     await expect(
       within(summary)
         .getAllByRole("link")
@@ -284,9 +284,9 @@ export const ClosesTooSoon: Story = {
     fireEvent.change(date, { target: { value: "2026-10-18" } });
     fireEvent.change(time, { target: { value: "13:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent(
-      "Choose a time at least 90 minutes from now.",
-    );
+    await expect(
+      await canvas.findByRole("region", { name: "Your draft wasn't saved" }),
+    ).toHaveTextContent("Choose a time at least 90 minutes from now.");
     await expect(date).toHaveAttribute("aria-invalid", "true");
   },
 };

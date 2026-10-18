@@ -20,7 +20,6 @@ import {
   type FormQuestion,
   formOf,
   MAX_OPTIONS,
-  MAX_QUESTIONS,
   newOption,
   newPollForm,
   newQuestion,
@@ -145,6 +144,10 @@ function Picks({
   errors: readonly FieldError[];
   onChange: (n: number) => void;
 }) {
+  // The text as typed, so the field can be cleared to retype; the count is
+  // what it parses to (0 while empty), judged by the field checks.
+  const [typed, setTyped] = useState(String(value));
+  const shown = Number.parseInt(typed, 10) === value ? typed : String(value);
   return (
     <div className="grid content-start gap-2">
       <Label htmlFor={id} className="text-base font-semibold">
@@ -160,8 +163,9 @@ function Picks({
         step={1}
         className={cn(FIELD, "w-24 tabular-nums")}
         {...described(errors, id)}
-        value={String(value)}
+        value={typed === "" && value === 0 ? "" : shown}
         onChange={(e) => {
+          setTyped(e.target.value);
           const n = Number.parseInt(e.target.value, 10);
           onChange(Number.isInteger(n) ? Math.min(Math.max(n, 0), MAX_OPTIONS) : 0);
         }}
@@ -381,7 +385,6 @@ function QuestionFields({
           <Button
             id={addId}
             variant="outline"
-            disabled={m >= MAX_OPTIONS}
             {...described(errors, addId)}
             onClick={() => onChange({ ...q, options: [...q.options, newOption()] })}
           >
@@ -517,12 +520,17 @@ export function PollFormPage({
   const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    if (id === undefined) {
-      setForm((f) => f ?? newPollForm());
-      return;
-    }
     // A new draft's own ID arriving in the address names what is already on the page.
-    if (id === savedId.current) return;
+    if (id !== undefined && id === savedId.current) return;
+    // Any other address is another poll: nothing of the last one stays.
+    savedId.current = undefined;
+    setErrors([]);
+    setSaved(false);
+    setFailure(undefined);
+    setUnavailable(undefined);
+    setForm(id === undefined ? newPollForm() : undefined);
+    if (id === undefined) return setBusy(false);
+    setBusy(true);
     if (!ID.test(id)) {
       setUnavailable("gone");
       setBusy(false);
@@ -677,7 +685,7 @@ export function PollFormPage({
             <div
               ref={summary}
               tabIndex={-1}
-              role="alert"
+              role="region"
               aria-labelledby="poll-form-errors"
               className="grid gap-2 border-2 border-destructive p-5 outline-none focus-visible:ring-3 focus-visible:ring-ring"
             >
@@ -773,7 +781,6 @@ export function PollFormPage({
                 <Button
                   id={fieldId.addQuestion}
                   variant="outline"
-                  disabled={form.questions.length >= MAX_QUESTIONS}
                   {...described(errors, fieldId.addQuestion)}
                   onClick={() => change({ ...form, questions: [...form.questions, newQuestion()] })}
                 >

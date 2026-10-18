@@ -5,6 +5,7 @@
 // a field; `pollDraftProblem`, the rules the handler itself applies, has the
 // last word, so a draft the handler would refuse is never sent (T-34, T-72).
 
+import { DEFINITION_V5_LIMITS } from "@abolishus/crypto";
 import {
   MAX_CLOSE_SECONDS,
   MIN_OPEN_SECONDS,
@@ -64,9 +65,9 @@ export const TEXT_BYTES = {
 } as const;
 
 /** Definition version 5's limits (docs/spec/election-definition.md, Questions). */
-export const MAX_QUESTIONS = 32;
+export const MAX_QUESTIONS = DEFINITION_V5_LIMITS.maxQuestions;
 /** Options across every question of a poll. */
-export const MAX_OPTIONS = 64;
+export const MAX_OPTIONS = DEFINITION_V5_LIMITS.maxOptions;
 
 /** The tiers a poll can be offered to today: only Tier 0 has groups (part 2, Known-weak). */
 export const OFFERED_TIERS: readonly number[] = [0];

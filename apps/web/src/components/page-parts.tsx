@@ -42,6 +42,7 @@ export function Section({
   mark,
   title,
   id,
+  titleRef,
   lede,
   children,
 }: {
@@ -49,6 +50,7 @@ export function Section({
   mark: string;
   title: string;
   id: string;
+  titleRef?: Ref<HTMLHeadingElement>;
   lede?: ReactNode;
   children: ReactNode;
 }) {
@@ -60,7 +62,9 @@ export function Section({
         </SectionMark>
         <h2
           id={id}
-          className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl md:col-span-7"
+          ref={titleRef}
+          tabIndex={titleRef === undefined ? undefined : -1}
+          className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance outline-none sm:text-4xl md:col-span-7"
         >
           {title}
         </h2>

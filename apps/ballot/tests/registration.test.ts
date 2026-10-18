@@ -189,7 +189,6 @@ describe("sendTier0Request", () => {
   test.each<[number, unknown, Tier0Answer]>([
     [200, {}, "accepted"],
     [400, { code: "BAD_REQUEST" }, "malformed"],
-    [400, "not json", "malformed"],
     [422, { code: "REGISTRATION_MALFORMED", data: { code: "non-canonical" } }, "malformed"],
     [422, { code: "REGION_UNKNOWN" }, "region-unknown"],
     [503, { code: "REGISTRATION_BUSY" }, "busy"],
@@ -215,6 +214,9 @@ describe("sendTier0Request", () => {
     [500, { code: "INTERNAL_SERVER_ERROR" }],
     [404, { code: "NOT_FOUND" }],
     [503, { code: "toString" }],
+    [400, "not json"],
+    [400, {}],
+    [400, { code: "REGISTRATION_MALFORMED" }],
     [503, { code: "__proto__" }],
   ])("reads %i %j as unreachable", async (status, json) => {
     expect(await send(status, json)).toBe("unreachable");

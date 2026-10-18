@@ -79,8 +79,7 @@ export function challengeToken(
   challengeOrigin: string,
   frame: unknown,
 ): string | undefined {
-  if (event.origin !== challengeOrigin || frame === null || event.source !== frame)
-    return undefined;
+  if (event.origin !== challengeOrigin || frame == null || event.source !== frame) return undefined;
   const { data } = event;
   if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
   if (Object.getPrototypeOf(data) !== Object.prototype) return undefined;
@@ -173,9 +172,12 @@ export async function sendTier0Request(
   const answer = await readJson(response);
   if (response.status === 200)
     return isRecord(answer) && Object.keys(answer).length === 0 ? "accepted" : "unreachable";
-  // Every route's own refusal of a body outside its forms (step 1 and 2's forms).
-  if (response.status === 400) return "malformed";
   const code = isRecord(answer) ? answer["code"] : undefined;
+  // Every route's own refusal of a body outside its forms (steps 1 and 2),
+  // only in the route's own shape: this client checked the forms before
+  // sending, so a bare 400 is an edge's, and is read as unreachable rather
+  // than as a fault that would keep the direct path from being offered (T-25).
+  if (response.status === 400) return code === "BAD_REQUEST" ? "malformed" : "unreachable";
   const refusal =
     typeof code === "string" && Object.hasOwn(REFUSALS, code) ? REFUSALS[code] : undefined;
   return refusal !== undefined && refusal[0] === response.status ? refusal[1] : "unreachable";

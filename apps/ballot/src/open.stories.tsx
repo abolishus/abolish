@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { App } from "./app.tsx";
+import type { Backer } from "./backup-offer.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
 import { parseLink } from "./link.ts";
@@ -1116,6 +1117,7 @@ function registrar(
     readAt = READ_AT,
     registry: read,
     outcomes = [NOT_YET],
+    backup,
   }: {
     created?: Awaited<ReturnType<Registrar["create"]>>;
     recorded?: Awaited<ReturnType<Registrar["record"]>>;
@@ -1123,6 +1125,7 @@ function registrar(
     readAt?: bigint;
     registry?: LoadedRegistry;
     outcomes?: readonly Tier0OutcomeResult[];
+    backup?: Backer;
   } = {},
 ): Registrar {
   let store = held;
@@ -1185,6 +1188,7 @@ function registrar(
     outcome,
     join,
     now: () => NOW,
+    backup,
   };
   REGISTRARS.set(made, { create, commitment, send, record, registry, outcome, join, secrets });
   return made;
@@ -1275,6 +1279,44 @@ export const RegistersANewIdentity: Story = {
     );
     await registrarZeroed(args.source, 3);
     await expect(canvas.getByRole("button", { name: "Check again" })).toBeVisible();
+  },
+};
+
+export const BacksUpOnceSent: Story = {
+  name: "Sent: the backup offered, and made",
+  args: {
+    source: registering({
+      registrar: registrar(
+        { kind: "found", identity: { secret: SECRET, memberships: [] } },
+        ["accepted"],
+        {
+          backup: {
+            credential: fn<Backer["credential"]>(() => Promise.resolve({ kind: "none" })),
+            backUp: fn<Backer["backUp"]>(() =>
+              Promise.resolve({ kind: "stored", syncable: true, backedUp: true }),
+            ),
+            now: () => NOW,
+          },
+        },
+      ),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    // Offered only once the request went, never on the way to it.
+    await expect(canvas.queryByRole("button", { name: "Back up with a passkey" })).toBeNull();
+    await userEvent.click(await canvas.findByRole("button", { name: "Register it" }));
+    const check = await canvas.findByRole("button", { name: "Pass the check" });
+    await expect(canvas.queryByRole("button", { name: "Back up with a passkey" })).toBeNull();
+    await userEvent.click(check);
+    await focused(canvas, { level: 1, name: "Your registration was sent" });
+    const backup = args.source.registrar?.backup;
+    await userEvent.click(await canvas.findByRole("button", { name: "Back up with a passkey" }));
+    await expect(await canvas.findByText("Backed up with your passkey")).toBeVisible();
+    await expect(backup?.backUp).toHaveBeenCalledOnce();
+    // Focus follows the pressed button to the outcome, never to the page.
+    await expect(canvas.getByRole("status")).toHaveFocus();
   },
 };
 

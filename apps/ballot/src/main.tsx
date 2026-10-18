@@ -9,12 +9,16 @@ import { StrictMode, useMemo, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
+import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
+import type { Backer } from "./backup-offer.tsx";
 import { STAGING, tier0Region } from "./deployment.ts";
 import {
   createIdentity,
+  readBackupCredential,
   readIdentity,
   recordTier0Membership,
   recordTier0Request,
+  saveBackupCredential,
 } from "./identity.ts";
 import { parseLink } from "./link.ts";
 import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
@@ -49,6 +53,38 @@ const challengeFrame: Registrar["Challenge"] | undefined = undefined;
 const region = tier0Region(STAGING);
 const groupRegistry = STAGING.groupRegistry;
 const pinned = STAGING.registrars;
+// The passkey backup, where this build offers one (`Deployment.backups`).
+const backer: Backer | undefined = !STAGING.backups
+  ? undefined
+  : {
+      credential: () => readBackupCredential(),
+      backUp: () =>
+        backUp({
+          credentials: navigator.credentials,
+          rpId: STAGING.backupRpId,
+          identity: () => readIdentity(),
+          credential: () => readBackupCredential(),
+          keep: (credential) => saveBackupCredential(credential),
+          // In a worker of its own, so a backup never waits behind, or stops,
+          // the worker holding the poll. `backupSeal` reaches its postMessage
+          // before its first await, so both are copied before this returns.
+          async seal(prf, secret) {
+            const own = new BallotWorker();
+            try {
+              return await own.backupSeal(prf, secret);
+            } finally {
+              own.terminate();
+            }
+          },
+          put: (locator, envelope) =>
+            putIdentityBackup(STAGING, locator, envelope, (url, init) => fetch(url, init)),
+          fetch: (locator) =>
+            fetchIdentityBackup(STAGING, locator, (url, init) => fetch(url, init)),
+          now: () => Date.now(),
+        }),
+      now: () => Date.now(),
+    };
+
 const registrar: Registrar | undefined =
   challengeFrame === undefined ||
   region === undefined ||
@@ -91,6 +127,7 @@ const registrar: Registrar | undefined =
           ),
         join: (secret, group) => recordTier0Membership(secret, group),
         now: () => Date.now(),
+        backup: backer,
       };
 
 const source: ElectionSource = {

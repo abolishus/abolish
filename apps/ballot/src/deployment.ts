@@ -72,6 +72,15 @@ export interface Deployment {
    * browser rather than making a passkey bound to that host.
    */
   readonly backupRpId: string;
+  /**
+   * Whether this build offers voters a backup: only where the client is
+   * served from `backupRpId`'s own host, so that no `/.well-known/webauthn`
+   * file is needed to let it evaluate the passkey's PRF. A release offers it
+   * only once its signed well-known file, the test that the file lists no
+   * `apps/web` origin, and P1-19's check of the served copy exist
+   * ([[0017-identity-recovery-backup]], Consequences; T-20).
+   */
+  readonly backups: boolean;
 }
 
 /**
@@ -107,4 +116,6 @@ export const STAGING: Deployment = {
   // host, `up.railway.app` being a public suffix, so the host is a
   // registrable domain of its own. A release's entry points replace it.
   backupRpId: "ballot-staging.up.railway.app",
+  // Staging serves the client from the RP ID's own host.
+  backups: true,
 };

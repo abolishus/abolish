@@ -2,6 +2,7 @@ import { isForbiddenCommitment } from "@abolishus/crypto";
 import { Button, useI18n, useTranslate } from "@abolishus/ui";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
+import { type Backer, BackupOffer } from "./backup-offer.tsx";
 import { ACTION, EverydayFrame, type FramePoll, Note, Part, ScreenTitle } from "./frame.tsx";
 import type { IdentityRead, Tier0Request } from "./identity.ts";
 import type { LoadedRegistry } from "./load.ts";
@@ -58,6 +59,11 @@ export interface Registrar {
   join(secret: Uint8Array, group: bigint): Promise<"recorded" | "changed" | "unwritable">;
   /** This device's clock, in milliseconds since the UNIX epoch. */
   now(): number;
+  /**
+   * The passkey backup offered once a request went, or `undefined` where
+   * the build offers none (`Deployment.backups`).
+   */
+  readonly backup: Backer | undefined;
 }
 
 const STOPPED = {
@@ -360,7 +366,7 @@ export function Register({
         />
       );
     case "joined":
-      return <RegisterJoined poll={poll} onBack={onDone} />;
+      return <RegisterJoined poll={poll} backer={registrar.backup} onBack={onDone} />;
     case "moved":
       return <RegisterMoved poll={poll} />;
     case "challenge":
@@ -374,7 +380,7 @@ export function Register({
         />
       );
     case "sent":
-      return <RegisterSent poll={poll} onBack={onDone} />;
+      return <RegisterSent poll={poll} backer={registrar.backup} onBack={onDone} />;
     case "stopped": {
       const { commitment } = step;
       // A new solve where the route could take one; the worker's failure
@@ -474,8 +480,20 @@ export function RegisterChallenge({
   );
 }
 
-/** The route accepted the request: it is signed into a group in a later batch, and the voter comes back. */
-export function RegisterSent({ poll, onBack }: { poll: FramePoll; onBack: () => void }) {
+/**
+ * The route accepted the request: it is signed into a group in a later
+ * batch, and the voter comes back. The identity now waits on a list, so this
+ * is where its backup is offered, with nothing else to do meanwhile.
+ */
+export function RegisterSent({
+  poll,
+  backer,
+  onBack,
+}: {
+  poll: FramePoll;
+  backer?: Backer | undefined;
+  onBack: () => void;
+}) {
   const t = useTranslate(catalogs);
   return (
     <EverydayFrame
@@ -492,6 +510,7 @@ export function RegisterSent({ poll, onBack }: { poll: FramePoll; onBack: () => 
       <Part title={t("registerWaitTitle")}>
         <p className="m-0">{t("registerWait")}</p>
       </Part>
+      {backer === undefined ? null : <BackupOffer backer={backer} />}
     </EverydayFrame>
   );
 }
@@ -561,8 +580,20 @@ export function RegisterDue({
   );
 }
 
-/** The identity is on the list of the region it asked for, and kept as registered: back to the poll. */
-export function RegisterJoined({ poll, onBack }: { poll: FramePoll; onBack: () => void }) {
+/**
+ * The identity is on the list of the region it asked for, and kept as
+ * registered: back to the poll, with the backup offered again if it wasn't
+ * made, or where it stands if it was.
+ */
+export function RegisterJoined({
+  poll,
+  backer,
+  onBack,
+}: {
+  poll: FramePoll;
+  backer?: Backer | undefined;
+  onBack: () => void;
+}) {
   const t = useTranslate(catalogs);
   return (
     <EverydayFrame
@@ -576,6 +607,7 @@ export function RegisterJoined({ poll, onBack }: { poll: FramePoll; onBack: () =
       <ScreenTitle title={t("registerJoinedTitle")} focus>
         <p className="m-0">{t("registerJoined")}</p>
       </ScreenTitle>
+      {backer === undefined ? null : <BackupOffer backer={backer} />}
     </EverydayFrame>
   );
 }

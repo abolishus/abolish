@@ -384,6 +384,55 @@ const enUS = {
   joinNotNotedTitle: "You're registered, but this device couldn't note it",
   joinNotNoted:
     "The voting identity on this device changed or couldn't be written. Nothing was sent. Try again: the list is read afresh.",
+  // Backing up the voting identity with a passkey (backup-offer.tsx).
+  backupOfferTitle: "Back up with a passkey?",
+  backupOffer:
+    "So you can keep answering from your other devices as the same person, and keep your place if you lose this one.",
+  backupStart: "Back up with a passkey",
+  backupSkip: "Not now",
+  backupSkipMeans:
+    "If you skip it, you can still answer on this device. A new device would start as someone new. Your receipts stay on this device either way.",
+  backupSectionTitle: "Passkey backup",
+  backupSkipped:
+    "No backup for now. You can keep answering on this device, and back up later from this app.",
+  backupWorking:
+    "Follow your browser's passkey prompt. This device seals your voting identity under the passkey, then stores the sealed copy.",
+  backupStoredTitle: "Backed up with your passkey",
+  backupStored:
+    "A sealed copy of your voting identity is stored, and only your passkey opens it. Your receipts stay on this device.",
+  backupNoSyncTitle: "This passkey can't be copied to your other devices",
+  backupNoSync:
+    "The backup is stored, but the passkey that opens it lives only on this device or security key, so it's lost with it. Don't clear this site's data.",
+  backupNotSyncedTitle: "Your passkey isn't on your other devices yet",
+  backupNotSynced:
+    "The backup is stored, but until your passkey app copies the passkey, losing this device would lose it too. Check again once your devices have synced.",
+  backupCheckSync: "Check again",
+  backupRetry: "Try again",
+  backupUnreadableTitle: "There's no voting identity to back up",
+  backupUnreadable:
+    "This device couldn't read a voting identity or its backup record, so nothing was backed up. Don't clear this site's data.",
+  backupUnwritableTitle: "This browser won't keep the backup's record",
+  backupUnwritable:
+    "It refused to store which passkey holds the backup, perhaps in a private window or with site data blocked, so nothing was backed up. Open the ballot in a normal window to back up.",
+  backupCancelledTitle: "The passkey prompt was closed",
+  backupCancelled: "Nothing was backed up. Try again when you're ready.",
+  backupUnsupportedTitle: "This passkey can't hold a backup",
+  backupUnsupported:
+    "Your browser or passkey app doesn't support what the backup needs, so nothing was saved. You can keep answering on this device. To back up, try another browser or passkey app.",
+  backupNoUvTitle: "The passkey didn't check it was you",
+  backupNoUv:
+    "A backup needs your passkey to ask for your fingerprint, face, PIN or screen lock, and this one didn't, so nothing was saved. Try again, or use another passkey app.",
+  backupFailedTitle: "The backup didn't finish",
+  backupFailed: "Something on this device stopped it, and nothing was backed up. Try again.",
+  backupRejectedTitle: "The backup service refused this backup",
+  backupRejected:
+    "It says the sealed copy isn't one it takes, so this copy of the ballot may be faulty. Open the ballot from abolishus.eth or another address Abolish lists.",
+  backupUnreachableTitle: "The backup couldn't be stored",
+  backupUnreachable:
+    "The backup service was unavailable or unreachable. Your voting identity is still on this device. Try again in a few minutes.",
+  backupNotKeptTitle: "The backup service didn't keep the backup",
+  backupNotKept:
+    "It accepted the sealed copy but didn't give it back when this device checked, so it isn't counted as backed up. Try again.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

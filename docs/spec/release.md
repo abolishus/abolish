@@ -8,7 +8,7 @@ What this page doesn't cover:
 
 - **The registry:** its calls, its storage layout and how a reader proves a release published and not revoked from a finalized L1 header ([[contracts]], Release registry).
 - **The served-client check:** fetching a site from an origin and comparing it with the record ([[verifier]], Served client).
-- **The deployment record** (`0x0020`, reserved): the chain IDs, contract addresses, registrars, panels, API and RPC origins and prover keys the client is built for, which the release record binds by hash ([[P4-4]] part 2b-3).
+- **The deployment record** (`0x0020`): the chain IDs, contract addresses, registrars, panels, published groups, API and RPC origins, RP IDs and prover hashes the client is built for, which the release record binds by hash, and the rules a release and its deployment meet together ([[deployment]]).
 - **Building and publishing:** the release workflow that builds the record from two reproducible builds and the Safe transaction that appends it ([[P4-4]] part 2e, a `ci:` PR).
 
 ## Not a result-critical record
@@ -26,7 +26,7 @@ Record type `0x001f` ([[versioning]]), version 1.
 | `sequence`        | `u64`           | The record's position in that registry: 0 for its first release, then one more for each                                                                |
 | `previous`        | `bytes[32]`     | The release hash of the record at `sequence − 1` in the same registry, or 32 zero bytes when `sequence` is 0                                           |
 | `source_commit`   | `bytes[20]`     | The git commit on `main` of `abolishus/abolish` the release was built from (its SHA-1 object name)                                                     |
-| `deployment_hash` | `bytes[32]`     | `H(DS("abolish/v1/deployment", d))`, where `d` is the encoding of the deployment record (`0x0020`) the client is built for ([[P4-4]] part 2b-3)        |
+| `deployment_hash` | `bytes[32]`     | `H(DS("abolish/v1/deployment", d))`, where `d` is the encoding of the deployment record (`0x0020`) the client is built for ([[deployment]])            |
 | `sites`           | `list<site, 2>` | What the release serves: the ballot client, and the challenge page when the release has one ([[registration]], Challenge page), in ascending `kind`    |
 
 `site`:
@@ -137,5 +137,5 @@ A site with `loopback` true may also be served by `apps/node` at one origin of t
 - **Header values are free text.** The grammar fixes their bytes but not their meaning: a `content-security-policy` that allows more than the client needs is well formed. The release Safe's signers check the policy against the build before signing (part 2e), and [[verifier]] 1.1 reports the headers it finds; no rule here judges a policy (T-43).
 - **Size is bounded, not small.** A record at its maximums is about 2.6 MB and a site at its maximums 256 GiB. A reader bounds what it fetches by the lengths the record lists, never by what a source sends ([[content-addressing]], Reading by CID; T-52), and sets its own limit below the record's when it can't spend that much.
 - **`source_commit` is a SHA-1 name.** Git names commits by SHA-1, which has chosen-prefix collisions; git's collision detection catches the known attacks only. The files are bound by SHA-256, so what the record serves rests on nothing SHA-1, but the link from a release to its reviewed source does: the signers' runbook (part 2e) binds the source by a SHA-256 of its tree as well.
-- **The challenge origin's separation isn't in the record.** `origin-shared` compares bytes only. That the challenge origin isn't under the RP ID's registrable domain ([[registration]], Challenge page) needs the Public Suffix List and the RP ID, which the deployment record carries (part 2b-3); the signers and [[verifier]] 1.1 check it.
+- **The challenge origin's separation isn't in the record.** `origin-shared` compares bytes only. That the challenge origin isn't under the RP ID's registrable domain ([[registration]], Challenge page) needs the Public Suffix List and the RP IDs, which the deployment record carries: its `challenge-rp` rule ([[deployment]], Against its release) is the part decidable without the list, and the signers and [[verifier]] 1.1 check the rest.
 - **A loopback origin is the voter's own.** Anything on the voter's machine that can listen on a loopback port can serve a client there. `apps/node` is the one program the record trusts to, and a voter who runs another is outside what any check here can see (T-41).

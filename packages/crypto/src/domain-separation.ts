@@ -208,7 +208,7 @@ export const TAG_REGISTRY = Object.freeze(
       },
       { tag: "abolish/v1/keyed-nullifier/query", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/release", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/deployment", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/deployment", primitive: "plain", status: "specified" },
       {
         tag: "abolish/v1/keyed-nullifier/key-context-2",
         primitive: "plain",

@@ -443,7 +443,7 @@ The codes of step 2 come from the trie walk, which is Anchors from L1's and whic
 
 - **what another visitor was served** (T-41): a host can serve the release to the verifier and another client to one voter, so a pass is evidence for the host's behaviour toward this run only. The ballot client's own check of its origin (P2-8) and `apps/node`, which serves only a release it proved published and not revoked ([[P4-5]] part 4), are what protect a voter;
 - **paths the record doesn't list**: the run asks for none, so a host answering an unlisted path (an IPFS gateway's directory listing, a script no listed file loads) isn't seen ([[release]], Serving; T-43);
-- **the challenge origin's separation** from the RP ID's registrable domain ([[release]], Security notes), which needs the deployment record ([[P4-4]] part 2b-3): until then 1.1 doesn't check it;
+- **the challenge origin's separation** from the RP ID's registrable domain ([[release]], Security notes), which needs the deployment record ([[deployment]], Against its release) and the Public Suffix List: until 1.1 reads the record ([[P4-4]] part 2c) it doesn't check it;
 - **whether the release is any good**: a release with a weak CSP or a hostile build passes once the Safe publishes it ([[contracts]], Release registry, Known-weak; T-69).
 
 An entry point whose host can't send the release's headers (an ENS gateway, [[0036-release-record]], Consequences) fails with `header-missing`; [[P4-4]] part 3 must settle what such a gateway can send before its name is listed.

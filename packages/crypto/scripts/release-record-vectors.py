@@ -943,7 +943,7 @@ def decode_cases(typical, first):
         ("trailing-byte", "A byte after the last field", typical + b"\x00", "trailing-bytes"),
         ("unknown-version", "Version 2", at(typical, 2, b"\x02"), "unknown-version"),
         ("version-zero", "Version 0", at(typical, 2, b"\x00"), "unknown-version"),
-        ("reserved-deployment-type", "The deployment record's reserved type", at(typical, 0, b"\x00\x20"), "unknown-record-type"),
+        ("deployment-type", "The deployment record's type, which a release decoder doesn't know", at(typical, 0, b"\x00\x20"), "unknown-record-type"),
         ("test-type", "A test-range type", at(typical, 0, b"\xff\x00"), "unknown-record-type"),
         ("sites-over-max", "Three sites", at(first_enc, sites_at, u32(3)), "length-over-max"),
         ("kind-zero", "Site kind 0", at(first_enc, site0, b"\x00"), "invalid-enum"),

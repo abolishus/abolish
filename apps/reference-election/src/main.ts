@@ -131,11 +131,13 @@ import {
 } from "./receipts.ts";
 import { anchorSlots, receiptKeySlot } from "./slots.ts";
 import {
+  deliver,
   electorateCheck,
   nodeCeremony,
   nodeIntake,
   nodeKeys,
   registrationFrom,
+  serveSeats,
   startSeats,
   stubOf,
 } from "./seats.ts";
@@ -515,39 +517,46 @@ async function run(
     let lastBallot:
       | { readonly bytes: Uint8Array; readonly ciphertexts: readonly Uint8Array[] }
       | undefined;
-    for (const [voter, votes, ref] of ballots) {
-      const ballot = await castVote(casting, voter, votes, ref);
-      board(honest, ballot.bytes);
-      const signed = await nodeIntake(
-        nodes,
-        honest.definition.value,
-        honest.transcript,
-        ballot.bytes,
-        ballot.ciphertexts,
-      );
-      const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
-      if (
-        signed.length !== taken.receipts.length ||
-        signed.some((r, i) => hex(r) !== hex(taken.receipts[i] ?? new Uint8Array()))
-      )
-        throw new Error("the nodes' share receipts aren't the ones their keys sign");
-      receipts.push(...signed);
-      last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
-      lastBallot = ballot;
-    }
-    // A control: by the delivery deadline `t_D` the intake cutoff has
-    // passed, and every node refuses the same ballot again (T-54).
-    if (lastBallot === undefined) throw new Error("no ballot was cast");
-    l1Time = deliveryDeadlines(timing.closesAt, BigInt(timing.inclusionBound)).delivery;
-    for (const s of nodes) {
-      const late = await s.intake.intake(
-        stubOf(honest.definition.value),
-        honest.transcript,
-        lastBallot.bytes,
-        lastBallot.ciphertexts[s.index - 1] ?? new Uint8Array(),
-      );
-      if (late.ok || late.code !== "intake-closed")
-        throw new Error(`seat ${s.index}'s node took a ballot past the intake cutoff`);
+    // Each ballot reaches every seat at its node's intake endpoint, over TLS
+    // with the hybrid group, as the client's direct route delivers it.
+    const served = await serveSeats(stores, nodes);
+    try {
+      for (const [voter, votes, ref] of ballots) {
+        const ballot = await castVote(casting, voter, votes, ref);
+        board(honest, ballot.bytes);
+        const signed = await nodeIntake(
+          served.endpoints,
+          honest.definition.value,
+          honest.transcript,
+          ballot.bytes,
+          ballot.ciphertexts,
+        );
+        const taken = intake(casting.election, honest.secrets, ballot.bytes, ballot.ciphertexts);
+        if (
+          signed.length !== taken.receipts.length ||
+          signed.some((r, i) => hex(r) !== hex(taken.receipts[i] ?? new Uint8Array()))
+        )
+          throw new Error("the nodes' share receipts aren't the ones their keys sign");
+        receipts.push(...signed);
+        last.set(voter, { payload: ballot.bytes, shares: taken.shares, votes });
+        lastBallot = ballot;
+      }
+      // A control: by the delivery deadline `t_D` the intake cutoff has
+      // passed, and every node refuses the same ballot again (T-54).
+      if (lastBallot === undefined) throw new Error("no ballot was cast");
+      l1Time = deliveryDeadlines(timing.closesAt, BigInt(timing.inclusionBound)).delivery;
+      for (const e of served.endpoints) {
+        const late = await deliver(e, {
+          stub: stubOf(honest.definition.value),
+          transcript: honest.transcript,
+          record: lastBallot.bytes,
+          ciphertext: lastBallot.ciphertexts[e.index - 1] ?? new Uint8Array(),
+        });
+        if (late.ok || late.code !== "intake-closed")
+          throw new Error(`seat ${e.index}'s node took a ballot past the intake cutoff`);
+      }
+    } finally {
+      await served.close();
     }
     for (const r of receipts) board(honest, r);
     counted.set(honest, {
@@ -556,7 +565,7 @@ async function run(
       counts: countsOf([...last.values()].map((b) => b.votes)),
     });
     log(
-      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each with every seat's share receipt from its trustee node, and every node refusing intake past the cutoff; one challenged attempt checked`,
+      `stage 4 (honest): ${ballots.length} ballots with real membership proofs boarded in segment ${cast}, one a re-vote, each delivered to every seat's intake endpoint and receipted by its trustee node, and every node's endpoint refusing intake past the cutoff; one challenged attempt checked`,
     );
   }
   {

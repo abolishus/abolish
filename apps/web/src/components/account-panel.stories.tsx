@@ -84,6 +84,12 @@ const noPolls: DraftsClient = {
     throw new DraftsError("failed");
   },
   update: async () => {},
+  moderation: async () => {
+    throw new DraftsError("gone");
+  },
+  appeal: async () => {
+    throw new DraftsError("gone");
+  },
 };
 
 /** The panel's own notice; the polls list below it has its own. */

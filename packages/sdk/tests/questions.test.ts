@@ -304,7 +304,17 @@ describe("runSimulation with questions", { timeout }, () => {
     const { challenged, published, superseded, server, direct, postings, undelivered } = r.ballots;
     for (const n of [challenged, published, superseded, server, direct, postings, undelivered])
       expect(n).toBeGreaterThan(0);
-    expect(r.verifier.passed).toEqual(["2.9", "3.2", "4.1", "4.2", "5.4", "5.5", "5.7"]);
+    expect(r.verifier.passed).toEqual([
+      "2.9",
+      "3.2",
+      "4.1",
+      "4.2",
+      "5.4",
+      "5.5",
+      "5.7",
+      "7.5",
+      "7.6",
+    ]);
     expect(r.verifier.failed.map((f) => f.code)).toEqual(Array(3).fill("membership-proof"));
     expect(r.cells.map((c) => c.tier)).toEqual([0, 2]);
     for (const c of r.cells) {

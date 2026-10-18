@@ -5,6 +5,7 @@ import { admitForIntake, admitForIntakeV4, panelBallotElectionWith } from "../sr
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import {
   type BallotCheckV4,
+  type BallotMembership,
   type BallotRecordV4,
   ballotSignalsV3,
   ballotSignalsV4,
@@ -33,8 +34,11 @@ import {
   statementHashV4,
   UnsupportedVersionError,
   verifyMembershipProof,
+  finishBallotStep,
   finishBallotSteps,
+  semaphoreField,
   stepBallotV4,
+  stepMembershipV4,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -285,6 +289,48 @@ describe("ballot-v4-records.json", () => {
       expect(admissionOf(batched[i] as NonNullable<(typeof batched)[number]>)).toEqual(b.admission);
       expect(batched[i]).toEqual(checkBallotV4(election, record));
     }
+  }, 60_000);
+
+  // Live results' running sets count a ballot whose membership proof passes
+  // whatever its other checks find (docs/spec/tally.md, Running set,
+  // condition 1; T-45): the verdict is snarkjs's on the vector's own signals.
+  test("membership alone: snarkjs's verdict over the ballot's own M, whatever else rejects it", () => {
+    const steps = vectors.ballots.map((b) =>
+      stepMembershipV4(
+        electionOf(b.election, b.registered, b.authorRegistered),
+        decodeBallot(hex(b.encoding), 4),
+      ),
+    );
+    const held = steps.flatMap((s) => (s === undefined ? [] : [s]));
+    const batched = finishBallotSteps(held);
+    let next = 0;
+    const rejectedMembers = new Set<string>();
+    for (const [i, b] of vectors.ballots.entries()) {
+      const step = steps[i];
+      if (b.signals === undefined) {
+        expect(step).toBeUndefined();
+        continue;
+      }
+      if (step === undefined) throw new Error(`${b.id}: no membership step`);
+      const m = batched[next++] as BallotMembership;
+      expect(m).toEqual(finishBallotStep(step));
+      const record = decodeBallot(hex(b.encoding), 4);
+      expect(m.member).toBe(b.snarkjs);
+      expect(String(semaphoreField(m.message))).toBe(b.signals.message);
+      expect(m.nullifier).toBe(record.nullifier);
+      expect(m.cell).toBe(record.cell);
+      expect(m.l1RefNumber).toBe(record.l1_ref_number);
+      expect(m.tier).toBe(
+        vectors.elections[b.election]?.cells.find((c) => c.cell === record.cell)?.tier,
+      );
+      if (b.admission.code === "ok") expect(toHex(m.message)).toBe(b.admission.message);
+      if (b.admission.code === "membership-proof") expect(m.member).toBe(false);
+      else if (m.member) rejectedMembers.add(b.admission.code);
+    }
+    // A ballot rejected after its membership proof, or before it for its
+    // share hashes, is still a member's.
+    for (const code of ["share-hash-unqualified", "option-proof", "sum-proof"])
+      expect(rejectedMembers.has(code)).toBe(true);
   }, 60_000);
 
   test("covers every admission code version 4 can return, beside acceptance, and both panels' unqualified seats", () => {

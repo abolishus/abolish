@@ -32,6 +32,10 @@ export const VERIFIER_PASSES: readonly string[] = Object.freeze([
   "5.4",
   "5.5",
   "5.7",
+  // A sealed definition has no releases, and its board no running opening
+  // (verifier.md, Releases, step 1).
+  "7.5",
+  "7.6",
 ]);
 
 /** Admission's membership rows: passed with a prover, else failed by the placeholder proofs, every ballot rejected under this code. */

@@ -1003,6 +1003,56 @@ export function stepBallotV4(
   return stepOf(mapStep(step, (result) => (result.ok ? { ...result, cell } : result)));
 }
 
+/** A version-4 ballot's membership check alone, with what a running set reads of it. */
+export interface BallotMembership {
+  /** Whether its membership proof verifies against its cell's root and scope over its own `M`. */
+  readonly member: boolean;
+  /** `M`, recomputed from the record: copies with the same one are one ballot (5.7). */
+  readonly message: Uint8Array;
+  readonly tier: number;
+  readonly cell: number;
+  readonly nullifier: bigint;
+  readonly l1RefNumber: bigint;
+}
+
+/**
+ * A version-4 ballot's membership proof checked alone, whatever its shape,
+ * share hashes and validity proofs find: live results count every ballot of
+ * a nullifier whose membership proof passes towards a running set's
+ * one-ballot rule (docs/spec/tally.md, Running set, condition 1), since only
+ * the holder of its identity secret can make one, and a ballot rejected for
+ * anything else must still hold a re-vote out (T-45). `M` is over the
+ * record's own committed vote, as `stepBallotV4` computes it once the shape
+ * holds; the ballot hash is defined for every decoded vote. `undefined` if
+ * the ballot names another definition or a cell the partition doesn't have:
+ * it isn't the tier's (verifier 5.4's `ballot-stray`, `ballot-cell`). Finish
+ * it with `finishBallotStep` or, batched, `finishBallotSteps`.
+ */
+export function stepMembershipV4(
+  election: PanelBallotElection,
+  ballot: BallotRecordV4,
+): BallotStep<BallotMembership> | undefined {
+  const definitionHash = madeHashOf(election, 4);
+  const fields = fieldsOf(ballot);
+  const { cell } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash)) return undefined;
+  const target = cellTarget(election, cell);
+  if (target === undefined) return undefined;
+  const hash = ballotHashV4({ definitionHash, cell, nullifier: fields.nullifier }, fields.vote);
+  const { message, signals } = signalsOf(definitionHash, target, fields, hash);
+  const read = {
+    message,
+    tier: target.tier,
+    cell,
+    nullifier: fields.nullifier,
+    l1RefNumber: fields.l1RefNumber,
+  };
+  return stepOf({
+    check: { proof: ballot.membership_proof, signals },
+    finish: (member) => ({ member, ...read }),
+  });
+}
+
 type AdmitCode = Exclude<BallotCode, "ballot-stray" | "ballot-tier">;
 
 // The election's rules from the context, never from the ballot's committed vote.

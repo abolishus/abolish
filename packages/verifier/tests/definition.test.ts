@@ -434,11 +434,17 @@ describe("the board checks' inputs come from the definition", () => {
       // fails, which stops none of the other checks.
       const r3 = format3(forElection(v.anchor), v);
       const r2 = format2(v);
-      // 1.3, 2.9 and 4.4 need a decoded definition, which only format 3 carries.
+      // 1.3, 2.9, 4.4, 7.5 and 7.6 need a decoded definition, which only
+      // format 3 carries.
       const others = (r: Report) =>
-        r.checks.filter((c) => !["1.3", "2.1", "2.3", "2.9", "4.4"].includes(c.id));
+        r.checks.filter((c) => !["1.3", "2.1", "2.3", "2.9", "4.4", "7.5", "7.6"].includes(c.id));
       expect(others(r3)).toEqual(others(r2));
       expect(row(r3, "2.3")).toEqual(COMBINATION_FAILS);
+      // A sealed definition has no releases, and its board no running opening
+      // (Releases, step 1).
+      for (const id of ["7.5", "7.6"]) expect(row(r3, id)).toMatchObject({ status: "pass" });
+      for (const id of ["7.5", "7.6"])
+        expect(row(r2, id)).toMatchObject({ code: "not-implemented" });
       // board.json's entry 1 is a framing placeholder of type 0x0008, not a
       // contract-event record. It fails 4.4 where 4.1 and 4.2 pass with it
       // inside the anchored extent; with nothing anchored it isn't read; and

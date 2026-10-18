@@ -46,6 +46,15 @@ export {
   type TierReport,
 } from "./counted.ts";
 export { type TallyBreak, type TallyReport } from "./tallies.ts";
+export { type ReleasesReport } from "./live.ts";
+export {
+  type CellReleasesReport,
+  type DecisionReport,
+  type FinalBatchReport,
+  type RunningBreak,
+  type RunningOpeningReport,
+  type TierReleasesReport,
+} from "./releases.ts";
 export {
   type ClaimReport,
   type CloseCode,

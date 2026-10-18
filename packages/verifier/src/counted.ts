@@ -1112,7 +1112,7 @@ function panelTally(
  * cells are the tiers, under versions 3 to 6 every tier's cells in
  * `electorate` order (election-definition.md, Notes, Tally partition).
  */
-function cellTiers(definition: VerifiedDefinition): readonly number[] {
+export function cellTiers(definition: VerifiedDefinition): readonly number[] {
   switch (definition.version) {
     case 1:
       return definition.value.electorate.map((g) => g.tier);

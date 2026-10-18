@@ -29,7 +29,9 @@ import {
   READ_VERSION,
   type Rpc,
 } from "@abolishus/node";
+import { keccak256, toBytes } from "viem";
 import type { AvailabilityKind, ContractPath } from "./availability.ts";
+import type { ReceiptPath } from "./delivery.ts";
 
 export interface RecordedOptions {
   /** The seat's own L2 node. */
@@ -127,5 +129,54 @@ export async function l2RecordedAvailability(
     }
     if (found.length > 1) throw new L2Error("l2-repeated");
     return found[0];
+  };
+}
+
+const SHARE_RECEIPT_BATCH_SUBMITTED = keccak256(
+  toBytes("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)"),
+  "bytes",
+);
+
+/**
+ * `ReceiptPath.recorded` over the seat's own L2 node: every share-receipt
+ * batch the board emitted for the definition and seat, from the board's
+ * deployment block to the node's finalized block. The board takes any number
+ * of batches per seat, so any number may be returned; the seat looks only
+ * for its stored ones among them. A node that hides a batch makes the seat
+ * resend it, which the board takes as a no-op, and one that shows a batch
+ * the board never recorded stops the seat sending it, which only a node the
+ * seat trusts for its own L2 can do (T-53, T-71). Checks the node's chain
+ * once, here (`RecordedError`); each read throws `RpcError` when the node's
+ * answer can't be read.
+ */
+export async function l2RecordedReceiptBatches(
+  options: RecordedOptions,
+): Promise<ReceiptPath["recorded"]> {
+  const { l2, board } = options;
+  if ((await chainId(l2)) !== options.l2ChainId) throw new RecordedError("chain");
+  const contracts = boardOnly(board);
+  return async (definitionHash: Uint8Array, seat: number) => {
+    // The board's `seat` topic is a `uint8`.
+    if (!Number.isInteger(seat) || seat < 0 || seat > 0xff)
+      throw new RangeError("recorded: seat must be a u8");
+    const seatWord = new Uint8Array(32);
+    seatWord[31] = seat;
+    const finalized = await l2Finalized(l2);
+    if (finalized < options.l2FromBlock) return [];
+    const logs = await contractLogs(
+      l2,
+      board,
+      [SHARE_RECEIPT_BATCH_SUBMITTED, definitionHash, seatWord],
+      options.l2FromBlock,
+      finalized,
+    );
+    const found: Uint8Array[] = [];
+    for (const log of logs) {
+      const checked = checkContractEvent(log, contracts, READ_VERSION);
+      if (!checked.ok || checked.event.event !== "ShareReceiptBatchSubmitted") continue;
+      const e = checked.event;
+      if (equal(e.definitionHash, definitionHash) && e.seat === seat) found.push(e.record);
+    }
+    return found;
   };
 }

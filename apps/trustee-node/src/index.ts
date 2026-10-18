@@ -19,6 +19,12 @@ export {
   type SeatResult,
 } from "./ceremony.ts";
 export {
+  ReceiptDuty,
+  type ReceiptDutyOptions,
+  type ReceiptDutyStatus,
+  type ReceiptPath,
+} from "./delivery.ts";
+export {
   type ElectionRefusal,
   type IntakeConfig,
   type IntakeOutcome,
@@ -77,13 +83,21 @@ export {
   encodeRequests,
   MAX_RECORD,
 } from "./wire.ts";
-export { l2RecordedAvailability, RecordedError, type RecordedOptions } from "./recorded.ts";
+export {
+  l2RecordedAvailability,
+  l2RecordedReceiptBatches,
+  RecordedError,
+  type RecordedOptions,
+} from "./recorded.ts";
 export {
   AVAILABILITY_CALL_GAS,
   availabilitySender,
+  type BoardSender,
+  boardSender,
   DEPOSIT_GAS_FLOOR,
   MAX_SIGNED_PER_RECORD,
   MAX_TRANSACTION_GAS,
+  RECEIPT_CALL_GAS,
   SendError,
   type SendErrorCode,
   type SendOptions,

@@ -1,30 +1,35 @@
-// The availability duty's sending path (docs/spec/availability.md, Windows
-// and Contract path): a seat's stored record sent to the board contract's
-// `submitAvailabilityRecord` through the seat's L2 node, which passes it to
-// the sequencer, and deposited through the L2's portal on L1 when the
-// sequencer refuses it, holds it back, or the cutoff is near. The L2 must
-// include a deposit within its sequencing window `F` whatever the sequencer
-// wants, and a record counts by the time of the L2 block that emits it, so a
-// deposit on L1 by `c_I` lands by `t_A = c_I + F` (T-25, T-50, T-71).
+// The board's contract-path sending (docs/spec/availability.md, Windows and
+// Contract path; docs/spec/delivery.md, Direct submit): a seat's stored
+// record sent to the board contract (`submitAvailabilityRecord` for an
+// availability record, `submitReceiptBatch` for a share-receipt batch)
+// through the seat's L2 node, which passes it to the sequencer, and
+// deposited through the L2's portal on L1 when the sequencer refuses it,
+// holds it back, or the cutoff is near. The L2 must include a deposit within
+// its sequencing window `F` whatever the sequencer wants, and a record
+// counts by the time of the L2 block that emits it, so a deposit on L1 by a
+// cutoff of its deadline less `F` (`c_I` for `t_A`, `c_D` for `t_D`) lands
+// in time (T-25, T-50, T-71).
 //
 // One account, the deployment's, pays on both chains. It grants no
-// authority: the board accepts the record for its P-256 signature, which
+// authority: the board accepts each record for its P-256 signature, which
 // binds the seat, whoever sends it, so the key only spends the account's
-// gas. It signs nothing but this call and deposits of it. The board takes a
-// byte-identical repeat as a no-op, so a record that reaches it both ways,
-// or again after a restart, costs gas and nothing else (T-52).
+// gas. It signs nothing but these calls and deposits of them. The board
+// takes a byte-identical repeat as a no-op, so a record that reaches it both
+// ways, or again after a restart, costs gas and nothing else (T-52).
 //
-// Nothing here decides whether a record is recorded: `recorded` reads that
-// from finalized L2 history, and the seat resends until it is. What a node
-// answers here only decides when to deposit, so a node that lies about a
-// receipt can delay the deposit to `c_I − forceLead`, never past it, and
-// one that lies about nonces can make the sender sign at most
+// Nothing here decides whether a record is recorded: the seat reads that
+// from finalized L2 history, and resends until it is. What a node answers
+// here only decides when to deposit, so a node that lies about a receipt can
+// delay the deposit to `cutoff − forceLead`, never past it, and one that
+// lies about nonces can make the sender sign at most
 // `MAX_SIGNED_PER_RECORD` transactions of a record on each chain.
 import { boardAbi } from "@abolishus/contracts/abi";
+import { FORCED_PATH } from "@abolishus/crypto";
 import { chainId, type Rpc, RpcError } from "@abolishus/node";
 import { bytesToHex, encodeFunctionData, type Hex, hexToBytes, keccak256, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { ContractPath } from "./availability.ts";
+import type { ReceiptPath } from "./delivery.ts";
 
 /**
  * The gas limit of the board call, sent or deposited: the board's figure for
@@ -35,6 +40,14 @@ import type { ContractPath } from "./availability.ts";
  * slot empty.
  */
 export const AVAILABILITY_CALL_GAS = 600_000n;
+
+/**
+ * The gas limit of the receipt-batch call, sent or deposited: the release's
+ * `RECEIPT_CALL_GAS`, measured cold for a full batch of `RECEIPT_BATCH_MAX`
+ * pairs, which the board's tests require a deposit with exactly this limit
+ * to carry (docs/spec/delivery.md, Capacity).
+ */
+export const RECEIPT_CALL_GAS = FORCED_PATH.receiptCallGas;
 
 /** EIP-7825's cap on one transaction's gas, 2²⁴: a deposit estimated past it can't be sent. */
 export const MAX_TRANSACTION_GAS = 1n << 24n;
@@ -79,7 +92,7 @@ export type SendErrorCode =
   | "chain"
   /** The board or the portal has no code: a transaction to it would do nothing. */
   | "no-code"
-  /** The board reverted the call: it refuses the record, so no resend can fill the slot. */
+  /** The board reverted the call: it refuses the record, so no resend can get it recorded. */
   | "reverted"
   /** Neither the sequencer nor the portal took the record now. */
   | "unsent"
@@ -170,8 +183,16 @@ interface Pending {
   readonly deposit: Slot;
 }
 
+/** The board calls one sender makes, sharing its account, so its nonces. */
+export interface BoardSender {
+  /** `submitAvailabilityRecord`, by the point's cutoff. */
+  readonly availability: ContractPath["send"];
+  /** `submitReceiptBatch`, by `c_D`. */
+  readonly receiptBatch: ReceiptPath["send"];
+}
+
 /**
- * `ContractPath.send` over the seat's L2 node and an L1 node. Checks both
+ * The board's calls over the seat's L2 node and an L1 node. Checks both
  * nodes' chains and that the board and the portal have code, once, here
  * (`SendError`). Each send offers the record's board call to the sequencer,
  * resending the same signed transaction until it is in a block, and deposits
@@ -184,7 +205,7 @@ interface Pending {
  * deposit can't be sent at all. Sends run one at a time, so two never take
  * one nonce; the deployment runs one sender per account, since two would.
  */
-export async function availabilitySender(options: SendOptions): Promise<ContractPath["send"]> {
+export async function boardSender(options: SendOptions): Promise<BoardSender> {
   const o = options;
   if (o.board.length !== 20 || o.portal.length !== 20)
     throw new RangeError("send: board and portal must be 20-byte addresses");
@@ -290,13 +311,14 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
   const pending = new Map<string, Pending>();
   let queue: Promise<unknown> = Promise.resolve();
 
-  const send = async (record: Uint8Array, cutoff: bigint): Promise<void> => {
+  const send = async (
+    functionName: "submitAvailabilityRecord" | "submitReceiptBatch",
+    gasLimit: bigint,
+    record: Uint8Array,
+    cutoff: bigint,
+  ): Promise<void> => {
     const now = o.clock();
-    const call = encodeFunctionData({
-      abi: boardAbi,
-      functionName: "submitAvailabilityRecord",
-      args: [bytesToHex(record)],
-    });
+    const call = encodeFunctionData({ abi: boardAbi, functionName, args: [bytesToHex(record)] });
     const key = keccak256(call);
     const p: Pending = pending.get(key) ?? {
       since: now,
@@ -308,7 +330,7 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
     let l2State: Inclusion | "refused";
     try {
       // The board's revert is final: the same call reverts again.
-      l2State = await offer(l2, p.l2, false, () => sign(l2, board, call, AVAILABILITY_CALL_GAS));
+      l2State = await offer(l2, p.l2, false, () => sign(l2, board, call, gasLimit));
     } catch (e) {
       // An unreachable node and a refusing sequencer alike leave the record
       // to the portal.
@@ -327,7 +349,7 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
     const deposit = encodeFunctionData({
       abi: portalAbi,
       functionName: "depositTransaction",
-      args: [board, 0n, AVAILABILITY_CALL_GAS, false, call],
+      args: [board, 0n, gasLimit, false, call],
     });
     try {
       // A deposit that reverted on L1 made no deposit, and the portal's
@@ -343,9 +365,20 @@ export async function availabilitySender(options: SendOptions): Promise<Contract
     if (l2State === "reverted") throw new SendError("reverted");
   };
 
-  return (record, cutoff) => {
-    const run = queue.then(() => send(record, cutoff));
-    queue = run.catch(() => undefined);
-    return run;
+  const queued =
+    (functionName: Parameters<typeof send>[0], gasLimit: bigint) =>
+    (record: Uint8Array, cutoff: bigint) => {
+      const run = queue.then(() => send(functionName, gasLimit, record, cutoff));
+      queue = run.catch(() => undefined);
+      return run;
+    };
+  return {
+    availability: queued("submitAvailabilityRecord", AVAILABILITY_CALL_GAS),
+    receiptBatch: queued("submitReceiptBatch", RECEIPT_CALL_GAS),
   };
+}
+
+/** `ContractPath.send`: the availability call of a sender of its own (`boardSender`). */
+export async function availabilitySender(options: SendOptions): Promise<ContractPath["send"]> {
+  return (await boardSender(options)).availability;
 }

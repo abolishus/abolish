@@ -10,8 +10,10 @@ import { anvil, type Node } from "./anvil.ts";
 import {
   AVAILABILITY_CALL_GAS,
   availabilitySender,
+  boardSender,
   DEPOSIT_GAS_FLOOR,
   MAX_SIGNED_PER_RECORD,
+  RECEIPT_CALL_GAS,
   SendError,
   type SendOptions,
 } from "../src/send.ts";
@@ -45,6 +47,15 @@ const selector = (s: string) => keccak_256(new TextEncoder().encode(s)).slice(0,
 const boardCall = (record: Uint8Array) =>
   concatBytes(
     selector("submitAvailabilityRecord(bytes)"),
+    word(32n),
+    word(BigInt(record.length)),
+    padded(record),
+  );
+
+/** `submitReceiptBatch(record)` in the one encoding the board takes. */
+const batchCall = (record: Uint8Array) =>
+  concatBytes(
+    selector("submitReceiptBatch(bytes)"),
     word(32n),
     word(BigInt(record.length)),
     padded(record),
@@ -624,4 +635,40 @@ test("over any refusals, mining and timing, every record's board call reaches th
     }),
     { numRuns },
   );
+});
+
+describe("the receipt-batch call (P2-13 part 4b-2b-1)", () => {
+  test("is the batch's canonical call with RECEIPT_CALL_GAS, on the availability call's nonces", async () => {
+    const sender = await boardSender(options());
+    const record = new Uint8Array(104 + 64 * 1024).fill(0xab);
+    const availability = randomBytes(106);
+    await Promise.all([
+      sender.receiptBatch(record, CUTOFF),
+      sender.availability(availability, CUTOFF),
+    ]);
+    const txs = await txsFrom(l2.rpc, w.from);
+    expect(txs.map((t) => [t.nonce, t.input, t.gas])).toEqual([
+      [0n, hex(batchCall(record)), RECEIPT_CALL_GAS],
+      [1n, hex(boardCall(availability)), AVAILABILITY_CALL_GAS],
+    ]);
+    expect(RECEIPT_CALL_GAS).toBe(4_500_000n);
+  });
+
+  test("is deposited from cutoff − forceLead with RECEIPT_CALL_GAS as the deposit's gas limit", async () => {
+    const send = (await boardSender(options())).receiptBatch;
+    const record = new Uint8Array(104 + 64 * 1024).fill(0xab);
+    w.now = CUTOFF - FORCE_LEAD;
+    await send(record, CUTOFF);
+    const [deposit, ...rest] = await txsFrom(l1.rpc, w.from);
+    expect(rest).toEqual([]);
+    if (deposit === undefined) expect.fail("the batch was deposited");
+    expect(deposit.to).toBe(hex(PORTAL));
+    expect(depositOf(deposit)).toEqual({
+      to: hex(BOARD),
+      value: 0n,
+      gasLimit: RECEIPT_CALL_GAS,
+      isCreation: false,
+      data: hex(batchCall(record)),
+    });
+  });
 });

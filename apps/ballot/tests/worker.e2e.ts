@@ -20,9 +20,7 @@ import {
   type ElectionDefinition,
   encodeDisplayText,
   encodeElectionDefinition,
-  membershipProverInput,
   sealingElectionV5,
-  verifyMembershipProof,
 } from "@abolishus/crypto";
 import { type Browser, chromium, type Page } from "playwright";
 import { build, preview, type PreviewServer } from "vite-plus";
@@ -456,161 +454,98 @@ describe("sealing a version-5 poll", () => {
 });
 
 describe("casting a version-5 poll's seal", () => {
-  test("the worker finds the voter's cell from the board and casts a seal there through a prover worker into a record the admission checks pass, and never opens it", async () => {
-    const l1 = { number: "9000000", hash: "ab".repeat(32) };
-    const json = await page.evaluate(
-      ([id, h, d, t, entries, panel, secret, find, block]) =>
-        (
-          globalThis as unknown as {
-            ballotHarness: {
-              sealAndCast(
-                id: string,
-                h: string,
-                d: string,
-                t: string,
-                entries: readonly string[],
-                panel: { threshold: number; keys: readonly string[] },
-                votes: readonly (0 | 1)[],
-                secret: string,
-                find: {
-                  tier: number;
-                  group: string;
-                  board: readonly string[];
-                  registrars: readonly string[];
-                  threshold: number;
-                },
-                l1: { number: string; hash: string },
-              ): Promise<string>;
-            };
-          }
-        ).ballotHarness.sealAndCast(
-          id,
-          h,
-          d,
-          t,
-          entries,
-          panel,
-          [0, 0, 1, 1, 0],
-          secret,
-          find,
-          block,
-        ),
-      [
-        hex(poll.definition.election_id),
-        hex(poll.registeredHash),
-        hex(poll.definitionBytes),
-        hex(poll.displayText),
-        [hex(poll.entry)],
-        { threshold: poll.panel.threshold, keys: poll.panel.keys.map(hex) },
-        hex(poll.members[1] as Uint8Array),
-        {
-          tier: 0,
-          group: String(poll.GROUP),
-          board: poll.board.map(hex),
-          registrars: poll.registrars.registrars.map(hex),
-          threshold: poll.registrars.threshold,
-        },
-        l1,
-      ] as const,
-    );
-    const { check, cast, opened } = JSON.parse(json) as {
-      check: boolean;
-      cast: { ok: boolean; ballot: string; ballotHash: string };
-      opened: unknown;
-    };
-    expect(check).toBe(true);
-    expect(cast.ok, JSON.stringify(cast)).toBe(true);
-    // Judged here, under a context made from the same records, not by the worker.
-    const independent = sealingElectionV5(poll.definition, [poll.panel], [poll.entry]);
-    if (!independent.ok) throw new Error(independent.code);
-    const record = decodeBallot(fromHex(cast.ballot), 3);
-    const verdict = checkBallotV3(independent.election, record);
-    expect(verdict.ok).toBe(true);
-    if (verdict.ok) expect(hex(verdict.ballotHash)).toBe(cast.ballotHash);
-    expect(record.l1_ref_number).toBe(BigInt(l1.number));
-    expect(opened).toEqual({ ok: false, problem: "cast" });
-    expect(violations).toEqual([]);
-    expect(consoleErrors).toEqual([]);
-    for (const url of requests) expect(new URL(url).origin).toBe(origin);
-  }, 120_000);
-});
+  const l1 = { number: "9000000", hash: "ab".repeat(32) };
 
-describe("proving membership", () => {
-  // docs/spec/vectors/membership-prover.json: Semaphore 4.14.3's identities
-  // over Abolish tier trees (P2-21 part 2).
-  interface ProverVectors {
-    readonly definitionHash: string;
-    readonly members: readonly { readonly secret: string }[];
-    readonly trees: readonly {
-      readonly id: string;
-      readonly tier: number;
-      readonly leaves: readonly string[];
-      readonly root: string;
-    }[];
-    readonly cases: readonly {
-      readonly member: number;
-      readonly tree: string;
-      readonly message: string;
-      readonly input: { readonly merkleProofIndex: string };
-    }[];
-  }
-  const loadCase = async () => {
-    const v = JSON.parse(
-      await readFile(
-        new URL("../../../docs/spec/vectors/membership-prover.json", import.meta.url),
-        "utf8",
-      ),
-    ) as ProverVectors;
-    const c = v.cases[0];
-    const tree = v.trees.find((t) => t.id === c?.tree);
-    const secret = v.members[c?.member ?? -1]?.secret;
-    if (c === undefined || tree === undefined || secret === undefined) throw new Error("no case");
-    return { ...c, tree, secret, definitionHash: v.definitionHash };
-  };
-  type Case = Awaited<ReturnType<typeof loadCase>>;
-  let proving: Case;
-  beforeAll(async () => {
-    proving = await loadCase();
-  });
-
-  const prove = (c: Case, leaves = c.tree.leaves) =>
+  /** Checks `poll`, finds `secret`'s cell from its board, seals there and casts, in the page. */
+  const sealAndCast = (secret = poll.members[1] as Uint8Array) =>
     page
       .evaluate(
-        ([secret, l, h, tier, root, message]) =>
+        ([id, h, d, t, entries, panel, voter, find, block]) =>
           (
             globalThis as unknown as {
               ballotHarness: {
-                prove(
-                  ...args: [string, readonly string[], string, number, string, string]
+                sealAndCast(
+                  id: string,
+                  h: string,
+                  d: string,
+                  t: string,
+                  entries: readonly string[],
+                  panel: { threshold: number; keys: readonly string[] },
+                  votes: readonly (0 | 1)[],
+                  secret: string,
+                  find: {
+                    tier: number;
+                    group: string;
+                    board: readonly string[];
+                    registrars: readonly string[];
+                    threshold: number;
+                  },
+                  l1: { number: string; hash: string },
                 ): Promise<string>;
               };
             }
-          ).ballotHarness.prove(secret, l, h, tier, root, message),
-        [c.secret, leaves, c.definitionHash, c.tree.tier, c.tree.root, c.message] as const,
+          ).ballotHarness.sealAndCast(
+            id,
+            h,
+            d,
+            t,
+            entries,
+            panel,
+            [0, 0, 1, 1, 0],
+            voter,
+            find,
+            block,
+          ),
+        [
+          hex(poll.definition.election_id),
+          hex(poll.registeredHash),
+          hex(poll.definitionBytes),
+          hex(poll.displayText),
+          [hex(poll.entry)],
+          { threshold: poll.panel.threshold, keys: poll.panel.keys.map(hex) },
+          hex(secret),
+          {
+            tier: 0,
+            group: String(poll.GROUP),
+            board: poll.board.map(hex),
+            registrars: poll.registrars.registrars.map(hex),
+            threshold: poll.registrars.threshold,
+          },
+          l1,
+        ] as const,
       )
       .then(
         (json) =>
           JSON.parse(json) as {
-            result: { ok?: boolean; proof?: string; problem?: string; thrown?: string };
-            progress: [number, number][];
+            check: boolean;
+            found?: { ok: boolean; problem?: string; code?: string };
+            cast?: { ok: boolean; ballot: string; ballotHash: string };
+            opened?: unknown;
+            progress?: [number, number][];
           },
       );
 
-  const signals = (c: Case) =>
-    membershipProverInput(fromHex(c.secret), c.tree.leaves.map(BigInt), {
-      definitionHash: fromHex(c.definitionHash),
-      tier: c.tree.tier,
-      root: BigInt(c.tree.root),
-      message: fromHex(c.message),
-    }).signals;
+  /** The record, judged here under a context made from the same records, not by the worker. */
+  const admitted = (cast: { ok: boolean; ballot: string; ballotHash: string } | undefined) => {
+    expect(cast?.ok, JSON.stringify(cast)).toBe(true);
+    const independent = sealingElectionV5(poll.definition, [poll.panel], [poll.entry]);
+    if (!independent.ok) throw new Error(independent.code);
+    const record = decodeBallot(fromHex(cast?.ballot ?? ""), 3);
+    const verdict = checkBallotV3(independent.election, record);
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(hex(verdict.ballotHash)).toBe(cast?.ballotHash);
+    return record;
+  };
 
   const artifactRequests = () =>
     requests.filter((url) => /\/assets\/semaphore-32-[0-9a-f]{16}\.(zkey|wasm)$/.test(url));
 
-  test("proves in a prover worker of its own, under the client's CSP, with nothing requested but its own files", async () => {
-    const { result, progress } = await prove(proving);
-    expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(verifyMembershipProof(fromHex(result.proof ?? ""), signals(proving))).toBe(true);
+  test("the worker finds the voter's cell from the board and casts a seal there through a prover worker of its own into a record the admission checks pass, with nothing requested but the client's own files, and never opens it", async () => {
+    const { check, cast, opened, progress } = await sealAndCast();
+    expect(check).toBe(true);
+    const record = admitted(cast);
+    expect(record.l1_ref_number).toBe(BigInt(l1.number));
+    expect(opened).toEqual({ ok: false, problem: "cast" });
     // Real progress, every step once and in order, from none to all.
     expect(progress).toEqual(Array.from({ length: 11 }, (_, i) => [i, 10]));
     expect(violations).toEqual([]);
@@ -631,20 +566,16 @@ describe("proving membership", () => {
     );
   }, 120_000);
 
-  test("fetches the artifacts once and proves again from the cache, into another proof", async () => {
-    const first = await prove(proving);
+  test("fetches the artifacts once and casts again from the cache", async () => {
+    admitted((await sealAndCast()).cast);
     const fetched = artifactRequests().length;
-    const second = await prove(proving);
+    admitted((await sealAndCast()).cast);
     expect(fetched).toBe(2);
     expect(artifactRequests()).toHaveLength(2);
-    expect(second.result.ok).toBe(true);
-    expect(verifyMembershipProof(fromHex(second.result.proof ?? ""), signals(proving))).toBe(true);
-    // Re-randomised each time from the ballot worker's CSPRNG.
-    expect(second.result.proof).not.toBe(first.result.proof);
   }, 180_000);
 
-  test("drops a cached key that isn't the pinned one, and proves with the key fetched again", async () => {
-    await prove(proving);
+  test("drops a cached key that isn't the pinned one, and casts with the key fetched again", async () => {
+    admitted((await sealAndCast()).cast);
     const zkeyUrl = `${origin}/assets/${PROVER_ARTIFACT_NAMES.zkey}`;
     await page.evaluate(
       async ([name, url]) => {
@@ -654,19 +585,16 @@ describe("proving membership", () => {
       [PROVER_CACHE, zkeyUrl] as const,
     );
     const before = artifactRequests().length;
-    const { result } = await prove(proving);
-    expect(result.ok).toBe(true);
+    admitted((await sealAndCast()).cast);
     expect(artifactRequests().slice(before)).toEqual([zkeyUrl]);
   }, 180_000);
 
-  test("refuses a secret whose commitment isn't a leaf, without a proof", async () => {
-    const without = proving.tree.leaves.filter(
-      (_, i) => i !== Number(proving.input.merkleProofIndex),
-    );
-    const { result, progress } = await prove(proving, without);
-    expect(result).toEqual({ ok: false, problem: "not-a-member" });
-    // The prover never got a witness to make a step of.
-    expect(progress.filter(([done]) => done > 0)).toEqual([]);
+  // That the prover then hears nothing is cast.test.ts's: the harness stops at the refusal.
+  test("finds no cell for a secret whose commitment isn't on the board", async () => {
+    const outsider = new Uint8Array(32);
+    outsider[0] = 1;
+    const { found } = await sealAndCast(outsider);
+    expect(found).toEqual({ ok: false, problem: "cell", code: "not-a-member" });
   }, 120_000);
 });
 

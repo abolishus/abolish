@@ -10,7 +10,7 @@ import { STAGING } from "../../src/deployment.ts";
 import { IDENTITY_DB, readIdentity, saveIdentity } from "../../src/identity.ts";
 import { loadElection } from "../../src/load.ts";
 import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
-import { castBallot, proveMembership } from "../../src/prover-client.ts";
+import { castBallot } from "../../src/prover-client.ts";
 import { BallotWorker } from "../../src/worker-client.ts";
 
 const worker = new BallotWorker();
@@ -54,49 +54,6 @@ const harness = {
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
   },
   /**
-   * Loads the artifacts from the client's own origin (through its cache) and
-   * proves membership through a prover worker, with every step it reported.
-   */
-  async prove(
-    secret: string,
-    leaves: readonly string[],
-    definitionHash: string,
-    tier: number,
-    root: string,
-    message: string,
-  ): Promise<string> {
-    const progress: [number, number][] = [];
-    let result: unknown;
-    try {
-      const artifacts = await loadProverArtifacts({
-        base: import.meta.url,
-        fetch: (url, init) => fetch(url, init),
-        caches: globalThis.caches,
-      });
-      result = await proveMembership(
-        worker,
-        {
-          secret: fromHex(secret),
-          leaves: leaves.map(BigInt),
-          definitionHash: fromHex(definitionHash),
-          tier,
-          root: BigInt(root),
-          message: fromHex(message),
-        },
-        artifacts,
-        (done, of) => progress.push([done, of]),
-      );
-    } catch (e) {
-      result = {
-        thrown: e instanceof Error ? e.name : "?",
-        problem: (e as { problem?: string }).problem,
-      };
-    }
-    return JSON.stringify({ result, progress }, (_, v: unknown) =>
-      v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
-    );
-  },
-  /**
    * Checks a version-5 poll with its board's entries under `panel`, then
    * seals `votes` in cell 0 and challenges the seal twice, with every answer.
    */
@@ -125,9 +82,11 @@ const harness = {
     );
   },
   /**
-   * Checks a version-5 poll as `sealAndChallenge` does, seals `votes` in
-   * cell 0, casts the seal for `secret` over `leaves` under the L1 block
-   * given, then tries to challenge it, with every answer.
+   * Checks a version-5 poll as `sealAndChallenge` does, finds the voter's
+   * cell from `find`'s board, seals `votes` there, casts the seal for `secret` under the L1 block given,
+   * with the artifacts loaded from the client's own origin (through its
+   * cache), then tries to challenge it, with every answer and every proving
+   * step the prover reported.
    */
   async sealAndCast(
     electionId: string,
@@ -172,6 +131,7 @@ const harness = {
       fetch: (url, init) => fetch(url, init),
       caches: globalThis.caches,
     });
+    const progress: [number, number][] = [];
     const cast = await castBallot(
       worker,
       {
@@ -181,9 +141,10 @@ const harness = {
         l1Hash: fromHex(l1.hash),
       },
       artifacts,
+      (done, of) => progress.push([done, of]),
     );
     const opened = await worker.challenge(sealed.seal);
-    return JSON.stringify({ check: check.ok, sealed, cast, opened }, (_, v: unknown) =>
+    return JSON.stringify({ check: check.ok, sealed, cast, opened, progress }, (_, v: unknown) =>
       v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
     );
   },

@@ -105,68 +105,23 @@ describe("requests", () => {
 });
 
 describe("membership proof requests", () => {
-  const { port1 } = new MessageChannel();
-  const prove = () => ({
-    v: PROTOCOL_VERSION,
-    id: 9,
-    kind: "prove-membership",
-    secret: new Uint8Array(32).fill(2),
-    leaves: [1n, 2n, 3n],
-    definitionHash: new Uint8Array(32).fill(3),
-    tier: 0,
-    root: 5n,
-    message: new Uint8Array(32).fill(4),
-    prover: port1,
-  });
-  port1.close();
-
-  test("accepts a well-formed request as it is, its port included", () => {
-    const parsed = parseRequest(prove());
-    expect(parsed).toEqual(prove());
-    expect(parsed?.kind === "prove-membership" && parsed.prover).toBe(port1);
-  });
-
-  test("accepts any leaves and statement values: their checks are membershipProverInput's", () => {
-    fc.assert(
-      fc.property(fc.array(fc.bigInt()), fc.bigInt(), fc.integer(), (leaves, root, tier) => {
-        const r = { ...prove(), leaves, root, tier };
-        expect(parseRequest(r)).toEqual(r);
+  test("are refused, however well formed: a proof is made only by a cast, under the statement the worker derives from the poll it checked", () => {
+    const { port1 } = new MessageChannel();
+    port1.close();
+    expect(
+      parseRequest({
+        v: PROTOCOL_VERSION,
+        id: 9,
+        kind: "prove-membership",
+        secret: new Uint8Array(32).fill(2),
+        leaves: [1n, 2n, 3n],
+        definitionHash: new Uint8Array(32).fill(3),
+        tier: 0,
+        root: 5n,
+        message: new Uint8Array(32).fill(4),
+        prover: port1,
       }),
-      { numRuns },
-    );
-  });
-
-  test.each([
-    ["a short secret", { secret: new Uint8Array(31) }],
-    ["a long secret", { secret: new Uint8Array(33) }],
-    ["a secret as hex", { secret: "02".repeat(32) }],
-    ["leaves that aren't a list", { leaves: new BigUint64Array(3) }],
-    ["a leaf that isn't a bigint", { leaves: [1n, 2, 3n] }],
-    ["a leaf as a decimal string", { leaves: ["1"] }],
-    ["a short definition hash", { definitionHash: new Uint8Array(31) }],
-    ["a fractional tier", { tier: 0.5 }],
-    ["a tier as a bigint", { tier: 0n }],
-    ["a root that isn't a bigint", { root: 5 }],
-    ["a short message", { message: new Uint8Array(31) }],
-    ["a prover that isn't a port", { prover: {} }],
-    ["an extra key", { extra: true }],
-    ["another version", { v: PROTOCOL_VERSION + 1 }],
-  ])("refuses %s", (_, change) => {
-    expect(parseRequest({ ...prove(), ...change })).toBeUndefined();
-  });
-
-  test.each(["secret", "leaves", "definitionHash", "tier", "root", "message", "prover"])(
-    "refuses a request without %s",
-    (key) => {
-      const r: Record<string, unknown> = prove();
-      delete r[key];
-      expect(parseRequest(r)).toBeUndefined();
-    },
-  );
-
-  test("refuses a check-election request's keys under the proof's kind, and the reverse", () => {
-    expect(parseRequest({ ...request(), kind: "prove-membership" })).toBeUndefined();
-    expect(parseRequest({ ...prove(), kind: "check-election" })).toBeUndefined();
+    ).toBeUndefined();
   });
 });
 
@@ -353,9 +308,6 @@ describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "error" })).toBe(4);
-    expect(responseId({ v: PROTOCOL_VERSION, id: 5, kind: "prove-membership", result: {} })).toBe(
-      5,
-    );
     expect(responseId({ v: PROTOCOL_VERSION, id: 6, kind: "seal", result: {} })).toBe(6);
     expect(responseId({ v: PROTOCOL_VERSION, id: 7, kind: "challenge", result: {} })).toBe(7);
     expect(responseId({ v: PROTOCOL_VERSION, id: 8, kind: "cast", result: {} })).toBe(8);
@@ -365,6 +317,9 @@ describe("responses", () => {
   test("ignores another version's response or kind", () => {
     expect(responseId({ v: PROTOCOL_VERSION + 1, id: 4, kind: "error" })).toBeUndefined();
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "ready" })).toBeUndefined();
+    expect(
+      responseId({ v: PROTOCOL_VERSION, id: 5, kind: "prove-membership", result: {} }),
+    ).toBeUndefined();
     expect(responseId({ v: PROTOCOL_VERSION, kind: "error" })).toBeUndefined();
   });
 });

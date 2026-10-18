@@ -27,9 +27,14 @@ export interface Node {
   readonly process: ChildProcess;
 }
 
-export async function anvil(id: bigint, automine: boolean): Promise<Node> {
+/** An Anvil node on chain `id`; `extra` are more of Anvil's options (a genesis time, a finality depth). */
+export async function anvil(
+  id: bigint,
+  automine: boolean,
+  extra: readonly string[] = [],
+): Promise<Node> {
   const port = await freePort();
-  const args = ["--host", "127.0.0.1", "--port", String(port), "--chain-id", String(id)];
+  const args = ["--host", "127.0.0.1", "--port", String(port), "--chain-id", String(id), ...extra];
   if (!automine) args.push("--no-mining");
   const child = spawn("anvil", [...args, "--silent"], { stdio: ["ignore", "ignore", "inherit"] });
   const url = new URL(`http://127.0.0.1:${port}`);

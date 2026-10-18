@@ -27,6 +27,7 @@ import {
   type Checkpoint,
   checkpointHash,
   countedCheckpoints,
+  decodeAvailabilityAttestation,
   encodeAvailabilityAttestation,
   encodeAvailabilityComplaint,
   objectCid,
@@ -36,6 +37,7 @@ import {
   signAvailabilityComplaint,
   verifyBoard,
 } from "@abolishus/crypto";
+import { RpcError } from "@abolishus/node";
 import type { ApprovedElection } from "./ceremony.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
@@ -133,6 +135,14 @@ export type AvailabilityStatus =
    * a store rolled back). An alarm, never a step the node retries past.
    */
   | { readonly state: "foreign-record"; readonly kind: AvailabilityKind };
+
+/** The ballot extent as the seat attested it (`AvailabilitySeat.heldExtent`). */
+export interface HeldExtent {
+  /** Every board entry through `C_A`, encoded, in board order. */
+  readonly entries: readonly Uint8Array[];
+  /** `s_A = period(closes_at) + 1`, the last segment a board-path ballot may be in. */
+  readonly boardSegment: bigint;
+}
 
 const POINT = AVAILABILITY_POINTS.ballotExtent;
 const PANEL = SEAT_PANELS.default;
@@ -252,7 +262,7 @@ export class AvailabilitySeat {
     const extent = this.#extent(anchors, clock, now);
     if ("state" in extent) return extent;
     const held = await this.#held(extent.through, clock, now);
-    if ("objects" in held) {
+    if ("entries" in held) {
       // Pinned before the attestation is signed: what it says the seat held
       // is what the seat serves.
       for (const [cid, object] of held.objects) await o.pin(cid, object);
@@ -294,6 +304,32 @@ export class AvailabilitySeat {
   }
 
   /**
+   * The ballot extent the seat attested, read again through the same
+   * anchors from the blocks it pinned before attesting, for the decision of
+   * what it owes at `c_I` (docs/spec/availability.md, The ballot extent and
+   * what a node owes); undefined unless its attestation is stored. Only an
+   * attesting seat holds every segment through `s_A`, which is what lets it
+   * show a ballot absent. Throws `RpcError` while the L1 node shows another
+   * `C_A` than the attested one (it hides an anchor, or lags), and an
+   * `Error` when the pinned blocks no longer hold the extent: the seat
+   * decides over nothing it can't read.
+   */
+  async heldExtent(): Promise<HeldExtent | undefined> {
+    const o = this.#o;
+    const stored = await o.store.get(`${this.#prefix}/attestation`);
+    if (stored === undefined) return undefined;
+    const { anchors, clock, now } = await o.l1.read(o.election.electionId);
+    const extent = this.#extent(anchors, clock, now);
+    const attested = decodeAvailabilityAttestation(stored, 1).checkpoint_hash;
+    if ("state" in extent || !equal(checkpointHash(extent.checkpoint), attested))
+      throw new RpcError("the L1 node doesn't show the attested ballot-extent checkpoint");
+    const held = await this.#held(extent.through, clock, now);
+    if (!("entries" in held))
+      throw new Error("trustee node: the attested ballot extent isn't held any more");
+    return { entries: held.entries, boardSegment: extent.boardSegment };
+  }
+
+  /**
    * `C_A` and the anchors through it, once it is fixed: the counted
    * checkpoint with the largest segment at or before `s_A = period(closes_at)
    * + 1`, fixed once `s_A`'s anchoring deadline has passed on finalized L1,
@@ -304,7 +340,13 @@ export class AvailabilitySeat {
     anchors: readonly Anchor[],
     clock: AnchorClock,
     now: bigint,
-  ): AvailabilityStatus | { readonly checkpoint: Checkpoint; readonly through: Anchor[] } {
+  ):
+    | AvailabilityStatus
+    | {
+        readonly checkpoint: Checkpoint;
+        readonly through: Anchor[];
+        readonly boardSegment: bigint;
+      } {
     const { electionId, closesAt } = this.#o.election;
     // A board failing from L1 alone is reported first, as the verifier does.
     if (closesAt < clock.epoch) {
@@ -333,13 +375,17 @@ export class AvailabilitySeat {
       if (BigInt(cp.segment) <= sA && (cA === undefined || cp.segment > cA.segment)) cA = cp;
     if (cA === undefined) return { state: "no-checkpoint" };
     const last = cA.segment;
-    return { checkpoint: cA, through: anchors.filter((a) => a.checkpoint.segment <= last) };
+    return {
+      checkpoint: cA,
+      through: anchors.filter((a) => a.checkpoint.segment <= last),
+      boardSegment: sA,
+    };
   }
 
   /**
    * Whether the seat's copy, read by the anchored CIDs, reaches `C_A` and
    * passes the board checks through it (steps 1 to 5, `checkpoint-cid`
-   * among them), with the extent's objects if it does; if it doesn't from
+   * among them), with its entries and the extent's objects if it does; if it doesn't from
    * these sources, the CID of the first run it couldn't read, for a
    * complaint.
    */
@@ -350,7 +396,10 @@ export class AvailabilitySeat {
   ): Promise<
     | AvailabilityStatus
     | { readonly cid: Uint8Array }
-    | { readonly objects: ReadonlyArray<readonly [Uint8Array, Uint8Array]> }
+    | {
+        readonly entries: readonly Uint8Array[];
+        readonly objects: ReadonlyArray<readonly [Uint8Array, Uint8Array]>;
+      }
   > {
     const o = this.#o;
     const runCid = (j: number) => (through[j] as Anchor).checkpoint.object_cid;
@@ -371,6 +420,7 @@ export class AvailabilitySeat {
       if (!PAST_EXTENT.has(e.code)) return { state: "board-failed", code: e.code };
     }
     return {
+      entries: copy.encodedEntries,
       objects: extentObjects(o.election.electionId, through, clock, now, copy.encodedEntries),
     };
   }

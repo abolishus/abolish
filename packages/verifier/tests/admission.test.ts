@@ -4,6 +4,7 @@ import {
   decodeBallot,
   decodeBoardEntry,
   decodeElectionDefinition,
+  membershipMessage,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -199,7 +200,7 @@ describe("admitAll gives each payload the verdict admit gives, its membership pr
 });
 
 describe("hands the caller what 5.8 needs", () => {
-  test("the definition's L1 chain and each admitted ballot's L1 block, as its record names them", () => {
+  test("the definition's L1 chain and each admitted ballot's L1 block and ballot hash, as its record gives them", () => {
     // 5.8 is the caller's: it judges the block against the finalized L1
     // chain the definition names, so both must be the record's own fields.
     const c = byId("admitted");
@@ -217,6 +218,17 @@ describe("hands the caller what 5.8 needs", () => {
       const record = decodeBallot(payload, version as 1);
       expect(r.l1RefNumber).toBe(record.l1_ref_number);
       expect(r.l1RefHash).toEqual(new Uint8Array(record.l1_ref_hash));
+      // `M` binds the ballot hash, so the one handed over is the one the
+      // membership proof was checked against.
+      expect(
+        membershipMessage({
+          definitionHash: record.definition_hash,
+          tier: r.tier,
+          ballotHash: r.ballotHash,
+          l1RefNumber: r.l1RefNumber,
+          l1RefHash: r.l1RefHash,
+        }),
+      ).toEqual(r.message);
       seen++;
     }
     expect(seen).toBeGreaterThan(0);

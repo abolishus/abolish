@@ -52,6 +52,8 @@ export type ElectionAdmissionCode =
 export type BallotAdmission =
   | {
       readonly ok: true;
+      /** The ballot hash, recomputed from the record (never a decoded field): what a share receipt names. */
+      readonly ballotHash: Uint8Array;
       readonly tier: number;
       readonly nullifier: bigint;
       /** `M`, recomputed from the record, so a re-randomised proof doesn't hide a repeat (T-38). */
@@ -174,6 +176,7 @@ export function electionAdmission(
     checked.ok
       ? {
           ok: true,
+          ballotHash: new Uint8Array(checked.ballotHash),
           tier: checked.tier,
           nullifier: checked.nullifier,
           message: checked.message,

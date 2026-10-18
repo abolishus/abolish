@@ -24,7 +24,9 @@ describe("circuit source rules", () => {
   test.each(files)("%s never asks bb for a proof without zero knowledge", (file) => {
     // A non-ZK proof doesn't hide the witness, and a membership or Tier 2
     // witness identifies the voter (T-13, T-15).
-    expect(read(file)).not.toMatch(/disable[_-]zk|no[_-]zk|non[_-]zk|zk\s*=\s*false/i);
+    expect(read(file)).not.toMatch(
+      /disable[_-]?zk\s*[:=]\s*true|disable[_-]zk|no[_-]zk|non[_-]zk|zk\s*=\s*false/i,
+    );
   });
 
   test.each(files.filter((f) => f.endsWith("Nargo.toml")))(

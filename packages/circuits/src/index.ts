@@ -1,0 +1,26 @@
+export {
+  type CheckedOutputResult,
+  type CheckedQuery,
+  type CheckedQueryResult,
+  answerQuery,
+  checkOutput,
+  checkQuery,
+  type ProvedQuery,
+  proveOutput,
+  proveQuery,
+  type QueryFields,
+  type QueryOpening,
+} from "./nullifier.ts";
+export {
+  CIRCUITS,
+  CRS_SHA256,
+  type NullifierCircuit,
+  type NullifierPrograms,
+  NullifierProofs,
+  PROOF_LENGTH,
+  PROOF_SETTINGS,
+  type ProofsOptions,
+  PUBLIC_INPUTS,
+  type ReferenceString,
+  VK_SHA256,
+} from "./proofs.ts";

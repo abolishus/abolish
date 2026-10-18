@@ -115,9 +115,11 @@ const l1: FinalizedL1 = {
 };
 
 /** A vector ballot as the board carries it, cast under L1 block `ref`. */
-function ballotOf(id: string, ref: bigint) {
+function ballotOf(id: string, ref: bigint, voter = 0n) {
   const b = ballotVector(id);
-  const nullifier = BigInt(b.context.nullifier);
+  // Another voter's ballot with the same vote: the ciphertexts bind the
+  // definition, the seat and the commitments, never the nullifier.
+  const nullifier = BigInt(b.context.nullifier) + voter;
   const vote = decode(COMMITTED_VOTE, unhex(b.committedVote));
   const hash = ballotHash({ definitionHash: DEFINITION, tier: 0, nullifier }, vote);
   const l1RefHash = new Uint8Array(32).fill(Number(ref % 256n));
@@ -501,10 +503,42 @@ describe("ComplaintDuty", () => {
       ballotOf("plurality", 160n).record,
       encodeBallot({ ...other, nullifier: other.nullifier + 1n }),
     ];
-    expect(await h.duty().step()).toEqual({ state: "waiting-ballots", missing: 1 });
+    expect(await h.duty().step()).toEqual({
+      state: "waiting-ballots",
+      missing: 1,
+      until: C_K - RELEASE_WINDOWS.margin,
+    });
     expect(await h.store.list(DELIVERIES)).toEqual([]);
     h.ballots = [bad.record];
     expect((await h.duty().step()).state).toBe("sent");
     checkSent(h, 2, bad, BAD);
+  });
+
+  test("past c_K − R it decides without a ballot its sources withhold, giving up only that one's complaint (T-29, T-54)", async () => {
+    const withheld = ballotOf("bad-share", 160n);
+    const held = ballotOf("bad-share", 160n, 1n);
+    const h = harness(2, [withheld.copy, held.copy]);
+    h.postings = [postingOf(BAD, withheld), postingOf(BAD, held)];
+    h.ballots = [held.record];
+    const giveUp = C_K - RELEASE_WINDOWS.margin;
+    h.now = giveUp - 1n;
+    expect(await h.duty().step()).toEqual({ state: "waiting-ballots", missing: 1, until: giveUp });
+    h.now = giveUp;
+    expect(await h.duty().step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
+    checkSent(h, 2, held, BAD);
+  });
+
+  test("never waits on, or complains about, a ballot the seat receipted", async () => {
+    const bad = ballotOf("bad-share", 160n);
+    const h = harness(2, [bad.copy]);
+    h.postings = [postingOf(BAD, bad)];
+    // Decided at `c_I` before the postings are in, then shown receipted:
+    // its shares passed this seat's intake, so a passing posting opens again.
+    h.now = POSTINGS_RECORDED;
+    expect((await h.duty().step()).state).toBe("waiting-postings");
+    await h.store.putOnce(`intake/${"51".repeat(32)}/${hex(bad.hash)}`, new Uint8Array([1]));
+    h.now = POSTINGS_RECORDED + 1n;
+    expect(await h.duty().step()).toEqual({ state: "recorded", total: 0 });
+    expect(h.sent).toEqual([]);
   });
 });

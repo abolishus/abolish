@@ -102,10 +102,12 @@ export type ComplaintDutyStatus =
   /**
    * `missing` ballots of the scope have a posting for the seat but no
    * record from the seat's sources, so their postings can't be checked yet.
-   * Nothing is decided until they come: deciding without them would give
-   * up their complaints for good.
+   * Nothing is decided until they come, or until `until` (`c_K − R`): then
+   * the seat decides without them, giving up only theirs, rather than let
+   * one withheld ballot cost every complaint it owes. An alarm for the
+   * node's operator.
    */
-  | { readonly state: "waiting-ballots"; readonly missing: number }
+  | { readonly state: "waiting-ballots"; readonly missing: number; readonly until: bigint }
   /** `batches` were sent (or resent) this step; `recorded` of `total` are recorded. */
   | {
       readonly state: "sent";
@@ -242,7 +244,9 @@ export class ComplaintDuty {
       )
         continue;
       const posting = { ciphertext: encode(SHARE_CIPHERTEXT, r.ciphertext), m: r.m };
-      postings.set(ballot, [...(postings.get(ballot) ?? []), posting]);
+      const held = postings.get(ballot);
+      if (held === undefined) postings.set(ballot, [posting]);
+      else held.push(posting);
     }
     if (postings.size === 0) return [];
     const votes = new Map<string, BallotRecord["committed_vote"]>();
@@ -266,12 +270,17 @@ export class ComplaintDuty {
       if (postings.has(h)) votes.set(h, b.committed_vote);
     }
     const missing = [...postings.keys()].filter((h) => !votes.has(h)).length;
-    if (missing > 0) return { state: "waiting-ballots", missing };
+    // Anyone can post against a scope ballot whose record a source withholds,
+    // so the wait ends with `R` left to send what the rest owe (T-29, T-54).
+    const giveUp = this.cutoff - RELEASE_WINDOWS.margin;
+    if (missing > 0 && o.now() < giveUp)
+      return { state: "waiting-ballots", missing, until: giveUp };
     const ctx = { definitionHash: election.definitionHash };
     const pair = election.kemKeyPair;
     const owed: ComplaintEntry[] = [];
     for (const [h, posted] of postings) {
-      const vote = votes.get(h) as BallotRecord["committed_vote"];
+      const vote = votes.get(h);
+      if (vote === undefined) continue;
       // Every passing posting of a ballot and seat carries the same `ct_i`
       // and `m_i`, so the first one decides (docs/spec/delivery.md, Delivery
       // check); a failing one is ignored and proves nothing.
@@ -284,6 +293,8 @@ export class ComplaintDuty {
       // share check, never for shares that open (share-encryption.md,
       // Complaints; T-15).
       if (opened.ok || (opened.code !== "share-decrypt" && opened.code !== "share-check")) continue;
+      // `proveComplaint` runs both checks again: the duty's own, above, keep a
+      // posting whose shares open from ever reaching it.
       owed.push({
         ballot_hash: Uint8Array.from(Buffer.from(h, "hex")),
         proof: proveComplaint(ctx, election.index, pair, vote.vss, vote.share_hashes, passing),

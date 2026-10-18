@@ -70,6 +70,5 @@ export function pageHeaders(deployment: ChallengeDeployment): Readonly<Record<st
     "content-security-policy": `${PAGE_POLICY}; frame-ancestors ${deployment.entryPoints.join(" ")}`,
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
-    "cross-origin-resource-policy": "same-origin",
   };
 }

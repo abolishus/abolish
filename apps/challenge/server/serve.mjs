@@ -7,9 +7,14 @@
 
 import { createServer } from "node:http";
 import { readFileSync, statSync } from "node:fs";
-import { extname, join, normalize, sep } from "node:path";
+import { extname, join, normalize, resolve as resolvePath, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = process.env.CHALLENGE_DIST ?? new URL("../dist/", import.meta.url).pathname;
+// With its separator, so a sibling such as dist-x/ never passes the prefix check.
+const root =
+  resolvePath(process.env.CHALLENGE_DIST ?? fileURLToPath(new URL("../dist/", import.meta.url))) +
+  sep;
+const assets = join(root, "assets") + sep;
 const HEADERS = JSON.parse(readFileSync(join(root, "headers.json"), "utf8"));
 if (typeof HEADERS["content-security-policy"] !== "string")
   throw new Error("headers.json has no content-security-policy");
@@ -29,11 +34,12 @@ function resolve(urlPath) {
     return undefined;
   }
   // The fragment never reaches the host, so `/` is the page's one address.
-  if (path === "/") path = "/index.html";
-  else if (!path.startsWith("/assets/")) return undefined;
+  if (path === "/") return join(root, "index.html");
+  // Checked after normalizing, so `..` can't reach the page, the headers
+  // file or anything outside assets/.
   const file = normalize(join(root, path));
-  if (!file.startsWith(root) || file.includes(`${sep}.`)) return undefined;
-  if (!(extname(file) in TYPES)) return undefined;
+  if (!file.startsWith(assets) || file.includes(`${sep}.`)) return undefined;
+  if (extname(file) !== ".js" && extname(file) !== ".css") return undefined;
   try {
     return statSync(file).isFile() ? file : undefined;
   } catch {
@@ -53,7 +59,16 @@ const server = createServer((req, res) => {
       .end("Not found\n");
     return;
   }
-  const body = readFileSync(file);
+  let body;
+  try {
+    body = readFileSync(file);
+  } catch {
+    // Gone since it was found: answered, so one request can't stop the host.
+    res
+      .writeHead(404, { ...HEADERS, "content-type": "text/plain; charset=utf-8" })
+      .end("Not found\n");
+    return;
+  }
   res.writeHead(200, {
     ...HEADERS,
     "content-type": TYPES[extname(file)],

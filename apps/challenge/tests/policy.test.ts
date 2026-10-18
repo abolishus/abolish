@@ -42,7 +42,6 @@ describe("the policy", () => {
       "content-security-policy": `${PAGE_POLICY}; frame-ancestors https://a.example https://b.example:8443`,
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
-      "cross-origin-resource-policy": "same-origin",
     });
     expect(pageHeaders(STAGING)["content-security-policy"]).toBe(
       `${PAGE_POLICY}; frame-ancestors https://ballot-staging.up.railway.app`,

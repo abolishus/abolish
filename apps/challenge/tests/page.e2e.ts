@@ -6,7 +6,8 @@
 // script that records what the page asks of it.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { type IncomingHttpHeaders, request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,7 +72,21 @@ function freePort(): Promise<number> {
   });
 }
 
+/** A GET of `path` exactly as written. */
+function raw(path: string): Promise<{ status: number | undefined; headers: IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    const { hostname, port } = new URL(local);
+    request({ hostname, port, path }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers }));
+    })
+      .on("error", reject)
+      .end();
+  });
+}
+
 let outDir: string;
+
 let server: ChildProcess;
 let local: string;
 let browser: Browser;
@@ -84,6 +99,11 @@ let consoleErrors: string[];
 beforeAll(async () => {
   outDir = await mkdtemp(join(tmpdir(), "abolish-challenge-e2e-"));
   await buildPage(TEST, outDir);
+  // A directory beside assets/ whose name extends it, and a dot-file in it,
+  // each a script the server must not serve.
+  await mkdir(join(outDir, "assets-x"));
+  await writeFile(join(outDir, "assets-x", "a.js"), "sibling");
+  await writeFile(join(outDir, "assets", ".hidden.js"), "hidden");
   const port = await freePort();
   server = spawn(process.execPath, [serve], {
     env: {
@@ -250,8 +270,9 @@ describe("the challenge page", () => {
   test("can't be framed by a page that isn't an entry point", async () => {
     // Even with the fragment naming the client, the browser refuses the
     // frame (frame-ancestors), so the page never runs and nothing is posted.
-    const frame = await framed(OTHER, frameSrc(CLIENT));
-    expect(await frame?.evaluate(() => typeof document.getElementById)).not.toBe("function");
+    await framed(OTHER, frameSrc(CLIENT));
+    for (const frame of page.frames())
+      expect(await frame.evaluate(() => document.getElementById("challenge"))).toBeNull();
     await page.waitForTimeout(200);
     expect(turnstileRequests).toEqual([]);
     expect(await messages()).toEqual([]);
@@ -312,18 +333,24 @@ describe("its server", () => {
   });
 
   test("serves the page and its assets and nothing else", async () => {
+    // Raw paths, which fetch would normalize before the server saw them.
     for (const path of [
       "/index.html",
       "/headers.json",
       "/assets/",
       "/assets/../headers.json",
-      "/%2e%2e/package.json",
+      "/assets/../index.html",
+      "/assets/%2e%2e/headers.json",
+      "/assets/..%2fheaders.json",
+      "/assets/..%2f..%2fpackage.json",
+      "/assets/..%2fassets-x%2fa.js",
+      "/assets/.hidden.js",
       "/x",
       "/assets/%ZZ",
     ]) {
-      const response = await fetch(`${local}${path}`);
-      expect(response.status, path).toBe(404);
-      expect(response.headers.get("content-security-policy"), path).not.toBeNull();
+      const { status, headers } = await raw(path);
+      expect(status, path).toBe(404);
+      expect(headers["content-security-policy"], path).toBeDefined();
     }
     expect((await fetch(`${local}/`, { method: "POST" })).status).toBe(405);
   });

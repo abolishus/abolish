@@ -94,6 +94,7 @@ import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import type { CloseReport } from "./close.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import { releaseChecks, type ReleasesReport } from "./live.ts";
+import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
@@ -355,7 +356,10 @@ function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
  * version its profile pins, and the board checks' inputs taken from it. Any
  * other format gives them as they are.
  */
-function fromDefinition(bundle: Bundle):
+function fromDefinition(
+  bundle: Bundle,
+  pins: readonly PinnedPanel[] = PINNED_PANELS,
+):
   | {
       readonly inputs: BoardInputs;
       readonly hash?: Uint8Array;
@@ -439,8 +443,13 @@ function fromDefinition(bundle: Bundle):
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
   if (!isReadable(version)) return stopped("2.3", UNSUPPORTED, hash);
   let combination: Outcome | undefined;
-  const pins = profileCombinationRule(definition);
-  switch (pins) {
+  // The live restriction counts the seats the release pins as ours on the
+  // definition's default panel (docs/spec/verifier.md, 2.3; T-16, T-45).
+  const combinationRule = profileCombinationRule(
+    definition,
+    pinnedOurs(bytesToHex(definition.panel_id), definition.panel_size, pins),
+  );
+  switch (combinationRule) {
     case undefined:
       break;
     case "profile-combination":
@@ -454,7 +463,7 @@ function fromDefinition(bundle: Bundle):
       combination = UNSUPPORTED;
       break;
     default: {
-      const unknown: never = pins;
+      const unknown: never = combinationRule;
       throw new Error(`unmapped profile rule ${String(unknown)}`);
     }
   }
@@ -596,9 +605,15 @@ export async function readBoardByCid(
   };
 }
 
-/** Runs every check over one bundle and reports it (docs/spec/verifier.md, Report). */
-export function verifyBundle(bundle: Bundle): Report {
-  const definition = fromDefinition(bundle);
+/**
+ * Runs every check over one bundle and reports it (docs/spec/verifier.md,
+ * Report). `pins` are the panels the release pins, whose kinds 2.5 and whose
+ * seats marked ours 2.3's live restriction read: `PINNED_PANELS` unless a
+ * test gives others. Changing them changes the trust roots, as a new release
+ * would (T-64).
+ */
+export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINNED_PANELS): Report {
+  const definition = fromDefinition(bundle, pins);
   const unsplit = { entries: bundle.entries.length, unreadableBytes: bundle.unreadableBytes };
   let board: Report["board"] = unsplit;
   let input: ReturnType<typeof anchoring> | undefined;
@@ -711,6 +726,7 @@ export function verifyBundle(bundle: Bundle): Report {
         authorRunOf(definition.definition),
         bundle.entries,
         definition.inputs.boardEntryVersion,
+        pins,
       );
       implemented = new Map([...implemented, ...checked.rows]);
       ceremony = checked.report;

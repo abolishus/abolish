@@ -179,6 +179,8 @@ library ElectionDefinitionLib {
     /// `u8(len(tag)) ‖ tag` for the two hashes (0x1e = 30, 0x18 = 24).
     bytes internal constant DS_DEFINITION = "\x1eabolish/v1/election-definition";
     bytes internal constant DS_STUB = "\x18abolish/v1/election-stub";
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/author-panel` (0x17 = 23).
+    bytes internal constant DS_AUTHOR_PANEL = "\x17abolish/v1/author-panel";
 
     // --- decoding ----------------------------------------------------------
 
@@ -467,12 +469,27 @@ library ElectionDefinitionLib {
 
     /// Whether some point of P-256 has this `x`.
     function _onCurve(uint256 x) private view returns (bool) {
+        if (x >= P256.P) return false;
+        return P256.isValidPublicKey(bytes32(x), bytes32(_candidateY(x)));
+    }
+
+    /// The candidate square root of `x³ + ax + b`, as `P256.isValidPublicKey`
+    /// computes the right-hand side: a `y` of the point with this `x` when
+    /// there is one.
+    function _candidateY(uint256 x) private view returns (uint256) {
         uint256 p = P256.P;
-        if (x >= p) return false;
-        // x³ + ax + b, as `P256.isValidPublicKey` computes it.
         uint256 rhs = addmod(mulmod(addmod(mulmod(x, x, p), P256.A, p), x, p), P256.B, p);
-        uint256 y = Math.modExp(rhs, P256_SQRT_EXPONENT, p);
-        return P256.isValidPublicKey(bytes32(x), bytes32(y));
+        return Math.modExp(rhs, P256_SQRT_EXPONENT, p);
+    }
+
+    /// The point `(x, y)` of a decoded `p256-key`: the decoder admitted only
+    /// keys whose `x` is a point's, so `y` is the candidate root or its
+    /// negation, whichever has the prefix's parity (`0x02` even, `0x03` odd).
+    /// P-256 has no point with `y = 0`, so the two always differ in parity.
+    function point(P256Key memory key) internal view returns (uint256 x, uint256 y) {
+        x = uint256(key.x);
+        y = _candidateY(x);
+        if (y & 1 != uint256(key.prefix) - 2) y = P256.P - y;
     }
 
     /// A `field<bn254>`: T-04, T-31, one encoding per field element.
@@ -788,6 +805,46 @@ library ElectionDefinitionLib {
     /// `definition_hash = H(DS("abolish/v1/election-definition", encode(definition)))`.
     function hash(bytes calldata d) internal pure returns (bytes32) {
         return sha256(abi.encodePacked(DS_DEFINITION, d));
+    }
+
+    /// `author_panel_id = H(DS("abolish/v1/author-panel", u8(k_A) ‖ u8(n_A) ‖
+    /// Q_1 ‖ … ‖ Q_{n_A}))` (docs/spec/trustee-identity.md, Author panel
+    /// identifier), over the 33-byte encodings of version 6's `author_keys`
+    /// as the definition carries them. The decoder's 16-key limit keeps
+    /// `n_A` within a `u8`.
+    function authorPanelId(Definition memory def) internal pure returns (bytes32) {
+        bytes memory keys;
+        for (uint256 i; i < def.authorKeys.length; i++) {
+            keys = abi.encodePacked(keys, def.authorKeys[i].prefix, def.authorKeys[i].x);
+        }
+        return sha256(
+            abi.encodePacked(
+                DS_AUTHOR_PANEL, def.authorThreshold, uint8(def.authorKeys.length), keys
+            )
+        );
+    }
+
+    /// `author_stub_hash = H(DS("abolish/v1/election-stub", encode(author_stub)))`
+    /// of a version-6 definition: both `ceremony_transcript_hash` at
+    /// `transcriptOffset` and `author_transcript_hash`, the layout's last
+    /// field and so its last 32 bytes, zeroed (docs/spec/election-definition.md,
+    /// Stub hash and the ceremony). Only version 6 has an author panel among
+    /// the versions this decoder reads; a later one with fields after
+    /// `author_transcript_hash` (version 7) needs its offset recorded instead.
+    function authorStubHash(bytes calldata d, uint256 transcriptOffset)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return sha256(
+            abi.encodePacked(
+                DS_STUB,
+                d[:transcriptOffset],
+                bytes32(0),
+                d[transcriptOffset + 32:d.length - 32],
+                bytes32(0)
+            )
+        );
     }
 
     /// `stub_hash = H(DS("abolish/v1/election-stub", encode(stub)))`, the

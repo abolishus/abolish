@@ -20,4 +20,24 @@ interface ITrusteeRegistry {
         uint8 threshold,
         uint8 panelSize
     ) external view returns (bool);
+
+    /// @notice Checks an author panel's registration record, in this
+    /// registry's registration layout, for the election registry
+    /// (docs/spec/contracts.md, Author panel registration, checks 6 to 9):
+    /// its key set has at least `threshold` seats, in strictly increasing
+    /// order within the panel, with distinct valid signing keys, none of
+    /// them one of `keys`; and its approvals' seats are strictly increasing
+    /// within the panel and each signature verifies under that seat's point
+    /// in `keys` (the author keys, in seat order) on the ceremony
+    /// registration statement naming this registry and the record's panel,
+    /// stub, transcript and key set hash. Returns the key set's hash and its
+    /// seats as a bitmask; reverts with the registry's own errors otherwise.
+    /// A view of its inputs alone: it checks nothing against the panels
+    /// this registry pins and records nothing, so the caller checks the
+    /// record's header and quorum against the definition.
+    function checkAuthorRegistration(
+        bytes calldata registration,
+        uint256[2][] calldata keys,
+        uint8 threshold
+    ) external view returns (bytes32 keySetHash, uint256 seats);
 }

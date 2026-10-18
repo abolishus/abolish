@@ -11,18 +11,24 @@
 // contract-event-v5.json (version 5, with the obligation root's),
 // contract-event-v6.json (version 6, with the group registry's Tier 1
 // addition), contract-event-v7.json (version 7, with its two self-paid
-// events) and contract-event-v8.json (version 8, with the board's two
-// availability events), written by independent generators. The board
-// declares version 8's eleven, so only version 8 is compared with it, and the
-// group registry declares version 7's seven, so only versions 7 and 8 are
-// compared with it: no board with the availability calls may be deployed
-// beside a registry that serves a profile pinning versions 1 to 7, and no
-// group registry with the self-paid calls beside one that serves a profile
-// pinning versions 1 to 6 (contracts.md, Contract-event record, Event tables
-// (versions 7 and 8)). The group registry's two nullifier-key events join the
-// tables in a later version (contracts.md, Group registry, Events), so they
-// are compared apart: declared exactly as the spec lists them, and in no
-// version's table yet.
+// events), contract-event-v8.json (version 8, with the board's two
+// availability events) and contract-event-v9.json (version 9, with the
+// election registry's AuthorPanelRegistered), written by independent
+// generators. The election registry declares version 9's three, so versions
+// 1 to 8 are compared with it less AuthorPanelRegistered, which they lack; the board declares version 8's eleven,
+// which version 9 keeps, so only versions 8 and 9 are compared with it; and
+// the group registry declares version 7's seven, so only versions 7 to 9 are
+// compared with it: no election registry with the author registration may
+// be deployed serving a profile pinning versions 1 to 8, no board with the
+// availability calls beside a registry that serves a profile pinning
+// versions 1 to 7, and no group registry with the self-paid calls beside one
+// that serves a profile pinning versions 1 to 6 (contracts.md,
+// Contract-event record, Event tables (versions 7 to 9)). Until part 5e of
+// P2-16 moves rule 9 to version 9, rule 9 refuses every definition that
+// could make the registry emit AuthorPanelRegistered (version 6).
+// The group registry's two nullifier-key events join the tables in a later
+// version (contracts.md, Group registry, Events), so they are compared apart:
+// declared exactly as the spec lists them, and in no version's table yet.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -57,9 +63,13 @@ interface AbiItem {
   }[];
 }
 
-const registries: readonly [string, readonly AbiItem[]][] = [
-  ["election-registry", electionRegistryAbi],
-  ["trustee-registry", trusteeRegistryAbi],
+const electionRegistry: readonly [string, readonly AbiItem[]] = [
+  "election-registry",
+  electionRegistryAbi,
+];
+const trusteeRegistry: readonly [string, readonly AbiItem[]] = [
+  "trustee-registry",
+  trusteeRegistryAbi,
 ];
 
 const groupRegistry: readonly [string, readonly AbiItem[]] = ["group-registry", groupRegistryAbi];
@@ -68,20 +78,19 @@ const board: readonly [string, readonly AbiItem[]] = ["board", boardAbi];
 // Version 1's tables name no board event; version 2's name four of its
 // eleven, version 3's six, version 4's eight and versions 5 to 7 nine.
 // Versions 1 to 5 name four of the group registry's seven events, and
-// version 6 five.
+// version 6 five. Versions 1 to 8 name two of the election registry's three.
+const versions = ["", "-v2", "-v3", "-v4", "-v5", "-v6", "-v7", "-v8", "-v9"].map(
+  (suffix) => `contract-event${suffix}.json`,
+);
+// The events a table may lack because a later version adds them: versions 1
+// to 8 lack the election registry's AuthorPanelRegistered, and every other
+// event the registry declares must still match their rows.
+const AUTHOR_PANEL = "AuthorPanelRegistered(bytes32,bytes32,bytes)";
 const cases = [
-  ...registries.map(([role, abi]) => ["contract-event.json", role, abi] as const),
-  ...registries.map(([role, abi]) => ["contract-event-v2.json", role, abi] as const),
-  ...registries.map(([role, abi]) => ["contract-event-v3.json", role, abi] as const),
-  ...registries.map(([role, abi]) => ["contract-event-v4.json", role, abi] as const),
-  ...registries.map(([role, abi]) => ["contract-event-v5.json", role, abi] as const),
-  ...registries.map(([role, abi]) => ["contract-event-v6.json", role, abi] as const),
-  ...[...registries, groupRegistry].map(
-    ([role, abi]) => ["contract-event-v7.json", role, abi] as const,
-  ),
-  ...[...registries, groupRegistry, board].map(
-    ([role, abi]) => ["contract-event-v8.json", role, abi] as const,
-  ),
+  ...versions.map((file) => [file, ...trusteeRegistry, []] as const),
+  ...versions.slice(6).map((file) => [file, ...groupRegistry, []] as const),
+  ...versions.slice(7).map((file) => [file, ...board, []] as const),
+  ...versions.map((file, i) => [file, ...electionRegistry, i < 8 ? [AUTHOR_PANEL] : []] as const),
 ];
 
 // The events a contract declares that no version's table lists yet.
@@ -110,14 +119,17 @@ const isPending = (role: string, signature: string) =>
   (pending[role] ?? []).some((e) => e.signature === signature);
 
 describe("contract-event tables", () => {
-  test.each(cases)("%s: %s declares exactly its table's events", (file, role, abi) => {
+  test.each(cases)("%s: %s declares exactly its table's events", (file, role, abi, later) => {
     const vectors = load(file);
-    const declared = declaredEvents(abi).filter((e) => !isPending(role, e.signature));
+    const declared = declaredEvents(abi).filter(
+      (e) => !isPending(role, e.signature) && !(later as readonly string[]).includes(e.signature),
+    );
     const table = vectors.events
       .filter((e) => e.role === role)
       .map((e) => ({ signature: e.signature, indexed: [...e.indexed] }))
       .sort((a, b) => a.signature.localeCompare(b.signature));
     expect(table.length).toBeGreaterThan(0);
+    expect(table.some((e) => (later as readonly string[]).includes(e.signature))).toBe(false);
     expect(declared).toEqual(table);
   });
 

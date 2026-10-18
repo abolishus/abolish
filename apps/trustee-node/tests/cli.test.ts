@@ -456,8 +456,10 @@ describe("run with the availability duty", () => {
       stubHash: new Uint8Array(32),
       definitionHash: new Uint8Array(32),
       electionId: new Uint8Array(32),
+      opensAt: 0n,
       closesAt: 0n,
       l1InclusionBound: 0n,
+      members: 0n,
       signingSecret: new Uint8Array(32),
     };
     const reader = { boardVersion: 5 as const, read: async () => expect.fail("not read") };

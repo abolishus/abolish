@@ -30,11 +30,13 @@ import {
   intakeCutoff,
   keySetEntry,
   keySetHash,
+  membershipMessage,
   SHARES,
   shareReceiptRecord,
   struct,
   u64,
   u8,
+  type ViewBallot,
 } from "@abolishus/crypto";
 import type { CeremonySeat } from "./ceremony.ts";
 import type { SeatStore } from "./store.ts";
@@ -183,6 +185,11 @@ export class IntakeSeat {
       `copies/${hex(stubHash)}/${ballot}/${taken.l1RefNumber}-${hex(taken.l1RefHash)}`,
       encode(COPY, { l1_ref_number: taken.l1RefNumber, l1_ref_hash: taken.l1RefHash }),
     );
+    // Checked again once the records are durable: a receipt leaves the node
+    // only if its records were written before `c_I`, so the decision taken
+    // from `c_I` on, which reads them then, covers every receipt the seat
+    // gave (`decideObligation`).
+    if (this.#closed(opened.value)) return { ok: false, code: "intake-closed" };
     return {
       ok: true,
       ballotHash: taken.ballotHash,
@@ -300,4 +307,51 @@ export class IntakeSeat {
       },
     };
   }
+}
+
+/**
+ * What a seat holds of its own intake for the stub: the ballot hash of every
+ * receipt it gave, and each copy it receipted as a view ballot, with `M`
+ * recomputed from the ballot hash, its tier and the copy's L1 reference under
+ * `definitionHash`, the definition the approval registers. A copy from intake
+ * has no entry the node has seen (docs/spec/delivery.md, What a node owes).
+ */
+export async function heldIntake(
+  store: SeatStore,
+  stubHash: Uint8Array,
+  definitionHash: Uint8Array,
+): Promise<{ receipts: Uint8Array[]; copies: ViewBallot[] }> {
+  const stub = hex(stubHash);
+  const receipts: Uint8Array[] = [];
+  const copies: ViewBallot[] = [];
+  for (const name of await store.list(`intake/${stub}`)) {
+    const ballotHash = Uint8Array.from(Buffer.from(name, "hex"));
+    const held = await store.get(`intake/${stub}/${name}`);
+    if (held === undefined) throw new Error(`trustee node: intake record ${name} is gone`);
+    const { tier, nullifier } = decode(TAKEN, held);
+    receipts.push(ballotHash);
+    for (const ref of await store.list(`copies/${stub}/${name}`)) {
+      const bytes = await store.get(`copies/${stub}/${name}/${ref}`);
+      if (bytes === undefined) throw new Error(`trustee node: copy record ${ref} is gone`);
+      const copy = decode(COPY, bytes);
+      copies.push({
+        ballotHash,
+        tier,
+        nullifier,
+        // T-38: `M` is recomputed, never stored, so a copy can't name a
+        // message its ballot hash and reference don't give.
+        message: membershipMessage({
+          definitionHash,
+          tier,
+          ballotHash,
+          l1RefNumber: copy.l1_ref_number,
+          l1RefHash: copy.l1_ref_hash,
+        }),
+        l1RefNumber: copy.l1_ref_number,
+        l1RefHash: copy.l1_ref_hash,
+        entry: null,
+      });
+    }
+  }
+  return { receipts, copies };
 }

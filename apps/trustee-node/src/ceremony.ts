@@ -120,8 +120,11 @@ export interface ApprovedElection {
   /** The definition the approval registers: the stub with the approved transcript. */
   readonly definitionHash: Uint8Array;
   readonly electionId: Uint8Array;
+  readonly opensAt: bigint;
   readonly closesAt: bigint;
   readonly l1InclusionBound: bigint;
+  /** `M`, the definition's members over its tiers: what bounds the seat's contract-path obligation at `2M`. */
+  readonly members: bigint;
   /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
   readonly signingSecret: Uint8Array;
 }
@@ -479,8 +482,10 @@ export class CeremonySeat {
       stubHash: Uint8Array.from(stubHash),
       definitionHash: r.definition_hash,
       electionId: Uint8Array.from(run.params.electionId),
+      opensAt: r.opens_at,
       closesAt: r.closes_at,
       l1InclusionBound: BigInt(r.l1_inclusion_bound),
+      members: r.members,
       signingSecret: Uint8Array.from(run.seat.signingSecret),
     };
   }

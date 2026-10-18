@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import {
   type Checkpoint,
   decodeElectionDefinitionRecord,
+  definitionMembers,
   electionDefinitionHash,
   type ElectionDefinition,
   encodeElectionDefinition,
@@ -230,8 +231,10 @@ async function setup(
       stubHash: keccak_256(text(`stub ${name}`)),
       definitionHash: electionDefinitionHash(d),
       electionId: id,
+      opensAt: d.opens_at,
       closesAt: d.closes_at,
       l1InclusionBound: BigInt(d.l1_inclusion_bound),
+      members: definitionMembers(d),
       signingSecret: keccak_256(text(`secret ${name}`)),
     },
     options: {

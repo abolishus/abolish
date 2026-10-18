@@ -14,9 +14,11 @@ import {
   electionDefinitionHash,
   encodeBallot,
   encryptShares,
+  type FinalizedL1,
   finishMembershipProof,
   identityCommitment,
   intakeCutoff,
+  L1_REF_MARGIN,
   membershipMessage,
   membershipProverInput,
   newIdentitySecret,
@@ -24,14 +26,18 @@ import {
   type RegisteredKeys,
   shareVote,
   tierTreeRoot,
+  type ViewBallot,
 } from "@abolishus/crypto";
 import { type MembershipProverArtifacts, proveMembership } from "@abolishus/membership-prover";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   CeremonySeat,
+  decideObligation,
   encodeDelivery,
   type IntakeConfig,
   IntakeSeat,
+  type ObligationStatus,
+  type ObligationView,
   type RegistrationCheck,
   type SeatStore,
   serveIntake,
@@ -471,5 +477,211 @@ describe("the election's checks before intake", () => {
     expect((await deliver(seat!)).ok).toBe(true);
     seats.clock = s.cutoff;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-closed" });
+  });
+});
+
+describe("the obligation decided at the intake cutoff", () => {
+  // Finalized L1 with 12-second blocks: block 100, which the casts name, is the
+  // first at `opens_at − L1_REF_MARGIN`, and the head is the first after
+  // `closes_at`. Block `n` hashes to `n` repeated, but 100 and 101 to the
+  // casts' 0x07 and 0x08 unless `reorged`.
+  const l1Of = (closedAt: bigint, reorged = false): FinalizedL1 => {
+    const start = s.e.stub.opens_at - L1_REF_MARGIN - 100n * 12n;
+    const head = (closedAt - start) / 12n + 1n;
+    return {
+      head,
+      block(n) {
+        const fill = reorged ? 0xee : n === 100n ? 0x07 : n === 101n ? 0x08 : Number(n % 256n);
+        return { hash: new Uint8Array(32).fill(fill), timestamp: start + n * 12n };
+      },
+    };
+  };
+  const SEGMENT = 50n;
+  const viewOf = (change: Partial<ObligationView> = {}): ObligationView => ({
+    l1: l1Of(s.e.stub.closes_at),
+    low: 0n,
+    board: [],
+    boardSegment: SEGMENT,
+    absent: [],
+    ...change,
+  });
+  /** A board copy for voter `v`'s nullifier under another ballot hash, as a newer ballot the seat never receipted. */
+  const boardCopy = (nullifier: bigint, l1RefNumber: bigint, fill: number): ViewBallot => {
+    const ballotHash = new Uint8Array(32).fill(fill);
+    const l1RefHash = new Uint8Array(32).fill(Number(l1RefNumber % 256n));
+    return {
+      ballotHash,
+      tier: TIER,
+      nullifier,
+      message: membershipMessage({
+        definitionHash: s.election.definitionHash,
+        tier: TIER,
+        ballotHash,
+        l1RefNumber,
+        l1RefHash,
+      }),
+      l1RefNumber,
+      l1RefHash,
+      entry: { path: "board", value: SEGMENT },
+    };
+  };
+
+  async function receipted(store: SeatStore, ...casts: Cast[]) {
+    const seats = seatsOf(s, { store });
+    for (const c of casts) {
+      const out = await seats.intake[0]!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        c.bytes,
+        c.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(out.code);
+    }
+    const approved = await s.e.seats[0]!.approvedElection(s.e.stubHash);
+    if (approved === undefined) expect.fail("the seat approved the stub");
+    return { seats, approved };
+  }
+
+  const options = (store: SeatStore, view: ObligationView, now = s.cutoff) => ({
+    store,
+    view: () => Promise.resolve(view),
+    now: () => now,
+  });
+  const hashes = (status: ObligationStatus) =>
+    status.state === "decided"
+      ? { receipts: status.receipts.map(hex), complaints: status.complaints.map(hex) }
+      : status;
+  const honestHash = () =>
+    hex(
+      ballotHash(
+        {
+          definitionHash: s.election.definitionHash,
+          tier: TIER,
+          nullifier: honest.record.nullifier,
+        },
+        honest.record.committed_vote,
+      ),
+    );
+
+  it("decides nothing while intake is open, then owes the receipt of the ballot it receipted", async () => {
+    const store = new MemoryStore();
+    const { approved } = await receipted(store, honest);
+    expect(await decideObligation(options(store, viewOf(), s.cutoff - 1n), approved)).toEqual({
+      state: "open",
+      until: s.cutoff,
+    });
+    expect(hashes(await decideObligation(options(store, viewOf()), approved))).toEqual({
+      receipts: [honestHash()],
+      complaints: [honestHash()],
+    });
+    expect(approved.members).toBe(3n);
+  });
+
+  it("waits for finalized L1 past the close", async () => {
+    const store = new MemoryStore();
+    const { approved } = await receipted(store, honest);
+    const early = viewOf({ l1: l1Of(s.e.stub.closes_at - 12n) });
+    expect(await decideObligation(options(store, early), approved)).toEqual({
+      state: "waiting-l1",
+    });
+    expect(await store.list("obligations")).toEqual([]);
+  });
+
+  it("decides once: a view that changes later changes nothing it owes (T-52, T-54)", async () => {
+    const store = new MemoryStore();
+    const { approved } = await receipted(store, honest);
+    const first = await decideObligation(options(store, viewOf()), approved);
+    const newer = boardCopy(honest.record.nullifier, 110n, 0xb1);
+    const later = viewOf({ board: [newer] });
+    expect(await decideObligation(options(store, later, s.cutoff + 3600n), approved)).toEqual(
+      first,
+    );
+    // A decision taken over the later view would have owed nothing.
+    expect(hashes(await decideObligation(options(new MemoryStore(), later), approved))).toEqual({
+      receipts: [],
+      complaints: [hex(newer.ballotHash)],
+    });
+  });
+
+  it("owes nothing for a ballot a newer one on the board supersedes, which it complains over", async () => {
+    const store = new MemoryStore();
+    const { approved } = await receipted(store, honest);
+    const newer = boardCopy(honest.record.nullifier, 110n, 0xb1);
+    const other = boardCopy(123n, 105n, 0xc1);
+    const status = await decideObligation(
+      options(store, viewOf({ board: [newer, other] })),
+      approved,
+    );
+    expect(hashes(status)).toEqual({
+      receipts: [],
+      complaints: [hex(newer.ballotHash), hex(other.ballotHash)].sort(),
+    });
+  });
+
+  it("drops a ballot it shows absent from the view, but a copy boarded late doesn't displace it", async () => {
+    const absentStore = new MemoryStore();
+    const a = await receipted(absentStore, honest);
+    const absent = viewOf({ absent: [Buffer.from(honestHash(), "hex")] });
+    expect(hashes(await decideObligation(options(absentStore, absent), a.approved))).toEqual({
+      receipts: [],
+      complaints: [],
+    });
+    const lateStore = new MemoryStore();
+    const b = await receipted(lateStore, honest);
+    const late = {
+      ...boardCopy(honest.record.nullifier, 110n, 0xb1),
+      entry: { path: "board" as const, value: SEGMENT + 1n },
+    };
+    expect(
+      hashes(await decideObligation(options(lateStore, viewOf({ board: [late] })), b.approved)),
+    ).toEqual({
+      receipts: [honestHash()],
+      complaints: [honestHash()],
+    });
+  });
+
+  it("owes the receipt of a ballot whose block was reorganised away, once per voter (T-25)", async () => {
+    const store = new MemoryStore();
+    const recast = await castAgain(s, 0, honest, {
+      number: 101n,
+      hash: new Uint8Array(32).fill(8),
+    });
+    const { approved } = await receipted(store, honest, recast);
+    const view = viewOf({ l1: l1Of(s.e.stub.closes_at, true) });
+    expect(hashes(await decideObligation(options(store, view), approved))).toEqual({
+      receipts: [honestHash()],
+      complaints: [honestHash()],
+    });
+  });
+
+  it("refuses a view that holds a ballot shown absent from the board, and an obligation over 2M", async () => {
+    const store = new MemoryStore();
+    const { approved } = await receipted(store, honest);
+    const copy = boardCopy(7n, 105n, 0xd1);
+    await expect(
+      decideObligation(
+        options(store, viewOf({ board: [copy], absent: [copy.ballotHash] })),
+        approved,
+      ),
+    ).rejects.toThrow("shown absent");
+    // Three members: a view naming seven voters' ballots holds copies no member made.
+    const flood = Array.from({ length: 7 }, (_, i) => boardCopy(BigInt(1000 + i), 105n, 0xe0 + i));
+    await expect(
+      decideObligation(options(store, viewOf({ board: flood })), approved),
+    ).rejects.toThrow("bound of 2M");
+    expect(await store.list("obligations")).toEqual([]);
+  });
+
+  it("gives no receipt for a delivery whose records become durable at the cutoff", async () => {
+    const store = new MemoryStore();
+    const times = [s.cutoff - 1n, s.cutoff - 1n, s.cutoff];
+    const [seat] = seatsOf(s, { store, now: () => times.shift() ?? s.cutoff }).intake;
+    const out = await seat!.intake(
+      s.e.stubBytes,
+      s.transcript,
+      honest.bytes,
+      honest.ciphertexts[0] as Uint8Array,
+    );
+    expect(out).toEqual({ ok: false, code: "intake-closed" });
   });
 });

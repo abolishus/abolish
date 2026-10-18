@@ -31,6 +31,16 @@ export interface VerifierRun {
       /** Format 5, once selection (6.1) passed: each selected ballot in copy order. */
       readonly selected?: readonly { readonly entry: number }[];
     };
+    /** Format 5, once 7.1 to 7.3 ran: each cell's counted ballots and, if it passes 7.2, its counts. */
+    readonly cells?: readonly {
+      readonly cell: number;
+      readonly counted: number;
+      readonly counts?: readonly string[];
+    }[];
+    /** Format 5, once 8.5 ran: each registered seat's destruction. */
+    readonly destruction?: {
+      readonly seats: readonly { readonly seat: number; readonly code?: string }[];
+    };
     /** How a copy read by CID came out (docs/spec/verifier.md, Board by CID). */
     readonly board?: {
       readonly byCid?: {

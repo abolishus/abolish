@@ -40,6 +40,7 @@ import {
   type Question,
   RECORD_TYPES,
   revealsMessage,
+  type SeatSecrets,
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -59,11 +60,11 @@ export const STUBS = Object.freeze({
     "the panel's identity keys are fresh random keys, given to the verifier as a local file: no release pins a panel yet ([[0006-trustees]], P1-7)",
   anchorAuthority:
     "the anchoring authority is a one-byte contract Anvil lets the fixture send from, not the Safe (P4-1 part 2)",
-  seal: "lastSegment is two segments after the ceremony's, the one after the voting window's: no definition-derived seal yet, since no post-close window is fixed (P1-13, P1-15, P1-18)",
+  seal: "lastSegment is four segments after the ceremony's: the tally's opening follows the counted extent's floor, period(closes_at) + 1, by one segment and the destruction statements follow it by one, not tally.md's windows, since no seal is derived from the definition yet (P1-13, P1-15, P1-18)",
   l1References:
     "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name, and the poll's receipt keys are read at the latest block, not the latest finalized one; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
   casting:
-    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission or trustee intake (P2-8, P2-3, P2-13); the poll's receipts are signed by the fixture as operator, not by the API's board service",
+    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission, and the seats' intake, summed shares, openings and destruction statements are made by the fixture through @abolishus/crypto, not by apps/trustee-node, with summed-share messages passed in memory (P2-8, P2-3, P2-13); the poll's receipts are signed by the fixture as operator, not by the API's board service",
 });
 
 // Distinct, recognisable placeholder values: anyone can recompute them from
@@ -130,6 +131,12 @@ export interface Ceremony<D extends FixtureDefinition = FixtureDefinition> {
   readonly transcript: Uint8Array;
   /** The seats that took part. */
   readonly seats: readonly Trustee[];
+  /**
+   * Each seat's per-election secrets from the ceremony, in seat order: the
+   * fixture holds every trustee node's keys, to take ballots' shares, tally
+   * and state destruction as each node would (stages 4 and 6).
+   */
+  readonly secrets: readonly SeatSecrets[];
 }
 
 export interface Timing {
@@ -288,7 +295,11 @@ function keyCeremony(
   hash: Uint8Array,
   trustees: Trustees,
   absent: number,
-): { readonly transcript: Uint8Array; readonly seats: readonly Trustee[] } {
+): {
+  readonly transcript: Uint8Array;
+  readonly seats: readonly Trustee[];
+  readonly secrets: readonly SeatSecrets[];
+} {
   const params = {
     l2ChainId: stub.l2_chain_id,
     trusteeRegistry: stub.trustee_registry,
@@ -313,7 +324,7 @@ function keyCeremony(
     answers,
     reveals,
   });
-  return { transcript, seats: present };
+  return { transcript, seats: present, secrets: seats };
 }
 
 /**
@@ -347,11 +358,16 @@ export function runCeremony(
     ],
     display_text_commitment: displayTextCommitment(text),
   };
-  const { transcript, seats } = keyCeremony(stub, electionStubHash(stub), trustees, absent);
+  const { transcript, seats, secrets } = keyCeremony(
+    stub,
+    electionStubHash(stub),
+    trustees,
+    absent,
+  );
   const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
   const rule = electionDefinitionRule(definition);
   if (rule !== undefined) throw new Error(`the fixture's definition breaks ${rule}`);
-  return { panel, definition: { version: 1, value: definition }, transcript, seats };
+  return { panel, definition: { version: 1, value: definition }, transcript, seats, secrets };
 }
 
 export interface QuestionCeremonyOptions {
@@ -397,11 +413,11 @@ export function runQuestionCeremony(
     // In ascending order of their encodings (the rule `receipt-keys`).
     receipt_keys: [...receiptKeys].sort((a, b) => compare(a, b)),
   };
-  const { transcript, seats } = keyCeremony(stub, electionStubV5Hash(stub), trustees, 0);
+  const { transcript, seats, secrets } = keyCeremony(stub, electionStubV5Hash(stub), trustees, 0);
   const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
   const failure = electionDefinitionV5Rule(definition);
   if (failure !== undefined) throw new Error(`the fixture's definition breaks ${failure.rule}`);
-  return { panel, definition: { version: 5, value: definition }, transcript, seats };
+  return { panel, definition: { version: 5, value: definition }, transcript, seats, secrets };
 }
 
 function compare(a: Uint8Array, b: Uint8Array): number {

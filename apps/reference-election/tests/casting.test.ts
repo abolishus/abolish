@@ -150,7 +150,9 @@ test(
     if (voter === undefined) throw new Error("no voter");
 
     const votes = [0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0] as const;
-    const bytes = await castQuestions(casting, voter, votes, ref);
+    const { ballot: bytes, ciphertexts } = await castQuestions(casting, voter, votes, ref);
+    // One ciphertext for each seat, whose hash the ballot carries.
+    expect(ciphertexts.map((x) => x.seat)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const decoded = decodeBallot(bytes, 3);
     const checked = checkBallotV3(other.election, decoded);
     expect(checked.ok).toBe(true);

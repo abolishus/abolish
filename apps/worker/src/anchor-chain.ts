@@ -154,8 +154,9 @@ export interface AnchorDeployment {
  * judges by, and sends from the account it accepts (T-49, T-53). The
  * authority must have code that isn't an EIP-7702 delegation, as the
  * anchor's constructor requires; that it is the Safe the deployment record
- * names, with its owners, threshold and no module or guard, is part 2b-2's
- * check. Throws naming the mismatch.
+ * names, with its owners, threshold, history and no module or guard, is
+ * `checkAnchorSafe`'s (`src/anchor-safe.ts`), which the sender runs before
+ * every signature and part 2b-2b runs at startup. Throws naming the mismatch.
  */
 export async function checkAnchorDeployment(
   client: PublicClient,

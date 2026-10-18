@@ -7,9 +7,12 @@ export {
 export {
   type AnchorSafe,
   checkAnchorSafe,
+  checkAnchorSafeHistory,
+  checkAnchorSafeState,
   FALLBACK_HANDLER_SLOT,
   GUARD_SLOT,
   keySigner,
+  LOG_RANGE,
   safeAbi,
   safeSender,
   type SafeSenderOptions,

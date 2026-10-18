@@ -3,13 +3,14 @@ pragma solidity 0.8.30;
 
 import {BoardAnchor} from "../src/BoardAnchor.sol";
 import {Safe} from "../vendor/safe-smart-account/contracts/Safe.sol";
+import {SafeL2} from "../vendor/safe-smart-account/contracts/SafeL2.sol";
 import {Enum} from "../vendor/safe-smart-account/contracts/common/Enum.sol";
 import {
     SafeProxyFactory
 } from "../vendor/safe-smart-account/contracts/proxies/SafeProxyFactory.sol";
 import {TestBase} from "./utils/Vm.sol";
 
-/// The board anchor with a real Safe (v1.4.1, vendored) as its authority, as
+/// The board anchor with a real Safe (SafeL2 v1.4.1, vendored) as its authority, as
 /// the deployment runs it (docs/spec/contracts.md, Board anchor): a call
 /// lands only with the threshold's signatures, and a Safe transaction whose
 /// anchor call the anchor refuses reverts as a whole when it carries no
@@ -27,7 +28,7 @@ contract BoardAnchorSafeTest is TestBase {
     BoardAnchor internal anchor;
 
     function setUp() public {
-        Safe singleton = new Safe();
+        Safe singleton = new SafeL2();
         SafeProxyFactory factory = new SafeProxyFactory();
         address[] memory owners = new address[](3);
         for (uint256 i; i < 3; i++) {
@@ -46,6 +47,19 @@ contract BoardAnchorSafeTest is TestBase {
         assertTrue(_exec(data, _sign(data, _pair(0, 1))), "executed");
         assertTrue(anchor.checkpointHashOf(ID, 1) != bytes32(0), "anchored");
         assertEq(safe.nonce(), 1, "nonce");
+    }
+
+    /// Any two of the three owners anchor, and the same pair again can't
+    /// replay the transaction once the nonce has moved.
+    function testFuzz_AnyTwoOwnersAnchor(uint8 a, uint8 b) public {
+        uint256 i = a % 3;
+        uint256 j = (i + 1 + (b % 2)) % 3;
+        bytes memory data = _call(_checkpoint(1));
+        bytes memory sigs = _sign(data, _pair(i, j));
+        assertTrue(_exec(data, sigs), "executed");
+        assertTrue(anchor.checkpointHashOf(ID, 1) != bytes32(0), "anchored");
+        vm.expectRevert(bytes("GS026"));
+        _exec(data, sigs);
     }
 
     function test_RefusesFewerSignaturesThanTheThreshold() public {

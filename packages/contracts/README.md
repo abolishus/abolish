@@ -71,7 +71,7 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - A call may carry the `archiveLocator` of ADR 0005 (`u16(version) ‖ body`, at most 128 bytes, framed but not interpreted), alone or with checkpoints; `ArchiveLocated` logs it and the latest one stays in state with a count, so the archive is found from L1 alone, even after history expiry (T-49, T-51).
 - `registerReceiptKey(bytes key)` and `retireReceiptKey(bytes key)` keep the append-only record of receipt keys ([`docs/adr/0023-receipt-evidence.md`](../../docs/adr/0023-receipt-evidence.md)): from the authority only, with canonical calldata, a 33-byte key framed as compressed P-256 (not checked on the curve); a key is registered once and retired at most once, each time in one word (`registeredAt`, `retiredAt`) under the same namespace, so a verifier proves both with one storage proof, and `ReceiptKeyRegistered` and `ReceiptKeyRetired` go through the event accumulator (T-26, T-69, T-17).
 - `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
-- `test/BoardAnchorSafe.t.sol` runs it with a real Safe (v1.4.1, vendored, below) as the authority, as the deployment does: a call lands with the threshold's signatures, ordered by owner, and is refused with fewer (`GS020`) or out of order (`GS026`); and a Safe transaction with no `safeTxGas` and no gas price whose anchor call the anchor refuses reverts as a whole (`GS013`), nonce unchanged, which the worker's sender relies on (T-49, T-69).
+- `test/BoardAnchorSafe.t.sol` runs it with a real Safe (SafeL2 v1.4.1, vendored, below) as the authority, as the deployment does: a call lands with any two of three owners' signatures (fuzzed), ordered by owner, and can't be replayed, and is refused with fewer (`GS020`) or out of order (`GS026`); and a Safe transaction with no `safeTxGas` and no gas price whose anchor call the anchor refuses reverts as a whole (`GS013`), nonce unchanged, which the worker's sender relies on (T-49, T-69).
 - The hourly job and the Sepolia deployment are P4-1 part 2.
 
 ## L1 relay
@@ -196,13 +196,14 @@ fb027b5d2397bf767cc1caa5660c408ea900c1a8c48b8e2db1b19ae6e856972d  contracts/util
 
 Tree hash: `efa4d5c9136075d04d5eff8ff1396e8e13398357c6eb3763d45c3553cffca405`.
 
-`vendor/safe-smart-account/` holds nineteen unmodified files of [Safe Smart Account](https://github.com/safe-global/safe-smart-account) at tag `v1.4.1`, commit `bf943f80fec5ac647159d26161446ac5d716a294`: `Safe.sol` and every file it imports, and `proxies/SafeProxyFactory.sol` with its two imports. They are byte-identical to the same paths in that commit and in the npm package `@safe-global/safe-contracts@1.4.1` (integrity `sha512-fP1jewywSwsIniM04NsqPyVRFKPMAuirC3ftA/TA4X3Zc5EnwQp/UCJUU2PL/37/z/jMo8UUaJ+pnFNWmMU7dQ==`). Every file declares `SPDX-License-Identifier: LGPL-3.0-only`, and the repository's `LICENSE`, beside them, is LGPL-3.0, which this AGPL-3.0-only package can include. Only the tests deploy them (`test/BoardAnchorSafe.t.sol`, and `apps/worker`'s Safe tests on Anvil), compiled with this package's settings, so their bytecode isn't the canonical deployment's: the anchoring authority is a proxy of Safe's own v1.4.1 deployment, which the worker's startup check pins by address and code hash (P4-1 part 2b-2a). No contract of ours imports them, and they use relative imports, so `foundry.toml` maps nothing to them.
+`vendor/safe-smart-account/` holds twenty unmodified files of [Safe Smart Account](https://github.com/safe-global/safe-smart-account) at tag `v1.4.1`, commit `bf943f80fec5ac647159d26161446ac5d716a294`: `SafeL2.sol`, `Safe.sol` and every file it imports, and `proxies/SafeProxyFactory.sol` with its two imports. They are byte-identical to the same paths in that commit and in the npm package `@safe-global/safe-contracts@1.4.1` (integrity `sha512-fP1jewywSwsIniM04NsqPyVRFKPMAuirC3ftA/TA4X3Zc5EnwQp/UCJUU2PL/37/z/jMo8UUaJ+pnFNWmMU7dQ==`). Every file declares `SPDX-License-Identifier: LGPL-3.0-only`, and the repository's `LICENSE`, beside them, is LGPL-3.0, which this AGPL-3.0-only package can include. Only the tests deploy them (`test/BoardAnchorSafe.t.sol`, and `apps/worker`'s Safe tests on Anvil), compiled with this package's settings, so their bytecode isn't the canonical deployment's: the anchoring authority is a proxy of Safe's own SafeL2 v1.4.1 deployment, which the worker's check pins by address and code hash (P4-1 part 2b-2a). SafeL2 logs every execution with its operation, which the worker's check reads. No contract of ours imports them, and they use relative imports, so `foundry.toml` maps nothing to them.
 
 <!-- vendored:safe-smart-account -->
 
 ```text
 da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768  LICENSE
 efd3301ed5c6bf522fb3a7a43be4a27341e65dff6d1fee04f8567f304a67e365  contracts/Safe.sol
+8ed69cb26d132702443e006c50d7ce36bd1ea05e2274d57df61e0ec1a96be7fe  contracts/SafeL2.sol
 8b72e40ac996a4ed5d9ac35721fdaae5272ca545ad5e3e6b77a6b83e2f3a5805  contracts/base/Executor.sol
 209c67c9557153f2ff6f9d0a82f0c570e5eec5c2bef7735f69a1c60e8aa4058b  contracts/base/FallbackManager.sol
 3faa2d7ebddf3ff217767865eec31fc5b7ec6ad6f4b5abeef66fb1f0f5654dcc  contracts/base/GuardManager.sol
@@ -223,7 +224,7 @@ a32e2bb41a928cc17ac82a7240571e7ad8b8230555f711c13343584d8a4802bb  contracts/prox
 0bf51e2baa3945a0e975d602d85aec63f49513e4c4a159e1c538d0a5f0808889  contracts/proxies/SafeProxyFactory.sol
 ```
 
-Tree hash: `a4c7eeb08cae06c7ccce0fc967097baf89a8591c4303ece650a1ea2c973d2a07`.
+Tree hash: `c21216c8f0ceb78d499bdc906c5ca12a3a0451f03c3b976bd09b17c35fb1273a`.
 
 The check proves the files haven't changed since they were vendored, not that they match upstream: re-deriving them from the tag in CI needs a `ci:` change (rule B), recorded as known-weak in [`docs/status/P1-18.md`](../../docs/status/P1-18.md).
 

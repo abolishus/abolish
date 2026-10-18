@@ -7,22 +7,30 @@
 // The anchor pins only the Safe's address, and a quorum can later make one
 // key the authority without touching the anchor: by enabling a module (which
 // executes as the Safe with no signatures), setting a guard or another
-// fallback handler, or replacing the proxy's singleton through a
-// delegatecall (Board anchor, Known-weak). So the runner checks the whole
-// configuration at startup, at the L1 node's finalized block, and again
-// before every signature, at the block it signs at, and signs for nothing
+// fallback handler, or replacing the proxy's singleton (Board anchor,
+// Known-weak). The Safe's own getters don't show everything: a delegatecall
+// can write a module or an owner into the Safe's mappings without linking it
+// into the lists `getModulesPaginated` and `getOwners` walk, and the Safe
+// lets it act. So the Safe is a SafeL2, which logs every execution with its
+// operation, and the check reads its whole history as well as its state:
+// set up with no setup delegatecall, never a delegatecall since, and never a
+// module's execution. With no delegatecall ever, the Safe's storage changed
+// only through its own functions, which keep the lists whole, so its getters
+// and slots show what can act (T-49, T-69). The runner signs for nothing
 // else: a Safe changed since the deployment record is an alarm for a person,
-// never a transaction to keep signing (T-49, T-69). The owners and the
-// threshold are pinned too, so the quorum the record names is the one the
-// runners sign for.
+// never a transaction to keep signing. The owners and the threshold are
+// pinned too, so the quorum the record names is the one the runners sign
+// for.
 //
 // A Safe transaction is signed with no `safeTxGas`, base gas or gas price,
-// so a Safe whose anchor call reverts reverts as a whole (`GS013`) and
-// nothing is mined as made (packages/contracts/test/BoardAnchorSafe.t.sol);
-// the receipt must also carry the Safe's `ExecutionSuccess` for exactly the
-// hash signed. Keys are used for nothing but signing, and nothing here logs
-// or throws a key, a signature or a node's answer (T-10, T-65).
+// so a Safe whose anchor call reverts reverts as a whole (`GS013`), leaving
+// its nonce and the anchor unchanged (packages/contracts/test/
+// BoardAnchorSafe.t.sol); the receipt must also carry the Safe's
+// `ExecutionSuccess` for exactly the hash signed. Keys are used for nothing
+// but signing, and what this file throws is its own fixed text, never a
+// key, a signature or a node's answer (T-10, T-65).
 
+import { boardAnchorAbi } from "@abolishus/contracts/abi";
 import {
   type Address,
   BaseError,
@@ -36,12 +44,13 @@ import {
   parseEventLogs,
   type PublicClient,
   recoverAddress,
+  toFunctionSelector,
   TransactionReceiptNotFoundError,
   zeroAddress,
 } from "viem";
 import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
 
-/** The parts of Safe v1.4.1's interface the check and the sender use. */
+/** The parts of SafeL2 v1.4.1's interface the check and the sender use. */
 export const safeAbi = parseAbi([
   "function getOwners() view returns (address[])",
   "function getThreshold() view returns (uint256)",
@@ -49,7 +58,24 @@ export const safeAbi = parseAbi([
   "function getModulesPaginated(address start, uint256 pageSize) view returns (address[] array, address next)",
   "function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)",
   "event ExecutionSuccess(bytes32 indexed txHash, uint256 payment)",
+  "event SafeSetup(address indexed initiator, address[] owners, uint256 threshold, address initializer, address fallbackHandler)",
+  "event SafeMultiSigTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures, bytes additionalInfo)",
+  "event SafeModuleTransaction(address module, address to, uint256 value, bytes data, uint8 operation)",
+  "event ExecutionFromModuleSuccess(address indexed module)",
+  "event ExecutionFromModuleFailure(address indexed module)",
 ]);
+
+const HISTORY_EVENTS = safeAbi.filter(
+  (item) =>
+    item.type === "event" &&
+    [
+      "SafeSetup",
+      "SafeMultiSigTransaction",
+      "SafeModuleTransaction",
+      "ExecutionFromModuleSuccess",
+      "ExecutionFromModuleFailure",
+    ].includes(item.name),
+);
 
 /** The modules list's sentinel (Safe's `ModuleManager`). */
 const SENTINEL = "0x0000000000000000000000000000000000000001";
@@ -60,6 +86,13 @@ export const FALLBACK_HANDLER_SLOT =
   "0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5";
 /** The proxy keeps its singleton in slot 0 (Safe's `SafeProxy`). */
 const SINGLETON_SLOT = "0x0";
+/** The most blocks one `eth_getLogs` asks for, within common node limits. */
+export const LOG_RANGE = 5_000n;
+/** The order of secp256k1, which a key must be below. */
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+const ANCHOR_SELECTOR = toFunctionSelector(
+  boardAnchorAbi.find((item) => item.type === "function" && item.name === "anchor")!,
+);
 
 /** The EIP-712 type a Safe owner signs (Safe v1.4.1, `SAFE_TX_TYPEHASH`). */
 const SAFE_TX_TYPES = {
@@ -81,9 +114,11 @@ const SAFE_TX_TYPES = {
 export interface AnchorSafe {
   /** The Safe's proxy: the anchor's `authority`. */
   readonly address: Address;
+  /** The block the proxy was created and set up in. */
+  readonly deploymentBlock: bigint;
   /** `keccak256` of the proxy's runtime code. */
   readonly proxyCodeHash: Hex;
-  /** The singleton the proxy must delegate to, and `keccak256` of its runtime code. */
+  /** The SafeL2 singleton the proxy must delegate to, and `keccak256` of its runtime code. */
   readonly singleton: Address;
   readonly singletonCodeHash: Hex;
   /** Exactly the Safe's owners, in any order. */
@@ -102,13 +137,72 @@ const sameSet = (a: readonly Address[], b: readonly Address[]) => {
 };
 
 /**
- * The Safe at `blockNumber` is exactly `safe`: the proxy's and singleton's
- * code, the singleton it delegates to, its owners and threshold, no module,
- * no guard and the named fallback handler. Throws naming the first
- * mismatch; the configuration itself is refused if its threshold is below
- * 2 or above its owners.
+ * The Safe at `blockNumber` is exactly `safe`: its history from its
+ * deployment (`checkAnchorSafeHistory`) and its state there
+ * (`checkAnchorSafeState`). Throws naming the first mismatch.
  */
 export async function checkAnchorSafe(
+  client: PublicClient,
+  safe: AnchorSafe,
+  blockNumber: bigint,
+): Promise<void> {
+  await checkAnchorSafeHistory(client, safe, safe.deploymentBlock, blockNumber);
+  await checkAnchorSafeState(client, safe, blockNumber);
+}
+
+/**
+ * The Safe's logs in blocks `from` to `to`: one `SafeSetup` with no
+ * initializer in its deployment block, if the range holds it, and none
+ * elsewhere; every `SafeMultiSigTransaction` a `CALL`; no module's
+ * execution. Read `LOG_RANGE` blocks at a time.
+ */
+export async function checkAnchorSafeHistory(
+  client: PublicClient,
+  safe: AnchorSafe,
+  from: bigint,
+  to: bigint,
+): Promise<void> {
+  if (from < safe.deploymentBlock) throw new RangeError("the history starts at the deployment");
+  const address = getAddress(safe.address);
+  let setups = 0;
+  for (let start = from; start <= to; start += LOG_RANGE) {
+    const end = start + LOG_RANGE - 1n < to ? start + LOG_RANGE - 1n : to;
+    const logs = await client.getLogs({
+      address,
+      events: HISTORY_EVENTS,
+      fromBlock: start,
+      toBlock: end,
+      strict: true,
+    });
+    for (const log of logs) {
+      if (getAddress(log.address) !== address) throw new Error("the node returned another's logs");
+      switch (log.eventName) {
+        case "SafeSetup":
+          if (log.blockNumber !== safe.deploymentBlock || log.args.initializer !== zeroAddress)
+            throw new Error("the Safe's setup isn't the record's");
+          setups += 1;
+          break;
+        case "SafeMultiSigTransaction":
+          if (log.args.operation !== 0) throw new Error("the Safe has made a delegatecall");
+          break;
+        default:
+          throw new Error("a module has acted as the Safe");
+      }
+    }
+  }
+  if (setups !== (from === safe.deploymentBlock ? 1 : 0))
+    throw new Error("the Safe's setup isn't the record's");
+}
+
+/**
+ * The Safe's state at `blockNumber`: the proxy's and singleton's code, the
+ * singleton it delegates to, its owners and threshold, no module, no guard
+ * and the named fallback handler. Sound only over a history
+ * `checkAnchorSafeHistory` accepted, since a delegatecall can act through
+ * entries the getters don't list. The record itself is refused if its
+ * threshold is below 2 or above its owners.
+ */
+export async function checkAnchorSafeState(
   client: PublicClient,
   safe: AnchorSafe,
   blockNumber: bigint,
@@ -153,11 +247,18 @@ export interface SafeSigner {
   sign(hash: Hex): Promise<Hex>;
 }
 
+/** A secp256k1 key's account, refused without quoting the key. */
+function account(key: Uint8Array, what: string): PrivateKeyAccount {
+  if (key.length !== 32) throw new TypeError(`${what} is 32 bytes`);
+  const k = BigInt(bytesToHex(key));
+  if (k === 0n || k >= SECP256K1_N) throw new RangeError(`${what} isn't a secp256k1 key`);
+  return privateKeyToAccount(bytesToHex(key));
+}
+
 /** An owner key held by this runner. */
 export function keySigner(key: Uint8Array): SafeSigner {
-  if (key.length !== 32) throw new TypeError("an owner key is 32 bytes");
-  const account = privateKeyToAccount(bytesToHex(key));
-  return { address: account.address, sign: (hash) => account.sign({ hash }) };
+  const a = account(key, "an owner key");
+  return { address: a.address, sign: (hash) => a.sign({ hash }) };
 }
 
 /** How many of the latest base fee a transaction's fee cap allows, before its tip. */
@@ -170,7 +271,7 @@ export interface SafeSenderOptions {
   readonly client: PublicClient;
   /** The node's chain, as `checkAnchorDeployment` checked it. */
   readonly chainId: bigint;
-  /** The board anchor: the only contract this sender calls. */
+  /** The board anchor: the only contract, and `anchor` the only function, this sender calls. */
   readonly anchor: Address;
   readonly safe: AnchorSafe;
   /** Owners' signers; their first `threshold` valid signatures are used. */
@@ -183,11 +284,13 @@ export interface SafeSenderOptions {
 }
 
 /**
- * `ViemAnchorChain`'s sender: `calldata` to the anchor as a transaction of
- * the Safe, checked, signed by the threshold's owners and executed. Resolves
- * once a successful receipt carries the Safe's `ExecutionSuccess` for it;
- * throws otherwise, without a transaction if the Safe has changed, too few
- * owners signed, or the node's simulation of the execution reverts.
+ * `ViemAnchorChain`'s sender: `anchor` calldata to the anchor as a
+ * transaction of the Safe, checked, signed by the threshold's owners and
+ * executed. Resolves once a successful receipt carries the Safe's
+ * `ExecutionSuccess` for it; throws otherwise, without a transaction if the
+ * Safe has changed, too few owners signed, or the node's estimate of the
+ * execution reverts. The Safe's history up to the finalized block is read
+ * once and remembered; the rest, and its state, on every call.
  */
 export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) => Promise<void> {
   const { client, chainId, safe } = options;
@@ -199,14 +302,31 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
     throw new Error("a signer isn't one of the Safe's owners");
   if (new Set(signers.map((s) => s.address)).size < safe.threshold)
     throw new Error("fewer signers than the Safe's threshold");
-  if (options.executor.length !== 32) throw new TypeError("the executor key is 32 bytes");
-  const executor: PrivateKeyAccount = privateKeyToAccount(bytesToHex(options.executor));
+  const executor = account(options.executor, "the executor key");
   const timeout = options.receiptTimeoutMs ?? 600_000;
   const pollMs = options.pollMs ?? 2_000;
+  // The finalized history already accepted, and the highest block read: a
+  // node (or a load balancer's other node) that later answers from below it
+  // could show a Safe from before a change (T-49).
+  let checkedThrough = safe.deploymentBlock - 1n;
+  let seen = 0n;
 
   return async (calldata) => {
-    const block = await client.getBlock({ blockTag: "latest" });
-    await checkAnchorSafe(client, safe, block.number);
+    if (bytesToHex(calldata.subarray(0, 4)) !== ANCHOR_SELECTOR)
+      throw new Error("the sender signs only anchor calls");
+    const [block, finalized] = await Promise.all([
+      client.getBlock({ blockTag: "latest" }),
+      client.getBlock({ blockTag: "finalized" }),
+    ]);
+    if (block.number < seen || finalized.number > block.number)
+      throw new Error("the node is behind blocks already read");
+    seen = block.number;
+    if (finalized.number > checkedThrough) {
+      await checkAnchorSafeHistory(client, safe, checkedThrough + 1n, finalized.number);
+      checkedThrough = finalized.number;
+    }
+    await checkAnchorSafeHistory(client, safe, checkedThrough + 1n, block.number);
+    await checkAnchorSafeState(client, safe, block.number);
     const nonce = await client.readContract({
       address,
       abi: safeAbi,
@@ -249,24 +369,37 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
       ],
     });
     // The estimate runs the execution: a stale nonce, a bad signature or
-    // an anchor call the anchor refuses reverts it, before anything is sent.
-    const [gas, tip, pending] = await Promise.all([
-      client.estimateGas({ account: executor.address, to: address, data }),
+    // an anchor call the anchor refuses reverts it, before anything is
+    // sent. Its error would quote the calldata, signatures included.
+    let gas: bigint;
+    try {
+      gas = await client.estimateGas({ account: executor.address, to: address, data });
+    } catch {
+      throw new Error("the node's estimate of the Safe's transaction failed");
+    }
+    // The latest nonce, not the pending one: a transaction stuck under a
+    // fee rise is replaced at today's fees, never queued behind.
+    const [tip, nextNonce] = await Promise.all([
       client.estimateMaxPriorityFeePerGas(),
-      client.getTransactionCount({ address: executor.address, blockTag: "pending" }),
+      client.getTransactionCount({ address: executor.address, blockTag: "latest" }),
     ]);
     if (block.baseFeePerGas === null) throw new Error("the L1 has no base fee");
     const tx = await executor.signTransaction({
       type: "eip1559",
       chainId: Number(chainId),
-      nonce: pending,
+      nonce: nextNonce,
       to: address,
       data,
       gas: (gas * GAS_HEADROOM) / 100n,
       maxFeePerGas: block.baseFeePerGas * BASE_FEE_HEADROOM + tip,
       maxPriorityFeePerGas: tip,
     });
-    const sent = await client.sendRawTransaction({ serializedTransaction: tx });
+    let sent: Hex;
+    try {
+      sent = await client.sendRawTransaction({ serializedTransaction: tx });
+    } catch {
+      throw new Error("the node refused the Safe's transaction");
+    }
     const receipt = await receiptOf(client, sent, timeout, pollMs);
     if (receipt.status !== "success") throw new Error("the Safe's transaction reverted");
     const executed = parseEventLogs({
@@ -283,8 +416,9 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
 /**
  * `threshold` signatures of `hash` by distinct owners, ordered by owner
  * address as the Safe requires. A signature that doesn't recover to its
- * signer's address is skipped, so a signer elsewhere (part 2b-2b) can fail a
- * call but never make the Safe count someone else.
+ * signer's address, or a signer that fails, is skipped, so a signer
+ * elsewhere (part 2b-2b) can withhold a signature but never make the Safe
+ * count someone else; too few left is the error.
  */
 async function signaturesOf(
   signers: readonly SafeSigner[],
@@ -319,7 +453,7 @@ async function receiptOf(client: PublicClient, hash: Hex, timeout: number, pollM
       return await client.getTransactionReceipt({ hash });
     } catch (e) {
       if (!(e instanceof BaseError && e.walk((c) => c instanceof TransactionReceiptNotFoundError)))
-        throw e;
+        throw new Error("the node's receipt couldn't be read");
     }
     if (Date.now() > end) throw new Error("the Safe's transaction wasn't included in time");
     await new Promise((r) => setTimeout(r, pollMs));

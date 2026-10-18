@@ -9,6 +9,7 @@ import {
   createWalletClient,
   custom,
   defineChain,
+  encodeAbiParameters,
   encodeFunctionData,
   getAddress,
   type Hex,
@@ -26,21 +27,25 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   type AnchorSafe,
   checkAnchorSafe,
+  checkAnchorSafeHistory,
+  checkAnchorSafeState,
   FALLBACK_HANDLER_SLOT,
   GUARD_SLOT,
   keySigner,
+  LOG_RANGE,
   type SafeSigner,
   safeSender,
   ViemAnchorChain,
 } from "../src/index.ts";
 
-// The anchoring authority's Safe against a real one (P4-1 part 2b-2a): Safe
-// v1.4.1, vendored in packages/contracts, deployed on Anvil through its
-// proxy factory as the board anchor's authority. The check passes the
+// The anchoring authority's Safe against a real one (P4-1 part 2b-2a):
+// SafeL2 v1.4.1, vendored in packages/contracts, deployed on Anvil through
+// its proxy factory as the board anchor's authority. The check passes the
 // deployment record's Safe and refuses each change that would let fewer
-// than its threshold act as it; the sender anchors through the Safe with
-// the threshold's signatures, and sends nothing for a changed Safe, too few
-// honest signatures or a call that would revert (T-49, T-69). Every key
+// than its threshold act as it, through the Safe's own functions or through
+// a delegatecall the getters can't see; the sender anchors through the Safe
+// with the threshold's signatures, and sends nothing for a changed Safe, too
+// few honest signatures or a call that would revert (T-49, T-69). Every key
 // here is made by the test and held by no one else (AGENTS.md).
 
 const contractsRoot = fileURLToPath(new URL("../../../packages/contracts", import.meta.url));
@@ -57,6 +62,9 @@ const setupAbi = parseAbi([
   "function setFallbackHandler(address handler)",
   "function addOwnerWithThreshold(address owner, uint256 threshold)",
   "function changeThreshold(uint256 threshold)",
+  "function execTransactionFromModule(address to, uint256 value, bytes data, uint8 operation) returns (bool)",
+  "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)",
+  "function nonce() view returns (uint256)",
 ]);
 
 async function freePort(): Promise<number> {
@@ -128,7 +136,7 @@ beforeAll(async () => {
     return wallet.getAddresses();
   })) as [Address];
   anchorBytecode = inspect("src/BoardAnchor.sol:BoardAnchor");
-  singleton = await deploy(inspect("vendor/safe-smart-account/contracts/Safe.sol:Safe"));
+  singleton = await deploy(inspect("vendor/safe-smart-account/contracts/SafeL2.sol:SafeL2"));
   factory = await deploy(
     inspect("vendor/safe-smart-account/contracts/proxies/SafeProxyFactory.sol:SafeProxyFactory"),
   );
@@ -173,13 +181,13 @@ interface Fixture {
 }
 
 /** A `threshold`-of-`n` Safe, the anchor whose authority it is (periods 0 and 1 ended), and a funded executor. */
-async function fixture(n = 3, threshold = 2n): Promise<Fixture> {
+async function fixture(n = 3, threshold = 2n, setupTo: Address = zeroAddress): Promise<Fixture> {
   const keys = Array.from({ length: n }, () => generatePrivateKey());
   const owners = keys.map((k) => privateKeyToAddress(k));
   const initializer = encode("setup", [
     owners,
     threshold,
-    zeroAddress,
+    setupTo,
     "0x",
     zeroAddress,
     zeroAddress,
@@ -193,7 +201,7 @@ async function fixture(n = 3, threshold = 2n): Promise<Fixture> {
     functionName: "createProxyWithNonce",
     args: [singleton, initializer, (salt += 1n)],
   });
-  await receiptOf(await wallet.writeContract({ ...request, chain }));
+  const created = await receiptOf(await wallet.writeContract({ ...request, chain }));
   const latest = await client.getBlock({ blockTag: "latest" });
   const clock = { epoch: latest.timestamp - 2n * PERIOD - 60n, period: PERIOD, deadline: DEADLINE };
   const hash = await wallet.deployContract({
@@ -210,6 +218,7 @@ async function fixture(n = 3, threshold = 2n): Promise<Fixture> {
   return {
     safe: {
       address: proxy,
+      deploymentBlock: created.blockNumber,
       proxyCodeHash: await codeHash(proxy),
       singleton,
       singletonCodeHash: await codeHash(singleton),
@@ -222,6 +231,49 @@ async function fixture(n = 3, threshold = 2n): Promise<Fixture> {
     executor: hexToBytes(executor),
   };
 }
+
+/** Code at a fresh address: `code`, or STOP. */
+async function contractAt(code: Hex = "0x00"): Promise<Address> {
+  const address = privateKeyToAddress(generatePrivateKey());
+  await rpc("anvil_setCode", [address, code]);
+  return address;
+}
+
+/** Executes a Safe transaction signed by the first two owners. */
+async function execSafe(f: Fixture, to: Address, data: Hex, operation: number) {
+  const nonce = (await client.readContract({
+    address: f.safe.address,
+    abi: setupAbi,
+    functionName: "nonce",
+  })) as bigint;
+  const hash = (await client.readContract({
+    address: f.safe.address,
+    abi: setupAbi,
+    functionName: "getTransactionHash",
+    args: [to, 0n, data, operation, 0n, 0n, 0n, zeroAddress, zeroAddress, nonce],
+  })) as Hex;
+  const signers = f.keys.slice(0, 2).map(signer);
+  signers.sort((a, b) => (BigInt(a.address) < BigInt(b.address) ? -1 : 1));
+  const signatures =
+    `0x${(await Promise.all(signers.map((s) => s.sign(hash)))).map((x) => x.slice(2)).join("")}` as Hex;
+  await as(
+    deployer,
+    f.safe.address,
+    encodeFunctionData({
+      abi: parseAbi([
+        "function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)",
+      ]),
+      functionName: "execTransaction",
+      args: [to, 0n, data, operation, 0n, 0n, 0n, zeroAddress, zeroAddress, signatures],
+    }),
+  );
+}
+
+/** Code that writes `modules[module] = 1` into the Safe's storage when delegatecalled. */
+const hiddenModuleCode = (module: Address): Hex =>
+  `0x7f${toHex(1n, { size: 32 }).slice(2)}7f${keccak256(
+    encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [module, 1n]),
+  ).slice(2)}5500`;
 
 const encode = (name: (typeof setupAbi)[number]["name"], args: readonly unknown[]): Hex =>
   encodeFunctionData({ abi: setupAbi, functionName: name, args } as never);
@@ -290,13 +342,14 @@ describe("the Safe's check", () => {
     const other = (await fixture()).safe;
     const cases: [Partial<AnchorSafe>, string][] = [
       [{ proxyCodeHash: f.safe.singletonCodeHash }, "isn't the Safe's proxy"],
-      [{ address: f.anchor }, "isn't the Safe's proxy"],
+      [{ address: f.anchor }, "setup isn't the record's"],
       [{ singleton: f.anchor }, "another singleton"],
       [{ singletonCodeHash: f.safe.proxyCodeHash }, "singleton has other code"],
       [{ fallbackHandler: f.anchor }, "another fallback handler"],
       [{ owners: other.owners }, "other owners"],
       [{ owners: [...f.safe.owners.slice(1), f.safe.owners[1]!] }, "other owners"],
       [{ threshold: 3n }, "another threshold"],
+      [{ deploymentBlock: f.safe.deploymentBlock + 1n }, "setup isn't the record's"],
     ];
     for (const [change, error] of cases)
       await expect(checkAnchorSafe(client, { ...f.safe, ...change }, block)).rejects.toThrow(error);
@@ -364,6 +417,64 @@ describe("the Safe's check", () => {
   });
 });
 
+describe("the Safe's history", () => {
+  test("refuses a delegatecall that hides a module from the Safe's getters", async () => {
+    const f = await fixture();
+    const module = privateKeyToAddress(generatePrivateKey());
+    await execSafe(f, await contractAt(hiddenModuleCode(module)), "0x", 1);
+    await mine(FINALITY_DEPTH);
+    const block = await finalized();
+    // The getters and slots show nothing, yet the module acts as the Safe.
+    await expect(checkAnchorSafeState(client, f.safe, block)).resolves.toBeUndefined();
+    await as(module, f.safe.address, encode("execTransactionFromModule", [deployer, 0n, "0x", 0]));
+    await expect(checkAnchorSafe(client, f.safe, block)).rejects.toThrow("made a delegatecall");
+  });
+
+  test("refuses any delegatecall, and accepts calls", async () => {
+    const f = await fixture();
+    await execSafe(f, await contractAt(), "0x", 0);
+    await mine(FINALITY_DEPTH);
+    await expect(checkAnchorSafe(client, f.safe, await finalized())).resolves.toBeUndefined();
+    await execSafe(f, await contractAt(), "0x", 1);
+    await mine(FINALITY_DEPTH);
+    await expect(checkAnchorSafe(client, f.safe, await finalized())).rejects.toThrow(
+      "made a delegatecall",
+    );
+  });
+
+  test("refuses a Safe set up with a delegatecall", async () => {
+    const f = await fixture(3, 2n, await contractAt());
+    await expect(checkAnchorSafe(client, f.safe, await finalized())).rejects.toThrow(
+      "setup isn't the record's",
+    );
+  });
+
+  test("refuses a module's execution", async () => {
+    const f = await fixture();
+    const module = privateKeyToAddress(generatePrivateKey());
+    await as(f.safe.address, f.safe.address, encode("enableModule", [module]));
+    await as(module, f.safe.address, encode("execTransactionFromModule", [deployer, 0n, "0x", 0]));
+    await mine(FINALITY_DEPTH);
+    const block = await finalized();
+    await expect(
+      checkAnchorSafeHistory(client, f.safe, f.safe.deploymentBlock, block),
+    ).rejects.toThrow("a module has acted");
+  });
+
+  test("reads the history in ranges, and only from the deployment", async () => {
+    const f = await fixture();
+    await mine(Number(LOG_RANGE) + 10);
+    await execSafe(f, await contractAt(), "0x", 1);
+    await mine(FINALITY_DEPTH);
+    await expect(checkAnchorSafe(client, f.safe, await finalized())).rejects.toThrow(
+      "made a delegatecall",
+    );
+    await expect(
+      checkAnchorSafeHistory(client, f.safe, f.safe.deploymentBlock - 1n, await finalized()),
+    ).rejects.toThrow(RangeError);
+  });
+});
+
 describe("the sender", () => {
   test("anchors through the Safe with the threshold's signatures", async () => {
     const f = await fixture();
@@ -384,6 +495,54 @@ describe("the sender", () => {
     await expect(adapter(f, send).anchor([segment(id, 0)])).rejects.toThrow("has a module");
     expect(await sent(f)).toBe(0);
     expect(await held(f, id, 0)).toMatch(/^0x0{64}$/);
+  });
+
+  test("sends nothing once the Safe has made a delegatecall, finalized or not", async () => {
+    const f = await fixture();
+    const send = sender(f);
+    const id = election();
+    await adapter(f, send).anchor([segment(id, 0)]);
+    await execSafe(f, await contractAt(), "0x", 1);
+    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("made a delegatecall");
+    await mine(FINALITY_DEPTH);
+    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("made a delegatecall");
+    expect(await sent(f)).toBe(1);
+  });
+
+  test("signs only anchor calls, and refuses a node behind a block already read", async () => {
+    const f = await fixture();
+    await expect(
+      sender(f)(
+        hexToBytes(
+          encodeFunctionData({
+            abi: boardAnchorAbi,
+            functionName: "retireReceiptKey",
+            args: [toHex(new Uint8Array(33).fill(2))],
+          }),
+        ),
+      ),
+    ).rejects.toThrow("only anchor calls");
+    let behind = 0n;
+    const lagging = createPublicClient({
+      chain,
+      transport: custom(
+        {
+          async request({ method, params }: { method: string; params?: unknown }) {
+            const answer = await client.request({ method, params } as never);
+            if (method !== "eth_getBlockByNumber" || answer === null) return answer;
+            const b = answer as { number: Hex };
+            return { ...b, number: toHex(BigInt(b.number) - behind) };
+          },
+        },
+        { retryCount: 0 },
+      ),
+    }) as PublicClient;
+    const send = sender(f, f.keys.map(signer), lagging);
+    const id = election();
+    await adapter(f, send).anchor([segment(id, 0)]);
+    behind = 5n;
+    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("behind blocks");
+    expect(await sent(f)).toBe(1);
   });
 
   test("skips a signer whose signature isn't its own, and sends nothing without the threshold", async () => {
@@ -464,6 +623,10 @@ describe("the sender", () => {
       }),
     ).toThrow(TypeError);
     expect(() => keySigner(new Uint8Array(31))).toThrow(TypeError);
+    for (const key of [new Uint8Array(32), new Uint8Array(32).fill(0xff)]) {
+      expect(() => keySigner(key)).toThrow(RangeError);
+      expect(() => keySigner(key)).not.toThrow(/00|ff/i);
+    }
     expect(getAddress(signer(a).address)).toBe(f.safe.owners[0]);
   });
 });

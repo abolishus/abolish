@@ -10,6 +10,11 @@
     "check": "nargo fmt --check && nargo check --workspace",
     "test": "nargo test --workspace && vp test run"
   },
+  "dependencies": {
+    "@abolishus/crypto": "workspace:*",
+    "@aztec/bb.js": "catalog:",
+    "@noir-lang/noir_js": "catalog:"
+  },
   "devDependencies": {
     "@noble/curves": "catalog:",
     "@types/node": "catalog:",

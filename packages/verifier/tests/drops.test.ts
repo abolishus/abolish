@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import {
+  boardEntryHash,
   decodeBoardEntry,
+  encodeBoardEntry,
   encodeReceipt,
   pinnedVersion,
   type ReceiptVerdict,
@@ -295,8 +297,8 @@ describe("the drop rule", { timeout: 120_000 }, () => {
         const outcome = judgeDropRule(
           ruleInputs(admitted, entry, { admitted: admitted.admittedOf(entries) }),
         );
-        // The model: the case's ballots are distinct, so a ballot's only
-        // copy is its own entry.
+        // The model: the case's ballots differ in M, its re-vote included
+        // (the same tier and ν), so a ballot's only copy is its own entry.
         expect(outcome).toEqual(
           kept.includes(entry)
             ? { status: "not-drop", code: "present", entry }
@@ -311,38 +313,49 @@ describe("the drop rule", { timeout: 120_000 }, () => {
 describe("judgeDrop over a bundle", { timeout: 120_000 }, () => {
   const c = byId("admitted");
   const d = admitted.definition.value;
-  const receiptFor = (electionId: Uint8Array = d.election_id) =>
+  const payload = admitted.payloads.get(1) as Uint8Array;
+  const receiptFor = (covered: Uint8Array = payload, electionId: Uint8Array = d.election_id) =>
     encodeReceipt(
       signReceipt(new Uint8Array(32).fill(7), {
         election_id: electionId,
         index: 5n,
         segment: 1,
-        entry_hash: new Uint8Array(32),
+        entry_hash: boardEntryHash(
+          encodeBoardEntry(
+            { election_id: electionId, index: 5n, segment: 1, payload: covered },
+            admitted.version,
+          ),
+        ),
         link: new Uint8Array(32),
         root: new Uint8Array(32),
         inclusion: [],
       }),
     );
-  const payload = admitted.payloads.get(1) as Uint8Array;
   const OPENS = d.opens_at;
   const CLOSES = d.closes_at;
+  // Every input of a vectors' bundle is a local file, so `drop` never
+  // claims what `dropAgainstInputs` found.
+  const againstInputs = (dropAgainstInputs: unknown) => ({
+    drop: { status: "unjudged", code: "inputs-unauthenticated" },
+    dropAgainstInputs,
+  });
 
   test("a verdict that isn't an alarm is never a drop", () => {
+    const notAlarm = { status: "not-drop", code: "not-alarm" };
     for (const verdict of OTHER_VERDICTS)
       expect(judgeDrop(bundleOf(c), receiptFor(), payload, verdict)).toEqual({
-        status: "not-drop",
-        code: "not-alarm",
+        drop: notAlarm,
+        dropAgainstInputs: notAlarm,
       });
   });
 
   test("under format 4 the L1 reference can't be judged, so no receipt's ballot is", () => {
-    expect(judgeDrop(bundleOf(c), receiptFor(), payload, UNANCHORED)).toEqual({
-      status: "unjudged",
-      code: "l1-blocks-missing",
-    });
+    expect(judgeDrop(bundleOf(c), receiptFor(), payload, UNANCHORED)).toEqual(
+      againstInputs({ status: "unjudged", code: "l1-blocks-missing" }),
+    );
   });
 
-  test("under format 5, the payload's reference is judged as the board's copy of it is", () => {
+  test("under format 5, the payload's reference is judged as the board's copy of it is, against the inputs only", () => {
     // The vectors' references name no block of this run, whose head is after
     // close: 5.8 rejects them all, and so the payload.
     const blocks = run(21_000_000n, [OPENS - 3600n - 12n, CLOSES + 12n]).map((h) =>
@@ -351,10 +364,9 @@ describe("judgeDrop over a bundle", { timeout: 120_000 }, () => {
     const bundle = bundleOf(c, blocks);
     const row = verifyBundle(bundle).checks.find((x) => x.id === "5.8") as CheckResult;
     expect(row.status).toBe("fail");
-    expect(judgeDrop(bundle, receiptFor(), payload, UNANCHORED)).toEqual({
-      status: "not-drop",
-      code: row.code,
-    });
+    expect(judgeDrop(bundle, receiptFor(), payload, UNANCHORED)).toEqual(
+      againstInputs({ status: "not-drop", code: row.code }),
+    );
   });
 
   test("a bundle whose definition doesn't decode reaches no ballot", () => {
@@ -365,7 +377,20 @@ describe("judgeDrop over a bundle", { timeout: 120_000 }, () => {
         payload,
         UNANCHORED,
       ),
-    ).toEqual({ status: "unjudged", code: "not-reached" });
+    ).toEqual(againstInputs({ status: "unjudged", code: "not-reached" }));
+  });
+
+  test("a payload the receipt doesn't cover isn't judged: no other ballot can be called the dropped one", () => {
+    // Another admitted ballot of the election, never under this receipt.
+    const other = admitted.payloads.get(2) as Uint8Array;
+    expect(() => judgeDrop(bundleOf(c), receiptFor(), other, UNANCHORED)).toThrow(RangeError);
+    expect(() => judgeDrop(bundleOf(c), receiptFor(other), other, UNANCHORED)).not.toThrow();
+  });
+
+  test("a receipt for another election isn't this board's to judge", () => {
+    expect(() =>
+      judgeDrop(bundleOf(c), receiptFor(payload, new Uint8Array(32).fill(1)), payload, UNANCHORED),
+    ).toThrow(RangeError);
   });
 
   test("the board's admitted ballots are read only from a sealed copy its anchors authenticate, once 6.1 passes", () => {
@@ -432,11 +457,5 @@ describe("judgeDrop over a bundle", { timeout: 120_000 }, () => {
     expect(read(anchoredAt(sealEnds))).toBeUndefined();
     // The vectors' own evidence anchors another copy.
     expect(read(bundleOf(c, blocks))).toBeUndefined();
-  });
-
-  test("a receipt for another election isn't this board's to judge", () => {
-    expect(() =>
-      judgeDrop(bundleOf(c), receiptFor(new Uint8Array(32).fill(1)), payload, UNANCHORED),
-    ).toThrow(RangeError);
   });
 });

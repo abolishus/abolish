@@ -43,7 +43,9 @@ export type DropUnjudgedCode =
   | "l1-blocks-missing"
   | "l1-blocks-short"
   | "l1-ref-pending"
-  | "board-unsettled";
+  | "board-unsettled"
+  /** `judgeDrop`'s `drop` where an input doesn't authenticate (verify.ts, `DropReport`). */
+  | "inputs-unauthenticated";
 
 export type DropOutcome =
   | { readonly status: "drop" }

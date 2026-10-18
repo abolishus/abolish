@@ -104,6 +104,7 @@ export {
   type CheckCode,
   type CheckResult,
   type CheckStatus,
+  type DropReport,
   judgeDrop,
   type Report,
   REPORT_FORMAT,

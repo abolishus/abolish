@@ -3,6 +3,7 @@
 import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
+import { type BoardRow, boardRows } from "../board.ts";
 import { fromHex } from "../values.ts";
 import {
   definitionView,
@@ -121,6 +122,98 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
   if (!view.ok || shortCode(fromHex(view.poll.definitionHash), code.length) !== code)
     return { kind: "not-found" };
   return { kind: "poll", electionId };
+}
+
+/**
+ * Entries per page of the board page. Pages start only at multiples of it,
+ * so a visit tells our server which window of the board was read, never
+ * which entry (T-10).
+ */
+export const BOARD_PAGE = 25;
+
+export type BoardPage =
+  | {
+      readonly kind: "board";
+      readonly poll: PollView;
+      readonly head: BoardHead;
+      /** Where the page starts, as a canonical decimal `u64`. */
+      readonly from: string;
+      /** The entries from `from`, checked; empty at the end of the board. */
+      readonly rows: readonly BoardRow[];
+    }
+  | {
+      /** `from` is past the end of the board as `head` gives it. */
+      readonly kind: "beyond";
+      readonly poll: PollView;
+      readonly head: BoardHead;
+      readonly from: string;
+    }
+  | { readonly kind: "not-found" }
+  | {
+      readonly kind: "unavailable";
+      /**
+       * The definition's, or `undecodable-entries` when the definition pins
+       * no board-entry version this page reads or an entry fails its checks
+       * (src/board.ts).
+       */
+      readonly problem: DefinitionProblem | "undecodable-entries";
+    };
+
+const outOfRange = (error: unknown) =>
+  error instanceof ORPCError && error.defined && error.code === "OUT_OF_RANGE";
+
+/**
+ * A page of the board of `electionId` from position `from` (a canonical
+ * decimal `u64` and a multiple of `BOARD_PAGE`), which the caller has checked. The definition is decoded and
+ * checked as on the poll page; the head is the server's claim, shown as one.
+ */
+export async function loadBoardPage(
+  api: Api,
+  electionId: string,
+  from: string,
+): Promise<BoardPage> {
+  let answers;
+  try {
+    answers = await Promise.all([
+      api.elections.getDefinition({ electionId }),
+      api.board.getHead({ electionId }),
+      // Past the end is an answer of its own, not a failure of the page.
+      api.board
+        .getEntries({ electionId, start: from, limit: String(BOARD_PAGE) })
+        .catch((error: unknown) => {
+          if (outOfRange(error)) return undefined;
+          throw error;
+        }),
+    ]);
+  } catch (error) {
+    if (notFound(error)) return { kind: "not-found" };
+    throw error;
+  }
+  const [{ definition }, head, first] = answers;
+  const view = definitionView(electionId, definition);
+  if (!view.ok) return { kind: "unavailable", problem: view.problem };
+  if (first === undefined) return { kind: "beyond", poll: view.poll, head, from };
+  // The API may cut a page short by bytes (T-52); the rest is asked for, so
+  // every page holds the same window of the board and the next one starts
+  // where it ends. Each answer short of the end holds at least one entry, so
+  // this asks at most `BOARD_PAGE` times.
+  const entries = [...first.entries];
+  let last = first.entries.length;
+  while (last > 0 && entries.length < BOARD_PAGE) {
+    const more = await api.board.getEntries({
+      electionId,
+      start: String(BigInt(from) + BigInt(entries.length)),
+      limit: String(BOARD_PAGE - entries.length),
+    });
+    last = more.entries.length;
+    entries.push(...more.entries.slice(0, BOARD_PAGE - entries.length));
+  }
+  const rows =
+    view.boardEntryVersion === undefined
+      ? undefined
+      : boardRows(electionId, view.boardEntryVersion, BigInt(from), entries);
+  if (rows === undefined) return { kind: "unavailable", problem: "undecodable-entries" };
+  return { kind: "board", poll: view.poll, head, from, rows };
 }
 
 /** Decisions per page of the moderation log. */

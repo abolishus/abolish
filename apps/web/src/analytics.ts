@@ -9,6 +9,7 @@ export const PAGES = [
   "/",
   "/polls",
   "/polls/:id",
+  "/polls/:id/board",
   "/p/:code",
   "/moderation",
   "/account",
@@ -27,6 +28,8 @@ export function pageOf(pathname: string): Page {
   // Any single segment: a malformed ID is still a poll page's 404, and the
   // segment itself is never kept.
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";
+  // Its board's pages: the entry a page starts at is in the query, never kept.
+  if (/^\/polls\/[^/]+\/board$/.test(pathname)) return "/polls/:id/board";
   // An author's draft (or `new`): its ID is the account's, never kept (T-10).
   if (/^\/account\/polls\/[^/]+$/.test(pathname)) return "/account/polls/:id";
   if (/^\/account\/polls\/[^/]+\/setup$/.test(pathname)) return "/account/polls/:id/setup";

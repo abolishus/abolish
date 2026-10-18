@@ -367,6 +367,47 @@ const enUS = {
   boardRoot: "Tree root",
   boardUnanchored:
     "Until an L1 checkpoint covers these values, they are only this server's word. Keep them: a later board that doesn't extend them is evidence of tampering.",
+  boardLink: "Read the board, entry by entry",
+  boardPageEyebrow: "Poll {prefix}… · Public board",
+  boardPageTitle: "The poll's board",
+  boardPageLede:
+    "Every record on this poll's board, in the order the board took them: the key ceremony, chain events, sealed ballots, openings and the count. Entries are only ever added at the end, and none shows how anyone voted.",
+  boardPageBack: "Back to the poll",
+  boardPageScope: "on this board as this page loaded",
+  boardPageClaim:
+    "These entries come from our server. This page decodes each one, checks that it names this poll and sits at its place, and computes its hash itself. Whether every entry chains to the head above is for the verifier, which checks the whole board.",
+  boardLedgerMark: "The ledger",
+  boardLedgerTitle: "Read the board, entry by entry",
+  boardLedgerLede:
+    "Each row is one entry: its number, the anchoring period the board added it in, what it records and its hash. The fingerprint draws the hash, so two copies can be compared without reading hex.",
+  boardColumnEntry: "Entry",
+  boardColumnPeriod: "Period",
+  boardColumnKind: "Kind",
+  boardColumnHash: "Entry hash",
+  boardCaption: "Entries {first} to {last} of {count}",
+  boardEnd: "This is the end of the board. Later entries will appear here.",
+  boardBeyond: "The board has {count} entries, numbered from 0, so there is no entry {entry} yet.",
+  boardPages: "Pages of the board",
+  boardEarlier: "Earlier entries",
+  boardLater: "Later entries",
+  boardLatest: "Latest entries",
+  boardOwnEntry:
+    "This page doesn't look up a receipt's entry: asking our server for your own entry would tell it which one is yours, and each page here covers 25 entries so that browsing tells it less. To check your receipt, download the whole board and look for your entry there, where no one learns which one you looked for.",
+  boardEntriesUndecodable:
+    "Our server sent entries for this poll's board that don't check: one doesn't decode under the poll's definition, names another poll or sits at another place. This page shows none of them rather than show a board it can't read. Its board is unaffected wherever else it is copied.",
+  fingerprintHead: "Fingerprint of the chain head {prefix}",
+  fingerprintEntry: "Fingerprint of entry {entry}",
+  entryKind_ballot: "Sealed ballot",
+  entryKind_spoiledOpening: "Spoiled ballot, opened",
+  entryKind_ceremony: "Key ceremony",
+  entryKind_tallyOpening: "Count, opened",
+  entryKind_contractEvent: "Chain event",
+  entryKind_shareReceipt: "Trustee receipt",
+  entryKind_shareComplaint: "Trustee complaint",
+  entryKind_destruction: "Key destroyed",
+  entryKind_closeStatement: "Close statement",
+  entryKind_runningOpening: "Running count, opened",
+  entryKind_authorApprovals: "Author's trustees' approval",
   illFormed:
     "This definition breaks a protocol rule ({rule}), so the verifier fails this election.",
   illFormedQuestion:

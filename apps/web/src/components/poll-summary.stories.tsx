@@ -112,7 +112,8 @@ export const NoShortCode: Story = {
     const canvas = within(canvasElement);
     await openEvidence(canvasElement);
     await expect(canvas.queryByText("Short link")).toBeNull();
-    await expect(canvas.queryByRole("link")).toBeNull();
+    // The board's link is the only one left.
+    await expect(canvas.getByRole("link")).toHaveAccessibleName("Read the board, entry by entry");
   },
 };
 

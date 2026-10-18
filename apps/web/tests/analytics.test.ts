@@ -27,6 +27,7 @@ describe("pages", () => {
     fc.assert(
       fc.property(fc.oneof(electionId, fc.stringMatching(/^[^/?#]+$/)), (id) => {
         expect(pageOf(`/polls/${id}`)).toBe("/polls/:id");
+        expect(pageOf(`/polls/${id}/board`)).toBe("/polls/:id/board");
       }),
       runs,
     );
@@ -64,6 +65,8 @@ describe("pages", () => {
     for (const path of [
       "/polls/",
       "/polls/a/b",
+      "/polls/a/board/",
+      "/polls//board",
       "/account/x",
       "/account/polls",
       "/account/polls/",

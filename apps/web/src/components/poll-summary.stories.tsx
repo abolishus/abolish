@@ -7,11 +7,10 @@ import { PollSummary } from "./poll-summary.tsx";
 const poll: PollView = {
   electionId: "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
   definitionHash: "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750",
+  version: 1,
   illFormed: undefined,
-  electionType: "plurality",
-  optionCount: 3,
-  minSelections: 0,
-  maxSelections: 1,
+  counting: "plurality",
+  questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [
     { tier: 0, groupSize: "5000" },
     { tier: 2, groupSize: "1" },
@@ -167,10 +166,65 @@ export const Delisted: Story = {
 };
 
 export const IllFormed: Story = {
-  args: { poll: { ...poll, electionType: "approval", illFormed: "panel" } },
+  args: {
+    poll: { ...poll, counting: "approval", illFormed: { rule: "panel", question: undefined } },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("alert")).toHaveTextContent("(trustee panel)");
     await expect(canvas.getAllByText("Approve any number")[0]).toBeVisible();
+  },
+};
+
+/** Version 5: each question's limits, worded as the ballot client words them. */
+const questions: PollView = {
+  ...poll,
+  version: 5,
+  counting: "questions",
+  questions: [
+    { optionCount: 3, minSelections: 0, maxSelections: 1 },
+    { optionCount: 5, minSelections: 0, maxSelections: 5 },
+    { optionCount: 4, minSelections: 0, maxSelections: 2 },
+    { optionCount: 6, minSelections: 3, maxSelections: 3 },
+    { optionCount: 4, minSelections: 1, maxSelections: 4 },
+    { optionCount: 5, minSelections: 2, maxSelections: 3 },
+  ],
+};
+
+const questionsPlay: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getAllByText("Question by question")[0]).toBeVisible();
+  await expect(canvas.getByText("6 questions, 27 options")).toBeVisible();
+  await openEvidence(canvasElement);
+  // The term's row holds the list; `getByText` would have thrown without it.
+  const row = canvas.getByText("Questions", { selector: "dt" }).parentElement!;
+  const items = within(row).getAllByRole("listitem");
+  await expect(items.map((li) => li.textContent)).toEqual([
+    "Question 1: Pick one, from 3 options; 0 to 1 selections",
+    "Question 2: Pick any, from 5 options; 0 to 5 selections",
+    "Question 3: Pick up to 2, from 4 options; 0 to 2 selections",
+    "Question 4: Pick exactly 3, from 6 options; 3 to 3 selections",
+    "Question 5: Pick at least 1, from 4 options; 1 to 4 selections",
+    "Question 6: Pick 2 to 3, from 5 options; 2 to 3 selections",
+  ]);
+  await expect(canvas.getByText("Options", { selector: "dt" }).nextSibling).toHaveTextContent("27");
+  await expect(canvas.queryByText("Selections per ballot")).toBeNull();
+};
+
+export const Questions: Story = { args: { poll: questions }, play: questionsPlay };
+
+export const QuestionsDark: Story = {
+  args: { poll: questions },
+  parameters: { theme: "dark" },
+  play: questionsPlay,
+};
+
+/** A rule broken in one question names the question, counted from 1. */
+export const IllFormedQuestion: Story = {
+  args: { poll: { ...questions, illFormed: { rule: "selections", question: 3 } } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("alert")).toHaveTextContent(
+      "(selection limits) in question 4",
+    );
   },
 };

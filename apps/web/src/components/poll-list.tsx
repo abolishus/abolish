@@ -4,7 +4,7 @@ import { useId } from "react";
 import { catalogs } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll, PollList as List } from "../server/load.ts";
-import { STATUS_MARK } from "./poll-status.ts";
+import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./poll-summary.tsx";
 
 /** A listed poll's ID, which names its row: a definition carries no title of its own. */
@@ -65,9 +65,7 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
             <div className="grid content-start gap-1 md:col-span-3">
               <dt className={CELL_TERM}>{t("listCounting")}</dt>
               <dd className="m-0 grid gap-1 text-sm">
-                <span>
-                  {t(entry.poll.electionType === "approval" ? "typeApproval" : "typePlurality")}
-                </span>
+                <span>{t(COUNTING_LABEL[entry.poll.counting])}</span>
                 {entry.poll.illFormed !== undefined ? (
                   <span className="text-destructive">{t("listIllFormed")}</span>
                 ) : null}

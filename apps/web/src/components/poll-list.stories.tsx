@@ -7,11 +7,10 @@ import { PollList } from "./poll-list.tsx";
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
   definitionHash: "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750",
+  version: 1,
   illFormed: undefined,
-  electionType: "plurality",
-  optionCount: 3,
-  minSelections: 0,
-  maxSelections: 1,
+  counting: "plurality",
+  questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [{ tier: 0, groupSize: "5000" }],
   threshold: 4,
   panelSize: 7,
@@ -34,8 +33,8 @@ const meta = {
         {
           kind: "poll",
           poll: poll(SECOND, {
-            electionType: "approval",
-            illFormed: "timing",
+            counting: "approval",
+            illFormed: { rule: "timing", question: undefined },
             closesAt: { seconds: "18446744073709551615", iso: undefined },
           }),
         },

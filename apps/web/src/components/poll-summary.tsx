@@ -3,10 +3,17 @@ import { ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
-import { type Instant, pollStatus, type PollStatus, type PollView, type Tier } from "../poll.ts";
+import {
+  type Instant,
+  instructionOf,
+  pollStatus,
+  type PollStatus,
+  type PollView,
+  type Tier,
+} from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
-import { STATUS_MARK } from "./poll-status.ts";
+import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
 
 export interface PollSummaryProps {
   poll: PollView;
@@ -96,7 +103,9 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
   const status = pollStatus(poll, asOf);
-  const counting = t(poll.electionType === "approval" ? "typeApproval" : "typePlurality");
+  const counting = t(COUNTING_LABEL[poll.counting]);
+  const options = poll.questions.reduce((sum, q) => sum + q.optionCount, 0);
+  const illFormed = poll.illFormed;
   const tiers = (
     <ul className="m-0 grid list-none gap-1 p-0">
       {/* By position: an ill-formed definition can repeat a tier. */}
@@ -136,9 +145,14 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
           </p>
         ) : null}
 
-        {poll.illFormed !== undefined ? (
+        {illFormed !== undefined ? (
           <p role="alert" className="m-0 max-w-prose border-l-4 border-destructive pl-4">
-            {t("illFormed", { rule: t(`rule_${poll.illFormed}`) })}
+            {illFormed.question === undefined
+              ? t("illFormed", { rule: t(`rule_${illFormed.rule}`) })
+              : t("illFormedQuestion", {
+                  rule: t(`rule_${illFormed.rule}`),
+                  number: illFormed.question + 1,
+                })}
           </p>
         ) : null}
 
@@ -153,7 +167,9 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
                 <>
                   {counting}
                   <span className="block text-sm text-muted-foreground">
-                    {t("optionCount", { count: poll.optionCount })}
+                    {poll.version === 5
+                      ? `${t("questionCount", { count: poll.questions.length })}, ${t("optionCount", { count: options })}`
+                      : t("optionCount", { count: options })}
                   </span>
                 </>
               ),
@@ -217,11 +233,39 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
             <dl className="m-0">
               <Fact term={t("factType")}>{counting}</Fact>
               <Fact term={t("factOptions")}>
-                <Count value={poll.optionCount} />
+                <Count value={options} />
               </Fact>
-              <Fact term={t("factSelections")}>
-                {t("selectionsRange", { min: poll.minSelections, max: poll.maxSelections })}
-              </Fact>
+              {poll.version === 5 ? (
+                <Fact term={t("factQuestions")}>
+                  {/* Each question's limits as the proof enforces them, and no
+                      figure across questions (T-29, T-34). */}
+                  <ol className="m-0 grid list-none gap-1 p-0">
+                    {poll.questions.map((q, i) => {
+                      const instruction = instructionMessage(instructionOf(q));
+                      return (
+                        <li key={i}>
+                          <span className="font-medium">
+                            {t("questionNumber", { number: i + 1 })}
+                          </span>
+                          {": "}
+                          {t("questionLimits", {
+                            instruction: t(instruction.key, instruction.values),
+                            options: t("optionCount", { count: q.optionCount }),
+                            min: q.minSelections,
+                            max: q.maxSelections,
+                          })}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </Fact>
+              ) : (
+                poll.questions.map((q, i) => (
+                  <Fact key={i} term={t("factSelections")}>
+                    {t("selectionsRange", { min: q.minSelections, max: q.maxSelections })}
+                  </Fact>
+                ))
+              )}
               <Fact term={t("factElectorate")}>
                 <ul className="m-0 grid list-none gap-1 p-0">
                   {poll.electorate.map((group, i) => (

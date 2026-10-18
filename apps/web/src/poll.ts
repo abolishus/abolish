@@ -8,6 +8,8 @@
 // other: a version it can't read is undecodable here, never guessed at.
 
 import {
+  BOARD_ENTRY,
+  type BoardEntryVersion,
   DecodeError,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
@@ -19,6 +21,7 @@ import {
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
   type ElectionDefinitionV5Rule,
+  pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
@@ -81,7 +84,16 @@ export interface PollView {
 export type DefinitionProblem = "undecodable" | "another-election";
 
 export type DefinitionResult =
-  | { readonly ok: true; readonly poll: PollView }
+  | {
+      readonly ok: true;
+      readonly poll: PollView;
+      /**
+       * The board-entry version the definition's profile pins, which the
+       * board page decodes entries under; `undefined` unless exactly one pin
+       * names a version this release reads.
+       */
+      readonly boardEntryVersion: BoardEntryVersion | undefined;
+    }
   | { readonly ok: false; readonly problem: DefinitionProblem };
 
 // `Date` holds ±8.64e15 ms from the epoch.
@@ -176,7 +188,12 @@ export function definitionView(electionId: string, definitionHex: string): Defin
   }
   const poll = definition.version === 5 ? viewV5(definition.value) : viewV1(definition.value);
   if (poll.electionId !== electionId) return { ok: false, problem: "another-election" };
-  return { ok: true, poll };
+  const pinned = pinnedVersion(definition.value, RECORD_TYPES.boardEntry);
+  const boardEntryVersion =
+    pinned !== undefined && Object.hasOwn(BOARD_ENTRY.versions, pinned)
+      ? (pinned as BoardEntryVersion)
+      : undefined;
+  return { ok: true, poll, boardEntryVersion };
 }
 
 /**

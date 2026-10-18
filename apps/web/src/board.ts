@@ -1,0 +1,96 @@
+// One page of a poll's board as the board page shows it, built from the
+// API's encoded entries. Nothing here is trusted: each entry is decoded with
+// @abolishus/crypto under the version the poll's definition pins, must name
+// this poll and sit at the position the page asked for, and its hash is
+// computed here from its bytes, never taken from the server (T-23, T-31,
+// T-34). A page with any entry that fails is refused whole rather than shown
+// in part. Whether the entries chain to the head the server claims is the
+// verifier's check, over the whole board.
+
+import {
+  boardEntryHash,
+  type BoardEntryVersion,
+  DecodeError,
+  decodeBoardEntry,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
+
+import { fromHex, toHex } from "./values.ts";
+
+/** What an entry records, named by its payload's record type (docs/spec/board.md, Allowed payloads). */
+export type EntryKind =
+  | "ballot"
+  | "spoiled-opening"
+  | "ceremony"
+  | "tally-opening"
+  | "contract-event"
+  | "share-receipt"
+  | "share-complaint"
+  | "destruction"
+  | "close-statement"
+  | "running-opening"
+  | "author-approvals";
+
+const KINDS: ReadonlyMap<number, EntryKind> = new Map([
+  [RECORD_TYPES.ballot, "ballot"],
+  [RECORD_TYPES.spoiledBallotOpening, "spoiled-opening"],
+  [RECORD_TYPES.ceremonyTranscript, "ceremony"],
+  [RECORD_TYPES.tallyOpening, "tally-opening"],
+  [RECORD_TYPES.contractEvent, "contract-event"],
+  [RECORD_TYPES.shareReceipt, "share-receipt"],
+  [RECORD_TYPES.shareComplaint, "share-complaint"],
+  [RECORD_TYPES.destructionStatement, "destruction"],
+  [RECORD_TYPES.closeStatement, "close-statement"],
+  [RECORD_TYPES.runningOpening, "running-opening"],
+  [RECORD_TYPES.authorApprovals, "author-approvals"],
+]);
+
+export interface BoardRow {
+  /** The entry's position, as a canonical decimal `u64`. */
+  readonly index: string;
+  /** The anchoring period the board appended it in. */
+  readonly segment: number;
+  readonly kind: EntryKind;
+  /** Its entry hash, computed here. */
+  readonly hash: string;
+}
+
+/**
+ * The rows for `entries`, the API's page from position `from` of the board of
+ * `electionId`, or `undefined` if any entry doesn't decode under `version`,
+ * names another election, sits at another position, or goes back to an
+ * earlier anchoring period than the entry before it.
+ */
+export function boardRows(
+  electionId: string,
+  version: BoardEntryVersion,
+  from: bigint,
+  entries: readonly string[],
+): readonly BoardRow[] | undefined {
+  const rows: BoardRow[] = [];
+  for (const [i, hex] of entries.entries()) {
+    let bytes;
+    let entry;
+    try {
+      bytes = fromHex(hex);
+      entry = decodeBoardEntry(bytes, version);
+    } catch (error) {
+      if (error instanceof DecodeError || error instanceof RangeError) return undefined;
+      throw error;
+    }
+    if (toHex(entry.election_id) !== electionId || entry.index !== from + BigInt(i))
+      return undefined;
+    const previous = rows.at(-1);
+    if (previous !== undefined && entry.segment < previous.segment) return undefined;
+    // The record header's first two bytes are its type, big-endian (docs/spec/notation.md).
+    const kind = KINDS.get(((entry.payload[0] ?? 0) << 8) | (entry.payload[1] ?? 0));
+    if (kind === undefined) return undefined;
+    rows.push({
+      index: entry.index.toString(),
+      segment: entry.segment,
+      kind,
+      hash: toHex(boardEntryHash(bytes)),
+    });
+  }
+  return rows;
+}

@@ -5,7 +5,9 @@ import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
 import {
+  BOARD_PAGE,
   LIST_PAGE,
+  loadBoardPage,
   loadModerationLog,
   loadPoll,
   loadPollList,
@@ -34,6 +36,16 @@ export const fetchPoll = createServerFn({ method: "GET" })
     return electionId;
   })
   .handler(({ data }) => opaque(() => loadPoll(api(), data)));
+
+export const fetchBoardPage = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const { electionId, from } = (input ?? {}) as { electionId?: unknown; from?: unknown };
+    if (!isElectionId(electionId)) throw new TypeError("expected an election ID");
+    if (!isCanonicalU64(from) || BigInt(from) % BigInt(BOARD_PAGE) !== 0n)
+      throw new TypeError("expected a canonical decimal u64, a multiple of the page size");
+    return { electionId, from };
+  })
+  .handler(({ data }) => opaque(() => loadBoardPage(api(), data.electionId, data.from)));
 
 export const fetchModerationLog = createServerFn({ method: "GET" })
   .inputValidator((after: unknown) => {

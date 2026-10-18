@@ -9,10 +9,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { shortCode } from "@abolishus/core/short-codes";
 import {
+  boardEntryHash,
+  decodeBoardEntry,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  encodeBoardEntry,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
@@ -46,13 +49,38 @@ const ID = typical.value.election_id;
 /** Known to the stub, but its definition names another election. */
 const SWAPPED_ID = "ab".repeat(32);
 const UNKNOWN_ID = "cd".repeat(32);
-const HEAD = { treeSize: "12", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
+const HEAD = { treeSize: "30", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
 const LATEST = {
   seq: "7",
   action: "hide",
   reason: "personal-data",
   decidedAt: "2026-10-01T12:00:00.000Z",
 };
+
+/**
+ * The typical poll's board, as many entries as `HEAD` claims: the valid board
+ * vector's payloads under the typical poll's ID, at their positions. The stub
+ * serves these entries for every poll, so any other poll's board names
+ * another election.
+ */
+const boardVector = (
+  JSON.parse(
+    readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
+  ) as { boards: { id: string; entries: string[] }[] }
+).boards.find((b) => b.id === "valid");
+if (boardVector === undefined) throw new Error("vectors missing");
+const BOARD = Array.from({ length: Number(HEAD.treeSize) }, (_, i) => {
+  const { payload } = decodeBoardEntry(
+    fromHex(boardVector.entries[i % boardVector.entries.length]!),
+    1,
+  );
+  return toHex(
+    encodeBoardEntry(
+      { election_id: fromHex(ID), index: BigInt(i), segment: Math.floor(i / 5), payload },
+      1,
+    ),
+  );
+});
 
 /** A poll whose text moderation has hidden: the approval vector, under an ID of its own. */
 const HIDDEN_ID = "ef".repeat(32);
@@ -197,6 +225,19 @@ function stubApi(): Server {
         return json(200, { definition });
       case "/board/head":
         return json(200, HEAD);
+      case "/board/entries": {
+        const start = Number(url.searchParams.get("start"));
+        if (start > BOARD.length)
+          return json(416, {
+            defined: true,
+            code: "OUT_OF_RANGE",
+            status: 416,
+            message: "The requested positions are beyond the board this server holds.",
+          });
+        // At most 7 entries an answer, as a page the API cut short by bytes would be.
+        const limit = Math.min(Number(url.searchParams.get("limit")), 7);
+        return json(200, { entries: BOARD.slice(start, start + limit) });
+      }
       case "/moderation/status":
         return json(
           200,
@@ -272,6 +313,7 @@ describe("every page", () => {
   test.each([
     "/",
     `/polls/${ID}`,
+    `/polls/${ID}/board`,
     "/moderation",
     "/polls",
     "/account",
@@ -427,6 +469,75 @@ describe("poll page", () => {
     const response = await get(`/polls/${id}`);
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("There is no page at this address");
+  });
+});
+
+describe("board page", () => {
+  const text = async (path: string) => (await (await get(path)).text()).replace(/<[^>]+>/g, "");
+  const short = (entry: string) => {
+    const hash = toHex(boardEntryHash(fromHex(entry)));
+    return `${hash.slice(0, 8)}…${hash.slice(-8)}`;
+  };
+
+  test("the poll page links to its board", async () => {
+    expect(await (await get(`/polls/${ID}`)).text()).toContain(`href="/polls/${ID}/board"`);
+  });
+
+  test("shows a page of entries with the hashes this page computed, and the head as a claim", async () => {
+    const response = await get(`/polls/${ID}/board`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    const page = html.replace(/<[^>]+>/g, "");
+    // A full page, though the API answers 7 entries at a time.
+    expect(page).toContain("Entries 0 to 24 of 30");
+    for (const entry of BOARD.slice(0, 25)) expect(page).toContain(short(entry));
+    expect(page).not.toContain(short(BOARD[25]!));
+    // The vector's first payloads: the ceremony, then a chain event.
+    expect(page).toContain("Key ceremony");
+    expect(page).toContain("Chain event");
+    expect(page).toContain(HEAD.chainHead);
+    expect(page).toContain("they are only this server");
+    expect(page).not.toContain("Earlier entries");
+    expect(html).toContain(`href="/polls/${ID}/board?from=25"`);
+    // Never a lookup by entry number (T-10).
+    expect(html).not.toMatch(/<input\b[^>]*name="from"/);
+  });
+
+  test("pages by windows of 25, with links to the earlier ones", async () => {
+    const html = await (await get(`/polls/${ID}/board?from=25`)).text();
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("Entries 25 to 29 of 30");
+    expect(page).not.toContain(short(BOARD[24]!));
+    expect(html).toContain(`href="/polls/${ID}/board?from=0"`);
+    expect(page).not.toContain("Later entries");
+  });
+
+  test("says where the board ends, and when an entry isn't on it yet", async () => {
+    expect(await text(`/polls/${ID}/board?from=50`)).toContain("there is no entry 50 yet");
+  });
+
+  test("starts from the first entry for anything but a canonical page start", async () => {
+    for (const from of ["abc", "01", "-1", "10", "18446744073709551616"]) {
+      const response = await follow(`/polls/${ID}/board?from=${from}`);
+      expect((await response.text()).replace(/<[^>]+>/g, "")).toContain("Entries 0 to 24 of 30");
+    }
+  });
+
+  test("refuses entries that name another poll, showing none of them (T-31)", async () => {
+    const page = await text(`/polls/${FILLER[3]}/board`);
+    expect(page).toContain("sits at another place");
+    expect(page).not.toContain(short(BOARD[0]!));
+  });
+
+  test("refuses a definition that names another election (T-34)", async () => {
+    expect(await text(`/polls/${SWAPPED_ID}/board`)).toContain("the definition of another poll");
+  });
+
+  test.each([
+    ["an unknown poll", UNKNOWN_ID],
+    ["a non-canonical ID", ID.toUpperCase()],
+  ])("%s has no board page", async (_, id) => {
+    expect((await get(`/polls/${id}/board`)).status).toBe(404);
   });
 });
 
@@ -750,7 +861,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(6);
+    expect(ids.length).toBe(7);
     return ids;
   }
 

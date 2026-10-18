@@ -1,5 +1,5 @@
 import { cn, Count, Fingerprint, Hash, useI18n, useTranslate } from "@abolishus/ui";
-import { ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
+import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
@@ -315,6 +315,13 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
                 <p className="m-0 max-w-prose text-muted-foreground">{t("boardUnanchored")}</p>
               </>
             )}
+            <a
+              className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+              href={`/polls/${poll.electionId}/board`}
+            >
+              {t("boardLink")}
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </a>
           </section>
         </div>
       </details>

@@ -95,6 +95,24 @@ describe("definitionView", () => {
     }
   });
 
+  test("carries the board-entry version the profile pins, and none unless exactly one", () => {
+    const typical = decodable.find((v) => v.id === "definition-typical")!;
+    const result = definitionView(typical.value!.election_id, typical.encoding);
+    expect(result.ok && result.boardEntryVersion).toBe(1);
+    const d = decodeElectionDefinition(fromHex(typical.encoding));
+    const others = d.profile.pins.filter((p) => p.record_type !== 7);
+    for (const pins of [
+      others,
+      [...others, { record_type: 7, version: 1 }, { record_type: 7, version: 1 }],
+      [...others, { record_type: 7, version: 2 }],
+    ]) {
+      const encoding = toHex(encodeElectionDefinition({ ...d, profile: { ...d.profile, pins } }));
+      const view = definitionView(typical.value!.election_id, encoding);
+      // Such a profile breaks a rule the page reports, but it never picks a version for it.
+      expect(view.ok && view.boardEntryVersion).toBeUndefined();
+    }
+  });
+
   test("never throws on arbitrary bytes", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 2048 }), (bytes) => {
@@ -159,6 +177,12 @@ const vectorsV5 = load<VectorV5>("election-definition-v5.json");
 const decodableV5 = vectorsV5.filter((v) => v.value !== undefined);
 
 describe("definitionView, version 5", () => {
+  test("carries version 5's pinned board-entry version", () => {
+    const typical = decodableV5.find((v) => v.id === "definition-v5-typical")!;
+    const result = definitionView(typical.value!.election_id, typical.encoding);
+    expect(result.ok && result.boardEntryVersion).toBe(4);
+  });
+
   test("has vectors of every kind", () => {
     expect(decodableV5.length).toBeGreaterThan(10);
     expect(decodableV5.filter((v) => v.illFormedQuestion !== undefined).length).toBeGreaterThan(5);

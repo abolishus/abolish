@@ -1,11 +1,12 @@
 // The page's side of opening an election: it reads the definition hash the
 // election registry holds for the linked election from the L2, then fetches
-// the definition, its display text and the board's first entry (where the
-// operator boards the ceremony transcript) from the API, and hands them all
-// to the worker, which decides whether the election may be shown
-// (election.ts, worker/session.ts). The
+// the definition, its display text, the board's first entry (where the
+// operator boards the ceremony transcript) and the poll's moderation state
+// from the API, and hands the records to the worker, which decides whether
+// the election may be shown (election.ts, worker/session.ts). The
 // worker does no I/O (T-43); this module decides nothing about the records,
-// only whether they could be fetched (T-34, T-41).
+// only whether they could be fetched (T-34, T-41), and whether the
+// moderation policy lets this client show them (T-68).
 //
 // Every answer is untrusted. A wrong one ends in a refusal: here, when it
 // isn't even shaped like an answer, or in the worker, when the records don't
@@ -26,7 +27,7 @@ export type LoadProblem =
   | "not-registered"
   /** The API holds no definition or display text for a registered election. */
   | "not-found"
-  /** The API withholds the poll's text under the moderation policy. */
+  /** The poll's text is withheld under the moderation policy, from this client too. */
   | "withheld"
   /** The network failed, or a server answered with an error it shouldn't. */
   | "unreachable"
@@ -42,6 +43,8 @@ export type Loaded =
       readonly displayText: Uint8Array;
       /** The board's first entry, or none on an empty board: the worker looks for the transcript there. */
       readonly entries: readonly Uint8Array[];
+      /** Whether our web pages withhold the text as a threat while the poll is open, so the client shows it under a notice. */
+      readonly hiddenAsThreat: boolean;
     }
   | { readonly ok: false; readonly problem: LoadProblem };
 
@@ -82,6 +85,8 @@ const MAX_BOARD_BYTES = 256 * 1024 * 1024;
 const ENTRY_COST = 64;
 const PAGE_COST = 64 * 1024;
 const MAX_RPC_ANSWER = 4096;
+// `{ state, latest: { seq, action, reason, decidedAt } }` with room to spare.
+const MAX_STATUS_ANSWER = 1024;
 
 // No cookie, no referrer, no cache and no redirect to anywhere else: each
 // request names only the election, which is all the server needs (T-10, T-11).
@@ -112,14 +117,31 @@ export async function loadElection(
     const registeredHash = await registeredHashOf(deployment, registry, electionId, fetchFn);
     if (registeredHash.every((b) => b === 0)) return { ok: false, problem: "not-registered" };
     const id = toHex(electionId);
-    const [[definition, displayText], entries] = await both(
+    const [[[definition, displayText], entries], moderation] = await both(
       both(
-        apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
-        apiRecord(deployment, "display-text", id, "displayText", MAX_DISPLAY_TEXT_ANSWER, fetchFn),
+        both(
+          apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
+          apiRecord(
+            deployment,
+            "display-text",
+            id,
+            "displayText",
+            MAX_DISPLAY_TEXT_ANSWER,
+            fetchFn,
+          ),
+        ),
+        firstEntry(deployment, id, fetchFn),
       ),
-      firstEntry(deployment, id, fetchFn),
+      moderationOf(deployment, id, fetchFn),
     );
-    return { ok: true, registeredHash, definition, displayText, entries };
+    return {
+      ok: true,
+      registeredHash,
+      definition,
+      displayText,
+      entries,
+      hiddenAsThreat: moderation === "threat",
+    };
   } catch (error) {
     if (error instanceof Stop) return { ok: false, problem: error.problem };
     throw error;
@@ -225,6 +247,56 @@ async function apiRecord(
   if (typeof value !== "string" || !/^(?:[0-9a-f]{2})*$/.test(value)) throw new Stop("bad-answer");
   return fromHex(value);
 }
+
+/**
+ * What the moderation policy lets this client do with the poll's text
+ * (docs/moderation-policy.md, Open polls), from `GET /moderation/status`:
+ * `withheld` (thrown, so it ranks as the display-text route's 451 does) for
+ * a poll hidden under any ground but `threat` as its newest decision,
+ * `threat` for one hidden as a threat, `shown` otherwise. The
+ * display-text route already withholds what the policy withholds (451); this
+ * read gives the threat notice, and keeps the text of a poll whose newest
+ * decision withholds it from being shown even if that route served it. It
+ * sees only the newest decision, so a withholding hide re-cited as `threat`
+ * is withheld by the route alone (docs/status/P2-10.md, Known-weak). A status that can't be read, or isn't
+ * shaped like one, is `shown`: an outage, or someone blocking this route,
+ * must not stop voting through our client (T-68). It rejects otherwise only
+ * for a fault of this page (an abort).
+ */
+async function moderationOf(
+  deployment: Deployment,
+  electionId: string,
+  fetchFn: Fetch,
+): Promise<"shown" | "threat"> {
+  let answer: unknown;
+  try {
+    const url = `${deployment.api}/moderation/status?electionId=${electionId}`;
+    const response = await fetchFn(url, { ...REQUEST, method: "GET" });
+    if (!response.ok) return "shown";
+    answer = await readJson(response, MAX_STATUS_ANSWER);
+  } catch (error) {
+    if (error instanceof Stop || error instanceof TypeError) return "shown";
+    throw error;
+  }
+  if (!isRecord(answer) || answer["state"] !== "hidden") return "shown";
+  const latest = answer["latest"];
+  // A hidden poll's newest decision is the hide (packages/core, moderation).
+  if (!isRecord(latest) || latest["action"] !== "hide") return "shown";
+  const reason = latest["reason"];
+  if (reason === "threat") return "threat";
+  if (typeof reason === "string" && WITHHOLDING.has(reason)) throw new Stop("withheld");
+  return "shown";
+}
+
+// The policy's removal grounds but `threat` (docs/moderation-policy.md, Reasons).
+const WITHHOLDING: ReadonlySet<string> = new Set([
+  "illegal",
+  "personal-data",
+  "harassment",
+  "spam",
+  "impersonation",
+  "legal-notice",
+]);
 
 /**
  * The board's first entry (`GET /board/entries` from 0, one entry), or none

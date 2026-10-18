@@ -56,7 +56,9 @@ const rpcResult = (id: number, result: unknown) => JSON.stringify({ jsonrpc: "2.
 
 /** An honest deployment, with any one answer replaced. */
 function honest(
-  override: Partial<Record<"chainId" | "call" | "definition" | "text" | "entries", Answer>> = {},
+  override: Partial<
+    Record<"chainId" | "call" | "definition" | "text" | "entries" | "status", Answer>
+  > = {},
 ) {
   return network((url, method) => {
     if (url === DEPLOYMENT.rpc) {
@@ -72,6 +74,8 @@ function honest(
       return override.text ?? { status: 200, body: JSON.stringify({ displayText: TEXT }) };
     if (url === `${DEPLOYMENT.api}/board/entries?electionId=${ID_HEX}&start=0&limit=1`)
       return override.entries ?? { status: 200, body: JSON.stringify({ entries: [ENTRY] }) };
+    if (url === `${DEPLOYMENT.api}/moderation/status?electionId=${ID_HEX}`)
+      return override.status ?? { status: 200, body: JSON.stringify({ state: "visible" }) };
     return { status: 500, body: "" };
   });
 }
@@ -92,6 +96,7 @@ describe("the registry read", () => {
     expect(hex(loaded.definition)).toBe(DEFINITION);
     expect(hex(loaded.displayText)).toBe(TEXT);
     expect(loaded.entries.map(hex)).toEqual([ENTRY]);
+    expect(loaded.hiddenAsThreat).toBe(false);
     const call = calls.find((c) => (c.body as { method?: string })?.method === "eth_call");
     // The pinned registry, the election's word after the selector, the finalized head.
     expect(call?.body).toEqual({
@@ -105,7 +110,7 @@ describe("the registry read", () => {
   test("no request carries credentials or a referrer, or follows a redirect", async () => {
     const { calls, fetchFn } = honest();
     await loadElection(DEPLOYMENT, ID, fetchFn);
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
     for (const { init } of calls) {
       expect(init.credentials).toBe("omit");
       expect(init.referrerPolicy).toBe("no-referrer");
@@ -393,6 +398,144 @@ describe("the board's first entry", () => {
         problem: "withheld",
       });
     }
+  });
+});
+
+/** A status answer: the poll hidden, its newest decision citing `reason`. */
+const hidden = (reason: string): Answer => ({
+  status: 200,
+  body: JSON.stringify({
+    state: "hidden",
+    latest: { seq: "3", action: "hide", reason, decidedAt: "2026-10-18T01:00:00.000Z" },
+  }),
+});
+
+// docs/moderation-policy.md, Open polls: a `threat` hide keeps the text in our
+// ballot client under a notice, every other hide withholds it, and a state
+// the client can't read is visible, so blocking the route can't stop voting
+// (T-68).
+/** The policy's removal grounds that withhold the text (docs/moderation-policy.md, Reasons). */
+const WITHHOLDING = [
+  "illegal",
+  "personal-data",
+  "harassment",
+  "spam",
+  "impersonation",
+  "legal-notice",
+];
+
+describe("the moderation state", () => {
+  test("a poll hidden as a threat comes back with its text and the notice", async () => {
+    const { fetchFn } = honest({ status: hidden("threat") });
+    const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(hex(loaded.displayText)).toBe(TEXT);
+    expect(loaded.hiddenAsThreat).toBe(true);
+  });
+
+  test("a poll hidden on any other ground is withheld, even if its text is served", async () => {
+    for (const reason of WITHHOLDING) {
+      const { fetchFn } = honest({ status: hidden(reason) });
+      expect(await loadElection(DEPLOYMENT, ID, fetchFn)).toEqual({
+        ok: false,
+        problem: "withheld",
+      });
+    }
+  });
+
+  test("a withheld poll outranks the board's failure, whichever answers first", async () => {
+    for (const delay of [0, 5]) {
+      const { fetchFn } = honest({ entries: "network", status: hidden("illegal") });
+      const slowFirst: Fetch = (url, init) =>
+        url.includes("/moderation/status")
+          ? new Promise((r) => setTimeout(r, delay)).then(() => fetchFn(url, init))
+          : fetchFn(url, init);
+      expect(await loadElection(DEPLOYMENT, ID, slowFirst)).toEqual({
+        ok: false,
+        problem: "withheld",
+      });
+    }
+  });
+
+  test("a delisted or restored poll is shown without the notice", async () => {
+    for (const body of [
+      { state: "delisted", latest: { seq: "1", action: "delist", reason: "spam", decidedAt: "x" } },
+      {
+        state: "visible",
+        latest: { seq: "2", action: "restore", reason: "error", decidedAt: "x" },
+      },
+    ]) {
+      const { fetchFn } = honest({ status: { status: 200, body: JSON.stringify(body) } });
+      const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+      if (!loaded.ok) throw new Error(loaded.problem);
+      expect(loaded.hiddenAsThreat).toBe(false);
+    }
+  });
+
+  test("a state that can't be read is visible: the poll opens without the notice", async () => {
+    const answers: Answer[] = [
+      "network",
+      { status: 500, body: "" },
+      { status: 404, body: "{}" },
+      { status: 451, body: "{}" },
+      { status: 200, body: "not json" },
+      { status: 200, body: JSON.stringify({ state: "hidden" }) },
+      { status: 200, body: JSON.stringify({ state: "hidden", latest: { action: "delist" } }) },
+      { status: 200, body: JSON.stringify({ state: "hidden", latest: { action: "hide" } }) },
+      hidden("no-such-ground"),
+      hidden("Illegal"),
+      // An answer over the cap is refused unread, and so is visible too.
+      {
+        status: 200,
+        body: JSON.stringify({
+          state: "hidden",
+          latest: { action: "hide", reason: "illegal", pad: "x".repeat(2048) },
+        }),
+      },
+    ];
+    for (const status of answers) {
+      const { fetchFn } = honest({ status });
+      const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+      if (!loaded.ok) throw new Error(`${JSON.stringify(status)}: ${loaded.problem}`);
+      expect(loaded.hiddenAsThreat).toBe(false);
+    }
+  });
+
+  test("whatever the status route answers, it never stops voting but by a withholding hide", async () => {
+    const reason = fc.oneof(fc.constantFrom("threat", "error", ...WITHHOLDING), fc.string());
+    const latest = fc.record(
+      { action: fc.constantFrom("hide", "delist", "restore"), reason, seq: fc.string() },
+      { requiredKeys: [] },
+    );
+    const body = fc.oneof(
+      fc.record(
+        { state: fc.constantFrom("visible", "delisted", "hidden"), latest },
+        { requiredKeys: [] },
+      ),
+      fc.jsonValue(),
+    );
+    await fc.assert(
+      fc.asyncProperty(fc.constantFrom(200, 404, 500), body, async (code, answer) => {
+        const { fetchFn } = honest({ status: { status: code, body: JSON.stringify(answer) } });
+        const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+        const a = answer as { state?: unknown; latest?: { action?: unknown; reason?: unknown } };
+        const hiddenBy =
+          code === 200 &&
+          typeof a === "object" &&
+          a !== null &&
+          a.state === "hidden" &&
+          typeof a.latest === "object" &&
+          a.latest !== null &&
+          a.latest.action === "hide"
+            ? a.latest.reason
+            : undefined;
+        if (hiddenBy === "threat") expect(loaded).toMatchObject({ ok: true, hiddenAsThreat: true });
+        else if (typeof hiddenBy === "string" && WITHHOLDING.includes(hiddenBy))
+          expect(loaded).toEqual({ ok: false, problem: "withheld" });
+        else expect(loaded).toMatchObject({ ok: true, hiddenAsThreat: false });
+      }),
+      { numRuns },
+    );
   });
 });
 

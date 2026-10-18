@@ -326,8 +326,8 @@ describe("walkArchive", () => {
     ];
     const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source, { earlier });
     expect(walk.findings).toEqual([
-      { code: "locator-mismatch", locator: 1, sequence: 1n, named: fork.cid, chain: m1.cid },
       { code: "locator-version", locator: 2, version: 9 },
+      { code: "locator-mismatch", locator: 1, sequence: 1n, named: fork.cid, chain: m1.cid },
       { code: "locator-mismatch", locator: 3, sequence: 3n, named: ahead.cid, chain: undefined },
       { code: "unavailable", from: { locator: 4 }, cid: gone.cid, transaction: gone.transaction },
       {
@@ -346,7 +346,7 @@ describe("walkArchive", () => {
       earlier,
       maxManifests: 4,
     });
-    expect(codes(short.findings)).toEqual(["locator-mismatch", "locator-version", "over-budget"]);
+    expect(codes(short.findings)).toEqual(["locator-version", "locator-mismatch", "over-budget"]);
 
     // No chain reached: earlier locators aren't judged.
     const none = await walkArchive(locatorOf(gone), DEPLOYMENT, source, { earlier });
@@ -444,6 +444,69 @@ describe("walkArchive", () => {
       8n,
       10n,
     ]);
+  });
+
+  test("an earlier locator is judged against the whole chain, whatever the locators' order", async () => {
+    const m0 = manifest(0n, []);
+    const m1 = manifest(1n, [m0]);
+    const m2 = manifest(2n, [m1]);
+    const reupload = { ...m1, transaction: tx(901) };
+    // m1's first upload is withheld; its second is named only by the later locator.
+    const { source } = arweave([m0, reupload, m2]);
+    for (const earlier of [
+      [locatorOf(m0), locatorOf(reupload)],
+      [locatorOf(reupload), locatorOf(m0)],
+    ]) {
+      const walk = await walkArchive(locatorOf(m2), DEPLOYMENT, source, { earlier });
+      expect(walk.findings).toEqual([]);
+      expect(walk.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
+    }
+  });
+
+  test("a read an earlier locator made for the chain's manifest is reported as the locator's", async () => {
+    const m0 = manifest(0n, []);
+    const m1 = manifest(1n, [m0]);
+    const reupload = { ...m0, transaction: tx(902) };
+    const walk = await walkArchive(locatorOf(m1), DEPLOYMENT, arweave([m1]).source, {
+      earlier: [locatorOf(reupload)],
+    });
+    expect(walk.findings).toEqual([
+      { code: "unavailable", from: { link: 0n }, cid: m0.cid, transaction: m0.transaction },
+      { code: "unavailable", from: { locator: 0 }, cid: m0.cid, transaction: reupload.transaction },
+      { code: "archive-gap", first: 0n, last: 0n },
+    ]);
+  });
+
+  test("an honest archive is never reported overwritten, whatever a source withholds", async () => {
+    // A linear honest chain, each manifest also uploaded a second time; a
+    // source withholding any uploads; and every manifest's locator, under
+    // either upload, given in any order.
+    const arb = fc.integer({ min: 2, max: 10 }).chain((n) =>
+      fc.record({
+        n: fc.constant(n),
+        withheld: fc.array(fc.integer({ min: 0, max: 2 * n - 1 }), { maxLength: 2 * n }),
+        earlier: fc.shuffledSubarray(
+          Array.from({ length: 2 * n }, (_, k) => k),
+          { minLength: 0 },
+        ),
+      }),
+    );
+    await fc.assert(
+      fc.asyncProperty(arb, async ({ n, withheld, earlier }) => {
+        const chain: Stored[] = [manifest(0n, [])];
+        for (let k = 1; k < n; k++) chain.push(manifest(BigInt(k), [chain.at(-1) as Stored]));
+        const second = chain.map((m, k) => ({ ...m, transaction: tx(50_000 + k) }));
+        const uploads = [...chain, ...second];
+        const top = chain.at(-1) as Stored;
+        const served = uploads.filter((u, k) => u === top || !withheld.includes(k));
+        const walk = await walkArchive(locatorOf(top), DEPLOYMENT, arweave(served).source, {
+          earlier: earlier.map((k) => locatorOf(uploads[k] as Stored)),
+        });
+        expect(codes(walk.findings)).not.toContain("locator-mismatch");
+        expect(codes(walk.findings)).not.toContain("link-conflict");
+      }),
+      { numRuns },
+    );
   });
 
   test("a manifest the whole chain omits, named by an earlier locator, is a mismatch", async () => {

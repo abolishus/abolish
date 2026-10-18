@@ -58,7 +58,7 @@ Every key is `abolish:{<queue>}:…`. The braces are a hash tag: BullMQ's Lua sc
 
 ## Running
 
-`vp run --filter @abolishus/worker start` (plain Node, as `apps/api`; `erasableSyntaxOnly` keeps it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), `REDIS_URL` and optionally `AUDIT_EVERY_MS` (at least 60000).
+`vp run --filter @abolishus/worker start` (plain Node, as `apps/api`; `erasableSyntaxOnly` keeps it that way), or in the image (`Dockerfile`: the bundle `vp pack` builds into `dist/`, `main.mjs` and `creation-key.mjs`, with every dependency inlined) `node main.mjs`, with `DATABASE_URL` (a user granted `abolish_app`, never the owner), `REDIS_URL` and optionally `AUDIT_EVERY_MS` (at least 60000).
 
 Ballot admission (`{ballot-submit}`) runs only with all three of `BALLOT_PINNED_PANELS` (the trustee panels the release pins, as JSON: `[{"threshold": k, "keys": ["<hex>", …]}]`, each key a seat's identity key in seat order), `BALLOT_ANCHOR_EPOCH` and `BALLOT_ANCHOR_PERIOD` (the anchoring clock of the anchor contract our definitions name, docs/spec/board.md, Timing); the worker refuses to start with only some. They were the API's `API_PINNED_PANELS`, `API_ANCHOR_EPOCH` and `API_ANCHOR_PERIOD` before admission moved here. With them, `BALLOT_L1_RPC_URL` (an L1 node, `https:` or `http:`) and `BALLOT_L1_CHAIN_ID` (the `l1_chain_id` our definitions name), both or neither, turn on the L1 reference check (verifier 5.8): the worker refuses to start if the node is on another chain, then refuses a ballot whose reference the finalized chain already rejects (`l1-ref-before-open`, `l1-ref-after-close`, `l1-ref-unknown`), boards one naming a block L1 hasn't finalized yet, and boards one unchecked, with an `l1-unchecked` log line naming neither ballot nor election, when the node can't be read within 2 s or the definition names another chain.
 
@@ -138,6 +138,8 @@ The anchoring runner (`{board-anchor}`, P4-1 part 2b-2b-1) runs only when every 
 
 `ANCHOR_EVERY_MS` (optional, only with them) sets the schedule: 300,000 (five minutes) by default, at least 60,000, and no longer than the anchor's period (so each checkpoint is sent soon after its period ends) or its deadline (so no checkpoint's window opens and closes between two runs; T-49). Keys are 64 hex digits, `0x` optional, and are never quoted in an error (removing them from the environment protects child processes and later reads of `process.env`, not the process's own memory or `/proc/<pid>/environ`); the URL is treated as a secret as Tier 0's are. Until a co-signer on independent hosting exists (P4-1 part 2b-2b-2), one runner holds the Safe's whole threshold, so it is a testnet's arrangement only (docs/spec/contracts.md, Board anchor, Known-weak).
 
+One image serves both deployments, told apart by their variables only: the creation worker gets the creation step's and nothing else, the setup worker every other job's but the anchoring runner's, which refuses to share a process with Tier 0's or Tier 1's keys (`docs/runbooks/railway.md`, Services).
+
 The creation step (`{poll-create}`) runs only when every one of `CREATE_L2_RPC_URL` (the L2 node, HTTP), `CREATE_CHAIN_ID`, `CREATE_REGISTRY` (the election registry our definitions name), `CREATE_KEY` (secret: the creation key, 64 hex digits, `0x` optional), `CREATE_L1_RPC_URL`, `CREATE_L1_CHAIN_ID`, `CREATE_ANCHOR` and `CREATE_PANEL_THRESHOLD` and `CREATE_PANEL_KEYS` (the default panel, as `POLL_STUB_PANEL_*` give it) is set, with `CREATE_DAILY_CEILING` optional (creations sent in any 24 hours, 200 by default); the worker refuses to start with some of them, with the ceiling alone, or with any ballot, Tier 0, Tier 1, registry-sync or anchoring variable beside them, since the key runs alone (ADR 0032, rule 2; `docs/runbooks/poll-creation.md`). At startup (`checkPollCreationDeployment`) the registry's trustee registry must pin the panel at its threshold and rule 7's quorum `max(k, n − 1)`, and is the one ceremonies are registered with. Neither the key nor the URL is ever quoted in an error.
 
 The roots step (`{poll-root}`) runs only when every one of `POLL_ROOT_GROUPS` (the deployment record's published groups, `<tier>:<group_id>` pairs separated by commas, each group once, each in region 0 until the registry records regions), `POLL_ROOT_REGISTRARS` (the group registry's registrars in seat order, comma-separated) and `POLL_ROOT_THRESHOLD` is set, and only beside the registry sync's variables, whose index, nodes, group registry and event version it reads with; the worker refuses to start with some of them or without the sync. All three are public.
@@ -146,7 +148,7 @@ The stub step (`{poll-stub}`) runs only when every one of `POLL_STUB_PANEL_THRES
 
 ## Tests
 
-`vp run --filter @abolishus/worker test` needs `TEST_DATABASE_URL` and `REDIS_URL`, and runs uncached. Each run uses its own key prefix and removes its keys afterwards.
+`vp run --filter @abolishus/worker test` needs `TEST_DATABASE_URL` and `REDIS_URL`, and runs uncached. Each run uses its own key prefix and removes its keys afterwards. `tests/image.test.ts` packs the bundle outside the repository and runs it with plain Node: it refuses to start without its database and Redis, and refuses the creation key beside another job's variable without quoting the key or a URL.
 
 ## Decisions
 

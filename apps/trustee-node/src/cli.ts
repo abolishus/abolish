@@ -2,7 +2,8 @@
 // seat's node against its coordinator, with its availability and receipt
 // duties and the gateway serving what it attests when the configuration
 // names the chains and sources they need, and its intake endpoint when it
-// names where to listen; and `local-ceremony`, a whole
+// names where to listen; `run-env`, the same from the environment and a
+// persistent volume (env-seat.ts); and `local-ceremony`, a whole
 // ceremony between a local panel's nodes and a local coordinator over HTTP
 // on loopback. Output is one JSON object per line, never a secret.
 import { once } from "node:events";
@@ -42,6 +43,7 @@ import {
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
 import { AvailabilityDuties, ComplaintDuties, type DutyEvent, ReceiptDuties } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
+import { seatFromEnv } from "./env-seat.ts";
 import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
@@ -69,6 +71,7 @@ export interface CliIo {
 export const USAGE = [
   "usage: trustee-node keygen --out <file>",
   "       trustee-node run --config <file>",
+  "       trustee-node run-env --data <dir>",
   "       trustee-node local-ceremony [--seats <n>] [--threshold <k>] [--dir <path>]",
 ].join("\n");
 
@@ -99,6 +102,7 @@ export async function cli(argv: readonly string[], io: CliIo): Promise<number> {
   try {
     if (command === "keygen") return await keygen(rest, io);
     if (command === "run") return await runNode(rest, io);
+    if (command === "run-env") return await runFromEnv(rest, io);
     if (command === "local-ceremony") return await localCeremony(rest, io);
   } catch (e) {
     if (e instanceof ConfigError || (e as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")) {
@@ -124,6 +128,34 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
   } catch (e) {
     throw new ConfigError(`config: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
   }
+  return runConfig(text, io);
+}
+
+/**
+ * `run` over `TRUSTEE_CONFIG` and `TRUSTEE_IDENTITY_KEY`, with the key file
+ * and the store on the volume at `--data` (env-seat.ts).
+ */
+async function runFromEnv(args: readonly string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: [...args],
+    options: { data: { type: "string" } },
+    strict: true,
+  });
+  if (values.data === undefined) throw new ConfigError("run-env: --data is required");
+  const env = {
+    config: process.env["TRUSTEE_CONFIG"],
+    identityKey: process.env["TRUSTEE_IDENTITY_KEY"],
+  };
+  // T-65: read once and unset, so nothing the process spawns inherits the
+  // key, or the nodes' URLs a configuration can carry. The kernel's copy of
+  // the initial environment stays, readable only as the volume's key file is.
+  delete process.env["TRUSTEE_IDENTITY_KEY"];
+  delete process.env["TRUSTEE_CONFIG"];
+  const text = await seatFromEnv(env, values.data);
+  return runConfig(text, io);
+}
+
+async function runConfig(text: string, io: CliIo): Promise<number> {
   const config = parseConfig(text);
   const identitySecret = await readIdentityKey(config.identityKeyFile);
   const own = config.panel.keys[config.seat - 1] as Uint8Array;

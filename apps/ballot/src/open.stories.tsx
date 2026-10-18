@@ -5,7 +5,7 @@ import { App } from "./app.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
 import { parseLink } from "./link.ts";
-import type { Loaded, LoadedBoard } from "./load.ts";
+import type { Loaded, LoadedBoard, LoadedRegistry } from "./load.ts";
 import type { ProverArtifacts } from "./prover-artifacts.ts";
 import {
   type ArtifactProblem,
@@ -18,7 +18,12 @@ import {
 } from "./open.tsx";
 import type { Registrar } from "./register.tsx";
 import type { Tier0Answer } from "./registration.ts";
-import type { CastResult, ChallengeResult, SealResult } from "./worker/protocol.ts";
+import type {
+  CastResult,
+  ChallengeResult,
+  SealResult,
+  Tier0OutcomeResult,
+} from "./worker/protocol.ts";
 
 // Opening a poll from its link (open.tsx), with the network and the worker
 // replaced by a source that answers at once: what each end of the fetch and
@@ -1077,6 +1082,9 @@ type RegistrarMocks = {
   readonly commitment: Mock<Registrar["commitment"]>;
   readonly send: Mock<Registrar["send"]>;
   readonly record: Mock<Registrar["record"]>;
+  readonly registry: Mock<Registrar["registry"]>;
+  readonly outcome: Mock<Registrar["outcome"]>;
+  readonly join: Mock<Registrar["join"]>;
   /** Each secret the screens handed the worker, as given, and a copy taken when it was. */
   readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
 };
@@ -1087,11 +1095,16 @@ const registrarMocks = (of: ElectionSource) => {
   return found;
 };
 
+/** The finalized block's time a story's registry is read at by default: just after NOW, so no request is due again. */
+const READ_AT = BigInt(NOW / 1000);
+const NOT_YET: Tier0OutcomeResult = { ok: true, outcome: { kind: "not-yet" } };
+
 /**
- * A registrar for region 0 over a store that starts as `held` (none, or an
- * identity in no group) and keeps what `create` and `record` write, whose
- * worker commits every secret to COMMITMENT, and whose route answers
- * `answers` in turn (the last one repeats).
+ * A registrar for region 0 over a store that starts as `held` and keeps
+ * what `create`, `record` and `join` write, whose worker commits every
+ * secret to COMMITMENT, whose route answers `answers` in turn, whose
+ * registry is read at `readAt` (or answers `registry`), and whose worker
+ * gives `outcomes` in turn (each list's last answer repeats).
  */
 function registrar(
   held: IdentityRead,
@@ -1099,13 +1112,22 @@ function registrar(
   {
     created = "created",
     recorded = "recorded",
+    joined = "recorded",
+    readAt = READ_AT,
+    registry: read,
+    outcomes = [NOT_YET],
   }: {
     created?: Awaited<ReturnType<Registrar["create"]>>;
     recorded?: Awaited<ReturnType<Registrar["record"]>>;
+    joined?: Awaited<ReturnType<Registrar["join"]>>;
+    readAt?: bigint;
+    registry?: LoadedRegistry;
+    outcomes?: readonly Tier0OutcomeResult[];
   } = {},
 ): Registrar {
   let store = held;
   let sent = 0;
+  let outcomesGiven = 0;
   const secrets: { given: Uint8Array; copy: Uint8Array }[] = [];
   const create = fn<Registrar["create"]>(() => {
     if (created === "created" && store.kind === "none")
@@ -1124,6 +1146,28 @@ function registrar(
       store = { kind: "found", identity: { ...store.identity, tier0Request: request } };
     return Promise.resolve(recorded);
   });
+  const registry = fn<Registrar["registry"]>(() =>
+    Promise.resolve(
+      read ?? { ok: true, block: 40_000_000n, timestamp: readAt, records: [BOARD_ENTRY] },
+    ),
+  );
+  const outcome = fn<Registrar["outcome"]>((secret) => {
+    secrets.push({ given: secret, copy: secret.slice() });
+    return Promise.resolve(
+      outcomes[Math.min(outcomesGiven++, outcomes.length - 1)] as Tier0OutcomeResult,
+    );
+  });
+  const join = fn<Registrar["join"]>((_, group) => {
+    if (joined === "recorded" && store.kind === "found")
+      store = {
+        kind: "found",
+        identity: {
+          secret: store.identity.secret,
+          memberships: [{ tier: 0, group }, ...store.identity.memberships],
+        },
+      };
+    return Promise.resolve(joined);
+  });
   const made: Registrar = {
     region: 0,
     Challenge: PassTheCheck,
@@ -1137,9 +1181,12 @@ function registrar(
     commitment,
     send,
     record,
+    registry,
+    outcome,
+    join,
     now: () => NOW,
   };
-  REGISTRARS.set(made, { create, commitment, send, record, secrets });
+  REGISTRARS.set(made, { create, commitment, send, record, registry, outcome, join, secrets });
   return made;
 }
 
@@ -1161,6 +1208,13 @@ const BODY = JSON.stringify({
   region: "0",
   turnstile: "token.1",
 });
+
+/**
+ * Waits for the heading `name` to take focus: the screens focus their title
+ * in an effect, which can run after the heading is already in the page.
+ */
+const focused = (canvas: ReturnType<typeof within>, name: { level: number; name: string }) =>
+  waitFor(() => expect(canvas.getByRole("heading", name)).toHaveFocus());
 
 export const RegistersANewIdentity: Story = {
   name: "No identity: one is made, kept and registered, then the voter waits",
@@ -1208,11 +1262,18 @@ export const RegistersANewIdentity: Story = {
     // Back at the poll, the voter is told the request is on its way.
     await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
     await answerAndSeal(canvas);
-    await expect(
-      await canvas.findByRole("heading", { level: 1, name: "Your registration is on its way" }),
-    ).toHaveFocus();
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
     await expect(send).toHaveBeenCalledOnce();
     await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
+    // Read from the whole registry, for the region asked for.
+    const { registry, outcome } = registrarMocks(args.source);
+    await expect(registry).toHaveBeenCalledOnce();
+    await expect(outcome).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      0,
+      expect.objectContaining({ timestamp: READ_AT }),
+    );
+    await registrarZeroed(args.source, 3);
     await expect(canvas.getByRole("button", { name: "Check again" })).toBeVisible();
   },
 };
@@ -1380,3 +1441,218 @@ export const UnregisteredWithoutARegistrar = stopsBeforeTheSearch(
   },
   "Your voting identity isn't registered yet",
 );
+
+const REQUEST = { region: 0, acceptedAt: NOW };
+const WAITING: IdentityRead = {
+  kind: "found",
+  identity: { secret: SECRET, memberships: [], tier0Request: REQUEST },
+};
+const ON_THE_LIST: Tier0OutcomeResult = { ok: true, outcome: { kind: "registered", group: 9n } };
+
+export const WaitingThenRegistered: Story = {
+  name: "A request on the list: kept as the identity's membership, and the poll goes on",
+  args: { source: registering({ registrar: registrar(WAITING, [], { outcomes: [ON_THE_LIST] }) }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "You're registered" });
+    const { join, send } = registrarMocks(args.source);
+    // Kept beside the identity the outcome was read for, with the group it is counted in.
+    await expect(join).toHaveBeenCalledOnce();
+    await expect(join).toHaveBeenCalledWith(expect.any(Uint8Array), 9n);
+    await registrarZeroed(args.source, 1);
+    await expect(join.mock.calls[0]?.[0].every((b) => b === 0)).toBe(true);
+    await expect(send).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
+    await answerAndSeal(canvas);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your answers are sealed" }),
+    ).toBeVisible();
+    await expect(mocks(args.source).findCell).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      expect.any(Uint8Array),
+      { tier: 0, group: 9n },
+      [BOARD_ENTRY],
+    );
+  },
+};
+
+export const WaitingBesideAnotherTier: Story = {
+  name: "A request beside a membership in a tier the poll doesn't admit: read once, kept beside it",
+  args: {
+    source: registering({
+      registrar: registrar(
+        {
+          kind: "found",
+          identity: {
+            secret: SECRET,
+            memberships: [{ tier: 1, group: 4n }],
+            tier0Request: REQUEST,
+          },
+        },
+        [],
+        { outcomes: [ON_THE_LIST] },
+      ),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "You're registered" });
+    // The other tier's membership doesn't end the wait or restart the read.
+    await expect(registrarMocks(args.source).registry).toHaveBeenCalledOnce();
+    await expect(registrarMocks(args.source).join).toHaveBeenCalledWith(expect.any(Uint8Array), 9n);
+  },
+};
+
+export const WaitingCheckedAgain: Story = {
+  name: "A request not on the list yet: checked again in place",
+  args: {
+    source: registering({
+      registrar: registrar(WAITING, [], { outcomes: [NOT_YET, ON_THE_LIST] }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
+    // Not due yet: nothing is offered to send.
+    await expect(canvas.queryByRole("button", { name: "Send it again" })).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
+    await focused(canvas, { level: 1, name: "You're registered" });
+    await expect(registrarMocks(args.source).registry).toHaveBeenCalledTimes(2);
+    await registrarZeroed(args.source, 2);
+  },
+};
+
+export const WaitingDueSentAgain: Story = {
+  name: "A request due again: the same commitment and region sent once more",
+  args: {
+    source: registering({
+      // RETRY_AFTER (4,800 seconds) of finalized time after the request was accepted.
+      registrar: registrar(WAITING, ["accepted"], { readAt: READ_AT + 4800n }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, {
+      level: 1,
+      name: "Your registration hasn't appeared yet",
+    });
+    await userEvent.dblClick(canvas.getByRole("button", { name: "Send it again" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Pass the check" }));
+    await focused(canvas, { level: 1, name: "Your registration was sent" });
+    const { create, send, record } = registrarMocks(args.source);
+    await expect(create).not.toHaveBeenCalled();
+    await expect(send).toHaveBeenCalledOnce();
+    await expect(send).toHaveBeenCalledWith(BODY);
+    await expect(record).toHaveBeenCalledWith(expect.any(Uint8Array), REQUEST);
+  },
+};
+
+export const WaitingJustBeforeDue: Story = {
+  name: "A request a second short of due: still waiting",
+  args: {
+    source: registering({ registrar: registrar(WAITING, [], { readAt: READ_AT + 4799n }) }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
+  },
+};
+
+export const WaitingMoved: Story = {
+  name: "A request counted in another region's group: the alarm",
+  args: {
+    source: registering({
+      registrar: registrar(WAITING, [], {
+        outcomes: [{ ok: true, outcome: { kind: "moved", group: 3n } }],
+      }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, {
+      level: 1,
+      name: "Your voting identity was put on another area's list",
+    });
+    // Nothing is kept or sent, and nothing offered.
+    await expect(registrarMocks(args.source).join).not.toHaveBeenCalled();
+    await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.queryByRole("button")).toBeNull();
+    await registrarZeroed(args.source, 1);
+  },
+};
+
+/** A story where reading a waiting request's outcome stops at `title`. */
+const outcomeStops = (
+  name: string,
+  options: Parameters<typeof registrar>[2],
+  title: string,
+  retry: boolean,
+  held: IdentityRead = WAITING,
+): Story => ({
+  name,
+  args: { source: registering({ registrar: registrar(held, [], options) }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: title });
+    await expect(registrarMocks(args.source).send).not.toHaveBeenCalled();
+    const again = canvas.queryByRole("button", { name: "Try again" });
+    await expect(again !== null).toBe(retry);
+  },
+});
+
+export const RegistryUnreachable = outcomeStops(
+  "The group registry can't be read",
+  { registry: { ok: false, problem: "unreachable" } },
+  "Your registration couldn't be checked",
+  true,
+);
+
+export const RegistryRefused = outcomeStops(
+  "The group registry's log isn't one the worker accepts",
+  { outcomes: [{ ok: false, problem: "registry", code: "group-history" }] },
+  "Your registration couldn't be checked",
+  true,
+);
+
+export const NoGroupRegistry = outcomeStops(
+  "A build that names no group registry",
+  { registry: { ok: false, problem: "no-registry" } },
+  "This copy of the ballot can't check registrations",
+  false,
+);
+
+export const RegionChanged = outcomeStops(
+  "A request for a region this build doesn't serve",
+  {},
+  "This copy of the ballot serves a different area",
+  false,
+  {
+    kind: "found",
+    identity: { secret: SECRET, memberships: [], tier0Request: { region: 3, acceptedAt: NOW } },
+  },
+);
+
+export const JoinNotNoted = outcomeStops(
+  "Registered, but the device couldn't keep it",
+  { outcomes: [ON_THE_LIST], joined: "changed" },
+  "You're registered, but this device couldn't note it",
+  true,
+);
+
+export const WaitingWithoutARegistrar: Story = {
+  name: "A request sent earlier, on a build that can't read its outcome",
+  args: { source: registering({ identity: WAITING }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await answerAndSeal(canvas);
+    await focused(canvas, { level: 1, name: "Your registration is on its way" });
+    await expect(mocks(args.source).findCell).not.toHaveBeenCalled();
+  },
+};

@@ -11,6 +11,7 @@ import {
   createIdentity,
   IDENTITY_DB,
   readIdentity,
+  recordTier0Membership,
   recordTier0Request,
   saveIdentity,
 } from "../../src/identity.ts";
@@ -169,6 +170,9 @@ const harness = {
   /** Notes an accepted Tier 0 request beside the identity of `secret` (identity.ts). */
   recordTier0Request: (secret: string, region: number, acceptedAt: number) =>
     recordTier0Request(fromHex(secret), { region, acceptedAt }),
+  /** Keeps a Tier 0 membership in `group` in place of the request the identity of `secret` waits on (identity.ts). */
+  recordTier0Membership: (secret: string, group: string) =>
+    recordTier0Membership(fromHex(secret), BigInt(group)),
   /** The worker's commitment of `secret`, as a decimal string, and whether the page's copy was left whole. */
   async commitment(secret: string): Promise<string> {
     const given = fromHex(secret);

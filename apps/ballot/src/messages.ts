@@ -353,6 +353,37 @@ const enUS = {
   registerNotNotedTitle: "Your registration was sent, but this device couldn't note it",
   registerNotNoted:
     "The voting identity on this device changed or couldn't be read back, so it may be offered for registration again. Don't clear this site's data.",
+  registerReadingTitle: "Checking your registration",
+  registerReading:
+    "This device is reading the public list of registrations, all of it, so nobody learns which entry it looks for.",
+  registerDueTitle: "Your registration hasn't appeared yet",
+  registerDue:
+    "This device sent your registration on {when}, and it should be on the list by now. It may have been dropped, so you can send it again.",
+  registerRepeatTitle: "Sending it again is safe",
+  registerRepeat:
+    "It's the same code from the same voting identity, for the same area. If the first one is added after all, the second changes nothing.",
+  registerAgain: "Send it again",
+  registerJoinedTitle: "You're registered",
+  registerJoined:
+    "The code from your voting identity is on the list, and this device has noted it. You can answer this poll now.",
+  registerMovedTitle: "Your voting identity was put on another area's list",
+  registerMoved:
+    "The code from your voting identity is on the public list, but for a different area than the one this device asked for, so your answers would be counted there. Don't answer polls with it, and don't clear this site's data.",
+  registerMovedWhyTitle: "Why this matters",
+  registerMovedWhy:
+    "Someone else added your code there before your own registration landed. That can't be undone: only a new voting identity would put you back in your own area, and this copy of the ballot can't yet replace the one you have. The list this device read could also be wrong, so open the ballot again later to check.",
+  registryUnavailableTitle: "Your registration couldn't be checked",
+  registryUnavailable:
+    "The public list of registrations couldn't be read in full, or what came back wasn't it. Nothing was sent, and your voting identity is kept on this device. Try again in a few minutes.",
+  noGroupRegistryTitle: "This copy of the ballot can't check registrations",
+  noGroupRegistry:
+    "It doesn't know where the public list of registrations is kept. Your registration was sent and your voting identity is kept on this device. Open the ballot from abolishus.eth or another address Abolish lists.",
+  regionChangedTitle: "This copy of the ballot serves a different area",
+  regionChanged:
+    "Your registration asked for an area this copy of the ballot no longer registers people in, so it won't check or resend it here. Your voting identity is kept on this device. Open the ballot from abolishus.eth or another address Abolish lists.",
+  joinNotNotedTitle: "You're registered, but this device couldn't note it",
+  joinNotNoted:
+    "The voting identity on this device changed or couldn't be written. Nothing was sent. Try again: the list is read afresh.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

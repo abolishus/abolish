@@ -3,7 +3,10 @@ import { expect, fn, userEvent, within } from "storybook/test";
 
 import {
   RegisterChallenge,
+  RegisterDue,
   RegisterIntro,
+  RegisterJoined,
+  RegisterMoved,
   RegisterSent,
   RegisterStopped,
   RegisterWaiting,
@@ -154,5 +157,72 @@ export const Faulty: Story = {
       "The registration service refused this request",
     );
     await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const Reading: Story = {
+  name: "Reading the registry: nothing to press",
+  render: () => <RegisterWorking poll={POLL} kind="reading" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("status")).toHaveTextContent(/all of it/);
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+const onSend = fn();
+
+export const Due: Story = {
+  name: "Due again: the request may be sent once more",
+  render: () => <RegisterDue poll={POLL} sentAt="16 Oct 2026, 09:12" onSend={onSend} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await expect(canvas.getByText(/sent your registration on 16 Oct 2026, 09:12/)).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: "Sending it again is safe" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Send it again" }));
+    await expect(onSend).toHaveBeenCalledOnce();
+  },
+};
+
+const onJoined = fn();
+
+export const Joined: Story = {
+  name: "Registered: back to the poll",
+  render: () => <RegisterJoined poll={POLL} onBack={onJoined} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("You're registered");
+    await userEvent.click(canvas.getByRole("button", { name: "Back to the poll" }));
+    await expect(onJoined).toHaveBeenCalledOnce();
+  },
+};
+
+export const Moved: Story = {
+  name: "Moved to another region's list: the alarm, with nothing to press",
+  render: () => <RegisterMoved poll={POLL} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+    await expect(canvas.getByText("Why this matters")).toBeVisible();
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const MovedDark: Story = {
+  ...Moved,
+  name: "Moved, dark",
+  parameters: { layout: "fullscreen", theme: "dark" },
+};
+
+export const RegistryUnavailable: Story = {
+  name: "The registry couldn't be read, with a retry",
+  render: () => <RegisterStopped poll={POLL} problem="registry-unavailable" onRetry={fn()} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your registration couldn't be checked",
+    );
+    await expect(canvas.getByRole("button", { name: "Try again" })).toBeVisible();
   },
 };

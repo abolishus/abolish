@@ -10,9 +10,14 @@ import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
 import { STAGING, tier0Region } from "./deployment.ts";
-import { createIdentity, readIdentity, recordTier0Request } from "./identity.ts";
+import {
+  createIdentity,
+  readIdentity,
+  recordTier0Membership,
+  recordTier0Request,
+} from "./identity.ts";
 import { parseLink } from "./link.ts";
-import { loadBoard, loadElection } from "./load.ts";
+import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
@@ -33,13 +38,22 @@ const locale = "en-US";
 // one a later check spawned.
 let worker: BallotWorker | undefined;
 
+const fromHex = (hex: string) =>
+  Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+
 // The challenge page's frame comes with the challenge origin, a `ci:` change
-// to the client's policy (P2-8 part 3b-2c-2b-2b-2); until then, and while
-// the deployment publishes no single Tier 0 region, no build registers anyone.
+// to the client's policy (P2-8 part 3b-2c-2b-2b-2c); until then, and while
+// the deployment publishes no single Tier 0 region and pins no group
+// registry to read the outcome from, no build registers anyone.
 const challengeFrame: Registrar["Challenge"] | undefined = undefined;
 const region = tier0Region(STAGING);
+const groupRegistry = STAGING.groupRegistry;
+const pinned = STAGING.registrars;
 const registrar: Registrar | undefined =
-  challengeFrame === undefined || region === undefined
+  challengeFrame === undefined ||
+  region === undefined ||
+  groupRegistry === undefined ||
+  pinned === undefined
     ? undefined
     : {
         region,
@@ -59,6 +73,23 @@ const registrar: Registrar | undefined =
         commitment: (secret) => withWorker((used) => used.commitment(secret)),
         send: (body) => sendTier0Request(STAGING, body, (url, init) => fetch(url, init)),
         record: (secret, request) => recordTier0Request(secret, request),
+        registry: () => loadGroupRegistry(STAGING, (url, init) => fetch(url, init)),
+        // As `commitment`: the secret is copied before this returns.
+        outcome: (secret, asked, { block, records }) =>
+          withWorker((used) =>
+            used.tier0Outcome({
+              secret,
+              region: asked,
+              block,
+              groups: STAGING.tier0Groups,
+              records,
+              registry: fromHex(groupRegistry.address.slice(2)),
+              chainId: STAGING.chainId,
+              version: groupRegistry.eventVersion,
+              ...pinned,
+            }),
+          ),
+        join: (secret, group) => recordTier0Membership(secret, group),
         now: () => Date.now(),
       };
 

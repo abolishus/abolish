@@ -284,6 +284,46 @@ export async function recordTier0Request(
   // Checked before the transaction, so a bad request throws rather than reads as a refusal.
   const checked = storedIdentity({ secret, memberships: [], tier0Request: request });
   (checked["secret"] as Uint8Array).fill(0);
+  return updateHeld(secret, factory, (held) =>
+    held.memberships[0]?.tier === 0 ? undefined : { ...held, tier0Request: request },
+  );
+}
+
+/**
+ * Records that the identity whose secret is `secret` is registered at Tier
+ * 0 in `group` ([[registration]], Outcome: its counted occurrence is in a
+ * published group of the region it asked for), in place of the request it
+ * waited on, in one transaction with the read that finds it still there and
+ * still waiting. `changed` if the device now holds another identity, an
+ * unreadable one, or one no longer waiting on a request, which is left as
+ * it is; `unwritable` for storage the browser refuses.
+ */
+export async function recordTier0Membership(
+  secret: Uint8Array,
+  group: bigint,
+  factory: IDBFactory = indexedDB,
+): Promise<"recorded" | "changed" | "unwritable"> {
+  const checked = storedIdentity({ secret, memberships: [{ tier: 0, group }] });
+  (checked["secret"] as Uint8Array).fill(0);
+  return updateHeld(secret, factory, ({ secret: held, memberships, tier0Request }) =>
+    // A waiting identity has no Tier 0 membership (`parseStoredIdentity`),
+    // so the new one goes first, in ascending order of tier.
+    tier0Request === undefined
+      ? undefined
+      : { secret: held, memberships: [{ tier: 0, group }, ...memberships] },
+  );
+}
+
+/**
+ * Replaces the stored identity with what `change` makes of it, in one
+ * transaction with the read, only while it is readable and its secret is
+ * `secret`; `change` returning `undefined` leaves it as it is (`changed`).
+ */
+async function updateHeld(
+  secret: Uint8Array,
+  factory: IDBFactory,
+  change: (held: VotingIdentity) => VotingIdentity | undefined,
+): Promise<"recorded" | "changed" | "unwritable"> {
   try {
     return await withStore(factory, "readwrite", (store) => {
       let outcome: "recorded" | "changed" = "changed";
@@ -293,9 +333,9 @@ export async function recordTier0Request(
         const held = parseStoredIdentity(value);
         wipeStored(value);
         if (held === undefined) return;
-        const same = equalBytes(held.secret, secret) && held.memberships[0]?.tier !== 0;
-        if (same) {
-          const record = storedIdentity({ ...held, tier0Request: request });
+        const changed = equalBytes(held.secret, secret) ? change(held) : undefined;
+        if (changed !== undefined) {
+          const record = storedIdentity(changed);
           store.put(record, KEY);
           (record["secret"] as Uint8Array).fill(0);
           outcome = "recorded";

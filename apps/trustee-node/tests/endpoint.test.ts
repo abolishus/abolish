@@ -138,23 +138,43 @@ describe("the intake endpoint", () => {
     expect(s.state.given).toEqual([delivery]);
   });
 
-  it("answers a refusal with its code, and the member limit with 429", async () => {
+  it("answers a refusal with its code", async () => {
     const codes: IntakeOutcome[] = [
       { ok: false, code: "membership-proof" },
       { ok: false, code: "intake-closed" },
-      { ok: false, code: "intake-rate" },
     ];
     const s = seat(async () => codes.shift() as IntakeOutcome);
     const { url } = await serve(s.intake);
-    for (const [status, code] of [
-      [422, "membership-proof"],
-      [422, "intake-closed"],
-      [429, "intake-rate"],
-    ] as const) {
+    for (const code of ["membership-proof", "intake-closed"]) {
       const res = await post(url, encodeDelivery(delivery));
-      expect(res.status).toBe(status);
+      expect(res.status).toBe(422);
       expect(await res.text()).toBe(code);
     }
+  });
+
+  it("frees the place of an upload its peer abandons, logging nothing", async () => {
+    const logged: unknown[] = [];
+    const s = seat();
+    const endpoint = await serveIntake(s.intake, {
+      host: "127.0.0.1",
+      port: 0,
+      queue: 1,
+      log: (e) => logged.push(e),
+    });
+    open.push(endpoint);
+    expect(endpoint.server.maxConnections).toBe(4);
+    const req = httpRequest(endpoint.url, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream", "content-length": "100" },
+    });
+    req.on("error", () => undefined);
+    req.write(new Uint8Array(10));
+    await new Promise((r) => setTimeout(r, 50));
+    req.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await post(endpoint.url, encodeDelivery(delivery))).status).toBe(200);
+    expect(logged).toEqual([]);
+    expect(s.state.given).toHaveLength(1);
   });
 
   it("answers a browser's preflight, and refuses other paths, methods and types without asking the seat", async () => {

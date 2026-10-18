@@ -24,8 +24,6 @@ export {
   type IntakeOutcome,
   type IntakeRefusal,
   IntakeSeat,
-  MEMBER_LIMIT,
-  type MemberLimit,
   type RegistrationCheck,
 } from "./intake.ts";
 export {

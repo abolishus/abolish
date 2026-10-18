@@ -76,6 +76,8 @@ export interface Endpoint {
 export const INTAKE_GROUPS = "X25519MLKEM768";
 /** Seconds a client is told to wait when the queue is full. */
 export const BUSY_RETRY_SECONDS = 5;
+/** Open connections allowed for each queue place. */
+export const CONNECTIONS_PER_PLACE = 4;
 const HEADERS_MS = 10_000;
 const REQUEST_MS = 30_000;
 
@@ -92,7 +94,7 @@ const CORS = {
 /**
  * Serves `intake` at `POST /v1/intake`. The body is a `Delivery` as
  * `application/octet-stream`; a share receipt record (`0x000b`) comes back
- * with 200, a refusal's code as text with 422 (429 for `intake-rate`).
+ * with 200, a refusal's code as text with 422.
  */
 export async function serveIntake(intake: Intake, options: EndpointOptions): Promise<Endpoint> {
   if (!Number.isSafeInteger(options.queue) || options.queue < 1)
@@ -120,7 +122,14 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
     held++;
     void (async () => {
       try {
-        const body = await readBody(req);
+        let body;
+        try {
+          body = await readBody(req);
+        } catch {
+          // The peer went away or timed out mid-body: nothing to answer and
+          // nothing worth a log line, which anyone could flood.
+          return void res.destroy();
+        }
         if (body === undefined) return end(res, 413);
         let delivery: Delivery;
         try {
@@ -138,7 +147,7 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
           return end(res, 200, { "content-type": "application/octet-stream" }, out.receipt);
         return end(
           res,
-          out.code === "intake-rate" ? 429 : 422,
+          422,
           { "content-type": "text/plain; charset=utf-8" },
           new TextEncoder().encode(out.code),
         );
@@ -150,7 +159,13 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
       }
     })();
   };
-  const timeouts = { headersTimeout: HEADERS_MS, requestTimeout: REQUEST_MS, maxHeaderSize: 8192 };
+  const timeouts = {
+    headersTimeout: HEADERS_MS,
+    requestTimeout: REQUEST_MS,
+    // Node enforces both timeouts only at this interval (30 s by default).
+    connectionsCheckingInterval: 1000,
+    maxHeaderSize: 8192,
+  };
   const server =
     options.tls === undefined
       ? createHttpServer(timeouts, handle)
@@ -164,6 +179,9 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
           },
           handle,
         );
+  // Connections still sending headers hold no queue place, so they are
+  // bounded apart, before they exhaust the host's descriptors.
+  server.maxConnections = CONNECTIONS_PER_PLACE * options.queue;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => {

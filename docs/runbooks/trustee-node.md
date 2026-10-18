@@ -33,7 +33,7 @@ With an `intake` section the node serves its seat's intake endpoint (README, Int
 - **TLS on the node.** Give `tlsCertFile` and `tlsKeyFile` (PEM) and a public `host`: the node then takes TLS 1.3 only, with the hybrid post-quantum group `X25519MLKEM768` and no classical fallback, as [[0002-everlasting-privacy]] requires of every intake endpoint (a recorded share ciphertext is otherwise exposed to a later quantum break). Hold the key as the identity key is (owner-only, never a link): whoever reads it can pose as the endpoint and read each ballot record delivered to it, with the voter's network address, though never a share. A client too old for the group can't connect; it falls back to the operator's route.
 - **Or a proxy on the host.** Without the TLS files the node listens only on loopback; a TLS proxy on the same host must then negotiate `X25519MLKEM768` only, and keep no log of addresses or bodies.
 - **Publish the URL** (`https://<host>:<port>/v1/intake`) for the release record's panel listing.
-- **The queue** (`queue`, 16 by default) bounds the deliveries held at once; past it the node answers 503 with `Retry-After`. Each delivery is checked one at a time, so raise it only with the CPU to drain it. One member may have at most 8 distinct ballots held, and one more an hour after the poll opens (`intake-rate`, 429).
+- **The queue** (`queue`, 16 by default) bounds the deliveries held at once; past it the node answers 503 with `Retry-After`. Each delivery is checked one at a time, so raise it only with the CPU to drain it.
 
 ## Availability duty
 

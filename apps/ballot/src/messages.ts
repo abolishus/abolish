@@ -421,7 +421,7 @@ const enUS = {
     "The code from your voting identity is on the public list, but for a different area than the one this device asked for, so your answers would be counted there. Don't answer polls with it, and don't clear this site's data.",
   registerMovedWhyTitle: "Why this matters",
   registerMovedWhy:
-    "Someone else added your code there before your own registration landed. That can't be undone: only a new voting identity would put you back in your own area. One source of the list could be wrong, so this device replaces your identity only once a second, separate source shows the same. Check again in a few minutes.",
+    "Someone else added your code there before your own registration landed. That can't be undone: only a new voting identity would put you back in your own area. This device offers a new one only once a second, separate source of the list shows the same, since one source could be wrong, and only once your own registration has had time to land, since it would still count first. Check again in a while.",
   registerMovedConfirmed:
     "Two separate sources of the public list agree: the code from your voting identity is on it for a different area than the one this device asked for, so your answers would be counted there. Don't answer polls with it.",
   registerMovedStartAgain:
@@ -429,7 +429,7 @@ const enUS = {
   registerStartAgain: "Make a new voting identity",
   registerReplacingTitle: "Making your new voting identity",
   registerReplacing:
-    "This device is checking that it still holds the identity that was moved, then making a new one in its place. Nothing is sent.",
+    "This device is reading the list again from both sources and checking that it still holds the identity that was moved, then making a new one in its place. Nothing is sent.",
   outcomeDisputedTitle: "Two sources of the list disagree",
   outcomeDisputed:
     "One source showed your code on another area's list, and a second, separate source didn't show the same. One of them is wrong, so this device changed nothing, and your voting identity is kept. Try again in a few minutes.",

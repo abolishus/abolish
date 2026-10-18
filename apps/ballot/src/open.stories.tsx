@@ -2053,58 +2053,96 @@ export const WaitingJustBeforeDue: Story = {
 };
 
 const MOVED: Tier0OutcomeResult = { ok: true, outcome: { kind: "moved", group: 3n } };
-/** The second L2 endpoint's read of the registry, at its own finalized block. */
+/** Finalized time past the retry bound (RETRY_AFTER, 4,800 seconds) since the request. */
+const PAST_BOUND = READ_AT + 4800n;
+/** The second L2 endpoint's read of the registry, at its own later finalized block, past the bound. */
 const CONFIRM_READ: LoadedRegistry = {
   ok: true,
   block: 40_000_007n,
-  timestamp: READ_AT,
+  timestamp: PAST_BOUND,
   records: [BOARD_ENTRY],
 };
+const MOVED_TITLE = { level: 1, name: "Your voting identity was put on another area's list" };
 
-export const WaitingMoved: Story = {
-  name: "A request counted in another region's group, on a build with no second endpoint: the alarm, unconfirmed",
-  args: {
-    source: registering({ registrar: registrar(WAITING, [], { outcomes: [MOVED] }) }),
-  },
+/** A waiting identity whose move both endpoints show past the bound, with `options` on top. */
+const confirmedMove = (options: Parameters<typeof registrar>[2] = {}) =>
+  registering({
+    registrar: registrar(WAITING, [], {
+      outcomes: [MOVED],
+      readAt: PAST_BOUND,
+      confirm: CONFIRM_READ,
+      ...options,
+    }),
+  });
+
+/** A story where a move stays an unconfirmed alarm: nothing kept, sent or replaced, and a check again. */
+const unconfirmedMove = (name: string, options: Parameters<typeof registrar>[2]): Story => ({
+  name,
+  args: { source: registering({ registrar: registrar(WAITING, [], options) }) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
-    // Nothing is kept, sent or replaced: one endpoint's word isn't enough.
+    await focused(canvas, MOVED_TITLE);
     const { join, send, replace } = registrarMocks(args.source);
     await expect(join).not.toHaveBeenCalled();
     await expect(send).not.toHaveBeenCalled();
     await expect(replace).not.toHaveBeenCalled();
     await expect(canvas.queryByRole("button", { name: "Make a new voting identity" })).toBeNull();
-    await expect(canvas.getByText(/a second, separate source shows the same/)).toBeVisible();
-    // The outcome, then the commitment the move was shown for.
-    await registrarZeroed(args.source, 2);
+    await expect(
+      canvas.getByText(/a second, separate source of the list shows the same/),
+    ).toBeVisible();
+    // Every secret handed out was zeroed, and a check again reads the first endpoint anew.
+    await registrarZeroed(args.source, registrarMocks(args.source).secrets.length);
     await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
+    await focused(canvas, MOVED_TITLE);
     await expect(registrarMocks(args.source).registry).toHaveBeenCalledTimes(2);
   },
-};
+});
+
+export const WaitingMoved = unconfirmedMove(
+  "A request counted in another region's group, on a build with no second endpoint: the alarm, unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND },
+);
+
+export const MovedSecondReadFails = unconfirmedMove(
+  "A move the second endpoint can't be read for: unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND, confirm: { ok: false, problem: "unreachable" } },
+);
+
+const REFUSED_LOG: Tier0OutcomeResult = { ok: false, problem: "registry", code: "group-history" };
+
+export const MovedSecondLogRefused = unconfirmedMove(
+  "A move where the second endpoint's log isn't one the worker accepts: unconfirmed, not disputed",
+  {
+    // Each read's first endpoint, then its second, for the alarm and the check again.
+    outcomes: [MOVED, REFUSED_LOG, MOVED, REFUSED_LOG],
+    readAt: PAST_BOUND,
+    confirm: CONFIRM_READ,
+  },
+);
+
+export const MovedTooSoon = unconfirmedMove(
+  "A move both endpoints show before the retry bound: unconfirmed, since the voter's own batch may still land",
+  { outcomes: [MOVED], confirm: { ...CONFIRM_READ, timestamp: READ_AT } },
+);
+
+export const MovedSecondTooSoon = unconfirmedMove(
+  "A move both show, the second endpoint's read before the bound: unconfirmed",
+  { outcomes: [MOVED], readAt: PAST_BOUND, confirm: { ...CONFIRM_READ, timestamp: READ_AT } },
+);
+
+export const MovedRegisteredLater = unconfirmedMove(
+  "A move the second endpoint, at a later block, shows registered: unconfirmed, the first may lag",
+  { outcomes: [MOVED, ON_THE_LIST, MOVED, ON_THE_LIST], readAt: PAST_BOUND, confirm: CONFIRM_READ },
+);
 
 export const MovedConfirmedStartsAgain: Story = {
-  name: "A move both endpoints show: a new identity in place of the moved one, then registration",
-  args: {
-    source: registering({
-      registrar: registrar(WAITING, [], { outcomes: [MOVED], confirm: CONFIRM_READ }),
-    }),
-  },
+  name: "A move both endpoints show: read afresh on the tap, a new identity in place of the moved one, then registration",
+  args: { source: confirmedMove() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
+    await focused(canvas, MOVED_TITLE);
     await expect(canvas.getByText(/Two separate sources of the public list agree/)).toBeVisible();
     const { registry, confirmRegistry, outcome, replace, send } = registrarMocks(args.source);
     // The second read is the second endpoint's, of the same identity.
@@ -2114,38 +2152,31 @@ export const MovedConfirmedStartsAgain: Story = {
     await expect(outcome.mock.calls[1]?.[2]).toEqual(CONFIRM_READ);
     await expect(replace).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Make a new voting identity" }));
-    // Replaced only after its commitment was checked once more, then the
-    // poll checked anew, which offers the new identity's registration.
+    // Both endpoints read again before the replacement, then the poll
+    // checked anew, which offers the new identity's registration.
     await answerAndSeal(canvas);
     await focused(canvas, { level: 1, name: "Register your voting identity" });
+    await expect(registry).toHaveBeenCalledTimes(2);
+    await expect(confirmRegistry).toHaveBeenCalledTimes(2);
     await expect(replace).toHaveBeenCalledOnce();
     await expect(send).not.toHaveBeenCalled();
-    // Two outcomes, three commitments and the replacement, each zeroed.
-    await registrarZeroed(args.source, 6);
+    // Four outcomes, four commitments and the replacement, each zeroed.
+    await registrarZeroed(args.source, 9);
   },
 };
 
-export const MovedSecondReadFails: Story = {
-  name: "A move the second endpoint can't be read for: the alarm, unconfirmed",
-  args: {
-    source: registering({
-      registrar: registrar(WAITING, [], {
-        outcomes: [MOVED],
-        confirm: { ok: false, problem: "unreachable" },
-      }),
-    }),
-  },
+export const MovedOvertakenAtTheTap: Story = {
+  name: "A confirmed move the voter's own batch overtakes before the tap: registered, nothing replaced",
+  args: { source: confirmedMove({ outcomes: [MOVED, MOVED, ON_THE_LIST] }) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await answerAndSeal(canvas);
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
-    await expect(canvas.queryByRole("button", { name: "Make a new voting identity" })).toBeNull();
-    await expect(canvas.getByRole("button", { name: "Check again" })).toBeVisible();
-    // The identity isn't read again for a second read that failed.
-    await expect(registrarMocks(args.source).outcome).toHaveBeenCalledOnce();
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Make a new voting identity" }),
+    );
+    await focused(canvas, { level: 1, name: "You're registered" });
+    await expect(registrarMocks(args.source).replace).not.toHaveBeenCalled();
+    await expect(registrarMocks(args.source).join).toHaveBeenCalledWith(expect.any(Uint8Array), 9n);
   },
 };
 
@@ -2153,8 +2184,10 @@ export const MovedSecondReadFails: Story = {
 const disputed = (name: string, second: Tier0OutcomeResult): Story => ({
   name,
   args: {
-    source: registering({
-      registrar: registrar(WAITING, [], { outcomes: [MOVED, second], confirm: CONFIRM_READ }),
+    source: confirmedMove({
+      outcomes: [MOVED, second],
+      // At the first endpoint's block, so a registered answer isn't explained by lag.
+      confirm: { ...CONFIRM_READ, block: 40_000_000n },
     }),
   },
   play: async ({ canvasElement, args }) => {
@@ -2173,45 +2206,20 @@ export const MovedDisputedNotYet = disputed(
   NOT_YET,
 );
 export const MovedDisputedRegistered = disputed(
-  "A move where the second endpoint shows the voter's own region",
+  "A move where the second endpoint, at the same block, shows the voter's own region",
   ON_THE_LIST,
 );
 export const MovedDisputedGroup = disputed(
   "A move to another group than the first endpoint showed",
   { ok: true, outcome: { kind: "moved", group: 4n } },
 );
-export const MovedSecondLogRefused: Story = {
-  name: "A move where the second endpoint's log isn't one the worker accepts: unconfirmed, not disputed",
-  args: {
-    source: registering({
-      registrar: registrar(WAITING, [], {
-        outcomes: [MOVED, { ok: false, problem: "registry", code: "group-history" }],
-        confirm: CONFIRM_READ,
-      }),
-    }),
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await answerAndSeal(canvas);
-    await focused(canvas, {
-      level: 1,
-      name: "Your voting identity was put on another area's list",
-    });
-    await expect(canvas.queryByRole("button", { name: "Make a new voting identity" })).toBeNull();
-    await expect(canvas.getByRole("button", { name: "Check again" })).toBeVisible();
-  },
-};
 
-export const MovedOtherIdentityAtStart: Story = {
-  name: "A confirmed move, then another identity on the device before the voter starts again: kept",
+export const MovedOtherIdentityAtTheTap: Story = {
+  name: "A confirmed move, then another identity on the device by the tap: nothing replaced, the poll checked anew",
   args: {
-    source: registering({
-      registrar: registrar(WAITING, [], {
-        outcomes: [MOVED],
-        confirm: CONFIRM_READ,
-        // The read's, the confirmation's, then another tab's identity.
-        commitments: [COMMITMENT, COMMITMENT, COMMITMENT + 1n],
-      }),
+    source: confirmedMove({
+      // The two reads', the tap's first read, then another tab's identity.
+      commitments: [COMMITMENT, COMMITMENT, COMMITMENT, COMMITMENT + 1n],
     }),
   },
   play: async ({ canvasElement, args }) => {
@@ -2220,36 +2228,33 @@ export const MovedOtherIdentityAtStart: Story = {
     await userEvent.click(
       await canvas.findByRole("button", { name: "Make a new voting identity" }),
     );
-    await focused(canvas, { level: 1, name: "Your voting identity was kept" });
+    await answerAndSeal(canvas);
+    await focused(canvas, MOVED_TITLE);
     await expect(registrarMocks(args.source).replace).not.toHaveBeenCalled();
   },
 };
 
-export const MovedNotReplaced = outcomeStopsAfterStartAgain(
+export const MovedNotReplaced = stopsAtTheTap(
   "A confirmed move whose identity the store no longer holds as waiting: kept",
   "changed",
   "Your voting identity was kept",
 );
 
-export const MovedReplaceUnwritable = outcomeStopsAfterStartAgain(
+export const MovedReplaceUnwritable = stopsAtTheTap(
   "A confirmed move the browser won't store a new identity for",
   "unwritable",
   "This browser won't keep a voting identity",
 );
 
 /** A confirmed move whose replacement answers `replaced`, ending at `title`. */
-function outcomeStopsAfterStartAgain(
+function stopsAtTheTap(
   name: string,
   replaced: Awaited<ReturnType<Registrar["replace"]>>,
   title: string,
 ): Story {
   return {
     name,
-    args: {
-      source: registering({
-        registrar: registrar(WAITING, [], { outcomes: [MOVED], confirm: CONFIRM_READ, replaced }),
-      }),
-    },
+    args: { source: confirmedMove({ replaced }) },
     play: async ({ canvasElement, args }) => {
       const canvas = within(canvasElement);
       await answerAndSeal(canvas);

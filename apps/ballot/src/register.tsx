@@ -136,8 +136,9 @@ const STOPPED = {
    */
   "outcome-disputed": { title: "outcomeDisputedTitle", detail: "outcomeDisputed", retry: true },
   /**
-   * The identity changed since the move was confirmed (another tab), or is
-   * in a group, so it was kept: the poll is checked anew.
+   * The store no longer held the moved identity waiting when it was to be
+   * replaced (another tab), or it is in a group: kept, and the poll is
+   * checked anew.
    */
   "not-replaced": { title: "notReplacedTitle", detail: "notReplaced", retry: true },
 } as const satisfies Record<
@@ -166,9 +167,8 @@ type Step =
   | { readonly kind: "waiting"; readonly acceptedAt: number }
   | { readonly kind: "due"; readonly acceptedAt: number }
   | { readonly kind: "joined" }
-  // A move both endpoints show, with the commitment they showed moved, or
-  // one shown by the first alone.
-  | { readonly kind: "moved"; readonly confirmed: bigint | undefined }
+  // A move both endpoints show past the retry bound, or one not (yet) confirmed.
+  | { readonly kind: "moved"; readonly confirmed: boolean }
   | { readonly kind: "replacing" }
   | { readonly kind: "preparing" }
   | { readonly kind: "challenge"; readonly commitment: bigint; readonly round: number }
@@ -248,8 +248,8 @@ export function Register({
    * is kept across the outcome, so the membership is kept only beside the
    * identity it was read for, then zeroed (T-12).
    */
-  function read() {
-    setStep({ kind: "reading" });
+  function read(replacing = false) {
+    setStep({ kind: replacing ? "replacing" : "reading" });
     run(async () => {
       const registry = await registrar.registry();
       if (!registry.ok) return { kind: "stopped", problem: UNREAD[registry.problem] };
@@ -290,28 +290,41 @@ export function Register({
       } finally {
         secret.fill(0);
       }
-      return confirmMoved(moved.group, await moved.held);
+      return confirmMoved(moved.group, await moved.held, registry, replacing);
     });
   }
 
   /**
-   * A move the group registry's log showed, read again through the second
+   * A move the first endpoint's log showed, read again through the second
    * L2 endpoint for the same identity, again without the page holding the
-   * secret for the download. Confirmed only if it shows the same identity
-   * moved to the same group; a second read that fails leaves the move
-   * unconfirmed, and one that shows anything else is a dispute: one of the
-   * two endpoints misreports the log, and nothing is changed (T-16, T-11).
+   * secret for the download (T-16, T-11). Confirmed only if it shows the same
+   * identity moved to the same group, and only once both reads are past the
+   * retry bound: until then a signed batch already sent for the voter's own
+   * region may still land, and a signed occurrence counts before any
+   * self-paid copy ([[membership]], Cell tree), so the move could still be
+   * undone. A second read that fails, is refused or is too soon leaves the
+   * move unconfirmed, as does one at a later block that shows the identity
+   * registered (the first endpoint may only lag); anything else is a
+   * dispute, and nothing is changed.
+   *
+   * `replacing` is the voter's tap on a confirmed move: both reads are made
+   * afresh, so a confirmation shown long ago is never acted on, and only the
+   * identity they show moved is replaced, in one step with its check (T-18).
    */
-  async function confirmMoved(group: bigint, held: CommitmentResult): Promise<Step | "restart"> {
+  async function confirmMoved(
+    group: bigint,
+    held: CommitmentResult,
+    first: ReadRegistry,
+    replacing: boolean,
+  ): Promise<Step | "restart"> {
     if (!held.ok) return { kind: "stopped", problem: "unreadable" };
-    const unconfirmed: Step = { kind: "moved", confirmed: undefined };
+    const unconfirmed: Step = { kind: "moved", confirmed: false };
     if (registrar.confirmRegistry === undefined) return unconfirmed;
-    const registry = await registrar.confirmRegistry();
-    if (!registry.ok) return unconfirmed;
+    const second = await registrar.confirmRegistry();
+    if (!second.ok) return unconfirmed;
     const read = await registrar.identity();
     if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
     const { secret, tier0Request } = read.identity;
-    let result: Tier0OutcomeResult;
     try {
       if (tier0Request === undefined) return "restart";
       if (tier0Request.region !== registrar.region)
@@ -320,47 +333,28 @@ export function Register({
       if (!again.ok) return { kind: "stopped", problem: "unreadable" };
       // Another identity meanwhile (another tab): the poll decides anew.
       if (again.commitment !== held.commitment) return "restart";
-      result = await registrar.outcome(secret, tier0Request.region, registry);
-    } finally {
-      secret.fill(0);
-    }
-    if (!result.ok)
-      return result.problem === "secret" ? { kind: "stopped", problem: "unreadable" } : unconfirmed;
-    const { outcome } = result;
-    return outcome.kind === "moved" && outcome.group === group
-      ? { kind: "moved", confirmed: held.commitment }
-      : { kind: "stopped", problem: "outcome-disputed" };
-  }
-
-  /**
-   * The voter's choice, once both endpoints showed the move: the identity
-   * they showed moved is replaced with a new one, which the poll then offers
-   * to register ([[registration]], Outcome). Only that identity: one whose
-   * commitment differs (another tab's) is kept (T-18).
-   */
-  function startAgain() {
-    if (step.kind !== "moved" || step.confirmed === undefined) return;
-    const { confirmed } = step;
-    setStep({ kind: "replacing" });
-    run(async () => {
-      const read = await registrar.identity();
-      if (read.kind !== "found") return { kind: "stopped", problem: "unreadable" };
-      const { secret } = read.identity;
-      let replaced: Awaited<ReturnType<Registrar["replace"]>>;
-      try {
-        const again = await registrar.commitment(secret);
-        if (!again.ok || again.commitment !== confirmed)
-          return { kind: "stopped", problem: "not-replaced" };
-        replaced = await registrar.replace(secret);
-      } finally {
-        secret.fill(0);
-      }
+      const result = await registrar.outcome(secret, tier0Request.region, second);
+      if (!result.ok)
+        return result.problem === "secret"
+          ? { kind: "stopped", problem: "unreadable" }
+          : unconfirmed;
+      const { outcome } = result;
+      if (outcome.kind === "registered" && second.block > first.block) return unconfirmed;
+      if (outcome.kind !== "moved" || outcome.group !== group)
+        return { kind: "stopped", problem: "outcome-disputed" };
+      const { acceptedAt } = tier0Request;
+      if (!retryDue(acceptedAt, first.timestamp) || !retryDue(acceptedAt, second.timestamp))
+        return unconfirmed;
+      if (!replacing) return { kind: "moved", confirmed: true };
+      const replaced = await registrar.replace(secret);
       if (replaced === "replaced") return "restart";
       return {
         kind: "stopped",
         problem: replaced === "unwritable" ? "unwritable" : "not-replaced",
       };
-    });
+    } finally {
+      secret.fill(0);
+    }
   }
 
   /**
@@ -486,7 +480,7 @@ export function Register({
         <RegisterWaiting
           poll={poll}
           sentAt={formatTime(locale, BigInt(Math.floor(step.acceptedAt / 1000)))}
-          onCheck={read}
+          onCheck={() => read()}
         />
       );
     case "due":
@@ -500,10 +494,10 @@ export function Register({
     case "joined":
       return <RegisterJoined poll={poll} backer={registrar.backup} onBack={onDone} />;
     case "moved":
-      return step.confirmed === undefined ? (
-        <RegisterMoved poll={poll} onCheck={read} />
+      return step.confirmed ? (
+        <RegisterMoved poll={poll} onStartAgain={() => read(true)} />
       ) : (
-        <RegisterMoved poll={poll} onStartAgain={startAgain} />
+        <RegisterMoved poll={poll} onCheck={() => read()} />
       );
     case "challenge":
       return (

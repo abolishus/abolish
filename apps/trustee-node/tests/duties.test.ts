@@ -2,7 +2,7 @@
 // election the seat approved, built once its reader can be set up, stepped
 // until it settles, each status and failure reported once, and anything the
 // node can't get past ending the loop.
-import { RpcError } from "@abolishus/node";
+import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
@@ -29,7 +29,7 @@ const approvedOf = (n: number): ApprovedElection => ({
   signingSecret: new Uint8Array(32).fill(0xee),
 });
 
-type Step = AvailabilityStatus | Error;
+type Step = AvailabilityStatus | Error | Promise<AvailabilityStatus> | (() => AvailabilityStatus);
 
 interface Harness {
   readonly duties: AvailabilityDuties;
@@ -64,7 +64,7 @@ function harness(approved: number[]): Harness {
       const script = h.steps.get(n) ?? [{ state: "fetching" }];
       const next = (script.length > 1 ? script.shift() : script[0]) as Step;
       if (next instanceof Error) throw next;
-      return next;
+      return typeof next === "function" ? next() : await next;
     },
   });
   (h as { duties: AvailabilityDuties }).duties = new AvailabilityDuties({
@@ -142,16 +142,25 @@ describe("the availability duties", () => {
 
   test("retry a node's failures and report each once, until it changes", async () => {
     const h = harness([1]);
-    h.buildFailures.set(1, [new RpcError("eth_chainId: TimeoutError")]);
+    h.buildFailures.set(1, [
+      new L2Error("l2-definition-missing"),
+      new RpcError("eth_chainId: TimeoutError"),
+    ]);
     h.steps.set(1, [
       new L1Error("l1-proof-missing"),
       new L1Error("l1-proof-missing"),
       new SendError("unsent"),
       { state: "sent", kind: "attestation" },
     ]);
-    for (let i = 0; i < 6; i++) await h.duties.step();
+    for (let i = 0; i < 7; i++) await h.duties.step();
     expect(h.built).toEqual([name(1)]);
     expect(h.events).toEqual([
+      {
+        event: "availability-error",
+        stubHash: name(1),
+        error: "L2Error",
+        message: "l2-definition-missing",
+      },
       {
         event: "availability-error",
         stubHash: name(1),
@@ -167,6 +176,73 @@ describe("the availability duties", () => {
       { event: "availability-error", stubHash: name(1), error: "SendError", message: "unsent" },
       { event: "availability", stubHash: name(1), state: "sent", kind: "attestation" },
     ]);
+  });
+
+  test("give up on an election still not set up once t_A has passed, since nothing it sent could count", async () => {
+    const h = harness([1, 2]);
+    const failures = Array.from({ length: 4 }, () => new L2Error("l2-definition-missing"));
+    h.buildFailures.set(1, failures);
+    await h.duties.step();
+    h.wall = 10n ** 12n;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.built).toEqual([name(2)]);
+    // Two attempts: one before t_A, retried, and one after it, abandoned.
+    expect(failures).toHaveLength(2);
+    expect(h.events.filter((e) => e.stubHash === name(1))).toEqual([
+      {
+        event: "availability-error",
+        stubHash: name(1),
+        error: "L2Error",
+        message: "l2-definition-missing",
+      },
+      { event: "availability-abandoned", stubHash: name(1) },
+    ]);
+  });
+
+  test("settle at past-cutoff only by a time the step had passed, so an unrecorded record is still reported", async () => {
+    const h = harness([1]);
+    h.steps.set(1, [
+      () => {
+        // t_A passes while the step resends the complaint.
+        h.wall = DEADLINE + 1n;
+        return { state: "past-cutoff", complained: true };
+      },
+      { state: "unrecorded", kind: "complaint" },
+    ]);
+    h.wall = DEADLINE;
+    await h.duties.step();
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(2);
+    expect(h.events.at(-1)).toEqual({
+      event: "availability",
+      stubHash: name(1),
+      state: "unrecorded",
+      kind: "complaint",
+    });
+  });
+
+  test("step the elections side by side: one whose sources hang delays no other's step", async () => {
+    const h = harness([1, 2]);
+    let release: (s: AvailabilityStatus) => void = () => {};
+    const hung = new Promise<AvailabilityStatus>((r) => {
+      release = r;
+    });
+    h.steps.set(1, [hung, { state: "recorded" }]);
+    h.steps.set(2, [{ state: "sent", kind: "attestation" }]);
+    const stepping = h.duties.step();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.events).toEqual([
+      { event: "availability", stubHash: name(2), state: "sent", kind: "attestation" },
+    ]);
+    release({ state: "fetching" });
+    await stepping;
+    expect(h.events.at(-1)).toEqual({
+      event: "availability",
+      stubHash: name(1),
+      state: "fetching",
+    });
   });
 
   test("give up on an election whose reader refuses it for good, and go on with the others", async () => {
@@ -215,6 +291,7 @@ describe("the availability duties", () => {
       fc.constant<Step>({ state: "unrecorded", kind: "attestation" }),
       fc.constant<Step>(new RpcError("eth_getLogs: status 503")),
       fc.constant<Step>(new SendError("unsent")),
+      fc.constant<Step>(new L2Error("l2-creation-missing")),
     );
     await fc.assert(
       fc.asyncProperty(
@@ -232,6 +309,8 @@ describe("the availability duties", () => {
             const settledAt = script.findIndex(
               (s) =>
                 !(s instanceof Error) &&
+                !(s instanceof Promise) &&
+                typeof s !== "function" &&
                 (s.state === "recorded" ||
                   s.state === "unrecorded" ||
                   (s.state === "past-cutoff" && pastDeadline)),

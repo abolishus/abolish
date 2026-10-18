@@ -111,6 +111,11 @@ describe("the availability configuration", () => {
     expect(a.blocks).toBeUndefined();
   });
 
+  test("takes the operator's board budget", () => {
+    const c = config({ availability: availability({ maxBoardBytes: 4096 }) });
+    expect(parseConfig(JSON.stringify(c)).availability?.maxBoardBytes).toBe(4096);
+  });
+
   test("takes a directory of CAR files in place of gateways", () => {
     const a = parseConfig(
       JSON.stringify(

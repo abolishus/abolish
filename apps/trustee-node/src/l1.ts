@@ -90,7 +90,7 @@ export type L1AnchorRefusal =
   | "definition-deployment"
   /** The anchor's clock getters disagree with the pinned clock. */
   | "clock"
-  /** The creation's L1 origin isn't the finalized L1 block of its number. */
+  /** The creation's L1 origin isn't the finalized L1 block of its number: another hash or time. */
   | "origin"
   /** The creation's L1 origin is before the anchor's epoch, or `f` or `s_A` past a `u32`. */
   | "outside-clock";
@@ -177,7 +177,13 @@ export async function l1BoardAnchors(
   // with it a lower `f` that would count anchors made before the election
   // existed ([[contracts]], Board anchor, Pre-creation anchors).
   const created = reg.created;
-  if (created.number > finalized.number) throw new L1AnchorError("origin");
+  // An origin past this node's finalized block may be one the seat's L2
+  // node saw finalized first: this node lagging is no refusal, and the
+  // reader is set up again once it catches up (an RpcError is retried).
+  if (created.number > finalized.number)
+    throw new RpcError(
+      "eth_getBlockByNumber: the creation's L1 origin isn't final at this node yet",
+    );
   let held;
   try {
     held = decodeHeader(

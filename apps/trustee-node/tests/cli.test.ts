@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodeElectionDefinition, identityKey, panelId } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { cli } from "../src/cli.ts";
+import { cli, dutyWiring } from "../src/cli.ts";
+import { parseConfig } from "../src/config.ts";
+import { MemoryStore } from "../src/store.ts";
 import { LocalCoordinator, serveCoordinator } from "../src/local.ts";
 import { anvil, freePort, type Node } from "./anvil.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
@@ -269,6 +271,72 @@ describe("run with the availability duty", () => {
     },
     60_000,
   );
+
+  test("refuses the identity key as the account key", async () => {
+    const run = await runWith("same-key", { accountKeyFile: seatConfig["identityKeyFile"] });
+    expect(run.code).toBe(2);
+    expect(run.err).toEqual([{ error: "account key: must not be the identity key" }]);
+  });
+
+  test("wires the reader and each election's duty from the configuration, under the definition's own board version", () => {
+    const parsed = parseConfig(
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, "wiring-store"),
+        availability: availability({
+          anchorFromBlock: "11",
+          registryFromBlock: "22",
+          boardFromBlock: "33",
+          sendMarginSeconds: 1234,
+          maxBoardBytes: 5678,
+        }),
+      }),
+    );
+    const a = parsed.availability;
+    if (a === undefined) return expect.fail("no availability");
+    const sources = {
+      l1: { call: async () => null },
+      l2: { call: async () => null },
+      contract: { send: async () => {}, recorded: async () => undefined },
+      blocks: async () => [],
+      store: new MemoryStore(),
+      clock: () => 7n,
+    };
+    const w = dutyWiring(parsed.l2ChainId, a, sources);
+    expect(w.anchors).toEqual({
+      l1: sources.l1,
+      l1ChainId: L2_CHAIN_ID,
+      anchor: a.anchor,
+      timing: { epoch: 0n, period: 3600n, deadline: 43200n },
+      l1FromBlock: 11n,
+      l2: sources.l2,
+      l2ChainId: L2_CHAIN_ID,
+      registry: a.registry,
+      l2FromBlock: 22n,
+    });
+    const election = {
+      index: 1,
+      stubHash: new Uint8Array(32),
+      definitionHash: new Uint8Array(32),
+      electionId: new Uint8Array(32),
+      closesAt: 0n,
+      l1InclusionBound: 0n,
+      signingSecret: new Uint8Array(32),
+    };
+    const reader = { boardVersion: 5 as const, read: async () => expect.fail("not read") };
+    const o = w.seat(election, reader);
+    expect(o).toEqual({
+      store: sources.store,
+      election,
+      boardVersion: 5,
+      l1: reader,
+      blocks: sources.blocks,
+      contract: sources.contract,
+      clock: sources.clock,
+      sendMargin: 1234n,
+      maxBytes: 5678,
+    });
+  });
 
   test("refuses an account key others can read", async () => {
     const loose = join(dir, "loose-account");

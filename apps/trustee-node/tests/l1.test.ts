@@ -10,7 +10,7 @@ import {
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
-import { chainId, L2Error, type Rpc } from "@abolishus/node";
+import { chainId, L2Error, type Rpc, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { concatBytes, hexToBytes } from "@noble/hashes/utils.js";
@@ -484,7 +484,7 @@ describe("l1BoardAnchors refuses an election", () => {
         created(id, change(o)),
         registered(id, encodeElectionDefinition(d), electionDefinitionHash(d), o),
       ]);
-    // An earlier time, which would lower `f`; another hash; a block not yet final.
+    // An earlier time, which would lower `f`; another hash.
     await refused(
       await shifted("time", (o) => ({ ...o, timestamp: o.timestamp - PERIOD })),
       "origin",
@@ -493,7 +493,9 @@ describe("l1BoardAnchors refuses an election", () => {
       await shifted("hash", (o) => ({ ...o, hash: new Uint8Array(32).fill(3) })),
       "origin",
     );
-    await refused(await shifted("unfinal", (o) => ({ ...o, number: o.number + 1000n })), "origin");
+    // A block not yet final at the L1 node is a lag to wait out, retried, never a refusal.
+    const unfinal = await shifted("unfinal", (o) => ({ ...o, number: o.number + 1000n }));
+    await expect(l1BoardAnchors(unfinal.options, unfinal.election)).rejects.toThrow(RpcError);
   });
 
   test("that closes before its creation, or whose s_A is past a u32", async () => {

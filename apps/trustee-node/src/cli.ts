@@ -7,13 +7,24 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { type AsyncBlockSource, encodeElectionDefinition, identityKey } from "@abolishus/crypto";
-import { mirrorThen, openMirror, rpcClient, RpcError } from "@abolishus/node";
+import {
+  type AsyncBlockSource,
+  type BoardEntryVersion,
+  encodeElectionDefinition,
+  identityKey,
+} from "@abolishus/crypto";
+import { mirrorThen, openMirror, type Rpc, rpcClient, RpcError } from "@abolishus/node";
 import { gatewaySource } from "@abolishus/verifier";
-import { AvailabilitySeat } from "./availability.ts";
-import { CeremonySeat } from "./ceremony.ts";
+import {
+  type AvailabilityOptions,
+  AvailabilitySeat,
+  type ContractPath,
+  type FinalizedBoardAnchors,
+} from "./availability.ts";
+import { type ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import { HttpCoordinator } from "./client.ts";
 import {
+  type AvailabilityConfig,
   ConfigError,
   type NodeConfig,
   parseConfig,
@@ -21,7 +32,7 @@ import {
   readIdentityKey,
 } from "./config.ts";
 import { AvailabilityDuties, type DutyEvent } from "./duties.ts";
-import { l1BoardAnchors } from "./l1.ts";
+import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
 import { l2RecordedAvailability, RecordedError } from "./recorded.ts";
@@ -110,7 +121,7 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
   });
   let duties: AvailabilityDuties | undefined;
   try {
-    duties = await availabilityDuties(config, seat, store, io);
+    duties = await availabilityDuties(config, seat, store, identitySecret, io);
   } catch (e) {
     if (!(e instanceof RpcError)) throw e;
     io.err({ error: `availability: ${e.message}` });
@@ -145,6 +156,7 @@ async function availabilityDuties(
   config: NodeConfig,
   seat: CeremonySeat,
   store: SeatStore,
+  identitySecret: Uint8Array,
   io: CliIo,
 ): Promise<AvailabilityDuties | undefined> {
   const a = config.availability;
@@ -152,6 +164,10 @@ async function availabilityDuties(
   const l1 = rpcClient(a.l1);
   const l2 = rpcClient(a.l2);
   const accountKey = await readAccountKey(a.accountKeyFile);
+  // The identity key signs the seat's approvals; on a hot, funded account
+  // it would also sign transactions for a key of another curve (T-37).
+  if (Buffer.from(accountKey).equals(Buffer.from(identitySecret)))
+    throw new ConfigError("account key: must not be the identity key");
   const clock = () => BigInt(Math.floor(Date.now() / 1000));
   let contract;
   try {
@@ -184,38 +200,68 @@ async function availabilityDuties(
     throw e;
   }
   const blocks = await blockSource(a.gateways, a.blocks, io);
+  const wiring = dutyWiring(config.l2ChainId, a, { l1, l2, contract, blocks, store, clock });
   return new AvailabilityDuties({
     seat,
     clock,
     log: (e: DutyEvent) => io.out(e),
     build: async (election) => {
-      const reader = await l1BoardAnchors(
-        {
-          l1,
-          l1ChainId: a.l1ChainId,
-          anchor: a.anchor,
-          timing: a.anchorClock,
-          l1FromBlock: a.anchorFromBlock,
-          l2,
-          l2ChainId: config.l2ChainId,
-          registry: a.registry,
-          l2FromBlock: a.registryFromBlock,
-        },
-        election,
-      );
-      return new AvailabilitySeat({
-        store,
-        election,
-        boardVersion: reader.boardVersion,
-        l1: reader,
-        blocks,
-        contract,
-        clock,
-        sendMargin: a.sendMargin,
-        maxBytes: a.maxBoardBytes,
-      });
+      const reader = await l1BoardAnchors(wiring.anchors, election);
+      return new AvailabilitySeat(wiring.seat(election, reader));
     },
   });
+}
+
+/** What `run` builds the duty over, besides the configuration. */
+export interface DutySources {
+  readonly l1: Rpc;
+  readonly l2: Rpc;
+  readonly contract: ContractPath;
+  readonly blocks: AsyncBlockSource;
+  readonly store: SeatStore;
+  readonly clock: () => bigint;
+}
+
+/**
+ * The L1 reader's options and each election's duty options from the
+ * configuration: the board is checked under the registered definition's
+ * own board-entry pin, which the reader gives, never a configured one.
+ */
+export function dutyWiring(
+  l2ChainId: bigint,
+  a: AvailabilityConfig,
+  s: DutySources,
+): {
+  readonly anchors: L1AnchorOptions;
+  readonly seat: (
+    election: ApprovedElection,
+    reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
+  ) => AvailabilityOptions;
+} {
+  return {
+    anchors: {
+      l1: s.l1,
+      l1ChainId: a.l1ChainId,
+      anchor: a.anchor,
+      timing: a.anchorClock,
+      l1FromBlock: a.anchorFromBlock,
+      l2: s.l2,
+      l2ChainId,
+      registry: a.registry,
+      l2FromBlock: a.registryFromBlock,
+    },
+    seat: (election, reader) => ({
+      store: s.store,
+      election,
+      boardVersion: reader.boardVersion,
+      l1: reader,
+      blocks: s.blocks,
+      contract: s.contract,
+      clock: s.clock,
+      sendMargin: a.sendMargin,
+      maxBytes: a.maxBoardBytes,
+    }),
+  };
 }
 
 /**

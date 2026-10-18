@@ -5,12 +5,14 @@
 // and sends is `AvailabilitySeat`'s, so a crash, a restart or a step that
 // fails midway resends the stored record and never signs another.
 import { setTimeout as sleep } from "node:timers/promises";
+import { availabilityWindows } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import type { AvailabilitySeat, AvailabilityStatus } from "./availability.ts";
 import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import { L1AnchorError } from "./l1.ts";
 import { SendError } from "./send.ts";
+import { RELEASE_WINDOWS } from "./stub.ts";
 
 /**
  * What the duties report: each election's status when it changes, and why a
@@ -24,7 +26,13 @@ export type DutyEvent =
       readonly stubHash: string;
       readonly error: string;
       readonly message: string;
-    };
+    }
+  /**
+   * `t_A` passed before the election's duty could be set up (never
+   * registered, or never final at the seat's nodes): nothing it sent could
+   * count any more, so the node stops trying.
+   */
+  | { readonly event: "availability-abandoned"; readonly stubHash: string };
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -71,21 +79,37 @@ export class AvailabilityDuties {
     this.#o = options;
   }
 
-  /** One step of every unsettled election's duty, one election at a time. */
+  /**
+   * One step of every unsettled election's duty, the elections side by
+   * side, so one whose sources are slow delays no other's cutoff (T-52).
+   * A failure no later step can get past is rethrown once every step ends.
+   */
   async step(): Promise<void> {
-    for (const stubHash of await this.#o.seat.approvedStubs()) {
-      const name = hex(stubHash);
-      if (this.#settled.has(name)) continue;
-      try {
-        const duty = this.#duties.get(name) ?? (await this.#build(stubHash, name));
-        if (duty === undefined) continue;
-        const status = await duty.seat.step();
-        this.#report(name, status);
-        if (settles(status, this.#o.clock(), duty.deadline)) this.#settle(name);
-      } catch (e) {
-        if (!RETRIED.some((type) => e instanceof type)) throw e;
-        this.#failed(name, e as Error);
+    const unsettled = (await this.#o.seat.approvedStubs()).filter(
+      (stubHash) => !this.#settled.has(hex(stubHash)),
+    );
+    const outcomes = await Promise.allSettled(unsettled.map((s) => this.#stepOne(s)));
+    for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+  }
+
+  async #stepOne(stubHash: Uint8Array): Promise<void> {
+    const name = hex(stubHash);
+    // Read before the step, so a status settles the duty only by a time the
+    // step itself had passed: `past-cutoff` at a wall before `t_A` steps
+    // once more, and reports `unrecorded` if its record never was.
+    const wall = this.#o.clock();
+    let duty = this.#duties.get(name);
+    try {
+      if (duty === undefined) {
+        duty = await this.#build(stubHash, name, wall);
+        if (duty === undefined) return;
       }
+      const status = await duty.seat.step();
+      this.#report(name, status);
+      if (settles(status, wall, duty.deadline)) this.#settle(name);
+    } catch (e) {
+      if (!RETRIED.some((type) => e instanceof type)) throw e;
+      this.#failed(name, e as Error);
     }
   }
 
@@ -105,14 +129,29 @@ export class AvailabilityDuties {
   async #build(
     stubHash: Uint8Array,
     name: string,
+    wall: bigint,
   ): Promise<{ readonly seat: Duty; readonly deadline: bigint } | undefined> {
     const election = await this.#o.seat.approvedElection(stubHash);
     // Listed as approved, so its records exist; approvedElection throws if they don't.
     if (election === undefined) throw new Error(`trustee node: approval ${name} has no election`);
+    // `t_A`, as `AvailabilitySeat.deadline` computes it.
+    const { ballotDeadline } = availabilityWindows(
+      election.closesAt,
+      election.l1InclusionBound,
+      0n,
+      RELEASE_WINDOWS,
+    );
     let seat: Duty;
     try {
       seat = await this.#o.build(election);
     } catch (e) {
+      // A duty set up past `t_A` could send nothing that counts, so an
+      // election never registered stops costing reads every poll.
+      if (wall > ballotDeadline && RETRIED.some((type) => e instanceof type)) {
+        this.#settle(name);
+        this.#o.log({ event: "availability-abandoned", stubHash: name });
+        return undefined;
+      }
       if (!(e instanceof L1AnchorError)) throw e;
       // None of these changes on a retry: the seat can never attest this
       // board under this deployment, and the operator must look (T-53).

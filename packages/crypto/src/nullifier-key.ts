@@ -251,12 +251,13 @@ export interface NullifierKeyScope {
 
 /**
  * A scope and one run: its identifier and, for a version-2 run, its deadline,
- * the L2 block by which the key's approvals must be recorded to count. A run
- * without a deadline is a version-1 run, retired: its key never counts.
+ * the L2 block by which the key's approvals must be recorded to count.
+ * `null` asks for a version-1 run, retired and kept for its frozen vectors:
+ * its key never counts. Required, so no caller gets version 1 by omission.
  */
 export interface NullifierKeyParams extends NullifierKeyScope {
   readonly runId: Uint8Array;
-  readonly deadline?: bigint;
+  readonly deadline: bigint | null;
 }
 
 const CONTEXT = struct([
@@ -320,7 +321,7 @@ function runOf(params: NullifierKeyParams): Run {
     panel_id: scope.panelId,
     run_id: runId,
   };
-  if (deadline === undefined) {
+  if (deadline === null) {
     const context = H(ds("abolish/v1/keyed-nullifier/key-context", encode(CONTEXT, fields)));
     return { ...scope, context, deadline: null };
   }
@@ -1171,6 +1172,17 @@ function seatResults(run: Run, t: Rounds): KeySeatResult[] {
   return Array.from(reasons, ([index, r]) => ({ index, reasons: r }));
 }
 
+// Every valid result this module's check returned, frozen, so approving and
+// counting take a key's version, deadline, `key_id` and qualified seats only
+// as one check gave them together, never as a caller assembled them: a copy,
+// or a version-1 result relabelled version 2, isn't in it.
+const CHECKED = new WeakSet<object>();
+
+function checked(key: object): void {
+  if (!CHECKED.has(key))
+    throw new TypeError("nullifier key: expected a result of checkNullifierKeyTranscript");
+}
+
 /**
  * The transcript check of docs/spec/nullifier-key.md: the context rebuilt
  * from `scope` and the transcript's `run_id` and, under version 2, its
@@ -1201,7 +1213,7 @@ export function checkNullifierKeyTranscript(
   const run = runOf(
     "deadline" in t
       ? { ...pins, runId: t.run_id, deadline: t.deadline }
-      : { ...pins, runId: t.run_id },
+      : { ...pins, runId: t.run_id, deadline: null },
   );
   const code = structureCode(run, t);
   if (code !== null) return { ok: false, code };
@@ -1238,7 +1250,18 @@ export function checkNullifierKeyTranscript(
       (_, i) => qualified.find((s) => s.index === i + 1)?.commitment ?? null,
     ),
   };
-  return { ok: true, keyId, version, deadline: run.deadline, seats, dealers, qualified, key };
+  const result = Object.freeze({
+    ok: true as const,
+    keyId,
+    version,
+    deadline: run.deadline,
+    seats,
+    dealers: Object.freeze(dealers),
+    qualified: Object.freeze(qualified),
+    key,
+  });
+  CHECKED.add(result);
+  return result;
 }
 
 /** What a seat received from one other dealer: its dealt share, or the dealer's reveal. */
@@ -1368,11 +1391,12 @@ export function approvingSeats(
 }
 
 /**
- * Seat `index`'s approval of a version-2 key, as its check gave it (its
- * `keyId`, `version` and `deadline` together), refused for a version-1 key,
- * once the deadline has passed, or if it lies more than `MAX_KEY_WINDOW`
- * ahead of `currentL2Block`; the margin for recording the approval in time is
- * the caller's. The caller MUST have checked the approval rules of
+ * Seat `index`'s approval of a version-2 key, as a check of its transcript
+ * returned it (its `keyId`, `version` and `deadline` together, nothing a
+ * caller assembled), refused for a version-1 key, for fewer than `q`
+ * qualified seats (rule 1), once the deadline has passed, or if it lies more
+ * than `MAX_KEY_WINDOW` ahead of `currentL2Block`; the margin for recording
+ * the approval in time is the caller's. The caller MUST have checked the approval rules of
  * docs/spec/nullifier-key.md first, rules 4 and 6 above all: no key counts
  * for the scope, the seat approved no successor of any key of it, and every
  * other initial key it approved passed its deadline without counting.
@@ -1381,12 +1405,15 @@ export function approveNullifierKeyV2(
   scope: NullifierKeyScope,
   identitySecret: Uint8Array,
   index: number,
-  key: { readonly keyId: Uint8Array; readonly version: 1 | 2; readonly deadline: bigint | null },
+  key: Extract<NullifierKeyCheck, { ok: true }>,
   currentL2Block: bigint,
 ): Uint8Array {
+  checked(key);
   const { keyId, version, deadline } = key;
   if (version !== 2 || deadline === null)
     throw new RangeError("nullifier key: only a version-2 key is approved");
+  if (key.qualified.length < nullifierKeyQuorum(scope))
+    throw new RangeError("nullifier key: fewer than q qualified seats");
   checkRunDeadline(deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
   const s = scopeOf(scope);
   const pinned = s.keys[index - 1];
@@ -1413,8 +1440,9 @@ export function approvingSeatsV2(
 
 /**
  * Whether an initial key counts on the approvals given (docs/spec/
- * nullifier-key.md, Approval): its transcript is version 2, and `q`
- * distinct seats approved it under version 2's statement. A version-1 key
+ * nullifier-key.md, Approval): `check` is a result of this module's check,
+ * of a version-2 transcript with `q` qualified seats, and `q` distinct seats
+ * approved it under version 2's statement. A version-1 key
  * never counts: its runs have no deadline, so a stalled one would hold its
  * seats for good. That every approval was recorded by the run's deadline,
  * and that no other key counts for the scope, are the registry's to check
@@ -1425,9 +1453,12 @@ export function nullifierKeyCounts(
   check: Extract<NullifierKeyCheck, { ok: true }>,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): boolean {
+  checked(check);
+  const q = nullifierKeyQuorum(scope);
   return (
     check.version === 2 &&
-    approvingSeatsV2(scope, check.keyId, approvals).length >= nullifierKeyQuorum(scope)
+    check.qualified.length >= q &&
+    approvingSeatsV2(scope, check.keyId, approvals).length >= q
   );
 }
 

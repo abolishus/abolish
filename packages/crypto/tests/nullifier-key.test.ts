@@ -219,7 +219,7 @@ function seatsOf(t: TranscriptVector): RegistrationSecrets[] {
 const paramsOf = (t: TranscriptVector): NullifierKeyParams => ({
   ...scopeOf(panelOf(t.panel)),
   runId: hex(t.runId ?? ""),
-  ...(t.deadline === undefined ? {} : { deadline: BigInt(t.deadline) }),
+  deadline: t.deadline === undefined ? null : BigInt(t.deadline),
 });
 
 const polynomialsOf = (s: SeatVector) => ({ f: s.f.map(BigInt), g: s.g.map(BigInt) });
@@ -470,7 +470,7 @@ function honestRun(threshold: number, n: number, runId: Uint8Array) {
     groupRegistry: new Uint8Array(20).fill(7),
     panel,
   };
-  const params: NullifierKeyParams = { ...scope, runId };
+  const params: NullifierKeyParams = { ...scope, runId, deadline: null };
   const seats = identitySecrets.map((d, i) => registrationKeygen(i + 1, d));
   const keys = seats.map((s) => registrationKeysMessage(params, s));
   const dealings = seats.map((s) => dealingMessage(params, s, keys));
@@ -811,7 +811,9 @@ describe("nullifier-key.json, version 2", () => {
     expect(params.deadline).toBe(deadline);
     expect(toHex(nullifierKeyContext(params))).toBe(honest.context);
     // Version 1's context of the same run is another value under another tag.
-    expect(toHex(nullifierKeyContext({ ...scope, runId: params.runId }))).not.toBe(honest.context);
+    expect(toHex(nullifierKeyContext({ ...scope, runId: params.runId, deadline: null }))).not.toBe(
+      honest.context,
+    );
     const seats = seatsOf(honest);
     const vs = honest.seats as readonly SeatVector[];
     const keys = seats.map((s) => registrationKeysMessage(params, s, deadline - 1n));
@@ -948,6 +950,44 @@ describe("nullifier-key.json, version 2", () => {
     },
     60_000,
   );
+
+  test("approving and counting take only a check's own result", () => {
+    const r = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    const r1 = checkNullifierKeyTranscript(scope, hex(vectorOf("honest-5").transcript), 1);
+    if (!r.ok || !r1.ok) throw new Error("expected valid transcripts");
+    const secret = hex(V.panels["panel-5"]?.identitySecrets[0] ?? "");
+    const approvals = V2.approvals.approvals.map((x) => ({
+      index: x.index,
+      signature: hex(x.signature),
+    }));
+    // A copy, and a version-1 result relabelled version 2 with this deadline.
+    for (const forged of [{ ...r }, { ...r1, version: 2 as const, deadline }]) {
+      expect(() => approveNullifierKeyV2(scope, secret, 1, forged, deadline - 1n)).toThrow(
+        /checkNullifierKeyTranscript/,
+      );
+      expect(() => nullifierKeyCounts(scope, forged, approvals)).toThrow(
+        /checkNullifierKeyTranscript/,
+      );
+    }
+    expect(Object.isFrozen(r) && Object.isFrozen(r.qualified)).toBe(true);
+  }, 60_000);
+
+  test("a dealt share of a version-2 run isn't taken in version 1's run of the same run_id", () => {
+    const params = paramsOf(honest);
+    const tr = decodeNullifierKeyTranscriptV2(hex(honest.transcript), 2);
+    const seat = seatsOf(honest)[1] as RegistrationSecrets;
+    const shared = ((honest.seats as readonly SeatVector[])[0] as SeatVector).dealtShares.find(
+      (x) => x.recipient === 2,
+    );
+    if (shared === undefined) throw new Error("no share");
+    const secret = { index: 2, secretKey: seat.kem.secretKey };
+    expect(checkDealtShare(params, secret, tr, hex(shared.bytes)).ok).toBe(true);
+    // Under the version-1 context the rounds it was dealt in don't check, so
+    // the node refuses before it reads the share.
+    expect(() =>
+      checkDealtShare({ ...params, deadline: null }, secret, tr, hex(shared.bytes)),
+    ).toThrow(/key-signature/);
+  }, 60_000);
 
   test("a scope carrying a deadline doesn't change a version-1 check", () => {
     const t = vectorOf("honest-2");

@@ -595,7 +595,13 @@ const REGISTRY = new Uint8Array(20).fill(7);
 // An initial key through the production entry points, with every share.
 function initialKey(threshold: number, n: number) {
   const { secrets, panel } = testPanel(threshold, n, 0x31);
-  const params = { l2ChainId: L2, groupRegistry: REGISTRY, panel, runId: new Uint8Array(32) };
+  const params = {
+    l2ChainId: L2,
+    groupRegistry: REGISTRY,
+    panel,
+    runId: new Uint8Array(32),
+    deadline: null,
+  };
   const seats = secrets.map((d, i) => registrationKeygen(i + 1, d));
   const keys = seats.map((s) => registrationKeysMessage(params, s));
   const dealings = seats.map((s) => dealingMessage(params, s, keys));

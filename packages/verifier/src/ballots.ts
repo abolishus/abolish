@@ -373,7 +373,8 @@ export function ballotChecks(
     // Every path's copy, the relayed one's too: a member's ballot 5.4
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
-    // window (T-45, T-71).
+    // window (T-45, T-71). No event frames a version-4 ballot yet, so under
+    // definition version 6 only board-path copies reach this.
     live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {
       rejected.push({

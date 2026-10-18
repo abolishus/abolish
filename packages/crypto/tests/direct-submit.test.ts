@@ -49,6 +49,19 @@ describe.each(["ballot.json", "ballot-v2.json"])("frameBallot against %s", (file
   });
 });
 
+// No contract event carries a version-4 ballot yet: the board frames only
+// versions 1 to 3, so under definition version 6 every ballot is a
+// board-path one, and the verifier's live running sets, which read every
+// path's copy, have no ordinary or relayed copy to read (verifier.md,
+// Releases, step 3; T-45).
+test("frameBallot refuses every version-4 ballot, so no ordinary or relayed event carries one", () => {
+  const v4 = load<{
+    readonly ballots: readonly { readonly id: string; readonly encoding: string }[];
+  }>("ballot-v4-records.json");
+  expect(v4.ballots.length).toBeGreaterThan(0);
+  for (const b of v4.ballots) expect(frameBallot(hex(b.encoding))).toBeUndefined();
+});
+
 interface DeliveryFile {
   readonly records: readonly { readonly id: string; readonly encoding: string }[];
   readonly decode: readonly {

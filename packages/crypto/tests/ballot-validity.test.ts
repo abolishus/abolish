@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  checkEveryShare,
   type OptionPolynomials,
   proveValidityWith,
   shareVoteWith,
@@ -169,6 +170,7 @@ describe("ballot-validity.json", () => {
     const vss = decode(COMMITTED_VOTE, hex(ballot.encoding)).vss;
     const shares = decode(SHARES, hex(s.shares));
     expect(checkShares(vss, s.index, shares)).toBe(s.valid);
+    expect(checkEveryShare(vss, s.index, shares)).toBe(s.valid);
   });
 
   test.each(vectors.decode.map((d) => [d.id, d] as const))("rejects %s", (_, d) => {
@@ -276,6 +278,32 @@ describe("properties", () => {
         const bytes = encode(COMMITTED_VOTE, vote);
         expect(encode(COMMITTED_VOTE, decode(COMMITTED_VOTE, bytes))).toEqual(bytes);
       }),
+      { numRuns: Math.max(10, numRuns / 20) },
+    );
+  });
+
+  test("checkEveryShare agrees with checkShares on honest shares and on any one changed", () => {
+    fc.assert(
+      fc.property(
+        rulesAndVotes,
+        contextArb,
+        fc.nat(),
+        fc.nat(),
+        fc.constantFrom("v" as const, "r" as const),
+        ({ votes, ...rules }, c, seatPick, optionPick, field) => {
+          const { sharing, vote } = honestBallot(rules, votes, c);
+          const seat = (seatPick % rules.panelSize) + 1;
+          const shares = sharing.shares[seat - 1] as readonly Share[];
+          expect(checkEveryShare(vote.vss, seat, shares)).toBe(true);
+          const j = optionPick % shares.length;
+          const changed = shares.map((s, i) =>
+            i === j ? { ...s, [field]: mod(s[field] + 1n) } : s,
+          );
+          expect(checkShares(vote.vss, seat, changed)).toBe(false);
+          expect(checkEveryShare(vote.vss, seat, changed)).toBe(false);
+          expect(checkEveryShare(vote.vss, seat, shares.slice(1))).toBe(false);
+        },
+      ),
       { numRuns: Math.max(10, numRuns / 20) },
     );
   });
@@ -446,6 +474,8 @@ describe("prover inputs", () => {
     });
     expect(() => checkShares(vote.vss, 0, [])).toThrow(RangeError);
     expect(() => checkShares(vote.vss, 17, [])).toThrow(RangeError);
+    expect(() => checkEveryShare(vote.vss, 0, [])).toThrow(RangeError);
+    expect(() => checkEveryShare(vote.vss, 17, [])).toThrow(RangeError);
   });
 
   test("proves only a sharing shareVote made, unchanged (T-15)", () => {

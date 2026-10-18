@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
-import { describe, expect, test } from "vite-plus/test";
+import { describe, expect, test, vi } from "vite-plus/test";
 import {
   aggregateCell,
   type CommittedVote,
@@ -40,6 +40,14 @@ import {
   type SummedShareElectionContext,
 } from "../src/summed-share.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
+
+// Counts the summed-share check's runs, calling through to the real one.
+const { checkEveryShare } = vi.hoisted(() => ({ checkEveryShare: vi.fn() }));
+vi.mock("../src/ballot-validity.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/ballot-validity.ts")>();
+  checkEveryShare.mockImplementation(actual.checkEveryShare);
+  return { ...actual, checkEveryShare };
+});
 
 // docs/spec/vectors/summed-share.json comes from an independent Python
 // implementation of docs/spec/tally.md, Summed-share message
@@ -215,6 +223,34 @@ describe("summed-share.json", () => {
       hex(v.encoding),
     );
     expect(r.ok ? "ok" : r.code).toBe(v.result);
+  });
+
+  test("every message that reaches decapsulation runs the whole check (T-39)", () => {
+    // A registered sender timing the check from its next message's
+    // acknowledgement must not tell `summed-decrypt` from `summed-check`
+    // (docs/spec/tally.md, Summed-share message, Notes): each such message
+    // runs `checkEveryShare` once, over the cell's every option.
+    const reached = vectors.receiving.filter((v) =>
+      ["ok", "summed-decrypt", "summed-check"].includes(v.result),
+    );
+    expect(new Set(reached.map((v) => v.result))).toEqual(
+      new Set(["ok", "summed-decrypt", "summed-check"]),
+    );
+    for (const v of [...reached, ...vectors.receiving.filter((x) => !reached.includes(x))]) {
+      checkEveryShare.mockClear();
+      openSummedSharesWith(
+        election,
+        { index: v.recipient, secretKey: seat(v.recipient).kem.secretKey },
+        hex(v.encoding),
+      );
+      const calls = checkEveryShare.mock.calls;
+      if (!reached.includes(v)) {
+        expect(calls, v.id).toHaveLength(0);
+        continue;
+      }
+      expect(calls, v.id).toHaveLength(1);
+      expect(calls[0]?.[2], v.id).toHaveLength(rules.optionCount);
+    }
   });
 });
 

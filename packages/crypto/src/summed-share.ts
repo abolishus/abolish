@@ -14,7 +14,7 @@
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { randomBytes } from "@noble/hashes/utils.js";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
-import { type Share, SHARES } from "./ballot-validity.ts";
+import { checkEveryShare, type Share, SHARES } from "./ballot-validity.ts";
 import {
   bytesFixed,
   bytesVar,
@@ -697,19 +697,30 @@ export function openSummedSharesWith(
     msg.sender,
     msg.recipient,
   );
-  let summed: readonly Share[];
+  let summed: readonly Share[] | undefined;
   let plain: Uint8Array | undefined;
   try {
     plain = chacha20poly1305(k, NONCE, aad).decrypt(msg.sealed);
-    summed = decode(SHARES, plain);
+    const decoded = decode(SHARES, plain);
+    if (decoded.length === optionCount) summed = decoded;
   } catch {
-    return { ok: false, code: "summed-decrypt" };
+    // `summed-decrypt`, once the check below has run.
   } finally {
     k.fill(0);
     // Also when the plaintext opened but doesn't decode.
     plain?.fill(0);
   }
-  if (summed.length !== election.rules.optionCount) return { ok: false, code: "summed-decrypt" };
-  if (!checkSummedShares(aggregate, msg.sender, summed)) return { ok: false, code: "summed-check" };
+  // Every message that reaches decapsulation runs the whole summed-share
+  // check, over placeholder shares if it didn't open to `m` canonical ones,
+  // so its curve work doesn't tell `summed-decrypt` from `summed-check` to a
+  // registered sender (Notes; T-39). `checkEveryShare` blinds the scalars, so
+  // zeros in a plaintext the sender chose cost what any others do.
+  const passes = checkEveryShare(aggregate, msg.sender, summed ?? placeholder(optionCount));
+  if (summed === undefined) return { ok: false, code: "summed-decrypt" };
+  if (!passes) return { ok: false, code: "summed-check" };
   return { ok: true, cell: msg.cell, sender: msg.sender, summed };
 }
+
+/** Shares of the check's shape, for a message that opened none. */
+const placeholder = (m: number): readonly Share[] =>
+  Array.from({ length: m }, () => ({ v: 1n, r: 1n }));

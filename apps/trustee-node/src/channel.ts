@@ -11,7 +11,9 @@
 // and whatever the seat makes of it, so its answer never tells the sender
 // which check failed (Receiving, Notes; T-39). The check itself is
 // synchronous, so a registered seat's next message, acknowledged only once
-// the event loop is free, can still time it (README, Known-weak). It bounds
+// the event loop is free, times it; crypto's check does the same work for
+// `summed-decrypt` as for `summed-check`, so that tells the seat no more
+// than whether the message passed (README, Known-weak). It bounds
 // only what a message costs: the body, the messages held at once and the
 // time a peer may take to send one (T-52). The message is the spec's record
 // itself, with no envelope: every check is the seat's (`TallyDuty.receive`).

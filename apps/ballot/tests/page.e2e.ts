@@ -226,7 +226,7 @@ describe("the served ballot client", () => {
   test("frames the challenge origin, and refuses a frame from any other", async () => {
     const challenge = "https://challenge-staging.up.railway.app/";
     await page.route(challenge, (route) =>
-      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>c</title>" }),
+      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>challenge</title>" }),
     );
     await page.evaluate(
       (urls) =>
@@ -247,6 +247,8 @@ describe("the served ballot client", () => {
       .poll(() => violations.filter((v) => v.startsWith("frame-src")))
       .toEqual(["frame-src https://example.com"]);
     expect(foreignResponses).toEqual([challenge]);
+    const framed = page.frames().find((frame) => frame.url() === challenge);
+    await expect(framed?.title()).resolves.toBe("challenge");
   });
 
   test("compiles WebAssembly, and still refuses to evaluate a string as script", async () => {

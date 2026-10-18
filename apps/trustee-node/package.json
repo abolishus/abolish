@@ -16,9 +16,12 @@
   },
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
+    "@abolishus/node": "workspace:*",
+    "@abolishus/verifier": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

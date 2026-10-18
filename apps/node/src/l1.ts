@@ -311,19 +311,25 @@ export interface Logged {
   readonly refused: number;
 }
 
-/** Every `CheckpointAnchored` log the anchor emitted from `fromBlock` up to the header's block. */
+/**
+ * Every `CheckpointAnchored` log the anchor emitted from `fromBlock` up to
+ * the header's block, or only `electionId`'s when it is given.
+ */
 export async function loggedCheckpoints(
   rpc: Rpc,
   anchor: Uint8Array,
   header: L1Header,
   fromBlock: bigint,
+  electionId?: Uint8Array,
 ): Promise<Logged> {
+  const topics = [hex(CHECKPOINT_ANCHORED)];
+  if (electionId !== undefined) topics.push(hex(electionId));
   const logs = await rpc.call("eth_getLogs", [
     {
       address: hex(anchor),
       fromBlock: `0x${fromBlock.toString(16)}`,
       toBlock: `0x${header.number.toString(16)}`,
-      topics: [hex(CHECKPOINT_ANCHORED)],
+      topics,
     },
   ]);
   if (!Array.isArray(logs)) throw new RpcError("eth_getLogs: not a list");

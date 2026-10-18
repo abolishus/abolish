@@ -1,0 +1,50 @@
+comm_in = 0
+current_date = 0
+max_age_required = 0
+min_age_required = 0
+nullifier_secret = 0
+return = [0, 0, 0, 0]
+service_scope = 0
+service_subscope = 0
+
+[oprf_proof]
+beta = 0
+dlog_e = 0
+dlog_s = 0
+
+[oprf_proof.pk]
+x = 0
+y = 0
+
+[oprf_proof.response]
+x = 0
+y = 0
+
+[oprf_proof.response_blinded]
+x = 0
+y = 0
+
+[salted_dg1]
+hash = 0
+salt = 0
+value = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[salted_dg2_hash]
+hash = 0
+salt = 0
+value = 0
+
+[salted_dg2_hash_type]
+hash = 0
+salt = 0
+value = 0
+
+[salted_expiry_date]
+hash = 0
+salt = 0
+value = [0, 0, 0, 0, 0, 0]
+
+[salted_private_nullifier]
+hash = 0
+salt = 0
+value = 0

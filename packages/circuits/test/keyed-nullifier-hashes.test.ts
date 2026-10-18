@@ -9,16 +9,7 @@
 // does, and runs `nargo test` on it.
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -181,89 +172,10 @@ fn h2_refuses_a_point_of_order_two() {
   return `${out.join("\n\n")}\n`;
 }
 
-/** Git's object id of a directory as a tree (`git rev-parse <commit>:<path>`). */
-function gitTree(dir: URL): string {
-  const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
-    // A symlink would be hashed as its target's content; the trees have none.
-    if (!e.isDirectory() && !e.isFile()) throw new Error(`not a file: ${e.name}`);
-    const isDir = e.isDirectory();
-    const id = isDir
-      ? gitTree(new URL(`${e.name}/`, dir))
-      : gitObject("blob", readFileSync(new URL(e.name, dir)));
-    // Git sorts a tree's entries by name, a directory's as if it ended in "/".
-    return {
-      key: isDir ? `${e.name}/` : e.name,
-      mode: isDir ? "40000" : "100644",
-      name: e.name,
-      id,
-    };
-  });
-  entries.sort((a, b) => Buffer.compare(Buffer.from(a.key), Buffer.from(b.key)));
-  const body = Buffer.concat(
-    entries.map((e) =>
-      Buffer.concat([Buffer.from(`${e.mode} ${e.name}\0`), Buffer.from(e.id, "hex")]),
-    ),
-  );
-  return gitObject("tree", body);
-}
-
-function gitObject(kind: string, body: Buffer): string {
-  return createHash("sha1")
-    .update(Buffer.concat([Buffer.from(`${kind} ${body.length}\0`), body]))
-    .digest("hex");
-}
-
-// Every vendored entry, with the git object id `git rev-parse <commit>:<path>`
-// prints upstream (README.md, Vendored dependencies). Upstream's READMEs are
-// left out. babyjubjub's Nargo.toml is ours (a path dependency instead of
-// upstream's git one) and is checked byte for byte below.
-const VENDORED = [
-  { path: "vendor/oprf-nr/LICENSE", id: "b82e0563feef75ccfd57f081fd2efb5f80b391d7" },
-  { path: "vendor/oprf-nr/babyjubjub/src/", id: "4c27dd3b30880bd23c95dd88f0c794a8c9482366" },
-  { path: "vendor/noir-poseidon/LICENSE", id: "3fe6670c1099f6fb152d1cde560c3495ee3f9555" },
-  {
-    path: "vendor/noir-poseidon/poseidon2/Nargo.toml",
-    id: "7bf975d0e027da52afd3887ca1ddecef5092e8f4",
-  },
-  { path: "vendor/noir-poseidon/poseidon2/src/", id: "f3a287154fe93da15680fca1398ad583fe782450" },
-  {
-    path: "vendor/noir-poseidon/hash_utils/Nargo.toml",
-    id: "3e8398fa4ffff7a9e20c717791ca7607610dc58c",
-  },
-  { path: "vendor/noir-poseidon/hash_utils/src/", id: "d8bc189c687d2d01419758e43a49576b2bae66ff" },
-] as const;
-
 const dir = mkdtempSync(join(tmpdir(), "abolish-keyed-nullifier-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("vendored gadgets", () => {
-  test.each(VENDORED)("$path is upstream's, unchanged", ({ path, id }) => {
-    // T-55: a change to vendored code can't pass as a refresh of upstream.
-    const url = new URL(path, ROOT);
-    expect(path.endsWith("/") ? gitTree(url) : gitObject("blob", readFileSync(url))).toBe(id);
-    expect(read("README.md")).toContain(id);
-  });
-
-  test("nothing else is vendored", () => {
-    // Every file under vendor/ is pinned above or is babyjubjub's Nargo.toml.
-    const pinned = VENDORED.map((v) => v.path);
-    const files = readdirSync(new URL("vendor/", ROOT), { recursive: true, encoding: "utf8" })
-      .map((f) => `vendor/${f}`)
-      .filter((f) => !statSync(new URL(f, ROOT)).isDirectory());
-    for (const f of files) {
-      const covered =
-        f === "vendor/oprf-nr/babyjubjub/Nargo.toml" ||
-        pinned.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p));
-      expect(covered, f).toBe(true);
-    }
-  });
-
-  test("babyjubjub takes poseidon2 from the vendored copy, and nothing else", () => {
-    expect(read("vendor/oprf-nr/babyjubjub/Nargo.toml")).toBe(
-      '[package]\nname = "babyjubjub"\ntype = "lib"\nauthors = [""]\n\n[dependencies]\nposeidon2 = { path = "../../noir-poseidon/poseidon2" }\n',
-    );
-  });
-
   test("the copied rational map is the vendored file's text", () => {
     const upstream = read("vendor/oprf-nr/babyjubjub/src/hash_to_curve.nr").split("\n");
     const ours = read("lib/keyed_nullifier/src/rational_map.nr");

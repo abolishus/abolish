@@ -216,14 +216,15 @@ export async function nodeKeys(
 
 /**
  * The nodes' electorate check ([[verifier]] 2.4 on a stub) against the
- * fixture's one Tier 0 group, which no group registry holds yet (`STUBS`,
+ * fixture's one Tier 0 group of a version-1 stub, which no group registry holds yet (`STUBS`,
  * electorate): one tier, group 1, whose root and size are the voters' tree.
  */
 export function electorateCheck(electorate: Electorate): ElectorateCheck {
   return (stub) =>
     Promise.resolve(
-      stub.electorate.length === 1 &&
-        stub.electorate.every(
+      stub.version === 1 &&
+        stub.value.electorate.length === 1 &&
+        stub.value.electorate.every(
           (t) =>
             t.tier === 0 &&
             t.group_id === 1n &&

@@ -1,16 +1,22 @@
 import {
   deliveryWindowFits,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
+  encodeElectionDefinitionV6,
   type ElectionDefinition,
+  type ElectionDefinitionV5,
   electionStubHash,
+  electionStubV5Hash,
   panelId,
+  POLL_CLASSES,
   RECORD_TYPES,
+  RESULTS_MODES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import { CeremonySeat, checkStub, type ElectorateCheck, type Pins } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
-import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
+import { L2_CHAIN_ID, panelOf, stubFor, stubV5For, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const { panel, secrets } = panelOf(4, 2);
 const pinned: Pins = { panel, l2ChainId: L2_CHAIN_ID, trusteeRegistry: TRUSTEE_REGISTRY };
@@ -74,7 +80,11 @@ describe("stub check 4", () => {
 describe("stub checks", () => {
   test("accepts a stub its pins fix, with the hash recomputed from its bytes", async () => {
     const stub = stubFor(panel);
-    expect(await check(stub)).toEqual({ ok: true, stub, stubHash: electionStubHash(stub) });
+    expect(await check(stub)).toEqual({
+      ok: true,
+      stub: { version: 1, value: stub },
+      stubHash: electionStubHash(stub),
+    });
   });
 
   test("refuses bytes that don't decode", async () => {
@@ -191,10 +201,14 @@ describe("stub checks", () => {
   test("the electorate check can't change the stub that is hashed and returned", async () => {
     const stub = stubFor(panel);
     const result = await check(stub, (seen) => {
-      (seen as { election_id: Uint8Array }).election_id = new Uint8Array(32).fill(9);
+      (seen.value as { election_id: Uint8Array }).election_id = new Uint8Array(32).fill(9);
       return Promise.resolve(true);
     });
-    expect(result).toEqual({ ok: true, stub, stubHash: electionStubHash(stub) });
+    expect(result).toEqual({
+      ok: true,
+      stub: { version: 1, value: stub },
+      stubHash: electionStubHash(stub),
+    });
   });
 
   test("a seat refuses to join a run over a stub that fails, recording nothing", async () => {
@@ -213,5 +227,124 @@ describe("stub checks", () => {
     expect(
       await store.get(`runs/${hex(electionStubHash(stubFor(panel)))}/${hex(runId)}/begun`),
     ).toBeUndefined();
+  });
+});
+
+describe("version-5 stubs, as the website creates them", () => {
+  const checkV5 = (stub: ElectionDefinitionV5, electorate: ElectorateCheck = pass) =>
+    checkStub(encodeElectionDefinitionV5(stub), pinned, electorate, new Map());
+
+  test("accepts one its pins fix, with the version-5 stub hash, and gives the electorate check the version-5 stub", async () => {
+    const stub = stubV5For(panel);
+    const seen: unknown[] = [];
+    expect(
+      await checkV5(stub, (s) => {
+        seen.push(s);
+        return Promise.resolve(true);
+      }),
+    ).toEqual({ ok: true, stub: { version: 5, value: stub }, stubHash: electionStubV5Hash(stub) });
+    expect(seen).toEqual([{ version: 5, value: stub }]);
+    // Not the version-1 hash of the same fields: the hash follows the layout.
+    expect(Buffer.from(electionStubV5Hash(stub)).toString("hex")).not.toBe(
+      Buffer.from(electionStubHash(stubFor(panel))).toString("hex"),
+    );
+  });
+
+  test("refuses one that breaks version 5's own rules (T-28, T-34)", async () => {
+    const [first] = stubV5For(panel).questions;
+    if (first === undefined) throw new Error("no question");
+    for (const change of [
+      { questions: [] },
+      { questions: [{ ...first, option_count: 1 }] },
+      { questions: [{ ...first, max_selections: 0 }] },
+      { receipt_keys: [] },
+    ] satisfies Partial<ElectionDefinitionV5>[])
+      expect(await checkV5(stubV5For(panel, change))).toEqual({ ok: false, code: "stub-rule" });
+  });
+
+  test("refuses one that already names a transcript, or another panel, chain or registry", async () => {
+    expect(
+      await checkV5(stubV5For(panel, { ceremony_transcript_hash: new Uint8Array(32).fill(1) })),
+    ).toEqual({ ok: false, code: "stub-transcript-hash" });
+    for (const change of [
+      { panel_id: panelId(panelOf(4, 2).panel) },
+      { l2_chain_id: L2_CHAIN_ID + 1n },
+      { trustee_registry: new Uint8Array(20).fill(0xee) },
+      { threshold: 3 },
+    ] satisfies Partial<ElectionDefinitionV5>[])
+      expect(await checkV5(stubV5For(panel, change))).toEqual({ ok: false, code: "stub-pins" });
+  });
+
+  test("refuses a membership key other than the pinned one", async () => {
+    expect(
+      await checkV5(stubV5For(panel, { membership_vk_hash: new Uint8Array(32).fill(7) })),
+    ).toEqual({ ok: false, code: "stub-membership-key" });
+  });
+
+  test("refuses a pinned version this release doesn't read, for every record type", async () => {
+    const stub = stubV5For(panel);
+    for (const p of stub.profile.pins)
+      for (const version of [p.version - 1, p.version + 1].filter((v) => v > 0)) {
+        const pins = stub.profile.pins.map((q) => (q === p ? { ...q, version } : q));
+        const result = await checkStub(
+          encodeElectionDefinitionV5({ ...stub, profile: { ...stub.profile, pins } }),
+          pinned,
+          pass,
+          new Map(),
+        );
+        expect(result.ok, `0x${p.record_type.toString(16)} = ${version}`).toBe(false);
+      }
+  });
+
+  test("sizes the forced path by the members of every region (check 4)", async () => {
+    // Four seats: at most 15,360 members alone, here split over two regions.
+    const sized = (a: bigint, b: bigint) => {
+      const [tier] = stubV5For(panel).electorate;
+      if (tier === undefined) throw new Error("no tier");
+      return stubV5For(panel, {
+        electorate: [
+          {
+            ...tier,
+            groups: [
+              { group_id: 1n, region: 0 },
+              { group_id: 2n, region: 1 },
+            ],
+            regions: [a, b],
+            cells: [
+              { root: 1n << 200n, members: a },
+              { root: 1n << 201n, members: b },
+            ],
+          },
+        ],
+      });
+    };
+    expect((await checkV5(sized(10_000n, 5_360n))).ok).toBe(true);
+    expect(await checkV5(sized(10_000n, 5_361n))).toEqual({ ok: false, code: "stub-capacity" });
+  });
+
+  test("refuses version 6 (an author panel) as a version it doesn't read", async () => {
+    const stub = stubV5For(panel);
+    const pins = stub.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.electionDefinition
+        ? { ...p, version: 6 }
+        : p.record_type === RECORD_TYPES.ballot
+          ? { ...p, version: 4 }
+          : p,
+    );
+    const bytes = encodeElectionDefinitionV6({
+      ...stub,
+      profile: { ...stub.profile, pins },
+      poll_class: POLL_CLASSES.everyday,
+      results_mode: RESULTS_MODES.sealed,
+      live_every: 0,
+      live_batch: 0,
+      author_threshold: 0,
+      author_keys: [],
+      author_transcript_hash: new Uint8Array(32),
+    });
+    expect(await checkStub(bytes, pinned, pass, new Map())).toEqual({
+      ok: false,
+      code: "stub-version",
+    });
   });
 });

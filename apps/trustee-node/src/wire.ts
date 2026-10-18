@@ -11,14 +11,13 @@ import {
   type CeremonyTranscript,
   decode,
   decodeCeremonyTranscript,
-  decodeElectionDefinitionRecord,
   DecodeError,
-  electionStubHash,
   encode,
   list,
   p256Sig,
   struct,
 } from "@abolishus/crypto";
+import { decodeStub, stubHash } from "./stub.ts";
 
 const HASH = bytesFixed(32);
 /** Bound on an encoded stub or transcript; a 16-seat transcript is about 300 KiB. */
@@ -102,13 +101,11 @@ export const requestTranscript = (bytes: Uint8Array) => decodeCeremonyTranscript
  * checks decide whether the node takes part; this hash only names a run.
  */
 export function stubHashOf(stub: Uint8Array): Uint8Array | undefined {
-  let record;
+  // The versions the stub checks read (stub.ts).
   try {
-    record = decodeElectionDefinitionRecord(stub);
+    return stubHash(decodeStub(stub));
   } catch (e) {
     if (e instanceof DecodeError) return undefined;
     throw e;
   }
-  // Version 1 only, as the stub checks read (stub.ts).
-  return record.version === 1 ? electionStubHash(record.value) : undefined;
 }

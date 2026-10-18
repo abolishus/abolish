@@ -1,15 +1,21 @@
-// A version-1 stub, a panel and a coordinator that relays every round
-// between seats, dropping what a test tells it to.
+// A version-1 stub, a version-5 one as the website creates it, a panel and a
+// coordinator that relays every round between seats, dropping what a test
+// tells it to.
 import {
   type AnswersMessage,
   type ChallengesMessage,
   type ElectionDefinition,
+  type ElectionDefinitionV5,
   electionStubHash,
+  electionStubV5Hash,
   encodeCeremonyTranscript,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
   identityKey,
   type KeysMessage,
   type Panel,
+  QUESTION_METHODS,
+  RECORD_TYPES,
   type RevealsMessage,
 } from "@abolishus/crypto";
 import { expect } from "vite-plus/test";
@@ -37,26 +43,94 @@ export function stubFor(
   return localStub(panel, L2_CHAIN_ID, TRUSTEE_REGISTRY, change);
 }
 
-export interface Election {
+// The profile `packages/core`'s poll stubs pin: definition 5 with exactly
+// the versions the election registry's rule 9 serves for it.
+const V5_PINS: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.electionDefinition, 5],
+  [RECORD_TYPES.ballot, 3],
+  [RECORD_TYPES.spoiledBallotOpening, 2],
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 8],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+/**
+ * A definition-version-5 stub over `stubFor`'s chain, contracts and times:
+ * two questions (pick one of two, pick any of three), one Tier 0 cell of
+ * three members in one region, and one receipt key.
+ */
+export function stubV5For(
+  panel: Panel,
+  change: Partial<ElectionDefinitionV5> = {},
+): ElectionDefinitionV5 {
+  const v1 = stubFor(panel);
+  const pins = [];
+  for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
+    pins.push({ record_type: t, version: V5_PINS.get(t) ?? 1 });
+  return {
+    profile: { protocol_major: 1, pins },
+    election_id: v1.election_id,
+    l2_chain_id: v1.l2_chain_id,
+    l1_chain_id: v1.l1_chain_id,
+    election_registry: v1.election_registry,
+    board: v1.board,
+    trustee_registry: v1.trustee_registry,
+    group_registry: v1.group_registry,
+    l1_anchor: v1.l1_anchor,
+    l1_relay: v1.l1_relay,
+    questions: [
+      { method: QUESTION_METHODS.selection, option_count: 2, min_selections: 0, max_selections: 1 },
+      { method: QUESTION_METHODS.selection, option_count: 3, min_selections: 0, max_selections: 3 },
+    ],
+    tally_scheme: v1.tally_scheme,
+    electorate: [
+      {
+        tier: 0,
+        root_l2_block: 1n,
+        groups: [{ group_id: 1n, region: 0 }],
+        regions: [3n],
+        cells: [{ root: 1n << 200n, members: 3n }],
+      },
+    ],
+    membership_vk_hash: v1.membership_vk_hash,
+    panel_id: v1.panel_id,
+    threshold: v1.threshold,
+    panel_size: v1.panel_size,
+    ceremony_transcript_hash: new Uint8Array(32),
+    opens_at: v1.opens_at,
+    closes_at: v1.closes_at,
+    l1_inclusion_bound: v1.l1_inclusion_bound,
+    sequencing_window: v1.sequencing_window,
+    max_sequencer_drift: v1.max_sequencer_drift,
+    display_text_commitment: v1.display_text_commitment,
+    receipt_keys: [identityKey(crypto.getRandomValues(new Uint8Array(32)))],
+    ...change,
+  };
+}
+
+/** What a ceremony between seats needs of an election, whatever its definition version. */
+export interface CeremonyElection {
   readonly panelists: Panelists;
-  readonly stub: ElectionDefinition;
   readonly stubBytes: Uint8Array;
   readonly stubHash: Uint8Array;
   readonly seats: readonly CeremonySeat[];
 }
 
-export function election(
-  n: number,
-  k: number,
-  options: {
-    stores?: readonly SeatStore[];
-    electorate?: () => Promise<boolean>;
-    stub?: Partial<ElectionDefinition>;
-  } = {},
-): Election {
-  const panelists = panelOf(n, k);
-  const stub = stubFor(panelists.panel, options.stub);
-  const seats = panelists.secrets.map(
+export interface Election extends CeremonyElection {
+  readonly stub: ElectionDefinition;
+}
+
+export interface ElectionV5 extends CeremonyElection {
+  readonly stub: ElectionDefinitionV5;
+}
+
+interface ElectionOptions {
+  stores?: readonly SeatStore[];
+  electorate?: () => Promise<boolean>;
+}
+
+function seatsFor(panelists: Panelists, options: ElectionOptions): CeremonySeat[] {
+  return panelists.secrets.map(
     (identitySecret, i) =>
       new CeremonySeat({
         panel: panelists.panel,
@@ -68,12 +142,38 @@ export function election(
         store: options.stores?.[i] ?? new MemoryStore(),
       }),
   );
+}
+
+/** `election` over a version-5 stub (`stubV5For`). */
+export function electionV5(
+  n: number,
+  k: number,
+  options: ElectionOptions & { stub?: Partial<ElectionDefinitionV5> } = {},
+): ElectionV5 {
+  const panelists = panelOf(n, k);
+  const stub = stubV5For(panelists.panel, options.stub);
+  return {
+    panelists,
+    stub,
+    stubBytes: encodeElectionDefinitionV5(stub),
+    stubHash: electionStubV5Hash(stub),
+    seats: seatsFor(panelists, options),
+  };
+}
+
+export function election(
+  n: number,
+  k: number,
+  options: ElectionOptions & { stub?: Partial<ElectionDefinition> } = {},
+): Election {
+  const panelists = panelOf(n, k);
+  const stub = stubFor(panelists.panel, options.stub);
   return {
     panelists,
     stub,
     stubBytes: encodeElectionDefinition(stub),
     stubHash: electionStubHash(stub),
-    seats,
+    seats: seatsFor(panelists, options),
   };
 }
 
@@ -100,7 +200,7 @@ export interface Run {
  * refused or answers, as its node decides), and only seats that answer are
  * relayed.
  */
-export async function runCeremony(e: Election, drops: Drops = {}): Promise<Run> {
+export async function runCeremony(e: CeremonyElection, drops: Drops = {}): Promise<Run> {
   const runId = crypto.getRandomValues(new Uint8Array(32));
   const kept = <M extends { index: number }>(round: 1 | 2 | 3 | 4, results: SeatResult<M>[]) =>
     results

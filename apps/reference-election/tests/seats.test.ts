@@ -182,15 +182,16 @@ test("the electorate check takes only the voters' one Tier 0 tree", async () => 
   const stub = stubFor(s);
   const [tier] = stub.electorate;
   if (tier === undefined) throw new Error("no tier");
-  expect(await check(stub)).toBe(true);
+  const v1 = (value: typeof stub) => ({ version: 1 as const, value });
+  expect(await check(v1(stub))).toBe(true);
   for (const other of [
     { ...tier, root: s.electorate.root + 1n },
     { ...tier, group_size: s.electorate.size + 1n },
     { ...tier, group_id: 2n },
     { ...tier, tier: 1 as const },
   ])
-    expect(await check({ ...stub, electorate: [other] })).toBe(false);
-  expect(await check({ ...stub, electorate: [tier, tier] })).toBe(false);
+    expect(await check(v1({ ...stub, electorate: [other] }))).toBe(false);
+  expect(await check(v1({ ...stub, electorate: [tier, tier] }))).toBe(false);
 });
 
 // A ceremony and a depth-32 Groth16 proof: well past the 5-second default.

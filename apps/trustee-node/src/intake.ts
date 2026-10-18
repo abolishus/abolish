@@ -16,11 +16,7 @@ import {
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
   decode,
-  decodeElectionDefinitionRecord,
   DecodeError,
-  type ElectionDefinition,
-  electionDefinitionHash,
-  electionStubHash,
   encode,
   encodeShareReceipt,
   fieldBn254,
@@ -31,6 +27,8 @@ import {
   keySetEntry,
   keySetHash,
   membershipMessage,
+  questionBallotElection,
+  type QuestionBallotElection,
   SHARES,
   type Share,
   shareReceiptRecord,
@@ -41,7 +39,15 @@ import {
 } from "@abolishus/crypto";
 import type { CeremonySeat } from "./ceremony.ts";
 import type { SeatStore } from "./store.ts";
-import { checkStub, type ElectorateCheck, type Pins, RELEASE_WINDOWS } from "./stub.ts";
+import {
+  checkStub,
+  decodeStub,
+  type ElectorateCheck,
+  type Pins,
+  RELEASE_WINDOWS,
+  type Stub,
+  stubHash as hashOfStub,
+} from "./stub.ts";
 import { MAX_RECORD } from "./wire.ts";
 
 /**
@@ -115,7 +121,7 @@ const COPY = struct([
 ] as const);
 
 interface Opened {
-  readonly election: BallotElection;
+  readonly election: BallotElection | QuestionBallotElection;
   readonly stubHash: Uint8Array;
   readonly cutoff: bigint;
   readonly keys: Parameters<typeof intakeBallot>[1];
@@ -209,16 +215,14 @@ export class IntakeSeat {
     stubBytes: Uint8Array,
     transcript: Uint8Array,
   ): Promise<{ ok: true; value: Opened } | { ok: false; code: ElectionRefusal }> {
-    let stub: ElectionDefinition;
+    let stub: Stub;
     try {
-      const record = decodeElectionDefinitionRecord(stubBytes);
-      if (record.version !== 1) return { ok: false, code: "intake-unapproved" };
-      stub = record.value;
+      stub = decodeStub(stubBytes);
     } catch (e) {
       if (e instanceof DecodeError) return { ok: false, code: "intake-unapproved" };
       throw e;
     }
-    const stubHash = electionStubHash(stub);
+    const stubHash = hashOfStub(stub);
     const transcriptHash = ceremonyTranscriptHash(transcript);
     const name = `${hex(stubHash)}/${hex(transcriptHash)}`;
     let opened = this.#opened.get(name);
@@ -239,13 +243,14 @@ export class IntakeSeat {
   }
 
   async #check(
-    stub: ElectionDefinition,
+    record: Stub,
     stubBytes: Uint8Array,
     stubHash: Uint8Array,
     transcript: Uint8Array,
     transcriptHash: Uint8Array,
   ): Promise<{ ok: true; value: Opened } | { ok: false; code: ElectionRefusal }> {
     const config = this.#config;
+    const stub = record.value;
     const secrets = await config.ceremony.intakeSecrets(stubHash);
     if (secrets === undefined) return { ok: false, code: "intake-unapproved" };
     // 3.2 as this seat checked it when it approved: the transcript it signed
@@ -281,19 +286,28 @@ export class IntakeSeat {
     // other election it sees only this one's demand.
     const again = await checkStub(stubBytes, config, config.electorate, new Map());
     if (!again.ok) return { ok: false, code: "intake-definition" };
-    const definition: ElectionDefinition = { ...stub, ceremony_transcript_hash: result.hash };
-    const definitionHash = electionDefinitionHash(definition);
-    if (!(await config.registration(definitionHash, secrets.keySetHash)))
-      return { ok: false, code: "intake-unregistered" };
-    let election: BallotElection;
+    // Under definition version 5, ballot version 3: its questions' ranges
+    // and the cell each ballot names (P2-14).
+    let election: BallotElection | QuestionBallotElection;
     try {
-      election = ballotElection(definition, result.registered);
+      election =
+        record.version === 1
+          ? ballotElection(
+              { ...record.value, ceremony_transcript_hash: result.hash },
+              result.registered,
+            )
+          : questionBallotElection(
+              { ...record.value, ceremony_transcript_hash: result.hash },
+              result.registered,
+            );
     } catch (e) {
       // A root of 0, which anyone can prove membership of (T-04), passes no
       // correct electorate check; this refuses it whatever the deployment's does.
       if (e instanceof RangeError) return { ok: false, code: "intake-definition" };
       throw e;
     }
+    if (!(await config.registration(election.definitionHash, secrets.keySetHash)))
+      return { ok: false, code: "intake-unregistered" };
     return {
       ok: true,
       value: {

@@ -97,12 +97,15 @@ export {
   type StorageAtOutputRoot,
   storageAtOutputRoot,
 } from "./output-root.ts";
+export { type DropOutcome, type DropUnjudgedCode, type NotDropCode } from "./drops.ts";
 export { type ReceiptKeyCode, type ReceiptKeyRow, receiptKeyRow } from "./receipt-keys.ts";
 export {
   type CheckAt,
   type CheckCode,
   type CheckResult,
   type CheckStatus,
+  type DropReport,
+  judgeDrop,
   type Report,
   REPORT_FORMAT,
   readBoardByCid,

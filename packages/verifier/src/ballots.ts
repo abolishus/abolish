@@ -217,7 +217,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 // The contract-event versions this verifier reads; under version 1 the board
 // emits no event, so every ballot is a board-path one, and only versions 3
 // to 8 have the relayed path.
-const readsEvents = (v: number | undefined): v is ContractEventVersion =>
+export const readsEvents = (v: number | undefined): v is ContractEventVersion =>
   v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6 || v === 7 || v === 8;
 
 /** Where one ballot copy came from: its own path decides its window (5.5). */

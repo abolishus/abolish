@@ -33,13 +33,18 @@ import {
   boardPayloadTypes,
   type BoardErrorAt,
   type BoardErrorCode,
+  boardEntryHash,
   DecodeError,
   type DecodeErrorCode,
+  decodeReceipt,
   type ElectionDefinitionV6Rule,
+  encodeBoardEntry,
+  EncodeError,
   membershipVkHash,
   pinnedVersion,
   profileCombinationRule,
   readBoardCopy,
+  type ReceiptVerdict,
   RECORD_TYPES,
   verifyBoard,
 } from "@abolishus/crypto";
@@ -48,9 +53,13 @@ import {
   type AdmissionCode,
   ballotChecks,
   type BallotsReport,
+  type CountedCandidate,
+  judgeFor,
+  readsEvents,
   type WindowCode,
 } from "./ballots.ts";
-import type { L1RefCode } from "./references.ts";
+import { type DropOutcome, judgeDropRule } from "./drops.ts";
+import { type L1RefCode, referenceJudge } from "./references.ts";
 import type { BlockStore } from "./blocks.ts";
 import type { Gateways } from "./gateways.ts";
 import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
@@ -825,4 +834,147 @@ export function verifyBundle(bundle: Bundle): Report {
     }),
     checks,
   };
+}
+
+/**
+ * Whether a receipt's ballot was dropped, as `Report` has `verdict` and
+ * `verdictAgainstInputs`: `dropAgainstInputs` is what the rule found against
+ * the bundle's inputs, and `drop` is it only where every input authenticates,
+ * otherwise `inputs-unauthenticated`, so a crafted bundle can neither make
+ * nor clear a drop (T-53, T-24).
+ */
+export interface DropReport {
+  readonly drop: DropOutcome;
+  readonly dropAgainstInputs: DropOutcome;
+}
+
+/**
+ * Whether the ballot a receipt covers was dropped from the board this bundle
+ * holds (docs/spec/receipts.md, Drops), given the receipt, its payload and
+ * the verdict `judgeReceipt` reached for it. The payload is judged as
+ * `verifyBundle` judges the board's ballots, against the same registered key
+ * sets and, for format 5, its run of L1 headers, and the board's admitted
+ * ballots are read only once selection (6.1) has passed over the sealed,
+ * anchored copy: otherwise the outcome is `unjudged`, never a drop. Throws a
+ * `DecodeError` for a receipt that doesn't decode, and a `RangeError` for one
+ * of another election or whose entry hash isn't the payload's: an
+ * `unanchored` or `forked` verdict passed the checks at cast, which bind the
+ * receipt to both, so the verdict isn't this receipt and payload's.
+ */
+export function judgeDrop(
+  bundle: Bundle,
+  receipt: Uint8Array,
+  payload: Uint8Array,
+  verdict: ReceiptVerdict,
+): DropReport {
+  const report = (outcome: DropOutcome, authenticates: boolean): DropReport => ({
+    drop: authenticates ? outcome : { status: "unjudged", code: "inputs-unauthenticated" },
+    dropAgainstInputs: outcome,
+  });
+  if (verdict.verdict !== "unanchored" && verdict.verdict !== "forked")
+    return report({ status: "not-drop", code: "not-alarm" }, true);
+  const r = decodeReceipt(receipt);
+  const sources = Object.values(bundle.sources) as InputSource[];
+  const authenticates = sources.every(authenticated);
+  const definition = fromDefinition(bundle);
+  if (
+    "rows" in definition ||
+    definition.definition === undefined ||
+    definition.stubHash === undefined ||
+    (bundle.format !== "abolish-verifier-bundle/4" && bundle.format !== "abolish-verifier-bundle/5")
+  )
+    return report({ status: "unjudged", code: "not-reached" }, authenticates);
+  const d = definition.definition;
+  const { boardEntryVersion } = definition.inputs;
+  if (!equal(r.election_id, d.value.election_id))
+    throw new RangeError("judgeDrop: the receipt names another election");
+  // The checks at cast's `receipt-entry`: the payload is the one the
+  // receipt covers, so no other ballot can be called the dropped one, and
+  // the segment the close rule reads is that entry's.
+  let entry;
+  try {
+    entry = encodeBoardEntry(
+      { election_id: r.election_id, index: r.index, segment: r.segment, payload },
+      boardEntryVersion,
+    );
+  } catch (e) {
+    if (!(e instanceof EncodeError)) throw e;
+    throw new RangeError("judgeDrop: no board entry can carry the payload");
+  }
+  if (!equal(boardEntryHash(entry), r.entry_hash))
+    throw new RangeError("judgeDrop: the receipt doesn't cover the payload");
+  // Under a contract-event version this release doesn't read, 5.5 and 5.8
+  // are unsupported for the board's ballots, so they are for this one too:
+  // releases agree (T-36).
+  if (!readsEvents(pinnedVersion(d.value, RECORD_TYPES.contractEvent)))
+    return report({ status: "unjudged", code: "unsupported-version" }, authenticates);
+  const checked = ceremonyChecks(
+    d.value,
+    definition.stubHash,
+    bundle.panel,
+    authorRunOf(d),
+    bundle.entries,
+    boardEntryVersion,
+  );
+  const blocks = bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined;
+  return report(
+    judgeDropRule({
+      verdict,
+      segment: r.segment,
+      payload,
+      judge: judgeFor(d, checked.registered, checked.authorRegistered),
+      references:
+        blocks === undefined
+          ? undefined
+          : referenceJudge(blocks, d.value.opens_at, d.value.closes_at),
+      lastBoardSegment: countedFloor(d.value.closes_at, bundle.clock),
+      admitted: anchoredAdmitted(bundle, d, definition.inputs, checked),
+    }),
+    authenticates,
+  );
+}
+
+/** The admitted ballots of the anchored extent, once 6.1 passes over the bundle's copy, as `verifyBundle` decides it. */
+export function anchoredAdmitted(
+  bundle: Bundle,
+  definition: VerifiedDefinition,
+  inputs: BoardInputs,
+  checked: ReturnType<typeof ceremonyChecks>,
+): readonly CountedCandidate[] | undefined {
+  const input = anchoring(bundle, inputs);
+  if (input instanceof L1Error) return undefined;
+  const { board, outcomes } = runBoard(bundle, inputs, input.anchors, input.now);
+  if (outcomes.some((o) => o.status !== "pass") || board.unauthenticated === undefined)
+    return undefined;
+  const extent = board.entries - board.unauthenticated;
+  // Typed as a row, as `verifyBundle` reads 4.4: it can't pass in this
+  // release, and selection waits on its pass wherever an ordinary ballot is.
+  const events: Outcome = eventChecks(
+    definition,
+    bundle.entries,
+    inputs.boardEntryVersion,
+    extent,
+    bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+  );
+  const admission = ballotChecks(
+    definition,
+    checked.registered,
+    checked.authorRegistered,
+    bundle.entries,
+    inputs.boardEntryVersion,
+    bundle.clock,
+    bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+  );
+  const chosen = selectionCheck({
+    admissionSettled: admissionSettled(admission.rows),
+    candidates: admission.candidates,
+    ordinary: admission.ordinary ?? [],
+    extent,
+    eventsPass: events.status === "pass",
+    clock: bundle.clock,
+    now: input.now,
+    floor: countedFloor(definition.value.closes_at, bundle.clock),
+  });
+  if (chosen.row.status !== "pass" || admission.candidates === undefined) return undefined;
+  return admission.candidates.filter((c) => c.entry < extent);
 }

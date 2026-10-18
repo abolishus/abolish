@@ -43,6 +43,7 @@ import {
   encodeCeremonyTranscript,
   identityKey,
   KEM_SECRET_KEY,
+  type KemKeyPair,
   type KemSecretKey,
   type KeysMessage,
   keysMessage,
@@ -127,6 +128,8 @@ export interface ApprovedElection {
   readonly members: bigint;
   /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
   readonly signingSecret: Uint8Array;
+  /** The seat's per-election KEM key pair, its public key the one the approved run registered. The secret is never logged. */
+  readonly kemKeyPair: KemKeyPair;
 }
 
 /**
@@ -487,6 +490,13 @@ export class CeremonySeat {
       l1InclusionBound: BigInt(r.l1_inclusion_bound),
       members: r.members,
       signingSecret: Uint8Array.from(run.seat.signingSecret),
+      kemKeyPair: {
+        publicKey: run.seat.kem.publicKey,
+        secretKey: {
+          seed: Uint8Array.from(run.seat.kem.secretKey.seed),
+          x: run.seat.kem.secretKey.x,
+        },
+      },
     };
   }
 

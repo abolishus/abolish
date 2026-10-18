@@ -6,6 +6,7 @@ import {
   electionDefinitionHash,
   type ElectionDefinition,
   encodeElectionDefinition,
+  kemKeygen,
   type L1Origin,
   objectCid,
   pinnedVersion,
@@ -236,6 +237,7 @@ async function setup(
       l1InclusionBound: BigInt(d.l1_inclusion_bound),
       members: definitionMembers(d),
       signingSecret: keccak_256(text(`secret ${name}`)),
+      kemKeyPair: kemKeygen(),
     },
     options: {
       l1: chain.rpc,

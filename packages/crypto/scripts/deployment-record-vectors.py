@@ -50,6 +50,8 @@ MAX_ORIGINS = 4
 MAX_ORIGIN = 267
 MAX_RP_ID = 253
 MAX_SEQUENCER_DRIFT = 1800
+# The largest version-1 encoding, which the spec states and the boundaries vector reaches.
+MAX_ENCODING = 9779
 
 ORIGIN_LISTS = ["api", "l2_rpc", "l1_rpc"]
 RP_IDS = ["backup_rp_id", "account_rp_id"]
@@ -186,8 +188,17 @@ RULES = [
     "origin-shared",
     "rp-id",
     "rp-id-shared",
+    "endpoint-rp",
 ]
-PAIR_RULES = ["deployment-hash", "prover-files", "backup-origin", "challenge-rp"]
+PAIR_RULES = [
+    "deployment-hash",
+    "prover-files",
+    "backup-origin",
+    "challenge-rp",
+    "ballot-rp",
+    "endpoint-site",
+    "challenge-webauthn",
+]
 
 
 def distinct(xs):
@@ -201,6 +212,10 @@ def panel_id(p):
 def host_ok(x):
     # An origin's host: the origin grammar with nothing after the host.
     return b":" not in x and rr.origin_ok(b"https://" + x)
+
+
+def host_of(origin):
+    return origin[len(b"https://") :].partition(b":")[0]
 
 
 def under(a, b):
@@ -228,17 +243,19 @@ def ill_formed(d):
         if broken:
             return code, {}
     for i, p in enumerate(d["panels"]):
-        keys = [s["key"] for s in p["seats"]]
-        checks = [
-            ("panel-threshold", not 2 <= p["threshold"] <= len(p["seats"])),
-            ("panel-key", any(tv.decompress(k) is None for k in keys)),
-            ("panel-duplicate-key", not distinct(keys)),
-            ("panel-kind", p["kind"] == 1 and sum(s["ours"] for s in p["seats"]) > 1),
-        ]
-        assert [c for c, _ in checks] == PANEL_RULES
-        for code, broken in checks:
-            if broken:
-                return code, {"panel": i}
+        # trustee-identity's order: the threshold, then seat by seat its key
+        # and whether an earlier seat has it, then the kind.
+        if not 2 <= p["threshold"] <= len(p["seats"]):
+            return "panel-threshold", {"panel": i}
+        seen = set()
+        for s in p["seats"]:
+            if tv.decompress(s["key"]) is None:
+                return "panel-key", {"panel": i}
+            if s["key"] in seen:
+                return "panel-duplicate-key", {"panel": i}
+            seen.add(s["key"])
+        if p["kind"] == 1 and sum(s["ours"] for s in p["seats"]) > 1:
+            return "panel-kind", {"panel": i}
     ids = [panel_id(p) for p in d["panels"]]
     if not rr.ascending(ids):
         return "panel-order", {}
@@ -277,6 +294,8 @@ def ill_formed(d):
             return "rp-id", {"field": name}
     if under(d["backup_rp_id"], d["account_rp_id"]) or under(d["account_rp_id"], d["backup_rp_id"]):
         return "rp-id-shared", {}
+    if any(under(host_of(o), d["backup_rp_id"]) for o in every):
+        return "endpoint-rp", {}
     return None
 
 
@@ -286,12 +305,21 @@ def inconsistent(release, d):
     ballot = release["sites"][0]
     hashes = {f["sha256"] for f in ballot["files"]}
     challenge = [s for s in release["sites"] if s["kind"] == 2]
-    host = challenge[0]["origins"][0][len(b"https://") :].partition(b":")[0] if challenge else None
+    host = host_of(challenge[0]["origins"][0]) if challenge else None
+    own = b"https://" + d["backup_rp_id"]
+    endpoints = {o for name in ORIGIN_LISTS for o in d[name]}
+    sites = {o for site in release["sites"] for o in site["origins"]}
     checks = [
         ("deployment-hash", release["deployment_hash"] != deployment_hash(encode(d))),
         ("prover-files", d["membership_zkey_sha256"] not in hashes or d["membership_wasm_sha256"] not in hashes),
         ("backup-origin", d["backups"] and b"https://" + d["backup_rp_id"] not in ballot["origins"]),
         ("challenge-rp", host is not None and any(under(host, d[name]) for name in RP_IDS)),
+        (
+            "ballot-rp",
+            any(under(host_of(o), d["account_rp_id"]) or (under(host_of(o), d["backup_rp_id"]) and o != own) for o in ballot["origins"]),
+        ),
+        ("endpoint-site", bool(endpoints & sites)),
+        ("challenge-webauthn", any(f["path"] == b".well-known/webauthn" for site in challenge for f in site["files"])),
     ]
     assert [c for c, _ in checks] == PAIR_RULES
     for code, broken in checks:
@@ -480,12 +508,18 @@ def boundaries(base):
     kinds += [(20, 0, False), (20, 0, True), (2**32 - 1, 0, False), (2**32 - 1, 0, True)]
     d["groups"] = [group(i, tier, self_paid, region) for i, (region, tier, self_paid) in enumerate(kinds)]
     d["groups"][-1]["group_id"] = 2**64 - 1
-    host = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61])
-    d["api"] = sorted([f"https://{host}:65535".encode(), b"https://api.abolish.us", b"https://api.x.y:1", b"https://xn--bcher-kva.example"])
-    d["l2_rpc"] = sorted([b"https://l2-a.example", b"https://l2-b.example", b"https://l2-c.example", b"https://l2-d.example"])
-    d["l1_rpc"] = sorted([b"https://l1-a.example", b"https://l1-b.example", b"https://l1-c.example", b"https://l1-d.example"])
-    d["backup_rp_id"] = host.encode()
-    d["account_rp_id"] = b"a.b"
+    # Every origin 267 bytes (a 253-byte host and port 65535), each host its
+    # own, and both RP IDs 253 bytes: the record at its largest.
+    def host(c):
+        return ".".join([c * 63, c * 63, c * 63, "z" + c * 60])
+
+    def origin(c):
+        return f"https://{host(c)}:65535".encode()
+
+    for name, letters in zip(ORIGIN_LISTS, ["abcd", "efgh", "ijkm"]):
+        d[name] = sorted(origin(c) for c in letters)
+    d["backup_rp_id"] = host("n").encode()
+    d["account_rp_id"] = host("p").encode()
     d["backups"] = False
     return d
 
@@ -545,6 +579,13 @@ def ill_formed_cases(base):
         ("panel-key-prefix", "A seat key with an uncompressed prefix", seat(0, 0, "key", bytes([4]) + k1[1:]), "panel-key", P0),
         ("panel-key-x-high", "A seat key with x at the field prime", seat(0, 0, "key", bytes([2]) + tv.P.to_bytes(32, "big")), "panel-key", P0),
         ("panel-duplicate-key", "A key in two seats", seat(0, 1, "key", k1), "panel-duplicate-key", P0),
+        (
+            "panel-seat-order",
+            "Seat 2 repeating seat 1 and seat 3 not a key: seat by seat, the repeat comes first",
+            lambda d: (seat(0, 1, "key", k1)(d), seat(0, 2, "key", no_point)(d)),
+            "panel-duplicate-key",
+            P0,
+        ),
         ("panel-kind", "An independent panel with two seats ours", lambda d: d["panels"][0].__setitem__("kind", 1), "panel-kind", P0),
         (
             "panel-second",
@@ -587,6 +628,9 @@ def ill_formed_cases(base):
         ("rp-id-same", "One RP ID for the backup and the accounts", set_("backup_rp_id", b"abolish.us"), "rp-id-shared", {}),
         ("rp-id-backup-under", "The backup's RP ID under the accounts'", set_("backup_rp_id", b"ballot.abolish.us"), "rp-id-shared", {}),
         ("rp-id-account-under", "The accounts' RP ID under the backup's", set_("account_rp_id", b"www.ballot-staging.up.railway.app"), "rp-id-shared", {}),
+        ("endpoint-at-rp-id", "An API at the backup RP ID's host", set_("api", [b"https://ballot-staging.up.railway.app"]), "endpoint-rp", {}),
+        ("endpoint-under-rp-id", "An L2 endpoint under the backup RP ID, with a port", set_("l2_rpc", [b"https://rpc.ballot-staging.up.railway.app:8545"]), "endpoint-rp", {}),
+        ("endpoint-under-account", "An API under the accounts' RP ID: allowed", set_("api", [b"https://api2.abolish.us"]), None, {}),
         ("rp-id-suffix-only", "A backup RP ID that only ends in the accounts' bytes: not under it", set_("backup_rp_id", b"notabolish.us"), None, {}),
         ("rule-order", "A bad chain ID and no panel: chain-id comes first", lambda d: (d.__setitem__("l1_chain_id", 0), d.__setitem__("panels", [])), "chain-id", {}),
         (
@@ -614,6 +658,8 @@ def decode_cases(d):
     groups_at = panels + 4 + sum(len(enc_panel(p)) for p in d["panels"])
     tier0 = groups_at + 4 + 8
     api = groups_at + 4 + 14 * len(d["groups"])
+    l2 = api + len(lst(d["api"], var))
+    l1 = l2 + len(lst(d["l2_rpc"], var))
     backup = api + sum(len(lst(d[name], var)) for name in ORIGIN_LISTS)
     backups = backup + 4 + len(d["backup_rp_id"])
     account = backups + 1
@@ -642,6 +688,10 @@ def decode_cases(d):
         ("self-paid-two", "A self_paid byte of 2", at(tier0 + 1, b"\x02"), "invalid-enum"),
         ("api-over-max", "Five API origins", at(api, u32(5)), "length-over-max"),
         ("origin-over-max", "An origin of 268 bytes", at(api + 4, u32(268)), "length-over-max"),
+        ("l2-rpc-over-max", "Five L2 endpoints", at(l2, u32(5)), "length-over-max"),
+        ("l2-origin-over-max", "An L2 endpoint of 268 bytes", at(l2 + 4, u32(268)), "length-over-max"),
+        ("l1-rpc-over-max", "Five L1 endpoints", at(l1, u32(5)), "length-over-max"),
+        ("l1-origin-over-max", "An L1 endpoint of 268 bytes", at(l1 + 4, u32(268)), "length-over-max"),
         ("origin-past-end", "An origin longer than the input", enc[: api + 4] + u32(267) + b"https://", "truncated"),
         ("rp-id-over-max", "A 254-byte backup RP ID", at(backup, u32(254)), "length-over-max"),
         ("backups-two", "A backups byte of 2", at(backups, b"\x02"), "invalid-enum"),
@@ -670,6 +720,15 @@ def pair_cases(site_vectors, d, zkey, wasm):
         ("consistent-no-backups", "No backups offered, at origins without the RP ID's host", release(no_backups, [ballot(("https://abolishus.eth.limo",))], "pair-no-backups"), no_backups, None),
         ("consistent-swapped-prover", "The key's and calculator's hashes swapped: each is still a file of the site", release(swapped, [ballot()], "pair-swapped"), swapped, None),
     ]
+    api_at_ballot = dict(clone(d), api=[b"https://abolishus.eth.limo"])
+    l1_at_challenge = dict(clone(d), l1_rpc=[b"https://challenge-staging.up.railway.app"])
+
+    def webauthn_challenge():
+        site = challenge()
+        well_known = next(f for f in ballot()["files"] if f["path"] == b".well-known/webauthn")
+        site["files"] = sorted(site["files"] + [well_known], key=lambda f: f["path"])
+        return site
+
     other_hash = release(d, [ballot(), challenge()], "pair-other")
     other_hash["deployment_hash"] = deployment_hash(encode(no_backups))
     cases += [
@@ -681,6 +740,11 @@ def pair_cases(site_vectors, d, zkey, wasm):
         ("challenge-rp-account", "The challenge page at the accounts' RP ID itself", release(d, [ballot(), challenge("https://abolish.us")], "pair-account"), d, "challenge-rp"),
         ("challenge-rp-port", "The challenge page under the accounts' RP ID, with a port", release(d, [ballot(), challenge("https://challenge.abolish.us:8443")], "pair-port"), d, "challenge-rp"),
         ("challenge-rp-suffix-only", "A challenge host that only ends in the RP ID's bytes: not under it", release(d, [ballot(), challenge("https://notabolish.us")], "pair-suffix"), d, None),
+        ("ballot-rp-account", "A ballot entry point under the accounts' RP ID", release(d, [ballot(("https://abolishus.eth.limo", "https://ballot-staging.up.railway.app", "https://vote.abolish.us"))], "pair-ballot-account"), d, "ballot-rp"),
+        ("ballot-rp-backup", "A second ballot host under the backup's RP ID", release(d, [ballot(("https://ballot-staging.up.railway.app", "https://x.ballot-staging.up.railway.app"))], "pair-ballot-backup"), d, "ballot-rp"),
+        ("endpoint-site", "An API at the ballot client's entry point", release(api_at_ballot, [ballot()], "pair-endpoint"), api_at_ballot, "endpoint-site"),
+        ("endpoint-challenge", "An L1 endpoint at the challenge origin", release(l1_at_challenge, [ballot(), challenge()], "pair-endpoint-challenge"), l1_at_challenge, "endpoint-site"),
+        ("challenge-webauthn", "A challenge site listing a .well-known/webauthn file (its directory is the fixture's; no rule here rebuilds it)", release(d, [ballot(), webauthn_challenge()], "pair-webauthn"), d, "challenge-webauthn"),
         ("pair-rule-order", "Another deployment's hash and no prover files: deployment-hash comes first", release(no_backups, [ballot()], "pair-order"), other_zkey, "deployment-hash"),
     ]
     return cases
@@ -770,6 +834,7 @@ def main():
     assert len({p["id"] for p in pairs}) == len(pairs)
 
     largest = max(len(bytes.fromhex(v["encoding"])) for v in out_vectors if "value" in v)
+    assert largest == MAX_ENCODING, largest
     out = {
         "format": "abolish-deployment-record-vectors/1",
         "title": "Deployment record: encoding, strict decoding, well-formedness, the deployment hash and the rules against its release",

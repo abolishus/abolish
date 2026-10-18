@@ -48,6 +48,48 @@ function codes(from: string, to: string): string[] {
   return [...section.matchAll(/^\| `([a-z0-9-]+)` +\|/gm)].map((m) => m[1] ?? "");
 }
 
+// The spec's way of writing a type descriptor, as its Record tables do.
+type Descriptor = {
+  readonly kind: string;
+  readonly length?: number;
+  readonly max?: number;
+  readonly values?: readonly string[];
+  readonly of?: Descriptor;
+  readonly name?: string;
+  readonly fields?: readonly { readonly name: string; readonly type: Descriptor }[];
+};
+
+function spelled(t: Descriptor): string {
+  switch (t.kind) {
+    case "bytes":
+      return t.length === undefined ? `bytes<${t.max}>` : `bytes[${t.length}]`;
+    case "enum8":
+      return `enum8<${(t.values ?? []).join(", ")}>`;
+    case "list":
+      return `list<${t.of === undefined ? "?" : spelled(t.of)}, ${t.max}>`;
+    case "ref":
+      return t.name ?? "?";
+    case "struct":
+      return "seat";
+    default:
+      return t.kind;
+  }
+}
+
+// Each table of the spec's Record section, as [field, type] rows.
+function recordTables(): string[][][] {
+  const section = page.slice(page.indexOf("\n## Record\n"), page.indexOf("\n## Well-formedness\n"));
+  return section
+    .split(/\n\s*\n/)
+    .map((block) =>
+      [...block.matchAll(/^\| `([a-z0-9_]+)` +\| `([^`]+)` +\|/gm)].map((m) => [
+        m[1] ?? "",
+        m[2] ?? "",
+      ]),
+    )
+    .filter((rows) => rows.length > 0);
+}
+
 function decodeError(f: () => unknown): string | undefined {
   try {
     f();
@@ -101,6 +143,24 @@ describe("deployment record (docs/spec/deployment.md)", () => {
     }
   });
 
+  test("has the spec's layout: every table's fields and types, and its largest encoding", () => {
+    type Named = Readonly<Record<string, Descriptor>>;
+    const types = file.types as unknown as Named;
+    const rows = (t: Descriptor | undefined) =>
+      (t?.fields ?? []).map((f) => [f.name, spelled(f.type)]);
+    const seat = types["panel"]?.fields?.find((f) => f.name === "seats")?.type.of;
+    expect(recordTables()).toEqual([
+      rows(types["deployment"]),
+      rows(types["panel"]),
+      rows(seat),
+      rows(types["group"]),
+    ]);
+    expect(page).toContain(
+      `At its maximums a version-1 record is ${file.largestEncoding.toLocaleString("en")} bytes.`,
+    );
+    expect(Math.max(...decoded.map(([, v]) => hex(v.encoding).length))).toBe(file.largestEncoding);
+  });
+
   test("lists the spec's rules, in its order, each with a vector that breaks it", () => {
     expect(codes("Well-formedness", "Deployment hash")).toEqual(file.rules);
     expect(codes("Against its release", "Test vectors")).toEqual(file.pairRules);
@@ -124,7 +184,6 @@ describe("deployment record (docs/spec/deployment.md)", () => {
     });
     expect(toHex(schema.encode(deployment.recordType, 1, expected))).toBe(v.encoding);
     expect(toHex(H(ds("abolish/v1/deployment", bytes)))).toBe(v.deploymentHash);
-    expect(bytes.length).toBeLessThanOrEqual(file.largestEncoding);
   });
 
   test.each(rejected)("%s is rejected", (_id, v) => {

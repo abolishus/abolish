@@ -48,7 +48,19 @@ MAX_RELEASE_FILE = 1 << 28
 CHUNK = 1 << 20
 MAX_LINKS = 1024
 
-RESERVED_HEADERS = {b"connection", b"content-encoding", b"content-length", b"content-type", b"transfer-encoding"}
+RESERVED_HEADERS = {
+    b"connection",
+    b"content-encoding",
+    b"content-length",
+    b"content-range",
+    b"content-type",
+    b"keep-alive",
+    b"proxy-connection",
+    b"te",
+    b"transfer-encoding",
+    b"upgrade",
+}
+RESERVED_PATHS = {b"_headers", b"_redirects"}
 
 
 def sha256(b):
@@ -387,7 +399,7 @@ def origin_ok(o):
     labels = host.split(b".")
     if len(labels) < 2 or not all(LABEL.fullmatch(x) for x in labels):
         return False
-    return not labels[-1].isdigit()
+    return b"a" <= labels[-1][:1] <= b"z"
 
 
 def value_ok(v):
@@ -428,11 +440,14 @@ def ill_formed(r):
             ("origin-order", not ascending(s["origins"])),
             ("site-unreachable", not s["origins"] and not s["loopback"]),
             ("loopback-site", s["loopback"] and s["kind"] != 1),
+            ("challenge-origin", s["kind"] == 2 and len(s["origins"]) != 1),
             ("header-name", any(not TCHAR.fullmatch(n) for n in names)),
             ("header-reserved", any(n in RESERVED_HEADERS for n in names)),
             ("header-value", any(not value_ok(x["value"]) for x in s["headers"])),
             ("header-order", not ascending(names)),
+            ("site-csp", b"content-security-policy" not in names),
             ("path", any(not path_ok(p) for p in paths)),
+            ("path-reserved", any(p in RESERVED_PATHS for p in paths)),
             ("path-order", not ascending(paths)),
             ("path-conflict", any(q.startswith(p + b"/") for p in paths for q in paths)),
             ("site-index", b"index.html" not in paths),
@@ -459,6 +474,7 @@ MEDIA = {
     ".woff2": b"font/woff2",
     ".zkey": b"application/octet-stream",
     ".bin": b"application/octet-stream",
+    "webauthn": b"application/json",
 }
 
 
@@ -630,22 +646,31 @@ def main():
     def challenge(sid="challenge-like", origins=("https://challenge-staging.up.railway.app",), headers=CHALLENGE_HEADERS):
         return site_from(site_vectors, sid, 2, origins, False, headers)
 
-    first = base([ballot("index-only", ("https://ballot-staging.up.railway.app",), False, [])])
+    only_csp = [("content-security-policy", "default-src 'none'; frame-ancestors 'none'")]
+    first = base([ballot("index-only", ("https://ballot-staging.up.railway.app",), False, only_csp)])
     first_hash = release_hash(encode(strip(first)))
     typical = base([ballot(), challenge()], 1, first_hash, "typical")
     # The ill-formed vectors each break one rule of a small record that keeps
     # both sites, so every rule but the chain's is placed in a site.
     small = base(
-        [ballot("index-only", ("https://abolishus.eth.limo",), True, [("x-content-type-options", "nosniff")]), challenge()],
+        [
+            ballot(
+                "index-only",
+                ("https://abolishus.eth.limo",),
+                True,
+                [("content-security-policy", "default-src 'none'"), ("x-content-type-options", "nosniff")],
+            ),
+            challenge(),
+        ],
         1,
         first_hash,
         "small",
     )
 
     valid = [
-        ("first", "The first release in a registry: sequence 0, previous all zero, one site of one file and no headers", first),
+        ("first", "The first release in a registry: sequence 0, previous all zero, one site of one file and only its CSP", first),
         ("typical", "A ballot client and a challenge page, the release after `first`", typical),
-        ("loopback-only", "A ballot site with no listed origin, served only by apps/node at a loopback origin", base([ballot("index-only", (), True, [])], 2, first_hash, "loopback")),
+        ("loopback-only", "A ballot site with no listed origin, served only by apps/node at a loopback origin", base([ballot("index-only", (), True, only_csp)], 2, first_hash, "loopback")),
         (
             "boundaries",
             "Origins with a port and a 253-byte host, eight origins, sixteen headers, a 4,096-byte header value and a 127-byte media type",
@@ -657,7 +682,7 @@ def main():
         ("name-order", "File paths in byte order across punctuation, digits and both cases", base([ballot("name-order")], 6, first_hash, "order")),
         ("identical-files", "The same bytes at two paths", base([ballot("identical-files")], 7, first_hash, "identical")),
         ("chunk-boundaries", "Files of one chunk and one chunk and a byte", base([ballot("chunk-boundaries")], 8, first_hash, "chunks")),
-        ("max-sequence", "The largest sequence a u64 holds", base([ballot("index-only", ("https://ballot-staging.up.railway.app",), False, [])], 2**64 - 1, first_hash, "max")),
+        ("max-sequence", "The largest sequence a u64 holds", base([ballot("index-only", ("https://ballot-staging.up.railway.app",), False, only_csp)], 2**64 - 1, first_hash, "max")),
     ]
 
     out_vectors = []
@@ -739,7 +764,8 @@ def boundaries(ballot, site_vectors):
     )
     headers = sorted(
         [("x-max", "v" * MAX_HEADER_VALUE), ("x-" + "n" * (MAX_HEADER_NAME - 2), "~")]
-        + [(f"x-h{i:02d}", f"value {i}") for i in range(14)]
+        + [("content-security-policy", "default-src 'none'")]
+        + [(f"x-h{i:02d}", f"value {i}") for i in range(13)]
     )
     s = ballot("index-only", origins, True, headers)
     s["files"][0]["media_type"] = b"application/" + b"x" * (MAX_MEDIA_TYPE - len(b"application/"))
@@ -790,15 +816,23 @@ def ill_formed_cases():
         ("origin-label-long", "A 64-byte label", origins(0, [b"https://" + b"a" * 64 + b".y"]), "origin", S0),
         ("origin-host-long", "A 254-byte host", origins(0, [b"https://" + b".".join([b"a" * 63] * 3 + [b"b" * 62])]), "origin", S0),
         ("origin-userinfo", "An origin with userinfo", origins(0, [b"https://u@x.y"]), "origin", S0),
+        ("origin-hex-ipv4", "A last label a URL parser reads as a hex number, making the host an IPv4 address", origins(0, [b"https://1.2.3.0x4"]), "origin", S0),
+        ("origin-0x-tld", "A last label of 0x alone", origins(0, [b"https://a.0x"]), "origin", S0),
+        ("origin-digit-tld", "A last label starting with a digit", origins(0, [b"https://a.9b"]), "origin", S0),
         ("origins-unsorted", "Origins out of order", origins(0, [b"https://b.y", b"https://a.y"]), "origin-order", S0),
         ("origins-repeated", "An origin listed twice", origins(0, [b"https://a.y", b"https://a.y"]), "origin-order", S0),
         ("unreachable", "No origin and no loopback", lambda r: (r["sites"][0].__setitem__("origins", []), r["sites"][0].__setitem__("loopback", False)), "site-unreachable", S0),
         ("challenge-loopback", "A challenge page served at a loopback origin", site(1, lambda s: s.__setitem__("loopback", True)), "loopback-site", S1),
+        ("challenge-two-origins", "A challenge page at two origins", origins(1, [b"https://c1.example", b"https://c2.example"]), "challenge-origin", S1),
         ("header-upper", "An upper-case header name", headers(0, [(b"X-A", b"v")]), "header-name", S0),
         ("header-empty-name", "An empty header name", headers(0, [(b"", b"v")]), "header-name", S0),
         ("header-colon", "A header name with a colon", headers(0, [(b"x:a", b"v")]), "header-name", S0),
         ("header-content-type", "content-type among the site's headers", headers(0, [(b"content-type", b"text/html")]), "header-reserved", S0),
         ("header-content-encoding", "content-encoding among the site's headers", headers(0, [(b"content-encoding", b"gzip")]), "header-reserved", S0),
+        *[
+            (f"header-{n}", f"{n} among the site's headers", headers(0, [(n.encode(), b"v")]), "header-reserved", S0)
+            for n in ["connection", "content-length", "content-range", "keep-alive", "proxy-connection", "te", "transfer-encoding", "upgrade"]
+        ],
         ("header-empty-value", "An empty header value", headers(0, [(b"x-a", b"")]), "header-value", S0),
         ("header-value-space", "A header value ending in a space", headers(0, [(b"x-a", b"v ")]), "header-value", S0),
         ("header-value-newline", "A header value with a line feed", headers(0, [(b"x-a", b"v\nx-b: w")]), "header-value", S0),
@@ -806,6 +840,7 @@ def ill_formed_cases():
         ("header-value-8bit", "A header value with a byte above 0x7e", headers(0, [(b"x-a", b"v\x80")]), "header-value", S0),
         ("headers-unsorted", "Header names out of order", headers(0, [(b"x-b", b"v"), (b"x-a", b"v")]), "header-order", S0),
         ("headers-repeated", "A header listed twice", headers(0, [(b"x-a", b"v"), (b"x-a", b"w")]), "header-order", S0),
+        ("no-csp", "A site without a content-security-policy header", headers(1, [(b"x-content-type-options", b"nosniff")]), "site-csp", S1),
         ("path-leading-slash", "A path with a leading slash", paths(1, [b"/index.html"]), "path", S1),
         ("path-dot", "A `.` segment", paths(1, [b"./index.html"]), "path", S1),
         ("path-dot-dot", "A `..` segment", paths(1, [b"a/../index.html"]), "path", S1),
@@ -817,6 +852,8 @@ def ill_formed_cases():
         ("path-long-segment", "A 129-byte segment", paths(1, [b"a" * 129]), "path", S1),
         ("path-deep", "A path of 17 segments", paths(1, [b"/".join([b"d"] * 17)]), "path", S1),
         ("path-empty", "An empty path", paths(1, [b""]), "path", S1),
+        ("path-redirects", "A root _redirects file, which IPFS gateways apply", paths(1, [b"_redirects", b"index.html"]), "path-reserved", S1),
+        ("path-headers", "A root _headers file, which some hosts apply", paths(1, [b"_headers", b"index.html"]), "path-reserved", S1),
         ("paths-unsorted", "Paths out of order", paths(1, [b"index.html", b"assets/a.js"]), "path-order", S1),
         ("paths-repeated", "A path listed twice", paths(1, [b"index.html", b"index.html"]), "path-order", S1),
         ("path-conflict", "A path that is also a directory", paths(1, [b"a", b"a/b", b"index.html"]), "path-conflict", S1),
@@ -834,6 +871,27 @@ def ill_formed_cases():
         ("directory-raw", "A directory CID with the raw codec", site(1, lambda s: s.__setitem__("directory", bytes([0x01, 0x55, 0x12, 0x20]) + s["directory"][4:])), "directory-cid", S1),
         ("directory-cidv0-prefix", "A directory CID that isn't CIDv1", site(1, lambda s: s.__setitem__("directory", bytes([0x00, 0x70, 0x12, 0x20]) + s["directory"][4:])), "directory-cid", S1),
         ("origin-shared", "The ballot client and the challenge page at one origin", origins(1, [b"https://abolishus.eth.limo"]), "origin-shared", {}),
+        (
+            "rule-order-sites",
+            "A late rule in the ballot site and an early one in the challenge page: the ballot site's comes first",
+            lambda r: (r["sites"][0]["files"][0].__setitem__("media_type", b"x"), r["sites"][1].__setitem__("origins", [b"http://x.y"])),
+            "media-type",
+            S0,
+        ),
+        (
+            "rule-order-in-site",
+            "A bad header value and a bad origin in one site: origin comes first",
+            lambda r: (r["sites"][0]["headers"][0].__setitem__("value", b""), r["sites"][0].__setitem__("origins", [b"http://x.y"])),
+            "origin",
+            S0,
+        ),
+        (
+            "rule-order-ballot",
+            "Only a challenge page, with a bad origin: site-ballot comes first",
+            lambda r: (r.__setitem__("sites", r["sites"][1:]), r["sites"][0].__setitem__("origins", [b"http://x.y"])),
+            "site-ballot",
+            {},
+        ),
         ("rule-order", "A bad chain and a bad origin: release-chain comes first", lambda r: (r.__setitem__("sequence", 0), r["sites"][0].__setitem__("origins", [b"http://x.y"])), "release-chain", {}),
     ]
 
@@ -882,7 +940,11 @@ def _site_offsets(enc, origins_count):
         at += 4 + int.from_bytes(enc[at : at + 4], "big")
     loopback = at
     headers = loopback + 1
-    files = headers + 4  # no headers in `first`
+    at = headers + 4
+    for _ in range(int.from_bytes(enc[headers : headers + 4], "big")):
+        for _field in range(2):
+            at += 4 + int.from_bytes(enc[at : at + 4], "big")
+    files = at
     path = files + 4
     plen = int.from_bytes(enc[path : path + 4], "big")
     media = path + 4 + plen + 8 + 32

@@ -712,17 +712,15 @@ export function openSummedSharesWith(
   }
   // Every message that reaches decapsulation runs the whole summed-share
   // check, over placeholder shares if it didn't open to `m` canonical ones,
-  // so its time doesn't tell `summed-decrypt` from `summed-check` to a
-  // registered sender (Notes; T-39). Only a sender that knows `K` can choose
-  // a plaintext that opens, and one with zero scalars costs less: that tells
-  // it only that the message decrypted, which the accept or reject bit the
-  // Notes allow already does for a sender that seals its own sums.
+  // so its curve work doesn't tell `summed-decrypt` from `summed-check` to a
+  // registered sender (Notes; T-39). `checkEveryShare` blinds the scalars, so
+  // zeros in a plaintext the sender chose cost what any others do.
   const passes = checkEveryShare(aggregate, msg.sender, summed ?? placeholder(optionCount));
   if (summed === undefined) return { ok: false, code: "summed-decrypt" };
   if (!passes) return { ok: false, code: "summed-check" };
   return { ok: true, cell: msg.cell, sender: msg.sender, summed };
 }
 
-/** Shares of the check's shape that open no message: nonzero, so they cost what a real share does. */
+/** Shares of the check's shape, for a message that opened none. */
 const placeholder = (m: number): readonly Share[] =>
   Array.from({ length: m }, () => ({ v: 1n, r: 1n }));

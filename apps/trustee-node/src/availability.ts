@@ -41,6 +41,7 @@ import { RpcError } from "@abolishus/node";
 import type { ApprovedElection } from "./ceremony.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
+import { ViewError } from "./view.ts";
 
 export type AvailabilityKind = "attestation" | "complaint";
 
@@ -209,6 +210,18 @@ function extentObjects(
   return objects;
 }
 
+// Where a seat's ballot-extent records for a definition live.
+const extentPrefix = (definitionHash: Uint8Array) => `availability/${hex(definitionHash)}/ballot`;
+
+/**
+ * Whether the seat stored its ballot-extent attestation for the definition,
+ * which `AvailabilitySeat.heldExtent` needs before it reads anything: a
+ * seat that didn't attest has no extent, whatever its nodes answer.
+ */
+export async function attested(store: SeatStore, definitionHash: Uint8Array): Promise<boolean> {
+  return (await store.get(`${extentPrefix(definitionHash)}/attestation`)) !== undefined;
+}
+
 /**
  * The ballot-extent duty of one seat of the default panel for one election
  * it approved. `step` is idempotent: the node calls it on a schedule until it
@@ -225,7 +238,7 @@ export class AvailabilitySeat {
     if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1)
       throw new RangeError("availability: maxBytes must be a positive integer");
     this.#o = options;
-    this.#prefix = `availability/${hex(options.election.definitionHash)}/ballot`;
+    this.#prefix = extentPrefix(options.election.definitionHash);
   }
 
   /** `c_I`: the seat sends its ballot-extent record by then (docs/spec/availability.md, Windows). */
@@ -310,9 +323,9 @@ export class AvailabilitySeat {
    * what a node owes); undefined unless its attestation is stored. Only an
    * attesting seat holds every segment through `s_A`, which is what lets it
    * show a ballot absent. Throws `RpcError` while the L1 node shows another
-   * `C_A` than the attested one (it hides an anchor, or lags), and an
-   * `Error` when the pinned blocks no longer hold the extent: the seat
-   * decides over nothing it can't read.
+   * `C_A` than the attested one (it hides an anchor, or lags), and
+   * `ViewError` `extent-lost` when the pinned blocks no longer hold the
+   * extent: the seat decides over nothing it can't read.
    */
   async heldExtent(): Promise<HeldExtent | undefined> {
     const o = this.#o;
@@ -324,8 +337,7 @@ export class AvailabilitySeat {
     if ("state" in extent || !equal(checkpointHash(extent.checkpoint), attested))
       throw new RpcError("the L1 node doesn't show the attested ballot-extent checkpoint");
     const held = await this.#held(extent.through, clock, now);
-    if (!("entries" in held))
-      throw new Error("trustee node: the attested ballot extent isn't held any more");
+    if (!("entries" in held)) throw new ViewError("extent-lost");
     return { entries: held.entries, boardSegment: extent.boardSegment };
   }
 

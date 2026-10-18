@@ -1,8 +1,8 @@
 // The node's command line: `keygen`, a seat's identity key; `run`, one
-// seat's node against its coordinator, with its availability duty and the
-// gateway serving what it attests when the configuration names the chains
-// and sources it needs, and its intake endpoint when it names where to
-// listen; and `local-ceremony`, a whole
+// seat's node against its coordinator, with its availability and receipt
+// duties and the gateway serving what it attests when the configuration
+// names the chains and sources they need, and its intake endpoint when it
+// names where to listen; and `local-ceremony`, a whole
 // ceremony between a local panel's nodes and a local coordinator over HTTP
 // on loopback. Output is one JSON object per line, never a secret.
 import { once } from "node:events";
@@ -16,10 +16,12 @@ import {
   type BoardEntryVersion,
   encodeElectionDefinition,
   identityKey,
+  type Panel,
 } from "@abolishus/crypto";
 import { gateway, mirrorThen, type Rpc, rpcClient, RpcError } from "@abolishus/node";
 import { gatewaySource } from "@abolishus/verifier";
 import {
+  attested,
   type AvailabilityOptions,
   AvailabilitySeat,
   type ContractPath,
@@ -36,17 +38,19 @@ import {
   readIdentityKey,
   readTlsKey,
 } from "./config.ts";
-import { AvailabilityDuties, type DutyEvent } from "./duties.ts";
+import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
+import { AvailabilityDuties, type DutyEvent, ReceiptDuties } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
 import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
-import { l2RecordedAvailability, RecordedError } from "./recorded.ts";
-import { availabilitySender, SendError } from "./send.ts";
+import { l2RecordedAvailability, l2RecordedReceiptBatches, RecordedError } from "./recorded.ts";
+import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
+import { obligationView, type ViewOptions } from "./view.ts";
 
 export interface CliIo {
   readonly out: (value: unknown) => void;
@@ -134,7 +138,7 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
     coordinator: new HttpCoordinator(config.coordinator),
     log: (e: NodeEvent) => io.out(e),
   });
-  let availability: { duties: AvailabilityDuties; server: Server } | undefined;
+  let availability: Duties | undefined;
   try {
     availability = await availabilityDuties(config, seat, store, identitySecret, io);
   } catch (e) {
@@ -142,20 +146,24 @@ async function runNode(args: readonly string[], io: CliIo): Promise<number> {
     io.err({ error: `availability: ${e.message}` });
     return 1;
   }
-  const duties = availability?.duties;
   const endpoint = await intakeEndpoint(config, seat, store, io);
   io.out({
     event: "started",
     seat: config.seat,
-    availability: duties !== undefined,
+    availability: availability !== undefined,
     ...(endpoint === undefined ? {} : { intake: endpoint.url }),
   });
-  // Either loop failing (a store it can't read) stops the other, and the
-  // failure is rethrown once both have stopped and the gateway is closed.
+  // Any loop failing (a store it can't read) stops the others, and the
+  // failure is rethrown once all have stopped and the gateway is closed.
   const stop = new AbortController();
   const signal = AbortSignal.any([stop.signal, io.signal]);
   const ms = config.pollSeconds * 1000;
-  const loops = [node.run(signal, ms), ...(duties ? [duties.run(signal, ms)] : [])].map((loop) =>
+  const loops = [
+    node.run(signal, ms),
+    ...(availability
+      ? [availability.duties.run(signal, ms), availability.receipts.run(signal, ms)]
+      : []),
+  ].map((loop) =>
     loop.catch((error: unknown) => {
       stop.abort();
       throw error;
@@ -225,15 +233,23 @@ async function intakeEndpoint(
   }
 }
 
+/** The duties `run` steps beside the ceremony, and the gateway serving what the seat attests. */
+interface Duties {
+  readonly duties: AvailabilityDuties;
+  readonly receipts: ReceiptDuties;
+  readonly server: Server;
+}
+
 /**
- * The availability duty over the configured nodes, contracts and sources
- * (README, Availability duty), with the gateway serving the blocks
- * directory and what the duty pins into it, listening; or undefined when the
- * configuration has no `availability`. One sender for the one paying
- * account, shared by every election, so two sends never take one nonce. Its
- * setup checks both chains and the contracts' code: a mismatch, or an
- * address the gateway can't listen on, is the configuration's error, a node
- * that can't be read an `RpcError`.
+ * The availability and receipt duties over the configured nodes, contracts
+ * and sources (README, Availability duty and Receipt duty), with the gateway
+ * serving the blocks directory and what the availability duty pins into it,
+ * listening; or undefined when the configuration has no `availability`. One
+ * sender for the one paying account, shared by every election and both
+ * duties, so two sends never take one nonce. Its setup checks both chains
+ * and the contracts' code: a mismatch, or an address the gateway can't
+ * listen on, is the configuration's error, a node that can't be read an
+ * `RpcError`.
  */
 async function availabilityDuties(
   config: NodeConfig,
@@ -241,7 +257,7 @@ async function availabilityDuties(
   store: SeatStore,
   identitySecret: Uint8Array,
   io: CliIo,
-): Promise<{ duties: AvailabilityDuties; server: Server } | undefined> {
+): Promise<Duties | undefined> {
   const a = config.availability;
   if (a === undefined) return undefined;
   const l1 = rpcClient(a.l1);
@@ -252,29 +268,33 @@ async function availabilityDuties(
   if (Buffer.from(accountKey).equals(Buffer.from(identitySecret)))
     throw new ConfigError("account key: must not be the identity key");
   const clock = () => BigInt(Math.floor(Date.now() / 1000));
-  let contract;
+  let contract: ContractPath;
+  let receiptPath: ReceiptPath;
   try {
-    contract = {
-      send: await availabilitySender({
-        l2,
-        l2ChainId: config.l2ChainId,
-        l1,
-        l1ChainId: a.l1ChainId,
-        board: a.board,
-        portal: a.portal,
-        accountKey,
-        l2MaxFeePerGas: a.l2MaxFeePerGas,
-        l1MaxFeePerGas: a.l1MaxFeePerGas,
-        forceAfter: a.forceAfter,
-        forceLead: a.forceLead,
-        clock,
-      }),
-      recorded: await l2RecordedAvailability({
-        l2,
-        l2ChainId: config.l2ChainId,
-        board: a.board,
-        l2FromBlock: a.boardFromBlock,
-      }),
+    const sender = await boardSender({
+      l2,
+      l2ChainId: config.l2ChainId,
+      l1,
+      l1ChainId: a.l1ChainId,
+      board: a.board,
+      portal: a.portal,
+      accountKey,
+      l2MaxFeePerGas: a.l2MaxFeePerGas,
+      l1MaxFeePerGas: a.l1MaxFeePerGas,
+      forceAfter: a.forceAfter,
+      forceLead: a.forceLead,
+      clock,
+    });
+    const recorded = {
+      l2,
+      l2ChainId: config.l2ChainId,
+      board: a.board,
+      l2FromBlock: a.boardFromBlock,
+    };
+    contract = { send: sender.availability, recorded: await l2RecordedAvailability(recorded) };
+    receiptPath = {
+      send: sender.receiptBatch,
+      recorded: await l2RecordedReceiptBatches(recorded),
     };
   } catch (e) {
     // A RangeError here is the sender's option check, which never quotes the key.
@@ -285,10 +305,11 @@ async function availabilityDuties(
   const served = await servedOf(a.blocks, io);
   const gateways: AsyncBlockSource =
     a.gateways.length > 0 ? gatewaySource(a.gateways).source : () => Promise.resolve([]);
-  const wiring = dutyWiring(config.l2ChainId, a, {
+  const wiring = dutyWiring(config, a, {
     l1,
     l2,
     contract,
+    receipts: receiptPath,
     served,
     gateways,
     store,
@@ -303,6 +324,12 @@ async function availabilityDuties(
       return new AvailabilitySeat(wiring.seat(election, reader));
     },
   });
+  const receipts = new ReceiptDuties({
+    seat,
+    clock,
+    log: (e: DutyEvent) => io.out(e),
+    build: async (election) => new ReceiptDuty(wiring.receipts(election)),
+  });
   const server = gateway(served);
   server.listen(a.serve.port, a.serve.host);
   try {
@@ -316,7 +343,7 @@ async function availabilityDuties(
     io.err({ error: `serve: ${e.code ?? "failed"}` }),
   );
   io.out({ event: "serving", address: server.address() });
-  return { duties, server };
+  return { duties, receipts, server };
 }
 
 /** What `run` builds the duty over, besides the configuration. */
@@ -324,6 +351,8 @@ export interface DutySources {
   readonly l1: Rpc;
   readonly l2: Rpc;
   readonly contract: ContractPath;
+  /** The board's receipt-batch call, over the same account as `contract`. */
+  readonly receipts: ReceiptPath;
   /** The blocks directory, read first, where the seat pins what it attests. */
   readonly served: ServedBlocks;
   readonly gateways: AsyncBlockSource;
@@ -332,13 +361,18 @@ export interface DutySources {
 }
 
 /**
- * The L1 reader's options and each election's duty options from the
+ * The L1 reader's options, each election's availability duty options, the
+ * decision's view and each election's receipt duty options from the
  * configuration: the board is checked under the registered definition's
  * own board-entry pin, which the reader gives, never a configured one;
  * blocks are read from the directory the seat pins into, then the gateways.
+ * The view reads the extent the seat attested through a reader and an
+ * `AvailabilitySeat` set up as its availability duty's are, over the same
+ * store, so it sees the attestation that duty stored and the blocks it
+ * pinned (README, View).
  */
 export function dutyWiring(
-  l2ChainId: bigint,
+  config: { readonly l2ChainId: bigint; readonly panel: Panel },
   a: AvailabilityConfig,
   s: DutySources,
 ): {
@@ -347,34 +381,70 @@ export function dutyWiring(
     election: ApprovedElection,
     reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
   ) => AvailabilityOptions;
+  readonly view: ViewOptions;
+  readonly receipts: (election: ApprovedElection) => ReceiptDutyOptions;
 } {
+  const { l2ChainId } = config;
   // The directory first: a block it holds costs no request and tells no
   // gateway which election the seat reads (T-11). Every block is checked
   // against its CID by the readers, so neither source is trusted (T-49, T-53).
   const blocks = mirrorThen(s.served, s.gateways);
+  const anchors: L1AnchorOptions = {
+    l1: s.l1,
+    l1ChainId: a.l1ChainId,
+    anchor: a.anchor,
+    timing: a.anchorClock,
+    l1FromBlock: a.anchorFromBlock,
+    l2: s.l2,
+    l2ChainId,
+    registry: a.registry,
+    l2FromBlock: a.registryFromBlock,
+  };
+  const seat = (
+    election: ApprovedElection,
+    reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
+  ): AvailabilityOptions => ({
+    store: s.store,
+    election,
+    boardVersion: reader.boardVersion,
+    l1: reader,
+    blocks,
+    pin: s.served.pin,
+    contract: s.contract,
+    clock: s.clock,
+    sendMargin: a.sendMargin,
+    maxBytes: a.maxBoardBytes,
+  });
+  const view: ViewOptions = {
+    store: s.store,
+    panel: config.panel,
+    l1: s.l1,
+    l1ChainId: a.l1ChainId,
+    l2: s.l2,
+    l2ChainId,
+    registry: a.registry,
+    registryFromBlock: a.registryFromBlock,
+    board: a.board,
+    boardFromBlock: a.boardFromBlock,
+    // Only an attesting seat sets up the reader, so a seat that didn't
+    // attest decides over its own intake whatever the L1 reader says.
+    extent: async (election) =>
+      (await attested(s.store, election.definitionHash))
+        ? new AvailabilitySeat(seat(election, await l1BoardAnchors(anchors, election))).heldExtent()
+        : undefined,
+  };
+  // One view for every election: it holds no state of its own.
+  const decide = obligationView(view);
   return {
-    anchors: {
-      l1: s.l1,
-      l1ChainId: a.l1ChainId,
-      anchor: a.anchor,
-      timing: a.anchorClock,
-      l1FromBlock: a.anchorFromBlock,
-      l2: s.l2,
-      l2ChainId,
-      registry: a.registry,
-      l2FromBlock: a.registryFromBlock,
-    },
-    seat: (election, reader) => ({
+    anchors,
+    seat,
+    view,
+    receipts: (election) => ({
       store: s.store,
       election,
-      boardVersion: reader.boardVersion,
-      l1: reader,
-      blocks,
-      pin: s.served.pin,
-      contract: s.contract,
-      clock: s.clock,
-      sendMargin: a.sendMargin,
-      maxBytes: a.maxBoardBytes,
+      view: decide,
+      contract: s.receipts,
+      now: s.clock,
     }),
   };
 }

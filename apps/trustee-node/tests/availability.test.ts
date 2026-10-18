@@ -34,6 +34,7 @@ import {
 } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
+import { ViewError } from "../src/view.ts";
 import {
   type Election,
   election,
@@ -308,7 +309,7 @@ describe("the ballot extent", () => {
     await expect(w.seat.heldExtent()).rejects.toBeInstanceOf(RpcError);
     w.anchors = w.board.anchors;
     w.withheld.add(10);
-    await expect(w.seat.heldExtent()).rejects.toThrow("isn't held any more");
+    await expect(w.seat.heldExtent()).rejects.toEqual(new ViewError("extent-lost"));
   });
 
   test("a threshold of seats' attestations makes the ballot extent available", async () => {

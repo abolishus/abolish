@@ -1,46 +1,55 @@
-// The availability duty in a deployment: one `AvailabilitySeat` for each
-// election the seat approved, built once its sources can be set up, stepped
-// on a schedule until it settles (docs/spec/availability.md, What a seat
-// does; T-24, T-54). This file only schedules: what the seat signs, stores
-// and sends is `AvailabilitySeat`'s, so a crash, a restart or a step that
-// fails midway resends the stored record and never signs another.
+// A seat's duties in a deployment: for each election the seat approved, one
+// duty, built once its sources can be set up and stepped on a schedule until
+// it settles. Two kinds run so: the availability duty (`AvailabilitySeat`,
+// docs/spec/availability.md, What a seat does; T-24, T-54) and the receipt
+// duty (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52).
+// This file only schedules: what the seat decides, signs, stores and sends is
+// the duty's, so a crash, a restart or a step that fails midway resends the
+// stored record and never signs another.
 import { setTimeout as sleep } from "node:timers/promises";
-import { availabilityWindows } from "@abolishus/crypto";
+import { availabilityWindows, deliveryDeadlines } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import type { AvailabilitySeat, AvailabilityStatus } from "./availability.ts";
 import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
+import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
 import { L1AnchorError } from "./l1.ts";
 import { SendError } from "./send.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
+import { ViewError } from "./view.ts";
 
 /**
- * What the duties report: each election's status when it changes, and why a
- * step failed. Never a secret: stub hashes, states and error codes only, and
- * an RPC error's message, which names the method and never the node's URL.
+ * What one kind of duty reports: each election's status when it changes,
+ * and why a step failed. Never a secret: stub hashes, states, counts and
+ * error codes only, and an RPC error's message, which names the method and
+ * never the node's URL.
  */
-export type DutyEvent =
-  | ({ readonly event: "availability"; readonly stubHash: string } & StatusFields)
+export type KindEvent<K extends string, S> =
+  | ({ readonly event: K; readonly stubHash: string } & Logged<S>)
   | {
-      readonly event: "availability-error";
+      readonly event: `${K}-error`;
       readonly stubHash: string;
       readonly error: string;
       readonly message: string;
     }
   /**
-   * `t_A` passed before the election's duty could be set up (never
-   * registered, or never final at the seat's nodes): nothing it sent could
-   * count any more, so the node stops trying.
+   * The duty's deadline (`t_A`, `t_D`) passed before it could be set up
+   * (never registered, or never final at the seat's nodes): nothing it sent
+   * could count any more, so the node stops trying.
    */
-  | { readonly event: "availability-abandoned"; readonly stubHash: string };
+  | { readonly event: `${K}-abandoned`; readonly stubHash: string };
+
+export type AvailabilityEvent = KindEvent<"availability", AvailabilityStatus>;
+export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
+/** What the duties report. */
+export type DutyEvent = AvailabilityEvent | ReceiptEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
   ? { readonly [K in keyof S]: S[K] extends bigint ? string : S[K] }
   : never;
-type StatusFields = Logged<AvailabilityStatus>;
 
-export interface DutyOptions {
+export interface DutyOptions<D = Duty, E = AvailabilityEvent> {
   readonly seat: Pick<CeremonySeat, "approvedStubs" | "approvedElection">;
   /**
    * The election's duty over the deployment's sources. Throws
@@ -48,10 +57,10 @@ export interface DutyOptions {
    * registered another definition, the anchor's clock isn't the pinned
    * one), and an RPC or L2 error while it can't be read yet.
    */
-  readonly build: (election: ApprovedElection) => Promise<Duty>;
+  readonly build: (election: ApprovedElection) => Promise<D>;
   /** The node's wall clock, in seconds. */
   readonly clock: () => bigint;
-  readonly log: (event: DutyEvent) => void;
+  readonly log: (event: E) => void;
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -62,20 +71,47 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 // be read, a bug) ends the loop, as it ends the ceremony's: the node acts
 // on nothing it can't read.
 const RETRIED = [RpcError, L1Error, L2Error, SendError] as const;
+// Refusals no retry changes: the seat can never read this election under
+// this deployment (another registered definition, a wrong anchor clock, a
+// node on another chain, a poll too long to read), so the duty is given up
+// and the operator must look (T-53).
+const FINAL = [L1AnchorError, ViewError] as const;
 
-/** What the schedule needs of an election's duty: `AvailabilitySeat`. */
+/** What the schedule needs of an election's availability duty: `AvailabilitySeat`. */
 export type Duty = Pick<AvailabilitySeat, "step" | "deadline">;
+/** What the schedule needs of an election's receipt duty: `ReceiptDuty`. */
+export type ReceiptStep = Pick<ReceiptDuty, "step" | "deadline">;
 
-export class AvailabilityDuties {
-  readonly #o: DutyOptions;
-  readonly #duties = new Map<string, { readonly seat: Duty; readonly deadline: bigint }>();
+/** What the schedule needs of any duty. */
+interface Stepped<S> {
+  readonly step: () => Promise<S>;
+  /** Past this, a status the duty settles on is final. */
+  readonly deadline: bigint;
+}
+
+/** What sets one kind of duty apart in the schedule. */
+interface Kind<K extends string, S> {
+  readonly name: K;
+  /** The duty's deadline, from the election alone, so a duty never built can be given up. */
+  readonly deadline: (election: ApprovedElection) => bigint;
+  /** Whether `status`, from a step begun at `wall`, ends the duty. */
+  readonly settles: (status: S, wall: bigint, deadline: bigint) => boolean;
+}
+
+/** One kind of duty for every election the seat approved, each built once and stepped until it settles. */
+class ElectionDuties<K extends string, S extends object> {
+  readonly #kind: Kind<K, S>;
+  readonly #o: DutyOptions<Stepped<S>, KindEvent<K, S>>;
+  // Each built duty, with its deadline read once.
+  readonly #duties = new Map<string, { readonly seat: Stepped<S>; readonly deadline: bigint }>();
   // Elections whose duty is over, or that can never be read: never stepped again.
   readonly #settled = new Set<string>();
   // The last line logged per election, so a status or a failure that repeats
   // every step is reported once.
   readonly #last = new Map<string, string>();
 
-  constructor(options: DutyOptions) {
+  constructor(kind: Kind<K, S>, options: DutyOptions<Stepped<S>, KindEvent<K, S>>) {
+    this.#kind = kind;
     this.#o = options;
   }
 
@@ -95,8 +131,9 @@ export class AvailabilityDuties {
   async #stepOne(stubHash: Uint8Array): Promise<void> {
     const name = hex(stubHash);
     // Read before the step, so a status settles the duty only by a time the
-    // step itself had passed: `past-cutoff` at a wall before `t_A` steps
-    // once more, and reports `unrecorded` if its record never was.
+    // step itself had passed: the availability duty's `past-cutoff` at a wall
+    // before `t_A` steps once more, and reports `unrecorded` if its record
+    // never was.
     const wall = this.#o.clock();
     let duty = this.#duties.get(name);
     try {
@@ -106,10 +143,12 @@ export class AvailabilityDuties {
       }
       const status = await duty.seat.step();
       this.#report(name, status);
-      if (settles(status, wall, duty.deadline)) this.#settle(name);
+      if (this.#kind.settles(status, wall, duty.deadline)) this.#settle(name);
     } catch (e) {
-      if (!RETRIED.some((type) => e instanceof type)) throw e;
+      const final = FINAL.some((type) => e instanceof type);
+      if (!final && !RETRIED.some((type) => e instanceof type)) throw e;
       this.#failed(name, e as Error);
+      if (final) this.#settle(name);
     }
   }
 
@@ -130,32 +169,23 @@ export class AvailabilityDuties {
     stubHash: Uint8Array,
     name: string,
     wall: bigint,
-  ): Promise<{ readonly seat: Duty; readonly deadline: bigint } | undefined> {
+  ): Promise<{ readonly seat: Stepped<S>; readonly deadline: bigint } | undefined> {
     const election = await this.#o.seat.approvedElection(stubHash);
     // Listed as approved, so its records exist; approvedElection throws if they don't.
     if (election === undefined) throw new Error(`trustee node: approval ${name} has no election`);
-    // `t_A`, as `AvailabilitySeat.deadline` computes it.
-    const { ballotDeadline } = availabilityWindows(
-      election.closesAt,
-      election.l1InclusionBound,
-      0n,
-      RELEASE_WINDOWS,
-    );
-    let seat: Duty;
+    let seat;
     try {
       seat = await this.#o.build(election);
     } catch (e) {
-      // A duty set up past `t_A` could send nothing that counts, so an
-      // election never registered stops costing reads every poll.
-      if (wall > ballotDeadline && RETRIED.some((type) => e instanceof type)) {
+      // A duty set up past its deadline could send nothing that counts, so
+      // an election never registered stops costing reads every poll.
+      if (wall > this.#kind.deadline(election) && RETRIED.some((type) => e instanceof type)) {
         this.#settle(name);
-        this.#o.log({ event: "availability-abandoned", stubHash: name });
+        this.#o.log({ event: `${this.#kind.name}-abandoned`, stubHash: name } as KindEvent<K, S>);
         return undefined;
       }
-      if (!(e instanceof L1AnchorError)) throw e;
-      // None of these changes on a retry: the seat can never attest this
-      // board under this deployment, and the operator must look (T-53).
-      this.#failed(name, e);
+      if (!FINAL.some((type) => e instanceof type)) throw e;
+      this.#failed(name, e as Error);
       this.#settle(name);
       return undefined;
     }
@@ -170,23 +200,23 @@ export class AvailabilityDuties {
     this.#last.delete(name);
   }
 
-  #report(name: string, status: AvailabilityStatus): void {
+  #report(name: string, status: S): void {
     const fields = Object.fromEntries(
       Object.entries(status).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v]),
-    ) as StatusFields;
-    this.#once(name, { event: "availability", stubHash: name, ...fields });
+    );
+    this.#once(name, { event: this.#kind.name, stubHash: name, ...fields } as KindEvent<K, S>);
   }
 
   #failed(name: string, e: Error): void {
     this.#once(name, {
-      event: "availability-error",
+      event: `${this.#kind.name}-error`,
       stubHash: name,
       error: e.name,
       message: e.message,
-    });
+    } as KindEvent<K, S>);
   }
 
-  #once(name: string, event: DutyEvent): void {
+  #once(name: string, event: KindEvent<K, S>): void {
     const line = JSON.stringify(event);
     if (this.#last.get(name) === line) return;
     this.#last.set(name, line);
@@ -195,19 +225,56 @@ export class AvailabilityDuties {
 }
 
 /**
- * Whether the duty is over (AvailabilitySeat's `step`): the attestation is
- * recorded, an alarm no step can clear, or `c_I` has passed with nothing
- * left that can count, once `t_A` is behind the node.
+ * The availability duty of every election the seat approved: each one's
+ * `AvailabilitySeat`, built once its L1 reader can be set up and stepped
+ * until its attestation is recorded, an alarm no step can clear, or `c_I`
+ * has passed with nothing left that can count, once `t_A` is behind the node.
  */
-function settles(status: AvailabilityStatus, wall: bigint, deadline: bigint): boolean {
-  switch (status.state) {
-    case "recorded":
-    case "unrecorded":
-    case "foreign-record":
-      return true;
-    case "past-cutoff":
-      return wall > deadline;
-    default:
-      return false;
+export class AvailabilityDuties extends ElectionDuties<"availability", AvailabilityStatus> {
+  constructor(options: DutyOptions<Duty, AvailabilityEvent>) {
+    super(
+      {
+        name: "availability",
+        // `t_A`, as `AvailabilitySeat.deadline` computes it.
+        deadline: (e) =>
+          availabilityWindows(e.closesAt, e.l1InclusionBound, 0n, RELEASE_WINDOWS).ballotDeadline,
+        settles: (status, wall, deadline) => {
+          switch (status.state) {
+            case "recorded":
+            case "unrecorded":
+            case "foreign-record":
+              return true;
+            case "past-cutoff":
+              return wall > deadline;
+            default:
+              return false;
+          }
+        },
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * The receipt duty of every election the seat approved: each one's
+ * `ReceiptDuty`, stepped from before `c_I` (it decides nothing until then)
+ * until every batch the decision owes is recorded, or `t_D` has passed with
+ * some never recorded (`unrecorded`, an alarm). A view no retry can read
+ * (`ViewError`, `L1AnchorError`) gives the election up, reported: the seat
+ * then sends nothing through the contract path for it, and its operator
+ * must look (T-25, T-53).
+ */
+export class ReceiptDuties extends ElectionDuties<"receipts", ReceiptDutyStatus> {
+  constructor(options: DutyOptions<ReceiptStep, ReceiptEvent>) {
+    super(
+      {
+        name: "receipts",
+        // `t_D`, as `ReceiptDuty.deadline` computes it.
+        deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery,
+        settles: (status) => status.state === "recorded" || status.state === "unrecorded",
+      },
+      options,
+    );
   }
 }

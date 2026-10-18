@@ -84,15 +84,32 @@ function l1NumberOf(ballot: Uint8Array): bigint | undefined {
   }
 }
 
+// Where a board entry's fields sit (docs/spec/board.md): after the record
+// header, `election_id`, then `index` and `segment`, then the payload's
+// u32 length and the payload.
+const ENTRY_ELECTION = 3;
+const ENTRY_PAYLOAD_LENGTH = 3 + 32 + 8 + 4;
+
+/** The election a board entry names: what `checkBoarded` compared, read again from the stored bytes. */
+const entryElection = (entry: Uint8Array) => entry.subarray(ENTRY_ELECTION, ENTRY_ELECTION + 32);
+
 function boardedOf(v: unknown, ballot: Uint8Array): Boarded | undefined {
   if (!isRecord(v) || !hasExactly(v, ["entry", "link"])) return undefined;
   const { entry, link } = v;
   if (!(link instanceof Uint8Array) || link.length !== 32) return undefined;
-  // The entry carries exactly the ballot, so its length is fixed by it.
+  // The entry carries exactly the ballot, so its length is fixed by it, and
+  // its payload is the ballot's bytes: a store that holds another entry
+  // beside this cast is unreadable, not this cast's answer.
   if (!(entry instanceof Uint8Array) || entry.length !== ballot.length + BOARD_ENTRY_OVERHEAD)
+    return undefined;
+  const length = new DataView(entry.buffer, entry.byteOffset).getUint32(ENTRY_PAYLOAD_LENGTH);
+  if (length !== ballot.length || !equalBytes(entry.subarray(BOARD_ENTRY_OVERHEAD), ballot))
     return undefined;
   return { entry: entry.slice(), link: link.slice() };
 }
+
+/** The definition hash a decoded ballot record names, after its header. */
+const definitionOf = (ballot: Uint8Array) => ballot.subarray(3, 35);
 
 function castOf(v: unknown): CastRecord | undefined {
   if (!isRecord(v) || !hasExactly(v, ["ballot", "boarded"])) return undefined;
@@ -123,6 +140,18 @@ export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
     const cast = castOf(casts[i]);
     const last = parsed.at(-1);
     if (cast === undefined || (last !== undefined && cast.l1Number <= last.l1Number))
+      return undefined;
+    // One election's casts: every ballot names the same definition, and
+    // every answer the same election.
+    const first = parsed[0];
+    if (first !== undefined && !equalBytes(definitionOf(cast.ballot), definitionOf(first.ballot)))
+      return undefined;
+    const answered = parsed.find((c) => c.boarded !== undefined)?.boarded;
+    if (
+      answered !== undefined &&
+      cast.boarded !== undefined &&
+      !equalBytes(entryElection(cast.boarded.entry), entryElection(answered.entry))
+    )
       return undefined;
     parsed.push(cast);
   }
@@ -220,21 +249,26 @@ async function updateCasts<T extends string>(
  * recorded there is kept, in the same transaction as the read, so two tabs
  * can't both record a cast on one block: `not-newer` otherwise, and the
  * ballot must not be sent (T-45). `unreadable` for casts this device can't
- * read, which are never replaced; `unwritable` for storage the browser
- * refuses. Throws on bytes that aren't a version-3 ballot record.
+ * read, which are never replaced; `other-election` for a ballot naming
+ * another definition than those recorded there, which is never kept beside
+ * them; `unwritable` for storage the browser refuses. Throws on bytes that
+ * aren't a version-3 ballot record.
  */
 export async function recordCast(
   electionId: Uint8Array,
   tier: number,
   ballot: Uint8Array,
   factory: IDBFactory = indexedDB,
-): Promise<"recorded" | "not-newer" | "unreadable" | "unwritable"> {
+): Promise<"recorded" | "not-newer" | "other-election" | "unreadable" | "unwritable"> {
   const key = keyOf(electionId, tier);
   const l1Number = ballot instanceof Uint8Array ? l1NumberOf(ballot) : undefined;
   if (l1Number === undefined || ballot.length > MAX_BOARD_PAYLOAD)
     throw new TypeError("not a version-3 ballot record");
   const cast: CastRecord = { ballot: ballot.slice(), l1Number };
   return updateCasts(key, factory, (casts) => {
+    const first = casts[0];
+    if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
+      return "other-election";
     const newest = newestBlock(casts);
     return newest !== undefined && l1Number <= newest ? "not-newer" : [...casts, cast];
   });
@@ -245,7 +279,8 @@ export async function recordCast(
  * cast whose bytes are exactly `ballot`. The first answer kept stays: a
  * resend of the same bytes is answered with the same entry, so another one
  * is `conflict` and changes nothing. `missing` if no recorded cast has these
- * bytes.
+ * bytes. Throws on an entry that doesn't carry exactly `ballot` in
+ * `electionId`, which `checkBoarded` never passes.
  */
 export async function recordBoarded(
   electionId: Uint8Array,
@@ -255,8 +290,11 @@ export async function recordBoarded(
   factory: IDBFactory = indexedDB,
 ): Promise<"recorded" | "missing" | "conflict" | "unreadable" | "unwritable"> {
   const key = keyOf(electionId, tier);
-  const answer = boardedOf(boarded, ballot);
-  if (answer === undefined) throw new TypeError("not a board entry for this ballot");
+  // Only the entry and the link are kept: a `CheckedBoarded` also carries
+  // where the entry says it is, which the entry itself holds.
+  const answer = boardedOf({ entry: boarded.entry, link: boarded.link }, ballot);
+  if (answer === undefined || !equalBytes(entryElection(answer.entry), electionId))
+    throw new TypeError("not a board entry for this ballot");
   return updateCasts(key, factory, (casts) => {
     const at = casts.findIndex((cast) => equalBytes(cast.ballot, ballot));
     const cast = casts[at];

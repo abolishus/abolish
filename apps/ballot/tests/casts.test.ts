@@ -1,3 +1,4 @@
+import { encodeBoardEntry } from "@abolishus/crypto";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -34,8 +35,16 @@ function naming(n: bigint): Uint8Array {
 }
 
 const ENTRY_OVERHEAD = 51;
-const boardedFor = (ballot: Uint8Array) => ({
-  entry: new Uint8Array(ballot.length + ENTRY_OVERHEAD).fill(7),
+
+/** `ballot` naming another definition hash, its first byte flipped. */
+function otherDefinition(ballot: Uint8Array): Uint8Array {
+  const b = ballot.slice();
+  b[3] = (b[3] as number) ^ 1;
+  return b;
+}
+const ELECTION = new Uint8Array(32).fill(0x5e);
+const boardedFor = (ballot: Uint8Array, electionId = ELECTION) => ({
+  entry: encodeBoardEntry({ election_id: electionId, index: 1n, segment: 0, payload: ballot }, 5),
   link: new Uint8Array(32).fill(9),
 });
 
@@ -64,6 +73,8 @@ const record = (over: Record<string, unknown> = {}): Record<string, unknown> => 
 });
 
 describe("the stored casts", () => {
+  // Every ballot is decoded twice per run (stored, then read back): at CI's
+  // FC_NUM_RUNS this takes several seconds.
   test("round-trip through what is stored, with the block read from each ballot", () => {
     fc.assert(
       fc.property(casts, (list) => {
@@ -71,7 +82,7 @@ describe("the stored casts", () => {
       }),
       { numRuns },
     );
-  });
+  }, 120_000);
 
   test("hand out copies, never the stored arrays", () => {
     const stored = record();
@@ -165,6 +176,31 @@ describe("the stored casts", () => {
               ...boardedFor(ballot),
               entry: new Uint8Array(ballot.length + ENTRY_OVERHEAD + 1),
             },
+          },
+        ],
+      }),
+    ],
+    [
+      "an entry carrying other bytes than the cast's",
+      record({ casts: [{ ballot, boarded: boardedFor(naming(11n)) }] }),
+    ],
+    [
+      "casts naming two definitions",
+      record({
+        casts: [
+          { ballot, boarded: null },
+          { ballot: otherDefinition(naming(11n)), boarded: null },
+        ],
+      }),
+    ],
+    [
+      "answers naming two elections",
+      record({
+        casts: [
+          { ballot, boarded: boardedFor(ballot) },
+          {
+            ballot: naming(11n),
+            boarded: boardedFor(naming(11n), new Uint8Array(32).fill(0x5f)),
           },
         ],
       }),

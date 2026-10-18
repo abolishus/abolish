@@ -18,6 +18,7 @@ import {
   saveIdentity,
 } from "../../src/identity.ts";
 import { loadElection } from "../../src/load.ts";
+import { checkBoarded } from "../../src/send.ts";
 import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
 import { castBallot } from "../../src/prover-client.ts";
 import { BallotWorker } from "../../src/worker-client.ts";
@@ -310,12 +311,19 @@ const harness = {
   /** Records `ballot` as cast in `electionId` at `tier` before it is sent (casts.ts). */
   recordCast: (electionId: string, tier: number, ballot: string) =>
     recordCast(fromHex(electionId), tier, fromHex(ballot)),
-  /** Records the checked answer for the cast whose bytes are `ballot` (casts.ts). */
-  recordBoarded: (electionId: string, tier: number, ballot: string, entry: string, link: string) =>
-    recordBoarded(fromHex(electionId), tier, fromHex(ballot), {
-      entry: fromHex(entry),
-      link: fromHex(link),
-    }),
+  /**
+   * Records `checkBoarded`'s answer for the cast whose bytes are `ballot`
+   * (send.ts, casts.ts), as the page will: what it passed, position and all.
+   */
+  recordBoarded(electionId: string, tier: number, ballot: string, entry: string, link: string) {
+    const bytes = fromHex(ballot);
+    const checked = checkBoarded(
+      { entry, link },
+      { electionId: fromHex(electionId), ballot: bytes, boardEntryVersion: 5 },
+    );
+    if (checked === undefined) return Promise.resolve("unchecked");
+    return recordBoarded(fromHex(electionId), tier, bytes, checked);
+  },
   /** The casts of `electionId` at `tier`, read as the page reads them, with hex and decimal strings. */
   async readCasts(electionId: string, tier: number): Promise<string> {
     return JSON.stringify(await readCasts(fromHex(electionId), tier), (_, v: unknown) =>

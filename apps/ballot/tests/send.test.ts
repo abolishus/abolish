@@ -162,6 +162,8 @@ describe("sendBallot", () => {
   });
 });
 
+// Each run encodes and decodes a whole ballot record: at CI's FC_NUM_RUNS the
+// properties take several seconds.
 describe("checkBoarded", () => {
   const expected = { electionId: ELECTION, ballot: BALLOT, boardEntryVersion: VERSION } as const;
   const answerOf = (entry: Uint8Array, link = LINK) => ({ entry: toHex(entry), link: toHex(link) });
@@ -187,7 +189,7 @@ describe("checkBoarded", () => {
       ),
       { numRuns },
     );
-  });
+  }, 120_000);
 
   test("refuses an entry carrying any other bytes than those sent", () => {
     const entry = entryOf(BALLOT);
@@ -206,7 +208,7 @@ describe("checkBoarded", () => {
       ),
       { numRuns },
     );
-  });
+  }, 120_000);
 
   test("refuses an entry for another election", () => {
     const other = new Uint8Array(32).fill(0x5f);

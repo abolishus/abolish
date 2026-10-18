@@ -18,6 +18,7 @@ import {
   decodeDisplayText,
   decodeElectionDefinition,
   type ElectionDefinition,
+  encodeBoardEntry,
   encodeDisplayText,
   encodeElectionDefinition,
   identityBackupLocator,
@@ -1118,17 +1119,44 @@ describe("the device's records of its casts", () => {
   });
 
   test("keep the first checked answer for exactly the recorded bytes", async () => {
-    const entry = "07".repeat(ballot.length + 51);
+    const entryAt = (b: string, index: bigint, electionId = election) =>
+      hex(
+        encodeBoardEntry(
+          { election_id: fromHex(electionId), index, segment: 0, payload: fromHex(b) },
+          5,
+        ),
+      );
+    const entry = entryAt(naming(10n), 1n);
     const link = "09".repeat(32);
     await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("missing");
     await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    // `checkBoarded`'s answer, with where the entry says it is, is what's kept.
     await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("recorded");
     // The same answer again changes nothing; another is refused.
     await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("recorded");
+    await expect(boarded(0, naming(10n), entryAt(naming(10n), 2n), link)).resolves.toBe("conflict");
     await expect(boarded(0, naming(10n), entry, "08".repeat(32))).resolves.toBe("conflict");
+    // An entry for another election or other bytes never passes the check.
+    await expect(
+      boarded(0, naming(10n), entryAt(naming(10n), 1n, "5f".repeat(32)), link),
+    ).resolves.toBe("unchecked");
+    await expect(boarded(0, naming(10n), entryAt(naming(11n), 1n), link)).resolves.toBe(
+      "unchecked",
+    );
     await expect(read(0)).resolves.toEqual({
       kind: "read",
       casts: [{ ballot: naming(10n), l1Number: "10", boarded: { entry, link } }],
+    });
+  });
+
+  test("keep no cast of another election's definition beside one election's", async () => {
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    const other = fromHex(naming(11n));
+    other[3] = (other[3] as number) ^ 1;
+    await expect(record(0, hex(other))).resolves.toBe("other-election");
+    await expect(read(0)).resolves.toEqual({
+      kind: "read",
+      casts: [{ ballot: naming(10n), l1Number: "10" }],
     });
   });
 

@@ -6,6 +6,9 @@ import type { Panel } from "@abolishus/crypto";
 
 import type { ElectionCheck } from "./election.ts";
 import {
+  type BackupLocatorResult,
+  type BackupOpenRequest,
+  type BackupOpenResult,
   type BackupSealResult,
   type CastRequest,
   type CastResult,
@@ -39,6 +42,9 @@ export type FindCellQuery = Omit<FindCellRequest, "v" | "id" | "kind">;
 
 /** A registration's outcome as the page asks for it: everything but the envelope. */
 export type Tier0OutcomeQuery = Omit<Tier0OutcomeRequest, "v" | "id" | "kind">;
+
+/** A recovery's open as the page asks for it: everything but the message's envelope. */
+export type BackupOpenQuery = Omit<BackupOpenRequest, "v" | "id" | "kind">;
 
 /** A cast as the page makes it: everything but the envelope. */
 export type CastBallotRequest = Omit<CastRequest, "v" | "id" | "kind">;
@@ -133,6 +139,38 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "backup-seal") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * The locator of the backup passkey whose PRF output is `prf`, which is
+   * copied; the worker keeps its copy for `backupOpen`, so both go to the
+   * same worker.
+   */
+  async backupLocator(prf: Uint8Array): Promise<BackupLocatorResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "backup-locator", prf }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "backup-locator") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * Opens a recovered envelope under the PRF output the last
+   * `backupLocator` gave this worker, and finds its identity among the
+   * published Tier 0 groups from the group registry's whole log: a replay
+   * like `tier0Outcome`'s, so it gets as long. The secret comes back only
+   * once found, for the caller to keep and zero.
+   */
+  async backupOpen(query: BackupOpenQuery): Promise<BackupOpenResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "backup-open", ...query }),
+      [],
+      FIND_CELL_TIMEOUT_MS,
+    );
+    if (response.kind !== "backup-open") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

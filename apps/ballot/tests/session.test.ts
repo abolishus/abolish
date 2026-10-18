@@ -16,6 +16,7 @@ import {
   identityBackupLocator,
   openIdentityBackup,
   type Panel,
+  sealIdentityBackup,
   sealingElectionV5,
 } from "@abolishus/crypto";
 import { readFileSync } from "node:fs";
@@ -24,6 +25,7 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  type BackupOpenRequest,
   type BackupSealRequest,
   type ChallengeRequest,
   type CheckElectionRequest,
@@ -511,6 +513,151 @@ describe("a Tier 0 registration's outcome", () => {
     if (!sealed.ok) throw new Error(sealed.problem);
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
     expect(session.tier0Outcome(outcomeRequest()).ok).toBe(true);
+    expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+  });
+});
+
+const locatorRequest = (prf: Uint8Array) =>
+  ({ v: PROTOCOL_VERSION, id: 8, kind: "backup-locator", prf }) as const;
+const openRequest = (
+  envelope: Uint8Array,
+  change: Partial<BackupOpenRequest> = {},
+): BackupOpenRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 9,
+  kind: "backup-open",
+  envelope,
+  block: 1_000n,
+  groups: [
+    { group_id: GROUP, region: 3 },
+    { group_id: OTHER_GROUP, region: 7 },
+  ],
+  records: REGISTRY,
+  registry: definition.group_registry,
+  chainId: definition.l2_chain_id,
+  version: 8,
+  ...registrars,
+  ...change,
+});
+
+describe("a recovery's open", () => {
+  const PRF = new Uint8Array(32).fill(0x21);
+  // members[1] and members[2] are in GROUP (region 3) in REGISTRY; members[0] in none.
+  const registered = () => Uint8Array.from(members[2] as Uint8Array);
+  const located = (session: BallotSession, prf = PRF) => {
+    const request = locatorRequest(prf.slice());
+    const { locator } = session.backupLocator(request);
+    expect(request.prf.every((b) => b === 0)).toBe(true);
+    return locator;
+  };
+
+  test("the locator is the spec's for any PRF output, and the page's copy is zeroed", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (prf) => {
+        expect(toHex(located(new BallotSession(), prf))).toBe(toHex(identityBackupLocator(prf)));
+      }),
+      { numRuns: Math.min(numRuns, 100) },
+    );
+  });
+
+  test("opens the envelope under the kept PRF output and names the group counting the identity, whatever region it asked for", () => {
+    const session = new BallotSession();
+    located(session);
+    const result = session.backupOpen(openRequest(sealIdentityBackup(PRF, registered()).envelope));
+    expect(result).toEqual({ ok: true, secret: registered(), group: GROUP, region: 3 });
+  });
+
+  test("opens once per locator: the PRF output is gone after an open, whatever its outcome", () => {
+    const session = new BallotSession();
+    const { envelope } = sealIdentityBackup(PRF, registered());
+    expect(session.backupOpen(openRequest(envelope))).toEqual({ ok: false, problem: "no-passkey" });
+    located(session);
+    expect(session.backupOpen(openRequest(new Uint8Array(63)))).toMatchObject({ ok: false });
+    expect(session.backupOpen(openRequest(envelope))).toEqual({ ok: false, problem: "no-passkey" });
+  });
+
+  test("a later locator replaces the PRF output an earlier one kept", () => {
+    const session = new BallotSession();
+    const other = new Uint8Array(32).fill(0x22);
+    located(session, other);
+    located(session);
+    expect(session.backupOpen(openRequest(sealIdentityBackup(PRF, registered()).envelope)).ok).toBe(
+      true,
+    );
+  });
+
+  test("bytes that aren't an envelope, and an envelope altered or sealed under another passkey, are refused", () => {
+    const { envelope } = sealIdentityBackup(PRF, registered());
+    const opened = (bytes: Uint8Array) => {
+      const session = new BallotSession();
+      located(session);
+      return session.backupOpen(openRequest(bytes));
+    };
+    expect(opened(envelope.slice(0, 62))).toEqual({ ok: false, problem: "envelope" });
+    expect(opened(Uint8Array.from([...envelope, 0]))).toEqual({ ok: false, problem: "envelope" });
+    fc.assert(
+      fc.property(fc.nat({ max: 59 }), fc.integer({ min: 1, max: 255 }), (at, flip) => {
+        // Past the 3-byte header: the nonce and the sealed secret.
+        const altered = envelope.slice();
+        altered[3 + at] = (altered[3 + at] as number) ^ flip;
+        expect(opened(altered)).toEqual({ ok: false, problem: "open" });
+      }),
+      { numRuns: Math.min(numRuns, 100) },
+    );
+    const elsewhere = sealIdentityBackup(new Uint8Array(32).fill(0x22), registered()).envelope;
+    expect(opened(elsewhere)).toEqual({ ok: false, problem: "open" });
+  });
+
+  test("an identity counted in no group by the block read is refused, never handed to the page", () => {
+    for (const [secret, block] of [
+      [Uint8Array.from(members[0] as Uint8Array), 1_000n],
+      // The addition is logged at block 20 (tests/poll.ts).
+      [registered(), 19n],
+    ] as const) {
+      const session = new BallotSession();
+      located(session);
+      expect(
+        session.backupOpen(openRequest(sealIdentityBackup(PRF, secret).envelope, { block })),
+      ).toEqual({ ok: false, problem: "not-registered" });
+    }
+    const session = new BallotSession();
+    located(session);
+    expect(
+      session.backupOpen(
+        openRequest(sealIdentityBackup(PRF, registered()).envelope, { groups: [] }),
+      ),
+    ).toEqual({ ok: false, problem: "not-registered" });
+  });
+
+  test("a record of another version, or a history the pinned registrars didn't log, is refused", () => {
+    const { envelope } = sealIdentityBackup(PRF, registered());
+    const opened = (change: Partial<BackupOpenRequest>) => {
+      const session = new BallotSession();
+      located(session);
+      return session.backupOpen(openRequest(envelope, change));
+    };
+    expect(opened({ version: 7 })).toEqual({ ok: false, problem: "record" });
+    expect(opened({ records: [new Uint8Array([0, 8]), ...REGISTRY.slice(1)] })).toEqual({
+      ok: false,
+      problem: "record",
+    });
+    expect(opened({ threshold: registrars.threshold + 1 })).toEqual({
+      ok: false,
+      problem: "registry",
+      code: "group-history",
+    });
+  });
+
+  test("leaves the held poll, the voter's cell and the seals as they were", () => {
+    const session = holding();
+    const sealed = session.seal(sealRequest([1, 0, 0, 1, 0]));
+    if (!sealed.ok) throw new Error(sealed.problem);
+    expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
+    located(session);
+    expect(session.backupOpen(openRequest(sealIdentityBackup(PRF, registered()).envelope)).ok).toBe(
+      true,
+    );
     expect(session.challenge(challengeRequest(sealed.seal)).ok).toBe(true);
     expect(session.findCell(findCellRequest())).toEqual({ ok: true, cell: 0 });
   });

@@ -21,7 +21,7 @@ import type {
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -178,10 +178,54 @@ export interface BackupSealRequest {
   readonly secret: Uint8Array;
 }
 
+/**
+ * The first step of a recovery ([[identity-backup]], Opening): the locator
+ * of the backup passkey whose PRF output is `prf`, which the page fetches
+ * the envelope under. The worker keeps its copy of the PRF output for the
+ * `backup-open` that follows, so the page zeroes its own at once and holds
+ * it only between the ceremony and this request (T-41).
+ */
+export interface BackupLocatorRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "backup-locator";
+  /** 32 bytes, the PRF's `results.first`; the worker keeps its copy for `backup-open`. */
+  readonly prf: Uint8Array;
+}
+
+/**
+ * Opens `envelope` under the PRF output the last `backup-locator` kept,
+ * which is zeroed whatever the outcome, and finds the group counting the
+ * identity commitment of the secret inside among the deployment's published
+ * Tier 0 groups (`groups`), from the group registry's whole log up to
+ * `block` (`records` and the rest as `tier0-outcome` takes them): the
+ * client checks a recovered identity against groups it reads in full, never
+ * by asking a server about one commitment
+ * ([[0017-identity-recovery-backup]], Option A, step 6; T-11, T-18). The
+ * secret goes back to the page, to be kept, only once it is found there.
+ */
+export interface BackupOpenRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "backup-open";
+  readonly envelope: Uint8Array;
+  readonly block: bigint;
+  readonly groups: readonly { readonly group_id: bigint; readonly region: number }[];
+  readonly records: readonly Uint8Array[];
+  /** 20 bytes. */
+  readonly registry: Uint8Array;
+  readonly chainId: bigint;
+  readonly version: ContractEventVersion;
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+}
+
 export type WorkerRequest =
   | CheckElectionRequest
   | CommitmentRequest
   | BackupSealRequest
+  | BackupLocatorRequest
+  | BackupOpenRequest
   | Tier0OutcomeRequest
   | FindCellRequest
   | SealRequest
@@ -218,6 +262,38 @@ export type CommitmentResult =
 export type BackupSealResult =
   | { readonly ok: true; readonly locator: Uint8Array; readonly envelope: Uint8Array }
   | { readonly ok: false; readonly problem: "secret" };
+
+/** The locator to fetch the envelope under. */
+export interface BackupLocatorResult {
+  /** 32 bytes. */
+  readonly locator: Uint8Array;
+}
+
+/**
+ * The recovered identity, or why there is none: no PRF output kept by a
+ * `backup-locator` (`no-passkey`); bytes that aren't a version-1 envelope
+ * (`envelope`); a tag that doesn't verify, an envelope altered or sealed
+ * under another passkey (`open`); a plaintext that isn't an identity
+ * secret, or whose commitment can't be registered (`secret`); a record
+ * that isn't a contract-event record of the pinned version (`record`);
+ * `tier0Registration`'s refusal of the registry's history (`registry`, with
+ * its code); or a commitment counted in no published group by the block
+ * read (`not-registered`), which no client keeps (Option A, step 6).
+ */
+export type BackupOpenResult =
+  | {
+      readonly ok: true;
+      /** 32 bytes, the identity secret: the page keeps it and zeroes its copy. */
+      readonly secret: Uint8Array;
+      /** The Tier 0 group counting its commitment, and that group's region. */
+      readonly group: bigint;
+      readonly region: number;
+    }
+  | {
+      readonly ok: false;
+      readonly problem: "no-passkey" | "envelope" | "open" | "secret" | "record" | "not-registered";
+    }
+  | { readonly ok: false; readonly problem: "registry"; readonly code: TierMembershipErrorCode };
 
 /**
  * The registration's outcome, or why there is none: bytes that aren't an
@@ -287,6 +363,18 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "backup-seal";
       readonly result: BackupSealResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "backup-locator";
+      readonly result: BackupLocatorResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "backup-open";
+      readonly result: BackupOpenResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -366,6 +454,21 @@ const FIND_CELL_KEYS = [
 ];
 const COMMITMENT_KEYS = ["id", "kind", "secret", "v"];
 const BACKUP_SEAL_KEYS = ["id", "kind", "prf", "secret", "v"];
+const BACKUP_LOCATOR_KEYS = ["id", "kind", "prf", "v"];
+const BACKUP_OPEN_KEYS = [
+  "block",
+  "chainId",
+  "envelope",
+  "groups",
+  "id",
+  "kind",
+  "records",
+  "registrars",
+  "registry",
+  "threshold",
+  "v",
+  "version",
+];
 const OUTCOME_KEYS = [
   "block",
   "chainId",
@@ -444,6 +547,41 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
     const { prf, secret } = data;
     if (!isBytes(prf, 32) || !isBytes(secret, 32)) return undefined;
     return { v, id, kind: "backup-seal", prf, secret };
+  }
+  if (data["kind"] === "backup-locator") {
+    if (!hasKeys(data, BACKUP_LOCATOR_KEYS) || !isBytes(data["prf"], 32)) return undefined;
+    return { v, id, kind: "backup-locator", prf: data["prf"] };
+  }
+  if (data["kind"] === "backup-open") {
+    if (!hasKeys(data, BACKUP_OPEN_KEYS)) return undefined;
+    const { envelope, block, groups, records, registry, chainId, version } = data;
+    const { registrars, threshold } = data;
+    if (
+      !isBytes(envelope) ||
+      !isU64(block) ||
+      !isListOf(groups, isTier0Group) ||
+      !isListOf(records, isAnyBytes) ||
+      !isBytes(registry, 20) ||
+      !isU64(chainId) ||
+      !isEventVersion(version) ||
+      !isListOf(registrars, isAnyBytes) ||
+      !Number.isSafeInteger(threshold)
+    )
+      return undefined;
+    return {
+      v,
+      id,
+      kind: "backup-open",
+      envelope,
+      block,
+      groups,
+      records,
+      registry,
+      chainId,
+      version,
+      registrars,
+      threshold: threshold as number,
+    };
   }
   if (data["kind"] === "tier0-outcome") {
     if (!hasKeys(data, OUTCOME_KEYS)) return undefined;
@@ -560,6 +698,8 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "check-election",
   "commitment",
   "backup-seal",
+  "backup-locator",
+  "backup-open",
   "tier0-outcome",
   "find-cell",
   "seal",

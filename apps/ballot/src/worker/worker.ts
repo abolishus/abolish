@@ -31,6 +31,10 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "commitment", result: session.commitment(request) };
     case "backup-seal":
       return { v, id, kind: "backup-seal", result: session.backupSeal(request) };
+    case "backup-locator":
+      return { v, id, kind: "backup-locator", result: session.backupLocator(request) };
+    case "backup-open":
+      return { v, id, kind: "backup-open", result: session.backupOpen(request) };
     case "tier0-outcome":
       return { v, id, kind: "tier0-outcome", result: session.tier0Outcome(request) };
     case "find-cell":
@@ -53,7 +57,11 @@ scope.onmessage = ({ data }) => {
     return;
   }
   answer(request).then(
-    (response) => scope.postMessage(response),
+    (response) => {
+      scope.postMessage(response);
+      // The page has its own copy now; this realm's goes (T-12).
+      if (response.kind === "backup-open" && response.result.ok) response.result.secret.fill(0);
+    },
     () => scope.postMessage({ v: PROTOCOL_VERSION, id: request.id, kind: "error" }),
   );
 };

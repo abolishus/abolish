@@ -5,6 +5,14 @@ export {
   ViemAnchorChain,
 } from "./anchor-chain.ts";
 export {
+  ANCHOR_ENV,
+  ANCHOR_EVERY_ENV,
+  ANCHOR_EVERY_MS,
+  type AnchorConfig,
+  anchorFromEnv,
+} from "./anchor-env.ts";
+export { connectAnchorRunner, TESTNET_CHAIN_IDS } from "./anchor-runner.ts";
+export {
   type AnchorSafe,
   checkAnchorSafe,
   checkAnchorSafeHistory,

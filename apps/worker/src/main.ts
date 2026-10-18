@@ -9,6 +9,8 @@ import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
+import { ANCHOR_ENV, ANCHOR_EVERY_ENV, anchorFromEnv } from "./anchor-env.ts";
+import { connectAnchorRunner } from "./anchor-runner.ts";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
@@ -98,10 +100,16 @@ const pollCreationConfig = pollCreationFromEnv(
 const tier1Config = tier1FromEnv(
   Object.fromEntries(TIER1_ENV.map((name) => [name, process.env[name]])),
 );
+const anchorConfig = anchorFromEnv(
+  Object.fromEntries([...ANCHOR_ENV, ANCHOR_EVERY_ENV].map((name) => [name, process.env[name]])),
+);
 // T-65: read once; nothing later in the process, or anything it spawns,
-// finds the key in its environment. The relay's key is treated the same.
+// finds the key in its environment. The relay's key and the anchoring
+// runner's keys are treated the same.
 delete process.env["CREATE_KEY"];
 delete process.env["TIER1_RELAY_KEY"];
+delete process.env["ANCHOR_OWNER_KEYS"];
+delete process.env["ANCHOR_EXECUTOR_KEY"];
 // The creation key runs alone (ADR 0032, rule 2): refused before any other
 // job's chain is touched, as startWorker refuses it too.
 if (
@@ -115,6 +123,7 @@ if (
     ...REGISTRY_SYNC_ENV.map((name) => process.env[name]),
     ...POLL_ROOT_ENV.map((name) => process.env[name]),
     ...POLL_STUB_ENV.map((name) => process.env[name]),
+    ...ANCHOR_ENV.map((name) => process.env[name]),
   ].some((v) => v !== undefined && v !== "")
 )
   throw new Error("a worker holding the creation key runs nothing else");
@@ -168,6 +177,16 @@ if (ballotEnv.some((v) => v !== undefined)) {
 const tier0Config = tier0FromEnv(
   Object.fromEntries(TIER0_ENV.map((name) => [name, process.env[name]])),
 );
+
+// T-69, T-62: the Safe's owner keys never share a process with a relay's
+// keys, refused before either chain is touched, as startWorker refuses it.
+if (
+  anchorConfig !== undefined &&
+  [...TIER0_ENV, ...TIER1_ENV].some(
+    (name) => process.env[name] !== undefined && process.env[name] !== "",
+  )
+)
+  throw new Error("a worker holding the anchoring keys runs no relay");
 
 const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
 // BullMQ's workers block on Redis, so commands must wait out a reconnect
@@ -447,11 +466,30 @@ if (pollCreationConfig !== undefined) {
   };
 }
 
+// The anchoring runner (P4-1 part 2b-2b-1), only when configured: it starts
+// only once the anchor's finalized code fixes the configured clock and Safe
+// and the Safe is exactly the deployment record's (T-49, T-69). Each HTTP
+// attempt times out after 30 s, well within the run's schedule; a failure
+// here is reported by step only, since viem's errors quote the URL.
+let anchor: WorkerOptions["anchor"];
+if (anchorConfig !== undefined) {
+  const c = anchorConfig;
+  const client = createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) });
+  try {
+    anchor = { chain: await connectAnchorRunner(client, c), everyMs: c.everyMs };
+  } catch (e) {
+    if (e instanceof BaseError)
+      throw new Error("the anchoring runner's startup check couldn't reach L1");
+    throw e;
+  }
+}
+
 const worker = await startWorker({
   connection,
   sql,
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   auditEveryMs: env.AUDIT_EVERY_MS,
+  ...(anchor !== undefined && { anchor }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
   ...(ballots !== undefined && { ballots }),

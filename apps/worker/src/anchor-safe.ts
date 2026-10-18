@@ -417,7 +417,7 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
  * `threshold` signatures of `hash` by distinct owners, ordered by owner
  * address as the Safe requires. A signature that doesn't recover to its
  * signer's address, or a signer that fails, is skipped, so a signer
- * elsewhere (part 2b-2b) can withhold a signature but never make the Safe
+ * elsewhere (part 2b-2b-2) can withhold a signature but never make the Safe
  * count someone else; too few left is the error.
  */
 async function signaturesOf(

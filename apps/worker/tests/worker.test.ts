@@ -458,6 +458,22 @@ test("a worker refuses the creation key beside any other job", async () => {
     await expect(startWorker({ ...base, ...extra })).rejects.toThrow("runs nothing else");
 });
 
+test("a worker refuses the anchoring keys beside a relay's keys", async () => {
+  const base = {
+    connection,
+    sql: app,
+    log: () => {},
+    auditEveryMs: 3_600_000,
+    prefix: `abolish-test-${hex(randomBytes(6))}`,
+    anchor: { chain: {} as AnchorChain, everyMs: 3_600_000 },
+  };
+  for (const extra of [
+    { tier0: { batches: {} as Tier0Batches } },
+    { tier1: { batches: {} as Tier1Batches } },
+  ])
+    await expect(startWorker({ ...base, ...extra })).rejects.toThrow("runs no relay");
+});
+
 test("a worker refuses the roots step without the registry sync", async () => {
   await expect(
     startWorker({

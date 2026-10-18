@@ -19,10 +19,12 @@ contract NullifierKeyHandler is TestBase {
     uint64[3] internal deadlines;
     bytes32[3] internal keyIds;
     bytes32[3] internal predecessors;
+    bytes32[3] internal panels;
 
     /// Set if a record was accepted or refused against the rules.
     bool public unexpected;
     bytes32 public shadowKey;
+    bytes32 public shadowPanel;
     uint256 public initialKeys;
     uint256 public events;
     mapping(bytes32 keyId => bool) public shadowRecorded;
@@ -37,6 +39,10 @@ contract NullifierKeyHandler is TestBase {
                 uint64(vm.parseUint(vm.parseJsonString(json, string.concat(at, ".deadline"))));
             keyIds[i] = bytes32(_bytes(json, string.concat(at, ".keyId")));
             if (i > 0) predecessors[i] = bytes32(_bytes(json, string.concat(at, ".predecessor")));
+            string memory panel = i == 0
+                ? vm.parseJsonString(json, ".initialPanel")
+                : vm.parseJsonString(json, string.concat(at, ".newPanel"));
+            panels[i] = bytes32(_bytes(json, string.concat(".panels.", panel, ".panelId")));
         }
         // RegistrarsPinned, logged at deployment.
         events = 1;
@@ -74,6 +80,7 @@ contract NullifierKeyHandler is TestBase {
         if (ok != expected) unexpected = true;
         if (ok) {
             shadowKey = keyIds[i];
+            shadowPanel = panels[i];
             shadowRecorded[keyIds[i]] = true;
             if (i == 0) initialKeys++;
             events++;
@@ -131,7 +138,7 @@ contract NullifierKeysInvariantTest is TestBase {
         assertTrue(handler.initialKeys() <= 1, "a second initial key");
         (bytes32 current, bytes32 panel) = registry.nullifierKey();
         assertEq(current, handler.shadowKey(), "current key");
-        assertTrue((current == bytes32(0)) == (panel == bytes32(0)), "key without a panel");
+        assertEq(panel, handler.shadowPanel(), "current panel");
         for (uint256 i; i < 3; i++) {
             bytes32 k = handler.keyId(i);
             assertTrue(

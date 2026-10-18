@@ -18,6 +18,7 @@ import {
   decodeDisplayText,
   decodeElectionDefinition,
   type ElectionDefinition,
+  encodeBoardEntry,
   encodeDisplayText,
   encodeElectionDefinition,
   identityBackupLocator,
@@ -1010,5 +1011,179 @@ describe("the device's voting identity", () => {
     });
     expect(violations).toEqual([]);
     expect(consoleErrors).toEqual([]);
+  });
+});
+
+describe("the device's records of its casts", () => {
+  type Harness = {
+    recordCast(electionId: string, tier: number, ballot: string): Promise<string>;
+    recordBoarded(
+      electionId: string,
+      tier: number,
+      ballot: string,
+      entry: string,
+      link: string,
+    ): Promise<string>;
+    readCasts(electionId: string, tier: number): Promise<string>;
+    restampCasts(electionId: string, tier: number, version: number): Promise<void>;
+  };
+  const election = "5e".repeat(32);
+  let ballot: Uint8Array;
+  beforeAll(async () => {
+    const text = await readFile(
+      new URL("../../../docs/spec/vectors/ballot-v3-records.json", import.meta.url),
+      "utf8",
+    );
+    ballot = fromHex(
+      (JSON.parse(text) as { ballots: { encoding: string }[] }).ballots[0]!.encoding,
+    );
+  });
+  // The vector's ballot naming L1 block `n`, after the record header, the
+  // definition hash, the cell and the nullifier.
+  const naming = (n: bigint) => {
+    const b = ballot.slice();
+    new DataView(b.buffer).setBigUint64(3 + 32 + 1 + 32, n);
+    return hex(b);
+  };
+  const record = (tier: number, b: string) =>
+    page.evaluate(
+      ([e, t, x]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordCast(e, t, x),
+      [election, tier, b] as const,
+    );
+  const boarded = (tier: number, b: string, entry: string, link: string) =>
+    page.evaluate(
+      ([e, t, x, y, z]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordBoarded(
+          e,
+          t,
+          x,
+          y,
+          z,
+        ),
+      [election, tier, b, entry, link] as const,
+    );
+  const read = (tier: number) =>
+    page
+      .evaluate(
+        ([e, t]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.readCasts(e, t),
+        [election, tier] as const,
+      )
+      .then((json) => JSON.parse(json) as unknown);
+
+  test("are none until a cast is recorded, then kept in this origin's storage across loads, each tier its own", async () => {
+    await expect(read(0)).resolves.toEqual({ kind: "read", casts: [] });
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    await expect(record(0, naming(12n))).resolves.toBe("recorded");
+    const kept = {
+      kind: "read",
+      casts: [
+        { ballot: naming(10n), l1Number: "10" },
+        { ballot: naming(12n), l1Number: "12" },
+      ],
+    };
+    await expect(read(0)).resolves.toEqual(kept);
+    // Another tier's casts are its own (Client rule 7): the same block is new there.
+    await expect(record(1, naming(10n))).resolves.toBe("recorded");
+    await page.reload();
+    await page.locator("#root[data-ready]").waitFor({ state: "attached" });
+    await expect(read(0)).resolves.toEqual(kept);
+    await expect(read(1)).resolves.toEqual({
+      kind: "read",
+      casts: [{ ballot: naming(10n), l1Number: "10" }],
+    });
+    await expect(read(2)).resolves.toEqual({ kind: "read", casts: [] });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    // Nothing of it went anywhere: no request but the client's own files.
+    for (const url of requests)
+      expect(new URL(url).pathname).toMatch(/^\/(tests\/harness\/index\.html|assets\/[\w-]+\.js)$/);
+  });
+
+  test("keep only a cast naming a block strictly newer than every recorded one", async () => {
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    // The same block, the same bytes again, and an older block are never kept.
+    await expect(record(0, naming(10n))).resolves.toBe("not-newer");
+    await expect(record(0, naming(9n))).resolves.toBe("not-newer");
+    // Two tabs at once: one of them keeps its cast, never both.
+    const both = await Promise.all([record(0, naming(11n)), record(0, naming(11n))]);
+    expect(both.toSorted()).toEqual(["not-newer", "recorded"]);
+    await expect(read(0)).resolves.toEqual({
+      kind: "read",
+      casts: [
+        { ballot: naming(10n), l1Number: "10" },
+        { ballot: naming(11n), l1Number: "11" },
+      ],
+    });
+  });
+
+  test("keep the first checked answer for exactly the recorded bytes", async () => {
+    const entryAt = (b: string, index: bigint, electionId = election) =>
+      hex(
+        encodeBoardEntry(
+          { election_id: fromHex(electionId), index, segment: 0, payload: fromHex(b) },
+          5,
+        ),
+      );
+    const entry = entryAt(naming(10n), 1n);
+    const link = "09".repeat(32);
+    await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("missing");
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    // `checkBoarded`'s answer, with where the entry says it is, is what's kept.
+    await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("recorded");
+    // The same answer again changes nothing; another is refused.
+    await expect(boarded(0, naming(10n), entry, link)).resolves.toBe("recorded");
+    await expect(boarded(0, naming(10n), entryAt(naming(10n), 2n), link)).resolves.toBe("conflict");
+    await expect(boarded(0, naming(10n), entry, "08".repeat(32))).resolves.toBe("conflict");
+    // An entry for another election or other bytes never passes the check.
+    await expect(
+      boarded(0, naming(10n), entryAt(naming(10n), 1n, "5f".repeat(32)), link),
+    ).resolves.toBe("unchecked");
+    await expect(boarded(0, naming(10n), entryAt(naming(11n), 1n), link)).resolves.toBe(
+      "unchecked",
+    );
+    await expect(read(0)).resolves.toEqual({
+      kind: "read",
+      casts: [{ ballot: naming(10n), l1Number: "10", boarded: { entry, link } }],
+    });
+  });
+
+  test("keep no cast of another election's definition beside one election's", async () => {
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    const other = fromHex(naming(11n));
+    other[3] = (other[3] as number) ^ 1;
+    await expect(record(0, hex(other))).resolves.toBe("other-election");
+    await expect(read(0)).resolves.toEqual({
+      kind: "read",
+      casts: [{ ballot: naming(10n), l1Number: "10" }],
+    });
+  });
+
+  test("are unreadable, never replaced or read as none, once the record is of another version", async () => {
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    await page.evaluate(
+      ([e]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampCasts(e, 0, 2),
+      [election] as const,
+    );
+    await expect(read(0)).resolves.toEqual({ kind: "unreadable" });
+    await expect(record(0, naming(20n))).resolves.toBe("unreadable");
+    await expect(read(0)).resolves.toEqual({ kind: "unreadable" });
+  });
+
+  test("refuse bytes that aren't a version-3 ballot record, leaving the store as it was", async () => {
+    const refused = await page.evaluate(
+      ([e, b]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness
+          .recordCast(e, 0, b)
+          .then(
+            () => "recorded",
+            (error: unknown) => (error instanceof Error ? error.name : "?"),
+          ),
+      [election, naming(10n).slice(0, -2)] as const,
+    );
+    expect(refused).toBe("TypeError");
+    await expect(read(0)).resolves.toEqual({ kind: "read", casts: [] });
   });
 });

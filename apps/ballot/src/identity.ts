@@ -17,6 +17,8 @@
 
 import { isIdentitySecret } from "@abolishus/crypto";
 
+import { withStore } from "./store.ts";
+
 /** A tier group registration added the identity's commitment to. */
 export interface Membership {
   /** 0 passkey, 1 vouched, 2 document-verified. */
@@ -169,51 +171,6 @@ export function storedIdentity(identity: VotingIdentity): Record<string, unknown
 }
 
 /**
- * Runs `use` on the identity store, in one transaction that ends before it
- * resolves, with what the function `use` returned gives once it has.
- */
-async function withStore<T>(
-  factory: IDBFactory,
-  mode: IDBTransactionMode,
-  use: (store: IDBObjectStore) => () => T,
-): Promise<T> {
-  const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const open = factory.open(IDENTITY_DB, 1);
-    open.onupgradeneeded = () => open.result.createObjectStore(STORE);
-    open.onsuccess = () => resolve(open.result);
-    open.onerror = () => reject(open.error ?? new Error("the identity store didn't open"));
-    open.onblocked = () => reject(new Error("the identity store is blocked"));
-  });
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      // Strict durability for writes: completion then means on disk, not
-      // only in the browser's cache, so an identity a request was sent for
-      // survives a crash right after (T-18).
-      const transaction = db.transaction(
-        STORE,
-        mode,
-        mode === "readwrite" ? { durability: "strict" } : undefined,
-      );
-      const result = use(transaction.objectStore(STORE));
-      // Resolved on completion, so a write is durable before the caller goes on.
-      transaction.oncomplete = () => resolve(result());
-      // The failed request's own error (a ConstraintError, say), which bubbles
-      // here before the transaction's is set.
-      transaction.onerror = ({ target }) =>
-        reject(
-          (target instanceof IDBRequest ? target.error : null) ??
-            transaction.error ??
-            new Error("the identity store failed"),
-        );
-      transaction.onabort = () =>
-        reject(transaction.error ?? new Error("the identity store failed"));
-    });
-  } finally {
-    db.close();
-  }
-}
-
-/**
  * The identity this device holds, read afresh. Storage the browser refuses
  * (a private window, site data blocked) is `unreadable`, as is a record
  * `parseStoredIdentity` refuses: the voter is told, not asked to register a
@@ -222,7 +179,7 @@ async function withStore<T>(
 export async function readIdentity(factory: IDBFactory = indexedDB): Promise<IdentityRead> {
   let value: unknown;
   try {
-    value = await withStore<unknown>(factory, "readonly", (store) => {
+    value = await withStore<unknown>(factory, IDENTITY_DB, STORE, "readonly", (store) => {
       const get = store.get(KEY);
       return () => get.result as unknown;
     });
@@ -252,7 +209,7 @@ export async function saveIdentity(
 ): Promise<void> {
   const record = storedIdentity(identity);
   try {
-    await withStore(factory, "readwrite", (store) => {
+    await withStore(factory, IDENTITY_DB, STORE, "readwrite", (store) => {
       store.put(record, KEY);
       return () => undefined;
     });
@@ -305,7 +262,7 @@ async function addIdentity(
   const record = storedIdentity(identity);
   try {
     // `add`, not `put`: in the same transaction as the check that the key is free.
-    await withStore(factory, "readwrite", (store) => {
+    await withStore(factory, IDENTITY_DB, STORE, "readwrite", (store) => {
       store.add(record, KEY);
       return () => undefined;
     });
@@ -376,7 +333,7 @@ async function updateHeld(
   change: (held: VotingIdentity) => VotingIdentity | undefined,
 ): Promise<"recorded" | "changed" | "unwritable"> {
   try {
-    return await withStore(factory, "readwrite", (store) => {
+    return await withStore(factory, IDENTITY_DB, STORE, "readwrite", (store) => {
       let outcome: "recorded" | "changed" = "changed";
       const get = store.get(KEY);
       get.onsuccess = () => {
@@ -467,7 +424,7 @@ export async function readBackupCredential(
 ): Promise<BackupCredentialRead> {
   let value: unknown;
   try {
-    value = await withStore<unknown>(factory, "readonly", (store) => {
+    value = await withStore<unknown>(factory, IDENTITY_DB, STORE, "readonly", (store) => {
       const get = store.get(BACKUP_KEY);
       return () => get.result as unknown;
     });
@@ -486,7 +443,7 @@ export async function saveBackupCredential(
 ): Promise<"saved" | "unwritable"> {
   const record = storedBackupCredential(credential);
   try {
-    await withStore(factory, "readwrite", (store) => {
+    await withStore(factory, IDENTITY_DB, STORE, "readwrite", (store) => {
       store.put(record, BACKUP_KEY);
       return () => undefined;
     });

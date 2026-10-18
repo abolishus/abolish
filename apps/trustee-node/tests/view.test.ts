@@ -450,14 +450,16 @@ describe("a seat that attested the ballot extent", () => {
     expect(view.absent).toEqual([]);
   });
 
-  test("never shows absent a ballot whose contract event the anchored board archived, even one the L2 node hides", async () => {
+  test("shows absent a ballot whose contract event only the board archives: the operator's claim, not the contract's record", async () => {
     const { store, approved } = await receipted(older, newer);
+    // An operator that never boarded the newer ballot archives a forged
+    // `BallotSubmitted` for it, which passes the event check offline.
     const options = viewOptions(store, {
       held: extentOf([older], [archived(submitted(newer, 50n))]),
     });
     const view = await obligationView(options)(approved);
-    expect(view.absent).toEqual([]);
-    expect((await owed(options, approved)).receipts).toEqual([plain(ballotHashOf(newer))]);
+    expect(view.absent.map(plain)).toEqual([plain(ballotHashOf(newer))]);
+    expect((await owed(options, approved)).receipts).toEqual([plain(ballotHashOf(older))]);
   });
 
   test("reads ballot logs only from the board's deployment block, up to the L2 node's finalized one", async () => {

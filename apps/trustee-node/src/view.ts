@@ -21,9 +21,7 @@ import {
   checkContractEvent,
   CONTRACT_EVENT_SIGNATURES,
   type ContractEventVersion,
-  DecodeError,
   decodeBoardEntry,
-  decodeContractEvent,
   electionDefinitionHash,
   type EventContracts,
   type FinalizedL1,
@@ -202,50 +200,15 @@ export function obligationView(
     });
     // Absent: receipted, carried by no admitted copy of the extent, and named
     // by no ballot log of the board's for the definition, whether or not it
-    // passed the event check, nor by a ballot event the anchored board
-    // archived, so no log the node shows or hides is taken as absence.
-    const present = new Set([
-      ...board.map((b) => hex(b.ballotHash)),
-      ...recorded.named,
-      ...archivedBallots(entries, options.board, election.definitionHash, eventVersion),
-    ]);
+    // passed the event check. A contract event the board archives is the
+    // operator's claim, never the contract's record (delivery.md, Direct
+    // submit), so it can't keep a ballot from being shown absent: a forged
+    // one would cost the counted ballot this seat's receipt (T-25, T-53).
+    const present = new Set([...board.map((b) => hex(b.ballotHash)), ...recorded.named]);
     const held = await heldIntake(options.store, election.stubHash, election.definitionHash);
     const absent = held.receipts.filter((h) => !present.has(hex(h)));
     return { ...view, board, absent, boardSegment: extent.boardSegment };
   };
-}
-
-/** The ballot hashes of the board's ballot events for the definition that the extent archives. */
-function archivedBallots(
-  entries: readonly { readonly payload: Uint8Array }[],
-  board: Uint8Array,
-  definitionHash: Uint8Array,
-  eventVersion: ContractEventVersion,
-): string[] {
-  const named: string[] = [];
-  for (const { payload } of entries) {
-    if (
-      payload.length < 2 ||
-      (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent
-    )
-      continue;
-    let record;
-    try {
-      record = decodeContractEvent(payload, eventVersion);
-    } catch (e) {
-      if (e instanceof DecodeError) continue;
-      throw e;
-    }
-    const checked = checkContractEvent(record, boardOnly(board), eventVersion);
-    if (!checked.ok) continue;
-    const e = checked.event;
-    if (
-      (e.event === "BallotSubmitted" || e.event === "RelayedBallotSubmitted") &&
-      equal(e.definitionHash, definitionHash)
-    )
-      named.push(hex(e.ballotHash));
-  }
-  return named;
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {

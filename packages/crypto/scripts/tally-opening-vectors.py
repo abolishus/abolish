@@ -97,7 +97,8 @@ class Reject(Exception):
 
 
 def decode(b, pinned=VERSION):
-    """docs/spec/notation.md, Strict decoding, for a file whose only known type is 0x0006 version 1."""
+    """docs/spec/notation.md, Strict decoding, for a file whose only known type is 0x0006, under pin 1 or 2 (one layout, tally.md, Tally-opening version 2)."""
+    assert pinned in (1, 2), pinned
     at = 0
 
     def take(n):

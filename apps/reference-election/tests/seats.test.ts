@@ -27,6 +27,8 @@ import {
   nodeKeys,
   registrationFrom,
   type SeatNode,
+  type ServedSeats,
+  serveSeats,
   startSeats,
   stubOf,
 } from "../src/seats.ts";
@@ -51,11 +53,14 @@ const ref = { number: 7n, hash: new Uint8Array(32).fill(7) };
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 const roots: string[] = [];
-afterEach(() => {
+const served: ServedSeats[] = [];
+afterEach(async () => {
+  for (const e of served.splice(0)) await e.close();
   for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 
 interface Setup {
+  readonly root: string;
   readonly trustees: Trustees;
   readonly nodes: readonly SeatNode[];
   readonly voters: ReturnType<typeof newVoters>;
@@ -79,7 +84,7 @@ async function setup(): Promise<Setup> {
     registration: () => Promise.resolve(registered.value),
     now: () => clock.now,
   });
-  return { trustees, nodes, voters, electorate, clock, registered };
+  return { root, trustees, nodes, voters, electorate, clock, registered };
 }
 
 const stubFor = (s: Setup, counter = 0n) =>
@@ -190,7 +195,7 @@ test("the electorate check takes only the voters' one Tier 0 tree", async () => 
 
 // A ceremony and a depth-32 Groth16 proof: well past the 5-second default.
 test(
-  "every node receipts an honest ballot as its keys sign it, and refuses it unregistered or past the cutoff",
+  "every node receipts an honest ballot delivered to its endpoint as its keys sign it, and refuses it unregistered or past the cutoff",
   { timeout: 180_000 },
   async () => {
     const s = await setup();
@@ -208,8 +213,10 @@ test(
     const [voter] = s.voters;
     if (voter === undefined) throw new Error("no voter");
     const ballot = await castVote(casting, voter, [0, 1, 0], ref);
+    const seats = await serveSeats(s.root, s.nodes);
+    served.push(seats);
     const deliver = () =>
-      nodeIntake(s.nodes, value, run.transcript, ballot.bytes, ballot.ciphertexts);
+      nodeIntake(seats.endpoints, value, run.transcript, ballot.bytes, ballot.ciphertexts);
 
     // Until the registry shows the definition, no node takes it.
     s.registered.value = false;

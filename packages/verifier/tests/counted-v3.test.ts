@@ -589,7 +589,9 @@ describe("6.3 under definition version 5", () => {
   });
 });
 
-describe("the tally over the questions (7.1 to 7.4, 8.5)", () => {
+// Each test opens cells under the version-3 rules, which can pass the default
+// timeout on a shared runner beside the package's other suites.
+describe("the tally over the questions (7.1 to 7.4, 8.5)", { timeout: 60_000 }, () => {
   // Flat options: question 0 is 0 to 2, question 1 is 3 to 6, question 2 is 7 and 8.
   const e = election();
   const a = cast(0, [1, 0, 0, 1, 1, 0, 0, 1, 0]);

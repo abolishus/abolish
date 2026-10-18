@@ -9,6 +9,8 @@ The worker's two commands, run in the `worker-create` service with its variables
 - `vp run --filter @abolishus/worker creation-key status`: the key's balance and whether it is below a day's ceiling of creations, its nonce counts against the worker's ledger (`unrecorded` counts the key's included transactions the worker didn't send), and the polls the key still has to finish.
 - `vp run --filter @abolishus/worker creation-key sweep <funding address>`: sends the key's whole balance, less the transfer's fees, to the funding account. It refuses while the key has a pending transaction, or while the worker's ledger holds a creation the node hasn't included (sweeping would take its nonce), so let the creation queue finish sending, then stop it.
 
+In the worker's image, which has no `vp`, they are `node creation-key.mjs status` and `node creation-key.mjs sweep <funding address>`, run in the service's container; staging's Railway service for this deployment is `creation-worker` ([[railway]], Services).
+
 Both run the worker's startup check first, so they need every `CREATE_*` variable the worker does, the default panel's `CREATE_PANEL_THRESHOLD` and `CREATE_PANEL_KEYS` included, and refuse to run unless the registry's trustee registry still pins that panel: keep the old values beside an old key until it is swept.
 
 ## The key

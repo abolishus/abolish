@@ -6,7 +6,7 @@ description: >
   timezone and umask; deploy.yml pushes only if both digests match (T-61).
 inputs:
   service:
-    description: The image's service, api, web or ballot (apps/<service>, package @abolishus/<service>).
+    description: The image's service, api, web, ballot, worker or trustee-node (apps/<service>, package @abolishus/<service>).
     required: true
   variant:
     description: a or b.
@@ -42,8 +42,9 @@ runs:
       shell: bash
       working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
       run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
-    # The API's build reaches packages/contracts (through the worker), whose
-    # build runs forge: the same hash-verified toolchain as CI's.
+    # The API's, the worker's and the trustee node's builds reach
+    # packages/contracts, whose build runs forge: the same hash-verified
+    # toolchain as CI's.
     - name: Install Noir, Barretenberg and Foundry
       shell: bash
       working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
@@ -70,7 +71,7 @@ runs:
         umask "$UMASK"
         SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
         export SOURCE_DATE_EPOCH
-        case "$SERVICE" in api | web | ballot) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
+        case "$SERVICE" in api | web | ballot | worker | trustee-node) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
         vp run --no-cache --filter "@abolishus/$SERVICE..." build
         mkdir -p "$OUT"
         # The base image is pulled anonymously, and a registry can still refuse a

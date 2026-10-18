@@ -1,19 +1,23 @@
-# Builds, signs and deploys the API, web and ballot images to staging on every push to main
-# (P2-11; docs/runbooks/railway.md). Threats: T-61 (release compromise), T-65
-# (deployer credential leak), T-56 (compromised action or runner), T-23.
+# Builds, signs and deploys the API, web, ballot, worker and trustee-node
+# images to staging on every push to main (P2-11; docs/runbooks/railway.md).
+# Threats: T-61 (release compromise), T-65 (deployer credential leak), T-56
+# (compromised action or runner), T-23.
 #
 #   image-<service>-a/b  one fresh checkout each, different path, locale,
 #              timezone and umask; build the bundle and the image (.github/
 #              actions/image-build); output the image manifest digest. No
-#              secrets. One pair per service (api, web, ballot).
+#              secrets. One pair per service (api, web, ballot, worker,
+#              trustee-node).
 #   checks     ci, repro-build and reference-election passed on this commit.
 #   publish    per service: both digests match; the archive is that image;
 #              push it to GHCR by digest, sign it (cosign keyless) and attest SLSA build
 #              provenance. No Railway token.
 #   staging    in the `staging` environment (main only): verify signature and
-#              provenance of both images, run the API image's migrations,
-#              then point the Railway `api` and `web` services at their
-#              digests, in that order, and wait for each deployment.
+#              provenance of every image, run the API image's migrations,
+#              then point the Railway `api`, `web` and `ballot` services at
+#              their digests, in that order, then the workers and the
+#              launch panel's seats once their service IDs are set, and
+#              wait for each deployment.
 #
 # Production is not here yet: its deploy needs the reference election to have
 # passed against staging for the digest (P1-20), so until then no job can
@@ -150,6 +154,82 @@ jobs:
           service: ballot
           variant: b
 
+  image-worker-a:
+    name: image worker (a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: worker
+          variant: a
+
+  image-worker-b:
+    name: image worker (b)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: worker
+          variant: b
+
+  image-trustee-node-a:
+    name: image trustee-node (a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: trustee-node
+          variant: a
+
+  image-trustee-node-b:
+    name: image trustee-node (b)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: trustee-node
+          variant: b
+
   checks:
     name: checks
     runs-on: ubuntu-24.04
@@ -197,7 +277,17 @@ jobs:
   publish:
     name: publish ${{ matrix.service }}
     needs:
-      [image-api-a, image-api-b, image-web-a, image-web-b, image-ballot-a, image-ballot-b, checks]
+      - image-api-a
+      - image-api-b
+      - image-web-a
+      - image-web-b
+      - image-ballot-a
+      - image-ballot-b
+      - image-worker-a
+      - image-worker-b
+      - image-trustee-node-a
+      - image-trustee-node-b
+      - checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -206,13 +296,16 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        service: [api, web, ballot]
+        service: [api, web, ballot, worker, trustee-node]
     env:
       SERVICE: ${{ matrix.service }}
       IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-${{ matrix.service }}
-      # Job outputs, never artifacts, carry the digests (see below).
-      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || matrix.service == 'web' && needs.image-web-a.outputs.digest || needs.image-ballot-a.outputs.digest }}
-      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || matrix.service == 'web' && needs.image-web-b.outputs.digest || needs.image-ballot-b.outputs.digest }}
+      # Job outputs, never artifacts, carry the digests (see below). Each
+      # service names its own pair and anything else is empty, so a missing
+      # output fails the check below instead of falling through to another
+      # service's digest.
+      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || matrix.service == 'web' && needs.image-web-a.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-a.outputs.digest || matrix.service == 'worker' && needs.image-worker-a.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-a.outputs.digest || '' }}
+      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || matrix.service == 'web' && needs.image-web-b.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-b.outputs.digest || matrix.service == 'worker' && needs.image-worker-b.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-b.outputs.digest || '' }}
     steps:
       - name: Both builds produced one image
         env:
@@ -293,10 +386,20 @@ jobs:
 
   staging:
     name: staging
-    needs: [image-api-a, image-web-a, image-ballot-a, publish, current]
+    needs:
+      [
+        image-api-a,
+        image-web-a,
+        image-ballot-a,
+        image-worker-a,
+        image-trustee-node-a,
+        publish,
+        current,
+      ]
     if: needs.current.outputs.is_head == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Up to twelve Railway deployments, one after another.
+    timeout-minutes: 60
     # Secrets live only in this environment, which allows `main` alone
     # (owner setting): a workflow run for a PR branch can't read them (T-65).
     environment: staging
@@ -308,6 +411,8 @@ jobs:
       API_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-api@${{ needs.image-api-a.outputs.digest }}
       WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-web@${{ needs.image-web-a.outputs.digest }}
       BALLOT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-ballot@${{ needs.image-ballot-a.outputs.digest }}
+      WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-worker@${{ needs.image-worker-a.outputs.digest }}
+      SEAT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-trustee-node@${{ needs.image-trustee-node-a.outputs.digest }}
     steps:
       # A re-run of an older run would point staging back at an older digest
       # with nobody meaning to roll back. Only main's head deploys; a rollback
@@ -340,7 +445,7 @@ jobs:
           IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/deploy.yml@refs/heads/main
           REPO: ${{ github.repository }}
         run: |
-          for image in "$API_IMAGE" "$WEB_IMAGE" "$BALLOT_IMAGE"; do
+          for image in "$API_IMAGE" "$WEB_IMAGE" "$BALLOT_IMAGE" "$WORKER_IMAGE" "$SEAT_IMAGE"; do
             cosign verify "$image" \
               --certificate-identity "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
@@ -356,13 +461,21 @@ jobs:
           [ -n "$DATABASE_URL" ] || { echo "::error::MIGRATE_DATABASE_URL is not set in the staging environment"; exit 1; }
           docker run --rm -e DATABASE_URL "$API_IMAGE" node migrate.mjs
       # The API first: the web app's pages and the ballot client call it, and
-      # the API and web app run against the migrations just applied.
-      - name: Deploy the API, the web app and the ballot client to Railway
+      # the API, web app and workers run against the migrations just applied.
+      # The workers and the seats can't run until staging's testnet contracts
+      # and keys exist (docs/runbooks/staging-testnet.md), so each is deployed
+      # only once its service ID is set and skipped with a notice until then;
+      # their images are built, signed and verified either way.
+      - name: Deploy the API, the web app, the ballot client, the workers and the seats to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           API_SERVICE_ID: ${{ vars.RAILWAY_API_SERVICE_ID }}
           WEB_SERVICE_ID: ${{ vars.RAILWAY_WEB_SERVICE_ID }}
           BALLOT_SERVICE_ID: ${{ vars.RAILWAY_BALLOT_SERVICE_ID }}
+          SETUP_WORKER_SERVICE_ID: ${{ vars.RAILWAY_SETUP_WORKER_SERVICE_ID }}
+          CREATION_WORKER_SERVICE_ID: ${{ vars.RAILWAY_CREATION_WORKER_SERVICE_ID }}
+          # Space- or comma-separated, seat 1 first.
+          SEAT_SERVICE_IDS: ${{ vars.RAILWAY_SEAT_SERVICE_IDS }}
           # Railway's GraphQL API (backboard.railway.com/graphql/v2).
           Q_ENV: "query { projectToken { environmentId } }"
           Q_SOURCE: >-
@@ -375,6 +488,15 @@ jobs:
             echo "::error::RAILWAY_TOKEN, RAILWAY_API_SERVICE_ID, RAILWAY_WEB_SERVICE_ID and RAILWAY_BALLOT_SERVICE_ID must be set in the staging environment"
             exit 1
           fi
+          # Checked before anything deploys, so a mistyped list stops the run
+          # with staging untouched.
+          read -ra seats <<<"${SEAT_SERVICE_IDS//,/ }"
+          for seat in "${seats[@]}"; do
+            [[ "$seat" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || {
+              echo "::error::RAILWAY_SEAT_SERVICE_IDS holds something that isn't a Railway service ID"
+              exit 1
+            }
+          done
           gql() {
             curl -sS --fail-with-body --retry 4 https://backboard.railway.com/graphql/v2 \
               -H "Project-Access-Token: $RAILWAY_TOKEN" -H 'content-type: application/json' \
@@ -407,3 +529,22 @@ jobs:
           deploy "$API_SERVICE_ID" "$API_IMAGE"
           deploy "$WEB_SERVICE_ID" "$WEB_IMAGE"
           deploy "$BALLOT_SERVICE_ID" "$BALLOT_IMAGE"
+          # One image, two services: each worker's variables decide what it
+          # runs, and the creation worker holds the creation key alone.
+          if [ -n "$SETUP_WORKER_SERVICE_ID" ]; then
+            deploy "$SETUP_WORKER_SERVICE_ID" "$WORKER_IMAGE"
+          else
+            echo "::notice::RAILWAY_SETUP_WORKER_SERVICE_ID is not set; not deploying the setup worker"
+          fi
+          if [ -n "$CREATION_WORKER_SERVICE_ID" ]; then
+            deploy "$CREATION_WORKER_SERVICE_ID" "$WORKER_IMAGE"
+          else
+            echo "::notice::RAILWAY_CREATION_WORKER_SERVICE_ID is not set; not deploying the creation worker"
+          fi
+          # One seat at a time, each live before the next, so a seat Railway
+          # reports failed stops the release before the rest
+          # (docs/runbooks/trustee-node.md, Staging on Railway).
+          if [ "${#seats[@]}" = 0 ]; then
+            echo "::notice::RAILWAY_SEAT_SERVICE_IDS is not set; not deploying the launch panel's seats"
+          fi
+          for seat in "${seats[@]}"; do deploy "$seat" "$SEAT_IMAGE"; done

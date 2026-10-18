@@ -4,7 +4,7 @@ How a client asks the panel for its Tier 2 keyed nullifier and shows the atteste
 
 What this page doesn't yet specify:
 
-- **Part 2b-4:** the identity chain a query's `comm_in` must come from and its checks ([[0010-tier2-identity-provider]]'s pinned circuit set, US anchors, proof date and predicates), the transport of queries and answers under the registration KEM keys ([[nullifier-key]]) and a fresh client key, the attestation's group position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
+- **Part 2b-4:** queries and answers travel under [[nullifier-transport]]; still to come are the identity chain a query's `comm_in` must come from and its checks ([[0010-tier2-identity-provider]]'s pinned circuit set, US anchors, proof date and predicates), the output's transport to the attesters, the attestation's group position and quorum, the delivery of `N` to every seat, the published probe counts, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
 

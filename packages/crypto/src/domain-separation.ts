@@ -245,6 +245,11 @@ export const TAG_REGISTRY = Object.freeze(
         primitive: "signature",
         status: "specified",
       },
+      { tag: "abolish/v1/kem/nullifier-request", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/kem/nullifier-request-aad", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/kem/nullifier-reply", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/kem/nullifier-reply-aad", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/keyed-nullifier/request", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

@@ -344,46 +344,50 @@ describe("casting a seal", () => {
     PROOF_TIMEOUT,
   );
 
-  test("a seal is cast only in the voter's cell, found for the poll the worker holds", async () => {
-    const tries: [string, () => { session: BallotSession; seal: number }][] = [
-      ["no cell found", () => sealed(null)],
-      [
-        "a refused search",
-        () => {
-          const s = sealed();
-          s.session.findCell(findCellRequest({ group: GROUP + 1n }));
-          return s;
-        },
-      ],
-      [
-        "a seal in another cell",
-        () => {
-          const s = sealed();
-          return { session: s.session, seal: sealIn(s.session, 1) };
-        },
-      ],
-      [
-        "a poll checked anew",
-        () => {
-          const s = sealed();
-          s.session.checkElection(checkRequest);
-          return { session: s.session, seal: sealIn(s.session, 0) };
-        },
-      ],
-    ];
-    for (const [what, make] of tries) {
-      const { session, seal } = make();
-      const p = prover(() => undefined);
-      await expect(session.cast(castRequest(seal, p.port)), what).resolves.toEqual({
-        ok: false,
-        problem: "no-cell",
-      });
-      expect(p.received).toEqual([]);
-      p.close();
-      // Refused, but cast: never opened (T-45).
-      expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
-    }
-  });
+  test(
+    "a seal is cast only in the voter's cell, found for the poll the worker holds",
+    async () => {
+      const tries: [string, () => { session: BallotSession; seal: number }][] = [
+        ["no cell found", () => sealed(null)],
+        [
+          "a refused search",
+          () => {
+            const s = sealed();
+            s.session.findCell(findCellRequest({ group: GROUP + 1n }));
+            return s;
+          },
+        ],
+        [
+          "a seal in another cell",
+          () => {
+            const s = sealed();
+            return { session: s.session, seal: sealIn(s.session, 1) };
+          },
+        ],
+        [
+          "a poll checked anew",
+          () => {
+            const s = sealed();
+            s.session.checkElection(checkRequest);
+            return { session: s.session, seal: sealIn(s.session, 0) };
+          },
+        ],
+      ];
+      for (const [what, make] of tries) {
+        const { session, seal } = make();
+        const p = prover(() => undefined);
+        await expect(session.cast(castRequest(seal, p.port)), what).resolves.toEqual({
+          ok: false,
+          problem: "no-cell",
+        });
+        expect(p.received).toEqual([]);
+        p.close();
+        // Refused, but cast: never opened (T-45).
+        expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
+      }
+    },
+    PROOF_TIMEOUT,
+  );
 
   test(
     "a proof of another cast, an artifact the prover refused, and no answer in time are refusals",

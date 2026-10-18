@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 import {AvailabilityCheckLib} from "./AvailabilityCheck.sol";
-import {BallotCheckLib} from "./BallotCheck.sol";
+import {BallotCheck, BallotCheckLib} from "./BallotCheck.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {CloseStatementLib} from "./CloseStatement.sol";
 import {DeliveryCheckLib, IBoardElections, IBoardTrustees} from "./DeliveryCheck.sol";
@@ -27,7 +27,9 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// one obligation root of each kind per election (T-17), and attest that
 /// the board was available to it, or complain that it wasn't, once per point
 /// and election (docs/spec/availability.md, Contract path; T-24, T-53).
-/// There is no admin, proxy, pause or upgrade path.
+/// The ballot check runs in a contract the board creates at construction,
+/// outside the board's size limit (Deployment). There is no admin, proxy,
+/// pause or upgrade path.
 contract Board is EventAccumulator {
     /// @notice A ballot record (0x0002) passed the ballot check.
     event BallotSubmitted(bytes32 indexed definitionHash, bytes32 indexed ballotHash, bytes record);
@@ -110,6 +112,10 @@ contract Board is EventAccumulator {
     /// (docs/spec/contracts.md, Board, Deployment): verifier 1.2 compares it
     /// with the definition's `l1_relay`.
     address public immutable relay;
+    /// The ballot check, which this board created in its constructor, so it
+    /// is at the address of the board's first creation and holds the release
+    /// build's code: verifier 1.2 checks both (Deployment; T-64).
+    BallotCheck public immutable ballotCheck;
 
     /// Every accepted record, by `keccak256` of its bytes: a storage key
     /// that nothing outside the contract recomputes, never a protocol hash.
@@ -147,12 +153,15 @@ contract Board is EventAccumulator {
         electionRegistry = IBoardElections(elections);
         trusteeRegistry = IBoardTrustees(trustees);
         relay = relay_;
+        ballotCheck = new BallotCheck();
     }
 
     /// @notice Submits a ballot record. Reverts with the ballot check's
-    /// error unless it passes (docs/spec/contracts.md, Board, Ballots), with
-    /// `share-hash-unqualified` judged against the key set the trustee
-    /// registry recorded for the election's ceremony, and unless the block's
+    /// error unless it passes (docs/spec/contracts.md, Board, Ballots;
+    /// Ballots (version 4)), with `share-hash-unqualified` judged against the
+    /// key set the trustee registry recorded for the election's ceremony and
+    /// the author key set the election registry recorded with its
+    /// definition, and unless the block's
     /// timestamp is inside the election's window, the ordinary path's test
     /// (docs/spec/close.md, Window), so a ballot made after close never
     /// reaches the board on this path (T-35, T-45).
@@ -161,8 +170,9 @@ contract Board is EventAccumulator {
         bytes32 key = keccak256(record);
         // Only an accepted record is remembered, so a repeat passed before.
         if (_accepted[key]) return;
-        BallotCheckLib.Admitted memory a =
-            BallotCheckLib.check(record, electionRegistry, _qualified(record));
+        uint256[2] memory q = _qualified(record);
+        (BallotCheckLib.Admitted memory a,) =
+            ballotCheck.check(record, electionRegistry, q[0], q[1]);
         if (block.timestamp < a.opensAt || block.timestamp > a.closesAt) {
             revert BallotWindow(block.timestamp, a.opensAt, a.closesAt);
         }
@@ -193,8 +203,9 @@ contract Board is EventAccumulator {
             }
         }
         CanonicalCalldata.requireWordsThenBytes(4, record);
-        BallotCheckLib.Admitted memory a =
-            BallotCheckLib.check(record, electionRegistry, _qualified(record));
+        uint256[2] memory q = _qualified(record);
+        (BallotCheckLib.Admitted memory a,) =
+            ballotCheck.check(record, electionRegistry, q[0], q[1]);
         if (stamp < a.opensAt || stamp > a.closesAt) {
             revert RelayWindow(stamp, a.opensAt, a.closesAt);
         }
@@ -364,7 +375,7 @@ contract Board is EventAccumulator {
         bytes32 key = keccak256(posting);
         if (_accepted[key]) return;
         (bytes32 definitionHash, bytes32 ballotHash) = DeliveryCheckLib.checkPosting(
-            posting, ballot, electionRegistry, trusteeRegistry, _qualified(ballot)
+            posting, ballot, electionRegistry, trusteeRegistry, ballotCheck, _qualified(ballot)
         );
         _emit(SharePosted.selector, key, definitionHash, ballotHash, posting);
     }
@@ -423,14 +434,16 @@ contract Board is EventAccumulator {
     }
 
     /// The seats of the key set the trustee registry recorded for the
-    /// ceremony of the election a ballot record names, never a submitter's
-    /// (ADR 0028, 2B). Zero for a record too short to name an election,
-    /// which the ballot check's header refuses first.
-    function _qualified(bytes calldata record) private view returns (uint256 qualified) {
-        if (record.length < BallotCheckLib.TIER_AT) return 0;
-        (bytes32 stub, bytes32 panel) = electionRegistry.ceremony(
-            bytes32(record[BallotCheckLib.DEFINITION_AT:BallotCheckLib.TIER_AT])
-        );
-        (, qualified) = trusteeRegistry.keySetOf(stub, panel);
+    /// ceremony of the election a ballot record names, then those of the
+    /// author key set the election registry recorded with its definition (0
+    /// with no author panel), never a submitter's (ADR 0028, 2B; ADR 0035).
+    /// Both zero for a record too short to name an election, which the
+    /// ballot check's header refuses first.
+    function _qualified(bytes calldata record) private view returns (uint256[2] memory q) {
+        if (record.length < BallotCheckLib.TIER_AT) return q;
+        bytes32 h = bytes32(record[BallotCheckLib.DEFINITION_AT:BallotCheckLib.TIER_AT]);
+        (bytes32 stub, bytes32 panel) = electionRegistry.ceremony(h);
+        (, q[0]) = trusteeRegistry.keySetOf(stub, panel);
+        (, q[1]) = electionRegistry.authorKeySetOf(h);
     }
 }

@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
-import {BallotCheckLib, IElectionParameters} from "./BallotCheck.sol";
+import {BallotCheck, BallotCheckLib, IElectionParameters} from "./BallotCheck.sol";
 import {ElectionDefinitionLib} from "./ElectionDefinition.sol";
 import {ElectionRegistry} from "./ElectionRegistry.sol";
 import {TrusteeIdentityLib} from "./TrusteeRegistry.sol";
 
-/// What the board reads from the election registry: the parameters, and the
+/// What the board reads from the election registry: the parameters, the
 /// ceremony under which the trustee registry recorded a definition's key set
-/// (docs/spec/contracts.md, Election registry, Parameters).
+/// (docs/spec/contracts.md, Election registry, Parameters), and the author
+/// panel's key set recorded with the definition (Author panel registration).
 interface IBoardElections is IElectionParameters {
     function ceremony(bytes32 definitionHash)
         external
         view
         returns (bytes32 stubHash, bytes32 panelId);
+
+    function authorKeySetOf(bytes32 definitionHash)
+        external
+        view
+        returns (bytes32 keySetHash, uint256 seats);
 }
 
 /// What the board reads from the trustee registry: a recorded key set's
@@ -311,8 +317,9 @@ library DeliveryCheckLib {
 
     /// Checks a share posting against `ballot`, the record (0x0002) of the
     /// ballot it delivers, and returns the hashes it names. The ballot must
-    /// pass the whole ballot check under `qualified`, its election's key-set
-    /// seats, membership proof included, though it is never admitted or
+    /// pass the whole ballot check, run by `checker`, under `qualified`, its
+    /// election's key sets' seats (the default panel's, then the author
+    /// panel's), membership proof included, though it is never admitted or
     /// emitted here (docs/spec/delivery.md, Direct submit): otherwise anyone
     /// could make up a ballot committing to a ciphertext of their choice and
     /// archive it whole as a posting (T-17, T-52).
@@ -321,7 +328,8 @@ library DeliveryCheckLib {
         bytes calldata ballot,
         IBoardElections elections,
         IBoardTrustees trustees,
-        uint256 qualified
+        BallotCheck checker,
+        uint256[2] memory qualified
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
         (definitionHash, ballotHash) = _header(r, 0, POSTING_TYPE, elections);
         uint256 seat = _uint(r, 0, SEAT_AT, 1);
@@ -351,7 +359,7 @@ library DeliveryCheckLib {
         uint256 options = elections.parameters(definitionHash).optionCount;
         if (sealedLength != 4 + 64 * options + 16) revert DeliveryRefused(0, Code.PostingLength);
 
-        _bindBallot(r, ballot, elections, qualified, seat, definitionHash, ballotHash);
+        _bindBallot(r, ballot, elections, checker, qualified, seat, definitionHash, ballotHash);
     }
 
     /// A posting's ballot: it passes the whole ballot check, its ballot
@@ -361,13 +369,14 @@ library DeliveryCheckLib {
         bytes calldata r,
         bytes calldata ballot,
         IBoardElections elections,
-        uint256 qualified,
+        BallotCheck checker,
+        uint256[2] memory qualified,
         uint256 seat,
         bytes32 definitionHash,
         bytes32 ballotHash
     ) private view {
         (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) =
-            BallotCheckLib.checkWithLayout(ballot, elections, qualified);
+            checker.check(ballot, elections, qualified[0], qualified[1]);
         // Both of the posting's names: its ballot hash binds the ballot's
         // definition, never the posting's own `definition_hash`, which must
         // be the same election, or the seat, key set and length judged above

@@ -20,9 +20,10 @@ interface IElectionParameters {
     function cell(bytes32 definitionHash, uint256 c) external view returns (uint8, uint256);
 }
 
-/// @title The board's ballot check (docs/spec/contracts.md, Board, Ballots).
+/// @title The board's ballot check (docs/spec/contracts.md, Board, Ballots;
+/// Ballots (version 4)).
 /// @notice Checks a direct-submitted ballot record (type 0x0002, versions 1
-/// to 3) against its registered definition's parameters, in the spec's
+/// to 4) against its registered definition's parameters, in the spec's
 /// order: the header and the election it names, the version the election
 /// pins, strict framing of every field, then `ballot-tier` (`ballot-cell`),
 /// `validity-shape`, `share-hash-unqualified` and the membership proof over
@@ -62,13 +63,18 @@ library BallotCheckLib {
     }
 
     /// Where the committed vote's lists start, and their counts, as framing
-    /// found them.
+    /// found them. The author half's are 0 below version 4.
     struct Layout {
         uint256 vssCount;
         /// Whether every option has exactly `k` VSS commitments.
         bool degreesK;
         uint256 shareHashesAt;
         uint256 shareCount;
+        uint256 authorVssCount;
+        /// Whether every option of the author half has exactly `k_A`.
+        bool authorDegreesK;
+        uint256 authorShareHashesAt;
+        uint256 authorShareCount;
         uint256 optionProofCount;
         /// The sum proof's (version 3: the range proofs') count field.
         uint256 sumAt;
@@ -110,28 +116,21 @@ library BallotCheckLib {
     bytes internal constant DS_MESSAGE = "\x1dabolish/v1/membership-message";
 
     /// Checks `record` as the board does, against the parameters `registry`
-    /// recorded for the definition it names and `qualified`, the registered
-    /// key set's seats as a bitmask (bit `i` for seat `i`, from 1). Returns
-    /// what an admitted ballot gives; reverts with `BallotMalformed` or
-    /// `BallotRefused` on the first failure. `view` for the registry's reads
-    /// and the precompiles; it needs more than `MembershipProofLib.PAIRING_GAS`
-    /// left once the proof is reached.
-    function check(bytes calldata record, IElectionParameters registry, uint256 qualified)
-        internal
-        view
-        returns (Admitted memory a)
-    {
-        (a,) = checkWithLayout(record, registry, qualified);
-    }
-
-    /// `check`, also returning the committed vote's layout, so the board's
-    /// posting path finds the admitted ballot's share hashes without
-    /// framing it twice.
-    function checkWithLayout(bytes calldata record, IElectionParameters registry, uint256 qualified)
-        internal
-        view
-        returns (Admitted memory a, Layout memory l)
-    {
+    /// recorded for the definition it names, `qualified`, the registered
+    /// key set's seats as a bitmask (bit `i` for seat `i`, from 1), and
+    /// `authorQualified`, the author key set's seats likewise (0 with no
+    /// author panel). Returns what an admitted ballot gives and the committed
+    /// vote's layout, so the posting path finds its share hashes without
+    /// framing it twice; reverts with `BallotMalformed` or `BallotRefused` on
+    /// the first failure. `view` for the registry's reads and the
+    /// precompiles; it needs more than `MembershipProofLib.PAIRING_GAS` left
+    /// once the proof is reached.
+    function check(
+        bytes calldata record,
+        IElectionParameters registry,
+        uint256 qualified,
+        uint256 authorQualified
+    ) internal view returns (Admitted memory a, Layout memory l) {
         ElectionRegistry.Parameters memory p;
         (p, l) = frame(record, registry, a);
         (a.opensAt, a.closesAt) = (p.opensAt, p.closesAt);
@@ -142,13 +141,11 @@ library BallotCheckLib {
             _cell(registry, a.definitionHash, a.version, uint8(named), p.cellCount);
         if (!shapeOk(record, l, p, a.version)) revert BallotRefused(Code.ValidityShape);
         // A seat outside the registered key set gets no shares, so its hash
-        // is fixed and carries no chosen bytes into the archive (T-17).
-        for (uint256 seat = 1; seat <= p.panelSize; seat++) {
-            if (
-                (qualified >> seat) & 1 == 0
-                    && _uint(record, l.shareHashesAt + 32 * (seat - 1), 32) != 0
-            ) revert BallotRefused(Code.ShareHashUnqualified);
-        }
+        // is fixed and carries no chosen bytes into the archive (T-17): the
+        // default panel's seats first, then the author panel's, which has
+        // no seats below version 4 (ballot-validity.md, Admission (version 4)).
+        _requireQualified(record, l.shareHashesAt, p.panelSize, qualified);
+        _requireQualified(record, l.authorShareHashesAt, p.authorPanelSize, authorQualified);
 
         a.ballotHash = ballotHash(record);
         a.message = sha256(
@@ -194,7 +191,7 @@ library BallotCheckLib {
         // The registry doesn't yet refuse every profile combination
         // (contracts.md, Registration): a pin this library doesn't know
         // admits no ballot.
-        if (version > 3) {
+        if (version > 4) {
             _malformed(ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
         }
         a.version = version;
@@ -214,13 +211,13 @@ library BallotCheckLib {
         if (record.length < VOTE_AT) {
             _malformed(ElectionDefinitionLib.DecodeError.Truncated, PROOF_AT);
         }
-        l = frameVote(record, VOTE_AT, version, p.threshold);
+        l = frameVote(record, VOTE_AT, version, p.threshold, p.authorThreshold);
     }
 
     /// `ballot_hash = H(DS("abolish/v1/ballot", definition_hash ‖ u16(0x0002)
     /// ‖ u8(version) ‖ u8(tier or cell) ‖ encode(nullifier) ‖
     /// encode(committed_vote)))` (docs/spec/ballot-validity.md, Ballot hash;
-    /// Hashes (version 3)), from a framed record: every field but the
+    /// Hashes (versions 3 and 4)), from a framed record: every field but the
     /// membership proof and the L1 reference, which `M` binds.
     function ballotHash(bytes calldata record) internal pure returns (bytes32) {
         return sha256(
@@ -238,7 +235,10 @@ library BallotCheckLib {
     /// `k` commitments, `n` share hashes, `T` option proofs, and `max − min +
     /// 1` sum-proof branches (version 3: one range proof per question, each
     /// with its question's). Ballot versions 1 and 2 have one question; one
-    /// pinned beside a definition with several fits no shape.
+    /// pinned beside a definition with several fits no shape. Version 4's
+    /// author half has `T` options of exactly `k_A` and `n_A` share hashes
+    /// with an author panel, and is two empty lists without one, never `T`
+    /// empty lists, so such a ballot has one encoding.
     function shapeOk(
         bytes calldata record,
         Layout memory l,
@@ -248,6 +248,12 @@ library BallotCheckLib {
         if (
             l.vssCount != p.optionCount || !l.degreesK || l.shareCount != p.panelSize
                 || l.optionProofCount != p.optionCount
+        ) return false;
+        if (
+            version >= 4
+                && (l.authorVssCount != (p.authorThreshold == 0 ? 0 : p.optionCount)
+                    || !l.authorDegreesK
+                    || l.authorShareCount != p.authorPanelSize)
         ) return false;
         uint256 count = _uint(record, l.sumAt, 4);
         if (version < 3) {
@@ -265,30 +271,23 @@ library BallotCheckLib {
     }
 
     /// Frames the committed vote at `o` strictly (docs/spec/ballot-validity.md,
-    /// Committed vote; Committed vote (version 3)): every count within its
-    /// maximum before what it counts is read (T-52), every element's encoding
-    /// framed, every scalar below `ℓ`, and nothing after the last field.
-    /// Reverts with `BallotMalformed` at the first failure, left to right.
-    function frameVote(bytes calldata r, uint256 o, uint8 version, uint256 k)
+    /// Committed vote; Committed vote (versions 3 and 4)): every count within
+    /// its maximum before what it counts is read (T-52), every element's
+    /// encoding framed, every scalar below `ℓ`, and nothing after the last
+    /// field. Version 4's author half, between the share hashes and the
+    /// option proofs, is framed as the default half is, its rows counted
+    /// against `kA`. Reverts with `BallotMalformed` at the first failure,
+    /// left to right.
+    function frameVote(bytes calldata r, uint256 o, uint8 version, uint256 k, uint256 kA)
         internal
         pure
         returns (Layout memory l)
     {
-        (l.vssCount, o) = _count(r, o, MAX_OPTIONS);
-        l.degreesK = true;
-        for (uint256 j; j < l.vssCount; j++) {
-            uint256 degree;
-            (degree, o) = _count(r, o, MAX_TRUSTEES);
-            if (degree != k) l.degreesK = false;
-            for (uint256 t; t < degree; t++) {
-                o = _element(r, o);
-            }
-        }
-        l.shareHashesAt = o + 4;
-        (l.shareCount, o) = _count(r, o, MAX_TRUSTEES);
-        for (uint256 i; i < l.shareCount; i++) {
-            _uint(r, o, 32);
-            o += 32;
+        (l.vssCount, l.degreesK, o) = _vss(r, o, k);
+        (l.shareHashesAt, l.shareCount, o) = _shareHashes(r, o);
+        if (version >= 4) {
+            (l.authorVssCount, l.authorDegreesK, o) = _vss(r, o, kA);
+            (l.authorShareHashesAt, l.authorShareCount, o) = _shareHashes(r, o);
         }
         (l.optionProofCount, o) = _count(r, o, MAX_OPTIONS);
         o = _scalars(r, o, 4 * l.optionProofCount);
@@ -308,9 +307,59 @@ library BallotCheckLib {
         if (o != r.length) _malformed(ElectionDefinitionLib.DecodeError.TrailingBytes, o);
     }
 
+    /// A `vss` list at `o`: its count, whether every row has exactly `k`
+    /// elements, and where the list ends.
+    function _vss(bytes calldata r, uint256 o, uint256 k)
+        private
+        pure
+        returns (uint256 count, bool degreesK, uint256 next)
+    {
+        (count, o) = _count(r, o, MAX_OPTIONS);
+        degreesK = true;
+        for (uint256 j; j < count; j++) {
+            uint256 degree;
+            (degree, o) = _count(r, o, MAX_TRUSTEES);
+            if (degree != k) degreesK = false;
+            for (uint256 t; t < degree; t++) {
+                o = _element(r, o);
+            }
+        }
+        next = o;
+    }
+
+    /// A `share_hashes` list at `o`: where its first hash is, its count, and
+    /// where the list ends.
+    function _shareHashes(bytes calldata r, uint256 o)
+        private
+        pure
+        returns (uint256 at, uint256 count, uint256 next)
+    {
+        at = o + 4;
+        (count, o) = _count(r, o, MAX_TRUSTEES);
+        for (uint256 i; i < count; i++) {
+            _uint(r, o, 32);
+            o += 32;
+        }
+        next = o;
+    }
+
+    /// `share-hash-unqualified` over one panel's `size` share hashes at
+    /// `at`, in seat order: a seat outside `qualified` whose hash isn't 32
+    /// zero bytes. `validity-shape` passed, so every hash is in the record.
+    function _requireQualified(bytes calldata record, uint256 at, uint256 size, uint256 qualified)
+        private
+        pure
+    {
+        for (uint256 seat = 1; seat <= size; seat++) {
+            if ((qualified >> seat) & 1 == 0 && _uint(record, at + 32 * (seat - 1), 32) != 0) {
+                revert BallotRefused(Code.ShareHashUnqualified);
+            }
+        }
+    }
+
     /// The cell the ballot names, its tier and its root. Version 1 names a
     /// tier, which must be exactly one cell's: a definition of a later
-    /// version that splits the tier pins ballot version 2 or 3, and one that
+    /// version that splits the tier pins ballot version 2 to 4, and one that
     /// doesn't fails verifier 2.3, so nothing honest is refused.
     function _cell(
         IElectionParameters registry,
@@ -432,5 +481,23 @@ library BallotCheckLib {
 
     function _malformed(ElectionDefinitionLib.DecodeError code, uint256 offset) private pure {
         revert BallotMalformed(code, offset);
+    }
+}
+
+/// @title The board's ballot check as a contract of its own.
+/// @notice The board creates it at construction and calls it for every
+/// ballot and posting, so the check's code sits outside the board's EIP-170
+/// limit (docs/spec/contracts.md, Board, Deployment). It has no storage, no
+/// immutables and no state-changing call: it reads the registry it is given,
+/// and the board gives it the registry it pins (ADR 0028, 1C).
+contract BallotCheck {
+    /// `BallotCheckLib.check`, its reverts passed through unchanged.
+    function check(
+        bytes calldata record,
+        IElectionParameters registry,
+        uint256 qualified,
+        uint256 authorQualified
+    ) external view returns (BallotCheckLib.Admitted memory, BallotCheckLib.Layout memory) {
+        return BallotCheckLib.check(record, registry, qualified, authorQualified);
     }
 }

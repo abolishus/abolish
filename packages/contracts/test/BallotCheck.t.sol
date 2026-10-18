@@ -10,10 +10,11 @@ import {DefinitionHarness, MockTrusteeRegistry} from "./utils/DefinitionHarness.
 import {RegistryFixture} from "./utils/RegistryFixture.sol";
 import {TestBase} from "./utils/Vm.sol";
 
-/// The board's ballot check (docs/spec/contracts.md, Board, Ballots) against
-/// the ballot vectors: ballot.json, ballot-v2.json and ballot-v3-records.json
-/// (records with real Semaphore proofs, admission results and decode
-/// rejections), ballot-v3.json and ballot-validity.json (committed votes,
+/// The board's ballot check (docs/spec/contracts.md, Board, Ballots; Ballots
+/// (version 4)) against the ballot vectors: ballot.json, ballot-v2.json,
+/// ballot-v3-records.json and ballot-v4-records.json (records with real
+/// Semaphore proofs, admission results and decode rejections), ballot-v3.json
+/// and ballot-validity.json (committed votes,
 /// their shapes and codec rejections). Every expected value comes from the files. The board runs
 /// every admission check but the validity proofs (ADR 0028, 3B), so a vector
 /// the verifier rejects only at `option-proof` or `sum-proof` is admitted
@@ -23,6 +24,7 @@ contract BallotCheckTest is TestBase {
     string internal constant V2 = "../../docs/spec/vectors/ballot-v2.json";
     string internal constant V3 = "../../docs/spec/vectors/ballot-v3.json";
     string internal constant V3_RECORDS = "../../docs/spec/vectors/ballot-v3-records.json";
+    string internal constant V4_RECORDS = "../../docs/spec/vectors/ballot-v4-records.json";
     string internal constant VALIDITY = "../../docs/spec/vectors/ballot-validity.json";
 
     BallotHarness internal lib;
@@ -39,6 +41,10 @@ contract BallotCheckTest is TestBase {
         assertTrue(
             _eq(_str(vm.readFile(V3_RECORDS), ".format"), "abolish-ballot-vectors/1"),
             "v3 records format"
+        );
+        assertTrue(
+            _eq(_str(vm.readFile(V4_RECORDS), ".format"), "abolish-ballot-vectors/1"),
+            "v4 records format"
         );
         assertTrue(
             _eq(_str(vm.readFile(V3), ".format"), "abolish-ballot-v3-vectors/1"), "v3 format"
@@ -75,6 +81,119 @@ contract BallotCheckTest is TestBase {
         assertEq(_ballots(V3_RECORDS, 3), 20, "v3 ballot coverage");
     }
 
+    /// ballot-v4-records.json's ballots under their version-6 definitions'
+    /// panels, questions and cells, each judged against both of its
+    /// registered key sets: with an author panel and without one, an author
+    /// half where there is none or missing where there is one
+    /// (`validity-shape`), an unqualified seat of either panel, the default
+    /// panel's reported first (`share-hash-unqualified`), and a swapped author
+    /// half, which the ballot hash and so `M` bind (`membership-proof`;
+    /// T-17, T-37, T-38). Option and range proofs are the verifier's alone.
+    function test_BallotVectorsV4() public {
+        string memory json = vm.readFile(V4_RECORDS);
+        uint256 i;
+        for (; vm.keyExistsJson(json, _at(".ballots", i, "")); i++) {
+            string memory b = _at(".ballots", i, "");
+            string memory id = _str(json, string.concat(b, ".id"));
+            ParametersStub stub = _stubV4(
+                json, string.concat(".elections.", _str(json, string.concat(b, ".election")))
+            );
+            bytes memory record = _bytes(json, string.concat(b, ".encoding"));
+            uint256 qualified = _mask(vm.parseJsonUintArray(json, string.concat(b, ".registered")));
+            uint256 authorQualified =
+                _mask(vm.parseJsonUintArray(json, string.concat(b, ".authorRegistered")));
+            string memory code = _str(json, string.concat(b, ".admission.code"));
+            if (_eq(code, "ok") || _eq(code, "option-proof") || _eq(code, "sum-proof")) {
+                BallotCheckLib.Admitted memory a =
+                    lib.check(record, stub, qualified, authorQualified);
+                assertEq(a.version, 4, id);
+                if (_eq(code, "ok")) {
+                    string memory r = string.concat(b, ".admission");
+                    assertEq(
+                        a.ballotHash,
+                        bytes32(_bytes(json, string.concat(r, ".ballotHash"))),
+                        string.concat("ballot hash of ", id)
+                    );
+                    assertEq(
+                        a.message,
+                        bytes32(_bytes(json, string.concat(r, ".message"))),
+                        string.concat("M of ", id)
+                    );
+                    assertEq(
+                        a.cell,
+                        vm.parseJsonUint(json, string.concat(r, ".cell")),
+                        string.concat("cell of ", id)
+                    );
+                    assertEq(
+                        a.tier,
+                        vm.parseJsonUint(json, string.concat(r, ".tier")),
+                        string.concat("tier of ", id)
+                    );
+                }
+            } else {
+                try lib.check(record, stub, qualified, authorQualified) {
+                    revert(string.concat("admitted ", id));
+                } catch (bytes memory reason) {
+                    assertEq(
+                        keccak256(reason),
+                        keccak256(
+                            abi.encodeWithSelector(
+                                BallotCheckLib.BallotRefused.selector, _code(code)
+                            )
+                        ),
+                        string.concat("refusal of ", id)
+                    );
+                }
+            }
+        }
+        assertEq(i, 23, "v4 ballot coverage");
+    }
+
+    /// The author key set is judged on its own: a ballot whose author half
+    /// names a seat outside it is refused whatever the default key set, and
+    /// one the vectors admit is refused once any author seat it fills leaves
+    /// the set, so a check that skipped the author panel fails here (T-17).
+    function test_AuthorKeySetJudgedV4() public {
+        string memory json = vm.readFile(V4_RECORDS);
+        ParametersStub stub = _stubV4(json, ".elections.panels");
+        // ok-every-seat fills all three seats of both panels.
+        bytes memory record = _bytes(json, ".ballots[3].encoding");
+        assertTrue(_eq(_str(json, ".ballots[3].id"), "ok-every-seat"), "the every-seat ballot");
+        lib.check(record, stub, 14, 14);
+        for (uint256 seat = 1; seat <= 3; seat++) {
+            uint256 without = 14 & ~(1 << seat);
+            _expectRefusedV4(record, stub, 14, without, BallotCheckLib.Code.ShareHashUnqualified);
+            _expectRefusedV4(record, stub, without, 14, BallotCheckLib.Code.ShareHashUnqualified);
+        }
+        // Bit 0 and bits past the panel name no seat.
+        _expectRefusedV4(record, stub, 14, 1 | (1 << 4), BallotCheckLib.Code.ShareHashUnqualified);
+    }
+
+    /// Without an author panel the author half is two empty lists: a
+    /// ballot carrying one, even of zero-filled hashes, fits no shape, and so
+    /// does a ballot of a poll with one that leaves it out (validity-shape;
+    /// ballot-validity.md, Committed vote (version 4), Notes).
+    function test_AuthorHalfShapeV4() public {
+        string memory json = vm.readFile(V4_RECORDS);
+        ParametersStub stub = _stubV4(json, ".elections.panels");
+        bytes32 h = bytes32(_bytes(json, ".elections.panels.definitionHash"));
+        (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
+            _electionV4(json, ".elections.panels");
+        bytes memory record = _bytes(json, ".ballots[0].encoding");
+        lib.check(record, stub, 6, 6);
+        // The same parameters with another author threshold or panel size,
+        // or with none.
+        p.authorThreshold = 3;
+        stub.set(h, p, tiers, roots);
+        _expectRefusedV4(record, stub, 6, 6, BallotCheckLib.Code.ValidityShape);
+        (p.authorThreshold, p.authorPanelSize) = (2, 4);
+        stub.set(h, p, tiers, roots);
+        _expectRefusedV4(record, stub, 6, 6, BallotCheckLib.Code.ValidityShape);
+        (p.authorThreshold, p.authorPanelSize) = (0, 0);
+        stub.set(h, p, tiers, roots);
+        _expectRefusedV4(record, stub, 6, 0, BallotCheckLib.Code.ValidityShape);
+    }
+
     /// Every decode rejection at its offset. The one record of another type
     /// is a type the spec specifies, so the board reports it as unexpected,
     /// where the file, which knows only 0x0002, says unknown (notation.md,
@@ -89,6 +208,37 @@ contract BallotCheckTest is TestBase {
 
     function test_DecodeVectorsV3() public {
         assertEq(_decodes(V3_RECORDS, 3), 8, "v3 decode coverage");
+    }
+
+    /// ballot-v4-records.json's rejections: each author list's count over its
+    /// maximum before anything it counts is read (T-52), an author element
+    /// that is the identity or not canonical, and the same bytes under
+    /// versions 1 and 3, which the pin refuses.
+    function test_DecodeVectorsV4() public {
+        string memory json = vm.readFile(V4_RECORDS);
+        ParametersStub stub = _stubV4(json, ".elections.panels");
+        uint256 i;
+        for (; vm.keyExistsJson(json, _at(".decode", i, "")); i++) {
+            string memory d = _at(".decode", i, "");
+            string memory id = _str(json, string.concat(d, ".id"));
+            try lib.check(_bytes(json, string.concat(d, ".encoding")), stub, 14, 14) {
+                revert(string.concat("admitted ", id));
+            } catch (bytes memory reason) {
+                (ElectionDefinitionLib.DecodeError got, uint256 offset) = _malformed(reason);
+                assertTrue(
+                    got == _decodeError(_str(json, string.concat(d, ".error"))),
+                    string.concat("code for ", id)
+                );
+                if (vm.keyExistsJson(json, string.concat(d, ".offset"))) {
+                    assertEq(
+                        offset,
+                        vm.parseJsonUint(json, string.concat(d, ".offset")),
+                        string.concat("offset for ", id)
+                    );
+                }
+            }
+        }
+        assertEq(i, 13, "v4 decode coverage");
     }
 
     // --- committed votes (versions 1 and 3) ----------------------------------
@@ -262,10 +412,11 @@ contract BallotCheckTest is TestBase {
             _electionV1(json, ".elections.plurality");
         ParametersStub stub = new ParametersStub();
 
-        p.ballotVersion = 4;
+        // Version 5 (rolling electorates) is the first pin the board can't read.
+        p.ballotVersion = 5;
         stub.set(h, p, tiers, roots);
         _expect(
-            _withByte(honest, 2, 4),
+            _withByte(honest, 2, 5),
             stub,
             _malformedData(ElectionDefinitionLib.DecodeError.UnknownVersion, 2)
         );
@@ -404,6 +555,28 @@ contract BallotCheckTest is TestBase {
         position = position % honest.length;
         honest[position] = bytes1(uint8(honest[position]) ^ delta);
         try lib.check(honest, stub, 6) {
+            revert("a changed record was admitted");
+        } catch (bytes memory reason) {
+            bytes4 selector = bytes4(reason);
+            assertTrue(
+                selector == BallotCheckLib.BallotMalformed.selector
+                    || selector == BallotCheckLib.BallotRefused.selector,
+                "an unexpected revert"
+            );
+        }
+    }
+
+    /// The same for a version-4 record with both halves: the author half is
+    /// framed, shaped and bound by the ballot hash like the default half.
+    function testFuzz_NoOneByteChangeAdmittedV4(uint256 position, uint8 delta) public {
+        string memory json = vm.readFile(V4_RECORDS);
+        ParametersStub stub = _stubV4(json, ".elections.panels");
+        bytes memory honest = _bytes(json, ".ballots[3].encoding");
+        lib.check(honest, stub, 14, 14);
+        vm.assume(delta != 0);
+        position = position % honest.length;
+        honest[position] = bytes1(uint8(honest[position]) ^ delta);
+        try lib.check(honest, stub, 14, 14) {
             revert("a changed record was admitted");
         } catch (bytes memory reason) {
             bytes4 selector = bytes4(reason);
@@ -554,6 +727,57 @@ contract BallotCheckTest is TestBase {
         assertEq(p.ballotVersion, version, "the definition's ballot pin");
         if (version == 3) _assertQuestions(json, e, p.questions);
         stub.set(bytes32(_bytes(json, string.concat(e, ".definitionHash"))), p, tiers, roots);
+    }
+
+    /// A stub with one election of ballot-v4-records.json.
+    function _stubV4(string memory json, string memory e) internal returns (ParametersStub stub) {
+        stub = new ParametersStub();
+        (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
+            _electionV4(json, e);
+        stub.set(bytes32(_bytes(json, string.concat(e, ".definitionHash"))), p, tiers, roots);
+    }
+
+    /// A version-6 definition's parameters, decoded from its bytes and
+    /// checked against the panels and questions the file lists beside it,
+    /// with its cells' roots from the file.
+    function _electionV4(string memory json, string memory e)
+        internal
+        view
+        returns (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots)
+    {
+        ElectionDefinitionLib.Definition memory d =
+            defs.decode(_bytes(json, string.concat(e, ".definition")));
+        (p, tiers, roots) = _electionV2(json, e);
+        p.authorThreshold = d.authorThreshold;
+        p.authorPanelSize = uint8(d.authorKeys.length);
+        assertEq(p.ballotVersion, 4, "the definition's ballot pin");
+        _assertQuestions(json, e, p.questions);
+        assertEq(p.threshold, vm.parseUint(_str(json, string.concat(e, ".threshold"))), "k");
+        assertEq(p.panelSize, vm.parseUint(_str(json, string.concat(e, ".panelSize"))), "n");
+        assertEq(
+            p.authorThreshold, vm.parseUint(_str(json, string.concat(e, ".authorThreshold"))), "k_A"
+        );
+        assertEq(
+            p.authorPanelSize, vm.parseUint(_str(json, string.concat(e, ".authorPanelSize"))), "n_A"
+        );
+    }
+
+    function _expectRefusedV4(
+        bytes memory record,
+        IElectionParameters reg,
+        uint256 qualified,
+        uint256 authorQualified,
+        BallotCheckLib.Code code
+    ) internal view {
+        try lib.check(record, reg, qualified, authorQualified) {
+            revert("admitted");
+        } catch (bytes memory reason) {
+            assertEq(
+                keccak256(reason),
+                keccak256(abi.encodeWithSelector(BallotCheckLib.BallotRefused.selector, code)),
+                "unexpected refusal"
+            );
+        }
     }
 
     /// The questions decoded from the definition are the ones the file lists

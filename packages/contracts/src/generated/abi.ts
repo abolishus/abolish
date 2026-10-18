@@ -1,4 +1,103 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// BallotCheck
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const ballotCheckAbi = [
+  {
+    type: "function",
+    inputs: [
+      { name: "record", internalType: "bytes", type: "bytes" },
+      {
+        name: "registry",
+        internalType: "contract IElectionParameters",
+        type: "address",
+      },
+      { name: "qualified", internalType: "uint256", type: "uint256" },
+      { name: "authorQualified", internalType: "uint256", type: "uint256" },
+    ],
+    name: "check",
+    outputs: [
+      {
+        name: "",
+        internalType: "struct BallotCheckLib.Admitted",
+        type: "tuple",
+        components: [
+          { name: "definitionHash", internalType: "bytes32", type: "bytes32" },
+          { name: "version", internalType: "uint8", type: "uint8" },
+          { name: "cell", internalType: "uint8", type: "uint8" },
+          { name: "tier", internalType: "uint8", type: "uint8" },
+          { name: "nullifier", internalType: "uint256", type: "uint256" },
+          { name: "ballotHash", internalType: "bytes32", type: "bytes32" },
+          { name: "message", internalType: "bytes32", type: "bytes32" },
+          { name: "opensAt", internalType: "uint64", type: "uint64" },
+          { name: "closesAt", internalType: "uint64", type: "uint64" },
+        ],
+      },
+      {
+        name: "",
+        internalType: "struct BallotCheckLib.Layout",
+        type: "tuple",
+        components: [
+          { name: "vssCount", internalType: "uint256", type: "uint256" },
+          { name: "degreesK", internalType: "bool", type: "bool" },
+          { name: "shareHashesAt", internalType: "uint256", type: "uint256" },
+          { name: "shareCount", internalType: "uint256", type: "uint256" },
+          { name: "authorVssCount", internalType: "uint256", type: "uint256" },
+          { name: "authorDegreesK", internalType: "bool", type: "bool" },
+          {
+            name: "authorShareHashesAt",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          {
+            name: "authorShareCount",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          {
+            name: "optionProofCount",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          { name: "sumAt", internalType: "uint256", type: "uint256" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum ElectionDefinitionLib.DecodeError",
+        type: "uint8",
+      },
+      { name: "offset", internalType: "uint256", type: "uint256" },
+    ],
+    name: "BallotMalformed",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "code", internalType: "enum BallotCheckLib.Code", type: "uint8" }],
+    name: "BallotRefused",
+  },
+  { type: "error", inputs: [], name: "InsufficientGas" },
+  {
+    type: "error",
+    inputs: [{ name: "root", internalType: "uint256", type: "uint256" }],
+    name: "NonCanonicalRoot",
+  },
+  { type: "error", inputs: [], name: "PrecompileFailed" },
+  {
+    type: "error",
+    inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
+    name: "UnknownTier",
+  },
+  { type: "error", inputs: [], name: "ZeroRoot" },
+] as const;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // BallotRelay
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -143,6 +242,13 @@ export const boardAbi = [
       { name: "relay_", internalType: "address", type: "address" },
     ],
     stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "ballotCheck",
+    outputs: [{ name: "", internalType: "contract BallotCheck", type: "address" }],
+    stateMutability: "view",
   },
   {
     type: "function",
@@ -484,23 +590,6 @@ export const boardAbi = [
   {
     type: "error",
     inputs: [
-      {
-        name: "code",
-        internalType: "enum ElectionDefinitionLib.DecodeError",
-        type: "uint8",
-      },
-      { name: "offset", internalType: "uint256", type: "uint256" },
-    ],
-    name: "BallotMalformed",
-  },
-  {
-    type: "error",
-    inputs: [{ name: "code", internalType: "enum BallotCheckLib.Code", type: "uint8" }],
-    name: "BallotRefused",
-  },
-  {
-    type: "error",
-    inputs: [
       { name: "timestamp", internalType: "uint256", type: "uint256" },
       { name: "opensAt", internalType: "uint64", type: "uint64" },
       { name: "closesAt", internalType: "uint64", type: "uint64" },
@@ -547,15 +636,8 @@ export const boardAbi = [
     ],
     name: "DeliveryRefused",
   },
-  { type: "error", inputs: [], name: "InsufficientGas" },
   { type: "error", inputs: [], name: "InvalidDeployment" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
-  {
-    type: "error",
-    inputs: [{ name: "root", internalType: "uint256", type: "uint256" }],
-    name: "NonCanonicalRoot",
-  },
-  { type: "error", inputs: [], name: "PrecompileFailed" },
   {
     type: "error",
     inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
@@ -608,12 +690,6 @@ export const boardAbi = [
     inputs: [{ name: "count", internalType: "uint256", type: "uint256" }],
     name: "TopicCount",
   },
-  {
-    type: "error",
-    inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
-    name: "UnknownTier",
-  },
-  { type: "error", inputs: [], name: "ZeroRoot" },
 ] as const;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

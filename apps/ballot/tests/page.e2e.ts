@@ -247,15 +247,28 @@ describe("the served ballot client", () => {
     await expect.poll(() => violations).toEqual(["require-trusted-types-for trusted-types-sink"]);
   });
 
-  // Only the challenge page's origin may be framed (apps/challenge).
-  test("refuses a frame from any origin but the challenge page's", async () => {
+  // Only the challenge page's origin may be framed (apps/challenge). A
+  // cross-origin frame's violation reports its origin, not its URL.
+  test("frames the challenge page's origin, and refuses any other", async () => {
+    const challenge = "https://challenge-staging.up.railway.app";
+    await page.route(`${challenge}/**`, (route) =>
+      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>challenge</title>" }),
+    );
+    await page.evaluate((src) => {
+      const frame = document.createElement("iframe");
+      frame.src = src;
+      document.body.append(frame);
+    }, `${challenge}/`);
+    await expect.poll(() => page.frames().some((f) => f.url() === `${challenge}/`)).toBe(true);
     await page.evaluate(() => {
       const frame = document.createElement("iframe");
       frame.src = "https://example.com/";
       document.body.append(frame);
     });
-    await expect.poll(() => violations).toContain("frame-src https://example.com");
-    expect(foreignResponses).toEqual([]);
+    await expect
+      .poll(() => violations.filter((v) => v.startsWith("frame-src")))
+      .toEqual(["frame-src https://example.com"]);
+    expect(foreignResponses).toEqual([`${challenge}/`]);
   });
 
   test("refuses an image from another origin", async () => {

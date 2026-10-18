@@ -130,8 +130,8 @@ export const FRAME_ORIGINS: readonly string[] = ["https://challenge-staging.up.r
  * curve code and witness calculator; requests only to its own origin, for the
  * prover's key and witness calculator from its own release, and to
  * CONNECT_ORIGINS, from the main thread (a worker gets no CSP from the page,
- * so WORKER_BANNED keeps its I/O out); frames from FRAME_ORIGINS only; Web Workers from its own origin only,
- * where encryption and proving run; Trusted Types, with one named policy,
+ * so WORKER_BANNED keeps its I/O out); frames from FRAME_ORIGINS only; Web
+ * Workers from its own origin only, where encryption and proving run; Trusted Types, with one named policy,
  * `ballot-worker`, for the two workers' script URLs (`new Worker(url)` is a
  * script-URL sink; the client creates the policy first, and a second policy
  * of that name throws); no <base> and no form posts.

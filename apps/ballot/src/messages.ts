@@ -62,7 +62,7 @@ const enUS = {
   tryAgain: "Try again",
   notSentTitle: "Your answers weren't sent",
   notSent:
-    "This version of the ballot can seal answers but can't send them yet, so nothing left this device and nothing was counted.",
+    "This device made your ballot and checked it, but this version of the ballot can't send it yet, so nothing left this device and nothing was counted.",
   answerAgain: "Answer again",
   // The arrival check (check.tsx).
   realPoll: "This is the real poll, checked",
@@ -176,7 +176,10 @@ const enUS = {
   seal: "Seal my answers",
   sealExplained:
     "Sealing encrypts your answers on this device. Nothing is sent: once they are sealed you choose whether to cast them or to check the encryption first.",
-  // A sealed ballot, before the choice (sealed.tsx).
+  // Finding the voter on the poll's list, then sealing (sealed.tsx).
+  findingTitle: "Finding you on the poll's list",
+  finding:
+    "This device is reading the poll's public board to find your place among its members, without telling anyone which one is you. Nothing is sent.",
   sealingTitle: "Sealing your answers",
   sealing: "This device is encrypting your answers. Nothing is sent.",
   sealedTitle: "Your answers are sealed",
@@ -213,16 +216,40 @@ const enUS = {
     "Your answers aren't kept: you answer again, and this device seals them anew.",
   // When sealing or opening stopped (sealed.tsx).
   cantSealTitle: "This ballot can't seal answers for this poll yet",
-  cantSealCells:
-    "This poll's members are split by region, and this version of the ballot doesn't know yet which region is yours. Nothing was sealed or sent.",
   cantSealVersion:
     "This poll is of an older kind that this version of the ballot doesn't seal. Nothing was sealed or sent.",
+  noIdentityTitle: "This device has no voting identity yet",
+  noIdentity:
+    "Answering a poll needs a voting identity kept on this device, and this version of the ballot can't make one yet. Nothing was sealed or sent.",
+  identityUnreadableTitle: "The voting identity on this device can't be read",
+  identityUnreadable:
+    "This browser didn't let the ballot read it, or what it keeps isn't a voting identity. Nothing was sealed or sent. Don't clear this site's data: your identity may still be there.",
+  notListedTitle: "You aren't on this poll's list",
+  notListed:
+    "This poll is open to people verified in other ways than your voting identity was, so you can't answer it. Nothing was sealed or sent.",
+  boardUnavailableTitle: "The poll's public board couldn't be read",
+  boardUnavailable:
+    "This device reads the whole board to find your place on the poll's list, and it couldn't this time. Check your connection and answer again. Nothing was sealed or sent.",
+  noRegistrarsTitle: "This copy of the ballot can't find you on a poll's list yet",
+  noRegistrars:
+    "It doesn't yet know whose signatures add people to the lists, so it can't rebuild one. Nothing was sealed or sent.",
+  cellRefusedTitle: "Your place on the poll's list couldn't be found",
+  cellRefused:
+    "The board this device read doesn't show you among this poll's members, or doesn't check. A server may have sent an incomplete board, or your registration may not be on it yet. Answer again later. Nothing was sealed or sent.",
   sealFailedTitle: "This device couldn't seal your answers",
   sealFailed:
     "Nothing was sent. Answer again, or open the ballot from abolishus.eth or another address Abolish lists.",
   openFailedTitle: "This device couldn't open the sealed ballot",
   openFailed:
     "The ballot it sealed can't be counted now, and nothing was sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  noL1Title: "This ballot can't read Ethereum yet",
+  noL1: "Each cast ballot names a recent Ethereum block that this device reads for itself, and this version of the ballot can't read one yet. Your ballot wasn't made and nothing was sent.",
+  castFailedTitle: "This device couldn't make your ballot",
+  castFailed:
+    "Nothing was sent. Answer again, or open the ballot from abolishus.eth or another address Abolish lists.",
+  castFaultyTitle: "Your ballot didn't pass this device's check",
+  castFaulty:
+    "This device checks every ballot before it is sent, and this one was wrong, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
   // Proving membership (proving.tsx); each refusal names the check that stopped it.
   provingTitle: "Proving you can answer",
   proving:

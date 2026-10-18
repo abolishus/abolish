@@ -669,3 +669,68 @@ describe("proving membership", () => {
     expect(progress.filter(([done]) => done > 0)).toEqual([]);
   }, 120_000);
 });
+
+describe("the device's voting identity", () => {
+  type Harness = {
+    saveIdentity(secret: string, memberships: { tier: number; group: string }[]): Promise<void>;
+    readIdentity(): Promise<string>;
+    restampIdentity(version: number): Promise<void>;
+  };
+  const read = () =>
+    page
+      .evaluate(() =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.readIdentity(),
+      )
+      .then((json) => JSON.parse(json) as unknown);
+  const secret = `01${"0b".repeat(31)}`;
+  const memberships = [
+    { tier: 0, group: "5" },
+    { tier: 2, group: "18446744073709551615" },
+  ];
+
+  test("is none until one is saved, then the same one in this origin's storage, across loads", async () => {
+    await expect(read()).resolves.toEqual({ kind: "none" });
+    await page.evaluate(
+      ([s, m]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.saveIdentity(s, m),
+      [secret, memberships] as const,
+    );
+    const found = { kind: "found", identity: { secret, memberships } };
+    await expect(read()).resolves.toEqual(found);
+    await page.reload();
+    await page.locator("#root[data-ready]").waitFor({ state: "attached" });
+    await expect(read()).resolves.toEqual(found);
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    // Nothing of it went anywhere: no request but the client's own files.
+    for (const url of requests)
+      expect(new URL(url).pathname).toMatch(/^\/(tests\/harness\/index\.html|assets\/[\w-]+\.js)$/);
+  });
+
+  test("is unreadable, never guessed at, once the record is of another version", async () => {
+    await page.evaluate(
+      ([s, m]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.saveIdentity(s, m),
+      [secret, memberships] as const,
+    );
+    await page.evaluate(() =>
+      (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampIdentity(2),
+    );
+    await expect(read()).resolves.toEqual({ kind: "unreadable" });
+  });
+
+  test("refuses to save what isn't an identity, leaving the store as it was", async () => {
+    const refused = await page.evaluate(
+      ([m]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness
+          .saveIdentity("00".repeat(32), m)
+          .then(
+            () => "saved",
+            (e: unknown) => (e instanceof Error ? e.name : "?"),
+          ),
+      [memberships] as const,
+    );
+    expect(refused).toBe("TypeError");
+    await expect(read()).resolves.toEqual({ kind: "none" });
+  });
+});

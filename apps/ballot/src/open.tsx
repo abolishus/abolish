@@ -5,11 +5,21 @@ import { type Answers, pickLanguage, questionsOf, votesOf } from "./answers.ts";
 import { ArrivalCheck, ElectionRefused } from "./check.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
-import type { Loaded, LoadProblem } from "./load.ts";
+import type { IdentityRead, Membership } from "./identity.ts";
+import type { Loaded, LoadedBoard, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
+import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
+import type { ProvingProgress } from "./prover-client.ts";
+import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
 import { AnswerQuestions } from "./questions.tsx";
 import { Opened, Sealed, SealStopped, type SealProblem, Working } from "./sealed.tsx";
-import type { ChallengeResult, SealResult } from "./worker/protocol.ts";
+import type {
+  CastResult,
+  ChallengeResult,
+  FindCellResult,
+  MembershipProofProblem,
+  SealResult,
+} from "./worker/protocol.ts";
 
 // Opening the election a ballot link names (P2-8 part 2b-2): the page fetches
 // the registry's hash and the records (load.ts), the worker checks them
@@ -32,6 +42,59 @@ export interface ElectionSource {
   seal(definitionHash: Uint8Array, cell: number, votes: readonly (0 | 1)[]): Promise<SealResult>;
   /** The opening of a seal the voter challenged (`BallotWorker.challenge`); rejects if the worker fails. */
   challenge(seal: number): Promise<ChallengeResult>;
+  /** The voting identity this device holds (identity.ts), read afresh for each use. */
+  identity(): Promise<IdentityRead>;
+  /** The election's whole board (`loadBoard`), which the worker finds the voter's cell in. */
+  loadBoard(electionId: Uint8Array): Promise<LoadedBoard>;
+  /**
+   * The worker's search for the voter's cell in the poll it last checked
+   * (`BallotWorker.findCell`), under the registrars the build pins; rejects
+   * if the worker fails. `secret` is copied to the worker before this
+   * returns, so the caller zeroes its own at once (T-12).
+   */
+  findCell(
+    definitionHash: Uint8Array,
+    secret: Uint8Array,
+    membership: Membership,
+    entries: readonly Uint8Array[],
+  ): Promise<CellAnswer>;
+  /**
+   * The L1 block a ballot names, read from sources this client chose, never
+   * from our API ([[revoting]], Client rules 1 and 2), or `undefined` while
+   * the build has none (part 3c).
+   */
+  l1Block(): Promise<L1Block | undefined>;
+  /** The release's prover artifacts, checked against their pins (`loadProverArtifacts`). */
+  loadArtifacts(): Promise<ProverArtifacts | ArtifactProblem>;
+  /**
+   * The cast of a seal the worker holds, proved by a prover worker
+   * (`castBallot`), reporting the prover's steps; rejects if either worker
+   * fails. `secret` is copied to the worker before this returns, so the
+   * caller zeroes its own at once (T-12).
+   */
+  cast(
+    seal: number,
+    secret: Uint8Array,
+    l1: L1Block,
+    artifacts: ProverArtifacts,
+    onProgress: ProvingProgress,
+  ): Promise<CastResult>;
+}
+
+/** An L1 block, by number and hash, that a ballot's membership message names. */
+export interface L1Block {
+  readonly number: bigint;
+  /** 32 bytes. */
+  readonly hash: Uint8Array;
+}
+
+/** `find-cell`'s answer, or `no-registrars` from a build that pins no group registry. */
+export type CellAnswer = FindCellResult | { readonly ok: false; readonly problem: "no-registrars" };
+
+/** Why the prover artifacts weren't loaded, before any prover started. */
+export interface ArtifactProblem {
+  readonly ok: false;
+  readonly problem: ProverArtifactError["problem"];
 }
 
 type State =
@@ -204,18 +267,53 @@ export function BrokenLink() {
 /** Where a voter is between answering and sending. */
 type Step =
   | { readonly kind: "answering" }
+  | { readonly kind: "finding" }
   | { readonly kind: "sealing" }
   | { readonly kind: "sealed"; readonly seal: number; readonly trackingCode: string }
   | { readonly kind: "opening" }
   | { readonly kind: "opened"; readonly trackingCode: string; readonly opening: Uint8Array }
+  | { readonly kind: "proving"; readonly steps: ProvingSteps | undefined }
+  | { readonly kind: "proving-refused"; readonly problem: ProvingProblem }
   | { readonly kind: "cast" }
-  | { readonly kind: "stopped"; readonly problem: SealProblem };
+  | { readonly kind: "stopped"; readonly problem: SealProblem; readonly code?: string };
+
+const stopped = (problem: SealProblem, code?: string): Step =>
+  code === undefined ? { kind: "stopped", problem } : { kind: "stopped", problem, code };
+
+// The cast's refusals the membership proof makes, each shown on the proving
+// screen; the rest are the worker's or the page's (sealed.tsx).
+// A record, not a list, so a code the prover gains must be placed here.
+const PROOF_PROBLEMS: Record<MembershipProofProblem | "unavailable", true> = {
+  secret: true,
+  root: true,
+  "not-a-member": true,
+  zkey: true,
+  wasm: true,
+  proof: true,
+  rerandomised: true,
+  prover: true,
+  unavailable: true,
+};
+const isProofProblem = (problem: string): problem is keyof typeof PROOF_PROBLEMS =>
+  Object.hasOwn(PROOF_PROBLEMS, problem);
+
+// What answering again can change: the worker and the records are fetched and
+// checked anew. Never after the prover saw the witness (proving.tsx, T-55),
+// and never for the voter's own standing.
+const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
+  "seal-failed",
+  "open-failed",
+  "board-unavailable",
+  "cell-refused",
+  "cast-failed",
+]);
 
 /**
  * A checked election's questions, in the reader's language where the
- * election has it, then the seal: its tracking code before the choice, and
- * a challenged seal's opening ([[challenge]], Client rules 1 and 2). Every
- * attempt starts from nothing chosen.
+ * election has it, then the seal: the voter's cell found from the board,
+ * the tracking code before the choice, and a challenged seal's opening or a
+ * cast seal's proof ([[challenge]], Client rules 1 and 2; [[revoting]],
+ * Client rule 6). Every attempt starts from nothing chosen.
  */
 export function Ballot({
   election,
@@ -224,7 +322,7 @@ export function Ballot({
   onRestart,
 }: {
   election: CheckedElection;
-  source: Pick<ElectionSource, "seal" | "challenge">;
+  source: Omit<ElectionSource, "load" | "check">;
   languages: readonly string[];
   /** Check the poll again from the start. */
   onRestart: () => void;
@@ -245,42 +343,80 @@ export function Ballot({
     definitionHash: election.definitionHash,
     closes: formatTime(locale, election.closesAt),
   };
+  const definitionHash = fromHex(election.definitionHash);
 
   function again() {
     setStep({ kind: "answering" });
     setRound(round + 1);
   }
 
-  function ask<T>(request: () => Promise<T>, then: (answer: T) => Step, failed: SealProblem) {
+  /** Runs `steps`, whose screens land only while this is still the latest request. */
+  function run(steps: (current: () => boolean) => Promise<Step>, failed: Step) {
     const mine = ++asked.current;
+    const current = () => asked.current === mine;
     void (async () => {
       let next: Step;
       try {
-        next = then(await request());
+        next = await steps(current);
       } catch {
-        next = { kind: "stopped", problem: failed };
+        next = failed;
       }
-      if (asked.current === mine) setStep(next);
+      if (current()) setStep(next);
     })();
   }
 
+  /**
+   * The voter's cell, from the whole board and their identity, or the step
+   * that says why there is none. The page's copy of the secret is zeroed as
+   * soon as the worker has its own (T-12).
+   */
+  async function findCell(): Promise<number | Step> {
+    // The board first, whatever this device holds: the fetch says nothing
+    // of whether the voter has an identity in the poll's tiers (T-10).
+    const board = await source.loadBoard(fromHex(election.electionId));
+    if (!board.ok) return stopped("board-unavailable", board.problem);
+    const read = await source.identity();
+    if (read.kind !== "found")
+      return stopped(read.kind === "none" ? "no-identity" : "identity-unreadable");
+    const { secret, memberships } = read.identity;
+    let asked: Promise<CellAnswer>;
+    try {
+      // One tier per cast: a voter in several of the poll's tiers casts in
+      // each independently ([[revoting]], Client rule 7), the first here.
+      const membership = memberships.find(({ tier }) => election.tiers.includes(tier));
+      if (membership === undefined) return stopped("not-listed");
+      asked = source.findCell(definitionHash, secret, membership, board.entries);
+    } finally {
+      secret.fill(0);
+    }
+    const found = await asked;
+    if (found.ok) return found.cell;
+    switch (found.problem) {
+      case "no-registrars":
+        return stopped("no-registrars");
+      case "secret":
+        return stopped("identity-unreadable");
+      case "no-election":
+        return stopped("seal-failed");
+      case "cell":
+        return stopped("cell-refused", found.code);
+    }
+  }
+
   function seal(answers: Answers) {
-    // A version-5 poll of one cell: the voter's cell is that one. Choosing
-    // among several needs the voter's identity, which this client doesn't
-    // hold yet (part 3b-2c-2).
-    if (election.version !== 5) return setStep({ kind: "stopped", problem: "cant-seal-version" });
-    if (election.cells !== 1) return setStep({ kind: "stopped", problem: "cant-seal-cells" });
+    if (election.version !== 5) return setStep(stopped("cant-seal-version"));
     const votes = votesOf(questions, answers);
-    setStep({ kind: "sealing" });
-    ask(
-      () => source.seal(fromHex(election.definitionHash), 0, votes),
+    setStep({ kind: "finding" });
+    run(async (current) => {
+      const cell = await findCell();
+      if (typeof cell !== "number") return cell;
+      if (current()) setStep({ kind: "sealing" });
+      const sealed = await source.seal(definitionHash, cell, votes);
       // A code of any other length is the worker's fault, shown as one.
-      (sealed): Step =>
-        sealed.ok && sealed.trackingCode.length === 32
-          ? { kind: "sealed", seal: sealed.seal, trackingCode: toHex(sealed.trackingCode) }
-          : { kind: "stopped", problem: "seal-failed" },
-      "seal-failed",
-    );
+      return sealed.ok && sealed.trackingCode.length === 32
+        ? { kind: "sealed", seal: sealed.seal, trackingCode: toHex(sealed.trackingCode) }
+        : stopped("seal-failed");
+    }, stopped("seal-failed"));
   }
 
   function choose(seal: number): boolean {
@@ -292,15 +428,56 @@ export function Ballot({
   function challenge(seal: number, shown: string) {
     if (!choose(seal)) return;
     setStep({ kind: "opening" });
-    ask(
-      () => source.challenge(seal),
+    run(async () => {
+      const opened = await source.challenge(seal);
       // The worker opens only the core it sealed; an opening of any other is
       // a fault this device reports, never one it hands over (T-42).
-      (opened): Step =>
-        opened.ok && toHex(opened.trackingCode) === shown
-          ? { kind: "opened", trackingCode: shown, opening: opened.opening }
-          : { kind: "stopped", problem: "open-failed" },
-      "open-failed",
+      return opened.ok && toHex(opened.trackingCode) === shown
+        ? { kind: "opened", trackingCode: shown, opening: opened.opening }
+        : stopped("open-failed");
+    }, stopped("open-failed"));
+  }
+
+  // The proof is made only now, once the voter chose to cast ([[revoting]],
+  // Client rule 6), and the page never asks to open this seal again, so a
+  // ballot the voter chose to cast is never challenged (T-45).
+  function cast(seal: number) {
+    if (!choose(seal)) return;
+    setStep({ kind: "proving", steps: undefined });
+    run(
+      async (current) => {
+        const l1 = await source.l1Block();
+        if (l1 === undefined) return stopped("no-l1");
+        const artifacts = await source.loadArtifacts();
+        if ("ok" in artifacts) return { kind: "proving-refused", problem: artifacts.problem };
+        // Read only now, so the page holds the secret for no download.
+        const read = await source.identity();
+        if (read.kind !== "found")
+          return stopped(read.kind === "none" ? "no-identity" : "identity-unreadable");
+        const { secret } = read.identity;
+        // A step the prover reports after the ballot worker answered never
+        // puts the voter back on the proving screen.
+        let finished = false;
+        let asked: Promise<CastResult>;
+        try {
+          asked = source.cast(seal, secret, l1, artifacts, (done, of) => {
+            if (current() && !finished) setStep({ kind: "proving", steps: { done, of } });
+          });
+        } finally {
+          secret.fill(0);
+        }
+        const cast = await asked.finally(() => (finished = true));
+        if (cast.ok) return { kind: "cast" };
+        if (isProofProblem(cast.problem)) return { kind: "proving-refused", problem: cast.problem };
+        // A record that fails this device's own admission checks was made
+        // after the prover saw the witness: shown, never retried (T-55).
+        return cast.problem === "ballot"
+          ? stopped("cast-faulty", cast.code)
+          : stopped("cast-failed", cast.problem);
+      },
+      // Also an L1 or storage read that threw before any witness: shown as
+      // the worker's failure, without a retry, which is the safe side.
+      { kind: "proving-refused", problem: "worker-failed" },
     );
   }
 
@@ -316,24 +493,20 @@ export function Ballot({
           onSeal={seal}
         />
       );
+    case "finding":
     case "sealing":
-      return <Working poll={poll} kind="sealing" />;
+    case "opening":
+      return <Working poll={poll} kind={step.kind} />;
     case "sealed":
       return (
         <Sealed
           poll={poll}
           electionId={election.electionId}
           trackingCode={step.trackingCode}
-          // Sending is part 3c. The page never asks to open this seal again,
-          // so a ballot the voter chose to cast is never challenged (T-45).
-          onCast={() => {
-            if (choose(step.seal)) setStep({ kind: "cast" });
-          }}
+          onCast={() => cast(step.seal)}
           onChallenge={() => challenge(step.seal, step.trackingCode)}
         />
       );
-    case "opening":
-      return <Working poll={poll} kind="opening" />;
     case "opened":
       return (
         <Opened
@@ -343,6 +516,10 @@ export function Ballot({
           onAgain={again}
         />
       );
+    case "proving":
+      return <Proving steps={step.steps} />;
+    case "proving-refused":
+      return <ProvingRefused problem={step.problem} onRetry={onRestart} />;
     case "cast":
       return (
         <NotSent definitionHash={election.definitionHash} closes={poll.closes} onAgain={again} />
@@ -352,9 +529,8 @@ export function Ballot({
         <SealStopped
           poll={poll}
           problem={step.problem}
-          onAgain={
-            step.problem === "seal-failed" || step.problem === "open-failed" ? onRestart : undefined
-          }
+          code={step.code}
+          onAgain={RESTARTS.has(step.problem) ? onRestart : undefined}
         />
       );
   }

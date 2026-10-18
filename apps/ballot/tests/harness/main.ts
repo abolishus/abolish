@@ -7,6 +7,7 @@
 import "../../src/worker-policy.ts";
 
 import { STAGING } from "../../src/deployment.ts";
+import { IDENTITY_DB, readIdentity, saveIdentity } from "../../src/identity.ts";
 import { loadElection } from "../../src/load.ts";
 import { loadProverArtifacts } from "../../src/prover-artifacts.ts";
 import { castBallot, proveMembership } from "../../src/prover-client.ts";
@@ -185,6 +186,43 @@ const harness = {
     return JSON.stringify({ check: check.ok, sealed, cast, opened }, (_, v: unknown) =>
       v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
     );
+  },
+  /** Stores an identity as this device's (identity.ts), with its groups as decimal strings. */
+  async saveIdentity(
+    secret: string,
+    memberships: readonly { readonly tier: number; readonly group: string }[],
+  ): Promise<void> {
+    await saveIdentity({
+      secret: fromHex(secret),
+      memberships: memberships.map(({ tier, group }) => ({ tier, group: BigInt(group) })),
+    });
+  },
+  /** The identity this device holds, read as the page reads it, with hex and decimal strings. */
+  async readIdentity(): Promise<string> {
+    return JSON.stringify(await readIdentity(), (_, v: unknown) =>
+      v instanceof Uint8Array
+        ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")
+        : typeof v === "bigint"
+          ? v.toString()
+          : v,
+    );
+  },
+  /** Rewrites the stored record's version in place, as a store another client wrote would hold. */
+  async restampIdentity(version: number): Promise<void> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open(IDENTITY_DB, 1);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("identity", "readwrite");
+      const store = transaction.objectStore("identity");
+      const get = store.get("voter");
+      get.onsuccess = () => store.put({ ...(get.result as object), v: version }, "voter");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
   },
   /** Stops the worker, then reports how a request fares: at once, or at its timeout. */
   async stopThenCheck(): Promise<string> {

@@ -151,12 +151,47 @@ export const OpenFailed: Story = {
   },
 };
 
-export const CantSealCells: Story = {
-  name: "A poll of several cells",
-  render: () => <SealStopped poll={POLL} problem="cant-seal-cells" />,
+export const NoIdentity: Story = {
+  name: "No voting identity on this device",
+  render: () => <SealStopped poll={POLL} problem="no-identity" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText(/split by region/)).toBeVisible();
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "This device has no voting identity yet",
+    );
+    await expect(canvas.getByText(/Nothing was sealed or sent/)).toBeVisible();
+    // Nothing a retry could change.
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const CellRefused: Story = {
+  name: "The voter's place on the list couldn't be found",
+  render: () => (
+    <SealStopped poll={POLL} problem="cell-refused" code="not-a-member" onAgain={onAgain} />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your place on the poll's list couldn't be found",
+    );
+    // The check's own name, for whoever the voter reports it to.
+    await expect(canvas.getByText("not-a-member")).toBeVisible();
+    onAgain.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    await expect(onAgain).toHaveBeenCalledOnce();
+  },
+};
+
+export const NoL1: Story = {
+  name: "No L1 block to name yet",
+  render: () => <SealStopped poll={POLL} problem="no-l1" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "This ballot can't read Ethereum yet",
+    );
+    await expect(canvas.getByText(/Your ballot wasn't made/)).toBeVisible();
     await expect(canvas.queryByRole("button")).toBeNull();
   },
 };

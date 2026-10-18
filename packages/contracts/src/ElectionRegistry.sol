@@ -6,6 +6,7 @@ import {ElectionDefinitionLib} from "./ElectionDefinition.sol";
 import {EventAccumulator} from "./EventAccumulator.sol";
 import {IL1Block} from "./IL1Block.sol";
 import {ITrusteeRegistry} from "./ITrusteeRegistry.sol";
+import {TrusteeIdentityLib} from "./TrusteeRegistry.sol";
 
 /// @title The election identifier (docs/spec/contracts.md, Election registry).
 library ElectionIdLib {
@@ -35,7 +36,10 @@ library ElectionIdLib {
 /// profile pins the versions this deployment's board and the verifier serve
 /// for it (T-25, T-50, T-53). With each
 /// definition it records the parameters the board's checks read, so the board
-/// never takes them from a caller (ADR 0028, 1C; T-25). There is no admin,
+/// never takes them from a caller (ADR 0028, 1C; T-25), and with a definition
+/// that has an author panel, the key set a quorum of its author seats
+/// approved, in the same transaction, so no such election exists without one
+/// (ADR 0035; T-25, T-54, T-37). There is no admin,
 /// proxy, pause or upgrade path: every rule is fixed at deployment.
 contract ElectionRegistry is EventAccumulator {
     /// The contracts and clocks of the deployment, fixed at construction. A
@@ -102,6 +106,15 @@ contract ElectionRegistry is EventAccumulator {
         bytes32 panelId;
     }
 
+    /// The author panel's key set recorded for a registered definition: its
+    /// `key_set_hash`, which every approval signed, and its seats as a
+    /// bitmask (bit `i` for seat `i`), as the trustee registry records the
+    /// default panel's (docs/spec/contracts.md, Author panel registration).
+    struct KeySet {
+        bytes32 hash;
+        uint256 seats;
+    }
+
     /// A definition field that names something other than this deployment.
     enum DeploymentField {
         L2ChainId,
@@ -142,6 +155,15 @@ contract ElectionRegistry is EventAccumulator {
     /// loss. Constants of the bytecode, like δ's bounds.
     uint64 public constant MAX_SEQUENCING_WINDOW = 3600;
     uint64 public constant MAX_SEQUENCER_DRIFT = 1800;
+
+    /// @notice The key set a quorum of the author panel approved was recorded
+    /// for the definition whose hash is `definitionHash`, right after its
+    /// `DefinitionRegistered`. `registration` is the whole record, in the
+    /// trustee registry's layout, so anyone checks its approvals against the
+    /// definition's `author_keys` with the decoder of `CeremonyRegistered`.
+    event AuthorPanelRegistered(
+        bytes32 indexed definitionHash, bytes32 indexed authorPanelId, bytes registration
+    );
 
     /// @notice An election was created: `counter` elections were created
     /// before it, in an L2 block whose L1 origin is the block numbered
@@ -184,6 +206,27 @@ contract ElectionRegistry is EventAccumulator {
     error SequencerDriftTooLarge(uint64 maxSequencerDrift);
     error RootNotInPast(uint8 tier, uint64 rootL2Block, uint256 blockNumber);
     error CeremonyNotRecorded(bytes32 stubHash, bytes32 transcriptHash);
+    error AuthorRegistrationMissing();
+    error AuthorPanelAbsent();
+    /// 1 the panel, 2 the stub, 3 the transcript.
+    error AuthorRegistrationMismatch(uint8 field);
+    error MalformedRegistration();
+    error BelowQuorum(uint256 count, uint8 quorum);
+    /// Author panel registration's checks 6 to 9, raised by the trustee
+    /// registry's `checkAuthorRegistration` and passed through unchanged;
+    /// declared here so this contract's ABI decodes them.
+    error KeySetTooSmall(uint256 seats, uint8 threshold);
+    error KeySetSeatsOutOfOrder(uint8 index);
+    error InvalidSigningKey(uint8 index);
+    error DuplicateSigningKey(uint8 index);
+    error SeatsOutOfOrder(uint8 index);
+    error InvalidSignature(uint8 index);
+
+    /// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(seats)`, the
+    /// trustee registry's registration layout.
+    uint256 private constant HEADER_LENGTH = 97;
+    /// `u8(index) ‖ p256-sig`.
+    uint256 private constant APPROVAL_LENGTH = 65;
 
     address public immutable board;
     address public immutable trusteeRegistry;
@@ -204,6 +247,9 @@ contract ElectionRegistry is EventAccumulator {
     mapping(bytes32 definitionHash => uint8[]) private _cellTiers;
     mapping(bytes32 definitionHash => uint256[]) private _cellRoots;
     mapping(bytes32 definitionHash => Ceremony) private _ceremonies;
+    mapping(bytes32 definitionHash => KeySet) private _authorKeySets;
+    mapping(bytes32 definitionHash => mapping(uint256 index => uint256[2])) private
+        _authorSigningKeys;
 
     constructor(Deployment memory dep) {
         // The same rule a definition's `chain` check applies, so a deployment
@@ -259,6 +305,31 @@ contract ElectionRegistry is EventAccumulator {
         return (c.stubHash, c.panelId);
     }
 
+    /// @notice The author panel's key set recorded for the registered
+    /// definition whose hash is `definitionHash`: its `key_set_hash` and its
+    /// seats as a bitmask (bit `i` set for seat `i`). Both zero with no
+    /// author panel or no definition with this hash. The board takes an
+    /// author seat's place in the key set from here, never from a submitter.
+    function authorKeySetOf(bytes32 definitionHash)
+        external
+        view
+        returns (bytes32 keySetHash, uint256 seats)
+    {
+        KeySet storage k = _authorKeySets[definitionHash];
+        return (k.hash, k.seats);
+    }
+
+    /// @notice Author seat `index`'s per-election signing key as `(x, y)`;
+    /// zero for a seat outside the recorded key set.
+    function authorSigningKeyOf(bytes32 definitionHash, uint256 index)
+        external
+        view
+        returns (uint256 x, uint256 y)
+    {
+        uint256[2] storage q = _authorSigningKeys[definitionHash][index];
+        return (q[0], q[1]);
+    }
+
     /// @notice Cell `c`'s tier and root. Reverts unless `c` is below the
     /// definition's `cellCount`.
     function cell(bytes32 definitionHash, uint256 c)
@@ -293,9 +364,64 @@ contract ElectionRegistry is EventAccumulator {
 
     /// @notice Registers the definition of an election the caller created.
     /// Reverts unless every admission rule holds; see the contract's notice.
+    /// A definition with an author panel goes through
+    /// `registerDefinitionWithAuthorPanel`, so none is registered without
+    /// its author key set (T-25, T-54).
     function registerDefinition(bytes calldata definition) external {
         CanonicalCalldata.requireOneBytesArgument(definition);
-        ElectionDefinitionLib.Definition memory def = ElectionDefinitionLib.decode(definition);
+        (ElectionDefinitionLib.Definition memory def, bytes32 stub) = _admit(definition);
+        if (def.authorThreshold != 0) revert AuthorRegistrationMissing();
+        _register(definition, def, stub);
+    }
+
+    /// @notice Registers a definition with an author panel together with the
+    /// key set a quorum of its author seats approved (docs/spec/contracts.md,
+    /// Author panel registration). `authorRegistration` is the trustee
+    /// registry's registration record: `panel_id ‖ stub_hash ‖
+    /// ceremony_transcript_hash ‖ u8(seats) ‖ seats × (u8(index) ‖
+    /// kem_key_hash ‖ x ‖ y) ‖ u8(count) ‖ count × (u8(index) ‖ p256-sig)`.
+    /// Its header must be what the definition fixes (the author panel's
+    /// identifier, `author_stub_hash`, `author_transcript_hash`), so it
+    /// carries no bytes of its own choosing there (T-17); at least
+    /// `max(k_A, n_A − 1)` distinct author seats must sign, each under its
+    /// key in `author_keys`, over the key set's hash (T-14, T-37).
+    function registerDefinitionWithAuthorPanel(
+        bytes calldata definition,
+        bytes calldata authorRegistration
+    ) external {
+        CanonicalCalldata.requireTwoBytesArguments(definition, authorRegistration);
+        (ElectionDefinitionLib.Definition memory def, bytes32 stub) = _admit(definition);
+        if (def.authorThreshold == 0) revert AuthorPanelAbsent();
+        bytes32 authorPanel = _checkAuthorHeader(definition, def, authorRegistration);
+        // Checks 6 to 9 run in the trustee registry, whose statement every
+        // author seat signs and whose code already verifies P-256
+        // signatures; this contract's own code would outgrow EIP-170 with
+        // them. It returns the key set or reverts with the check's error.
+        KeySet memory k;
+        (k.hash, k.seats) = ITrusteeRegistry(trusteeRegistry)
+            .checkAuthorRegistration(authorRegistration, _authorKeyPoints(def), def.authorThreshold);
+
+        bytes32 h = _register(definition, def, stub);
+        _authorKeySets[h] = k;
+        uint256 seats = uint8(authorRegistration[96]);
+        for (uint256 i; i < seats; i++) {
+            uint256 at = HEADER_LENGTH + i * TrusteeIdentityLib.SEAT_LENGTH;
+            _authorSigningKeys[h][uint8(authorRegistration[at])] = [
+                uint256(bytes32(authorRegistration[at + 33:at + 65])),
+                uint256(bytes32(authorRegistration[at + 65:at + 97]))
+            ];
+        }
+        _log3(AuthorPanelRegistered.selector, h, authorPanel, abi.encode(authorRegistration));
+    }
+
+    /// Rules 2 to 9 of Registration on `definition`, reverting on the first
+    /// that fails; returns the decoded definition and its stub hash.
+    function _admit(bytes calldata definition)
+        private
+        view
+        returns (ElectionDefinitionLib.Definition memory def, bytes32 stub)
+    {
+        def = ElectionDefinitionLib.decode(definition);
         ElectionDefinitionLib.Rule r = ElectionDefinitionLib.rule(def);
         if (r != ElectionDefinitionLib.Rule.None) revert DefinitionIllFormed(r);
         _requireThisDeployment(def);
@@ -331,7 +457,7 @@ contract ElectionRegistry is EventAccumulator {
 
         // The ceremony was run for exactly this definition: the check compares
         // hashes the panel signed, never who sent the transaction (T-37, T-71).
-        bytes32 stub = ElectionDefinitionLib.stubHash(definition, def.transcriptOffset);
+        stub = ElectionDefinitionLib.stubHash(definition, def.transcriptOffset);
         // The panel's identifier, threshold and size are passed too, so the
         // trustee registry checks the approving quorum belongs to the panel
         // the definition names, at its threshold (T-14, T-37).
@@ -341,12 +467,77 @@ contract ElectionRegistry is EventAccumulator {
             );
         if (!recorded) revert CeremonyNotRecorded(stub, def.ceremonyTranscriptHash);
         _requireServedProfile(def);
+    }
 
-        bytes32 h = ElectionDefinitionLib.hash(definition);
-        definitionHashOf[id] = h;
+    /// Stores `definition`'s hash for its election, its ceremony and its
+    /// parameters, and emits `DefinitionRegistered`, once every check passed.
+    function _register(
+        bytes calldata definition,
+        ElectionDefinitionLib.Definition memory def,
+        bytes32 stub
+    ) private returns (bytes32 h) {
+        h = ElectionDefinitionLib.hash(definition);
+        definitionHashOf[def.electionId] = h;
         _ceremonies[h] = Ceremony(stub, def.panelId);
         _recordParameters(h, def);
-        _log3(DefinitionRegistered.selector, id, h, _registrationData(definition));
+        _log3(DefinitionRegistered.selector, def.electionId, h, _registrationData(definition));
+    }
+
+    /// Author panel registration's checks 1 to 5: the record's length, its
+    /// header against the definition, and the quorum. Returns the author
+    /// panel's identifier.
+    function _checkAuthorHeader(
+        bytes calldata definition,
+        ElectionDefinitionLib.Definition memory def,
+        bytes calldata registration
+    ) private pure returns (bytes32 authorPanel) {
+        if (registration.length < HEADER_LENGTH) {
+            revert MalformedRegistration();
+        }
+        uint256 approvalsAt =
+            HEADER_LENGTH + uint8(registration[96]) * TrusteeIdentityLib.SEAT_LENGTH + 1;
+        if (registration.length < approvalsAt) revert MalformedRegistration();
+        uint256 count = uint8(registration[approvalsAt - 1]);
+        if (registration.length != approvalsAt + count * APPROVAL_LENGTH) {
+            revert MalformedRegistration();
+        }
+        // Nothing in the first 96 bytes the definition doesn't fix (T-17), and
+        // no approval for another panel, stub or transcript counts (T-37).
+        authorPanel = ElectionDefinitionLib.authorPanelId(def);
+        if (bytes32(registration[0:32]) != authorPanel) revert AuthorRegistrationMismatch(1);
+        if (
+            bytes32(registration[32:64])
+                != ElectionDefinitionLib.authorStubHash(definition, def.transcriptOffset)
+        ) revert AuthorRegistrationMismatch(2);
+        if (bytes32(registration[64:96]) != def.authorTranscriptHash) {
+            revert AuthorRegistrationMismatch(3);
+        }
+        uint8 quorum = _authorQuorum(def);
+        if (count < quorum) revert BelowQuorum(count, quorum);
+    }
+
+    /// `q_A = max(k_A, n_A − 1)`, the author panel's approval quorum
+    /// (docs/spec/ceremony.md, Author panel, Approval): a formula of the
+    /// bytecode, never an input. `author-panel` held, so `1 ≤ k_A ≤ n_A ≤ 16`.
+    function _authorQuorum(ElectionDefinitionLib.Definition memory def)
+        private
+        pure
+        returns (uint8)
+    {
+        uint8 n = uint8(def.authorKeys.length);
+        return def.authorThreshold > n - 1 ? def.authorThreshold : n - 1;
+    }
+
+    /// Each of `author_keys` as the point `(x, y)` it encodes, in seat order.
+    function _authorKeyPoints(ElectionDefinitionLib.Definition memory def)
+        private
+        view
+        returns (uint256[2][] memory points)
+    {
+        points = new uint256[2][](def.authorKeys.length);
+        for (uint256 i; i < points.length; i++) {
+            (points[i][0], points[i][1]) = ElectionDefinitionLib.point(def.authorKeys[i]);
+        }
     }
 
     /// `DefinitionRegistered`'s ABI data: the block's L1 origin, then the
@@ -450,7 +641,14 @@ contract ElectionRegistry is EventAccumulator {
     /// direct submission, a seat's statement or a challenge without a path
     /// the verifier reads (T-25, T-50, T-42, T-53). `profile-types` fixed the
     /// pins as 0x0001 to 0x0009 in order.
-    function _requireServedProfile(ElectionDefinitionLib.Definition memory def) private pure {
+    /// Virtual only so the tests can reach the author panel's registration,
+    /// which no definition this rule serves can, before part 5e of P2-16
+    /// serves definition version 6; nothing in this contract overrides it.
+    function _requireServedProfile(ElectionDefinitionLib.Definition memory def)
+        internal
+        pure
+        virtual
+    {
         uint8 v = def.version;
         uint8[] memory pins = def.pinVersions;
         // 0: definition version 6, whose ballot version 4 the board can't check.

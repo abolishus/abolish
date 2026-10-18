@@ -128,7 +128,9 @@ library TrusteeIdentityLib {
 /// it counts only through the seats' signatures, never through who sent it
 /// (T-71, T-37). A seat counts at most once, so one key can't reach a quorum
 /// by signing twice (T-14). There is no admin, proxy, pause or upgrade path,
-/// and no way to add, change or remove a panel after deployment.
+/// and no way to add, change or remove a panel after deployment. For the
+/// election registry it also checks an author panel's registration record
+/// against keys it is given (`checkAuthorRegistration`), recording nothing.
 contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     /// A panel as the deployment pins it.
     struct PanelInput {
@@ -265,14 +267,7 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     /// verifies under its seat's pinned key over the key set's hash.
     function registerCeremony(bytes calldata registration) external {
         CanonicalCalldata.requireOneBytesArgument(registration);
-        if (registration.length < HEADER_LENGTH) revert MalformedRegistration();
-        uint256 seats = uint8(registration[96]);
-        uint256 approvalsAt = HEADER_LENGTH + seats * TrusteeIdentityLib.SEAT_LENGTH + 1;
-        if (registration.length < approvalsAt) revert MalformedRegistration();
-        uint256 count = uint8(registration[approvalsAt - 1]);
-        if (registration.length != approvalsAt + count * APPROVAL_LENGTH) {
-            revert MalformedRegistration();
-        }
+        (uint256 seats, uint256 approvalsAt, uint256 count) = _layout(registration);
 
         bytes32 panel = bytes32(registration[0:32]);
         bytes32 stub = bytes32(registration[32:64]);
@@ -285,9 +280,44 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
         // can't hold a second set of keys in reserve (ceremony.md, Approval).
         if (transcriptOf[stub][panel] != bytes32(0)) revert AlreadyRecorded(stub, panel);
 
-        KeySet memory k = _checkKeySet(registration, panel, p, seats);
-        _checkApprovals(registration, approvalsAt, count, p, k.hash);
+        uint256[2][] memory identity = new uint256[2][](p.size);
+        for (uint256 j; j < p.size; j++) {
+            identity[j] = _keyOf[panel][j + 1];
+        }
+        KeySet memory k = _checkKeySet(registration, identity, p.threshold, seats);
+        _checkApprovals(registration, approvalsAt, count, identity, k.hash);
         _record(registration, k, seats);
+    }
+
+    /// @inheritdoc ITrusteeRegistry
+    function checkAuthorRegistration(
+        bytes calldata registration,
+        uint256[2][] calldata keys,
+        uint8 threshold
+    ) external view returns (bytes32 keySetHash, uint256 seats) {
+        (uint256 seatCount, uint256 approvalsAt, uint256 count) = _layout(registration);
+        uint256[2][] memory identity = keys;
+        KeySet memory k = _checkKeySet(registration, identity, threshold, seatCount);
+        _checkApprovals(registration, approvalsAt, count, identity, k.hash);
+        return (k.hash, k.seats);
+    }
+
+    /// The record's length check (contracts.md, Registration, 2): returns
+    /// how many seats its key set has, where its approvals start and how
+    /// many there are.
+    function _layout(bytes calldata registration)
+        private
+        pure
+        returns (uint256 seats, uint256 approvalsAt, uint256 count)
+    {
+        if (registration.length < HEADER_LENGTH) revert MalformedRegistration();
+        seats = uint8(registration[96]);
+        approvalsAt = HEADER_LENGTH + seats * TrusteeIdentityLib.SEAT_LENGTH + 1;
+        if (registration.length < approvalsAt) revert MalformedRegistration();
+        count = uint8(registration[approvalsAt - 1]);
+        if (registration.length != approvalsAt + count * APPROVAL_LENGTH) {
+            revert MalformedRegistration();
+        }
     }
 
     /// Records the transcript, the key set and each of its seats' signing
@@ -323,27 +353,26 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     }
 
     /// The key set's checks (contracts.md, Registration, 7 and 8), seat by
-    /// seat, then its `key_set_hash` and seat bitmask. Nothing is stored yet:
-    /// the signatures over the hash are checked first.
-    function _checkKeySet(bytes calldata registration, bytes32 panel, Panel memory p, uint256 seats)
-        private
-        view
-        returns (KeySet memory)
-    {
+    /// seat, against a panel of threshold `threshold` whose seats' identity
+    /// keys are `identity`, in seat order; then its `key_set_hash` and seat
+    /// bitmask. Nothing is stored yet: the signatures over the hash are
+    /// checked first.
+    function _checkKeySet(
+        bytes calldata registration,
+        uint256[2][] memory identity,
+        uint8 threshold,
+        uint256 seats
+    ) private pure returns (KeySet memory) {
         uint256 mask;
         // At least k seats, so the panel can open a ballot (ceremony.md,
         // Transcript check, 5).
-        if (seats < p.threshold) revert KeySetTooSmall(seats, p.threshold);
-        uint256[2][] memory identity = new uint256[2][](p.size);
-        for (uint256 j; j < p.size; j++) {
-            identity[j] = _keyOf[panel][j + 1];
-        }
+        if (seats < threshold) revert KeySetTooSmall(seats, threshold);
         uint256[2][] memory points = new uint256[2][](seats);
         uint8 previous;
         for (uint256 i; i < seats; i++) {
             uint256 at = HEADER_LENGTH + i * TrusteeIdentityLib.SEAT_LENGTH;
             uint8 index = uint8(registration[at]);
-            if (index <= previous || index > p.size) revert KeySetSeatsOutOfOrder(index);
+            if (index <= previous || index > identity.length) revert KeySetSeatsOutOfOrder(index);
             previous = index;
             uint256 x = uint256(bytes32(registration[at + 33:at + 65]));
             uint256 y = uint256(bytes32(registration[at + 65:at + 97]));
@@ -365,13 +394,13 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     }
 
     /// The approvals' checks (contracts.md, Registration, 9 and 10), approval
-    /// by approval: its seat, then its signature over the statement with the
-    /// key set's hash.
+    /// by approval: its seat, then its signature under that seat's key in
+    /// `identity` over the statement with the key set's hash.
     function _checkApprovals(
         bytes calldata registration,
         uint256 approvalsAt,
         uint256 count,
-        Panel memory p,
+        uint256[2][] memory identity,
         bytes32 keySetHash
     ) private view {
         uint8 previous;
@@ -380,9 +409,9 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
             uint8 index = uint8(registration[at]);
             // Strictly increasing seats: each counts once, so one seat (or
             // one stolen key) signing twice never makes a quorum (T-14).
-            if (index <= previous || index > p.size) revert SeatsOutOfOrder(index);
+            if (index <= previous || index > identity.length) revert SeatsOutOfOrder(index);
             previous = index;
-            uint256[2] storage q = _keyOf[bytes32(registration[0:32])][index];
+            uint256[2] memory q = identity[index - 1];
             if (!TrusteeIdentityLib.verify(
                     _digest(registration, index, keySetHash),
                     uint256(bytes32(registration[at + 1:at + 33])),

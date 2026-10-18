@@ -1002,6 +1002,29 @@ export const electionRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [{ name: "definitionHash", internalType: "bytes32", type: "bytes32" }],
+    name: "authorKeySetOf",
+    outputs: [
+      { name: "keySetHash", internalType: "bytes32", type: "bytes32" },
+      { name: "seats", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "definitionHash", internalType: "bytes32", type: "bytes32" },
+      { name: "index", internalType: "uint256", type: "uint256" },
+    ],
+    name: "authorSigningKeyOf",
+    outputs: [
+      { name: "x", internalType: "uint256", type: "uint256" },
+      { name: "y", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "board",
     outputs: [{ name: "", internalType: "address", type: "address" }],
@@ -1162,10 +1185,45 @@ export const electionRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "definition", internalType: "bytes", type: "bytes" },
+      { name: "authorRegistration", internalType: "bytes", type: "bytes" },
+    ],
+    name: "registerDefinitionWithAuthorPanel",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "trusteeRegistry",
     outputs: [{ name: "", internalType: "address", type: "address" }],
     stateMutability: "view",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "authorPanelId",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "registration",
+        internalType: "bytes",
+        type: "bytes",
+        indexed: false,
+      },
+    ],
+    name: "AuthorPanelRegistered",
   },
   {
     type: "event",
@@ -1266,6 +1324,21 @@ export const electionRegistryAbi = [
     inputs: [{ name: "electionId", internalType: "bytes32", type: "bytes32" }],
     name: "AlreadyRegistered",
   },
+  { type: "error", inputs: [], name: "AuthorPanelAbsent" },
+  {
+    type: "error",
+    inputs: [{ name: "field", internalType: "uint8", type: "uint8" }],
+    name: "AuthorRegistrationMismatch",
+  },
+  { type: "error", inputs: [], name: "AuthorRegistrationMissing" },
+  {
+    type: "error",
+    inputs: [
+      { name: "count", internalType: "uint256", type: "uint256" },
+      { name: "quorum", internalType: "uint8", type: "uint8" },
+    ],
+    name: "BelowQuorum",
+  },
   {
     type: "error",
     inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
@@ -1314,10 +1387,39 @@ export const electionRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "DuplicateSigningKey",
+  },
+  {
+    type: "error",
     inputs: [{ name: "bound", internalType: "uint32", type: "uint32" }],
     name: "InclusionBoundOutOfRange",
   },
   { type: "error", inputs: [], name: "InvalidDeployment" },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "InvalidSignature",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "InvalidSigningKey",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "KeySetSeatsOutOfOrder",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "seats", internalType: "uint256", type: "uint256" },
+      { name: "threshold", internalType: "uint8", type: "uint8" },
+    ],
+    name: "KeySetTooSmall",
+  },
+  { type: "error", inputs: [], name: "MalformedRegistration" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
   {
@@ -1352,6 +1454,11 @@ export const electionRegistryAbi = [
       { name: "blockNumber", internalType: "uint256", type: "uint256" },
     ],
     name: "RootNotInPast",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "SeatsOutOfOrder",
   },
   {
     type: "error",
@@ -2270,6 +2377,20 @@ export const trusteeRegistryAbi = [
     ],
     name: "ceremonyRecorded",
     outputs: [{ name: "", internalType: "bool", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "registration", internalType: "bytes", type: "bytes" },
+      { name: "keys", internalType: "uint256[2][]", type: "uint256[2][]" },
+      { name: "threshold", internalType: "uint8", type: "uint8" },
+    ],
+    name: "checkAuthorRegistration",
+    outputs: [
+      { name: "keySetHash", internalType: "bytes32", type: "bytes32" },
+      { name: "seats", internalType: "uint256", type: "uint256" },
+    ],
     stateMutability: "view",
   },
   {

@@ -27,6 +27,33 @@ contract DefinitionHarness {
         return ElectionDefinitionLib.stubHash(d, ElectionDefinitionLib.decode(d).transcriptOffset);
     }
 
+    function authorStubHash(bytes calldata d) external view returns (bytes32) {
+        return
+            ElectionDefinitionLib.authorStubHash(
+                d, ElectionDefinitionLib.decode(d).transcriptOffset
+            );
+    }
+
+    function authorPanelId(bytes calldata d) external view returns (bytes32) {
+        return ElectionDefinitionLib.authorPanelId(ElectionDefinitionLib.decode(d));
+    }
+
+    function authorPanelIdOf(ElectionDefinitionLib.Definition memory def)
+        external
+        pure
+        returns (bytes32)
+    {
+        return ElectionDefinitionLib.authorPanelId(def);
+    }
+
+    function point(ElectionDefinitionLib.P256Key memory key)
+        external
+        view
+        returns (uint256 x, uint256 y)
+    {
+        return ElectionDefinitionLib.point(key);
+    }
+
     function electionId(uint64 chainId, address registry, uint64 counter)
         external
         pure
@@ -230,5 +257,16 @@ contract MockTrusteeRegistry is ITrusteeRegistry {
         return recorded[
             keccak256(abi.encode(stubHash, transcriptHash, panelId, threshold, panelSize))
         ];
+    }
+
+    /// No test registers an author panel through the mock: rule 9 refuses
+    /// every version-6 definition before the call, and the author panel's
+    /// tests run against a real trustee registry.
+    function checkAuthorRegistration(bytes calldata, uint256[2][] calldata, uint8)
+        external
+        pure
+        returns (bytes32, uint256)
+    {
+        revert("mock: no author check");
     }
 }

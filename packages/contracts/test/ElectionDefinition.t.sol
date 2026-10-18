@@ -3,6 +3,8 @@ pragma solidity 0.8.30;
 
 import {ElectionDefinitionLib} from "../src/ElectionDefinition.sol";
 import {ElectionIdLib} from "../src/ElectionRegistry.sol";
+import {TrusteeIdentityLib} from "../src/TrusteeRegistry.sol";
+import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
 import {DefinitionEncoder, DefinitionHarness} from "./utils/DefinitionHarness.sol";
 import {TestBase} from "./utils/Vm.sol";
 
@@ -114,6 +116,12 @@ contract ElectionDefinitionVectorsTest is TestBase {
             assertEq(lib.decode(b).version, version, id);
             assertEq(lib.hash(b), _bytes32(json, _key(i, ".hash")), id);
             assertEq(lib.stubHash(b), _bytes32(json, _key(i, ".stubHash")), id);
+            if (version == 6) {
+                assertEq(lib.authorStubHash(b), _bytes32(json, _key(i, ".authorStubHash")), id);
+                if (vm.keyExistsJson(json, _key(i, ".authorPanelId"))) {
+                    assertEq(lib.authorPanelId(b), _bytes32(json, _key(i, ".authorPanelId")), id);
+                }
+            }
             ElectionDefinitionLib.Rule expected = vm.keyExistsJson(json, _key(i, ".illFormed"))
                 ? _rule(_str(json, _key(i, ".illFormed")))
                 : ElectionDefinitionLib.Rule.None;
@@ -125,6 +133,60 @@ contract ElectionDefinitionVectorsTest is TestBase {
             accepted++;
         }
         assertTrue(accepted > 0 && rejected > 0, "vector coverage");
+    }
+
+    /// The author panel identifier of each valid panel in the version-6
+    /// file's `authorPanels`, from the panel's threshold and keys alone, as the
+    /// election registry checks an author registration's `panel_id`
+    /// (docs/spec/trustee-identity.md, Author panel identifier).
+    function test_AuthorPanelIdVectors() public view {
+        string memory json = vm.readFile(DEFINITIONS_V6);
+        uint256 checked;
+        for (uint256 i; vm.keyExistsJson(json, _panelKey(i, "")); i++) {
+            // An invalid panel has no identifier; the definition's rules
+            // refuse it before anything computes one.
+            if (!vm.keyExistsJson(json, _panelKey(i, ".authorPanelId"))) continue;
+            checked++;
+            ElectionDefinitionLib.Definition memory d;
+            d.authorThreshold = uint8(vm.parseJsonUint(json, _panelKey(i, ".threshold")));
+            string[] memory keys = vm.parseJsonStringArray(json, _panelKey(i, ".keys"));
+            d.authorKeys = new ElectionDefinitionLib.P256Key[](keys.length);
+            for (uint256 k; k < keys.length; k++) {
+                bytes memory enc = vm.parseBytes(keys[k]);
+                d.authorKeys[k] = ElectionDefinitionLib.P256Key(uint8(enc[0]), _word(enc, 1));
+                // The point the registry hands the trustee registry has this
+                // very encoding.
+                (uint256 x, uint256 y) = lib.point(d.authorKeys[k]);
+                assertEq(bytes32(x), d.authorKeys[k].x, "x");
+                assertEq(2 + (y & 1), uint8(enc[0]), "parity");
+                assertTrue(P256.isValidPublicKey(bytes32(x), bytes32(y)), "on the curve");
+            }
+            assertEq(
+                lib.authorPanelIdOf(d),
+                _bytes32(json, _panelKey(i, ".authorPanelId")),
+                _str(json, _panelKey(i, ".id"))
+            );
+        }
+        assertTrue(checked >= 5, "author panel coverage");
+    }
+
+    /// `point` inverts the `p256-key` encoding of any public key.
+    function testFuzz_PointOfAnEncodedKey(uint256 sk) public view {
+        sk = 1 + sk % (TrusteeIdentityLib.N - 1);
+        (uint256 x, uint256 y) = vm.publicKeyP256(sk);
+        (uint256 px, uint256 py) =
+            lib.point(ElectionDefinitionLib.P256Key(uint8(2 + (y & 1)), bytes32(x)));
+        assertTrue(px == x && py == y, "point");
+    }
+
+    function _panelKey(uint256 i, string memory field) internal pure returns (string memory) {
+        return string.concat(".authorPanels[", vm.toString(i), "]", field);
+    }
+
+    function _word(bytes memory b, uint256 at) internal pure returns (bytes32 w) {
+        assembly ("memory-safe") {
+            w := mload(add(add(b, 0x20), at))
+        }
     }
 
     function _known(uint8 version) internal pure returns (bool) {

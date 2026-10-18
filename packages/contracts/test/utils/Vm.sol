@@ -50,6 +50,10 @@ interface Vm {
         returns (uint256[] memory);
     function parseUint(string calldata stringifiedValue) external pure returns (uint256);
     function prank(address msgSender) external;
+    function publicKeyP256(uint256 privateKey)
+        external
+        pure
+        returns (uint256 publicKeyX, uint256 publicKeyY);
     function readFile(string calldata path) external view returns (string memory data);
     function recordLogs() external;
     function revertToState(uint256 snapshotId) external returns (bool success);

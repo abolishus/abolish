@@ -1171,15 +1171,34 @@ function seatResults(run: Run, t: Rounds): KeySeatResult[] {
   return Array.from(reasons, ([index, r]) => ({ index, reasons: r }));
 }
 
-// Every valid result this module's check returned, frozen, so approving and
-// counting take a key's version, deadline, `key_id` and qualified seats only
-// as one check gave them together, never as a caller assembled them: a copy,
-// or a version-1 result relabelled version 2, isn't in it.
-const CHECKED = new WeakSet<object>();
+// Every valid result this module's check returned, with private copies of
+// what approving and counting read from it, so they take a key's version,
+// deadline, `key_id` and qualified seats only as one check gave them together,
+// and only under the scope it was checked in: never as a caller assembled or
+// later changed them (a frozen result's byte arrays stay writable), and never
+// for another panel or registry, whose seats would sign a `key_id` its
+// transcript doesn't check under.
+interface Checked {
+  readonly scope: string;
+  readonly keyId: Uint8Array;
+  readonly version: 1 | 2;
+  readonly deadline: bigint | null;
+  readonly qualified: readonly number[];
+}
 
-function checked(key: object): void {
-  if (!CHECKED.has(key))
+const CHECKED = new WeakMap<object, Checked>();
+
+function scopeKey(s: Scope): string {
+  return `${s.l2ChainId}:${hex(s.groupRegistry)}:${hex(s.panelId)}`;
+}
+
+function checked(key: object, scope: NullifierKeyScope): Checked {
+  const c = CHECKED.get(key);
+  if (c === undefined)
     throw new TypeError("nullifier key: expected a result of checkNullifierKeyTranscript");
+  if (scopeKey(scopeOf(scope)) !== c.scope)
+    throw new RangeError("nullifier key: the check was made under another scope");
+  return c;
 }
 
 /**
@@ -1259,7 +1278,13 @@ export function checkNullifierKeyTranscript(
     qualified: Object.freeze(qualified),
     key,
   });
-  CHECKED.add(result);
+  CHECKED.set(result, {
+    scope: scopeKey(run),
+    keyId: Uint8Array.from(keyId),
+    version,
+    deadline: run.deadline,
+    qualified: qualified.map((q) => q.index),
+  });
   return result;
 }
 
@@ -1358,14 +1383,12 @@ export function approveNullifierKey(
   key: Extract<NullifierKeyCheck, { ok: true }>,
   currentL2Block: bigint,
 ): Uint8Array {
-  checked(key);
-  const { keyId, version, deadline } = key;
+  const { keyId, version, deadline, qualified } = checked(key, scope);
   if (version !== 2 || deadline === null)
     throw new RangeError("nullifier key: only a version-2 key is approved");
-  if (key.qualified.length < nullifierKeyQuorum(scope))
+  if (qualified.length < nullifierKeyQuorum(scope))
     throw new RangeError("nullifier key: fewer than q qualified seats");
-  if (!key.qualified.some((q) => q.index === index))
-    throw new RangeError("nullifier key: the seat isn't qualified");
+  if (!qualified.includes(index)) throw new RangeError("nullifier key: the seat isn't qualified");
   checkRunDeadline(deadline, currentL2Block, MAX_KEY_WINDOW, "nullifier key");
   checkRecordMargin(deadline, currentL2Block, "nullifier key");
   const s = scopeOf(scope);
@@ -1407,21 +1430,24 @@ export function approvingSeats(
  * module's check, of a version-2 transcript with `q` qualified seats, and `q`
  * distinct seats approved it with its deadline. A version-1 key never counts:
  * its runs have no deadline, so a stalled one would hold its seats for good.
- * Whether it counts is then the group registry's record of it, by the
- * deadline and while no key is recorded (`replayNullifierKeyRecords`).
+ * This is what an honest seat or the verifier needs of the transcript and of
+ * approvals it holds, not the counting rule: unlike the registry, it skips
+ * signatures that don't verify, so a key counts only once the group
+ * registry's record of it, by the deadline and while no key is recorded,
+ * passes `replayNullifierKeyRecords`.
  */
 export function nullifierKeyCounts(
   scope: NullifierKeyScope,
   check: Extract<NullifierKeyCheck, { ok: true }>,
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): boolean {
-  checked(check);
+  const { keyId, version, deadline, qualified } = checked(check, scope);
   const q = nullifierKeyQuorum(scope);
   return (
-    check.version === 2 &&
-    check.deadline !== null &&
-    check.qualified.length >= q &&
-    approvingSeats(scope, check.keyId, check.deadline, approvals).length >= q
+    version === 2 &&
+    deadline !== null &&
+    qualified.length >= q &&
+    approvingSeats(scope, keyId, deadline, approvals).length >= q
   );
 }
 

@@ -589,6 +589,20 @@ describe("nullifier-reshare.json", () => {
       /checkNullifierReshareTranscript/,
     );
     expect(Object.isFrozen(honest) && Object.isFrozen(honest.dealers)).toBe(true);
+    // Only under the scope it was checked in: another registry, or the same
+    // predecessor passing to another panel, is refused.
+    for (const other of [
+      { ...scope, groupRegistry: new Uint8Array(20) },
+      { ...scope, newPanel: scope.oldPanel },
+    ]) {
+      expect(() =>
+        approveNullifierReshare(other, secrets[0] as Uint8Array, 1, honest, now),
+      ).toThrow(/another scope/);
+      expect(() =>
+        consentNullifierReshare(other, oldSecrets[0] as Uint8Array, 1, honest, now),
+      ).toThrow(/another scope/);
+      expect(() => nullifierReshareCounts(other, honest, [], [])).toThrow(/another scope/);
+    }
   }, 60_000);
 
   test.each(V.decode.map((d) => [d.id, d] as const))(

@@ -809,14 +809,40 @@ function successorCommitment(
   return c;
 }
 
-// Every valid result this module's check returned, frozen, so approving,
-// consenting and counting take a successor's `key_id`, deadline, dealers and
-// qualified seats only as one check gave them together.
-const CHECKED = new WeakSet<object>();
+// Every valid result this module's check returned, with private copies of
+// what approving, consenting and counting read from it, so they take a
+// successor's `key_id`, deadline, dealers and qualified seats only as one
+// check gave them together, and only under the scope it was checked in (the
+// chain, the registry, both panels and the predecessor): a statement for
+// another new panel over this transcript's `key_id`, recorded, would stop the
+// scope's chain of keys for good.
+interface Checked {
+  readonly scope: string;
+  readonly keyId: Uint8Array;
+  readonly deadline: bigint;
+  readonly dealers: readonly number[];
+  readonly qualified: readonly number[];
+}
 
-function checked(successor: object): void {
-  if (!CHECKED.has(successor))
+const CHECKED = new WeakMap<object, Checked>();
+
+function scopeKey(s: Scope): string {
+  return [
+    s.l2ChainId,
+    hex(s.groupRegistry),
+    hex(s.old.id),
+    hex(s.next.id),
+    hex(s.predecessorId),
+  ].join(":");
+}
+
+function checked(successor: object, scope: NullifierReshareScope): Checked {
+  const c = CHECKED.get(successor);
+  if (c === undefined)
     throw new TypeError("nullifier reshare: expected a result of checkNullifierReshareTranscript");
+  if (scopeKey(scopeOf(scope)) !== c.scope)
+    throw new RangeError("nullifier reshare: the check was made under another scope");
+  return c;
 }
 
 /**
@@ -900,7 +926,13 @@ export function checkNullifierReshareTranscript(
     qualified: Object.freeze(qualified),
     key,
   });
-  CHECKED.add(result);
+  CHECKED.set(result, {
+    scope: scopeKey(run),
+    keyId: Uint8Array.from(keyId),
+    deadline: t.deadline,
+    dealers: dealers.slice(),
+    qualified: qualified.map((q) => q.index),
+  });
   return result;
 }
 
@@ -983,22 +1015,21 @@ export function nullifierReshareConsentMessage(
 }
 
 // Rule 1 of both the approval and the consent, and rule 5: the check's own
-// result, of this scope's predecessor, with both quorums, a deadline ahead
-// within the window, and the margin to force the record left.
+// result, under this scope, with both quorums, a deadline ahead within the
+// window, and the margin to force the record left.
 function checkSuccessor(
   scope: NullifierReshareScope,
   successor: Extract<NullifierReshareCheck, { ok: true }>,
   currentL2Block: bigint,
-): void {
-  checked(successor);
-  if (!equalBytes(successor.predecessor, scopeOf(scope).predecessorId))
-    throw new RangeError("nullifier reshare: the check is of another predecessor");
-  if (successor.dealers.length < nullifierReshareDealerQuorum(scope))
+): Checked {
+  const c = checked(successor, scope);
+  if (c.dealers.length < nullifierReshareDealerQuorum(scope))
     throw new RangeError("nullifier reshare: fewer than max(k, n − 1) qualified dealers");
-  if (successor.qualified.length < nullifierReshareQuorum(scope))
+  if (c.qualified.length < nullifierReshareQuorum(scope))
     throw new RangeError("nullifier reshare: fewer than q' qualified new seats");
-  checkDeadline(successor.deadline, currentL2Block);
-  checkRecordMargin(successor.deadline, currentL2Block, "nullifier reshare");
+  checkDeadline(c.deadline, currentL2Block);
+  checkRecordMargin(c.deadline, currentL2Block, "nullifier reshare");
+  return c;
 }
 
 /**
@@ -1018,8 +1049,8 @@ export function approveNullifierReshare(
   successor: Extract<NullifierReshareCheck, { ok: true }>,
   currentL2Block: bigint,
 ): Uint8Array {
-  checkSuccessor(scope, successor, currentL2Block);
-  if (!successor.qualified.some((q) => q.index === index))
+  const c = checkSuccessor(scope, successor, currentL2Block);
+  if (!c.qualified.includes(index))
     throw new RangeError("nullifier reshare: the new seat isn't qualified");
   const key = scopeOf(scope).next.keys[index - 1];
   if (key === undefined || !equalBytes(identityKey(identitySecret), key))
@@ -1027,7 +1058,7 @@ export function approveNullifierReshare(
   return signStatement(
     identitySecret,
     STATEMENT_TAGS.reshareApproval,
-    nullifierReshareApprovalMessage(scope, index, successor.keyId, successor.deadline),
+    nullifierReshareApprovalMessage(scope, index, c.keyId, c.deadline),
   );
 }
 
@@ -1049,8 +1080,8 @@ export function consentNullifierReshare(
   successor: Extract<NullifierReshareCheck, { ok: true }>,
   currentL2Block: bigint,
 ): Uint8Array {
-  checkSuccessor(scope, successor, currentL2Block);
-  if (!successor.dealers.includes(index))
+  const c = checkSuccessor(scope, successor, currentL2Block);
+  if (!c.dealers.includes(index))
     throw new RangeError("nullifier reshare: the old seat isn't a qualified dealer");
   const key = scopeOf(scope).old.keys[index - 1];
   if (key === undefined || !equalBytes(identityKey(identitySecret), key))
@@ -1058,7 +1089,7 @@ export function consentNullifierReshare(
   return signStatement(
     identitySecret,
     STATEMENT_TAGS.consent,
-    nullifierReshareConsentMessage(scope, index, successor.keyId, successor.deadline),
+    nullifierReshareConsentMessage(scope, index, c.keyId, c.deadline),
   );
 }
 
@@ -1127,9 +1158,10 @@ export function nullifierReshareDealerQuorum(scope: NullifierReshareScope): numb
  * `max(k, n − 1)` distinct old seats consented and `q'` distinct new seats
  * approved it with its deadline. The dealer quorum is checked here, not only
  * by honest approvers, because a panel of an insider's own keys has no honest
- * seat to check it. Whether it counts is then the group registry's record of
- * it, by the deadline, as a successor of the current key
- * (`replayNullifierKeyRecords`).
+ * seat to check it. This is not the counting rule: unlike the registry, it
+ * skips signatures that don't verify, so a successor counts only once the
+ * group registry's record of it, by the deadline, as a successor of the
+ * current key, passes `replayNullifierKeyRecords`.
  */
 export function nullifierReshareCounts(
   scope: NullifierReshareScope,
@@ -1137,15 +1169,14 @@ export function nullifierReshareCounts(
   consents: readonly { readonly index: number; readonly signature: Uint8Array }[],
   approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
 ): boolean {
-  checked(check);
+  const { keyId, deadline, dealers, qualified } = checked(check, scope);
   const dealerQuorum = nullifierReshareDealerQuorum(scope);
   const q = nullifierReshareQuorum(scope);
   return (
-    equalBytes(check.predecessor, scopeOf(scope).predecessorId) &&
-    check.dealers.length >= dealerQuorum &&
-    check.qualified.length >= q &&
-    reshareConsentingSeats(scope, check.keyId, check.deadline, consents).length >= dealerQuorum &&
-    reshareApprovingSeats(scope, check.keyId, check.deadline, approvals).length >= q
+    dealers.length >= dealerQuorum &&
+    qualified.length >= q &&
+    reshareConsentingSeats(scope, keyId, deadline, consents).length >= dealerQuorum &&
+    reshareApprovingSeats(scope, keyId, deadline, approvals).length >= q
   );
 }
 

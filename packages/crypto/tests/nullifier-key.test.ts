@@ -957,6 +957,18 @@ describe("nullifier-key.json, version 2", () => {
       );
     }
     expect(Object.isFrozen(r) && Object.isFrozen(r.qualified)).toBe(true);
+    // Only under the scope it was checked in.
+    const block = deadline - BigInt(PARAMETERS.RECORD_MARGIN);
+    const other = { ...scope, groupRegistry: new Uint8Array(20) };
+    expect(() => approveNullifierKey(other, secret, 1, r, block)).toThrow(/another scope/);
+    expect(() => nullifierKeyCounts(other, r, approvals)).toThrow(/another scope/);
+    // What is signed is what the check gave, whatever the result's bytes become.
+    const fresh = checkNullifierKeyTranscript(scope, hex(honest.transcript), 2);
+    if (!fresh.ok) throw new Error("expected a valid transcript");
+    const keyId = Uint8Array.from(fresh.keyId);
+    fresh.keyId.set([(fresh.keyId[0] ?? 0) ^ 1], 0);
+    const signature = approveNullifierKey(scope, secret, 1, fresh, block);
+    expect(approvingSeats(scope, keyId, deadline, [{ index: 1, signature }])).toEqual([1]);
   }, 60_000);
 
   test("a dealt share of a version-2 run isn't taken in version 1's run of the same run_id", () => {

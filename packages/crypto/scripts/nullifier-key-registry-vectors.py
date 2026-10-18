@@ -402,6 +402,11 @@ def main(out):
     a5 = sign(nxt["secrets"][0], RESHARE_APPROVAL_TAG, reshare_approval_message(nxt["id"], 5, K1, K2, D2))
     case("reshare-approval-beyond", "Approval seat 5 of a four-seat panel", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, c, a + [approval(5, a5)]), K1, K2, nxt["id"], B2)], (1, "seat"))
     case("reshare-approval-seat-order", "Approvals out of order", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, c, [a[1], a[0], a[2]]), K1, K2, nxt["id"], B2)], (1, "seat"))
+    case("reshare-consent-seat-zero", "Consent seat 0", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, [approval(0, c[0][1:])] + c[1:], a), K1, K2, nxt["id"], B2)], (1, "seat"))
+    def high_s(sig):
+        return sig[:33] + (ecdsa.N - int.from_bytes(sig[33:], "big")).to_bytes(32, "big")
+    case("reshare-consent-high-s", "Consent 4's signature with s replaced by n − s", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, c[:3] + [high_s(c[3])], a), K1, K2, nxt["id"], B2)], (1, "signature"))
+    case("reshare-approval-high-s", "Approval 3's signature with s replaced by n − s", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, c, a[:2] + [high_s(a[2])]), K1, K2, nxt["id"], B2)], (1, "signature"))
     by_new = consent_sigs(initial, nxt, [1, 2, 3, 4], K1, K2, D2, signer=nxt)
     case("reshare-consent-new-keys", "Consents signed by the new panel's seats", [e1, reshare_event(reshare_record(K1, nxt["id"], D2, K2, by_new, a), K1, K2, nxt["id"], B2)], (1, "signature"))
     as_approval = [approval(i, sign(initial["secrets"][i - 1], RESHARE_APPROVAL_TAG, consent_message(initial["id"], i, K1, nxt["id"], K2, D2))) for i in [1, 2, 3, 4]]

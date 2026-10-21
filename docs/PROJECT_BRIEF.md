@@ -88,7 +88,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 
 ## Identity
 - One identity interface, multiple tiers. Every result is always reported per tier.
-  - Tier 0: an account with a passkey (open polls). Voting needs an account, so one person can't vote again from another device: an account registers at most one Tier 0 voting identity per group, through account-gated blind tokens, so the server never learns which identity belongs to which account. The identity moves between the account's devices through its passkey-encrypted backup.
+  - Tier 0: an account with a passkey (open polls). Voting needs an account, so one person can't vote again from another device: an account registers at most one Tier 0 voting identity per group, through account-gated blind tokens, so the server never learns which identity belongs to which account. The identity moves between the account's devices through its passkey-encrypted backup. Every account is verified by email and by phone (owner, 2026-10-21): one account per phone number, so a second account costs a second number. The phone number is kept only as a keyed hash for that check, never in the clear.
   - Tier 1: vouched/web-of-trust
   - Tier 2: ZK proof of personhood over government-signed documents (NFC passport, ISO 18013-5 mDL). Proves citizenship/age/uniqueness without revealing identity.
 - Eligibility is anonymous group membership (Semaphore), not per-address tokens. Each verified person adds an identity commitment to the on-chain group for their tier. Voting proves membership + a per-poll nullifier in ZK. Membership is non-transferable and counts are public; participation across polls is unlinkable. A test asserts that no on-chain data links a member to any poll.

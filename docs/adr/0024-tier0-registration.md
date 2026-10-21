@@ -1,6 +1,6 @@
 # ADR 0024: Tier 0 registration
 
-- Status: Accepted (agent) — owner may veto (2026-10-12, rule A): option B, with option D as the direct path
+- Status: Superseded in part by the owner (2026-10-21): option C replaces B (Owner decision, below); D stays specified, and no everyday poll's electorate lists a self-paid group until the owner decides otherwise. Earlier: Accepted (agent) — owner may veto (2026-10-12, rule A): option B, with option D as the direct path
 - Date: 2026-10-12
 - Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-01, T-06, T-10, T-11, T-13, T-16, T-18, T-20, T-25, T-46, T-49, T-52, T-67, T-69 (see [[THREAT_MODEL]])
@@ -132,3 +132,11 @@ Under rule A (`AGENTS.md`): option B, with D as the direct path, status `Accepte
 - **C. No self-paid removals, and removed leaves are 0 before the walk** (chosen): a self-paid group can't be shrunk by anyone, and a commitment removed from a signed group can be self-added again and counts.
 
 What C costs: no Tier 0 removal revokes a commitment in a tier that lists a self-paid group, so a lost or stolen Tier 0 secret stays usable by whoever holds it (T-18, T-69), as at Tier 1 ([[0014-tier1-vouching]], Amendment 2). Revocation at Tier 0 needs a proof by the secret's holder, which neither removal path gives; it waits on T-18's design.
+
+## Owner decision (2026-10-21)
+
+Voting at Tier 0 needs an account, so one person can't vote again from another device: the brief's "Tier 0" line now says so ([[PROJECT_BRIEF]], Identity). **Option C replaces B**: an account obtains a blind-issued token, one per account per Tier 0 group, and the ballot client redeems it with its commitment, so the issuer learns which accounts took a token and never which commitment redeemed it. The brief's rule that the server never holds both an account and a ballot linkage stands, and C is the option that keeps it; A, which records account → commitment, stays rejected.
+
+- **What it buys and what it doesn't.** It stops one account registering on several devices; the identity moves between an account's devices through its recovery backup ([[0017-identity-recovery-backup]]). It doesn't stop one person opening several accounts: that costs what an account costs (C's Cons, above), so making accounts costlier (a verified email or phone, a payment, or Tier 2 later) is the lever, and an owner decision of its own.
+- **D, the self-paid addition.** It joins Tier 0 without an account, at the price of gas. It stays specified and built, as the censorship-resistant path, but no everyday poll's electorate lists a self-paid group until the owner decides how it squares with the account rule (for example a token redeemed on chain).
+- **Built by [[P2-30]]**: the issuance spec and vectors (VOPRF, RFC 9497, as in Privacy Pass, RFC 9578), the issuer key and its rotation, `apps/web`'s relay with the account's session, the ballot client's blinding and redemption, the signing service's check of a redeemed token in place of the Turnstile solve, and the delay and batching that keep the handoff's timing from joining an account to its commitment (T-11). Everything under B that C doesn't replace (the queue, the batch job, the paymaster) is reused.

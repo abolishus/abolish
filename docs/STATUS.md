@@ -6,7 +6,11 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
 ## Queue
 
-**Owner priority (2026-10-17):** the end-to-end path comes before everything else, whatever the phase: [[P2-8]] part 2b (its `connect-src` origins are decided and landed, see its file), then [[P2-21]] (the membership prover) and [[P2-22]] (creating a poll), which have no owner decision in front of their first parts. Once these are done or blocked, the queue's order applies again.
+**Owner priority (2026-10-21), replacing the earlier notes:** the everyday app first, finished completely before any official work ([[PROJECT_BRIEF]], Priority). Take the first unblocked item, in this order:
+
+1. **The everyday app**: [[P2-30]], [[P2-8]], [[P2-22]], [[P2-23]], [[P2-24]], [[P2-25]], [[P2-26]], [[P2-27]], [[P2-28]], [[P2-15]], [[P2-17]], [[P2-14]], [[P2-10]], [[P2-9]], [[P2-19]], [[P2-20]], [[P2-18]], [[P2-21]], and [[P2-29]]'s design iterations as each surface becomes reviewable.
+2. **What an everyday item waits on**, and only that part: the contracts ([[P1-18]]), the verifier and reference election ([[P1-19]], [[P1-20]], [[P1-21]]), intake and receipts ([[P1-12c]], [[P1-13b]]), the trustee node ([[P2-13]]), Tier 0 registration ([[P3-2]]), the indexer ([[P3-5]]), anchoring ([[P4-1]]) and the board's data availability ([[P4-3]]).
+3. **Deferred until [[P2-29]] is done**: Tier 1 and Tier 2 ([[P3-3]], [[P3-4]]), per-tier results ([[P3-6]]), the rest of Phase 4 ([[P4-2]], [[P4-4]], [[P4-5]], [[P4-6]]), Phase 5, the independent trustees ([[P1-7]]), and [[P2-16]]'s author-panel parts (6 to 9). An item already mid-part finishes that part; no new part starts.
 
 Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
 
@@ -51,11 +55,9 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P1-21]] Simulation surfaces in admin-cli and sdk
 - [[P1-22]] Phase 1 exit
 
-### Phase 2: Open polls end to end at Tier 0
+### Phase 2: Open polls end to end at Tier 0, and the complete everyday app
 
 - [[P2-8]] `apps/ballot`
-- [[P2-21]] The membership prover in the ballot client
-- [[P2-22]] Creating a poll: from the website to a registered, open election
 - [[P2-1]] `packages/core` and Drizzle schema
 - [[P2-2]] `packages/api-contract`
 - [[P2-3]] `apps/api`
@@ -73,7 +75,17 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P2-15]] Live results
 - [[P2-16]] Author-added trustees and the transitional panel
 - [[P2-17]] Rolling electorates
+- [[P2-21]] The membership prover in the ballot client
+- [[P2-22]] Creating a poll: from the website to a registered, open election
 - [[P2-18]] Short links
+- [[P2-23]] Discovery
+- [[P2-24]] Sharing
+- [[P2-25]] Results and interactivity
+- [[P2-26]] Creating polls well
+- [[P2-27]] Accounts, profiles and notifications
+- [[P2-28]] The installable app and quality targets
+- [[P2-30]] Account-gated Tier 0 registration
+- [[P2-29]] Design iterations of the everyday app
 - [[P2-12]] Phase 2 exit
 
 ### Phase 3: Tier 2 ZK identity, Semaphore groups, indexer, per-tier results

@@ -2,6 +2,12 @@
 
 We're building a production-grade, open-source, publicly auditable voting platform at abolish.us. It is deliberately non-binding: a citizen-run parallel record of public will that no government, company or operator (including us) can censor, forge or quietly alter. Its authority comes only from anyone being able to verify every result themselves. US first, then worldwide votes and user-defined polls. This is critical infrastructure: stable, fully tested, cryptographically sound, real-world deployable. No hacks, no shortcuts, no "we'll secure it later."
 
+## Priority (owner, 2026-10-21)
+- The everyday app comes first, and is finished completely before any official work starts: sharing, interactivity, discovery, every screen of both apps, and at least three design iterations of each surface for UX quality. The primary user is anyone who wants a quick, trustworthy answer from a group: friends, a neighbourhood, a club, a classroom, an online community.
+- Official work waits until then: civic referendums and their templates, organisational votes, Tier 1 and Tier 2 identity, the native app, named author trustees and the independent panel's handover, and the second domain, ENS and community-node entry points. Security and verifiability that everyday polls rely on stay in scope.
+- Everyday polls take a rolling electorate, so anyone who arrives after a poll opens can answer it.
+- Polls may carry emoji reactions on the poll itself, never on an answer; comments come later. Nothing social ever links an account to how it voted.
+
 ## First session only
 - Save this prompt verbatim as `docs/PROJECT_BRIEF.md`. Future sessions are started by routines and see only the repo, so AGENTS.md must point to the brief and hold everything needed to continue.
 - Create AGENTS.md (with CLAUDE.md pointing to it) and project skills in `.claude/skills/`, containing concrete rules for dev, crypto review, contracts, circuits, migrations, releases and deploys.
@@ -82,7 +88,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 
 ## Identity
 - One identity interface, multiple tiers. Every result is always reported per tier.
-  - Tier 0: passkey (open polls)
+  - Tier 0: an account with a passkey (open polls). Voting needs an account, so one person can't vote again from another device: an account registers at most one Tier 0 voting identity per group, through account-gated blind tokens, so the server never learns which identity belongs to which account. The identity moves between the account's devices through its passkey-encrypted backup.
   - Tier 1: vouched/web-of-trust
   - Tier 2: ZK proof of personhood over government-signed documents (NFC passport, ISO 18013-5 mDL). Proves citizenship/age/uniqueness without revealing identity.
 - Eligibility is anonymous group membership (Semaphore), not per-address tokens. Each verified person adds an identity commitment to the on-chain group for their tier. Voting proves membership + a per-poll nullifier in ZK. Membership is non-transferable and counts are public; participation across polls is unlinkable. A test asserts that no on-chain data links a member to any poll.
@@ -208,9 +214,11 @@ Starting system:
 
 ## Phased delivery
 1. Threat model + protocol spec + canonical encodings + crypto core + circuits + verifier + reference election (CLI only), plus CI, review and release workflows
-2. `apps/api`, `apps/worker`, `apps/web`, `apps/ballot`: open polls end to end at Tier 0 with accounts, reproducible signed builds, deployed to staging
+2. `apps/api`, `apps/worker`, `apps/web`, `apps/ballot`: open polls end to end at Tier 0 with accounts, reproducible signed builds, deployed to staging, and the complete everyday app (Priority, above)
 3. Tier 2 ZK identity (QR handoff) + Semaphore groups + `apps/indexer` + per-tier results
 4. Censorship resistance: L1 anchoring, direct-submit path, IPFS + permanent archive + ENS + secondary domain, `apps/node`, verifier running against chain + IPFS only
 5. US civic referendum templates + Capacitor app with native NFC/prover plugins
+
+Phases 3 to 5 wait for the everyday app to be complete (Priority, above), except the parts of them everyday polls rely on: Tier 0 registration and its group registry, the indexer where an everyday screen needs it, L1 anchoring and the board's data availability.
 
 Each phase ends deployed to staging, with STATUS.md updated: what's done, what's tested, and what's known-weak.

@@ -67,7 +67,7 @@ export const OfferedForSeveral: Story = {
 
 export const OfferedWithoutPosting: Story = {
   name: "A build with no contract path offers only trying again or leaving the ballot",
-  args: { onPost: undefined },
+  render: (args) => <PostingOffer {...args} onPost={undefined} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();

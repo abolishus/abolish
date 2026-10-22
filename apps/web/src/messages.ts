@@ -325,6 +325,10 @@ const enUS = {
   shareNoMenu:
     "This browser doesn't have a share menu. Copy the link and paste it where you like, or email it.",
   shareEmail: "Email the link",
+  shareQrShow: "Show a QR code",
+  shareQrLabel: "QR code for {link}",
+  shareQrNote:
+    "Point a phone's camera at it to open this poll. It holds the same link, so it says nothing about who showed it.",
   // Why a poll couldn't be set up, one per failure code core writes
   // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
   // retried comes back as a draft; one whose election was registered stays.

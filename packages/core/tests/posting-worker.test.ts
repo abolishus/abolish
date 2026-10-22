@@ -302,7 +302,9 @@ describe("an honest pair", { timeout: 60_000 }, () => {
   });
 });
 
-describe("step 1: the bytes again", { timeout: 60_000 }, () => {
+// The byte-flip property ticks the worker up to 200 times against Redis: about
+// 15s alone, but over 60s on a CI runner shared with every package's tests.
+describe("step 1: the bytes again", { timeout: 240_000 }, () => {
   test("a value that isn't a pair, or under another posting's key, is malformed", async () => {
     const pair = pairOf();
     const other = postingKey(pairOf(2).posting);

@@ -60,6 +60,28 @@ describe("pages", () => {
       expect(pageOf(path)).toBe("other");
   });
 
+  test("an embed is its template, in any case, whatever its code", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("/embed/p/", "/EMBED/P/", "/Embed/p/"),
+        fc.stringMatching(/^[^/?#]+$/),
+        (at, code) => {
+          expect(pageOf(`${at}${code}`)).toBe("/embed/p/:code");
+        },
+      ),
+      runs,
+    );
+    for (const path of [
+      "/embed",
+      "/embed/p",
+      "/embed/p/",
+      "/embed/p/a/",
+      "/embed/p/a/b",
+      "/x/embed/p/a",
+    ])
+      expect(pageOf(path)).toBe("other");
+  });
+
   test("every path is one of the fixed templates, so none carries a path's text", () => {
     fc.assert(
       fc.property(fc.webPath(), (path) => {

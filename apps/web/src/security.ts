@@ -13,6 +13,11 @@
 // It is third-party code on our origin, so it is allowed only there, and the
 // page loads it only when the author submits (src/account/challenge.ts; T-43,
 // T-55).
+//
+// The other: a poll's embed, `/embed/p/<code>` (P2-24 part 3), which other
+// sites frame (docs/design/sharing.md, The embed decision). It is the only
+// page any site may frame, and it has no script at all, so its policy has no
+// `script-src` and sandboxes the document whatever the host's iframe says.
 
 /** A fresh nonce for one response's inline scripts: 128 bits from the platform CSPRNG. */
 export function newNonce(): string {
@@ -30,6 +35,11 @@ export const CHALLENGE_ORIGIN = "https://challenges.cloudflare.com";
  */
 export function isChallengePage(pathname: string): boolean {
   return /^\/account\/polls\/[a-z0-9]+$/.test(pathname);
+}
+
+/** Whether `pathname` is a poll's embed, `/embed/p/<code>`, and so frameable. */
+export function isEmbedPage(pathname: string): boolean {
+  return /^\/embed\/p\/[^/]+$/i.test(pathname);
 }
 
 export interface PolicyOptions {
@@ -97,5 +107,41 @@ export function imageHeaders(): Readonly<Record<string, string>> {
     "referrer-policy": "no-referrer",
     "cross-origin-resource-policy": "cross-origin",
     "strict-transport-security": "max-age=31536000",
+  };
+}
+
+/**
+ * The headers on a poll's embed (`isEmbedPage`). Any site may frame it, so
+ * nothing in it may run or send anything: no `script-src` (so no script, ours
+ * or injected), no form action, and the CSP's own sandbox, which holds even
+ * where a host leaves the iframe's `sandbox` out. The sandbox keeps the
+ * page's origin only so its stylesheet and fonts load from us (an opaque
+ * origin would be refused our `same-origin` assets); with no script there is
+ * nothing to use it with. Links open in a new tab, outside the sandbox, as
+ * plain navigations (T-43, T-67). A reader's browser still contacts us when
+ * a host page loads (T-11): the page sets no cookie, asks for no referrer,
+ * and may be cached briefly, since it carries no nonce and nothing about
+ * whoever loaded it.
+ */
+export function embedHeaders(): Readonly<Record<string, string>> {
+  return {
+    "content-security-policy": [
+      "default-src 'none'",
+      "style-src 'self'",
+      "font-src 'self'",
+      "img-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors *",
+      "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+    ].join("; "),
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    // A host that isolates itself (COEP) can still frame it.
+    "cross-origin-resource-policy": "cross-origin",
+    "cache-control": "public, max-age=60",
+    "strict-transport-security": "max-age=31536000",
+    "permissions-policy":
+      "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()",
   };
 }

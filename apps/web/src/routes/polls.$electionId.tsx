@@ -1,6 +1,7 @@
 import { useTranslate } from "@abolishus/ui";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
+import { embedHeight } from "../components/poll-embed.tsx";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
 import { fetchPoll } from "../data.ts";
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/polls/$electionId")({
             url: `${origin}/p/${page.code}`,
             title: preview.title,
             flyer: `/p/${page.code}/flyer`,
+            embed: { page: `${origin}/embed/p/${page.code}`, height: embedHeight(page.poll) },
           }
         : undefined;
     return { page, preview, share };

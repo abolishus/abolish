@@ -13,6 +13,7 @@ export const PAGES = [
   "/polls/:id/board",
   "/p/:code",
   "/p/:code/flyer",
+  "/embed/p/:code",
   "/moderation",
   "/account",
   "/account/polls/:id",
@@ -42,6 +43,9 @@ export function pageOf(pathname: string): Page {
   if (/^\/[pP]\/[^/]+$/.test(pathname)) return "/p/:code";
   // Its flyer: the paper and ink are in the query, never kept.
   if (/^\/p\/[^/]+\/flyer$/i.test(pathname)) return "/p/:code/flyer";
+  // Its embed, loaded by every reader of a page that carries it: the code
+  // and the theme are never kept, nor which site it was on (T-11).
+  if (/^\/embed\/p\/[^/]+$/i.test(pathname)) return "/embed/p/:code";
   return "other";
 }
 

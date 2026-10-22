@@ -4,7 +4,7 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { type BoardRow, boardRows } from "../board.ts";
-import { type StreamCard, streamCard, type StreamSort } from "../stream.ts";
+import { type CardText, type StreamCard, streamCard, type StreamSort } from "../stream.ts";
 import { fromHex } from "../values.ts";
 import {
   definitionView,
@@ -383,5 +383,50 @@ export async function loadStream(
     cards: cards.filter((card) => card !== undefined),
     // The listing's own cursor, as the register's, so a dropped poll doesn't end the stream.
     next: elections.length === STREAM_PAGE ? elections.at(-1) : undefined,
+  };
+}
+
+export type EmbedPage =
+  | {
+      readonly kind: "poll";
+      readonly poll: PollView;
+      /** When the page was loaded, for the poll's status. */
+      readonly asOf: Instant;
+      /** Its words in the page's locale, checked against the definition; `undefined` if none can be shown. */
+      readonly text: CardText | undefined;
+    }
+  /** Moderation hid its text (docs/moderation-policy.md), so the embed shows none. */
+  | { readonly kind: "hidden" }
+  | { readonly kind: "not-found" };
+
+/**
+ * The poll `code` names (canonical, from the caller), as its embed draws it
+ * (docs/design/sharing.md, Embed): resolved as `/p/<code>` resolves it, then
+ * loaded and checked as the poll page is, which must print the same code
+ * (T-34), with its display text checked as the stream checks a card's
+ * (src/stream.ts). Nothing of the reader's is passed on (T-10, T-11).
+ */
+export async function loadEmbed(api: Api, code: string, locale: string): Promise<EmbedPage> {
+  const link = await resolveShortLink(api, code);
+  if (link.kind === "not-found") return link;
+  const page = await loadPoll(api, link.electionId);
+  if (page.kind !== "poll" || page.code !== code) return { kind: "not-found" };
+  if (page.moderation.state === "hidden") return { kind: "hidden" };
+  let card: StreamCard;
+  try {
+    const [{ definition }, displayText] = await Promise.all([
+      api.elections.getDefinition({ electionId: link.electionId }),
+      displayTextOf(api, link.electionId),
+    ]);
+    card = streamCard(link.electionId, definition, displayText, locale);
+  } catch (error) {
+    if (notFound(error)) return { kind: "not-found" };
+    throw error;
+  }
+  return {
+    kind: "poll",
+    poll: page.poll,
+    asOf: page.asOf,
+    text: card.kind === "poll" ? card.text : undefined,
   };
 }

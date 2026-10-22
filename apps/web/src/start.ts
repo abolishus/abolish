@@ -1,6 +1,13 @@
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 
-import { imageHeaders, isChallengePage, newNonce, securityHeaders } from "./security.ts";
+import {
+  embedHeaders,
+  imageHeaders,
+  isChallengePage,
+  isEmbedPage,
+  newNonce,
+  securityHeaders,
+} from "./security.ts";
 
 // Server functions are reachable only from our own pages: a request from
 // another origin is refused before any handler runs. Page loads are plain
@@ -10,7 +17,8 @@ const csrf = createCsrfMiddleware({ filter: ({ handlerType }) => handlerType ===
 // Every response gets the security headers, its CSP naming the nonce the
 // router stamps on the inline scripts it renders (src/router.tsx). A link
 // preview's PNG gets the image's set instead, keeping its route's caching.
-// Only the poll editor's pages may run Turnstile (src/security.ts).
+// Only the poll editor's pages may run Turnstile, and only a poll's embed
+// may be framed, with no script at all (src/security.ts).
 const headers = createMiddleware().server(async ({ next, request }) => {
   const nonce = newNonce();
   const result = await next({ context: { nonce } });
@@ -22,13 +30,17 @@ const headers = createMiddleware().server(async ({ next, request }) => {
   // redirect sets none and gets `no-store` like a page.
   const redirectCaching =
     response.status >= 300 && response.status < 400 ? response.headers.get("cache-control") : null;
-  const challenge = isChallengePage(new URL(request.url).pathname);
+  const { pathname } = new URL(request.url);
+  const embed = !image && isEmbedPage(pathname);
+  const challenge = isChallengePage(pathname);
   for (const [name, value] of Object.entries(
-    image ? imageHeaders() : securityHeaders(nonce, { challenge }),
+    image ? imageHeaders() : embed ? embedHeaders() : securityHeaders(nonce, { challenge }),
   ))
     response.headers.set(name, value);
   if (redirectCaching !== null) response.headers.set("cache-control", redirectCaching);
-  if (image) response.headers.delete("set-cookie");
+  if (image || embed) response.headers.delete("set-cookie");
+  // Only an embed that drew its poll may be cached: a failure is retried.
+  if (embed && response.status !== 200) response.headers.set("cache-control", "no-store");
   return { ...result, response };
 });
 

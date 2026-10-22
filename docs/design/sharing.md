@@ -54,19 +54,19 @@ A card for local news and community pages: who asked, the question, each option 
   style="max-width:640px;border:0"
   loading="lazy"
   referrerpolicy="no-referrer"
-  sandbox="allow-popups allow-popups-to-escape-sandbox"
+  sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
 ></iframe>
 ```
 
 Why:
 
 - **Live results need fresh data.** A pasted HTML snapshot goes stale at the next release; the iframe shows the latest release each time the page is read.
-- **No script on either side.** A `<script>` widget would run our code inside other people's pages and theirs beside ours, outside any policy we control (T-67, T-43). The embed page has no script at all; the sandbox withholds scripts, forms and same-origin from the frame, so even a compromised embed page can't run code or post anything.
+- **No script on either side.** A `<script>` widget would run our code inside other people's pages and theirs beside ours, outside any policy we control (T-67, T-43). The embed page has no script at all; the sandbox withholds scripts and forms from the frame, so even a compromised embed page can't run code or post anything. It keeps the frame's origin (`allow-same-origin`) only so the page's own stylesheet and fonts load: an opaque origin would be refused our `same-origin` assets, and with no script the origin gives the frame nothing else. The page's CSP carries the same sandbox, so it holds where a host leaves the attribute out (P2-24 part 3).
 - **It can't take a vote.** The card has no form, input or button; options and "Answer on Abolish" are links with `target="_blank"` to the ballot client, using the same fragment handoff as the website (`https://abolish.ch/#poll=<definition hash>&pick=<option>`, [[first-answer]]), so neither the poll nor the pick reaches a server. The ballot client itself must refuse to be framed (below).
 
 Costs: every reader's browser contacts abolish.us when the host page loads (T-11). The snippet sets `referrerpolicy="no-referrer"` and the embed route sets no cookies, but the host can override the attribute. For sites that don't want that, the dialog offers **a plain link** instead: the question as a link and one line, which loads nothing from us.
 
-Server-side: `/embed/*` is the only route whose CSP allows framing (`frame-ancestors *`, today `'none'` everywhere in `src/security.ts`), with `default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'` and no `script-src`. Without script the frame can't size itself, so the dialog writes a height for the poll's shape (one question: 300 + 76 per option; several: 480) and the page scrolls inside past that.
+Server-side: `/embed/p/<code>` is the only route whose CSP allows framing (`frame-ancestors *`; `'none'` on every other page, `src/security.ts`), with `default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'`, the sandbox above, and no `script-src`. Without script the frame can't size itself, so the dialog writes a height for the poll's shape (one question: 420 + 56 per option; several: 640, measured at 320 pixels wide) and the page scrolls inside past that.
 
 ## Short links and entry points
 

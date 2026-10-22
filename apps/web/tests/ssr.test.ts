@@ -193,9 +193,35 @@ const streamV1 = (electionId: string) =>
   );
 }
 for (const id of [STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT]) definitions.set(id, streamV1(id));
+/** Polls still open, for their embeds: one question of three answers, and two questions. */
+const OPEN_ONE = "e1".repeat(32);
+const OPEN_MANY = "e2".repeat(32);
+/** Long after any test runs. */
+const FAR = 4_102_444_800n;
+definitions.set(
+  OPEN_ONE,
+  toHex(
+    encodeElectionDefinition({
+      ...decodeElectionDefinition(fromHex(streamV1(OPEN_ONE))),
+      closes_at: FAR,
+    }),
+  ),
+);
+definitions.set(
+  OPEN_MANY,
+  toHex(
+    encodeElectionDefinitionV5({
+      ...decodeElectionDefinitionV5(fromHex(definitions.get(STREAM_V5)!)),
+      election_id: fromHex(OPEN_MANY),
+      closes_at: FAR,
+    }),
+  ),
+);
 const displayTexts = new Map([
   [STREAM_V5, TEXT_V2.encoding],
   [STREAM_V1, TEXT_V1.encoding],
+  [OPEN_ONE, TEXT_V1.encoding],
+  [OPEN_MANY, TEXT_V2.encoding],
   [STREAM_BAD_TEXT, TEXT_V2.encoding],
 ]);
 /** The stream under `new`; `closing` is the same polls the other way round. */
@@ -216,8 +242,16 @@ const FALSE_CODE = CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1
 /** A code the stub claims for the swapped poll, whose served definition names another. */
 const SWAPPED_CODE = "s".repeat(7);
 const UNKNOWN_CODE = "x".repeat(7);
+/** The open polls' codes. */
+const OPEN_ONE_CODE = codeOf(OPEN_ONE);
+const OPEN_MANY_CODE = shortCode(
+  electionDefinitionV5Hash(decodeElectionDefinitionV5(fromHex(definitions.get(OPEN_MANY)!))),
+  7,
+);
 const owners = new Map([
   [CODE, ID],
+  [OPEN_ONE_CODE, OPEN_ONE],
+  [OPEN_MANY_CODE, OPEN_MANY],
   [HIDDEN_CODE, HIDDEN_ID],
   [FALSE_CODE, ID],
   [SWAPPED_CODE, SWAPPED_ID],
@@ -232,6 +266,8 @@ const CODE_FAILS_ID = FILLER[2]!;
 /** Each poll's canonical code as the stub claims it; the other polls have no registration. */
 const codes = new Map([
   [ID, CODE],
+  [OPEN_ONE, OPEN_ONE_CODE],
+  [OPEN_MANY, OPEN_MANY_CODE],
   [HIDDEN_ID, HIDDEN_CODE],
   [MISCODED_ID, MISCODED_CODE],
 ]);
@@ -848,6 +884,159 @@ describe("flyer", () => {
       expect(JSON.stringify(headers)).not.toContain("secret");
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
     }
+  });
+});
+
+describe("embed", () => {
+  /** The policy every embed carries, found or not (src/security.ts, `embedHeaders`). */
+  const embedPolicy = (response: Response) => {
+    const csp = response.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors *");
+    expect(csp).toContain("form-action 'none'");
+    expect(csp).toContain("sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+    // No script of any kind, ours included.
+    expect(csp).not.toContain("script-src");
+    expect(csp).not.toContain("nonce-");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  };
+
+  /** Checks what any embed's HTML may hold: no script, nothing to fill in, every link a new tab. */
+  const scriptFree = (html: string) => {
+    expect(html).not.toMatch(/<script\b/);
+    expect(html).not.toMatch(/<(?:form|input|button|select|textarea|iframe)\b/);
+    expect(html).not.toMatch(/\son[a-z]+="/);
+    expect(html).not.toMatch(/\sstyle="/);
+    for (const [link] of html.matchAll(/<a\b[^>]*>/g)) {
+      expect(link).toContain('target="_blank"');
+      expect(link).toContain('rel="noopener"');
+    }
+    expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/[\w-]+\.css"\/>/);
+  };
+
+  test("draws an open poll's question, each answer a link into the ballot client, with no script", async () => {
+    const response = await get(`/embed/p/${OPEN_ONE_CODE}`);
+    expect(response.status).toBe(200);
+    embedPolicy(response);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    const html = await response.text();
+    scriptFree(html);
+    expect(html).toContain('<meta name="robots" content="noindex"/>');
+    // The reader's own setting by default.
+    expect(html).toMatch(/<html lang="en-US">/);
+    // The poll's own words, not the preview's headline.
+    expect(html).not.toContain(`Poll ${OPEN_ONE_CODE}`);
+    expect(html).toMatch(/<h1 id="[^"]+" lang="[a-z-]+" dir="auto"/);
+    // Each answer carries the poll and the pick in the fragment, which no server sees.
+    for (const pick of [0, 1, 2])
+      expect(html).toContain(`href="${BALLOT}#election=${OPEN_ONE}&amp;pick=${pick}"`);
+    expect(html).not.toContain("pick=3");
+    expect(html).toContain(`href="${BALLOT}#election=${OPEN_ONE}"`);
+    expect(html).toContain("Answer on Abolish");
+    expect(html).toContain("Answers are taken only on Abolish, never in this card.");
+    expect(html).toContain(`href="http://localhost/p/${OPEN_ONE_CODE}"`);
+    expect(html).toContain("Closes");
+    // The only links off the card: the ballot client and the poll's short link.
+    expect(
+      html
+        .replaceAll(
+          new RegExp(`href="${BALLOT}#election=${OPEN_ONE}(?:&amp;pick=[0-9])?"`, "g"),
+          "",
+        )
+        .replaceAll(`href="http://localhost/p/${OPEN_ONE_CODE}"`, ""),
+    ).not.toMatch(/href="(?:https?:)?\/\//);
+  });
+
+  test("names how many questions a poll of several has, and answers its first", async () => {
+    const html = await (await get(`/embed/p/${OPEN_MANY_CODE}`)).text();
+    scriptFree(html);
+    expect(html).toContain("2 questions");
+    expect(html).toContain("Answer 2 questions on Abolish");
+    expect(html).toContain("Pick an answer to question 1 of 2.");
+    expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}&amp;pick=2"`);
+    expect(html).not.toContain("pick=3");
+  });
+
+  test("a closed poll takes no answers and links to its page", async () => {
+    const html = await (await get(`/embed/p/${CODE}`)).text();
+    scriptFree(html);
+    expect(html).not.toContain(BALLOT);
+    // The stub serves no text for it, so the card names it as the link preview does.
+    expect(html).toContain(`>Poll ${CODE}</h1>`);
+    expect(html).toContain("See the poll on localhost");
+    expect(html).toContain("Closed");
+    expect(html).toContain("January 8, 2026");
+  });
+
+  test("comes light or dark by its link, and otherwise follows the reader", async () => {
+    expect(await (await get(`/embed/p/${CODE}?theme=dark`)).text()).toMatch(
+      /<html lang="en-US" data-theme="dark">/,
+    );
+    expect(await (await get(`/embed/p/${CODE}?theme=light`)).text()).toMatch(
+      /<html lang="en-US" data-theme="light">/,
+    );
+    const other = await (await get(`/embed/p/${CODE}?theme=%3Cb%3E`)).text();
+    expect(other).toMatch(/<html lang="en-US">/);
+    expect(other).not.toContain("&lt;b&gt;");
+  });
+
+  test("a code in any spelling draws its canonical form", async () => {
+    const html = await (await get(`/embed/p/${forgiving(CODE)}`)).text();
+    expect(html).toContain(`>Poll ${CODE}</h1>`);
+    expect(html).not.toContain(forgiving(CODE));
+  });
+
+  test("a hidden poll shows none of its text, and links to its page", async () => {
+    const response = await get(`/embed/p/${HIDDEN_CODE}`);
+    expect(response.status).toBe(200);
+    embedPolicy(response);
+    const html = await response.text();
+    scriptFree(html);
+    expect(html).toContain("Moderation has hidden this poll");
+    expect(html).not.toContain('data-testid="embed-card"');
+    expect(html).toContain(`href="http://localhost/p/${HIDDEN_CODE}"`);
+  });
+
+  test.each([
+    ["a code no poll owns", () => UNKNOWN_CODE],
+    ["a code the API claims for a poll whose hash doesn't start with it", () => FALSE_CODE],
+    ["a code whose poll's served definition names another election (T-34)", () => SWAPPED_CODE],
+    ["a malformed code", () => "3j55-dw1"],
+  ])("%s is not found, quoting nothing and never cached", async (_, code) => {
+    const response = await get(`/embed/p/${code()}`);
+    expect(response.status).toBe(404);
+    embedPolicy(response);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const html = await response.text();
+    scriptFree(html);
+    expect(html).toContain("No poll here");
+    expect(html).not.toContain(code());
+  });
+
+  test("forwards nothing of the reader's to the API (T-10, T-11)", async () => {
+    seen.length = 0;
+    await get(`/embed/p/${OPEN_ONE_CODE}?theme=dark`, {
+      cookie: "__Secure-abolish-account.session_token=secret",
+      "x-forwarded-for": "203.0.113.9",
+      referer: "https://news.example/story",
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("secret");
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+      expect(JSON.stringify(headers)).not.toContain("news.example");
+    }
+  });
+
+  test("only the embed may be framed: every other page refuses", async () => {
+    for (const path of [`/p/${CODE}/flyer`, `/polls/${ID}`, `/embed/p/${CODE}/x`, "/embed"])
+      expect((await get(path)).headers.get("content-security-policy")).toContain(
+        "frame-ancestors 'none'",
+      );
   });
 });
 

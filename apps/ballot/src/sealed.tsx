@@ -29,6 +29,7 @@ function shortHex(hash: string): string {
 }
 
 const WORKING = {
+  resuming: { title: "resumingTitle", detail: "resuming" },
   finding: { title: "findingTitle", detail: "finding" },
   sealing: { title: "sealingTitle", detail: "sealing" },
   opening: { title: "openingTitle", detail: "opening" },
@@ -40,8 +41,9 @@ const WORKING = {
 >;
 
 /**
- * While the page reads the board and the worker finds the voter's cell in
- * it, seals or opens, or while a cast ballot is sent: nothing to press.
+ * While the page reads this device's record of its casts, reads the board
+ * and the worker finds the voter's cell in it, seals or opens, or while a
+ * cast ballot is delivered and sent: nothing to press.
  */
 export function Working({ poll, kind }: { poll: FramePoll; kind: keyof typeof WORKING }) {
   const t = useTranslate(catalogs);
@@ -212,12 +214,19 @@ export function Opened({
 }
 
 /** Why a recorded cast isn't confirmed on the board yet: each one is answered by sending the same bytes again. */
-export type UnsentReason = "undelivered" | "busy" | "unavailable" | "unreachable" | "unconfirmed";
+export type UnsentReason =
+  | "earlier"
+  | "undelivered"
+  | "busy"
+  | "unavailable"
+  | "unreachable"
+  | "unconfirmed";
 
 const UNSENT: Record<
   UnsentReason,
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
+  earlier: { title: "unsentEarlierTitle", detail: "unsentEarlier" },
   undelivered: { title: "unsentUndeliveredTitle", detail: "unsentUndelivered" },
   busy: { title: "unsentBusyTitle", detail: "unsentBusy" },
   unavailable: { title: "unsentUnavailableTitle", detail: "unsentUnavailable" },
@@ -229,18 +238,21 @@ const UNSENT: Record<
  * A cast ballot this device recorded but the board hasn't confirmed: "Send
  * again" sends the same sealed ballot, never a new one, so at worst the
  * board holds it twice and counts it once ([[revoting]], Client rule 3;
- * T-25, T-45).
+ * T-25, T-45). With `onAgain`, the voter may instead answer anew, which
+ * casts a ballot that replaces this one.
  */
 export function Unsent({
   poll,
   trackingCode,
   reason,
   onSend,
+  onAgain,
 }: {
   poll: FramePoll;
   trackingCode: string;
   reason: UnsentReason;
   onSend: () => void;
+  onAgain?: (() => void) | undefined;
 }) {
   const t = useTranslate(catalogs);
   const { title, detail } = UNSENT[reason];
@@ -251,6 +263,13 @@ export function Unsent({
         <Button size="lg" className={ACTION} onClick={onSend}>
           {t("sendAgain")}
         </Button>
+      }
+      secondary={
+        onAgain === undefined ? undefined : (
+          <Button size="lg" variant="outline" className={ACTION} onClick={onAgain}>
+            {t("answerAgain")}
+          </Button>
+        )
       }
     >
       <ScreenTitle title={t(title)} focus>

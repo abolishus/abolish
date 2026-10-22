@@ -5,6 +5,7 @@ import {
   encodeBallotV3,
   encodeBoardEntry,
   encodeShareReceipt,
+  MEMBERSHIP_PROOF_LENGTH,
   shareCiphertextHash,
 } from "@abolishus/crypto";
 import fc from "fast-check";
@@ -20,6 +21,7 @@ import {
   newestBlock,
   parseStoredCasts,
   storedCasts,
+  unsentCast,
   withCast,
   withReceipt,
 } from "../src/casts.ts";
@@ -600,5 +602,131 @@ describe("a cast added to the casts", () => {
     expect(() => withCast([], naming(10n), kept() as unknown as CastShare[])).toThrow(TypeError);
     expect(() => withCast([], naming(10n), shares().slice(1))).toThrow(TypeError);
     expect(() => withCast([], naming(10n).subarray(1), shares())).toThrow(TypeError);
+  });
+});
+
+// Each valid committed vote of the spec's vectors with its context and core
+// hash, the tracking code the voter was shown, computed by the vectors' own
+// generator, never by the code under test.
+const CORE_VECTORS = (
+  JSON.parse(
+    readFileSync(new URL("../../../docs/spec/vectors/ballot-v3.json", import.meta.url), "utf8"),
+  ) as {
+    ballots: {
+      id: string;
+      context: { definitionHash: string; cell: number };
+      encoding: string;
+      coreHash: string;
+      result: string;
+    }[];
+  }
+).ballots.filter((b) => b.result === "ok");
+
+// A version-3 ballot record ends with its committed vote, after the header,
+// `definition_hash`, `cell`, `nullifier`, `l1_ref_number`, `l1_ref_hash` and
+// the membership proof ([[ballot-validity]], Ballot record (version 3)).
+const VOTE_AT = 3 + 32 + 1 + 32 + 8 + 32 + MEMBERSHIP_PROOF_LENGTH;
+
+/** The records vector's ballot carrying a vector's committed vote, definition hash and cell instead. */
+function recordOf(v: (typeof CORE_VECTORS)[number]): Uint8Array {
+  const b = Uint8Array.of(...BALLOT.subarray(0, VOTE_AT), ...Buffer.from(v.encoding, "hex"));
+  b.set(Buffer.from(v.context.definitionHash, "hex"), 3);
+  b[35] = v.context.cell;
+  return b;
+}
+
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+
+describe("an unsent cast", () => {
+  const definition = DECODED.definition_hash;
+
+  test("is none for no casts, and for a boarded newest whatever came before it", () => {
+    expect(unsentCast([], definition)).toBeUndefined();
+    const older: CastRecord = { ballot: naming(9n), l1Number: 9n, shares: shares() };
+    const newest: CastRecord = {
+      ballot: naming(10n),
+      l1Number: 10n,
+      shares: shares(),
+      boarded: boardedFor(naming(10n)),
+    };
+    expect(unsentCast([newest], definition)).toBeUndefined();
+    // An older cast never went, but the newest outranks it wherever both are boarded.
+    expect(unsentCast([older, newest], definition)).toBeUndefined();
+  });
+
+  test("is the newest when no answer is kept for it, with every seat still holding its m undelivered", () => {
+    const boarded: CastRecord = {
+      ballot: naming(9n),
+      l1Number: 9n,
+      shares: shares(),
+      boarded: boardedFor(naming(9n)),
+    };
+    const newest: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: receipted() };
+    const unsent = unsentCast([boarded, newest], definition);
+    if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
+    expect(unsent.ballot).toEqual(naming(10n));
+    // The receipted seat is never delivered again: its m is gone (Client rule 2).
+    expect(unsent.undelivered).toEqual(
+      SHARES.filter(({ seat }) => seat !== FIRST).map(({ seat, ciphertext }) => ({
+        seat,
+        ciphertext,
+      })),
+    );
+  });
+
+  test("hands out copies, never the record's arrays", () => {
+    const cast: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: shares() };
+    const unsent = unsentCast([cast], definition);
+    if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
+    unsent.ballot.fill(0);
+    for (const { ciphertext } of unsent.undelivered) ciphertext.fill(0);
+    expect(cast.ballot).toEqual(naming(10n));
+    expect(cast.shares).toEqual(shares());
+  });
+
+  test.each(CORE_VECTORS.map((v) => [v.id, v] as const))(
+    "carries the tracking code shown before the cast (%s)",
+    (_, v) => {
+      const ballot = recordOf(v);
+      const decoded = decodeBallot(ballot, 3);
+      const cast: CastRecord = { ballot, l1Number: decoded.l1_ref_number, shares: [] };
+      const unsent = unsentCast([cast], decoded.definition_hash);
+      if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
+      expect(hex(unsent.trackingCode)).toBe(v.coreHash);
+      expect(unsent.undelivered).toEqual([]);
+    },
+  );
+
+  test("is other-election for a newest cast of another poll, or bytes that aren't a version-3 record", () => {
+    const other: CastRecord = {
+      ballot: otherDefinition(naming(10n)),
+      l1Number: 10n,
+      shares: shares(),
+    };
+    expect(unsentCast([other], definition)).toBe("other-election");
+    const torn: CastRecord = { ballot: naming(10n).subarray(1), l1Number: 10n, shares: shares() };
+    expect(unsentCast([torn], definition)).toBe("other-election");
+    expect(
+      unsentCast([{ ...other, ballot: naming(10n) }], otherDefinition(BALLOT).subarray(3, 35)),
+    ).toBe("other-election");
+  });
+
+  test("is exactly the newest cast without a board entry, with its seats holding an m (fast-check)", () => {
+    fc.assert(
+      fc.property(casts, (held) => {
+        const unsent = unsentCast(held, definition);
+        const newest = held.at(-1);
+        if (newest === undefined || newest.boarded !== undefined) {
+          expect(unsent).toBeUndefined();
+          return;
+        }
+        if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
+        expect(unsent.ballot).toEqual(newest.ballot);
+        expect(unsent.undelivered.map(({ seat }) => seat)).toEqual(
+          newest.shares.filter((share) => "m" in share).map(({ seat }) => seat),
+        );
+      }),
+      { numRuns },
+    );
   });
 });

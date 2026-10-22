@@ -268,6 +268,11 @@ const enUS = {
   notNewer:
     "Your last ballot from this device is so recent that a new one now would cancel it instead of replacing it. Nothing was sent. Answer again in a minute.",
   // Delivering and sending a cast ballot (sealed.tsx).
+  resumingTitle: "Opening your ballot",
+  resuming: "This device is checking its record of the ballots it cast in this poll.",
+  unsentEarlierTitle: "Your last ballot here wasn't sent",
+  unsentEarlier:
+    "This device sealed and recorded a ballot for this poll, but the board never confirmed it. Send it to finish casting it, or answer again: a new ballot replaces it.",
   deliveringTitle: "Handing your ballot to the poll's trustees",
   delivering:
     "This device recorded your sealed ballot and is giving each of the poll's trustees its sealed part. Keep this page open.",

@@ -12,6 +12,7 @@ import {
   type RecordBoardedOutcome,
   type RecordCastOutcome,
   type RecordReceiptOutcome,
+  unsentCast,
 } from "./casts.ts";
 import { ArrivalCheck, ElectionRefused } from "./check.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
@@ -367,6 +368,7 @@ export function BrokenLink() {
 
 /** Where a voter is between answering and sending. */
 type Step =
+  | { readonly kind: "resuming" }
   | { readonly kind: "answering" }
   | { readonly kind: "finding" }
   | { readonly kind: "sealing" }
@@ -401,6 +403,8 @@ interface Sending {
   readonly trackingCode: string;
   /** Its qualified seats with no receipt kept yet, each with its `ct_i`: delivered before the ballot is sent. */
   readonly undelivered: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+  /** Found recorded on opening the poll, not cast on this page: the voter may leave it and answer anew. */
+  readonly resumed?: true;
 }
 
 /** Deliveries in flight at once: the relay takes a few at a time from everyone (T-52). */
@@ -468,11 +472,19 @@ export function Ballot({
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [round, setRound] = useState(0);
-  const [step, setStep] = useState<Step>({ kind: "answering" });
+  // Only a build that delivers ever recorded a cast to resume, and only
+  // under a definition it seals for.
+  const [step, setStep] = useState<Step>(() =>
+    source.delivers && election.version === 5 ? { kind: "resuming" } : { kind: "answering" },
+  );
   // Each request's answer lands only on the step that asked for it: never
   // after the voter left this election, or on a later attempt.
   const asked = useRef(0);
   useEffect(() => () => void asked.current++, []);
+  useEffect(() => {
+    if (step.kind === "resuming") run(resume, { kind: "answering" });
+    // Once per mount: every restart mounts the ballot afresh.
+  }, []);
   // The seals the voter already chose for: a second tap before the screen
   // changes neither opens a seal chosen for casting nor asks twice (T-45).
   const chosen = useRef(new Set<number>());
@@ -503,6 +515,35 @@ export function Ballot({
       }
       if (current()) setStep(next);
     })();
+  }
+
+  /**
+   * A cast this device recorded in one of the poll's tiers that the board
+   * never confirmed, offered to be delivered and sent with the same bytes
+   * before anything is answered: the page that recorded it may have gone
+   * before its seats were receipted or its ballot sent (a reload, a crash,
+   * a store that refused a receipt), and only this device can finish it
+   * ([[revoting]], Client rule 3; [[delivery]], Client rule 4; T-25). A
+   * seat whose `m_i` is still kept is delivered again, so a receipt the
+   * store refused after the worker erased its seal's copy is asked for once
+   * more, and its node answers with the same receipt (T-18). Casts that
+   * can't be read offer nothing here: the cast's own read stops on them.
+   */
+  async function resume(): Promise<Step> {
+    for (const tier of election.tiers) {
+      const held = await source.casts(electionId, tier);
+      if (held.kind === "unreadable") continue;
+      const unsent = unsentCast(held.casts, definitionHash);
+      if (unsent === undefined) continue;
+      if (unsent === "other-election") return stopped("cast-faulty");
+      const { ballot, trackingCode, undelivered } = unsent;
+      return {
+        kind: "unsent",
+        reason: "earlier",
+        sending: { ballot, tier, trackingCode: toHex(trackingCode), undelivered, resumed: true },
+      };
+    }
+    return { kind: "answering" };
   }
 
   /**
@@ -864,6 +905,7 @@ export function Ballot({
           onSeal={seal}
         />
       );
+    case "resuming":
     case "finding":
     case "sealing":
     case "opening":
@@ -900,6 +942,10 @@ export function Ballot({
           trackingCode={step.sending.trackingCode}
           reason={step.reason}
           onSend={() => sendAgain(step.sending)}
+          // A recorded cast found on opening the poll, however its sending
+          // went since: the voter may leave it and answer anew, which casts
+          // a ballot that replaces it.
+          onAgain={step.sending.resumed === true ? again : undefined}
         />
       );
     case "sent":

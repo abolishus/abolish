@@ -3,7 +3,8 @@
 // here imports a decoder, so the pages' script doesn't carry one (P2-28
 // part 2b).
 
-import type { DefinitionProblem, PollView } from "./poll.ts";
+import type { DefinitionProblem, PollTags, PollView } from "./poll.ts";
+import type { StreamFilter } from "./server/load.ts";
 
 /** The stream's orders, as `GET /elections` names them: each lists only the polls open now. */
 export const STREAM_SORTS = ["new", "closing", "answered"] as const;
@@ -83,6 +84,27 @@ export function isStreamPlace(place: string): boolean {
   return filter.kind === "place" && filter.place === place;
 }
 
+/**
+ * The stream's address for `sort` narrowed by `filter`, from just after
+ * `after`. `new` is the default, so its first page is plain `/discover`.
+ * Orders and topics are from fixed lists and `after` is canonical hex, so
+ * only the query and the place need escaping.
+ */
+export function streamHref(
+  sort: StreamSort,
+  { q, topic, place }: StreamFilter = {},
+  after?: string,
+): string {
+  const search = [
+    ...(sort === "new" ? [] : [`sort=${sort}`]),
+    ...(topic === undefined ? [] : [`topic=${topic}`]),
+    ...(place === undefined ? [] : [`place=${encodeURIComponent(place)}`]),
+    ...(q === undefined ? [] : [`q=${encodeURIComponent(q)}`]),
+    ...(after === undefined ? [] : [`after=${after}`]),
+  ];
+  return search.length === 0 ? "/discover" : `/discover?${search.join("&")}`;
+}
+
 /** One language's words for a card. */
 export interface CardText {
   /** The translation's tag, lowercase BCP 47, as the record holds it. */
@@ -106,7 +128,12 @@ export interface CardText {
 export type CardProblem = DefinitionProblem | "text";
 
 export type StreamCard =
-  | { readonly kind: "poll"; readonly poll: PollView; readonly text: CardText }
+  | {
+      readonly kind: "poll";
+      readonly poll: PollView;
+      readonly text: CardText;
+      readonly tags: PollTags;
+    }
   | { readonly kind: "unavailable"; readonly electionId: string; readonly problem: CardProblem };
 
 /**

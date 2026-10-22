@@ -9,10 +9,12 @@ import {
   instructionOf,
   pollStatus,
   type PollStatus,
+  type PollTags,
   type PollView,
   type Tier,
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
+import { ListedUnder } from "./listed-under.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
@@ -26,6 +28,8 @@ export interface PollSummaryProps {
   asOf: Instant;
   /** The canonical short code, if one is served. */
   code: string | undefined;
+  /** Where the poll is listed; none are shown without them, or while it's hidden. */
+  tags?: PollTags | undefined;
   /** The share sheet's link and title, for a poll with a short link that isn't hidden. */
   share?: PollShareProps | undefined;
   /** Where the poll's reactions are read and set; without one, none are shown. */
@@ -100,6 +104,7 @@ export function PollSummary({
   moderation,
   asOf,
   code,
+  tags,
   share,
   reactions,
 }: PollSummaryProps) {
@@ -179,6 +184,17 @@ export function PollSummary({
             },
           ]}
         />
+
+        {/* A hidden poll's tags are withheld with its text (T-68); a delisted
+            one's stand, but the stream they'd link to doesn't list it. */}
+        {tags === undefined ||
+        moderation.state === "hidden" ||
+        (tags.topic === undefined && tags.place === undefined) ? null : (
+          <div className="grid gap-2">
+            <ListedUnder tags={tags} linked={moderation.state === "visible"} />
+            <p className="m-0 max-w-prose text-sm text-muted-foreground">{t("streamTagsNote")}</p>
+          </div>
+        )}
       </header>
 
       <section

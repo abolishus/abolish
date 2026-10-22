@@ -1,6 +1,6 @@
 // The data behind each page, fetched from the API on the server.
 
-import type { PollTopic } from "@abolishus/core/poll-draft-rules";
+import { placeIsWellFormed, type PollTopic } from "@abolishus/core/poll-draft-rules";
 import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
@@ -8,7 +8,14 @@ import { type BoardRow, boardRows } from "../board.ts";
 import { BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
 import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex } from "../values.ts";
-import { type DefinitionProblem, type Instant, instant, type PollView } from "../poll.ts";
+import {
+  type DefinitionProblem,
+  type Instant,
+  instant,
+  NO_TAGS,
+  type PollTags,
+  type PollView,
+} from "../poll.ts";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
 import { streamCard } from "./stream-card.ts";
@@ -32,6 +39,8 @@ export type PollPage =
       readonly asOf: Instant;
       /** Its canonical short code, checked against its hash; `undefined` if none is served. */
       readonly code: string | undefined;
+      /** Where it is listed, as `tagsOf` reads it. */
+      readonly tags: PollTags;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -48,12 +57,13 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
       api.board.getHead({ electionId }),
       api.moderation.getStatus({ electionId }),
       codeOf(api, electionId),
+      tagsOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation, claimed] = answers;
+  const [{ definition }, board, moderation, claimed, tags] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   // A claim, checked as `/p/<code>` checks it: the code must be a prefix of
@@ -65,7 +75,7 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
     shortCode(fromHex(view.poll.definitionHash), claimed.length) === claimed
       ? claimed
       : undefined;
-  return { kind: "poll", poll: view.poll, board, moderation, asOf: now(), code };
+  return { kind: "poll", poll: view.poll, board, moderation, asOf: now(), code, tags };
 }
 
 /**
@@ -80,6 +90,26 @@ async function codeOf(api: Api, electionId: string): Promise<string | undefined>
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Where the API lists `electionId` (`GET /elections/tags`), or no tags while
+ * it withholds them (a hidden poll) or the read fails: they are optional on
+ * a page, as the code is, so an API without the route or a slow answer shows
+ * none rather than taking the page down. The contract bounds the place only;
+ * one a draft couldn't hold (a bidi override, an invisible character, or
+ * spacing at either end) is written past the rules (T-68) and isn't shown,
+ * so the place can't reorder or hide the words around it (T-67).
+ */
+async function tagsOf(api: Api, electionId: string): Promise<PollTags> {
+  let served;
+  try {
+    served = await api.elections.getTags({ electionId });
+  } catch {
+    return NO_TAGS;
+  }
+  const { topic, place } = served;
+  return { topic, place: place !== undefined && placeIsWellFormed(place) ? place : undefined };
 }
 
 export type ShortLink =
@@ -283,8 +313,8 @@ export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): 
 }
 
 /**
- * Polls per page of the stream: each costs the page a definition and a
- * display text, and a display text may be up to 4 MiB (T-52).
+ * Polls per page of the stream: each costs the page a definition, a display
+ * text and its tags, and a display text may be up to 4 MiB (T-52).
  */
 export const STREAM_PAGE = 10;
 
@@ -356,7 +386,8 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * in `locale`. The API
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
- * are checked here (src/server/stream-card.ts). A poll the database lost between the
+ * are checked here (src/server/stream-card.ts), and its tags read as the poll
+ * page reads them (`tagsOf`). A poll the database lost between the
  * listing and its definition drops out of the page.
  */
 export async function loadStream(
@@ -385,11 +416,12 @@ export async function loadStream(
   const cards = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const [{ definition }, displayText] = await Promise.all([
+        const [{ definition }, displayText, tags] = await Promise.all([
           api.elections.getDefinition({ electionId }),
           displayTextOf(api, electionId),
+          tagsOf(api, electionId),
         ]);
-        return streamCard(electionId, definition, displayText, locale);
+        return streamCard(electionId, definition, displayText, locale, tags);
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;
@@ -436,7 +468,7 @@ export async function loadEmbed(api: Api, code: string, locale: string): Promise
       api.elections.getDefinition({ electionId: link.electionId }),
       displayTextOf(api, link.electionId),
     ]);
-    card = streamCard(link.electionId, definition, displayText, locale);
+    card = streamCard(link.electionId, definition, displayText, locale, page.tags);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;

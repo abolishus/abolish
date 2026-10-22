@@ -21,7 +21,6 @@ import { placeKey, POLL_TOPICS } from "@abolishus/core";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { streamHref } from "../src/components/stream.tsx";
 import {
   isStreamPlace,
   isStreamSearch,
@@ -29,9 +28,11 @@ import {
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   pickTranslation,
+  streamHref,
   streamPlace,
   streamQuery,
 } from "../src/stream.ts";
+import { NO_TAGS } from "../src/poll.ts";
 import { streamCard } from "../src/server/stream-card.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
 
@@ -102,7 +103,13 @@ function pollV5(commitment: string, optionCounts: readonly number[]): string {
 
 describe("streamCard", () => {
   test("shows a version-5 poll's title in the locale's language", () => {
-    const card = streamCard(ID, pollV5(textV2.commitment!, [3, 2]), textV2.encoding, "en-US");
+    const card = streamCard(
+      ID,
+      pollV5(textV2.commitment!, [3, 2]),
+      textV2.encoding,
+      "en-US",
+      NO_TAGS,
+    );
     if (card.kind !== "poll") throw new Error(`refused: ${card.problem}`);
     // The first question under the title, and its answers for the card's links.
     expect(card.text).toEqual({
@@ -113,12 +120,27 @@ describe("streamCard", () => {
     });
     expect(card.poll.questions).toHaveLength(2);
     // Another locale gets its own translation, by primary language.
-    const spanish = streamCard(ID, pollV5(textV2.commitment!, [3, 2]), textV2.encoding, "es-MX");
+    const spanish = streamCard(
+      ID,
+      pollV5(textV2.commitment!, [3, 2]),
+      textV2.encoding,
+      "es-MX",
+      NO_TAGS,
+    );
     expect(spanish.kind === "poll" && spanish.text.language).toBe("es-419");
   });
 
+  test("carries the tags it was given on a card with words, and on no other", () => {
+    const tags = { topic: "transport", place: "Riverside" } as const;
+    expect(streamCard(ID, pollV1, textV1.encoding, "en-US", tags)).toMatchObject({
+      kind: "poll",
+      tags,
+    });
+    expect(streamCard(ID, pollV1, undefined, "en-US", tags)).not.toHaveProperty("tags");
+  });
+
   test("a version-1 poll's heading is its one question", () => {
-    const card = streamCard(ID, pollV1, textV1.encoding, "en-US");
+    const card = streamCard(ID, pollV1, textV1.encoding, "en-US", NO_TAGS);
     if (card.kind !== "poll") throw new Error(`refused: ${card.problem}`);
     expect(card.text).toEqual({
       language: "en",
@@ -131,26 +153,28 @@ describe("streamCard", () => {
   test("refuses text the definition doesn't commit to, showing none of it (T-41)", () => {
     // The two-question text beside a definition committed to other bytes.
     const other = pollV5(minimalV2.commitment!, [3, 2]);
-    expect(streamCard(ID, other, textV2.encoding, "en-US")).toEqual({
+    expect(streamCard(ID, other, textV2.encoding, "en-US", NO_TAGS)).toEqual({
       kind: "unavailable",
       electionId: ID,
       problem: "text",
     });
     // The right commitment, but the definition's questions have other option counts.
-    expect(streamCard(ID, pollV5(textV2.commitment!, [3, 3]), textV2.encoding, "en-US")).toEqual({
+    expect(
+      streamCard(ID, pollV5(textV2.commitment!, [3, 3]), textV2.encoding, "en-US", NO_TAGS),
+    ).toEqual({
       kind: "unavailable",
       electionId: ID,
       problem: "text",
     });
     // A version-1 text beside a version-5 definition.
-    expect(streamCard(ID, pollV5(textV1.commitment!, [3]), textV1.encoding, "en-US").kind).toBe(
-      "unavailable",
-    );
+    expect(
+      streamCard(ID, pollV5(textV1.commitment!, [3]), textV1.encoding, "en-US", NO_TAGS).kind,
+    ).toBe("unavailable");
   });
 
   test("a card with no text served, or text that isn't hex, has no words", () => {
     for (const text of [undefined, "zz", "0"])
-      expect(streamCard(ID, pollV1, text, "en-US")).toEqual({
+      expect(streamCard(ID, pollV1, text, "en-US", NO_TAGS)).toEqual({
         kind: "unavailable",
         electionId: ID,
         problem: "text",
@@ -158,12 +182,12 @@ describe("streamCard", () => {
   });
 
   test("refuses a definition as the poll page does (T-34)", () => {
-    expect(streamCard("b2".repeat(32), pollV1, textV1.encoding, "en-US")).toEqual({
+    expect(streamCard("b2".repeat(32), pollV1, textV1.encoding, "en-US", NO_TAGS)).toEqual({
       kind: "unavailable",
       electionId: "b2".repeat(32),
       problem: "another-election",
     });
-    expect(streamCard(ID, "00", textV1.encoding, "en-US")).toMatchObject({
+    expect(streamCard(ID, "00", textV1.encoding, "en-US", NO_TAGS)).toMatchObject({
       problem: "undecodable",
     });
   });
@@ -178,7 +202,9 @@ describe("streamCard", () => {
         (at, flip) => {
           const changed = bytes.slice();
           changed[at]! ^= flip;
-          expect(streamCard(ID, definition, toHex(changed), "en-US").kind).toBe("unavailable");
+          expect(streamCard(ID, definition, toHex(changed), "en-US", NO_TAGS).kind).toBe(
+            "unavailable",
+          );
         },
       ),
       runs,

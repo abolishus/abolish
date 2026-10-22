@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import type { PollView } from "../poll.ts";
+import { NO_TAGS, type PollView } from "../poll.ts";
 import type { StreamCard } from "../stream.ts";
-import { StreamPage, streamHref } from "./stream.tsx";
+import { streamHref } from "../stream.ts";
+import { StreamPage } from "./stream.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
@@ -37,6 +38,7 @@ const cards: StreamCard[] = [
       question: "When should the main library open on Sundays?",
       options: ["At 10", "At noon", "Stay closed"],
     },
+    tags: { topic: "culture", place: "Eastside" },
   },
   {
     kind: "poll",
@@ -54,6 +56,7 @@ const cards: StreamCard[] = [
       question: "Which one improvement matters most to you?",
       options: ["Better lighting", "Public toilets", "Basketball courts", "Street trees"],
     },
+    tags: { topic: undefined, place: "Riverside Park" },
   },
   {
     kind: "poll",
@@ -64,6 +67,7 @@ const cards: StreamCard[] = [
       question: undefined,
       options: ["Sí", "No"],
     },
+    tags: NO_TAGS,
   },
   { kind: "unavailable", electionId: UNREADABLE, problem: "text" },
 ];
@@ -130,6 +134,29 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(bus).getByText("Sí")).toHaveAttribute("lang", "es-419");
   await expect(list.getByText("3 questions")).toBeVisible();
   await expect(list.getAllByText(/^Closes/)[0]).toHaveTextContent("Closes January 8, 2026");
+
+  // Where each poll is listed, each tag a way into the stream narrowed to it;
+  // a poll filed under neither shows none.
+  const listed = list.getAllByRole("list", { name: "Where it's listed" });
+  await expect(listed).toHaveLength(2);
+  const [libraryTagList, riversideTagList] = listed;
+  if (libraryTagList === undefined || riversideTagList === undefined)
+    throw new Error("a tagged card shows no tags");
+  const libraryTags = within(libraryTagList);
+  const riversideTags = within(riversideTagList);
+  await expect(libraryTags.getByRole("link", { name: "Culture" })).toHaveAttribute(
+    "href",
+    "/discover?topic=culture",
+  );
+  await expect(libraryTags.getByRole("link", { name: "Eastside" })).toHaveAttribute(
+    "href",
+    "/discover?place=Eastside",
+  );
+  await expect(riversideTags.getAllByRole("link")).toHaveLength(1);
+  await expect(riversideTags.getByRole("link")).toHaveAttribute(
+    "href",
+    "/discover?place=Riverside%20Park",
+  );
 
   // A poll whose text failed its checks shows none, and can't be answered from here.
   await expect(list.getByText(/text can't be shown here/)).toBeVisible();

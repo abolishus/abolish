@@ -8,7 +8,7 @@ const TITLE = "Poll mhanrsz";
 
 const meta = {
   component: PollShare,
-  args: { url: URL, title: TITLE, canShare: true },
+  args: { url: URL, title: TITLE, canShare: true, flyer: "/p/mhanrsz/flyer" },
 } satisfies Meta<typeof PollShare>;
 
 export default meta;
@@ -58,6 +58,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await userEvent.click(sheet.getByRole("button", { name: "Share…" }));
   await expect(shared).toEqual([{ title: TITLE, url: URL }]);
   await expect(sheet.queryByRole("link", { name: "Email the link" })).toBeNull();
+  // The flyer is a page of its own, for the same link.
+  await expect(sheet.getByRole("link", { name: "Print a flyer" })).toHaveAttribute(
+    "href",
+    "/p/mhanrsz/flyer",
+  );
 };
 
 export const Default: Story = { play };

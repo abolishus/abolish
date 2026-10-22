@@ -12,6 +12,7 @@ export const PAGES = [
   "/polls/:id",
   "/polls/:id/board",
   "/p/:code",
+  "/p/:code/flyer",
   "/moderation",
   "/account",
   "/account/polls/:id",
@@ -39,6 +40,8 @@ export function pageOf(pathname: string): Page {
   // A short link, in either case (a QR code carries `/P/<CODE>`): the code
   // names a poll as surely as its ID does, so it is never kept either.
   if (/^\/[pP]\/[^/]+$/.test(pathname)) return "/p/:code";
+  // Its flyer: the paper and ink are in the query, never kept.
+  if (/^\/p\/[^/]+\/flyer$/i.test(pathname)) return "/p/:code/flyer";
   return "other";
 }
 

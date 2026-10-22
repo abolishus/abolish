@@ -8,7 +8,15 @@ import {
   DialogTrigger,
 } from "@abolishus/ui/ui/dialog";
 import { Input } from "@abolishus/ui/ui/input";
-import { Check, ChevronDown, Copy, Mail, QrCode as QrCodeIcon, Share2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Mail,
+  Printer,
+  QrCode as QrCodeIcon,
+  Share2,
+} from "lucide-react";
 import { useId, useState } from "react";
 
 import { catalogs } from "../messages.ts";
@@ -20,6 +28,8 @@ export interface PollShareProps {
   readonly title: string;
   /** Whether the browser has the Web Share API; detected when left out. */
   readonly canShare?: boolean | undefined;
+  /** The poll's flyer page, `/p/<code>/flyer`. */
+  readonly flyer?: string | undefined;
 }
 
 type CopyState = "idle" | "copied" | "failed";
@@ -33,13 +43,13 @@ const hasWebShare = () => typeof navigator !== "undefined" && typeof navigator.s
  * "Share this poll" (docs/design/sharing.md, Share sheet): the short link
  * with Copy link, then the system's share menu where the browser has one,
  * or an email where it doesn't, then a QR code of the same link, drawn in
- * the browser by our own encoder. The link carries no per-person code, so
+ * the browser by our own encoder, and a printable flyer carrying it. The link carries no per-person code, so
  * sharing it can't tie the sharer to the poll, let alone to an answer, and
  * nothing here reaches our servers or analytics: the copy and the share
  * happen in the browser (T-10, T-67). No count of who else shared, nothing
  * to nudge with.
  */
-export function PollShare({ url, title, canShare }: PollShareProps) {
+export function PollShare({ url, title, canShare, flyer }: PollShareProps) {
   const t = useTranslate(catalogs);
   const [copied, setCopied] = useState<CopyState>("idle");
   const [qr, setQr] = useState(false);
@@ -154,6 +164,14 @@ export function PollShare({ url, title, canShare }: PollShareProps) {
                 <p className="m-0 text-sm text-pretty text-muted-foreground">{t("shareQrNote")}</p>
               </div>
             </li>
+            {flyer === undefined ? null : (
+              <li>
+                <a href={flyer} className={ROW}>
+                  <Printer aria-hidden="true" className="size-5" />
+                  <span className="flex-1">{t("shareFlyer")}</span>
+                </a>
+              </li>
+            )}
           </ul>
         </div>
       </DialogContent>

@@ -421,6 +421,7 @@ describe("every page", () => {
     "/discover",
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
+    `/p/${CODE}/flyer`,
   ])(
     "%s carries the security headers, and its inline scripts the response's nonce",
     async (path) => {
@@ -762,6 +763,91 @@ describe("short links", () => {
     expect(response.status).toBeGreaterThanOrEqual(300);
     expect(response.status).toBeLessThan(400);
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("flyer", () => {
+  /** The sheet's HTML, from its opening tag to its tabs' end. */
+  const sheetOf = (html: string) =>
+    html.slice(html.indexOf("data-flyer"), html.indexOf("</ul>", html.indexOf("data-flyer")));
+
+  test("prints the poll's short link, as the poll page names it, on US Letter by default", async () => {
+    const response = await get(`/p/${CODE}/flyer`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<meta name="robots" content="noindex"');
+    const sheet = sheetOf(html);
+    expect(sheet).toContain("[page:flyer-letter]");
+    expect(sheet).toContain(`>Poll ${CODE}</h2>`);
+    // The QR code is drawn on the server, so the sheet prints without script.
+    expect(sheet).toContain(`<svg role="img" aria-label="QR code for localhost/p/${CODE}"`);
+    // Seven tear-off tabs, each with the link.
+    expect(sheet.match(new RegExp(`/p/<br/>${CODE}</span>`, "g"))).toHaveLength(7);
+    expect(html).toMatch(
+      /<a href="\/p\/[0-9a-z]+\/flyer\?paper=letter&amp;ink=color" aria-current="page"/,
+    );
+    // The stub's poll closed on 8 January 2026.
+    expect(sheet).toContain("Scan to see the poll");
+    expect(sheet).toContain("Closed January 8, 2026");
+    expect(sheet).toContain("Abolish alone holds the key for this poll");
+  });
+
+  test("comes on A4 and in black and white by its links, which need no script", async () => {
+    const html = await (await get(`/p/${CODE}/flyer?paper=a4&ink=mono`)).text();
+    const sheet = sheetOf(html);
+    expect(sheet).toContain("[page:flyer-a4]");
+    expect(sheet).not.toMatch(/\b(?:bg|border)-primary\b/);
+    expect(html).toContain(`href="/p/${CODE}/flyer?paper=letter&amp;ink=mono"`);
+    expect(html).toContain(`href="/p/${CODE}/flyer?paper=a4&amp;ink=color"`);
+    // Anything else is the default, quoting nothing.
+    const other = await (await follow(`/p/${CODE}/flyer?paper=%3Cb%3E&ink=x`)).text();
+    expect(sheetOf(other)).toContain("[page:flyer-letter]");
+    expect(other).not.toContain("&lt;b&gt;");
+  });
+
+  test("a code in any spelling prints its canonical form", async () => {
+    const response = await get(`/P/${CODE.toUpperCase()}/flyer`);
+    expect(response.status).toBe(200);
+    const sheet = sheetOf(await response.text());
+    expect(sheet).toContain(`>Poll ${CODE}</h2>`);
+    expect(sheet).not.toContain(CODE.toUpperCase());
+  });
+
+  test("a hidden poll gets no flyer, and says why", async () => {
+    const response = await get(`/p/${HIDDEN_CODE}/flyer`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Moderation has hidden this poll");
+    expect(html).not.toContain("data-flyer");
+    expect(html).toContain(`href="/p/${HIDDEN_CODE}"`);
+  });
+
+  test.each([
+    ["a code no poll owns", () => UNKNOWN_CODE],
+    ["a code the API claims for a poll whose hash doesn't start with it", () => FALSE_CODE],
+    ["a code whose poll's served definition names another election (T-34)", () => SWAPPED_CODE],
+    ["a malformed code", () => "3j55-dw1"],
+  ])("%s is not found, quoting nothing", async (_, code) => {
+    const response = await get(`/p/${code()}/flyer`);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("There is no page at this address");
+    expect(html).not.toContain(code());
+  });
+
+  test("forwards nothing of the visitor's to the API (T-10)", async () => {
+    seen.length = 0;
+    await get(`/p/${CODE}/flyer?paper=a4`, {
+      cookie: "__Secure-abolish-account.session_token=secret",
+      "x-forwarded-for": "203.0.113.9",
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("secret");
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+    }
   });
 });
 

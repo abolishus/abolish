@@ -333,6 +333,45 @@ const enUS = {
   shareQrLabel: "QR code for {link}",
   shareQrNote:
     "Point a phone's camera at it to open this poll. It holds the same link, so it says nothing about who showed it.",
+  shareFlyer: "Print a flyer",
+  // The flyer (docs/design/sharing.md, Printable flyer).
+  flyerTitle: "Print a flyer",
+  flyerBack: "Back to the poll",
+  flyerIntro:
+    "For noticeboards, shop windows and meetings. The QR code and the link are the same for everyone, so a flyer says nothing about who put it up.",
+  flyerPaper: "Paper",
+  flyerPaperLetter: "US Letter",
+  flyerPaperA4: "A4",
+  flyerInk: "Ink",
+  flyerInkColor: "Color",
+  flyerInkMono: "Black and white",
+  flyerPrint: "Print this flyer",
+  flyerPrintNote:
+    "Print at actual size. Only the flyer prints, edge to edge, so turn off headers and footers if your browser adds them.",
+  flyerPreview: "The flyer, as it prints",
+  flyerKicker: "A poll on {host}",
+  flyerQuestions: {
+    one: "{count} short question.",
+    other: "{count} short questions, answered together.",
+  },
+  flyerScan: "Scan to answer",
+  flyerScanClosed: "Scan to see the poll",
+  flyerOrType: "or type",
+  flyerCloses: "Closes {time}",
+  flyerClosed: "Closed {time}",
+  flyerOpens: "Opens {opens}, closes {closes}",
+  flyerHowTitle: "How to answer",
+  flyerHow:
+    "Open the link on a phone or computer and tap your answer. It takes about a minute, and you can change it until the poll closes.",
+  flyerClosedTitle: "This poll has closed",
+  flyerClosedBody: "It no longer takes answers. Open the link to see where the count stands.",
+  flyerCheckTitle: "Anyone can check the count",
+  flyerCheck:
+    "Every answer is sealed and listed on a public board, without the name of who sent it, and anyone can recount the result. During launch, Abolish alone holds the key for this poll.",
+  flyerFoot: "Non-binding, run by citizens.",
+  flyerTabs: "Tear-off tabs with the link",
+  flyerHidden:
+    "Moderation has hidden this poll's text, so there's no flyer for it. Its page says why.",
   // Why a poll couldn't be set up, one per failure code core writes
   // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
   // retried comes back as a draft; one whose election was registered stays.

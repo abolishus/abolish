@@ -226,7 +226,7 @@ describe("appendEntry", () => {
         const append = appendEntry(app, id, 0, record(type));
         if (!types.includes(type)) expect(await refusedWith(append)).toBe("invalid-entry");
         // The table's CHECK takes share receipts, whose writer exists
-        // (migrations/0026), and still refuses the other types (Known-weak).
+        // (migrations/0027), and still refuses the other types (Known-weak).
         else if (type === 0x000c) expect((await append).index).toBe(0n);
         else await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
       }

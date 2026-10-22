@@ -50,7 +50,7 @@ export const boardBallotKeys = pgTable(
   ],
 );
 
-// Drizzle view of migrations/0026_board_share_receipts.sql: each boarded
+// Drizzle view of migrations/0027_board_share_receipts.sql: each boarded
 // ballot's ballot hash, by which a share receipt finds the ballot it names
 // (docs/spec/delivery.md, Boarding, rule 2; T-52). Append-only like the board.
 export const boardBallotHashes = pgTable(

@@ -237,6 +237,12 @@ export {
 } from "./keyring.ts";
 export { createPostmarkSender, POSTMARK_EMAIL, type PostmarkOptions } from "./postmark.ts";
 export {
+  createTwilioVerifier,
+  TWILIO_LOOKUP,
+  TWILIO_VERIFY,
+  type TwilioOptions,
+} from "./twilio.ts";
+export {
   createTurnstile,
   MAX_TURNSTILE_TOKEN,
   type Turnstile,

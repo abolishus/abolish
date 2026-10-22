@@ -4,10 +4,13 @@
 // listens.
 
 import {
+  assertDistinctKeyrings,
   createAccounts,
   createPostmarkSender,
   createTurnstile,
+  createTwilioVerifier,
   emailKeys,
+  type Keyring,
   parseKeyring,
 } from "@abolishus/core";
 import { fileURLToPath } from "node:url";
@@ -18,6 +21,7 @@ import { ballotBase, isSiteKey } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
+import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
 
@@ -63,6 +67,17 @@ const Env = z
     EMAIL_BOX_KEYS: z.string().min(1).optional(),
     POSTMARK_SERVER_TOKEN: z.string().min(1).optional(),
     EMAIL_FROM: z.string().min(1).optional(),
+    // An account's phone number (src/node/phone.ts; ADR 0038, Phone codes):
+    // the keyring its hash chain is made under (its own keys, in no other
+    // ring, every one kept for good, oldest first), the Twilio API key and
+    // Verify service, and how many codes every account together may ask for
+    // in 24 hours (T-52). All five or none: without them every /phone route
+    // answers 503.
+    PHONE_HASH_KEYS: z.string().min(1).optional(),
+    TWILIO_KEY_SID: z.string().min(1).optional(),
+    TWILIO_KEY_SECRET: z.string().min(1).optional(),
+    TWILIO_VERIFY_SERVICE_SID: z.string().min(1).optional(),
+    PHONE_DAILY_CEILING: z.coerce.number().int().min(1).optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -87,6 +102,22 @@ const Env = z
     {
       message: "EMAIL_HASH_KEYS, EMAIL_BOX_KEYS, POSTMARK_SERVER_TOKEN and EMAIL_FROM go together",
     },
+  )
+  .refine(
+    (env) =>
+      new Set(
+        [
+          env.PHONE_HASH_KEYS,
+          env.TWILIO_KEY_SID,
+          env.TWILIO_KEY_SECRET,
+          env.TWILIO_VERIFY_SERVICE_SID,
+          env.PHONE_DAILY_CEILING,
+        ].map((v) => v === undefined),
+      ).size === 1,
+    {
+      message:
+        "PHONE_HASH_KEYS, TWILIO_KEY_SID, TWILIO_KEY_SECRET, TWILIO_VERIFY_SERVICE_SID and PHONE_DAILY_CEILING go together",
+    },
   );
 
 const env = Env.parse({
@@ -106,7 +137,31 @@ const env = Env.parse({
   EMAIL_BOX_KEYS: process.env["EMAIL_BOX_KEYS"] || undefined,
   POSTMARK_SERVER_TOKEN: process.env["POSTMARK_SERVER_TOKEN"] || undefined,
   EMAIL_FROM: process.env["EMAIL_FROM"] || undefined,
+  PHONE_HASH_KEYS: process.env["PHONE_HASH_KEYS"] || undefined,
+  TWILIO_KEY_SID: process.env["TWILIO_KEY_SID"] || undefined,
+  TWILIO_KEY_SECRET: process.env["TWILIO_KEY_SECRET"] || undefined,
+  TWILIO_VERIFY_SERVICE_SID: process.env["TWILIO_VERIFY_SERVICE_SID"] || undefined,
+  PHONE_DAILY_CEILING: process.env["PHONE_DAILY_CEILING"] || undefined,
 });
+
+/** Runs `make`, naming `name` and never the value in any failure: a key or a token (T-65). */
+function attempt<T>(name: string, make: () => T): T {
+  try {
+    return make();
+  } catch (e) {
+    throw new Error(`${name}: ${e instanceof Error ? e.message : "invalid"}`);
+  }
+}
+
+/** The e-mail service's keyrings, if configured. */
+function emailKeyrings(): { readonly hash: Keyring; readonly box: Keyring } | undefined {
+  const { EMAIL_HASH_KEYS, EMAIL_BOX_KEYS } = env;
+  if (EMAIL_HASH_KEYS === undefined || EMAIL_BOX_KEYS === undefined) return undefined;
+  return {
+    hash: attempt("EMAIL_HASH_KEYS", () => parseKeyring(EMAIL_HASH_KEYS)),
+    box: attempt("EMAIL_BOX_KEYS", () => parseKeyring(EMAIL_BOX_KEYS)),
+  };
+}
 
 /**
  * The e-mail service, if configured. Each failure names the variable,
@@ -121,21 +176,51 @@ function emailService(): EmailService | undefined {
     EMAIL_FROM === undefined
   )
     return undefined;
-  const attempt = <T>(name: string, make: () => T): T => {
-    try {
-      return make();
-    } catch (e) {
-      throw new Error(`${name}: ${e instanceof Error ? e.message : "invalid"}`);
-    }
-  };
-  const hash = attempt("EMAIL_HASH_KEYS", () => parseKeyring(EMAIL_HASH_KEYS));
-  const box = attempt("EMAIL_BOX_KEYS", () => parseKeyring(EMAIL_BOX_KEYS));
+  // Defined whenever the two variables are.
+  const { hash, box } = emailKeyrings()!;
   return {
     keys: attempt("EMAIL_HASH_KEYS and EMAIL_BOX_KEYS", () => emailKeys(hash, box)),
     // Its errors name the option (`serverToken`, `from`), never the value.
     sender: attempt("POSTMARK_SERVER_TOKEN or EMAIL_FROM", () =>
       createPostmarkSender({ serverToken: POSTMARK_SERVER_TOKEN, from: EMAIL_FROM }),
     ),
+  };
+}
+
+/** The phone service, if configured; each failure names the variable, never its value (T-65). */
+function phoneService(): PhoneService | undefined {
+  const {
+    PHONE_HASH_KEYS,
+    TWILIO_KEY_SID,
+    TWILIO_KEY_SECRET,
+    TWILIO_VERIFY_SERVICE_SID,
+    PHONE_DAILY_CEILING,
+  } = env;
+  if (
+    PHONE_HASH_KEYS === undefined ||
+    TWILIO_KEY_SID === undefined ||
+    TWILIO_KEY_SECRET === undefined ||
+    TWILIO_VERIFY_SERVICE_SID === undefined ||
+    PHONE_DAILY_CEILING === undefined
+  )
+    return undefined;
+  const keys = attempt("PHONE_HASH_KEYS", () => parseKeyring(PHONE_HASH_KEYS));
+  const email = emailKeyrings();
+  // ADR 0038, Keys: each key in one ring only, so a phone hash is never an e-mail one.
+  attempt("PHONE_HASH_KEYS and the e-mail keyrings", () =>
+    assertDistinctKeyrings(keys, ...(email === undefined ? [] : [email.hash, email.box])),
+  );
+  return {
+    keys,
+    // Its errors name the option (`keySid`, …), never the value.
+    verifier: attempt("TWILIO_KEY_SID, TWILIO_KEY_SECRET or TWILIO_VERIFY_SERVICE_SID", () =>
+      createTwilioVerifier({
+        keySid: TWILIO_KEY_SID,
+        keySecret: TWILIO_KEY_SECRET,
+        verifyServiceSid: TWILIO_VERIFY_SERVICE_SID,
+      }),
+    ),
+    dailyCeiling: PHONE_DAILY_CEILING,
   };
 }
 
@@ -178,6 +263,14 @@ const email = createEmailHandler({
   origin,
   log: write,
 });
+const phone = createPhoneHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  service: phoneService(),
+  turnstile,
+  origin,
+  log: write,
+});
 const prune = startAccountPrune({ sql, log: write });
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
@@ -193,6 +286,7 @@ const server = createWebServer({
   accounts: (request) => accounts.handler(request),
   drafts,
   email,
+  phone,
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,

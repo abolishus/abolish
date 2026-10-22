@@ -93,7 +93,7 @@ interface Line {
  */
 const CODE = "135790";
 function provider({
-  lines = new Map<string, Line | "unavailable">(),
+  lines = new Map<string, Line | "invalid" | "unavailable">(),
   start = "sent" as "sent" | "unavailable",
   check = undefined as "unavailable" | undefined,
 } = {}) {
@@ -105,7 +105,7 @@ function provider({
     lookup: async (n) => {
       lookups.push(n);
       const line = lines.get(n) ?? { country: "US", lineType: "mobile" };
-      return line === "unavailable" ? line : { number: n, ...line };
+      return typeof line === "string" ? line : { number: n, ...line };
     },
     start: async (n, channel) => {
       started.push([n, channel]);
@@ -399,6 +399,16 @@ describe("requestPhoneCode", () => {
     const a = await newAccount();
     const p = provider({ lines: new Map([[n, "unavailable"]]) });
     expect(await code(ask(a, n, { p }))).toBe("lookup-unavailable");
+    expect(await db.admin`SELECT 1 FROM account_phone_sends WHERE user_id = ${a}`).toHaveLength(1);
+    expect(await db.admin`SELECT 1 FROM account_phone_codes WHERE user_id = ${a}`).toHaveLength(0);
+  });
+
+  test("refuses a number the lookup knows of no line for, and the request still counts", async () => {
+    const n = fresh();
+    const a = await newAccount();
+    const p = provider({ lines: new Map([[n, "invalid"]]) });
+    expect(await code(ask(a, n, { p }))).toBe("invalid-number");
+    expect(p.started).toEqual([]);
     expect(await db.admin`SELECT 1 FROM account_phone_sends WHERE user_id = ${a}`).toHaveLength(1);
     expect(await db.admin`SELECT 1 FROM account_phone_codes WHERE user_id = ${a}`).toHaveLength(0);
   });

@@ -92,6 +92,15 @@ const EMAIL = {
   EMAIL_FROM: "codes@abolish.test",
 };
 
+/** A whole phone configuration, with made-up Twilio credentials nothing calls. */
+const PHONE = {
+  PHONE_HASH_KEYS: `p1:${randomBytes(32).toString("hex")}`,
+  TWILIO_KEY_SID: `SK${randomBytes(16).toString("hex")}`,
+  TWILIO_KEY_SECRET: randomBytes(16).toString("hex"),
+  TWILIO_VERIFY_SERVICE_SID: `VA${randomBytes(16).toString("hex")}`,
+  PHONE_DAILY_CEILING: "1000",
+};
+
 describe("dist/node/main.mjs", () => {
   test("serves pages, their assets and the account handler, from the bundle alone", async () => {
     const port = await freePort();
@@ -105,6 +114,7 @@ describe("dist/node/main.mjs", () => {
       TURNSTILE_SECRET_KEY: "turnstile-secret",
       TURNSTILE_SITE_KEY: SITE_KEY,
       ...EMAIL,
+      ...PHONE,
       WEB_PORT: String(port),
     });
     try {
@@ -152,6 +162,9 @@ describe("dist/node/main.mjs", () => {
       // The e-mail routes are served, and need a session.
       const email = await fetch(`${at}/email`);
       expect(await email.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+      // So are the phone routes.
+      const phone = await fetch(`${at}/phone`);
+      expect(await phone.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
       // Its log: one line per request, by route class, written once each
       // answer is sent.
       await new Promise((r) => setTimeout(r, 100));
@@ -162,6 +175,7 @@ describe("dist/node/main.mjs", () => {
         .map((l) => JSON.parse(l) as { route?: string });
       expect(lines.map((l) => l.route)).toContain("auth");
       expect(lines.map((l) => l.route)).toContain("email");
+      expect(lines.map((l) => l.route)).toContain("phone");
       // No start-up prune of the account tables failed as abolish_app.
       expect(web.out()).not.toContain("AccountPruneFailed");
       expect(web.out()).not.toContain("abolish.test");
@@ -299,6 +313,53 @@ describe("dist/node/main.mjs", () => {
       expect(web.err()).toContain(name);
       for (const value of Object.values(configured))
         if (value !== EMAIL.EMAIL_FROM) expect(web.err()).not.toContain(value.slice(3));
+    },
+    30_000,
+  );
+
+  test("refuses part of a phone configuration, quoting none of it", async () => {
+    const { PHONE_DAILY_CEILING: _, ...partial } = PHONE;
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
+      ...partial,
+    });
+    const [code] = (await once(web.child, "exit")) as [number];
+    expect(code).not.toBe(0);
+    expect(web.err()).toContain("PHONE_DAILY_CEILING go together");
+    for (const value of Object.values(partial)) expect(web.err()).not.toContain(value.slice(3));
+  }, 30_000);
+
+  test.each([
+    ["a malformed keyring", { PHONE_HASH_KEYS: "p1:0123" }, "PHONE_HASH_KEYS"],
+    [
+      "a key also in an e-mail keyring",
+      { PHONE_HASH_KEYS: `p1:${EMAIL.EMAIL_HASH_KEYS.slice(3)}` },
+      "PHONE_HASH_KEYS and the e-mail keyrings",
+    ],
+    ["a key SID that isn't one", { TWILIO_KEY_SID: `XX${"0".repeat(32)}` }, "keySid"],
+    ["a service SID that isn't one", { TWILIO_VERIFY_SERVICE_SID: "VA0123" }, "verifyServiceSid"],
+  ])(
+    "refuses %s, naming the variable and quoting none of it",
+    async (_, change, name) => {
+      const configured = { ...EMAIL, ...PHONE, ...change };
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...configured,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain(name);
+      for (const [variable, value] of Object.entries(configured))
+        if (variable !== "EMAIL_FROM" && variable !== "PHONE_DAILY_CEILING")
+          expect(web.err()).not.toContain(value.slice(3));
     },
     30_000,
   );

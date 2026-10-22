@@ -2,7 +2,7 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
-const buttonVariants = cva(
+const buttonClasses = cva(
   "group/button inline-flex shrink-0 items-center justify-center rounded-none border border-transparent bg-clip-padding text-xs font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-1 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
@@ -39,6 +39,16 @@ const buttonVariants = cva(
 );
 
 /**
+ * The button's classes, merged. The base's `text-xs` and each size's
+ * `text-base` or `text-sm` are rival utilities, and unmerged the stylesheet's
+ * order picks the base's, so a link drawn as a button (`<a
+ * className={buttonVariants()}>`) labelled itself at 12px.
+ */
+function buttonVariants(props?: Parameters<typeof buttonClasses>[0]): string {
+  return cn(buttonClasses(props));
+}
+
+/**
  * Added with `shadcn add button` (preset b2CQ2Q281) and adapted: larger
  * sizes and a full-strength focus ring. Base UI renders a native `<button>`
  * with `type="button"` unless told otherwise, so keyboard activation and its
@@ -49,12 +59,12 @@ function Button({ className, variant = "default", size = "default", ...props }: 
   return (
     <ButtonPrimitive
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={buttonVariants({ variant, size, className })}
       {...props}
     />
   );
 }
 
-type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonVariants>;
+type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonClasses>;
 
 export { Button, buttonVariants, type ButtonProps };

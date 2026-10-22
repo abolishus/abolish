@@ -621,6 +621,7 @@ const enUS = {
   skipToContent: "Skip to content",
   navSite: "Site",
   navHome: "Home",
+  navDiscoverNote: "Search the questions people are asking",
   navPollsNote: "Every poll this server lists",
   navModerationNote: "Every moderation decision, with its reason",
   navHomeNote: "Start again from the front page",
@@ -631,9 +632,9 @@ const enUS = {
   notFoundCode: "404 · Not found",
   notFoundTitle: "There is no page at this address",
   notFound:
-    "The link may be mistyped, or the page may have moved. Nothing on the record is ever removed: board entries, definitions and results are permanent.",
+    "The link may be mistyped or cut short. Polls and their results are never deleted, so a poll's own link keeps working.",
   notFoundPoll:
-    "If you were looking for a poll, paste its 64-character ID into the form on the front page.",
+    "Looking for a poll someone shared? Ask them to send the link again, or search for its question on Discover.",
   unavailableTitle: "Poll unavailable",
   definitionUndecodable:
     "The server sent a definition that doesn't decode under the protocol, so this page won't show it.",

@@ -250,7 +250,8 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
   const entries = entriesOf(window);
   const verdicts = (r: Report) =>
     new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
-  // Verified once: a whole check of the fixture takes seconds on a busy runner.
+  // Verified once: a whole check of the fixture takes seconds on a busy runner,
+  // so each test below that makes one has at least a minute.
   const report = format4(window);
   const full = verdicts(report);
   // Entries 5 and 7 are ordinary copies inside the window of entries 1 and 6:
@@ -295,7 +296,7 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
     // election identifier, so it is an entry of this election's board.
     const spliced = join([...own, entries[2] as Uint8Array]);
     expect(format4(admitted, spliced).ballots).toEqual(format4(admitted).ballots);
-  });
+  }, 60_000);
 
   test("another board event carries no ballot, so it is neither admitted nor rejected", () => {
     // contract-event-v2.json's ShareReceiptSubmitted, re-addressed to this
@@ -313,7 +314,7 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
     const r = format4(window, join(entries.map((e, i) => (i === 2 ? swapped : e))));
     expect(verdicts(r).has(2)).toBe(false);
     expect(r.ballots?.admitted).toBe(3);
-  });
+  }, 60_000);
 
   test("s_A takes the floor of a close before the epoch, so segment 1 is late when s_A is 0", () => {
     const admitted = byId("admitted");
@@ -332,7 +333,7 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
       ),
     );
     expect(r.ballots?.rejected).toEqual([{ entry: 1, code: "window-boarded-late" }]);
-  });
+  }, 60_000);
 
   test("a clock that puts s_A below a board-path ballot's segment rejects it as boarded late", () => {
     const admitted = byId("admitted");
@@ -351,7 +352,7 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
       new Set(["window-boarded-late"]),
     );
     expect(row(late, "5.5")).toMatchObject({ status: "fail", code: "window-boarded-late" });
-  });
+  }, 60_000);
 });
 
 describe("when ballot admission can't run", () => {
@@ -399,6 +400,7 @@ test("a ballot pin other than 1 leaves 6.2 unsupported: a later release may open
   expect(r.openings).toBeUndefined();
 });
 
+// The mixed case, which has taken over the 5-second default on CI's runners.
 test("the report gives the ballots after the ceremony, then the openings and the tallies", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
@@ -415,4 +417,4 @@ test("the report gives the ballots after the ceremony, then the openings and the
     "l1",
     "checks",
   ]);
-});
+}, 60_000);

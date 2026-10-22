@@ -10,6 +10,7 @@ import {
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
   TIER0_MAX_CONCURRENT,
+  TIER0_SHOWN_MARGIN,
   tier0Keys,
   Tier0RegistrationError,
   Tier0Registrations,
@@ -388,9 +389,12 @@ describe("Tier0Registrations", () => {
             await redis.hset(k.sizes, state === "queued-here" ? "7" : "9", "1");
           if (state === "live") await redis.sadd(k.live, commitment);
           if (state === "inflight") await redis.sadd(k.inflight, commitment);
-          // Shown at a re-issuance, its mark lapsing after now, or at now.
-          if (state === "shown") await redis.zadd(k.shown, NOW + 1, commitment);
-          if (state === "shown-lapsed") await redis.zadd(k.shown, NOW, commitment);
+          // Shown at a re-issuance, its mark kept until a second after now,
+          // or only until now.
+          if (state === "shown")
+            await redis.zadd(k.shown, NOW - TIER0_SHOWN_MARGIN + 1, commitment);
+          if (state === "shown-lapsed")
+            await redis.zadd(k.shown, NOW - TIER0_SHOWN_MARGIN, commitment);
           const before = await redis.hgetall(k.queue);
           await expect(service().registrations.register(request(commitment))).resolves.toBe(
             undefined,

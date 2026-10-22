@@ -6,6 +6,7 @@ import {
   commitmentKey,
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
+  TIER0_SHOWN_MARGIN,
   tier0Keys,
   Tier0Registrations,
   Tier0ShownList,
@@ -191,26 +192,51 @@ describe("Tier0ShownList", () => {
     expect(await marks()).toEqual({ [commitmentKey(c)]: LAPSE + 10 });
   });
 
-  test("a mark lapses on the service's clock: the route queues it again, and the next mark prunes it", async () => {
+  test("a mark is kept TIER0_SHOWN_MARGIN past its lapse, then the route queues it again and the next mark prunes it", async () => {
     const [c, d] = [41n, 42n];
+    const M = TIER0_SHOWN_MARGIN;
     await fresh();
     expect(await shown().show(c, NOW + 5)).toBe("shown");
-    await register(c, NOW + 4);
+    // Past its lapse, but inside the margin: a redemption checked before
+    // the lapse and queued after it is still dropped.
+    await fresh(NOW + 10);
+    await register(c, NOW + 10);
+    await fresh(NOW + 4 + M);
+    await register(c, NOW + 4 + M);
     expect(await redis.exists(keys().queue)).toBe(0);
-    await fresh(NOW + 5);
-    await register(c, NOW + 5);
+    // A mark inside the margin isn't pruned.
+    expect(await shown(NOW + 4 + M).show(d, LAPSE)).toBe("shown");
+    expect(Object.keys(await marks()).sort()).toEqual([c, d].map(commitmentKey).sort());
+    await fresh(NOW + 5 + M);
+    await register(c, NOW + 5 + M);
     expect(await redis.hkeys(keys().queue)).toEqual([commitmentKey(c)]);
-    expect(await shown(NOW + 5).show(d, LAPSE)).toBe("shown");
+    await redis.del(keys().queue, keys().sizes);
+    expect(await shown(NOW + 5 + M).show(d, LAPSE)).toBe("shown");
     expect(await marks()).toEqual({ [commitmentKey(d)]: LAPSE });
   });
 
-  test("a lapse already past is checked but not kept", async () => {
+  test("an issuer's clock ahead of the service's at the boundary still marks, and prunes no mark the service keeps", async () => {
+    // The issuer marks just after the lapse on its own clock, while the
+    // service's clock is still before it, so the dead key still redeems
+    // there: the route must drop the commitment.
+    const [c, other] = [51n, 52n];
     await fresh();
-    expect(await shown().show(51n, NOW)).toBe("shown");
-    expect(await shown().show(52n, NOW - 100)).toBe("shown");
-    expect(await redis.exists(keys().shown)).toBe(0);
+    expect(await shown().show(other, NOW)).toBe("shown");
+    const ahead = NOW + 120;
+    await fresh(ahead);
+    expect(await shown(ahead).show(c, NOW + 60)).toBe("shown");
+    expect(await marks()).toEqual({
+      [commitmentKey(c)]: NOW + 60,
+      [commitmentKey(other)]: NOW,
+    });
+    await fresh(NOW + 59);
+    await register(c, NOW + 59);
+    await register(other, NOW + 59);
+    expect(await redis.exists(keys().queue)).toBe(0);
+    // A past lapse is checked as any other.
+    await fresh(ahead);
     await redis.sadd(keys().live, commitmentKey(53n));
-    expect(await shown().show(53n, NOW)).toBe("registered");
+    expect(await shown(ahead).show(53n, NOW)).toBe("registered");
   });
 
   test("Redis keeps the commitment and its lapse and nothing else", async () => {

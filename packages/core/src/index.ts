@@ -309,6 +309,7 @@ export {
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
   TIER0_MAX_CONCURRENT,
+  TIER0_SHOWN_MARGIN,
   type Tier0Keys,
   tier0Keys,
   type Tier0MalformedCode,

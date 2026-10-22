@@ -18,6 +18,7 @@ import {
   commitmentKey,
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
+  TIER0_SHOWN_MARGIN,
   type Tier0Keys,
   tier0Keys,
   type Tier0Redis,
@@ -27,7 +28,7 @@ import {
  * What the mark found:
  *
  * - `shown`: `C` was never added to a Tier 0 group, isn't in flight or
- *   queued, and is now marked (or already was, until at least `lapse`);
+ *   queued, and is now marked (or already was, with at least `lapse`);
  * - `registered`: the index (the addition history of every Tier 0 group,
  *   signed or self-paid, removed since or not), an in-flight batch or the
  *   queue holds `C`, so the re-issuance is refused (`reissue-refused`);
@@ -38,29 +39,35 @@ export type Tier0ShowOutcome = "shown" | "registered" | "unavailable";
 
 export interface Tier0ShownOptions {
   readonly redis: Tier0Redis;
-  /** UNIX time in seconds: the signing service's clock, which judges a mark's lapse. */
+  /**
+   * UNIX time in seconds, for the index's age and pruning marks: the
+   * caller's clock, which may not be the signing service's, so marks are
+   * kept `TIER0_SHOWN_MARGIN` past their lapse.
+   */
   readonly now: () => number;
   /** The first segment of every key, as the route's. */
   readonly prefix?: string;
 }
 
 // One step: the index's age (as the route's step 6, so a lagging index never
-// passes a commitment it would have held), lapsed marks pruned, then the
-// check and the mark. A lapse below the one already kept never shortens it.
+// passes a commitment it would have held), marks past their lapse by more
+// than the margin pruned, then the check and the mark. A commitment is
+// marked even when its lapse has passed on this clock, which may lead the
+// signing service's; a lapse below the one already kept never shortens it.
 const SHOW = `
 local indexed = redis.call('GET', KEYS[5])
 if not indexed or not string.match(indexed, '^%d+$') or #indexed > 15 then return 'unavailable' end
 local now = tonumber(ARGV[2])
 local at = tonumber(indexed)
 if now - at > tonumber(ARGV[4]) or at - now > tonumber(ARGV[5]) then return 'unavailable' end
-redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', now - tonumber(ARGV[6]))
 if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1
   or redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1
   or redis.call('HEXISTS', KEYS[3], ARGV[1]) == 1 then
   return 'registered'
 end
 local kept = redis.call('ZSCORE', KEYS[4], ARGV[1])
-if tonumber(ARGV[3]) > now and (not kept or tonumber(kept) < tonumber(ARGV[3])) then
+if not kept or tonumber(kept) < tonumber(ARGV[3]) then
   redis.call('ZADD', KEYS[4], ARGV[3], ARGV[1])
 end
 return 'shown'
@@ -81,8 +88,10 @@ export class Tier0ShownList {
   /**
    * Checks that `commitment` was never added to a Tier 0 group and is in no
    * in-flight batch or queue, and marks it so the route drops it until
-   * `lapse`, the UNIX second at which the dead token's key stops redeeming
-   * (the end of its period `q + 1`, or at once for a key retired early).
+   * `TIER0_SHOWN_MARGIN` past `lapse`: the end of the dead token's key's
+   * period `q + 1`, also for a key retired early, since a signing service
+   * that hasn't yet loaded the retirement still redeems under it. Every
+   * token under the key shares that second, so it links nothing (T-10).
    * Rejects a commitment that isn't canonical or is forbidden, and a lapse
    * that isn't a safe integer: the caller decodes both first.
    */
@@ -107,6 +116,7 @@ export class Tier0ShownList {
         String(lapse),
         String(TIER0_INDEX_MAX_LAG),
         String(TIER0_INDEX_MAX_SKEW),
+        String(TIER0_SHOWN_MARGIN),
       );
     } catch {
       // The client's error quotes the script's arguments, the commitment

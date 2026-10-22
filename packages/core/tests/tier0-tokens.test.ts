@@ -11,6 +11,7 @@ import {
   TOKEN_KEY_PERIOD,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
+import { inspect } from "node:util";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -319,6 +320,33 @@ describe("issuance", () => {
     expect(await record(account)).toBeUndefined();
   });
 
+  test("refuses a key that only redeems before the region and B, unless it is the recorded one", async () => {
+    const account = await newAccount();
+    const bad = { region: 9, blindedElement: new Uint8Array(32) };
+    expect(await refusal(issue(account, { ...blind(Q - 1).request, ...bad }))).toBe(
+      "key-not-issuing",
+    );
+    await issue(account, blind().request);
+    expect(await refusal(issue(account, { ...blind().request, ...bad }, { now: at(Q + 1) }))).toBe(
+      "region-unknown",
+    );
+  });
+
+  test("the app role can't delete a record, which would free a second token (T-01)", async () => {
+    const account = await newAccount();
+    await issue(account, blind().request);
+    await expect(app`DELETE FROM account_tokens WHERE user_id = ${account}`).rejects.toThrow(
+      /permission denied/,
+    );
+  });
+
+  test("the issuer's secret keys never print", () => {
+    const shown = `${JSON.stringify(ISSUER.keys.keys)} ${inspect(ISSUER, { depth: 10 })}`;
+    expect(shown).not.toContain("secretKey");
+    for (const p of pairs.values()) expect(shown).not.toContain(hex(p.secretKey));
+    expect(KEYS.keys.every((k) => k.secretKey.length === 32)).toBe(true);
+  });
+
   test("refuses a region with no published group", async () => {
     const account = await newAccount();
     for (const region of [1, -1, 0.5, Number.NaN, 2 ** 32])
@@ -361,7 +389,7 @@ describe("issuance", () => {
     // Z is the key's, so the same; the proof's randomness is fresh.
     expect(hex(again.evaluationElement)).toBe(hex(first.evaluationElement));
     expect(await refusal(issue(account, blind().request))).toBe("token-taken");
-    // The same B for another commitment is still this B: a retry.
+    // Any number of retries, each answered alike.
     expect(hex((await issue(account, c.request)).evaluationElement)).toBe(
       hex(first.evaluationElement),
     );

@@ -67,14 +67,20 @@ export function parseTier0IssuerKeys(text: string): Tier0IssuerKeys {
     const period = Number(m[1]);
     if (periods.has(period)) throw new Error(`issuer key entry ${i + 1} repeats a period`);
     periods.add(period);
-    const secretKey = Uint8Array.from(Buffer.from(m[2]!, "hex"));
+    // Decoded straight into its own array, never through Buffer's shared
+    // pool, which would keep a copy beside unrelated data.
+    const secretKey = Uint8Array.from(m[2]!.match(/../g)!, (h) => parseInt(h, 16));
     let publicKey: Uint8Array;
     try {
       publicKey = tier0TokenPublicKey(secretKey);
     } catch {
       throw new Error(`issuer key entry ${i + 1} is not a non-zero scalar below l`);
     }
-    keys.push({ period, secretKey, publicKey, keyId: tier0TokenKeyId(period, publicKey) });
+    const key = { period, publicKey, keyId: tier0TokenKeyId(period, publicKey) };
+    // Not enumerable, so a log line, `util.inspect` or `JSON.stringify` of
+    // the issuer never prints `skS` (T-74).
+    Object.defineProperty(key, "secretKey", { value: secretKey, enumerable: false });
+    keys.push(key as Tier0IssuerKey);
   }
   keys.sort((a, b) => a.period - b.period);
   const byId = new Map(keys.map((k) => [Buffer.from(k.keyId).toString("hex"), k]));
@@ -200,6 +206,22 @@ export async function issueTier0Token(
   if (key === undefined || !tier0TokenKeyRedeems(key.period, seconds))
     throw new Tier0IssuanceError("key-not-issuing");
   const issues = tier0TokenKeyIssues(key.period, seconds);
+  const deployment = and(
+    eq(accountTokens.userId, accountId),
+    eq(accountTokens.chainId, issuer.chainId),
+    eq(accountTokens.groupRegistry, issuer.groupRegistry),
+  );
+  // A key that only redeems now serves a retry of the token recorded under
+  // it, and nothing else, before the region and `B` are looked at (step
+  // 2.2); step 2.5 then checks the rest of the retry.
+  if (!issues) {
+    const [held] = await db
+      .select({ keyId: accountTokens.keyId })
+      .from(accountTokens)
+      .where(deployment);
+    if (held?.keyId == null || !sameBytes(held.keyId, key.keyId))
+      throw new Tier0IssuanceError("key-not-issuing");
+  }
 
   const info = Number.isSafeInteger(request.region) ? issuer.infos.get(request.region) : undefined;
   if (info === undefined) throw new Tier0IssuanceError("region-unknown");
@@ -228,11 +250,6 @@ export async function issueTier0Token(
   };
 
   return db.transaction(async (tx) => {
-    const deployment = and(
-      eq(accountTokens.userId, accountId),
-      eq(accountTokens.chainId, issuer.chainId),
-      eq(accountTokens.groupRegistry, issuer.groupRegistry),
-    );
     if (issues) {
       // Step 3: insert-if-absent on the account and deployment, so of two
       // concurrent first requests with different `B` only one is recorded

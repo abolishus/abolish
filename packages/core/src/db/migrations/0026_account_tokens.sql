@@ -48,10 +48,12 @@ CREATE TABLE tier0_token_issuances (
 
 REVOKE ALL ON account_tokens, tier0_token_issuances FROM PUBLIC;
 -- UPDATE of the key and `B` only, for the dead mark and re-issuance's
--- replacement: a record's account, deployment and region never change.
--- DELETE for a record whose key can't evaluate for its group (Issuance,
--- step 4).
-GRANT SELECT, INSERT, DELETE ON account_tokens TO abolish_app;
+-- replacement: a record's account, deployment and region never change. No
+-- DELETE: the record is what stands between an account and a second token
+-- (T-01), so it goes only with its account, by the cascade, which runs with
+-- the owner's rights. A failed evaluation (Issuance, step 4) rolls its
+-- insert back instead.
+GRANT SELECT, INSERT ON account_tokens TO abolish_app;
 GRANT UPDATE (key_id, key_period, blinded_element) ON account_tokens TO abolish_app;
 -- Counts only ever grow.
 GRANT SELECT, INSERT, UPDATE ON tier0_token_issuances TO abolish_app;

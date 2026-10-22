@@ -38,6 +38,13 @@ export const IDENTITY: Element = Point.ZERO;
 
 const isZero = (b: Uint8Array) => b.every((x) => x === 0);
 
+/** `x⁻¹ mod ℓ`, by @noble/curves' field; `x` must be a scalar other than 0. */
+export function scalarInverse(x: bigint): bigint {
+  if (typeof x !== "bigint" || x <= 0n || x >= GROUP_ORDER)
+    throw new RangeError("scalarInverse: expected a scalar from 1 to ℓ - 1");
+  return Point.Fn.inv(x);
+}
+
 /**
  * `scalar`: 32 bytes little-endian, value below ℓ (RFC 9497 `SerializeScalar`).
  * A value at or above ℓ is rejected, never reduced, so each scalar has exactly

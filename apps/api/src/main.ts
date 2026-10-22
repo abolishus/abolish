@@ -44,6 +44,18 @@ const Env = z.strictObject({
   // default-panel seat's intake endpoint as the release lists it, an https
   // URL, comma-separated, seat 1 first. Without it the route answers 503.
   API_INTAKE_ENDPOINTS: z.string().min(1).optional(),
+  // The anchoring clock the worker labels board segments by, both or
+  // neither, with the worker's own values: the epoch and period of the
+  // anchor contract our definitions name (docs/spec/board.md, Timing).
+  // Without them the listing's `answered` order answers SORT_UNAVAILABLE.
+  BALLOT_ANCHOR_EPOCH: z
+    .string()
+    .regex(/^(0|[1-9][0-9]{0,19})$/)
+    .optional(),
+  BALLOT_ANCHOR_PERIOD: z
+    .string()
+    .regex(/^[1-9][0-9]{0,19}$/)
+    .optional(),
 });
 
 const env = Env.parse({
@@ -57,6 +69,8 @@ const env = Env.parse({
   API_TIER1_GROUP: process.env["API_TIER1_GROUP"],
   API_CORS_ORIGINS: process.env["API_CORS_ORIGINS"],
   API_INTAKE_ENDPOINTS: process.env["API_INTAKE_ENDPOINTS"],
+  BALLOT_ANCHOR_EPOCH: process.env["BALLOT_ANCHOR_EPOCH"],
+  BALLOT_ANCHOR_PERIOD: process.env["BALLOT_ANCHOR_PERIOD"],
 });
 
 let redis: Redis | undefined;
@@ -135,12 +149,20 @@ if (
 )
   throw new Error("API_INTAKE_ENDPOINTS must list one endpoint per API_CEREMONY_PANEL_KEYS key");
 
+if ((env.BALLOT_ANCHOR_EPOCH === undefined) !== (env.BALLOT_ANCHOR_PERIOD === undefined))
+  throw new Error("BALLOT_ANCHOR_EPOCH and BALLOT_ANCHOR_PERIOD go together");
+const boardClock =
+  env.BALLOT_ANCHOR_EPOCH === undefined || env.BALLOT_ANCHOR_PERIOD === undefined
+    ? undefined
+    : { epoch: BigInt(env.BALLOT_ANCHOR_EPOCH), period: BigInt(env.BALLOT_ANCHOR_PERIOD) };
+
 const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
 const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
+  ...(boardClock !== undefined && { boardClock }),
   ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
   ...(ceremony !== undefined && { ceremony: { deployment: ceremony } }),
   ...(intakeEndpoints !== undefined && { intake: { endpoints: intakeEndpoints } }),

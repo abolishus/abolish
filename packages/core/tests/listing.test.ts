@@ -5,6 +5,9 @@ import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  ANSWERED_WINDOW_SECONDS,
+  answeredWindow,
+  appendEntry,
   ListingError,
   type ListingOrder,
   listPolls,
@@ -151,12 +154,15 @@ describe("listPolls", () => {
       await expect(listPolls(app, undefined, limit)).rejects.toThrow(TypeError);
   });
 
-  test("reads only definitions, their registrations and times, and the moderation log, and writes nothing", async () => {
-    // T-68: listing is a view for our front ends; it never reaches a board or
-    // a result, and never changes what it reads. A read-only session refuses
-    // any write, however it is spelt.
+  test("reads only public data and the moderation log, and writes nothing", async () => {
+    // T-68: listing is a view for our front ends; it never reaches a result,
+    // and never changes what it reads. It reads the board only to count
+    // `answered`'s voters. A read-only session refuses any write, however it
+    // is spelt.
     const src = readFileSync(new URL("../src/listing.ts", import.meta.url), "utf8");
-    expect(src).not.toMatch(/boardEntries|board_entries|appendEntry|storeDefinition/);
+    expect(src).not.toMatch(
+      /appendEntry|storeDefinition|\baccount[A-Z_]|\.insert\(|\.update\(|\.delete\(/,
+    );
     const readOnly = await db.as("abolish_app");
     await readOnly`SET default_transaction_read_only = on`;
     const id = await election();
@@ -166,6 +172,15 @@ describe("listPolls", () => {
       expect(
         (await listPolls(readOnly, undefined, MAX_LISTING_PAGE, { sort, now: 150n })).map(hex),
       ).toContain(hex(open));
+    expect(
+      (
+        await listPolls(readOnly, undefined, MAX_LISTING_PAGE, {
+          sort: "answered",
+          now: 150n,
+          clock: { epoch: 0n, period: 10n },
+        })
+      ).map(hex),
+    ).toContain(hex(open));
   });
 });
 
@@ -178,12 +193,17 @@ describe("listPolls", () => {
 let block = 1_000n;
 
 /** A stored poll open from `opensAt` to `closesAt`, registered at the next position if `registered`. */
-async function timed(opensAt: bigint, closesAt: bigint, registered: boolean): Promise<Uint8Array> {
+async function timed(
+  opensAt: bigint,
+  closesAt: bigint,
+  registered: boolean,
+  id = new Uint8Array(randomBytes(32)),
+): Promise<Uint8Array> {
   const { electionId, definitionHash } = await storeDefinition(
     app,
     encodeElectionDefinition({
       ...typical,
-      election_id: new Uint8Array(randomBytes(32)),
+      election_id: id,
       opens_at: opensAt,
       closes_at: closesAt,
     }),
@@ -322,6 +342,223 @@ describe("listPolls, new and closing", () => {
       ).rejects.toThrow(TypeError);
     await expect(
       listPolls(app, undefined, 1, { sort: "popular" } as unknown as ListingOrder),
+    ).rejects.toThrow(TypeError);
+  });
+});
+
+// "Most answered this week" (P2-23 part 1b): the polls open now by the
+// distinct voters whose ballots were boarded in the last week's whole
+// anchoring periods. The count is of the public board alone, where every
+// entry carries its segment, so it keeps no time of its own (T-11), and a
+// re-vote never counts twice (T-01).
+
+const MAX_U32 = 2n ** 32n - 1n;
+
+describe("answeredWindow", () => {
+  const HOUR = { epoch: 0n, period: 3600n };
+
+  test("is the whole periods of the last week before now's own", () => {
+    const now = 1_000n * 3600n + 17n;
+    expect(answeredWindow(now, HOUR)).toEqual({ from: 1_000n - 168n, to: 999n });
+    // A period that doesn't divide the week rounds the window up.
+    expect(answeredWindow(100n * 7n * 3600n, { epoch: 0n, period: 7n * 3600n })).toEqual({
+      from: 100n - 24n,
+      to: 99n,
+    });
+  });
+
+  test("is empty before the epoch and in its first period, and short just after", () => {
+    const clock = { epoch: 10_000n, period: 3600n };
+    for (const now of [0n, 9_999n, 10_000n, 13_599n]) {
+      const { from, to } = answeredWindow(now, clock);
+      expect(from > to).toBe(true);
+    }
+    expect(answeredWindow(10_000n + 3n * 3600n, clock)).toEqual({ from: 0n, to: 2n });
+  });
+
+  test("covers at least the week before now's period, by at most a period more, and never now's period", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 10n ** 10n }),
+        fc.bigInt({ min: 0n, max: 10n ** 10n }),
+        fc.bigInt({ min: 1n, max: 2n * ANSWERED_WINDOW_SECONDS }),
+        (now, epoch, period) => {
+          const { from, to } = answeredWindow(now, { epoch, period });
+          if (now < epoch + period) {
+            expect(from > to).toBe(true);
+            return;
+          }
+          const current = (now - epoch) / period;
+          // Past the last u32 segment the window stops there; a case below.
+          if (current - 1n > MAX_U32) return;
+          expect(to).toBe(current - 1n);
+          const start = epoch + from * period;
+          const end = epoch + (to + 1n) * period;
+          expect(end).toBeLessThanOrEqual(now);
+          if (from > 0n) {
+            expect(end - start).toBeGreaterThanOrEqual(ANSWERED_WINDOW_SECONDS);
+            expect(end - start).toBeLessThan(ANSWERED_WINDOW_SECONDS + period);
+          }
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("stops at the last u32 segment, and is empty past it", () => {
+    const tick = { epoch: 0n, period: 1n };
+    expect(answeredWindow(MAX_U32 + 10n, tick)).toEqual({
+      from: MAX_U32 + 10n - ANSWERED_WINDOW_SECONDS,
+      to: MAX_U32,
+    });
+    const { from, to } = answeredWindow(MAX_U32 + ANSWERED_WINDOW_SECONDS + 2n, tick);
+    expect(from > to).toBe(true);
+  });
+
+  test("refuses a now or a clock outside the u64s, and a zero period", () => {
+    for (const [now, clock] of [
+      [-1n, HOUR],
+      [1n << 64n, HOUR],
+      [5, HOUR],
+      [0n, { epoch: -1n, period: 1n }],
+      [0n, { epoch: 0n, period: 0n }],
+      [0n, { epoch: 0n, period: 1 }],
+      [0n, null],
+    ] as const)
+      expect(() =>
+        answeredWindow(now as bigint, clock as unknown as { epoch: bigint; period: bigint }),
+      ).toThrow(TypeError);
+  });
+});
+
+describe("listPolls, answered", () => {
+  const clock = { epoch: 0n, period: 3600n };
+  // Far from every other test's times, so `now` picks out this block's polls.
+  const now = 6_000_000_000n;
+  const current = now / clock.period;
+  const answered = { sort: "answered", now, clock } as const;
+
+  /** Boards one ballot for `electionId` in `segment` from voter (`tier`, `nullifier`). */
+  async function cast(electionId: Uint8Array, segment: bigint, nullifier: bigint, tier = 0) {
+    await appendEntry(
+      app,
+      electionId,
+      Number(segment),
+      Uint8Array.of(0x00, 0x02, 1, ...randomBytes(8)),
+      {
+        ballot: { tier, nullifier, message: new Uint8Array(randomBytes(32)) },
+      },
+    );
+  }
+
+  test("orders the polls open now by distinct voters in the window, then by election ID", async () => {
+    const three = await timed(now - 10n, now + 100n, true);
+    for (const v of [1n, 2n, 3n]) await cast(three, current - 5n, v);
+    // One voter re-voting is one voter.
+    const revoted = await timed(now - 10n, now + 100n, true);
+    for (let i = 0n; i < 5n; i++) await cast(revoted, current - 10n + i, 9n);
+    // Ballots outside the window: before it, and in the period now is in.
+    const outside = await timed(now - 10n, now + 100n, true);
+    for (const v of [1n, 2n]) await cast(outside, current - 169n, v);
+    for (const v of [3n, 4n, 5n, 6n]) await cast(outside, current, v);
+    const quiet = await timed(now - 10n, now + 100n, false);
+    // Not open now: never listed, however answered.
+    const closed = await timed(now - 100n, now, true);
+    for (const v of [1n, 2n, 3n, 4n]) await cast(closed, current - 1n, v);
+    const mine = [three, revoted, outside, quiet, closed].map(hex);
+    const zeros = [hex(outside), hex(quiet)].sort();
+    for (const limit of [1, 2, MAX_LISTING_PAGE])
+      expect((await listAll(limit, answered)).filter((id) => mine.includes(id))).toEqual([
+        hex(three),
+        hex(revoted),
+        ...zeros,
+      ]);
+  });
+
+  test("counts a voter once per tier, at the window's edges", async () => {
+    // `tiers` has the higher election ID, so it lists first only by its
+    // count: two, if both tiers and both edges count, against `one`'s one.
+    const low = new Uint8Array(randomBytes(32));
+    low[0] = 0x00;
+    const high = new Uint8Array(randomBytes(32));
+    high[0] = 0xff;
+    const tiers = await timed(now - 10n, now + 100n, false, high);
+    await cast(tiers, current - 168n, 1n, 0);
+    await cast(tiers, current - 1n, 1n, 1);
+    const one = await timed(now - 10n, now + 100n, false, low);
+    await cast(one, current - 1n, 1n);
+    const mine = [tiers, one].map(hex);
+    expect((await listAll(MAX_LISTING_PAGE, answered)).filter((id) => mine.includes(id))).toEqual(
+      mine,
+    );
+  });
+
+  test("lists every page size in one order, by count then election ID", async () => {
+    // Few distinct counts over many polls, so ties and page edges inside a
+    // tie are both exercised.
+    const at = now + 7n * 24n * 3600n * 10n;
+    const seg = at / clock.period - 1n;
+    const order = { sort: "answered", now: at, clock } as const;
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.integer({ min: 0, max: 3 }), { minLength: 1, maxLength: 8 }),
+        fc.integer({ min: 1, max: 5 }),
+        async (counts, limit) => {
+          const mine = new Map<string, number>();
+          for (const n of counts) {
+            const id = await timed(at - 1n, at + 1n, false);
+            for (let v = 0; v < n; v++) await cast(id, seg, BigInt(v + 1));
+            mine.set(hex(id), n);
+          }
+          const listed = (await listAll(limit, order)).filter((id) => mine.has(id));
+          const expected = [...mine.keys()].sort((a, b) => {
+            const d = mine.get(b)! - mine.get(a)!;
+            return d !== 0 ? d : a < b ? -1 : 1;
+          });
+          expect(listed).toEqual(expected);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+  }, 120_000);
+
+  test("leaves out delisted polls, but pages on from one or from a poll since closed", async () => {
+    const at = now + 7n * 24n * 3600n * 20n;
+    const seg = at / clock.period - 1n;
+    const order = { sort: "answered", now: at, clock } as const;
+    const first = await timed(at - 1n, at + 10n, false);
+    for (const v of [1n, 2n, 3n]) await cast(first, seg, v);
+    const delisted = await timed(at - 1n, at + 10n, false);
+    for (const v of [1n, 2n]) await cast(delisted, seg, v);
+    const last = await timed(at - 1n, at + 10n, false);
+    await cast(last, seg, 1n);
+    await moderate(app, delisted, { action: "delist", reason: "spam", moderator: "mod-1" });
+    const mine = [first, delisted, last].map(hex);
+    expect((await listAll(MAX_LISTING_PAGE, order)).filter((id) => mine.includes(id))).toEqual([
+      hex(first),
+      hex(last),
+    ]);
+    expect((await listPolls(app, delisted, MAX_LISTING_PAGE, order)).map(hex)).toContain(hex(last));
+    const shut = await timed(at - 1n, at, false);
+    for (const v of [1n, 2n]) await cast(shut, seg, v);
+    const page = (await listPolls(app, shut, MAX_LISTING_PAGE, order)).map(hex);
+    expect(page).toContain(hex(last));
+    expect(page).not.toContain(hex(first));
+  });
+
+  test("refuses a cursor that names no stored poll, and a malformed clock", async () => {
+    await expect(listPolls(app, new Uint8Array(randomBytes(32)), 1, answered)).rejects.toThrow(
+      ListingError,
+    );
+    await expect(
+      listPolls(app, undefined, 1, {
+        sort: "answered",
+        now,
+        clock: { epoch: 0n, period: 0n },
+      }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      listPolls(app, undefined, 1, { sort: "answered", now } as unknown as ListingOrder),
     ).rejects.toThrow(TypeError);
   });
 });

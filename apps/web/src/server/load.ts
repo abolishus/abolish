@@ -1,5 +1,6 @@
 // The data behind each page, fetched from the API on the server.
 
+import type { PollTopic } from "@abolishus/core/poll-draft-rules";
 import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
@@ -319,7 +320,20 @@ export type Stream =
    * (src/stream.ts, `streamQuery`), or of no word left once the API
    * normalises it (control characters alone).
    */
-  | { readonly kind: "search-refused" };
+  | { readonly kind: "search-refused" }
+  /** The place is one the API doesn't take (src/stream.ts, `streamPlace`). */
+  | { readonly kind: "place-refused" };
+
+/**
+ * What a page of the stream narrows to beyond its order: a search (a query
+ * `streamQuery` admits), a topic and a place (one `streamPlace` hands on).
+ * Each filters, none ranks.
+ */
+export interface StreamFilter {
+  readonly q?: string | undefined;
+  readonly topic?: PollTopic | undefined;
+  readonly place?: string | undefined;
+}
 
 const listingError = (error: unknown, code: "SORT_UNAVAILABLE" | "CURSOR_NOT_FOUND") =>
   error instanceof ORPCError && error.defined && error.code === code;
@@ -353,8 +367,9 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
 /**
  * A page of the stream in the order `sort`, from just after `after` (an
  * election ID, or `""` from the start), only of the polls whose question
- * text holds every term of `q` when it is given (a query `streamQuery`
- * admits), each poll's text in `locale`. The API
+ * text holds every term of `q` when it is given and that their authors
+ * filed under `topic` and at `place` when given (`filter`), each poll's text
+ * in `locale`. The API
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/stream.ts). A poll the database lost between the
@@ -364,7 +379,7 @@ export async function loadStream(
   api: Api,
   sort: StreamSort,
   after: string,
-  q: string | undefined,
+  { q, topic, place }: StreamFilter,
   locale: string,
 ): Promise<Stream> {
   let elections;
@@ -373,6 +388,8 @@ export async function loadStream(
       sort,
       ...(after === "" ? {} : { after }),
       ...(q === undefined ? {} : { q }),
+      ...(topic === undefined ? {} : { topic }),
+      ...(place === undefined ? {} : { place }),
       limit: String(STREAM_PAGE),
     }));
   } catch (error) {

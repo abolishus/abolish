@@ -1,13 +1,15 @@
 import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
+import { POLL_TOPICS } from "@abolishus/core/poll-draft-rules";
 import { ArrowRight, Search } from "lucide-react";
 import { useId } from "react";
 
-import { catalogs, type Messages } from "../messages.ts";
-import type { Stream } from "../server/load.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import type { Stream, StreamFilter } from "../server/load.ts";
 import {
   type StreamCard as Card,
+  MAX_STREAM_PLACE,
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   STREAM_SORTS,
@@ -18,14 +20,20 @@ import { PageHeader } from "./page-parts.tsx";
 import { When } from "./poll-summary.tsx";
 
 /**
- * The stream's address for `sort` from just after `after`, searching for
- * `q` if given. `new` is the default, so its first page is plain
- * `/discover`. Orders are from a fixed list and `after` is canonical hex, so
- * only the query needs escaping.
+ * The stream's address for `sort` narrowed by `filter`, from just after
+ * `after`. `new` is the default, so its first page is plain `/discover`.
+ * Orders and topics are from fixed lists and `after` is canonical hex, so
+ * only the query and the place need escaping.
  */
-export function streamHref(sort: StreamSort, after?: string, q?: string): string {
+export function streamHref(
+  sort: StreamSort,
+  { q, topic, place }: StreamFilter = {},
+  after?: string,
+): string {
   const search = [
     ...(sort === "new" ? [] : [`sort=${sort}`]),
+    ...(topic === undefined ? [] : [`topic=${topic}`]),
+    ...(place === undefined ? [] : [`place=${encodeURIComponent(place)}`]),
     ...(q === undefined ? [] : [`q=${encodeURIComponent(q)}`]),
     ...(after === undefined ? [] : [`after=${after}`]),
   ];
@@ -44,8 +52,11 @@ const SORT_NOTE = {
   answered: "sortNote_answered",
 } as const satisfies Record<StreamSort, keyof Messages>;
 
+const LINK =
+  "inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none aria-[current=page]:border-foreground aria-[current=page]:bg-foreground aria-[current=page]:text-background";
+
 /** The orders, as links: each one a plain GET, so they work before the page's script loads. */
-function Sorts({ sort, q }: { sort: StreamSort; q: string | undefined }) {
+function Sorts({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
   const t = useTranslate(catalogs);
   return (
     <nav aria-label={t("discoverSorts")} className="grid gap-3">
@@ -53,9 +64,9 @@ function Sorts({ sort, q }: { sort: StreamSort; q: string | undefined }) {
         {STREAM_SORTS.map((option) => (
           <li key={option}>
             <a
-              href={streamHref(option, undefined, q)}
+              href={streamHref(option, filter)}
               aria-current={option === sort ? "page" : undefined}
-              className="inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none aria-[current=page]:border-foreground aria-[current=page]:bg-foreground aria-[current=page]:text-background"
+              className={LINK}
             >
               {t(SORT_LABEL[option])}
             </a>
@@ -68,21 +79,72 @@ function Sorts({ sort, q }: { sort: StreamSort; q: string | undefined }) {
 }
 
 /**
- * The search box: a plain GET form, so it works before the page's script
- * loads, keeping the order. What was typed is shown back only in the box,
- * never in the page's text, so a link can't put words in our voice.
+ * The topics, as links like the orders, each keeping the order, the search
+ * and the place. Topics are a fixed list, so naming one quotes nobody.
  */
-function SearchForm({ sort, typed }: { sort: StreamSort; typed: string }) {
+function Topics({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
+  const t = useTranslate(catalogs);
+  const { topic, ...rest } = filter;
+  return (
+    <nav aria-label={t("discoverTopics")} className="grid gap-3">
+      <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+        <li>
+          <a
+            href={streamHref(sort, rest)}
+            aria-current={topic === undefined ? "page" : undefined}
+            className={LINK}
+          >
+            {t("topicAll")}
+          </a>
+        </li>
+        {POLL_TOPICS.map((option) => (
+          <li key={option}>
+            <a
+              href={streamHref(sort, { ...rest, topic: option })}
+              aria-current={option === topic ? "page" : undefined}
+              className={LINK}
+            >
+              {t(POLL_TOPIC_MESSAGES[option])}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {/* The tags are the author's, kept by our server and refiled by
+          moderation, not part of the poll (T-68). */}
+      <p className="m-0 text-sm text-muted-foreground">{t("streamTagsNote")}</p>
+    </nav>
+  );
+}
+
+/**
+ * The search box and the place: a plain GET form, so it works before the
+ * page's script loads, keeping the order and the topic. What was typed is
+ * shown back only in the boxes, never in the page's text, so a link can't
+ * put words in our voice (T-67).
+ */
+function SearchForm({
+  sort,
+  topic,
+  typed,
+  typedPlace,
+}: {
+  sort: StreamSort;
+  topic: StreamFilter["topic"];
+  typed: string;
+  typedPlace: string;
+}) {
   const t = useTranslate(catalogs);
   const inputId = useId();
   const hintId = useId();
+  const placeId = useId();
+  const placeHintId = useId();
   return (
-    <form role="search" method="get" action="/discover" className="grid max-w-2xl gap-2">
-      <Label htmlFor={inputId} className="text-base font-semibold">
-        {t("streamSearchLabel")}
-      </Label>
-      <div className="flex flex-wrap gap-2">
-        <div className="relative min-w-0 flex-1 basis-64">
+    <form role="search" method="get" action="/discover" className="grid max-w-2xl gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor={inputId} className="text-base font-semibold">
+          {t("streamSearchLabel")}
+        </Label>
+        <div className="relative min-w-0">
           <Search
             aria-hidden="true"
             className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground"
@@ -98,14 +160,34 @@ function SearchForm({ sort, typed }: { sort: StreamSort; typed: string }) {
             className="h-12 ps-11 text-base md:text-base"
           />
         </div>
-        {sort === "new" ? null : <input type="hidden" name="sort" value={sort} />}
-        <Button type="submit" variant="outline" className="h-12 px-5">
-          {t("streamSearchSubmit")}
-        </Button>
+        <p id={hintId} className="m-0 text-sm text-muted-foreground">
+          {t("streamSearchHint", { words: MAX_STREAM_TERMS })}
+        </p>
       </div>
-      <p id={hintId} className="m-0 text-sm text-muted-foreground">
-        {t("streamSearchHint", { words: MAX_STREAM_TERMS })}
-      </p>
+      <div className="grid gap-2">
+        <Label htmlFor={placeId} className="text-base font-semibold">
+          {t("streamPlaceLabel")}
+        </Label>
+        <Input
+          id={placeId}
+          type="text"
+          name="place"
+          defaultValue={typedPlace}
+          // UTF-16 units, at most two to each of the place's code points.
+          maxLength={MAX_STREAM_PLACE * 2}
+          autoComplete="off"
+          aria-describedby={placeHintId}
+          className="h-12 text-base md:text-base"
+        />
+        <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
+          {t("streamPlaceHint")}
+        </p>
+      </div>
+      {sort === "new" ? null : <input type="hidden" name="sort" value={sort} />}
+      {topic === undefined ? null : <input type="hidden" name="topic" value={topic} />}
+      <Button type="submit" variant="outline" className="h-12 justify-self-start px-5">
+        {t("streamSearchSubmit")}
+      </Button>
     </form>
   );
 }
@@ -234,13 +316,63 @@ function Empty({
   );
 }
 
+/**
+ * What a narrowed page is narrowed by, each with a way to drop it alone:
+ * the search and the place in words of our own, quoting neither (T-67).
+ */
+function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
+  const t = useTranslate(catalogs);
+  const { q, place, ...rest } = filter;
+  const lines = [
+    ...(q === undefined
+      ? []
+      : [
+          {
+            key: "q",
+            note: t("streamSearching"),
+            clear: t("streamSearchClear"),
+            href: streamHref(sort, { ...rest, place }),
+          },
+        ]),
+    ...(place === undefined
+      ? []
+      : [
+          {
+            key: "place",
+            note: t("streamPlaceFiltering"),
+            clear: t("streamPlaceClear"),
+            href: streamHref(sort, { ...rest, q }),
+          },
+        ]),
+  ];
+  if (lines.length === 0) return null;
+  return (
+    <ul className="m-0 grid list-none gap-1 p-0">
+      {lines.map(({ key, note, clear, href }) => (
+        <li key={key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+          <span>{note}</span>
+          <a className="underline underline-offset-4" href={href}>
+            {clear}
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export interface StreamPageProps {
   stream: Stream;
   sort: StreamSort;
   /** What the search box holds: the visitor's query as it came, or `""`. */
   typed: string;
-  /** The query searched for, trimmed, or `undefined` when the page isn't a search. */
-  q: string | undefined;
+  /** What the place box holds: the visitor's place as it came, or `""`. */
+  typedPlace: string;
+  /**
+   * What the page narrows to: the query searched for, trimmed, the topic,
+   * and the place single-spaced, each `undefined` when the page doesn't ask
+   * for it (or asks for one refused).
+   */
+  filter: StreamFilter;
   /** The ballot client's address, or `null` where this site has none. */
   ballot: string | null;
 }
@@ -250,24 +382,27 @@ export interface StreamPageProps {
  * the API's orders, each the same for every visitor and moved by no
  * engagement signal; the listing leaves out delisted and hidden polls
  * (T-68). A search narrows the order to the polls whose question holds
- * every word, and never ranks them. More comes only when asked for, by a
- * link.
+ * every word, a topic or place to the polls their authors filed there, and
+ * none of them ranks. A topic's page is titled with the topic; a place,
+ * which a link's author writes, is never quoted but in its box (T-67). More
+ * comes only when asked for, by a link.
  */
-export function StreamPage({ stream, sort, typed, q, ballot }: StreamPageProps) {
+export function StreamPage({ stream, sort, typed, typedPlace, filter, ballot }: StreamPageProps) {
   const t = useTranslate(catalogs);
+  const { q, topic, place } = filter;
   return (
     <div className="grid gap-10">
-      <PageHeader eyebrow={t("navDiscover")} title={t("discoverTitle")} lede={t("discoverLede")} />
+      <PageHeader
+        eyebrow={t("navDiscover")}
+        title={topic === undefined ? t("discoverTitle") : t(POLL_TOPIC_MESSAGES[topic])}
+        lede={topic === undefined ? t("discoverLede") : t("discoverTopicLede")}
+      />
       <div className="grid gap-6">
-        <SearchForm sort={sort} typed={typed} />
-        <Sorts sort={sort} q={q} />
-        {q === undefined || stream.kind === "search-refused" ? null : (
-          <p className="m-0 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-            <span>{t("streamSearching")}</span>
-            <a className="underline underline-offset-4" href={streamHref(sort)}>
-              {t("streamSearchClear")}
-            </a>
-          </p>
+        <SearchForm sort={sort} topic={topic} typed={typed} typedPlace={typedPlace} />
+        <Sorts sort={sort} filter={filter} />
+        <Topics sort={sort} filter={filter} />
+        {stream.kind === "search-refused" || stream.kind === "place-refused" ? null : (
+          <Narrowed sort={sort} filter={filter} />
         )}
       </div>
       <section aria-labelledby="stream-title" className="grid content-start gap-6">
@@ -279,7 +414,7 @@ export function StreamPage({ stream, sort, typed, q, ballot }: StreamPageProps) 
         ) : stream.kind === "search-refused" ? (
           <Empty
             title={t("streamSearchRefusedTitle")}
-            href={streamHref(sort)}
+            href={streamHref(sort, { topic, place })}
             action={t("streamSearchClear")}
           >
             {t("streamSearchRefused", {
@@ -287,17 +422,33 @@ export function StreamPage({ stream, sort, typed, q, ballot }: StreamPageProps) 
               characters: MAX_STREAM_QUERY,
             })}
           </Empty>
+        ) : stream.kind === "place-refused" ? (
+          <Empty
+            title={t("streamPlaceRefusedTitle")}
+            href={streamHref(sort, { q, topic })}
+            action={t("streamPlaceClear")}
+          >
+            {t("streamPlaceRefused", { characters: MAX_STREAM_PLACE })}
+          </Empty>
         ) : stream.kind === "cursor-not-found" ? (
-          <Empty title={t("streamCursorLostTitle")} href={streamHref(sort, undefined, q)}>
+          <Empty title={t("streamCursorLostTitle")} href={streamHref(sort, filter)}>
             {t("streamCursorLost")}
           </Empty>
         ) : stream.cards.length === 0 && q !== undefined ? (
           <Empty
             title={t("streamSearchEmpty")}
-            href={streamHref(sort)}
+            href={streamHref(sort, { topic, place })}
             action={t("streamSearchClear")}
           >
             {t("streamSearchEmptyLede")}
+          </Empty>
+        ) : stream.cards.length === 0 && (topic !== undefined || place !== undefined) ? (
+          <Empty
+            title={t("streamFilterEmpty")}
+            href={streamHref(sort)}
+            action={t("streamShowEverything")}
+          >
+            {t("streamFilterEmptyLede")}
           </Empty>
         ) : stream.cards.length === 0 ? (
           <Empty title={t("streamEmpty")}>{t("streamEmptyLede")}</Empty>
@@ -313,7 +464,7 @@ export function StreamPage({ stream, sort, typed, q, ballot }: StreamPageProps) 
         {stream.kind === "stream" && stream.next !== undefined ? (
           <a
             className={cn(buttonVariants({ variant: "outline" }), "justify-self-start")}
-            href={streamHref(sort, stream.next, q)}
+            href={streamHref(sort, filter, stream.next)}
           >
             {t("streamMore")}
             <ArrowRight aria-hidden="true" />

@@ -297,6 +297,12 @@ const SEARCHES = new Map([
   ["park", [STREAM_V5, STREAM_V1]],
   ["library", [STREAM_V5]],
 ]);
+/** The stream's polls filed under each topic, and at each place by its key. */
+const TOPICS = new Map([
+  ["community", [STREAM_V5, STREAM_V1]],
+  ["transport", [STREAM_V1]],
+]);
+const PLACES = new Map([["riverside park", [STREAM_V5]]]);
 
 function stubApi(): Server {
   return createServer((req, res) => {
@@ -353,7 +359,18 @@ function stubApi(): Server {
           message: "No search term is left once normalised.",
         });
       if (sort === "new" || sort === "closing") {
-        const matches = q === null ? streamed : (SEARCHES.get(q.toLowerCase()) ?? []);
+        const topic = url.searchParams.get("topic");
+        const place = url.searchParams.get("place");
+        const filters = [
+          q === null ? undefined : (SEARCHES.get(q.toLowerCase()) ?? []),
+          topic === null ? undefined : (TOPICS.get(topic) ?? []),
+          place === null
+            ? undefined
+            : (PLACES.get(place.replace(/\s+/gu, " ").trim().toLowerCase()) ?? []),
+        ];
+        const matches = streamed.filter((id) =>
+          filters.every((only) => only === undefined || only.includes(id)),
+        );
         const order = sort === "new" ? matches : matches.toReversed();
         const from = after === "" ? 0 : order.indexOf(after) + 1;
         if (from === 0 && after !== "")
@@ -1323,6 +1340,61 @@ describe("stream", () => {
     html = await (await get("/discover?q=%C2%85")).text();
     expect(html).toContain("That search can&#x27;t be run");
     expect(html).not.toContain("BAD_REQUEST");
+  });
+
+  test("a topic's page lists the polls filed under it, titled with the topic, every link keeping it", async () => {
+    let html = await (await get("/discover?topic=community")).text();
+    expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
+    expect(html).toMatch(/<h1[^>]*>Community</);
+    expect(html).toMatch(
+      /<a href="\/discover\?topic=community" aria-current="page"[^>]*>Community</,
+    );
+    expect(html).toMatch(/<a href="\/discover"[^>]*>All topics</);
+    expect(html).toContain('href="/discover?sort=closing&amp;topic=community"');
+    expect(html).toMatch(/<input type="hidden" name="topic" value="community"/);
+    html = await (await get("/discover?sort=closing&topic=transport&q=park")).text();
+    expect(cards(html)).toEqual([STREAM_V1]);
+    expect(html).toContain('href="/discover?sort=closing&amp;topic=transport">Clear the search');
+    expect(html).toContain('href="/discover?sort=closing&amp;topic=community&amp;q=park"');
+    // A topic not on the list is no topic, quoting nothing.
+    const response = await follow("/discover?topic=bogus");
+    html = await response.text();
+    expect(cards(html)).toEqual(streamed.slice(0, 10));
+    expect(html).not.toContain("bogus");
+  });
+
+  test("filters by place as the API keys it, never quoting the place but in its box", async () => {
+    seen.length = 0;
+    let html = await (await get("/discover?place=%20RIVERSIDE%20%20park")).text();
+    expect(seen.find((r) => r.path === "/elections")?.query.get("place")).toBe("RIVERSIDE park");
+    expect(cards(html)).toEqual([STREAM_V5]);
+    expect(html).toMatch(/<input[^>]*name="place"[^>]*value=" RIVERSIDE  park"/);
+    expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*RIVERSIDE/);
+    expect(html).toContain("filed at the place you entered");
+    expect(html).toContain('href="/discover">Clear the place');
+    expect(html).toContain('href="/discover?sort=closing&amp;place=RIVERSIDE%20park"');
+    // Filed under a topic and at a place that share nothing.
+    html = await (await get("/discover?topic=transport&place=riverside+park")).text();
+    expect(cards(html)).toEqual([]);
+    expect(html).toContain("No open question is filed here");
+    expect(html).toContain('href="/discover">Show everything');
+    // A blank place is no place.
+    html = await (await get("/discover?place=%20")).text();
+    expect(cards(html)).toEqual(streamed.slice(0, 10));
+    expect(html).not.toContain("Clear the place");
+  });
+
+  test("refuses a place the API wouldn't take, without asking it", async () => {
+    for (const place of ["a".repeat(81), "%C2%85", "%01%20%C2%85"]) {
+      seen.length = 0;
+      const response = await get(`/discover?q=park&place=${place}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("That place can&#x27;t be looked up");
+      expect(html).toContain('href="/discover?q=park">Clear the place');
+      expect(cards(html)).toEqual([]);
+      expect(seen).toEqual([]);
+    }
   });
 
   test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {

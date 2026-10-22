@@ -10,17 +10,27 @@ import {
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
-import { contract, MAX_SEARCH_QUERY, MAX_SEARCH_TERMS } from "@abolishus/api-contract";
+import {
+  contract,
+  MAX_PLACE_LENGTH,
+  MAX_SEARCH_QUERY,
+  MAX_SEARCH_TERMS,
+  POLL_TOPICS as CONTRACT_TOPICS,
+} from "@abolishus/api-contract";
+import { placeKey, POLL_TOPICS } from "@abolishus/core";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import { streamHref } from "../src/components/stream.tsx";
 import {
+  isStreamPlace,
   isStreamSearch,
+  MAX_STREAM_PLACE,
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   pickTranslation,
   streamCard,
+  streamPlace,
   streamQuery,
 } from "../src/stream.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
@@ -296,7 +306,7 @@ describe("streamQuery", () => {
   test("a search's links carry it whole, read back as the same text", () => {
     fc.assert(
       fc.property(fc.string({ unit: "grapheme", minLength: 1, maxLength: 40 }), (q) => {
-        const href = streamHref("closing", "ab".repeat(32), q);
+        const href = streamHref("closing", { q }, "ab".repeat(32));
         const params = new URL(href, "https://web.test").searchParams;
         expect(params.get("q")).toBe(q);
         expect(params.get("sort")).toBe("closing");
@@ -305,5 +315,87 @@ describe("streamQuery", () => {
       }),
       runs,
     );
+  });
+});
+
+describe("streamPlace", () => {
+  const input = contract.elections.list["~orpc"].inputSchema!;
+  /** Whether the API's contract takes `place` as a listing's filter. */
+  const admits = (place: string) => {
+    const result = input["~standard"].validate({ limit: "1", place });
+    if (result instanceof Promise) throw new Error("the contract validates synchronously");
+    return result.issues === undefined;
+  };
+
+  test("its bound and the topics are the API contract's", () => {
+    expect(MAX_STREAM_PLACE).toBe(MAX_PLACE_LENGTH);
+    expect(POLL_TOPICS).toEqual(CONTRACT_TOPICS);
+  });
+
+  test("reads nothing, or only whitespace, as no place", () => {
+    for (const place of [undefined, "", " ", "\t\n", "\u3000"])
+      expect(streamPlace(place)).toEqual({ kind: "none" });
+  });
+
+  test("single-spaces and trims a place, and refuses one too long or of control characters alone", () => {
+    expect(streamPlace("  Riverside \t Park ")).toEqual({ kind: "place", place: "Riverside Park" });
+    expect(streamPlace("a".repeat(MAX_PLACE_LENGTH)).kind).toBe("place");
+    expect(streamPlace(`a${" ".repeat(200)}b`)).toEqual({ kind: "place", place: "a b" });
+    expect(streamPlace("a".repeat(MAX_PLACE_LENGTH + 1))).toEqual({ kind: "refused" });
+    // Code points, as the contract counts them, not UTF-16 units.
+    expect(streamPlace("\u{10000}".repeat(MAX_PLACE_LENGTH)).kind).toBe("place");
+    expect(streamPlace("\u{10000}".repeat(MAX_PLACE_LENGTH + 1))).toEqual({ kind: "refused" });
+    // U+0085 isn't whitespace to `\s`, but the API normalises it to a space.
+    expect(streamPlace("\u0085")).toEqual({ kind: "refused" });
+    expect(streamPlace(" \u0001 \u0085 ")).toEqual({ kind: "refused" });
+  });
+
+  test("hands on exactly the places the API can match, each as the contract takes it", () => {
+    const piece = fc.oneof(
+      fc.string({ unit: "binary", maxLength: 6 }),
+      fc.constantFrom(" ", "\t", "\n", "\u3000", "\u00a0", "\u2028", "\ufeff", "\u180e"),
+      fc.constantFrom("\u0085", "\u0001", "\ufdfa", "a".repeat(30)),
+    );
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 30 }), (pieces) => {
+        const typed = pieces.join("");
+        const filter = streamPlace(typed);
+        if (typed.replace(/\s+/gu, "") === "") {
+          expect(filter.kind).toBe("none");
+          return;
+        }
+        expect(filter.kind === "place", JSON.stringify(typed)).toBe(placeKey(typed) !== undefined);
+        if (filter.kind === "place") {
+          // Sent as typed would be matched alike; and nothing sent is refused.
+          expect(placeKey(filter.place)).toBe(placeKey(typed));
+          expect(admits(filter.place)).toBe(true);
+          expect(isStreamPlace(filter.place)).toBe(true);
+        }
+      }),
+      runs,
+    );
+  });
+
+  test("a filtered page's links carry every filter whole, read back as the same text", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ unit: "grapheme", minLength: 1, maxLength: 40 }),
+        fc.string({ unit: "grapheme", minLength: 1, maxLength: 40 }),
+        fc.constantFrom(...POLL_TOPICS),
+        (q, place, topic) => {
+          const href = streamHref("answered", { q, topic, place }, "cd".repeat(32));
+          const params = new URL(href, "https://web.test").searchParams;
+          expect(params.get("q")).toBe(q);
+          expect(params.get("place")).toBe(place);
+          expect(params.get("topic")).toBe(topic);
+          expect(params.get("sort")).toBe("answered");
+          expect(params.get("after")).toBe("cd".repeat(32));
+          expect([...params.keys()]).toHaveLength(5);
+        },
+      ),
+      runs,
+    );
+    expect(streamHref("new", { topic: "transport" })).toBe("/discover?topic=transport");
+    expect(streamHref("new", {})).toBe("/discover");
   });
 });

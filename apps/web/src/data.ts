@@ -1,6 +1,7 @@
 // Server functions: the only way a page gets data. They run on our server,
 // which calls the API (src/server/api.ts), so the browser never does.
 
+import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-draft-rules";
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
@@ -14,7 +15,7 @@ import {
   loadStream,
   resolveShortLink,
 } from "./server/load.ts";
-import { isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
+import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { LOCALE } from "./messages.ts";
 import { ballotBase, isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
 
@@ -83,7 +84,7 @@ export const fetchFirstPolls = createServerFn({ method: "GET" })
  */
 export const fetchStream = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { sort, after, q } = (input ?? {}) as { sort?: unknown; after?: unknown; q?: unknown };
+    const { sort, after, q, topic, place } = (input ?? {}) as Record<string, unknown>;
     if (!STREAM_SORTS.some((s) => s === sort)) throw new TypeError("expected a stream order");
     // `""` starts the stream, as for the register.
     if (after !== "" && !isElectionId(after))
@@ -91,7 +92,18 @@ export const fetchStream = createServerFn({ method: "GET" })
     // `""` is no search; anything else is a query as `streamQuery` gives it.
     if (q !== "" && (typeof q !== "string" || !isStreamSearch(q)))
       throw new TypeError("expected a search query or an empty string");
-    return { sort: sort as StreamSort, after, q };
+    // `""` is no topic and no place; anything else one the API takes.
+    if (topic !== "" && !POLL_TOPICS.some((t) => t === topic))
+      throw new TypeError("expected a topic or an empty string");
+    if (place !== "" && (typeof place !== "string" || !isStreamPlace(place)))
+      throw new TypeError("expected a place or an empty string");
+    return {
+      sort: sort as StreamSort,
+      after,
+      q,
+      topic: topic as PollTopic | "",
+      place,
+    };
   })
   .handler(({ data }) =>
     opaque(async () => ({
@@ -99,7 +111,11 @@ export const fetchStream = createServerFn({ method: "GET" })
         api(),
         data.sort,
         data.after,
-        data.q === "" ? undefined : data.q,
+        {
+          q: data.q === "" ? undefined : data.q,
+          topic: data.topic === "" ? undefined : data.topic,
+          place: data.place === "" ? undefined : data.place,
+        },
         LOCALE,
       ),
       ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,

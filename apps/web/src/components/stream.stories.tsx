@@ -74,7 +74,8 @@ const meta = {
     stream: { kind: "stream", cards, next: NEXT },
     sort: "new",
     typed: "",
-    q: undefined,
+    typedPlace: "",
+    filter: {},
     ballot: BALLOT,
   },
 } satisfies Meta<typeof StreamPage>;
@@ -160,6 +161,22 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(box).toHaveValue("");
   await expect(search.querySelector('input[name="sort"]')).toBeNull();
   await expect(canvas.queryByRole("link", { name: "Clear the search" })).toBeNull();
+  // The place shares the form, and the topics are links like the orders.
+  const place = within(search).getByRole("textbox", { name: "Place" });
+  await expect(place).toHaveAttribute("name", "place");
+  await expect(place).toHaveAccessibleDescription(/the whole name must match/);
+  await expect(search.querySelector('input[name="topic"]')).toBeNull();
+  const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
+  await expect(topics.getByRole("link", { name: "All topics" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(topics.getByRole("link", { name: "Transport" })).toHaveAttribute(
+    "href",
+    "/discover?topic=transport",
+  );
+  await expect(topics.getAllByRole("link")).toHaveLength(15);
+  await expect(canvas.getByText(/moderation can change them/)).toBeVisible();
 };
 
 export const Default: Story = { play };
@@ -187,7 +204,7 @@ export const MostAnswered: Story = {
     await expect(canvas.getByText(/each person once/)).toBeVisible();
     await expect(canvas.getByRole("link", { name: "More questions" })).toHaveAttribute(
       "href",
-      streamHref("answered", NEXT),
+      streamHref("answered", {}, NEXT),
     );
   },
 };
@@ -226,7 +243,7 @@ export const Empty: Story = {
 
 /** A search: the order and every next page keep it, and the box shows what was typed. */
 export const Searching: Story = {
-  args: { sort: "closing", typed: " library  hours", q: "library  hours" },
+  args: { sort: "closing", typed: " library  hours", filter: { q: "library  hours" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const search = canvas.getByRole("search");
@@ -256,7 +273,11 @@ export const Searching: Story = {
 };
 
 export const SearchFoundNothing: Story = {
-  args: { typed: "ferries", q: "ferries", stream: { kind: "stream", cards: [], next: undefined } },
+  args: {
+    typed: "ferries",
+    filter: { q: "ferries" },
+    stream: { kind: "stream", cards: [], next: undefined },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: "No open question matches" })).toBeVisible();
@@ -270,7 +291,7 @@ export const SearchFoundNothing: Story = {
 };
 
 export const SearchRefused: Story = {
-  args: { typed: "a b c d e f g h i", q: undefined, stream: { kind: "search-refused" } },
+  args: { typed: "a b c d e f g h i", stream: { kind: "search-refused" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: "That search can't be run" })).toBeVisible();
@@ -281,6 +302,94 @@ export const SearchRefused: Story = {
     );
     await expect(within(canvas.getByRole("search")).getByRole("searchbox")).toHaveValue(
       "a b c d e f g h i",
+    );
+  },
+};
+
+/** A topic's page: titled with it, and every link and the form keep it. */
+export const Topic: Story = {
+  args: { sort: "closing", filter: { topic: "transport" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Transport");
+    const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
+    await expect(topics.getByRole("link", { name: "Transport" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(topics.getByRole("link", { name: "All topics" })).toHaveAttribute(
+      "href",
+      "/discover?sort=closing",
+    );
+    await expect(canvas.getByRole("link", { name: "New" })).toHaveAttribute(
+      "href",
+      "/discover?topic=transport",
+    );
+    await expect(canvas.getByRole("search").querySelector('input[name="topic"]')).toHaveValue(
+      "transport",
+    );
+    await expect(canvas.getByRole("link", { name: "More questions" })).toHaveAttribute(
+      "href",
+      `/discover?sort=closing&topic=transport&after=${NEXT}`,
+    );
+  },
+};
+
+/** A place and a search: each says itself in our words and drops alone, quoting neither. */
+export const Place: Story = {
+  args: {
+    typed: "library",
+    typedPlace: " Old  Town",
+    filter: { q: "library", place: "Old Town" },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(within(canvas.getByRole("search")).getByRole("textbox")).toHaveValue(" Old  Town");
+    await expect(canvas.getByText(/filed at the place you entered/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Clear the place" })).toHaveAttribute(
+      "href",
+      "/discover?q=library",
+    );
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/discover?place=Old%20Town",
+    );
+    await expect(canvas.getByRole("link", { name: "Transport" })).toHaveAttribute(
+      "href",
+      "/discover?topic=transport&place=Old%20Town&q=library",
+    );
+    await expect(canvas.queryByText(/Old {1,2}Town/)).toBeNull();
+  },
+};
+
+export const FilteredToNothing: Story = {
+  args: {
+    filter: { topic: "transport", place: "Riverside" },
+    stream: { kind: "stream", cards: [], next: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { name: "No open question is filed here" }),
+    ).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Show everything" })).toHaveAttribute(
+      "href",
+      "/discover",
+    );
+  },
+};
+
+export const PlaceRefused: Story = {
+  args: { typedPlace: "a".repeat(81), stream: { kind: "place-refused" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { name: "That place can't be looked up" }),
+    ).toBeVisible();
+    await expect(canvas.getByText(/one to 80 characters/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Clear the place" })).toHaveAttribute(
+      "href",
+      "/discover",
     );
   },
 };

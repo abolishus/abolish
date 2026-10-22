@@ -67,6 +67,7 @@ What would change it: if the owner wants VOPRF mode literally, B is a drop-in re
 - A period has one key for good: a later release never lists another key for a period an earlier one listed, and a key retired early isn't replaced in its period, so the issuer can't split clients by release (T-74).
 - A new threat, T-74: the issuer key mints identities if stolen, and a per-account key would link accounts to commitments if clients didn't check it.
 - One identity per account for good: a token lost before redemption, or an identity lost without a backup after it, isn't replaced from the same account (Known-weak in [[tier0-token]]).
+- **Precondition:** tokens must not replace Turnstile in [[registration]] until the redemption is sealed to the signing service ([[tier0-token]], Redemption), or a self-paid copy of a waiting commitment, made by anyone who sees it in transit, would shut its account out for good.
 - Follow-ups in [[P2-30]]: `packages/crypto` (part 2), the issuer, its keys and the deployment record's key list (part 3), the relay and the ballot client (part 4), and redemption in the signing service in place of Turnstile (part 5).
 
 ## Decision

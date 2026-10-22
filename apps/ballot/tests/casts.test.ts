@@ -1050,10 +1050,12 @@ describe("the shares erased at the posting cutoff", () => {
     expect(unsentCast([older, newest], DECODED.definition_hash)).toBeUndefined();
   });
 
-  test("take no receipt in their place, and change nothing else", () => {
+  test("take no receipt in their place: the receipt is missing, never answered as kept", () => {
     const list: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: erased() }];
     const second = (SHARES[1] as CastShare).seat;
-    expect(withReceipt(list, naming(10n), checkedOf(second, receiptFor(second)))).toEqual(list);
+    expect(withReceipt(list, naming(10n), checkedOf(second, receiptFor(second)))).toBe("missing");
+    // The seat receipted before the erasure keeps its receipt, which passes again.
+    expect(withReceipt(list, naming(10n), checkedOf(FIRST, receiptFor(FIRST)))).toEqual(list);
   });
 
   test("are never taken from the worker's shares", () => {

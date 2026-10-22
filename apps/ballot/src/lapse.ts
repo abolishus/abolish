@@ -4,6 +4,10 @@
 // `t_D`. After it a posting delivers nothing, and the `ct_i` and `m_i` kept
 // for it only wait to be read off a seized device by anyone who later breaks
 // the share's classical encryption (T-18), so the client erases them.
+// Client rule 4's "deadline" is read as `c_D`, the client's own: a posting
+// sent between `c_D` and `t_D` could still land in time while the sequencer
+// doesn't censor it, and the client gives that window up on purpose, since
+// it can no longer be sure to.
 
 import { deliveryDeadlines } from "@abolishus/crypto";
 

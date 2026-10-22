@@ -638,6 +638,7 @@ export function withCast(
   if (kept === undefined) return "unreceipted";
   const receipted = kept.map((share): KeptShare => {
     const held = carriedShare(share.seat);
+    // `kept` holds no erased share once the shape passed: this only narrows.
     if (held === undefined || "erased" in share) return share;
     const { ciphertext } = share;
     const receipt = held.receipt.slice();
@@ -680,7 +681,8 @@ export async function recordCast(
  * cast it receipts: that cast and any recast of the same seal, which
  * carries the same ballot hash and share (Client rule 2; T-18). A seat
  * already receipted keeps its first receipt, which passed as well.
- * `missing` if no cast has these bytes. Throws on a receipt that doesn't
+ * `missing` if no cast has these bytes, or if that cast's seat was erased
+ * at the posting cutoff. Throws on a receipt that doesn't
  * name `seat` and exactly this ballot, which the worker never passes.
  */
 export function withReceipt(
@@ -696,7 +698,12 @@ export function withReceipt(
     !receiptFits(decoded, seat, receipt)
   )
     throw new TypeError("not a receipt for this ballot");
-  if (!casts.some((cast) => equalBytes(cast.ballot, ballot))) return "missing";
+  const own = casts.find((cast) => equalBytes(cast.ballot, ballot));
+  // A seat erased at the posting cutoff has no share left to take the
+  // receipt's place: never answered as kept, so the caller stops rather
+  // than counting the seat receipted (found by the in-session review).
+  if (own === undefined || own.shares.some((share) => share.seat === seat && "erased" in share))
+    return "missing";
   return casts.map((cast) => {
     const at = cast.shares.findIndex((share) => share.seat === seat && "m" in share);
     const share = cast.shares[at];

@@ -114,3 +114,12 @@ What would change it: a provider that sees less (none found: whoever sends the S
 ## Decision
 
 Under rule A (`AGENTS.md`): the options chosen above, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. Signing up for Twilio and an email provider, their terms, and the privacy notice that names them are the owner's; nothing goes live with real numbers until they are done.
+
+## Amendment (P2-31 part 2a, 2026-10-22)
+
+Building the e-mail half settled four details the text above left open or stated differently; none changes a decision.
+
+- **Per-account counts are Postgres rows**, in the account class, as poll submissions' are ([[0032-poll-creation-operations]]), rather than Redis counters: they recheck under the account's lock in the same transaction as the code they count. The rule above still holds: no count is keyed by an account and an address (or number) together.
+- **A daily cap per address** (5 messages, whichever accounts asked), keyed by the address's hash alone, so accounts made in bulk can't flood a mailbox through us (T-52). Past it, the request is answered as usual and nothing is sent, so the cap is no oracle. A request for an address another account holds sends that address a notice instead of a code and answers the requester the same way (T-11).
+- **Folding**: the local part lowercased after NFC, as above, and the domain in its ASCII form (UTS 46, which folds case too), so a domain written in Unicode and in punycode is one address.
+- **Rolling out a new key** takes two deploys: the key listed but not current everywhere, then current (`packages/core`'s keyring text marks the current key with `*`). An instance that doesn't hold a key can't match values made under it, so making a key current before every instance holds it could let one address be verified by two accounts. Part 3's rotation runbook follows this order.

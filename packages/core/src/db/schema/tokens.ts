@@ -2,7 +2,7 @@ import { bigint, numeric, pgTable, primaryKey, text } from "drizzle-orm/pg-core"
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0026_account_tokens.sql; a test checks the two
+// Drizzle view of migrations/0028_account_tokens.sql; a test checks the two
 // agree. `account_tokens` is in the account class: an account's one Tier 0
 // token per deployment, with no time. `tier0_token_issuances` is
 // operational: tokens issued per key and group, with no account

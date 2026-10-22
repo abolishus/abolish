@@ -259,7 +259,11 @@ const enUS = {
     "Open now, by how many people answered in the last seven days, each person once however often they changed their answer. Anyone can count it again from the public board.",
   streamQuestions: "Questions",
   streamCloses: "Closes",
-  streamAnswer: { one: "Answer the question", other: "Answer {count} questions" },
+  streamPick: {
+    one: "Choose an answer to open it in the voting app. Nothing is sent until you cast your ballot there.",
+    other:
+      "Choose an answer to question 1 of {count} to open it in the voting app. Nothing is sent until you cast your ballot there.",
+  },
   streamNoBallot: "Answering from this page isn't set up on this site yet.",
   streamText: "This poll's text can't be shown here. Its page has what this server holds.",
   streamEmpty: "No open questions just now",

@@ -85,10 +85,12 @@ describe("streamCard", () => {
   test("shows a version-5 poll's title in the locale's language", () => {
     const card = streamCard(ID, pollV5(textV2.commitment!, [3, 2]), textV2.encoding, "en-US");
     if (card.kind !== "poll") throw new Error(`refused: ${card.problem}`);
+    // The first question under the title, and its answers for the card's links.
     expect(card.text).toEqual({
       language: "en",
       heading: "Park and library",
-      question: undefined,
+      question: "Should the park stay open late?",
+      options: ["Yes", "No", "Abstain"],
     });
     expect(card.poll.questions).toHaveLength(2);
     // Another locale gets its own translation, by primary language.
@@ -103,6 +105,7 @@ describe("streamCard", () => {
       language: "en",
       heading: "Should the park stay open late?",
       question: undefined,
+      options: ["Yes", "No", "Abstain"],
     });
   });
 
@@ -194,6 +197,19 @@ describe("ballot links", () => {
     expect(ballotBase("https://abolish.ch")).toBe("https://abolish.ch/");
     expect(ballotBase("https://abolish.ch/vote/")).toBe("https://abolish.ch/vote/");
     expect(ballotLink("https://abolish.ch/", ID)).toBe(`https://abolish.ch/#election=${ID}`);
+  });
+
+  test("carry a card's tapped answer in the fragment, in the form the ballot client reads", () => {
+    // apps/ballot's parseLink: `&pick=` then the option in its one decimal spelling.
+    fc.assert(
+      fc.property(fc.nat({ max: 63 }), (pick) => {
+        const link = new URL(ballotLink("https://abolish.ch/vote/", ID, pick));
+        expect(link.hash).toMatch(/^#election=[0-9a-f]{64}&pick=(0|[1-9][0-9]?)$/);
+        expect(link.hash).toBe(`#election=${ID}&pick=${pick}`);
+        expect(`${link.origin}${link.pathname}${link.search}`).toBe("https://abolish.ch/vote/");
+      }),
+      runs,
+    );
   });
 
   test.each([

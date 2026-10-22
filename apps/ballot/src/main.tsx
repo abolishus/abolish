@@ -5,7 +5,7 @@ import "./worker-policy.ts";
 
 import { newIdentitySecret } from "@abolishus/crypto";
 import { I18nProvider } from "@abolishus/ui";
-import { StrictMode, useMemo, useSyncExternalStore } from "react";
+import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
@@ -24,7 +24,7 @@ import {
   saveBackupCredential,
 } from "./identity.ts";
 import { deliverShare } from "./intake.ts";
-import { parseLink } from "./link.ts";
+import { type Link, parseLink } from "./link.ts";
 import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
@@ -282,18 +282,37 @@ async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T
   }
 }
 
-// A new fragment (another link opened in this tab) opens its election.
+/**
+ * The fragment's link, with its pick taken out of the address once read: the
+ * tab's history entry then keeps only the election, so nobody who picks up
+ * the device later finds there which answer was tapped (T-45). Reloading
+ * opens the poll with nothing chosen.
+ */
+function takeLink(): Link {
+  const read = parseLink(location.hash);
+  if (read.kind === "election" && read.pick !== undefined)
+    history.replaceState(history.state, "", `#election=${read.hex}`);
+  return read;
+}
+
+// A new fragment (another link opened in this tab) opens its election. The
+// link is read once per fragment, here rather than in a render, so the
+// election's bytes keep their identity across renders, its check runs once,
+// and the pick taken out of the address isn't lost to a second read.
+let link = takeLink();
+const listeners = new Set<() => void>();
+addEventListener("hashchange", () => {
+  link = takeLink();
+  for (const listener of listeners) listener();
+});
 const subscribe = (onChange: () => void) => {
-  addEventListener("hashchange", onChange);
-  return () => removeEventListener("hashchange", onChange);
+  listeners.add(onChange);
+  return () => void listeners.delete(onChange);
 };
 function Client() {
-  const hash = useSyncExternalStore(subscribe, () => location.hash);
-  // Parsed once per fragment, so the election's bytes keep their identity
-  // across renders and its check runs once.
-  const link = useMemo(() => parseLink(hash), [hash]);
+  const current = useSyncExternalStore(subscribe, () => link);
   return (
-    <App link={link} source={source} origin={location.origin} languages={navigator.languages} />
+    <App link={current} source={source} origin={location.origin} languages={navigator.languages} />
   );
 }
 

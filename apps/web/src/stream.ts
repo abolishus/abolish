@@ -26,8 +26,13 @@ export interface CardText {
   readonly language: string;
   /** The poll's title, or its first question's text when it has no title (version 1 never has one). */
   readonly heading: string;
-  /** The one question's text, when the poll has one question and a title of its own. */
+  /** The first question's text, when the poll has a title of its own. */
   readonly question: string | undefined;
+  /**
+   * The first question's option labels, in option order: the index here is
+   * the pick a card's answer link carries ([[first-answer]], step 1).
+   */
+  readonly options: readonly string[];
 }
 
 /**
@@ -102,17 +107,23 @@ export function streamCard(
       );
     if (checked.version === 1) {
       const t = tagged(checked.displayText.translations);
-      return { language: t.language, heading: utf8.decode(t.question), question: undefined };
+      return {
+        language: t.language,
+        heading: utf8.decode(t.question),
+        question: undefined,
+        options: t.options.map((o) => utf8.decode(o.label)),
+      };
     }
     const t = tagged(checked.displayText.translations);
     const title = utf8.decode(t.title);
     // A checked text has exactly the definition's questions, and a well-formed definition one at least.
-    const first = utf8.decode(t.questions[0]!.question);
-    if (title === "") return { language: t.language, heading: first, question: undefined };
+    const first = t.questions[0]!;
+    const question = utf8.decode(first.question);
     return {
       language: t.language,
-      heading: title,
-      question: t.questions.length === 1 ? first : undefined,
+      heading: title === "" ? question : title,
+      question: title === "" ? undefined : question,
+      options: first.options.map((o) => utf8.decode(o.label)),
     };
   })();
   if (text === undefined) return { kind: "unavailable", electionId, problem: "text" };

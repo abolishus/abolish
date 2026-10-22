@@ -73,10 +73,15 @@ export function ballotBase(value: unknown): string | undefined {
 }
 
 /**
- * The ballot client's link to `electionId`: the poll rides in the fragment,
- * which a browser never sends, so neither the client's host nor a gateway
- * learns which poll was opened (T-10, T-11).
+ * The ballot client's link to `electionId`, and with `pick` to that option
+ * of its first question chosen ([[first-answer]], step 1): the poll and the
+ * pick ride in the fragment, which a browser never sends, so neither the
+ * client's host nor a gateway learns which poll was opened or which answer
+ * was tapped (T-10, T-11). The client reads exactly this form (apps/ballot,
+ * `parseLink`).
  */
-export function ballotLink(base: string, electionId: string): string {
-  return `${base}#election=${electionId}`;
+export function ballotLink(base: string, electionId: string, pick?: number): string {
+  return pick === undefined
+    ? `${base}#election=${electionId}`
+    : `${base}#election=${electionId}&pick=${pick}`;
 }

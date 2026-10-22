@@ -212,11 +212,14 @@ const fromHex = (hex: string) =>
 /** Fetches, checks and shows one election; `origin` is the page's own, which `onSharedGatewayPath` passed. */
 export function OpenElection({
   electionId,
+  pick,
   source,
   origin,
   languages,
 }: {
   electionId: Uint8Array;
+  /** The first question's option the link was tapped on, chosen until the ballot restarts. */
+  pick?: number | undefined;
   source: ElectionSource;
   origin: string;
   /** The reader's preferred languages, most preferred first (`navigator.languages`). */
@@ -224,6 +227,10 @@ export function OpenElection({
 }) {
   const [state, setState] = useState<State>({ kind: "checking" });
   const [attempt, setAttempt] = useState(0);
+  // The link's pick holds until a ballot restarts; a load that failed and
+  // was tried again showed no ballot, so it keeps it. A later link (a new
+  // fragment, so new bytes) brings its own pick.
+  const [restartedFor, setRestartedFor] = useState<Uint8Array | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -258,11 +265,15 @@ export function OpenElection({
           key={attempt}
           election={state.election}
           hiddenAsThreat={state.hiddenAsThreat}
+          pick={restartedFor === electionId ? undefined : pick}
           source={source}
           languages={languages}
           // A failed seal or opening checks the poll anew, in a fresh worker
           // if the last one stopped: the worker holds the poll it seals for.
-          onRestart={() => setAttempt(attempt + 1)}
+          onRestart={() => {
+            setRestartedFor(electionId);
+            setAttempt(attempt + 1);
+          }}
         />
       );
   }
@@ -452,11 +463,13 @@ const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
  * election has it, then the seal: the voter's cell found from the board,
  * the tracking code before the choice, and a challenged seal's opening or a
  * cast seal's proof ([[challenge]], Client rules 1 and 2; [[revoting]],
- * Client rule 6). Every attempt starts from nothing chosen.
+ * Client rule 6). Every attempt starts from nothing chosen, but the first
+ * shown with the link's `pick` ([[first-answer]], step 1).
  */
 export function Ballot({
   election,
   hiddenAsThreat = false,
+  pick,
   source,
   languages,
   onRestart,
@@ -464,6 +477,8 @@ export function Ballot({
   election: CheckedElection;
   /** Our web pages withhold the text as a threat while the poll is open: shown here under a notice (docs/moderation-policy.md, Open polls). */
   hiddenAsThreat?: boolean;
+  /** The first question's option the link was tapped on, chosen in the first round only. */
+  pick?: number | undefined;
   source: Omit<ElectionSource, "load" | "check">;
   languages: readonly string[];
   /** Check the poll again from the start. */
@@ -892,6 +907,7 @@ export function Ballot({
           key={`${election.definitionHash}/${round}`}
           poll={poll}
           questions={questions}
+          pick={round === 0 ? pick : undefined}
           arrival={
             <div className="grid gap-4">
               {hiddenAsThreat ? (

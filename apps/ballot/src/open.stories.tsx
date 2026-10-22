@@ -1,5 +1,6 @@
 import { encodeBoardEntry, RECORD_TYPES } from "@abolishus/crypto";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { type ComponentProps, useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import RECORDS from "../../../docs/spec/vectors/ballot-v3-records.json" with { type: "json" };
@@ -1610,6 +1611,83 @@ export const RetriedAfterAFailure: Story = {
     await expect(await canvas.findByRole("heading", { level: 1, name: QUESTION })).toBeVisible();
   },
 };
+
+/** Opened from a card's answer on the website: that answer is chosen, and nothing else. */
+export const OpensWithAPick: Story = {
+  name: "A poll opened from a card's answer",
+  args: {
+    link: parseLink(`#election=${ELECTION_ID}&pick=1`),
+    source: source([{ ok: false, problem: "unreachable" }, LOADED], {
+      ok: true,
+      election: POLL_OF_QUESTIONS,
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // A load tried again showed no ballot yet, so the pick still holds.
+    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(canvas.getByRole("radio", { name: "No" })).toBeChecked();
+    await expect(canvas.getByRole("radio", { name: "Yes" })).not.toBeChecked();
+    await expect(canvas.getByText("Selected")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Next question" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(SECOND);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+  },
+};
+
+/**
+ * The pick is for the first ballot shown only: after a cast, "Answer again"
+ * starts from nothing chosen, as the cast story's last step checks.
+ */
+export const SealedThenCastFromAPick: Story = {
+  ...SealedThenCast,
+  name: "Opened from a card's answer, cast, then answered again from nothing",
+  args: {
+    link: parseLink(`#election=${ELECTION_ID}&pick=1`),
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      cast: "hold",
+    }),
+  },
+};
+
+/** A restart checks the poll anew, and starts from nothing chosen. */
+export const RestartedFromAPick: Story = {
+  name: "Opened from a card's answer, then checked again from nothing",
+  args: {
+    link: parseLink(`#election=${ELECTION_ID}&pick=1`),
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      board: { ok: false, problem: "unreachable" },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("radio", { name: "No" })).toBeChecked();
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Answer again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(mocks(args.source).load).toHaveBeenCalledTimes(2);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+    // A later link in the same tab brings its own pick, even to the same poll.
+    await userEvent.click(canvas.getByRole("button", { name: "Open a later link" }));
+    await expect(await canvas.findByRole("radio", { name: "Yes" })).toBeChecked();
+    await expect(mocks(args.source).load).toHaveBeenCalledTimes(3);
+  },
+  render: (args) => <Relinked {...args} />,
+};
+
+/** The client with a way to open another link in the same tab, as a new fragment does. */
+function Relinked(props: ComponentProps<typeof App>) {
+  const [link, setLink] = useState(props.link);
+  return (
+    <>
+      <App {...props} link={link} />
+      <button type="button" onClick={() => setLink(parseLink(`#election=${ELECTION_ID}&pick=0`))}>
+        Open a later link
+      </button>
+    </>
+  );
+}
 
 export const WorkerFailed: Story = {
   name: "The worker failed",

@@ -556,6 +556,27 @@ describe("the link", () => {
     }
   });
 
+  test("a pick after the election is read as the option, in its one decimal spelling", () => {
+    expect(parseLink(`#election=${ID_HEX}`)).not.toHaveProperty("pick");
+    fc.assert(
+      fc.property(fc.stringMatching(/^[0-9a-fA-F]{64}$/), fc.nat({ max: 63 }), (x, pick) => {
+        const link = parseLink(`#election=${x}&pick=${pick}`);
+        if (link.kind !== "election") throw new Error(link.kind);
+        expect(link.hex).toBe(x.toLowerCase());
+        expect(link.pick).toBe(pick);
+      }),
+      { numRuns },
+    );
+    // Whatever parses is the link written back in its one form.
+    fc.assert(
+      fc.property(fc.string({ maxLength: 8 }), (s) => {
+        const link = parseLink(`#election=${ID_HEX}&pick=${s}`);
+        if (link.kind === "election") expect(`${link.pick}`).toBe(s);
+      }),
+      { numRuns },
+    );
+  });
+
   test("no fragment is the client's own page", () => {
     expect(parseLink("")).toEqual({ kind: "none" });
     expect(parseLink("#")).toEqual({ kind: "none" });
@@ -566,7 +587,15 @@ describe("the link", () => {
       `#election=${ID_HEX.slice(2)}`,
       `#election=${ID_HEX}00`,
       `#election=0x${ID_HEX}`,
-      `#election=${ID_HEX}&pick=1`,
+      `#election=${ID_HEX}&pick=01`,
+      `#election=${ID_HEX}&pick=64`,
+      `#election=${ID_HEX}&pick=-1`,
+      `#election=${ID_HEX}&pick=+1`,
+      `#election=${ID_HEX}&pick=1&pick=2`,
+      `#election=${ID_HEX}&pick=`,
+      `#election=${ID_HEX}&pick=1&`,
+      `#pick=1&election=${ID_HEX}`,
+      `#election=${ID_HEX}&Pick=1`,
       `#poll=${ID_HEX}`,
       `#election=${ID_HEX.slice(1)}g`,
       `#election= ${ID_HEX}`,
@@ -586,6 +615,8 @@ describe("the link", () => {
     );
     fc.assert(
       fc.property(near, (s) => {
+        // The one other parameter a link may carry, in its one spelling.
+        fc.pre(!/&pick=(0|[1-9][0-9]?)$/.test(s) || Number(s.split("=").at(-1)) >= 64);
         expect(parseLink(`#${s}`)).toEqual({ kind: "malformed" });
       }),
       { numRuns },

@@ -450,7 +450,10 @@ describe("every page", () => {
       expect(html).not.toMatch(/\sstyle="/);
       // The one way off the site: the ballot client, with a poll in the fragment.
       expect(
-        html.replaceAll(new RegExp(`href="${BALLOT}#election=[0-9a-f]{64}"`, "g"), ""),
+        html.replaceAll(
+          new RegExp(`href="${BALLOT}#election=[0-9a-f]{64}(?:&amp;pick=[0-9]+)?"`, "g"),
+          "",
+        ),
       ).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
     },
   );
@@ -887,9 +890,15 @@ describe("stream", () => {
       /<h3[^>]*lang="en"[^>]*><a href="\/polls\/c1c1[0-9a-f]{60}"[^>]*>Park and library</,
     );
     expect(html).toContain(">Should the park stay open late?<");
-    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V5}"`);
-    expect(html).toContain("Answer 2 questions");
-    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V1}"`);
+    // Each card's first question's answers, each a link with its pick in the fragment.
+    for (const id of [STREAM_V5, STREAM_V1])
+      expect(
+        [
+          ...html.matchAll(new RegExp(`href="${BALLOT}#election=${id}&amp;pick=([0-9]+)"`, "g")),
+        ].map((m) => m[1]),
+      ).toEqual(["0", "1", "2"]);
+    expect(html).toContain("Choose an answer to question 1 of 2");
+    expect(html).not.toContain(`#election=${STREAM_V5}"`);
     // Text the definition doesn't commit to, or none, gets no words and no way to answer (T-41).
     expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
     expect(html).not.toContain(`#election=${STREAM_NO_TEXT}`);

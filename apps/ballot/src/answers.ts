@@ -134,6 +134,29 @@ export function toggle(
   return { selection: [...selection, option].sort((a, b) => a - b), refused: false };
 }
 
+/**
+ * The answers a ballot opens with: nothing chosen, except the option a link
+ * was tapped on ([[first-answer]], step 1), on the first question, where it
+ * names one of that question's options. Any other pick chooses nothing: the
+ * link can't know the poll's options, and nothing is guessed for the voter.
+ * The pick is only ever a selection on screen, shown as one like any tap;
+ * nothing is sealed or sent until the voter asks (T-41).
+ */
+export function openingAnswers(questions: readonly BallotQuestion[], pick?: number): Answers {
+  const first = questions[0];
+  const picked =
+    first !== undefined &&
+    pick !== undefined &&
+    Number.isInteger(pick) &&
+    pick >= 0 &&
+    pick < first.options.length
+      ? toggle(first, [], pick)
+      : undefined;
+  // The same rule as a tap on the screen.
+  const opening = picked === undefined || picked.refused ? [] : picked.selection;
+  return questions.map((_, i) => (i === 0 ? opening : []));
+}
+
 /** Whether `selection` is an answer the question's validity proof accepts. */
 export function fits(q: BallotQuestion, selection: readonly number[]): boolean {
   if (selection.length < q.minSelections || selection.length > q.maxSelections) return false;

@@ -9,7 +9,9 @@ import {
   type PollSummary,
   type PollWithDraft,
 } from "../account/drafts.ts";
+import { ProfilesError } from "../account/profiles.ts";
 import { PollFormPage } from "./poll-form.tsx";
+import { fakeProfiles, HANDLE } from "./profiles-fake.ts";
 
 const ID = "draft".padEnd(32, "0");
 const NEW_ID = "made".padEnd(32, "0");
@@ -816,5 +818,108 @@ export const NoEditsWhileSending: Story = {
     await expect(await canvas.findByText("Submitting your poll…")).toBeVisible();
     await userEvent.type(title, "!");
     await expect(title).toHaveValue("Harbor library hours");
+  },
+};
+
+const PROFILE = {
+  handle: HANDLE,
+  name: "Harbor Street Neighbors",
+  renamableOn: undefined,
+  pollIds: [],
+};
+
+const profileBox = (canvas: ReturnType<typeof within>) =>
+  canvas.findByRole("checkbox", { name: "Show on your profile, Harbor Street Neighbors" });
+
+const profileCalls = (client: unknown) => (client as ReturnType<typeof fakeProfiles>).calls;
+
+/** A new poll's choice waits for its first save, which gives it the ID the choice names. */
+export const ShowANewPollOnTheProfile: Story = {
+  args: { client: fakeDrafts(), profiles: fakeProfiles({ profile: PROFILE }), onCreated: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await profileBox(canvas));
+    await expect(await profileBox(canvas)).toBeChecked();
+    await expect(profileCalls(args.profiles)).toEqual([]);
+    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), "Ferry name");
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "What do you want to ask?" }),
+      "What should the new ferry be called?",
+    );
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
+    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+      target: { value: "2026-11-04" },
+    });
+    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(profileCalls(args.profiles)).toEqual([`show ${NEW_ID} true`]);
+    await expect(await profileBox(canvas)).toBeChecked();
+    await expect(canvas.getByText(/^Your profile lists this poll/)).toBeVisible();
+  },
+};
+
+/** A saved draft's choice is sent at once, apart from saving the draft. */
+export const ChooseOnASavedDraft: Story = {
+  args: {
+    client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }),
+    id: ID,
+    profiles: fakeProfiles({ profile: { ...PROFILE, pollIds: [ID] } }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const box = await profileBox(canvas);
+    await waitFor(() => expect(box).toBeChecked());
+    await userEvent.click(box);
+    await expect(await canvas.findByText("Your profile doesn't show this poll.")).toBeVisible();
+    await expect(profileCalls(args.profiles)).toEqual([`show ${ID} false`]);
+    await expect(writes(args.client)).toEqual([]);
+  },
+};
+
+/** The draft saves even when its choice can't go through, and the page says so. */
+export const ShownChoiceRefused: Story = {
+  args: {
+    client: fakeDrafts(),
+    profiles: {
+      ...fakeProfiles({ profile: PROFILE }),
+      show: async () => {
+        throw new ProfilesError("failed");
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await profileBox(canvas));
+    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), "Ferry name");
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "What do you want to ask?" }),
+      "What should the new ferry be called?",
+    );
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
+    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+      target: { value: "2026-11-04" },
+    });
+    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "The draft is saved, but your profile doesn't show it. Tick the box again to show it.",
+    );
+    await expect(await profileBox(canvas)).not.toBeChecked();
+  },
+};
+
+/** No profile: the form says how to make one, and offers no choice. */
+export const NoProfile: Story = {
+  args: { client: fakeDrafts(), profiles: fakeProfiles() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("link", { name: "Make one on your account page" }),
+    ).toHaveAttribute("href", "/account#profile-title");
+    await expect(canvas.queryByRole("checkbox", { name: /^Show on your profile/ })).toBeNull();
   },
 };

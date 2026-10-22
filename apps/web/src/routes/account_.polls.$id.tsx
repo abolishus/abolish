@@ -3,6 +3,7 @@ import { useMemo } from "react";
 
 import { turnstileChallenge } from "../account/challenge.ts";
 import { draftsClient } from "../account/drafts.ts";
+import { profilesClient } from "../account/profiles.ts";
 import { PollFormPage } from "../components/poll-form.tsx";
 import { fetchChallengeKey, fetchPhoneVerification } from "../data.ts";
 
@@ -31,6 +32,7 @@ export const Route = createFileRoute("/account_/polls/$id")({
     return (
       <PollFormPage
         client={draftsClient}
+        profiles={profilesClient}
         id={id === "new" ? undefined : id}
         challenge={challenge}
         phoneVerification={phoneVerification}

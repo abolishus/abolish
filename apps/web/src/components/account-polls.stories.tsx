@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import {
   type DraftsClient,
@@ -8,6 +8,7 @@ import {
   type PollSummary,
 } from "../account/drafts.ts";
 import { AccountPolls } from "./account-polls.tsx";
+import { fakeProfiles, HANDLE } from "./profiles-fake.ts";
 
 const VISIBLE: PollModerationView = {
   state: "visible",
@@ -450,5 +451,51 @@ export const ModerationUnavailable: Story = {
     await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
       "This poll's moderation couldn't be loaded. Try again shortly.",
     );
+  },
+};
+
+const PROFILE = {
+  handle: HANDLE,
+  name: "Harbor Street Neighbors",
+  renamableOn: undefined,
+  pollIds: [OPEN.id],
+};
+
+const choice = (row: ReturnType<typeof within>) =>
+  row.getByRole("checkbox", { name: "Show on your profile, Harbor Street Neighbors" });
+
+/** Each poll's own choice of whether the profile shows it (P2-27 part 1d-3). */
+export const ChooseWhatTheProfileShows: Story = {
+  args: {
+    client: fakeDrafts([DRAFT, OPEN]),
+    profiles: fakeProfiles({ profile: PROFILE }),
+    onProfileChanged: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getAllByRole("checkbox")).toHaveLength(2));
+    const [draft, open] = canvas.getAllByRole("listitem").map((i) => within(i));
+    // Each box is described by its poll's title, so a screen reader knows which it is.
+    await expect(choice(open!)).toBeChecked();
+    await expect(choice(open!)).toHaveAccessibleDescription(/^Name the new ferry /);
+    await expect(choice(draft!)).not.toBeChecked();
+    await userEvent.click(choice(draft!));
+    await expect(await draft!.findByText("Your profile shows this poll.")).toBeVisible();
+    await waitFor(() => expect(choice(draft!)).toBeChecked());
+    await userEvent.click(choice(open!));
+    await waitFor(() => expect(choice(open!)).not.toBeChecked());
+    const profiles = args.profiles as ReturnType<typeof fakeProfiles>;
+    await expect(profiles.calls).toEqual([`show ${DRAFT.id} true`, `show ${OPEN.id} false`]);
+    await expect(args.onProfileChanged).toHaveBeenCalledTimes(2);
+  },
+};
+
+/** No profile: no choice under any poll; the profile's own section offers one. */
+export const NoProfile: Story = {
+  args: { client: fakeDrafts([DRAFT, OPEN]), profiles: fakeProfiles() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findAllByRole("listitem")).toHaveLength(2);
+    await expect(canvas.queryByRole("checkbox")).toBeNull();
   },
 };

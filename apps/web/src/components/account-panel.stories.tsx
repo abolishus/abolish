@@ -118,6 +118,9 @@ const noProfile: ProfilesClient = {
   appeal: async () => {
     throw new ProfilesError("changed");
   },
+  show: async () => {
+    throw new ProfilesError("changed");
+  },
 };
 
 /** An account's e-mail and phone as the handlers hold them; the verification page's stories are in account-verify.stories.tsx. */

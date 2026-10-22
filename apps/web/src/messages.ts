@@ -812,8 +812,8 @@ const enUS = {
   profileAddressHelp:
     "Chosen at random, and never given to anyone else. Profile pages aren't open yet; this is where yours will be.",
   profilePolls: "Polls it shows",
-  profilePollsNone: "None yet. You choose, poll by poll, which of your polls it shows.",
-  profilePollsSome: "{count}. You choose, poll by poll, which of your polls it shows.",
+  profilePollsNone: "None yet. You choose under each of your polls, above, which it shows.",
+  profilePollsSome: "{count}. You choose under each of your polls, above, which it shows.",
   profileRename: "Change name",
   profileRenameSave: "Save name",
   profileRenameCancel: "Keep the name",
@@ -850,6 +850,22 @@ const enUS = {
   profileFailure_unloaded: "Your profile couldn't be loaded. Try again shortly.",
   profileFailure_moderationUnloaded:
     "This profile's moderation couldn't be loaded. Try again shortly.",
+  profileChoiceLabel: "Show on your profile,",
+  profileChoiceHelp:
+    "Your profile lists this poll, and its page says your profile asked it, while the poll is listed. Untick it at any time.",
+  profileChoiceHelpUnsaved:
+    "Saving the draft puts it on your profile. Your profile lists it, and its page says your profile asked it, once the poll is open and listed.",
+  profileChoiceShown: "Your profile shows this poll.",
+  profileChoiceUnshown: "Your profile doesn't show this poll.",
+  profileChoiceNone:
+    "Your polls don't say who asked them. To put a name beside them, make a public profile.",
+  profileChoiceNoneLink: "Make one on your account page",
+  profileChoiceFailure_signedOut: "You've been signed out. Sign in again to choose.",
+  profileChoiceFailure_changed:
+    "Your profile or this poll changed since the page read it. Nothing changed here.",
+  profileChoiceFailure_failed: "That didn't work. Nothing changed; try again shortly.",
+  profileChoiceFailure_unsaved:
+    "The draft is saved, but your profile doesn't show it. Tick the box again to show it.",
   pollsMark: "Your polls",
   pollsTitle: "Polls you created",
   pollsLede:

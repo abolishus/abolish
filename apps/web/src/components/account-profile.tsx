@@ -52,6 +52,10 @@ export interface AccountProfileProps {
   readonly phone: boolean;
   /** Called when the session turns out to have ended. */
   readonly onSignedOut?: () => void;
+  /** Bumped when a poll's choice changed elsewhere on the page, so the profile is read again. */
+  readonly revision?: number;
+  /** Called once the profile was made, renamed or deleted, so the polls' choices are read again. */
+  readonly onChanged?: () => void;
 }
 
 /**
@@ -59,10 +63,17 @@ export interface AccountProfileProps {
  * ([[0040-creator-profiles]]): making it under a name, renaming it once a
  * UTC day, deleting it, and what moderation decided about it with the
  * author's appeal. Its handle is shown, never chosen. Which polls it shows
- * is chosen poll by poll, not here. Nothing here is about answering a poll,
+ * is chosen poll by poll, under each poll (ProfileChoice), not here. Nothing here is about answering a poll,
  * and the profile names nothing of the account (T-10, T-75).
  */
-export function AccountProfile({ client, index, phone, onSignedOut }: AccountProfileProps) {
+export function AccountProfile({
+  client,
+  index,
+  phone,
+  onSignedOut,
+  revision = 0,
+  onChanged,
+}: AccountProfileProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -101,6 +112,12 @@ export function AccountProfile({ client, index, phone, onSignedOut }: AccountPro
       .finally(() => setBusy(false));
   }, [refresh, failed]);
 
+  // A poll's choice changed: only the count of polls shown moves, so no notice.
+  useEffect(() => {
+    if (revision === 0) return;
+    refresh().catch((e: unknown) => failed(e, "unloaded"));
+  }, [revision, refresh, failed]);
+
   /**
    * Runs one action, then shows the profile as the server now has it. The
    * form stays open, with what was typed, only when the name was refused.
@@ -114,6 +131,7 @@ export function AccountProfile({ client, index, phone, onSignedOut }: AccountPro
     try {
       setDone(await action());
       setName(undefined);
+      onChanged?.();
     } catch (e) {
       failed(e, "failed");
       keepForm = e instanceof ProfilesError && e.failure === "invalidName";

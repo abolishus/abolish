@@ -127,6 +127,10 @@ export function AccountPanel({ client, drafts, profiles, verify, phone }: Accoun
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState<Notice | undefined>();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // The polls' choices and the profile section each read the profile: a
+  // change in one has the other read it again.
+  const [pollsRevision, setPollsRevision] = useState(0);
+  const [profileRevision, setProfileRevision] = useState(0);
   // An action disables the button that had focus, and may replace it: focus
   // goes back to the heading, so keyboard users keep their place.
   const heading = useRef<HTMLHeadingElement>(null);
@@ -254,8 +258,22 @@ export function AccountPanel({ client, drafts, profiles, verify, phone }: Accoun
         <>
           {/* First, so an account that hasn't verified sees it at sign-in (P2-31 part 4). */}
           <AccountVerification client={verify} index="01" phone={phone} />
-          <AccountPolls client={drafts} index="02" onSignedOut={signedOut} />
-          <AccountProfile client={profiles} index="03" phone={phone} onSignedOut={signedOut} />
+          <AccountPolls
+            client={drafts}
+            index="02"
+            onSignedOut={signedOut}
+            profiles={profiles}
+            profileRevision={pollsRevision}
+            onProfileChanged={() => setProfileRevision((n) => n + 1)}
+          />
+          <AccountProfile
+            client={profiles}
+            index="03"
+            phone={phone}
+            onSignedOut={signedOut}
+            revision={profileRevision}
+            onChanged={() => setPollsRevision((n) => n + 1)}
+          />
           <Section
             index="04"
             mark={t("passkeysTitle")}

@@ -11,6 +11,7 @@ import {
   type FormEvent,
   type ReactNode,
   type SyntheticEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import {
 
 import type { Challenge } from "../account/challenge.ts";
 import { DraftsError, type DraftsClient, type DraftsFailure } from "../account/drafts.ts";
+import type { OwnProfileView, ProfilesClient } from "../account/profiles.ts";
 import {
   ANSWER_RULES,
   type AnswerRule,
@@ -40,6 +42,7 @@ import {
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
+import { ProfileChoice } from "./profile-choice.tsx";
 
 const FIELD = "min-h-12 px-3 text-base md:text-base";
 
@@ -687,6 +690,8 @@ export interface PollFormPageProps {
   readonly id?: string | undefined;
   /** Called once a new draft is saved, with its ID, so the page's address can name it. */
   readonly onCreated?: (id: string) => void;
+  /** The account's profile, for the choice of whether it shows the poll; none to offer no choice. */
+  readonly profiles?: ProfilesClient;
   /** The check a submission's token comes from; none if this deployment has no site key. */
   readonly challenge?: Challenge | undefined;
   /** Called once the draft is submitted for setup, with its poll's ID. */
@@ -710,11 +715,16 @@ export interface PollFormPageProps {
  * Submitting a saved draft for setup (part 6c) takes a Turnstile solve for
  * `poll-create`: the check is loaded only when the author submits, and its
  * token is spent on that one request (T-72; src/account/challenge.ts).
+ *
+ * Where the account has a profile, the author chooses whether it shows the
+ * poll (P2-27 part 1d-3): at once for a saved draft, and for a new one
+ * right after its first save, since the choice names the poll's ID.
  */
 export function PollFormPage({
   client,
   id,
   onCreated,
+  profiles,
   challenge,
   onSubmitted,
   phoneVerification,
@@ -741,6 +751,12 @@ export function PollFormPage({
   const [submitFailure, setSubmitFailure] = useState<SubmitFailure | undefined>();
   // Whether the problems listed stopped a submission rather than a save.
   const [errorsStopped, setErrorsStopped] = useState<"save" | "submit">("save");
+  // The account's profile: none while unread or unreadable, `null` if it has none.
+  const [profile, setProfile] = useState<OwnProfileView | null | undefined>();
+  // A new poll's choice, made before its first save gives it an ID.
+  const [wantShown, setWantShown] = useState(false);
+  // The draft saved, but its choice to be shown didn't go through.
+  const [unshown, setUnshown] = useState(false);
   // The draft this page saves to: the one it opened, or the one its first save made.
   const savedId = useRef<string | undefined>(undefined);
   // Where the check is shown, and the way to take it down again.
@@ -765,6 +781,8 @@ export function PollFormPage({
     setSubmitting("idle");
     setSubmitFailure(undefined);
     setUnavailable(undefined);
+    setWantShown(false);
+    setUnshown(false);
     setForm(id === undefined ? newPollForm() : undefined);
     if (id === undefined) return setBusy(false);
     setBusy(true);
@@ -799,6 +817,19 @@ export function PollFormPage({
 
   // A check still showing when the page goes is taken down with it.
   useEffect(() => () => solving.current?.abort(), []);
+
+  const readProfile = useCallback(async () => {
+    if (profiles === undefined) return;
+    // Unreadable is shown as no choice: the account page says why.
+    setProfile(
+      await profiles.own().then(
+        (p) => p ?? null,
+        () => undefined,
+      ),
+    );
+  }, [profiles]);
+
+  useEffect(() => void readProfile(), [readProfile]);
 
   const seconds = () => BigInt(Math.floor(now().getTime() / 1000));
 
@@ -844,6 +875,16 @@ export function PollFormPage({
     try {
       if (savedId.current === undefined) {
         const created = await client.create(checked.draft);
+        // Before the page names the new draft, so its box never shows the choice undone.
+        if (wantShown && profiles !== undefined) {
+          setUnshown(
+            !(await profiles.show(created, true).then(
+              () => true,
+              () => false,
+            )),
+          );
+          await readProfile();
+        }
         savedId.current = created;
         onCreated?.(created);
       } else await client.update(savedId.current, checked.draft);
@@ -1107,6 +1148,36 @@ export function PollFormPage({
               <p className="m-0 max-w-prose text-sm text-muted-foreground">
                 {t("pollFormTagsNote")}
               </p>
+              {profiles === undefined || profile === undefined ? null : profile === null ? (
+                <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
+                  {t("profileChoiceNone")}{" "}
+                  <a href="/account#profile-title" className="underline underline-offset-4">
+                    {t("profileChoiceNoneLink")}
+                  </a>
+                </p>
+              ) : (
+                <div className="grid gap-1">
+                  <ProfileChoice
+                    client={profiles}
+                    profile={profile}
+                    pollId={savedId.current}
+                    wanted={wantShown}
+                    onWant={(on) => {
+                      setWantShown(on);
+                      setUnshown(false);
+                    }}
+                    onChanged={() => {
+                      setUnshown(false);
+                      void readProfile();
+                    }}
+                  />
+                  {unshown ? (
+                    <p role="alert" className="m-0 text-sm text-destructive">
+                      {t("profileChoiceFailure_unsaved")}
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </div>
           </Section>
 

@@ -1,7 +1,7 @@
 // The account page's calls to the profiles handler on our own origin
 // (src/node/profiles.ts, /profiles; [[0040-creator-profiles]]; P2-27 part
-// 1d-2): the author's own profile, its name, deleting it, and its
-// moderation and appeal. The session cookie goes only because the call is
+// 1d-2 and 1d-3): the author's own profile, its name, deleting it, which
+// of the author's polls it shows, and its moderation and appeal. The session cookie goes only because the call is
 // same-origin, as the account client's does (src/account/client.ts); the
 // handler names the account from it, and nothing here names one, nor ever
 // sends a handle (T-10). The report route is the profile page's, and goes
@@ -110,6 +110,11 @@ export interface ProfilesClient {
   moderation(): Promise<ProfileModerationView>;
   /** Appeals the profile's newest decision, which must be an unappealed hide. */
   appeal(): Promise<void>;
+  /**
+   * Shows one of the author's own polls on the profile, or stops showing
+   * it, answering whether that changed anything.
+   */
+  show(pollId: string, on: boolean): Promise<boolean>;
 }
 
 // The handler's codes (src/node/profiles.ts, PROFILE_ERRORS and the
@@ -127,10 +132,18 @@ const REFUSALS: Readonly<Record<string, ProfilesFailure>> = {
   ALREADY_APPEALED: "changed",
 };
 
-type Path = "/own" | "/make" | "/rename" | "/delete" | "/moderation" | "/appeal";
+// `show`'s `NOT_FOUND` is a poll the account no longer has, deleted or
+// discarded since the page read it; from any other route it is a route
+// the handler doesn't serve.
+const SHOW_REFUSALS: Readonly<Record<string, ProfilesFailure>> = {
+  ...REFUSALS,
+  NOT_FOUND: "changed",
+};
+
+type Path = "/own" | "/make" | "/rename" | "/delete" | "/moderation" | "/appeal" | "/show";
 
 /** The handler's answer, or `undefined` for `NO_PROFILE` where `none` is set. */
-async function call(path: Path, body: object, none = false): Promise<unknown> {
+async function call(path: Path, body: object, none = false, refusals = REFUSALS): Promise<unknown> {
   const response = await fetch(`/profiles${path}`, {
     method: "POST",
     credentials: "same-origin",
@@ -147,7 +160,7 @@ async function call(path: Path, body: object, none = false): Promise<unknown> {
     const code = isObject(answer) ? answer["code"] : undefined;
     if (none && response.status === 404 && code === "NO_PROFILE") return undefined;
     throw new ProfilesError(
-      (typeof code === "string" && Object.hasOwn(REFUSALS, code) && REFUSALS[code]) || "failed",
+      (typeof code === "string" && Object.hasOwn(refusals, code) && refusals[code]) || "failed",
     );
   }
   if (!isObject(answer)) throw new ProfilesError("failed");
@@ -270,5 +283,9 @@ export const profilesClient: ProfilesClient = {
   },
   async appeal() {
     matching(U64, exactly(await call("/appeal", {}), ["decisionSeq"])["decisionSeq"]);
+  },
+  async show(pollId, on) {
+    const answer = await call("/show", { pollId, on }, false, SHOW_REFUSALS);
+    return flag(exactly(answer, ["changed"])["changed"]);
   },
 };

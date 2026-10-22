@@ -25,6 +25,8 @@ import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { offlineWorkerConfig } from "../src/app/offline.ts";
+import type { ProfileRecord } from "../src/server/load.ts";
+import type { StartRequestContext } from "../src/start.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -474,7 +476,9 @@ function stubApi(): Server {
 const SITE_KEY = "1x00000000000000000000AA";
 
 let api: Server;
-let handler: { fetch(request: Request): Promise<Response> };
+let handler: {
+  fetch(request: Request, options?: { context?: StartRequestContext }): Promise<Response>;
+};
 
 beforeAll(async () => {
   api = stubApi();
@@ -504,8 +508,38 @@ afterAll(async () => {
   await new Promise((resolve) => api.close(resolve));
 });
 
+/** Profiles as the front's reader gives them (src/node/main.ts), by handle. */
+const HIDDEN_HANDLE = "hhhhhhhhhhhhhhhh";
+const EMPTY_HANDLE = "eeeeeeeeeeeeeeee";
+/** A name in a right-to-left script, which must not reorder the page's words (T-75). */
+const PROFILE_NAME = "Riverside \u05e9\u05db\u05e0\u05d9\u05dd";
+const profiles = new Map<string, ProfileRecord>([
+  [
+    PROFILE_HANDLE,
+    {
+      state: "visible",
+      handle: PROFILE_HANDLE,
+      name: PROFILE_NAME,
+      // A poll the API no longer serves drops out of its page.
+      polls: [UNKNOWN_ID, ...streamed],
+    },
+  ],
+  [HIDDEN_HANDLE, { state: "hidden", handle: HIDDEN_HANDLE, reason: "harassment" }],
+  [EMPTY_HANDLE, { state: "visible", handle: EMPTY_HANDLE, name: "Nobody yet", polls: [] }],
+]);
+/** Every handle the reader was asked for, in order. */
+const profileReads: unknown[] = [];
+
+/** Every request goes through Start as the front sends it, with the profiles' reader. */
 function get(path: string, headers: Record<string, string> = {}): Promise<Response> {
-  return handler.fetch(new Request(`http://localhost${path}`, { headers }));
+  return handler.fetch(new Request(`http://localhost${path}`, { headers }), {
+    context: {
+      readProfile: async (...args) => {
+        profileReads.push(...args);
+        return profiles.get(args[0]);
+      },
+    },
+  });
 }
 
 /** `get`, following one redirect to this site, as a browser would. */
@@ -543,6 +577,7 @@ describe("every page", () => {
     "/account/verify",
     "/how-it-works",
     "/discover",
+    `/by/${PROFILE_HANDLE}`,
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
     `/p/${CODE}/flyer`,
@@ -1082,7 +1117,7 @@ describe("embed", () => {
     expect(response.headers.get("cache-control")).toBe("public, max-age=60");
     const html = await response.text();
     scriptFree(html);
-    expect(html).toContain('<meta name="robots" content="noindex"/>');
+    expect(html).toContain('<meta name="robots" content="noindex"');
     // The reader's own setting by default.
     expect(html).toMatch(/<html lang="en-US">/);
     // The poll's own words, not the preview's headline.
@@ -1518,6 +1553,103 @@ describe("stream", () => {
   });
 });
 
+describe("profile page", () => {
+  /** The polls a page shows, in order, by the links of their cards' headings. */
+  const cards = (html: string) =>
+    [...html.matchAll(/<h3\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map((m) => m[1]);
+  const text = (html: string) => html.replace(/<[^>]+>/g, "");
+
+  test("shows the name isolated and its polls as the stream's cards, kept out of search engines", async () => {
+    const response = await get(`/by/${PROFILE_HANDLE}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // The name in its own isolate, so a right-to-left name can't reorder the page (T-75).
+    expect(html).toMatch(new RegExp(`<h1[^>]*><bdi>${PROFILE_NAME}</bdi></h1>`));
+    expect(html).toContain('<meta name="robots" content="noindex"');
+    // What the page is: a name nobody checked, and the website's word.
+    expect(text(html)).toContain("names aren&#x27;t checked and needn&#x27;t be unique");
+    expect(text(html)).toContain("It isn&#x27;t part of any poll");
+    // Its first ten listed polls, the one the API no longer serves dropped,
+    // each card checked and answerable as in the stream.
+    expect(cards(html)).toEqual(streamed.slice(0, 9));
+    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V5}&amp;pick=0"`);
+    expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
+    expect(html).toContain(`href="/by/${PROFILE_HANDLE}?after=${streamed[8]}"`);
+    expect(html).not.toContain(">Start from the top<");
+    // Reporting needs the page's script, and offers the policy's grounds once opened.
+    expect(html).toContain(">Report this profile<");
+    expect(html).toContain('href="/moderation"');
+  });
+
+  test("pages through the polls it shows, a page of ten at a time", async () => {
+    const second = await (await get(`/by/${PROFILE_HANDLE}?after=${streamed[8]}`)).text();
+    expect(cards(second)).toEqual(streamed.slice(9, 19));
+    expect(second).toContain(`href="/by/${PROFILE_HANDLE}"`);
+    expect(second).toContain(">Start from the top<");
+    const last = streamed.at(-1);
+    const end = await (await get(`/by/${PROFILE_HANDLE}?after=${streamed.at(-2)}`)).text();
+    expect(cards(end)).toEqual([last]);
+    expect(end).not.toContain(`?after=`);
+  });
+
+  test.each([`?after=${"0".repeat(64)}`, "?after=abc", "?after=1&after=2"])(
+    "%s starts from the top",
+    async (search) => {
+      const response = await follow(`/by/${PROFILE_HANDLE}${search}`);
+      expect(response.status).toBe(200);
+      expect(cards(await response.text())).toEqual(streamed.slice(0, 9));
+    },
+  );
+
+  test("a hidden profile shows the ground alone: no name and no polls (T-68)", async () => {
+    const response = await get(`/by/${HIDDEN_HANDLE}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("This profile is hidden");
+    expect(text(html)).toContain("for Harassment.");
+    expect(cards(html)).toEqual([]);
+    expect(html).not.toContain("Report this profile");
+    expect(html).toContain('<meta name="robots" content="noindex"');
+  });
+
+  test("a profile showing no polls says so", async () => {
+    const html = await (await get(`/by/${EMPTY_HANDLE}`)).text();
+    expect(html).toContain("<bdi>Nobody yet</bdi>");
+    expect(html).toContain("No polls to show");
+    expect(cards(html)).toEqual([]);
+  });
+
+  test("an unknown handle is not found, and a malformed one is never read", async () => {
+    profileReads.length = 0;
+    expect((await get(`/by/${"z".repeat(16)}`)).status).toBe(404);
+    expect(profileReads).toEqual(["z".repeat(16)]);
+    profileReads.length = 0;
+    for (const handle of [
+      "K7QA2MZR5XW3BN4D",
+      "k7qa2mzr5xw3bn4",
+      "k7qa2mzr5xw3bn4d0",
+      "k7qa2mzr5xw3bn41",
+    ])
+      expect((await get(`/by/${handle}`)).status).toBe(404);
+    expect(profileReads).toEqual([]);
+  });
+
+  test("reads the profile by its handle alone, and asks the API nothing of the visitor's (T-10)", async () => {
+    profileReads.length = 0;
+    seen.length = 0;
+    await get(`/by/${PROFILE_HANDLE}`, {
+      cookie: "session=secret",
+      "x-forwarded-for": "203.0.113.9",
+    });
+    expect(profileReads).toEqual([PROFILE_HANDLE]);
+    expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(10);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+    }
+  });
+});
+
 describe("moderation log", () => {
   test("lists decisions with their reasons, linking each poll", async () => {
     const html = await (await get("/moderation")).text();
@@ -1526,11 +1658,10 @@ describe("moderation log", () => {
     expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
   });
 
-  test("lists a decision about a profile by its handle, linking nothing", async () => {
+  test("lists a decision about a profile by its handle, linking its page", async () => {
     const html = await (await get("/moderation")).text();
     expect(html).toContain("Profile hidden");
-    expect(html).toContain(PROFILE_HANDLE);
-    expect(html).not.toContain(`href="/by/`);
+    expect(html).toMatch(new RegExp(`href="/by/${PROFILE_HANDLE}"[^>]*>${PROFILE_HANDLE}<`));
     expect(html.indexOf(PROFILE_HANDLE)).toBeLessThan(html.indexOf(`href="/polls/${HIDDEN_ID}"`));
   });
 
@@ -1658,7 +1789,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(9);
+    expect(ids.length).toBe(10);
     return ids;
   }
 
@@ -1684,7 +1815,7 @@ describe("server functions", () => {
         // The site key's and the phone setting's take no input, and answer
         // the key and the setting: off here, which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
+          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a page size|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }

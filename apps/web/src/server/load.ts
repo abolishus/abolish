@@ -16,6 +16,7 @@ import {
   type PollTags,
   type PollView,
 } from "../poll.ts";
+import type { RemovalGround } from "../components/moderation-log.tsx";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
 import { streamCard } from "./stream-card.ts";
@@ -478,5 +479,82 @@ export async function loadEmbed(api: Api, code: string, locale: string): Promise
     poll: page.poll,
     asOf: page.asOf,
     text: card.kind === "poll" ? card.text : undefined,
+  };
+}
+
+/**
+ * A creator's profile as apps/web's server reads it from packages/core's
+ * `readProfile` ([[0040-creator-profiles]]): an account table, so read by
+ * the front (src/node/main.ts) and handed to the page's server function in
+ * the request's context, never asked of the API, which reads no account
+ * table (T-10). Polls are election IDs in lowercase hex, the latest
+ * registered first.
+ */
+export type ProfileRecord =
+  | {
+      readonly state: "visible";
+      readonly handle: string;
+      readonly name: string;
+      readonly polls: readonly string[];
+    }
+  | { readonly state: "hidden"; readonly handle: string; readonly reason: RemovalGround };
+
+/** The profile at `handle`, or `undefined` if no profile has it now. */
+export type ReadProfile = (handle: string) => Promise<ProfileRecord | undefined>;
+
+export type ProfilePage =
+  | {
+      readonly kind: "profile";
+      readonly name: string;
+      readonly cards: readonly StreamCard[];
+      /** Where the next page starts (the last poll of this one), if more follow. */
+      readonly next: string | undefined;
+    }
+  /** Moderation hid it: the ground only, never the name or the polls. */
+  | { readonly kind: "hidden"; readonly reason: RemovalGround }
+  | { readonly kind: "not-found" };
+
+/**
+ * A page of the profile at `handle` (`/by/<handle>`): its name and, from
+ * just after `after` (one of its polls, or `""` from the top), up to
+ * `STREAM_PAGE` of the polls it shows, each card built and checked as the
+ * stream's (src/server/stream-card.ts), so the profile shows no words its
+ * polls don't commit to (T-34, T-41). Core lists only polls registered and
+ * neither delisted nor hidden, at most 100, so a page costs what a page of
+ * the stream does (T-52). An `after` the profile no longer shows starts from
+ * the top. A poll the database lost since drops out of the page.
+ */
+export async function loadProfile(
+  api: Api,
+  read: ReadProfile,
+  handle: string,
+  after: string,
+  locale: string,
+): Promise<ProfilePage> {
+  const profile = await read(handle);
+  if (profile === undefined) return { kind: "not-found" };
+  if (profile.state === "hidden") return { kind: "hidden", reason: profile.reason };
+  const start = after === "" ? 0 : profile.polls.indexOf(after) + 1;
+  const shown = profile.polls.slice(start, start + STREAM_PAGE);
+  const cards = await Promise.all(
+    shown.map(async (electionId) => {
+      try {
+        const [{ definition }, displayText, tags] = await Promise.all([
+          api.elections.getDefinition({ electionId }),
+          displayTextOf(api, electionId),
+          tagsOf(api, electionId),
+        ]);
+        return streamCard(electionId, definition, displayText, locale, tags);
+      } catch (error) {
+        if (notFound(error)) return undefined;
+        throw error;
+      }
+    }),
+  );
+  return {
+    kind: "profile",
+    name: profile.name,
+    cards: cards.filter((card) => card !== undefined),
+    next: start + STREAM_PAGE < profile.polls.length ? shown.at(-1) : undefined,
   };
 }

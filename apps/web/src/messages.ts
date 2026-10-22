@@ -811,7 +811,7 @@ const enUS = {
   profileName: "Name",
   profileAddress: "Address",
   profileAddressHelp:
-    "Chosen at random, and never given to anyone else. Profile pages aren't open yet; this is where yours will be.",
+    "Chosen at random, and never given to anyone else. Anyone with the address sees the name and the polls the profile shows.",
   profilePolls: "Polls it shows",
   profilePollsNone: "None yet. You choose under each of your polls, above, which it shows.",
   profilePollsSome: "{count}. You choose under each of your polls, above, which it shows.",
@@ -867,6 +867,30 @@ const enUS = {
   profileChoiceFailure_failed: "That didn't work. Nothing changed; try again shortly.",
   profileChoiceFailure_unsaved:
     "The draft is saved, but your profile doesn't show it. Tick the box again to show it.",
+  byEyebrow: "Profile",
+  byLede:
+    "The polls this profile shows, the latest first. Its author chose the name: names aren't checked and needn't be unique.",
+  byNote:
+    "Which polls a profile shows is what its author told this website. It isn't part of any poll, and no one outside this website can check it.",
+  byPolls: "Polls it asked",
+  byEmpty: "No polls to show",
+  byEmptyLede: "This profile doesn't show any poll that's listed right now.",
+  byMore: "More polls",
+  byHiddenTitle: "This profile is hidden",
+  byHidden:
+    "Moderators hid it under the moderation policy, for {reason}. Its name and polls aren't shown here, and its polls don't say who asked them. The polls themselves are moderated separately.",
+  byHiddenLog: "See the decision in the public moderation log",
+  byReportTitle: "Something wrong with this profile?",
+  byReportHelp:
+    "Reports are counted, never who sent them, and a moderator judges the profile against the policy: the number of reports never decides anything.",
+  byReportPolicy: "What moderation can and can't do",
+  byReport: "Report this profile",
+  byReportLegend: "Why should a moderator look at it?",
+  byReportSend: "Send report",
+  byReportCancel: "Cancel",
+  byReportDone: "Reported. A moderator will look at it.",
+  byReportGone: "This profile no longer exists, so nothing was reported.",
+  byReportFailed: "That didn't work. Nothing was reported; try again shortly.",
   pollsMark: "Your polls",
   pollsTitle: "Polls you created",
   pollsLede:

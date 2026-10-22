@@ -160,6 +160,10 @@ const phoneVerifier: PhoneVerifier = {
 
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
+/** The request context the front handed Start with each request, in order. */
+const contexts: unknown[] = [];
+/** The profiles' reader the front hands every page (src/start.ts). */
+const READ_PROFILE = async () => undefined;
 
 /** The last streamed page: how many chunks it gave and whether it was cancelled. */
 let stream = { pulls: 0, cancelled: false };
@@ -204,8 +208,9 @@ beforeAll(async () => {
   writeFileSync(join(clientDir, "icons", "other.png"), "not served");
   server = createWebServer({
     start: {
-      fetch: async (request) => {
+      fetch: async (request, options) => {
         started.push(request);
+        contexts.push(options?.context);
         const path = new URL(request.url).pathname;
         if (path === "/stream") return streamed();
         if (path === "/broken")
@@ -292,6 +297,7 @@ beforeAll(async () => {
       origin: ORIGIN,
       now: () => NOW,
     }),
+    context: { readProfile: READ_PROFILE },
     clientDir,
     origin: ORIGIN,
     log: (line) => logged.push(line),
@@ -934,6 +940,17 @@ describe("the front", () => {
     ])
       expect([target, (await raw(target)).status]).toEqual([target, 404]);
     expect(started).toHaveLength(0);
+  });
+
+  test("hands Start the profiles' reader with every page and server function, and nothing else", async () => {
+    started.length = 0;
+    contexts.length = 0;
+    await raw("/by/k7qa2mzr5xw3bn4d", { headers: { cookie: "session=secret" } });
+    await raw("/_serverFn/abc", { method: "POST" });
+    expect(started).toHaveLength(2);
+    // The same reader for everyone, by handle only: no session reaches a page (T-10).
+    expect(contexts).toEqual([{ readProfile: READ_PROFILE }, { readProfile: READ_PROFILE }]);
+    expect(started.map((r) => r.headers.get("cookie"))).toEqual([null, null]);
   });
 
   test("serves the manifest and its icons from the fixed list, and nothing beside them", async () => {

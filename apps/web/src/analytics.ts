@@ -14,6 +14,7 @@ export const PAGES = [
   "/p/:code",
   "/p/:code/flyer",
   "/embed/p/:code",
+  "/by/:handle",
   "/moderation",
   "/account",
   "/account/polls/:id",
@@ -48,6 +49,9 @@ export function pageOf(pathname: string): Page {
   // Its embed, loaded by every reader of a page that carries it: the code
   // and the theme are never kept, nor which site it was on (T-11).
   if (/^\/embed\/p\/[^/]+$/i.test(pathname)) return "/embed/p/:code";
+  // A creator's profile: the handle names it as surely as a code names a
+  // poll, so it is never kept ([[0040-creator-profiles]]).
+  if (/^\/by\/[^/]+$/.test(pathname)) return "/by/:handle";
   return "other";
 }
 

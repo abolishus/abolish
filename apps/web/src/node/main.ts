@@ -16,6 +16,7 @@ import {
   type Keyring,
   parseKeyring,
   parseTier0IssuerKeys,
+  readProfile,
   type Tier0Issuer,
   tier0Issuer,
 } from "@abolishus/core";
@@ -23,7 +24,8 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
 
-import { ballotBase, isSiteKey } from "../values.ts";
+import type { ReadProfile } from "../server/load.ts";
+import { ballotBase, isSiteKey, toHex } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
@@ -399,6 +401,14 @@ const profiles = createProfilesHandler({
   accountOf: (headers) => accounts.accountOf(headers),
   origin,
 });
+// A profile's page reads it by its public handle alone, never with a
+// session (pages never get the cookie), from the account side the API never
+// reads (T-10; [[0040-creator-profiles]]).
+const publicProfile: ReadProfile = async (handle) => {
+  const p = await readProfile(sql, handle);
+  if (p === undefined || p.state === "hidden") return p;
+  return { state: "visible", handle: p.handle, name: p.name, polls: p.polls.map(toHex) };
+};
 // A key retyped under its ID matches nothing made or rotated under the right
 // bytes, so through it an address or number another account holds would
 // verify again (T-01; the account-keys runbook): an instance holding one
@@ -433,6 +443,7 @@ const server = createWebServer({
   token,
   reactions,
   profiles,
+  context: { readProfile: publicProfile },
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,

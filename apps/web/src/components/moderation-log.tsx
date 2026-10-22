@@ -21,6 +21,8 @@ export const REMOVAL_GROUNDS = [
   "legal-notice",
 ] as const satisfies readonly Reason[];
 
+export type RemovalGround = (typeof REMOVAL_GROUNDS)[number];
+
 /** The policy's grounds for restoring a poll, tied to the API's as above. */
 export const RESTORE_GROUNDS = [
   "appeal-upheld",
@@ -168,9 +170,13 @@ function Row({ entry }: { entry: Entry }) {
                 page, and the log carries no free text (T-75, T-17). */}
             <dd className="m-0 flex min-w-0 items-center gap-3">
               <UserRound aria-hidden="true" className="size-7 shrink-0 p-1" />
-              <span className="font-mono text-sm break-all" translate="no">
+              <a
+                className="font-mono text-sm break-all underline underline-offset-4"
+                translate="no"
+                href={`/by/${entry.handle}`}
+              >
                 {entry.handle}
-              </span>
+              </a>
             </dd>
             <dt className={TERM}>{t("moderationAction")}</dt>
             <dd className="m-0 flex items-center gap-2 text-sm">

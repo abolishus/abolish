@@ -323,7 +323,12 @@ export function AccountProfile({
             {t("profileAddress")}
           </dt>
           <dd className="m-0 grid gap-1 border-b border-border pb-4 md:pt-4">
-            <span className="font-mono text-sm break-all">/by/{p.handle}</span>
+            <a
+              className="font-mono text-sm break-all underline underline-offset-4"
+              href={`/by/${p.handle}`}
+            >
+              /by/{p.handle}
+            </a>
             <span className="text-sm text-muted-foreground">{t("profileAddressHelp")}</span>
           </dd>
           <dt className="pt-4 text-sm font-semibold md:border-b md:border-border md:pb-4">

@@ -32,11 +32,12 @@ import { type ClientError, ERROR_NAME, pageOf, parseClientError } from "../analy
 import { APP_FILES } from "../app/install.ts";
 import { OFFLINE_PATH, WORKER_PATH } from "../app/offline.ts";
 import { appFileHeaders } from "../security.ts";
+import type { StartRequestContext } from "../start.ts";
 import { type Analytics, noAnalytics } from "./analytics.ts";
 
 /** The built Start server (`dist/server/server.js`'s default export). */
 export interface StartHandler {
-  fetch(request: Request): Promise<Response>;
+  fetch(request: Request, options?: { context?: StartRequestContext }): Promise<Response>;
 }
 
 /** The account handler (`createAccounts(...).handler` from @abolishus/core). */
@@ -121,6 +122,12 @@ export interface WebServerOptions {
   readonly token: TokenHandler;
   readonly reactions: ReactionsHandler;
   readonly profiles: ProfilesHandler;
+  /**
+   * What every page and server function gets in its request context
+   * (src/start.ts): readers of the account side's public records, by a
+   * public key only, never a session.
+   */
+  readonly context?: StartRequestContext;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -278,6 +285,7 @@ export function createWebServer({
   token,
   reactions,
   profiles,
+  context = {},
   clientDir,
   origin,
   log,
@@ -379,7 +387,8 @@ export function createWebServer({
       headers,
       ...(body === undefined ? {} : { body }),
     });
-    if (!ACCOUNT_ROUTES.has(route)) return send(res, await start.fetch(request), method === "HEAD");
+    if (!ACCOUNT_ROUTES.has(route))
+      return send(res, await start.fetch(request, { context }), method === "HEAD");
     // The account, drafts, e-mail, phone, token, reactions and profiles handlers answer
     // JSON and set few headers of their own (src/security.ts covers pages). A
     // copy: a response's own headers can be immutable.

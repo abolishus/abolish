@@ -82,6 +82,17 @@ describe("pages", () => {
       expect(pageOf(path)).toBe("other");
   });
 
+  test("a profile is its template, whatever its handle ([[0040-creator-profiles]])", () => {
+    fc.assert(
+      fc.property(fc.stringMatching(/^[^/?#]+$/), (handle) => {
+        expect(pageOf(`/by/${handle}`)).toBe("/by/:handle");
+      }),
+      runs,
+    );
+    for (const path of ["/by", "/by/", "/by/a/", "/by/a/b", "/x/by/a"])
+      expect(pageOf(path)).toBe("other");
+  });
+
   test("every path is one of the fixed templates, so none carries a path's text", () => {
     fc.assert(
       fc.property(fc.webPath(), (path) => {

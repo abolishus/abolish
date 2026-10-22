@@ -313,6 +313,18 @@ const enUS = {
   pollAnswer:
     "Answers are cast only in the ballot app, never on this website, and each is sealed on the voter's own device before anything is sent. The ballot app can't open a poll from this page yet.",
   pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
+  shareOpen: "Share this poll",
+  shareNeverYourAnswer:
+    "Sharing sends this link, never your answer. The link is the same for everyone, so it doesn't say who shared it or whether they answered.",
+  shareLinkLabel: "Link to this poll",
+  shareCopy: "Copy link",
+  shareCopied: "Link copied",
+  shareCopiedStatus: "Link copied. Paste it anywhere.",
+  shareCopyFailed: "Couldn't copy. Select the link above and copy it.",
+  shareMenu: "Share…",
+  shareNoMenu:
+    "This browser doesn't have a share menu. Copy the link and paste it where you like, or email it.",
+  shareEmail: "Email the link",
   // Why a poll couldn't be set up, one per failure code core writes
   // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
   // retried comes back as a draft; one whose election was registered stays.

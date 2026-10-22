@@ -489,6 +489,8 @@ describe("poll page", () => {
     expect(html).not.toContain('name="robots"');
     expect(html).toContain(`href="/p/${CODE}"`);
     expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
+    // The share sheet's trigger; the sheet itself opens in the browser.
+    expect(html).toContain(">Share this poll<");
   });
 
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
@@ -529,6 +531,8 @@ describe("poll page", () => {
     expect(html).not.toContain("/p/");
     expect(html).not.toContain(code);
     expect(html).toContain('<meta property="og:title" content="A poll on localhost"');
+    // Nothing to share without a short link.
+    expect(html).not.toContain("Share this poll");
   });
 
   test("forwards nothing of the visitor's to the API (T-10)", async () => {
@@ -555,6 +559,8 @@ describe("poll page", () => {
     expect(html).toContain("question and option text are withheld (Personal data)");
     expect(html).toContain('<meta name="robots" content="noindex"');
     expect(html).toContain("Approve any number");
+    // Moderation withheld its text: we don't offer to spread it.
+    expect(html).not.toContain("Share this poll");
   });
 
   test("refuses a definition that names another election (T-34)", async () => {

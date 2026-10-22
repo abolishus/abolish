@@ -6,7 +6,14 @@ import {
   accountVerifications,
 } from "./accounts.ts";
 import { accountAppeals, accountModerators } from "./appeals.ts";
-import { boardBallotKeys, boardCheckpoints, boardEntries, boardSubtrees } from "./board.ts";
+import {
+  boardBallotHashes,
+  boardBallotKeys,
+  boardCheckpoints,
+  boardEntries,
+  boardShareReceipts,
+  boardSubtrees,
+} from "./board.ts";
 import { electionDefinitions, electionRegistrations, electionSchedules } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
 import {
@@ -53,9 +60,11 @@ export {
   accountSessions,
   accountUsers,
   accountVerifications,
+  boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,
   boardEntries,
+  boardShareReceipts,
   boardSubtrees,
   ceremonyApprovals,
   ceremonyMessages,
@@ -87,9 +96,11 @@ export {
  */
 export const TABLE_CLASSES = {
   board: [
+    "board_ballot_hashes",
     "board_ballot_keys",
     "board_checkpoints",
     "board_entries",
+    "board_share_receipts",
     "board_subtrees",
     "election_definitions",
     "election_registrations",

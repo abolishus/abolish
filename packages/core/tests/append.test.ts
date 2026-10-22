@@ -224,10 +224,11 @@ describe("appendEntry", () => {
       const id = await newElection(app, version);
       for (const type of [0x000c, 0x000e, 0x000f]) {
         const append = appendEntry(app, id, 0, record(type));
-        if (types.includes(type))
-          // The table's CHECK still lists version 1's types only (Known-weak).
-          await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
-        else expect(await refusedWith(append)).toBe("invalid-entry");
+        if (!types.includes(type)) expect(await refusedWith(append)).toBe("invalid-entry");
+        // The table's CHECK takes share receipts, whose writer exists
+        // (migrations/0027), and still refuses the other types (Known-weak).
+        else if (type === 0x000c) expect((await append).index).toBe(0n);
+        else await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
       }
     }
   });

@@ -27,6 +27,7 @@ const keyOf = (tier = 0, nullifier = 7n, message = new Uint8Array(32).fill(1)): 
   tier,
   nullifier,
   message,
+  ballotHash: b32(),
 });
 
 let db: TestDb;

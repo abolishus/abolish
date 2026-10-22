@@ -24,6 +24,8 @@ export {
   type ElectionAdmission,
   electionAdmission,
   type ElectionAdmissionCode,
+  type ReceiptAdmission,
+  type ReceiptAdmissionCode,
 } from "./admission.ts";
 export {
   type AdmissionCode,

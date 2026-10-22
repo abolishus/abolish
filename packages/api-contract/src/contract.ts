@@ -356,7 +356,7 @@ const getModerationLog = oc
     path: "/moderation/log",
     summary: "A page of the public moderation log",
     description:
-      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and polls on our pages or restores it. Each cites one of the policy's reason codes, and the two kinds share one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
+      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. Each cites one of the policy's reason codes, and the two kinds share one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
     tags: ["moderation"],
   })
   .input(z.strictObject({ after: U64, limit: PageSize }))

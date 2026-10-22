@@ -54,7 +54,7 @@ export class SearchQueryError extends Error {
 /**
  * A query's terms: split on whitespace, each normalised and cut to its first
  * `MAX_SEARCH_QUERY` code points, blank ones and duplicates dropped. Refuses
- * a query longer than `MAX_SEARCH_QUERY`, one with no term, and one with more
+ * a query longer than `MAX_SEARCH_QUERY` code points, one with no term, and one with more
  * than `MAX_SEARCH_TERMS`, counted before normalising, as the contract's
  * pattern counts them (a `TypeError`); and one whose terms are all blank once
  * normalised, which the pattern can't see (a `SearchQueryError`). The cut
@@ -62,8 +62,10 @@ export class SearchQueryError extends Error {
  * eighteenfold (U+FDFA), and only widens a match (T-52).
  */
 export function searchTerms(query: string): string[] {
-  if (typeof query !== "string" || query.length > MAX_SEARCH_QUERY)
-    throw new TypeError(`query must be a string of at most ${MAX_SEARCH_QUERY} characters`);
+  // Code points, as the contract's `maxLength` counts them: UTF-16 units
+  // would refuse an astral query the contract lets through.
+  if (typeof query !== "string" || Array.from(query).length > MAX_SEARCH_QUERY)
+    throw new TypeError(`query must be a string of at most ${MAX_SEARCH_QUERY} code points`);
   const raw = query.split(/\s+/u).filter((t) => t !== "");
   if (raw.length < 1 || raw.length > MAX_SEARCH_TERMS)
     throw new TypeError(`query must have 1 to ${MAX_SEARCH_TERMS} terms`);

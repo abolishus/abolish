@@ -151,6 +151,9 @@ describe("terms", () => {
     expect(() => searchTerms(words(MAX_SEARCH_TERMS + 1))).toThrow(TypeError);
     expect(searchTerms("a".repeat(MAX_SEARCH_QUERY))).toHaveLength(1);
     expect(() => searchTerms("a".repeat(MAX_SEARCH_QUERY + 1))).toThrow(TypeError);
+    // Code points, as the contract counts them, not UTF-16 units.
+    expect(searchTerms("\u{10000}".repeat(MAX_SEARCH_QUERY))).toHaveLength(1);
+    expect(() => searchTerms("\u{10000}".repeat(MAX_SEARCH_QUERY + 1))).toThrow(TypeError);
     expect(() => searchTerms(7 as unknown as string)).toThrow(TypeError);
     // Control characters alone pass the pattern but normalise to spaces.
     for (const q of ["\u0085", "\u0001\u0002 \u009f"])

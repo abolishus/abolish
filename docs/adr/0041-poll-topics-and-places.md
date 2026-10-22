@@ -1,4 +1,4 @@
-# ADR 0040: Poll topics and places: listing tags beside the definition
+# ADR 0041: Poll topics and places: listing tags beside the definition
 
 - Status: Accepted (agent) — owner may veto
 - Date: 2026-10-22
@@ -53,9 +53,9 @@ What would change it: a need for third parties to list polls by topic or place f
 Rules, which [[P2-26]] part 1 and [[P2-23]] part 3 build:
 
 1. **The topic** is optional and, when given, one of `POLL_TOPICS` in `packages/core` (`poll-draft-rules.ts`): community, culture, economy, education, environment, food, government, health, housing, safety, science, sport, technology, transport. The website words each one in its own messages and translations. Codes are only ever added, never renamed or removed, since a poll keeps the code it was filed under.
-2. **The place** is optional and, when given, 1 to 80 code points with no control characters, line or paragraph separators, or bidi embeddings, overrides or isolates, no space at either end, and words separated by single ordinary spaces (`placeIsWellFormed`), so two places that look alike are the same string and no place can reorder the card around it (T-67). Places are matched for their pages as search matches text ([[P2-23]] part 4a: NFKC, lower-cased), never ranked.
+2. **The place** is optional and, when given, 1 to 80 code points in NFC with no control characters, line or paragraph separators, bidi marks, embeddings, overrides or isolates, or invisible characters (soft hyphen, zero-width space, word joiner, byte order mark; the zero-width joiner and non-joiner stay, since some scripts need them), no space at either end, and words separated by single ordinary spaces (`placeIsWellFormed`), so places that look alike are, short of confusable letters, the same string (T-67). Places are matched for their pages as search matches text ([[P2-23]] part 4a: NFKC, lower-cased), never ranked.
 3. **Both are the author's choice before submission only.** They are part of the draft (`account_polls.draft`, the account class, T-10), checked by `pollDraftProblem` (rules `topic` and `place`) at every write, and fixed at submission like the rest of the draft. After registration only moderation changes them.
-4. **They are labelled as the listing's**, never as words of the poll: a card or page shows them as where the poll is filed, apart from the checked display text, and the ballot client never shows them (T-34, T-41).
+4. **They are labelled as the listing's**, never as words of the poll: a card or page shows them as where the poll is filed, apart from the checked display text, and the ballot client never shows them (T-34, T-41). A place is shown isolated (`<bdi>` or its own element with `dir="auto"`), so a right-to-left name can't reorder the words around it.
 5. **They name no voter.** Nothing about who answers is stored, logged or keyed with them, and a topic or place page's requests carry nothing of the visitor's beyond the page itself; page views keep the route's template, never the topic or place (T-10, T-11, T-67).
 6. **A place is public.** The form says so, as it does for the poll's text, since an author may type their own street.
 

@@ -16,6 +16,8 @@ import {
   accountPolls,
   createPollDraft,
   deletePollDraft,
+  draftDisplayText,
+  draftQuestions,
   type DraftQuestion,
   listAccountPolls,
   MAX_CLOSE_SECONDS,
@@ -148,8 +150,19 @@ describe("pollDraftProblem", () => {
   });
 
   test("a place is one line of single-spaced words, up to its length in code points", () => {
-    for (const place of ["Riverside", "Alder County", "São Paulo", "東京", "Bahnhofstraße 3"])
+    for (const place of [
+      "Riverside",
+      "Alder County",
+      "São Paulo",
+      "東京",
+      "Bahnhofstraße 3",
+      // A name some scripts spell with the zero-width non-joiner.
+      "می\u200cخواهم",
+    ])
       expect(placeIsWellFormed(place)).toBe(true);
+    // A stored draft is JSON, so a place can be anything.
+    for (const place of [null, 1, {}, ["Riverside"]])
+      expect(rule(draft({ place: place as unknown as string }))).toEqual({ rule: "place" });
     // Counted in code points, so a place outside the BMP isn't cut short.
     expect(placeIsWellFormed("𝔸".repeat(MAX_PLACE_LENGTH))).toBe(true);
     expect(placeIsWellFormed("a".repeat(MAX_PLACE_LENGTH + 1))).toBe(false);
@@ -167,6 +180,15 @@ describe("pollDraftProblem", () => {
       "Riverside\u2066x\u2069",
       "a\u0000b",
       "a\u0085b",
+      "Rive\u200frside",
+      "Rive\u200erside",
+      "\u061cRiverside",
+      "Rivers\u200bide",
+      "River\u00adside",
+      "River\u2060side",
+      "\ufeffRiverside",
+      // Decomposed: the same place as "São Paulo" in NFC.
+      "Sa\u0303o Paulo",
     ])
       expect(placeIsWellFormed(place), JSON.stringify(place)).toBe(false);
   });
@@ -179,11 +201,28 @@ describe("pollDraftProblem", () => {
         const fixed = Array.from(normal(place)).slice(0, MAX_PLACE_LENGTH).join("").trim();
         // What the form would send after tidying: well formed unless it is
         // empty or holds a character no place may.
-        if (fixed !== "" && !/[\p{Cc}\p{Zl}\p{Zp}\u202a-\u202e\u2066-\u2069]/u.test(fixed))
+        if (
+          fixed !== "" &&
+          fixed === fixed.normalize("NFC") &&
+          !/[\p{Cc}\p{Zl}\p{Zp}\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u.test(
+            fixed,
+          )
+        )
           expect(placeIsWellFormed(fixed)).toBe(true);
       }),
       { numRuns },
     );
+  });
+
+  test("the topic and place stay out of everything the definition commits to", () => {
+    const salt = new Uint8Array(32).fill(7);
+    const plain = draft();
+    const filed = draft({ topic: "transport", place: "Harbor" });
+    expect(draftDisplayText(filed, salt)).toEqual(draftDisplayText(plain, salt));
+    expect(encodeDisplayTextV2(draftDisplayText(filed, salt))).toEqual(
+      encodeDisplayTextV2(draftDisplayText(plain, salt)),
+    );
+    expect(draftQuestions(filed)).toEqual(draftQuestions(plain));
   });
 
   test("refuses text that encodes to more than MAX_DRAFT_TEXT", () => {
@@ -380,13 +419,16 @@ describe("account_polls", () => {
 
   test("submits a draft once its token passes, and then it can't be edited, deleted or resubmitted", async () => {
     const author = await newAccount();
-    const id = await createPollDraft(app, author, draft(), NOW);
+    // Tagged, so submission's second check reads the stored tags back too.
+    const filed = draft({ topic: "health", place: "Northfield" });
+    const id = await createPollDraft(app, author, filed, NOW);
     const { calls, turnstile } = passing();
     await submitPollDraft(app, author, id, { turnstile, token: "t", now: NOW });
     expect(calls).toEqual([["t", "poll-create"]]);
     expect(await readAccountPoll(app, author, id)).toMatchObject({
       state: "submitted",
       submittedAt: NOW,
+      draft: filed,
     });
     expect(await code(updatePollDraft(app, author, id, draft(), NOW))).toBe("not-editable");
     expect(await code(deletePollDraft(app, author, id))).toBe("not-editable");

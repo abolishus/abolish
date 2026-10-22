@@ -37,7 +37,7 @@ export interface DraftQuestion {
 }
 
 /**
- * The topics a poll can be filed under ([[0040-poll-topics-and-places]]): a
+ * The topics a poll can be filed under ([[0041-poll-topics-and-places]]): a
  * fixed list the website words in its own messages, so no author's words
  * name a topic and a topic's page is the same in every language (T-67).
  * Codes are only ever added: a poll keeps the code it was filed under, so
@@ -67,9 +67,10 @@ export const MAX_PLACE_LENGTH = 80;
 /**
  * What an author writes: one translation of display text version 2, who can
  * answer and when the poll closes, and the topic and place the poll is
- * listed under (ADR 0040), which the definition doesn't commit to. Everything else in the definition (the
- * election identifier, the electorate's roots, the panel, `opens_at`) is the
- * worker's, set during setup (ADR 0032, rules 8 to 11).
+ * listed under, which the definition doesn't commit to (ADR 0041).
+ * Everything else in the definition (the election identifier, the
+ * electorate's roots, the panel, `opens_at`) is the worker's, set during
+ * setup (ADR 0032, rules 8 to 11).
  */
 export interface PollDraft {
   /** A BCP 47 tag in lower case, as display text requires. */
@@ -156,23 +157,30 @@ const UNSTORABLE = /[\p{Cs}\0]/u;
 
 /**
  * What a place may not hold: control characters, line and paragraph
- * separators, which would break the one line a card gives it, and the bidi
- * embeddings, overrides and isolates, which could make it display as other
- * words or reorder the text around it (T-67).
+ * separators, which would break the one line a card gives it; the bidi
+ * marks, embeddings, overrides and isolates, which could make it display as
+ * other words or reorder the text around it; and the invisible characters
+ * (soft hyphen, zero-width space, word joiner and invisible operators, byte
+ * order mark), which would make two places that look alike different
+ * strings (T-67). The zero-width joiner and non-joiner stay, since some
+ * scripts need them to spell a name.
  */
-const PLACE_REFUSED = /[\p{Cc}\p{Zl}\p{Zp}\u202a-\u202e\u2066-\u2069]/u;
+const PLACE_REFUSED =
+  /[\p{Cc}\p{Zl}\p{Zp}\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
 
 /**
- * Whether `place` is a place a draft can hold: 1 to `MAX_PLACE_LENGTH` code
- * points, none of them `PLACE_REFUSED`, with no space at either end and
- * words separated by single ordinary spaces, so two places that look the
- * same are the same string.
+ * Whether `place` is a place a draft can hold: a string of 1 to
+ * `MAX_PLACE_LENGTH` code points in NFC, none of them `PLACE_REFUSED`, with
+ * no space at either end and words separated by single ordinary spaces, so
+ * places that look alike are, short of confusable letters, the same string.
  */
 export function placeIsWellFormed(place: string): boolean {
   return (
+    typeof place === "string" &&
     place.length > 0 &&
     Array.from(place).length <= MAX_PLACE_LENGTH &&
     !PLACE_REFUSED.test(place) &&
+    place === place.normalize("NFC") &&
     place === place.trim().replace(/\s+/gu, " ")
   );
 }

@@ -103,8 +103,8 @@ const Draft = z.strictObject({
   tiers: z.array(z.int().min(0).max(255)).max(3),
   /** UNIX seconds, as a canonical decimal `u64`. */
   closesAt: z.string().regex(/^(?:0|[1-9][0-9]{0,19})$/),
-  // The longest topic code, and a place's `MAX_PLACE_LENGTH` code points as
-  // UTF-16 (ADR 0040).
+  // Above the longest topic code, and a place's `MAX_PLACE_LENGTH` code
+  // points as UTF-16 (ADR 0041).
   topic: z.string().max(16).optional(),
   place: z.string().max(160).optional(),
 });

@@ -1,4 +1,4 @@
-// The stream's cards (src/stream.ts): a poll's words reach a card only when
+// The stream's cards (src/server/stream-card.ts): a poll's words reach a card only when
 // its display text passes the ballot client's checks against the definition
 // beside it (T-34, T-41), in the translation the page's locale picks.
 

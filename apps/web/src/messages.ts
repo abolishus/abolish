@@ -1,7 +1,7 @@
 // apps/web's own strings. Every locale's catalog has `en-US`'s type, so a
 // missing key fails type-checking (@abolishus/ui, i18n).
 
-import type { PollTopic } from "@abolishus/core/poll-draft-rules";
+import type { PollTopic } from "@abolishus/core/poll-topics";
 import type { PollFailure } from "@abolishus/core/poll-failures";
 import type { Message } from "@abolishus/ui";
 

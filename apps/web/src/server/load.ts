@@ -356,7 +356,7 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * in `locale`. The API
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
- * are checked here (src/stream.ts). A poll the database lost between the
+ * are checked here (src/server/stream-card.ts). A poll the database lost between the
  * listing and its definition drops out of the page.
  */
 export async function loadStream(
@@ -422,7 +422,7 @@ export type EmbedPage =
  * (docs/design/sharing.md, Embed): resolved as `/p/<code>` resolves it, then
  * loaded and checked as the poll page is, which must print the same code
  * (T-34), with its display text checked as the stream checks a card's
- * (src/stream.ts). Nothing of the reader's is passed on (T-10, T-11).
+ * (src/server/stream-card.ts). Nothing of the reader's is passed on (T-10, T-11).
  */
 export async function loadEmbed(api: Api, code: string, locale: string): Promise<EmbedPage> {
   const link = await resolveShortLink(api, code);

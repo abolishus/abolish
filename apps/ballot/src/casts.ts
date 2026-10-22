@@ -11,7 +11,9 @@
 // a seat that never receipts, survive a reload ([[delivery]], Client rule 4).
 // Once a seat's receipt passes for the ballot, the receipt is kept in its
 // place and that seat's `m_i` erased from every cast it receipts, so a
-// receipted seat is never posted (Client rules 1 to 3).
+// receipted seat is never posted (Client rules 1 to 3); once the ballot is
+// boarded and the operator's board path answers for the receipt with an
+// entry that passes, that entry is kept beside it (Client rule 3).
 // Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
@@ -45,11 +47,26 @@ export interface Boarded {
 /**
  * One qualified seat's share as a cast keeps it: its `ct_i`, and either its
  * `m_i`, while no receipt for the ballot has passed, or that receipt once
- * one has, `m_i` then erased ([[delivery]], Client rule 2).
+ * one has, `m_i` then erased ([[delivery]], Client rule 2), with the board
+ * entry the operator answered for it once that answer passed (Client rule
+ * 3).
  */
 export type KeptShare =
   | { readonly seat: number; readonly ciphertext: Uint8Array; readonly m: Uint8Array }
-  | { readonly seat: number; readonly ciphertext: Uint8Array; readonly receipt: Uint8Array };
+  | {
+      readonly seat: number;
+      readonly ciphertext: Uint8Array;
+      readonly receipt: Uint8Array;
+      /**
+       * The board entry carrying a receipt that passed for this seat of the
+       * ballot, and the link after it: this one, or an earlier receipt for
+       * the seat the board path already carried ([[delivery]], Boarding,
+       * rule 5), which the worker passed as it did this one. Later checks
+       * of the board (an anchored inclusion, a resubmission) are of the
+       * receipt this entry carries, which may not be `receipt`.
+       */
+      readonly boarded?: Boarded;
+    };
 
 /** One ballot this device cast, a version-3 ballot record ([[ballot-validity]]). */
 export interface CastRecord {
@@ -98,6 +115,12 @@ export interface CheckedReceipt {
 /** `recordReceipt`'s outcome. */
 export type RecordReceiptOutcome = "recorded" | "missing" | "unreadable" | "unwritable";
 
+/** A receipted seat of a cast whose receipt no kept board entry carries yet, as `unboardedReceipts` finds it. */
+export interface UnboardedReceipt {
+  readonly seat: number;
+  readonly receipt: Uint8Array;
+}
+
 /** `recordBoarded`'s outcome. */
 export type RecordBoardedOutcome =
   | "recorded"
@@ -112,10 +135,11 @@ const STORE = "casts";
 
 /**
  * The stored record's version: another is unreadable, never migrated by
- * guessing. Version 1 kept no shares and version 2 no receipts; no build
- * wrote either, since none recorded a cast before it delivered.
+ * guessing. Version 1 kept no shares, version 2 no receipts and version 3
+ * no receipts' board entries; no build wrote any of them, since none
+ * recorded a cast before it delivered.
  */
-const RECORD_VERSION = 3;
+const RECORD_VERSION = 4;
 
 /** The length of an ML-KEM-768 message `m` ([[share-encryption]], Ciphertext). */
 const M_LENGTH = 32;
@@ -206,11 +230,12 @@ function receiptFits(record: BallotRecordV3, seat: number, receipt: Uint8Array):
 /**
  * Copies of stored `shares` if they are exactly the qualified seats' of
  * `record`: one per seat whose share hash isn't zero, in seat order, each a
- * ciphertext hashing to that share hash with either a 32-byte `m` and no
- * receipt or a receipt fitting the ballot and no `m`; `undefined`
- * otherwise. So a cast kept here carries a share for every seat its ballot
- * must be delivered to and none it doesn't name, and never both a seat's
- * receipt and its `m_i` (T-25, T-38).
+ * ciphertext hashing to that share hash with either a 32-byte `m`, no
+ * receipt and no board entry, or a receipt fitting the ballot, no `m`, and
+ * a board entry carrying a receipt that fits the ballot for that seat or
+ * none; `undefined` otherwise. So a cast kept here carries a share for
+ * every seat its ballot must be delivered to and none it doesn't name, and
+ * never both a seat's receipt and its `m_i` (T-25, T-38).
  */
 function sharesFor(record: BallotRecordV3, shares: unknown): KeptShare[] | undefined {
   // A cloned array keeps any extra own properties: only the indices are a record's.
@@ -223,9 +248,9 @@ function sharesFor(record: BallotRecordV3, shares: unknown): KeptShare[] | undef
   for (let i = 0; i < seats.length; i++) {
     const share: unknown = shares[i];
     const expected = seats[i] as (typeof seats)[number];
-    if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m", "receipt"]))
+    if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m", "receipt", "boarded"]))
       return undefined;
-    const { seat, ciphertext, m, receipt } = share;
+    const { seat, ciphertext, m, receipt, boarded } = share;
     if (
       seat !== expected.seat ||
       !(ciphertext instanceof Uint8Array) ||
@@ -233,16 +258,22 @@ function sharesFor(record: BallotRecordV3, shares: unknown): KeptShare[] | undef
       !equalBytes(shareCiphertextHash(ciphertext), expected.hash)
     )
       return undefined;
-    if (m instanceof Uint8Array && m.length === M_LENGTH && receipt === null)
+    if (m instanceof Uint8Array && m.length === M_LENGTH && receipt === null && boarded === null)
       copies.push({ seat, ciphertext: ciphertext.slice(), m: m.slice() });
     else if (
       m === null &&
       receipt instanceof Uint8Array &&
       receipt.length <= MAX_BOARD_PAYLOAD &&
       receiptFits(record, seat, receipt)
-    )
-      copies.push({ seat, ciphertext: ciphertext.slice(), receipt: receipt.slice() });
-    else return undefined;
+    ) {
+      const copy = { seat, ciphertext: ciphertext.slice(), receipt: receipt.slice() };
+      if (boarded === null) copies.push(copy);
+      else {
+        const entry = receiptEntryOf(boarded, record, seat);
+        if (entry === undefined) return undefined;
+        copies.push({ ...copy, boarded: entry });
+      }
+    } else return undefined;
   }
   return copies;
 }
@@ -253,6 +284,10 @@ const storedShare = (share: KeptShare) => ({
   ciphertext: share.ciphertext.slice(),
   m: "m" in share ? share.m.slice() : null,
   receipt: "receipt" in share ? share.receipt.slice() : null,
+  boarded:
+    "receipt" in share && share.boarded !== undefined
+      ? { entry: share.boarded.entry.slice(), link: share.boarded.link.slice() }
+      : null,
 });
 
 // Where a board entry's fields sit (docs/spec/board.md): after the record
@@ -264,20 +299,36 @@ const ENTRY_PAYLOAD_LENGTH = 3 + 32 + 8 + 4;
 /** The election a board entry names: what `checkBoarded` compared, read again from the stored bytes. */
 const entryElection = (entry: Uint8Array) => entry.subarray(ENTRY_ELECTION, ENTRY_ELECTION + 32);
 
-function boardedOf(v: unknown, ballot: Uint8Array): Boarded | undefined {
+/**
+ * A stored entry and link whose entry carries a payload `fits` passes, of at
+ * most `MAX_BOARD_PAYLOAD` bytes, as copies; `undefined` otherwise.
+ */
+function entryOf(v: unknown, fits: (payload: Uint8Array) => boolean): Boarded | undefined {
   if (!isRecord(v) || !hasExactly(v, ["entry", "link"])) return undefined;
   const { entry, link } = v;
   if (!(link instanceof Uint8Array) || link.length !== 32) return undefined;
-  // The entry carries exactly the ballot, so its length is fixed by it, and
-  // its payload is the ballot's bytes: a store that holds another entry
-  // beside this cast is unreadable, not this cast's answer.
-  if (!(entry instanceof Uint8Array) || entry.length !== ballot.length + BOARD_ENTRY_OVERHEAD)
+  if (
+    !(entry instanceof Uint8Array) ||
+    entry.length < BOARD_ENTRY_OVERHEAD ||
+    entry.length > MAX_BOARD_PAYLOAD + BOARD_ENTRY_OVERHEAD
+  )
     return undefined;
   const length = new DataView(entry.buffer, entry.byteOffset).getUint32(ENTRY_PAYLOAD_LENGTH);
-  if (length !== ballot.length || !equalBytes(entry.subarray(BOARD_ENTRY_OVERHEAD), ballot))
-    return undefined;
+  const payload = entry.subarray(BOARD_ENTRY_OVERHEAD);
+  if (length !== payload.length || !fits(payload)) return undefined;
   return { entry: entry.slice(), link: link.slice() };
 }
+
+// The entry carries exactly the ballot, so its payload is the ballot's
+// bytes: a store that holds another entry beside this cast is unreadable,
+// not this cast's answer.
+const boardedOf = (v: unknown, ballot: Uint8Array) =>
+  entryOf(v, (payload) => equalBytes(payload, ballot));
+
+// The entry carries a receipt for `seat` of exactly this ballot, whose
+// signature the worker passed before it was kept, as the kept receipt's.
+const receiptEntryOf = (v: unknown, record: BallotRecordV3, seat: number) =>
+  entryOf(v, (payload) => receiptFits(record, seat, payload));
 
 /** What a cast asked the worker for: the poll, the voter's cell and the L1 block its ballot names. */
 export interface CastAsked {
@@ -307,6 +358,14 @@ export function castAsAsked(ballot: Uint8Array, asked: CastAsked): boolean {
     equalBytes(decoded.l1_ref_hash, asked.l1Hash)
   );
 }
+
+/** Every board entry a cast keeps: its ballot's, then its receipts'. */
+const entriesOf = (cast: CastRecord): Boarded[] => [
+  ...(cast.boarded === undefined ? [] : [cast.boarded]),
+  ...cast.shares.flatMap((share) =>
+    "receipt" in share && share.boarded !== undefined ? [share.boarded] : [],
+  ),
+];
 
 /** The definition hash a decoded ballot record names, after its header. */
 const definitionOf = (ballot: Uint8Array) => ballot.subarray(3, 35);
@@ -339,6 +398,7 @@ export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
   // A cloned array keeps any extra own properties: only the indices are a record's.
   if (!Array.isArray(casts) || Object.keys(casts).length !== casts.length) return undefined;
   const parsed: CastRecord[] = [];
+  let election: Uint8Array | undefined;
   // Indexed, not `map`: that skips a list's holes.
   for (let i = 0; i < casts.length; i++) {
     const cast = castOf(casts[i]);
@@ -350,13 +410,11 @@ export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
     const first = parsed[0];
     if (first !== undefined && !equalBytes(definitionOf(cast.ballot), definitionOf(first.ballot)))
       return undefined;
-    const answered = parsed.find((c) => c.boarded !== undefined)?.boarded;
-    if (
-      answered !== undefined &&
-      cast.boarded !== undefined &&
-      !equalBytes(entryElection(cast.boarded.entry), entryElection(answered.entry))
-    )
-      return undefined;
+    // Every entry kept, a ballot's or a receipt's, names the same election.
+    for (const { entry } of entriesOf(cast)) {
+      election ??= entryElection(entry);
+      if (!equalBytes(entryElection(entry), election)) return undefined;
+    }
     parsed.push(cast);
   }
   return parsed;
@@ -521,14 +579,17 @@ export function withCast(
   const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
   if (decoded === undefined || ballot.length > MAX_BOARD_PAYLOAD)
     throw new TypeError("not a version-3 ballot record");
-  // A receipt an earlier cast keeps for `seat` that also receipts this one.
-  const carried = (seat: number) =>
+  // An earlier cast's share for `seat` whose receipt also receipts this
+  // one, with the board entry kept for it, if any: it receipts the same
+  // ballot hash, so it carries this one's receipt too.
+  const carriedShare = (seat: number) =>
     casts
       .flatMap((cast) => cast.shares)
       .find(
         (held): held is Extract<KeptShare, { receipt: Uint8Array }> =>
           held.seat === seat && "receipt" in held && receiptFits(decoded, seat, held.receipt),
-      )?.receipt;
+      );
+  const carried = (seat: number) => carriedShare(seat)?.receipt;
   // In the form `sharesFor` reads: a share without `m` takes its carried
   // receipt, or none (`unreceipted` below); `shape` stands an `m` in its
   // place, so the shares are judged in full before anything is read.
@@ -536,10 +597,11 @@ export function withCast(
     Array.isArray(shares)
       ? shares.map((share: unknown) => {
           if (!isRecord(share)) return null;
-          if (hasExactly(share, ["seat", "ciphertext", "m"])) return { ...share, receipt: null };
+          if (hasExactly(share, ["seat", "ciphertext", "m"]))
+            return { ...share, receipt: null, boarded: null };
           if (!hasExactly(share, ["seat", "ciphertext"]) || typeof share["seat"] !== "number")
             return null;
-          return { ...share, ...missing(share["seat"]) };
+          return { ...share, ...missing(share["seat"]), boarded: null };
         })
       : shares;
   const shape = asStored(() => ({ m: new Uint8Array(M_LENGTH), receipt: null }));
@@ -558,11 +620,18 @@ export function withCast(
   );
   if (kept === undefined) return "unreceipted";
   const receipted = kept.map((share): KeptShare => {
-    if (!("m" in share)) return share;
-    const receipt = carried(share.seat);
-    return receipt === undefined
-      ? share
-      : { seat: share.seat, ciphertext: share.ciphertext, receipt: receipt.slice() };
+    const held = carriedShare(share.seat);
+    if (held === undefined) return share;
+    const { ciphertext } = share;
+    const receipt = held.receipt.slice();
+    return held.boarded === undefined
+      ? { seat: share.seat, ciphertext, receipt }
+      : {
+          seat: share.seat,
+          ciphertext,
+          receipt,
+          boarded: { entry: held.boarded.entry.slice(), link: held.boarded.link.slice() },
+        };
   });
   return [...casts, { ballot: ballot.slice(), l1Number, shares: receipted }];
 }
@@ -679,4 +748,94 @@ export async function recordBoarded(
         : "conflict";
     return casts.with(at, { ...cast, boarded: answer });
   });
+}
+
+/**
+ * The receipted seats of the cast whose bytes are exactly `ballot` whose
+ * receipt no kept board entry carries yet, in seat order, as copies: what
+ * the client submits through the operator's board path once the ballot is
+ * boarded ([[delivery]], Client rule 3). None for a ballot no cast has.
+ */
+export function unboardedReceipts(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+): UnboardedReceipt[] {
+  const cast = casts.find((c) => equalBytes(c.ballot, ballot));
+  return (cast?.shares ?? []).flatMap((share) =>
+    "receipt" in share && share.boarded === undefined
+      ? [{ seat: share.seat, receipt: share.receipt.slice() }]
+      : [],
+  );
+}
+
+/**
+ * `casts` with `boarded`, the operator's checked board entry for a receipt
+ * of `checked`'s seat, kept beside that seat's receipt in every cast it
+ * receipts: the cast whose bytes are exactly `ballot` and any recast of the
+ * same seal ([[delivery]], Client rule 3). `checked` is the entry's own
+ * payload, which the worker passed for the ballot under the poll's
+ * registered keys: this device's receipt, or an earlier one the board path
+ * already carried for the seat (Boarding, rule 5). A share already holding
+ * an entry keeps its first, which passed as well. `missing` if no cast has
+ * these bytes with that seat receipted. Throws on an entry whose payload
+ * isn't `checked`'s receipt, or on a receipt that doesn't name the seat
+ * and exactly this ballot, which the page never passes on.
+ */
+export function withReceiptBoarded(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+  checked: CheckedReceipt,
+  boarded: Boarded,
+): CastRecord[] | "missing" {
+  const { seat, receipt } = checked;
+  const decoded = ballot instanceof Uint8Array ? decodedOf(ballot) : undefined;
+  const entry =
+    decoded === undefined || !(receipt instanceof Uint8Array)
+      ? undefined
+      : entryOf({ entry: boarded.entry, link: boarded.link }, (payload) =>
+          equalBytes(payload, receipt),
+        );
+  if (decoded === undefined || entry === undefined || !receiptFits(decoded, seat, receipt))
+    throw new TypeError("not a board entry of a receipt for this ballot");
+  const holds = (cast: CastRecord) =>
+    cast.shares.some((share) => share.seat === seat && "receipt" in share);
+  if (!casts.some((cast) => equalBytes(cast.ballot, ballot) && holds(cast))) return "missing";
+  return casts.map((cast) => {
+    const at = cast.shares.findIndex(
+      (share) => share.seat === seat && "receipt" in share && share.boarded === undefined,
+    );
+    const share = cast.shares[at];
+    if (share === undefined || !("receipt" in share)) return cast;
+    // Every cast held decoded when it was read.
+    const record = decodedOf(cast.ballot) as BallotRecordV3;
+    if (!receiptFits(record, seat, receipt)) return cast;
+    return {
+      ...cast,
+      shares: cast.shares.with(at, {
+        ...share,
+        boarded: { entry: entry.entry.slice(), link: entry.link.slice() },
+      }),
+    };
+  });
+}
+
+/**
+ * Records the operator's checked board entry for a receipt
+ * (`withReceiptBoarded`) in `electionId` at `tier`. Throws as
+ * `withReceiptBoarded` does, and on an entry naming another election,
+ * before reading.
+ */
+export async function recordReceiptBoarded(
+  electionId: Uint8Array,
+  tier: number,
+  ballot: Uint8Array,
+  checked: CheckedReceipt,
+  boarded: Boarded,
+  factory: IDBFactory = indexedDB,
+): Promise<RecordReceiptOutcome> {
+  const key = keyOf(electionId, tier);
+  withReceiptBoarded([], ballot, checked, boarded);
+  if (!equalBytes(entryElection(boarded.entry), electionId))
+    throw new TypeError("not a board entry for this election");
+  return updateCasts(key, factory, (casts) => withReceiptBoarded(casts, ballot, checked, boarded));
 }

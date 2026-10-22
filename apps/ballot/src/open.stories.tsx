@@ -1703,6 +1703,43 @@ export const PostingRecordChanged: Story = {
   },
 };
 
+export const PostingStoredReceiptRefused: Story = {
+  name: "A receipt another tab kept that fails the worker's check again sends nothing",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      receipts: (receipt) =>
+        receipt[1] === 3 && receipt[2] === 0xff
+          ? { ok: false, problem: "refused" }
+          : passes(receipt),
+      heldAfterRecord: {
+        kind: "read",
+        casts: [
+          {
+            ballot: CAST.ballot,
+            l1Number: L1.number,
+            shares: [
+              { seat: 1, ciphertext: new Uint8Array(4).fill(1), receipt: Uint8Array.of(0xec, 1) },
+              {
+                seat: 3,
+                ciphertext: new Uint8Array(4).fill(3),
+                receipt: Uint8Array.of(0xec, 3, 0xff),
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // A stored receipt taken on trust would board the ballot with the seat undelivered (T-25).
+    await castInto(canvas, "This device's record of your ballots can't be read");
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(mocks(args.source).post).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingNotNeeded: Story = {
   name: "A seat another tab receipted since is never posted: the ballot is sent",
   args: {

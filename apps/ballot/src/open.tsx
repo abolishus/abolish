@@ -1078,7 +1078,14 @@ export function Ballot({
     try {
       for (const seat of undelivered) {
         const kept = cast.shares.find((share) => share.seat === seat.seat);
-        if (kept !== undefined && "receipt" in kept) continue;
+        if (kept !== undefined && "receipt" in kept) {
+          // Kept by another tab, which the worker passed there; checked again
+          // here, since a stored receipt taken on trust would board this
+          // ballot with the seat undelivered (T-18, T-25).
+          const checked = await source.receipt(ballot, kept.receipt);
+          if (!checked.ok || checked.checked.seat !== seat.seat) return stopped("casts-unreadable");
+          continue;
+        }
         // Erased since (a decline or the cutoff in another tab), or not the
         // ciphertext delivered: nothing is posted from this record.
         if (kept === undefined || !("m" in kept) || !equalBytes(kept.ciphertext, seat.ciphertext))
@@ -1095,7 +1102,10 @@ export function Ballot({
       passed = true;
       return { sending: { ...sending, undelivered: left }, shares };
     } finally {
-      if (!passed) for (const { m } of shares) m.fill(0);
+      // Every other `m` this read handed out goes now; the shares' go once used.
+      const used = new Set(passed ? shares.map(({ m }) => m) : []);
+      for (const { shares: kept } of read.casts)
+        for (const share of kept) if ("m" in share && !used.has(share.m)) share.m.fill(0);
     }
   }
 

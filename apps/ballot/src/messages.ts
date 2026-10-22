@@ -313,7 +313,7 @@ const enUS = {
     "This device hands the same sealed parts to the trustees again, so nothing counts twice. Wait a minute first.",
   postingPostTitle: "Post the missing parts publicly",
   postingPostExplained:
-    "The missing parts go on the public record with the key to their outer seal, so the trustees can open them without having taken them. Your vote stays secret today, but those parts lose their long-term protection: anyone who later breaks today's encryption can read them, and if enough of your ballot's parts are posted to open it, they can read your whole ballot.",
+    "The missing parts go on the public record with the key to their outer seal, so the trustees can open them without having taken them. Your vote stays secret today, but those parts lose their long-term protection: anyone who later breaks today's encryption can read them, and if enough of your ballot's parts are posted to open it, they can read your whole ballot. This can't be undone.",
   postingPost: "Post publicly, then send",
   postingDeclineTitle: "Leave this ballot",
   postingDeclineExplained:

@@ -372,12 +372,12 @@ const email = createEmailHandler({
   origin,
   log: write,
 });
-const phoneVerification = phoneService();
+const phoneProvider = phoneService();
 const phone = createPhoneHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
   // Off, no number goes to the provider: the routes answer as unconfigured.
-  service: env.PHONE_VERIFICATION === "on" ? phoneVerification : undefined,
+  service: env.PHONE_VERIFICATION === "on" ? phoneProvider : undefined,
   turnstile,
   origin,
   log: write,
@@ -401,12 +401,12 @@ if (emailVerification !== undefined && (await checkEmailKeys(sql, emailVerificat
   throw new Error(
     "EMAIL_HASH_KEYS or EMAIL_BOX_KEYS: a key differs from the one its ID was first seen with",
   );
-if (phoneVerification !== undefined && (await checkPhoneKeys(sql, phoneVerification.keys)) > 0)
+if (phoneProvider !== undefined && (await checkPhoneKeys(sql, phoneProvider.keys)) > 0)
   throw new Error("PHONE_HASH_KEYS: a key differs from the one its ID was first seen with");
 const prune = startAccountPrune({
   sql,
   log: write,
-  ...(phoneVerification === undefined ? {} : { phoneKeys: phoneVerification.keys }),
+  ...(phoneProvider === undefined ? {} : { phoneKeys: phoneProvider.keys }),
   ...(emailVerification === undefined ? {} : { emailKeys: emailVerification.keys }),
 });
 const analytics =

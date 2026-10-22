@@ -192,6 +192,8 @@ describe("schema", () => {
       ["account_poll_submissions", "INSERT,SELECT"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_sessions", "DELETE,INSERT,SELECT,UPDATE"],
+      // Plus UPDATE of the key and B (tier0-tokens.test.ts).
+      ["account_tokens", "DELETE,INSERT,SELECT"],
       ["account_users", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_verifications", "DELETE,INSERT,SELECT,UPDATE"],
     ]);

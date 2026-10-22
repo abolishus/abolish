@@ -288,6 +288,19 @@ export {
   TURNSTILE_ACTION_TIER0,
 } from "./tier0-registration.ts";
 export {
+  issueTier0Token,
+  markDeadTier0Tokens,
+  parseTier0IssuerKeys,
+  type Tier0IssuanceErrorCode,
+  Tier0IssuanceError,
+  type Tier0IssuanceRequest,
+  type Tier0Issuer,
+  tier0Issuer,
+  type Tier0IssuerKey,
+  type Tier0IssuerKeys,
+  type Tier0IssuerOptions,
+} from "./tier0-tokens.ts";
+export {
   TIER1_BATCH_LOCK_MS,
   TIER1_RELAY_GAS_LIMIT,
   TIER1_RELAY_MAX_BATCH,

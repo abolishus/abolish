@@ -126,6 +126,7 @@ Sybil resistance is the core problem: if one person can vote many times, results
 | [[T-20]] | Account-to-identity linkage through the recovery backup  | A-2, A-1       | Planned        |
 | [[T-21]] | Tier 2 proof front-running and trust roots               | A-9, A-1, A-6  | Needs decision |
 | [[T-22]] | Tier 1 social graph exposure                             | A-2, A-1, A-10 | Needs design   |
+| [[T-73]] | Verification providers and the number's keyed hash       | A-1, A-2, A-10 | Planned        |
 
 ### Integrity and verifiability (G-7, G-8, G-9)
 

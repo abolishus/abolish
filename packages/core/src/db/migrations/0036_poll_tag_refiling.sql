@@ -5,8 +5,11 @@
 -- log's own sequence under the same lock (src/moderation.ts, lockModeration),
 -- so the poll, profile and refiling logs read as one log in commit order.
 --
--- A row records the tags the poll was refiled under, never the ones it
--- replaces: a place cleared for personal data must not survive in the log.
+-- A row records only what the refiling changed: `topic_set` and `place_set`
+-- say which tags it set, and `topic` and `place` hold a set tag's new value
+-- (NULL when it was cleared). A tag the refiling kept, and the value a set
+-- tag replaced, are never written, so a place cleared for personal data
+-- survives in no row of the log.
 --
 -- Operational, like the rest of the moderation log and poll_tags: a wipe
 -- loses them, never a result (T-53). The log names an election and two
@@ -20,8 +23,13 @@ ALTER TABLE poll_tags DROP CONSTRAINT poll_tags_check;
 CREATE TABLE poll_tag_actions (
   seq bigint PRIMARY KEY CHECK (seq >= 1),
   election_id bytea NOT NULL CHECK (octet_length(election_id) = 32),
+  topic_set boolean NOT NULL,
   topic text CHECK (topic ~ '^[a-z]{1,16}$'),
+  place_set boolean NOT NULL,
   place text CHECK (char_length(place) BETWEEN 1 AND 80),
+  CHECK (topic_set OR place_set),
+  CHECK (topic IS NULL OR topic_set),
+  CHECK (place IS NULL OR place_set),
   reason text NOT NULL CHECK (
     reason IN (
       'misfiled', 'illegal', 'personal-data', 'threat', 'harassment', 'spam', 'impersonation',

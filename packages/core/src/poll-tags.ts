@@ -147,21 +147,23 @@ export interface RefileDecision {
   readonly moderator: string;
 }
 
-const sameTags = (a: PollTags, b: PollTags) => a.topic === b.topic && a.place === b.place;
-
 /**
  * Files `electionId`'s poll under `decision.tags`, replacing whatever it was
  * filed under (its author's tags, an earlier refiling's, or none), and
  * returns the refiling's log sequence number. Taken under the moderation
  * lock and dated by the database clock, as `moderate` does, so its number
- * orders it among every other decision. A poll refiled under neither tag
+ * orders it among every other decision. The log records only the tags it
+ * set, never one it kept or the value it replaced (migration 0036), so a
+ * moderator changing only the topic must pass the place back, and it isn't
+ * logged. A poll refiled under neither tag
  * keeps an empty row, so a later opening step or `fillPollTags` never puts
  * its author's tags back. Refused, with nothing written, as `moderate`
  * refuses: malformed (`invalid`: tags no draft could hold, a reason outside
  * `REFILE_REASONS`, a bad handle), an election with no stored definition
  * (`unknown-election`), a handle that isn't an active moderator's
  * (`unknown-moderator`), a moderator refiling a poll their account created
- * (`own-poll`), and tags the poll is already filed under (`no-change`). As
+ * (`own-poll`), and tags the poll is already filed under (`no-change`; a
+ * poll with no row is filed under nothing, so even `{}` files it). As
  * for `moderate`, the app role can write the table directly, so the rules
  * hold for the tooling, not against an insider (T-68).
  */
@@ -201,19 +203,38 @@ export async function refilePoll(
       const account = await moderatorAccount(tx, moderator);
       if (account === undefined) throw new ModerationError("unknown-moderator");
       if (await createdBy(tx, id, account)) throw new ModerationError("own-poll");
-      if (sameTags(await tagsOf(tx, id), tags)) throw new ModerationError("no-change");
-      await tx
+      // An empty row first, if the poll has none, so an opening step
+      // writing its author's tags meanwhile waits for this transaction and
+      // then leaves the row alone; then the row, locked, is what this
+      // refiling changes.
+      const created = await tx
         .insert(pollTags)
-        .values({ electionId: id, ...columns(tags) })
-        .onConflictDoUpdate({ target: pollTags.electionId, set: columns(tags) });
+        .values({ electionId: id })
+        .onConflictDoNothing({ target: pollTags.electionId })
+        .returning({ electionId: pollTags.electionId });
+      const [current] = await tx
+        .select({ topic: pollTags.topic, place: pollTags.place })
+        .from(pollTags)
+        .where(eq(pollTags.electionId, id))
+        .for("update");
+      // A poll with no row is filed under nothing yet, so every refiling of
+      // it sets both tags, even to none.
+      const topicSet = created.length > 0 || (current?.topic ?? undefined) !== tags.topic;
+      const placeSet = created.length > 0 || (current?.place ?? undefined) !== tags.place;
+      if (!topicSet && !placeSet) throw new ModerationError("no-change");
+      await tx.update(pollTags).set(columns(tags)).where(eq(pollTags.electionId, id));
       const [row] = await tx
         .insert(pollTagActions)
         .values({
           // The insert trigger draws `seq` from the poll log's sequence.
           seq: 0n,
           electionId: id,
-          topic: tags.topic ?? null,
-          place: tags.place ?? null,
+          // Only what changed: never a kept tag, or the value a set one
+          // replaced (migration 0036).
+          topicSet,
+          topic: topicSet ? (tags.topic ?? null) : null,
+          placeSet,
+          place: placeSet ? (tags.place ?? null) : null,
           reason,
           moderator,
           decidedAt,
@@ -222,7 +243,7 @@ export async function refilePoll(
       // INSERT … RETURNING yields exactly the one row inserted.
       return { seq: row!.seq };
     },
-    // The tags must be read after the lock is taken, as `moderate` reads
+    // The row must be read after the lock is taken, as `moderate` reads
     // the newest decisions: a snapshot older than the lock could miss a
     // refiling and record one that changes nothing.
     { isolationLevel: "read committed" },

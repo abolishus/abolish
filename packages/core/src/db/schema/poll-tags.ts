@@ -1,4 +1,4 @@
-import { bigint, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0035_poll_tags.sql; a test checks the two agree.
@@ -18,7 +18,9 @@ export const pollTags = pgTable("poll_tags", {
 export const pollTagActions = pgTable("poll_tag_actions", {
   seq: bigint("seq", { mode: "bigint" }).primaryKey(),
   electionId: bytea("election_id").notNull(),
+  topicSet: boolean("topic_set").notNull(),
   topic: text("topic"),
+  placeSet: boolean("place_set").notNull(),
   place: text("place"),
   reason: text("reason").notNull(),
   moderator: text("moderator").notNull(),

@@ -255,24 +255,33 @@ describe("schema", () => {
     }
     // Whatever number an insert names, the trigger draws the next one.
     const [written] = await app`
-      INSERT INTO poll_tag_actions (seq, election_id, topic, place, reason, moderator, decided_at)
-      VALUES (1, ${id}, 'food', NULL, 'misfiled', 'mod-1', now()) RETURNING seq`;
+      INSERT INTO poll_tag_actions
+        (seq, election_id, topic_set, topic, place_set, place, reason, moderator, decided_at)
+      VALUES (1, ${id}, true, 'food', false, NULL, 'misfiled', 'mod-1', now()) RETURNING seq`;
     const [last] = await app`SELECT max(seq) AS seq FROM moderation_actions`;
     expect(BigInt(written!["seq"])).toBeGreaterThan(1n);
     expect(BigInt(written!["seq"])).toBeGreaterThan(BigInt(last!["seq"] ?? 0));
     const insert = (
+      topicSet: boolean,
       topic: string | null,
+      placeSet: boolean,
       place: string | null,
-      reason: string,
-      moderator: string,
+      reason = "misfiled",
+      moderator = "mod-1",
     ) =>
       failsWith(app`
-        INSERT INTO poll_tag_actions (seq, election_id, topic, place, reason, moderator, decided_at)
-        VALUES (0, ${id}, ${topic}, ${place}, ${reason}, ${moderator}, now())`);
-    expect(await insert("food", null, "error", "mod-1")).toBe("23514");
-    expect(await insert("food", null, "misfiled", "Mod-1")).toBe("23514");
-    expect(await insert("Food", null, "misfiled", "mod-1")).toBe("23514");
-    expect(await insert(null, "", "misfiled", "mod-1")).toBe("23514");
+        INSERT INTO poll_tag_actions
+          (seq, election_id, topic_set, topic, place_set, place, reason, moderator, decided_at)
+        VALUES (0, ${id}, ${topicSet}, ${topic}, ${placeSet}, ${place}, ${reason}, ${moderator},
+          now())`);
+    expect(await insert(true, "food", false, null, "error")).toBe("23514");
+    expect(await insert(true, "food", false, null, "misfiled", "Mod-1")).toBe("23514");
+    expect(await insert(true, "Food", false, null)).toBe("23514");
+    expect(await insert(false, null, true, "")).toBe("23514");
+    // A row sets at least one tag, and holds a value only for a tag it set.
+    expect(await insert(false, null, false, null)).toBe("23514");
+    expect(await insert(false, "food", true, null)).toBe("23514");
+    expect(await insert(true, null, false, "Mill Lane")).toBe("23514");
   });
 });
 
@@ -419,6 +428,13 @@ const refused = async (
   expect(await app`SELECT count(*)::int AS n FROM poll_tag_actions`).toEqual([count]);
 };
 
+const logged = async (id: Uint8Array) =>
+  (
+    await app`
+      SELECT topic_set, topic, place_set, place, reason, moderator
+      FROM poll_tag_actions WHERE election_id = ${id} ORDER BY seq`
+  ).map((r) => ({ ...r }));
+
 describe("refiling", () => {
   test("changes a poll's tags, and the listing's filters follow", async () => {
     const t = hex(randomBytes(4));
@@ -436,17 +452,55 @@ describe("refiling", () => {
     expect(await listed({ topic: "housing" })).not.toContain(hex(id));
     expect(await listed({ topic: "transport" })).toContain(hex(id));
     // The log keeps the new tags, never the place it replaced.
-    const logged = await app`
-      SELECT election_id, topic, place, reason, moderator FROM poll_tag_actions WHERE seq = ${seq.toString()}`;
-    expect(logged.map((r) => ({ ...r, election_id: hex(r["election_id"]) }))).toEqual([
+    expect(
+      await app`SELECT election_id FROM poll_tag_actions WHERE seq = ${seq.toString()}`,
+    ).toEqual([{ election_id: Buffer.from(id) }]);
+    expect(await logged(id)).toEqual([
       {
-        election_id: hex(id),
+        topic_set: true,
         topic: "transport",
+        place_set: true,
         place: `Ward ${t}`,
         reason: "personal-data",
         moderator: "mod-1",
       },
     ]);
+  });
+
+  test("logs only what it changed, so a place it kept and then cleared survives in no row", async () => {
+    const place = `14 Elm Street ${hex(randomBytes(4))}`;
+    const id = await poll({ topic: "food", place });
+    // A topic-only refiling passes the place back, and doesn't log it.
+    await refilePoll(app, id, {
+      tags: { topic: "housing", place },
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    await refilePoll(app, id, {
+      tags: { topic: "housing" },
+      reason: "personal-data",
+      moderator: "mod-2",
+    });
+    expect(await logged(id)).toEqual([
+      {
+        topic_set: true,
+        topic: "housing",
+        place_set: false,
+        place: null,
+        reason: "misfiled",
+        moderator: "mod-1",
+      },
+      {
+        topic_set: false,
+        topic: null,
+        place_set: true,
+        place: null,
+        reason: "personal-data",
+        moderator: "mod-2",
+      },
+    ]);
+    expect(await app`SELECT 1 FROM poll_tag_actions WHERE place = ${place}`).toEqual([]);
+    expect(await row(id)).toEqual([{ topic: "housing", place: null, place_key: null }]);
   });
 
   test("files an untagged poll, clears both tags, and keeps only the two tags of the decision", async () => {
@@ -463,6 +517,45 @@ describe("refiling", () => {
     expect(await insertPollTags(app, id, { topic: "food" })).toBe(false);
     expect(await row(id)).toEqual([{ topic: null, place: null, place_key: null }]);
     expect(await listed({ placeKey: "mill lane" })).not.toContain(hex(id));
+    // A poll with no row is filed under nothing yet: even no tags file it.
+    const unfiled = await poll({});
+    await refilePoll(app, unfiled, { tags: {}, reason: "personal-data", moderator: "mod-1" });
+    expect(await row(unfiled)).toEqual([{ topic: null, place: null, place_key: null }]);
+    expect(await insertPollTags(app, unfiled, { place: "Mill Lane" })).toBe(false);
+    expect(await logged(unfiled)).toEqual([
+      {
+        topic_set: true,
+        topic: null,
+        place_set: true,
+        place: null,
+        reason: "personal-data",
+        moderator: "mod-1",
+      },
+    ]);
+  });
+
+  test("against an opening step writing the author's tags at once, either one files the poll and nothing is logged twice", async () => {
+    for (let i = 0; i < 5; i++) {
+      const id = await poll({});
+      const other = await db.as("abolish_app");
+      const [refiled, inserted] = await Promise.all([
+        refilePoll(app, id, {
+          tags: { topic: "sport" },
+          reason: "misfiled",
+          moderator: "mod-1",
+        }).then(
+          () => "ok",
+          (e: unknown) => (e as ModerationError).code,
+        ),
+        insertPollTags(other, id, { topic: "sport" }),
+      ]);
+      await other.end();
+      expect(await row(id)).toEqual([{ topic: "sport", place: null, place_key: null }]);
+      // The refiling waited for the step's row and found nothing to change,
+      // or the step found the refiling's row and wrote nothing.
+      expect(inserted).toBe(refiled !== "ok");
+      expect((await logged(id)).length).toBe(refiled === "ok" ? 1 : 0);
+    }
   });
 
   test("takes its number from the poll log's sequence, between decisions about polls and profiles", async () => {
@@ -535,18 +628,33 @@ describe("refiling", () => {
         }),
         async (author, refilings) => {
           const id = await poll(author);
-          let model: PollTags = author;
+          // A poll filed under nothing has no row, so its first refiling
+          // sets both tags whatever they are.
+          let model: PollTags | undefined =
+            author.topic === undefined && author.place === undefined ? undefined : author;
+          const want: Record<string, unknown>[] = [];
           for (const [tags, reason] of refilings) {
-            const same = tags.topic === model.topic && tags.place === model.place;
+            const topicSet = model === undefined || tags.topic !== model.topic;
+            const placeSet = model === undefined || tags.place !== model.place;
             const result = await refilePoll(app, id, { tags, reason, moderator: "mod-1" }).then(
               () => "ok",
               (e: unknown) => (e as ModerationError).code,
             );
-            expect(result).toBe(same ? "no-change" : "ok");
-            if (!same) model = tags;
+            expect(result).toBe(topicSet || placeSet ? "ok" : "no-change");
+            if (!topicSet && !placeSet) continue;
+            model = tags;
+            want.push({
+              topic_set: topicSet,
+              topic: topicSet ? (tags.topic ?? null) : null,
+              place_set: placeSet,
+              place: placeSet ? (tags.place ?? null) : null,
+              reason,
+              moderator: "mod-1",
+            });
           }
+          expect(await logged(id)).toEqual(want);
           const view = await readPollTags(app, id);
-          expect(view).toEqual({ state: "visible", tags: model });
+          expect(view).toEqual({ state: "visible", tags: model ?? {} });
         },
       ),
       { numRuns: Math.min(numRuns, 50) },

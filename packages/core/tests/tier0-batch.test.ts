@@ -879,5 +879,7 @@ describe("the queue's state", () => {
       ),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Up to 50 runs of 25 operations, each through Redis and the batch job:
+    // seconds on a shared runner, past the default 5 s (seen on #539).
+  }, 60_000);
 });

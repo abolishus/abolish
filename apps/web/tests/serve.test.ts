@@ -6,6 +6,7 @@
 import {
   createAccounts,
   decideAppeal,
+  decideProfileAppeal,
   emailKeys,
   type EmailMessage,
   MAX_REACTION_CHANGES_PER_HOUR,
@@ -14,9 +15,12 @@ import {
   type PhoneVerifier,
   TURNSTILE_HEADER,
   type TurnstileVerdict,
+  makeProfile,
   moderate,
+  moderateProfile,
   newAccountId,
   parseTier0IssuerKeys,
+  readProfileReportQueue,
   tier0Issuer,
   type TurnstileAction,
 } from "@abolishus/core";
@@ -54,6 +58,7 @@ import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
+import { createProfilesHandler } from "../src/node/profiles.ts";
 import { createReactionsHandler } from "../src/node/reactions.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 import { createTokenHandler } from "../src/node/token.ts";
@@ -279,6 +284,11 @@ beforeAll(async () => {
       accountOf: (headers) => accounts.accountOf(headers),
       origin: ORIGIN,
       now: () => NOW,
+    }),
+    profiles: createProfilesHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      origin: ORIGIN,
     }),
     clientDir,
     origin: ORIGIN,
@@ -1048,8 +1058,12 @@ describe("failures", () => {
     ]);
   });
 
-  test("the reaction counts never get the account cookie; own and set do", async () => {
+  test("the reaction counts and a profile's report never get the account cookie; the rest do", async () => {
     const seen: [string, string | null][] = [];
+    const record = async (request: Request) => {
+      seen.push([new URL(request.url).pathname, request.headers.get("cookie")]);
+      return Response.json({});
+    };
     const front = createWebServer({
       start: { fetch: async () => new Response() },
       accounts: async () => new Response(),
@@ -1057,10 +1071,8 @@ describe("failures", () => {
       email: async () => new Response(),
       phone: async () => new Response(),
       token: async () => new Response(),
-      reactions: async (request) => {
-        seen.push([new URL(request.url).pathname, request.headers.get("cookie")]);
-        return Response.json({});
-      },
+      reactions: record,
+      profiles: record,
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1068,7 +1080,14 @@ describe("failures", () => {
     await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
     try {
       const { port } = front.address() as AddressInfo;
-      for (const path of ["/reactions/counts", "/reactions/own", "/reactions/set"])
+      for (const path of [
+        "/reactions/counts",
+        "/reactions/own",
+        "/reactions/set",
+        "/profiles/report",
+        "/profiles/moderation",
+        "/profiles/appeal",
+      ])
         await fetch(`http://127.0.0.1:${port}${path}`, {
           method: "POST",
           headers: {
@@ -1082,6 +1101,9 @@ describe("failures", () => {
         ["/reactions/counts", null],
         ["/reactions/own", `${SESSION}=tok`],
         ["/reactions/set", `${SESSION}=tok`],
+        ["/profiles/report", null],
+        ["/profiles/moderation", `${SESSION}=tok`],
+        ["/profiles/appeal", `${SESSION}=tok`],
       ]);
     } finally {
       await new Promise((resolve) => front.close(resolve));
@@ -1839,6 +1861,7 @@ describe("an account's Tier 0 token under /token", () => {
         now: () => NOW,
       }),
       reactions: async () => new Response(),
+      profiles: async () => new Response(),
       clientDir,
       origin: ORIGIN,
       log: (line) => lines.push(line),
@@ -2112,6 +2135,232 @@ describe("reactions on a poll under /reactions", () => {
   });
 });
 
+describe("a profile's reports and its author's appeals under /profiles", () => {
+  const cookieOf = (b: Browser) => [...b.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+
+  /** A signed-in author with a verified phone, and their profile's handle unless told otherwise. */
+  async function author({ profile = true } = {}) {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(browser) })))!;
+    await sql`
+      INSERT INTO account_phones VALUES (${account}, ${randomBytes(32)}, 'p1',
+        date_trunc('day', now(), 'UTC'))`;
+    const handle = profile
+      ? await makeProfile(sql, account, "Riverside Neighbours", { now: NOW })
+      : undefined;
+    return { browser, handle };
+  }
+
+  /** The handle's pending reports, by ground, as the moderators' queue shows them. */
+  const pendingOf = async (handle: string) =>
+    Object.fromEntries(
+      (await readProfileReportQueue(sql, 1000))
+        .filter((r) => r.handle === handle)
+        .map((r) => [r.reason, r.pending]),
+    );
+
+  let moderators: string[];
+  beforeAll(async () => {
+    const prefix = newAccountId().slice(0, 8);
+    moderators = [`${prefix}-a`, `${prefix}-b`];
+    await addModerators(sql, ...moderators);
+  });
+
+  test("anyone reports a profile by its handle, signed in or not, and nothing names who", async () => {
+    const { browser, handle } = await author();
+    const report = async (b: Browser, reason: string) => {
+      const res = await b.call("POST", "/profiles/report", { handle, reason });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res;
+    };
+    const anyone = new Browser();
+    const sent = await report(anyone, "spam");
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toEqual({});
+    await report(anyone, "spam");
+    // Its own author's report counts the same: the front never hands the
+    // handler the session, so it can't tell (T-10, T-11).
+    expect((await report(browser, "impersonation")).status).toBe(200);
+    expect(await pendingOf(handle!)).toEqual({ spam: 2n, impersonation: 1n });
+
+    // A hidden profile is still reportable, under another ground.
+    await moderateProfile(sql, handle!, {
+      action: "hide",
+      reason: "spam",
+      moderator: moderators[0]!,
+    });
+    expect((await report(anyone, "harassment")).status).toBe(200);
+    expect(await pendingOf(handle!)).toEqual({ spam: 2n, impersonation: 1n, harassment: 1n });
+
+    // T-10, T-11, T-67: the log has the route class, never the handle.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "profiles", status: 200 });
+    expect(JSON.stringify(logged)).not.toContain(handle);
+  });
+
+  test("refuses a report of a handle no profile has, or a malformed one, recording nothing", async () => {
+    const { handle } = await author();
+    const anyone = new Browser();
+    expect(
+      await (
+        await anyone.call("POST", "/profiles/report", { handle: "a".repeat(16), reason: "spam" })
+      ).json(),
+    ).toEqual({ code: "UNKNOWN_PROFILE", status: 404 });
+    for (const bad of [
+      { handle: handle!.toUpperCase(), reason: "spam" },
+      { handle: handle!.slice(1), reason: "spam" },
+      { handle: `${handle!.slice(1)}1`, reason: "spam" },
+      // A restore ground isn't a report's.
+      { handle, reason: "appeal-upheld" },
+      { handle, reason: "Spam" },
+      { handle },
+      { handle, reason: "spam", extra: 1 },
+    ])
+      expect(await (await anyone.call("POST", "/profiles/report", bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    const text = await fetch(`${base}/profiles/report`, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(await text.json()).toEqual({ code: "BAD_REQUEST", status: 400 });
+    expect(await pendingOf(handle!)).toEqual({});
+  });
+
+  test("an author sees their profile's hide, appeals it once and sees the outcome, without a moderator", async () => {
+    const { browser, handle } = await author();
+    const view = async () => {
+      const res = await browser.call("POST", "/profiles/moderation", {});
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.json();
+    };
+    expect(await view()).toEqual({ handle, state: "visible", appealable: false, appeals: [] });
+    expect(await (await browser.call("POST", "/profiles/appeal", {})).json()).toEqual({
+      code: "NOT_APPEALABLE",
+      status: 409,
+    });
+
+    const { seq } = await moderateProfile(sql, handle!, {
+      action: "hide",
+      reason: "impersonation",
+      moderator: moderators[0]!,
+    });
+    const latest = {
+      seq: `${seq}`,
+      action: "hide",
+      reason: "impersonation",
+      decidedAt: expect.any(String),
+    };
+    expect(await view()).toEqual({
+      handle,
+      state: "hidden",
+      latest,
+      appealable: true,
+      appeals: [],
+    });
+
+    const filed = await browser.call("POST", "/profiles/appeal", {});
+    expect(filed.status).toBe(201);
+    expect(await filed.json()).toEqual({ decisionSeq: `${seq}` });
+    expect(await (await browser.call("POST", "/profiles/appeal", {})).json()).toEqual({
+      code: "ALREADY_APPEALED",
+      status: 409,
+    });
+    const pending = await view();
+    expect(pending).toEqual({
+      handle,
+      state: "hidden",
+      latest,
+      appealable: false,
+      appeals: [{ decisionSeq: `${seq}`, filedAt: expect.any(String) }],
+    });
+    expect(JSON.stringify(pending)).not.toContain(moderators[0]);
+
+    const { restoreSeq } = await decideProfileAppeal(sql, seq, "upheld", moderators[1]!);
+    const decided = await view();
+    expect(decided).toEqual({
+      handle,
+      state: "visible",
+      latest: {
+        seq: `${restoreSeq}`,
+        action: "restore",
+        reason: "appeal-upheld",
+        decidedAt: expect.any(String),
+      },
+      appealable: false,
+      appeals: [
+        {
+          decisionSeq: `${seq}`,
+          filedAt: expect.any(String),
+          outcome: "upheld",
+          reviewedAt: expect.any(String),
+        },
+      ],
+    });
+    expect(JSON.stringify(decided)).not.toMatch(new RegExp(moderators.join("|")));
+    expect(JSON.stringify(logged)).not.toContain(handle);
+  });
+
+  test("each author sees only their own profile; signed out, malformed or cross-site calls are refused", async () => {
+    const { browser, handle } = await author();
+    await moderateProfile(sql, handle!, {
+      action: "hide",
+      reason: "spam",
+      moderator: moderators[0]!,
+    });
+    // Another account sees its own profile, never this one's, and can't appeal it.
+    const other = await author();
+    expect(await (await other.browser.call("POST", "/profiles/moderation", {})).json()).toEqual({
+      handle: other.handle,
+      state: "visible",
+      appealable: false,
+      appeals: [],
+    });
+    expect((await other.browser.call("POST", "/profiles/appeal", {})).status).toBe(409);
+    const none = await author({ profile: false });
+    for (const path of ["/profiles/moderation", "/profiles/appeal"]) {
+      expect(await (await none.browser.call("POST", path, {})).json()).toEqual({
+        code: "NO_PROFILE",
+        status: 404,
+      });
+      expect(await (await new Browser().call("POST", path, {})).json()).toEqual({
+        code: "SIGNED_OUT",
+        status: 401,
+      });
+      // The profile is the session's: a handle in the body is refused, not read.
+      for (const bad of [{ handle }, []])
+        expect(await (await browser.call("POST", path, bad)).json()).toEqual({
+          code: "BAD_REQUEST",
+          status: 400,
+        });
+      const post = (headers: Record<string, string>) =>
+        fetch(`${base}${path}`, {
+          method: "POST",
+          headers: { cookie: cookieOf(browser), ...headers },
+          body: "{}",
+        });
+      expect(
+        (await post({ origin: "https://elsewhere.test", "content-type": "application/json" }))
+          .status,
+      ).toBe(403);
+      expect((await post({ "content-type": "application/json" })).status).toBe(403);
+      expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+      expect((await browser.call("POST", `${path}?x=1`, {})).status).toBe(404);
+      expect((await browser.call("GET", path)).status).toBe(404);
+    }
+    expect((await browser.call("POST", "/profiles", {})).status).toBe(404);
+    expect((await browser.call("POST", "/profiles/read", {})).status).toBe(404);
+    // Nothing was appealed by any of it.
+    expect(await (await browser.call("POST", "/profiles/moderation", {})).json()).toMatchObject({
+      appealable: true,
+      appeals: [],
+    });
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -2131,6 +2380,7 @@ describe("limits", () => {
       phone: async () => new Response(null, { status: 404 }),
       token: async () => new Response(null, { status: 404 }),
       reactions: async () => new Response(null, { status: 404 }),
+      profiles: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -2158,6 +2408,7 @@ describe("limits", () => {
       phone: async () => new Response(),
       token: async () => new Response(),
       reactions: async () => new Response(),
+      profiles: async () => new Response(),
       clientDir,
       log: () => {},
     };

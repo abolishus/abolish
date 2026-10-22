@@ -4,7 +4,9 @@
 // e-mail address under /email (src/node/email.ts), its phone number under
 // /phone (src/node/phone.ts), its Tier 0 token under /token
 // (src/node/token.ts), reactions on a poll under /reactions
-// (src/node/reactions.ts), and the client's hashed assets from disk, with
+// (src/node/reactions.ts), a profile's reports and its author's appeals
+// under /profiles (src/node/profiles.ts), and the client's hashed assets
+// from disk, with
 // the web app manifest and its icons (src/app/install.ts), and the offline
 // shell's page and worker, which Start renders (src/app/offline.ts).
 //
@@ -55,6 +57,9 @@ export type TokenHandler = (request: Request) => Promise<Response>;
 /** The reactions handler (`createReactionsHandler(...)` from src/node/reactions.ts). */
 export type ReactionsHandler = (request: Request) => Promise<Response>;
 
+/** The profiles handler (`createProfilesHandler(...)` from src/node/profiles.ts). */
+export type ProfilesHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -65,6 +70,7 @@ export type RouteClass =
   | "phone"
   | "token"
   | "reactions"
+  | "profiles"
   | "asset"
   | "offline"
   | "ingest"
@@ -114,6 +120,7 @@ export interface WebServerOptions {
   readonly phone: PhoneHandler;
   readonly token: TokenHandler;
   readonly reactions: ReactionsHandler;
+  readonly profiles: ProfilesHandler;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -174,14 +181,16 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "phone",
   "token",
   "reactions",
+  "profiles",
 ]);
 
 /**
  * Paths under an account route class that answer anyone alike and never get
  * the cookie: the poll page asks a poll's reaction counts for every visitor,
- * so the session and the poll it names never arrive together (T-11).
+ * so the session and the poll it names never arrive together (T-11), and a
+ * profile's report never names who sent it (T-10, T-11).
  */
-const SESSION_FREE_PATHS: ReadonlySet<string> = new Set(["/reactions/counts"]);
+const SESSION_FREE_PATHS: ReadonlySet<string> = new Set(["/reactions/counts", "/profiles/report"]);
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
@@ -190,6 +199,7 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/phone" || path.startsWith("/phone/")) return "phone";
   if (path === "/token" || path.startsWith("/token/")) return "token";
   if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
+  if (path === "/profiles" || path.startsWith("/profiles/")) return "profiles";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (
@@ -267,6 +277,7 @@ export function createWebServer({
   phone,
   token,
   reactions,
+  profiles,
   clientDir,
   origin,
   log,
@@ -369,7 +380,7 @@ export function createWebServer({
       ...(body === undefined ? {} : { body }),
     });
     if (!ACCOUNT_ROUTES.has(route)) return send(res, await start.fetch(request), method === "HEAD");
-    // The account, drafts, e-mail, phone, token and reactions handlers answer
+    // The account, drafts, e-mail, phone, token, reactions and profiles handlers answer
     // JSON and set few headers of their own (src/security.ts covers pages). A
     // copy: a response's own headers can be immutable.
     const handler =
@@ -383,7 +394,9 @@ export function createWebServer({
               ? phone
               : route === "token"
                 ? token
-                : reactions;
+                : route === "reactions"
+                  ? reactions
+                  : profiles;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");

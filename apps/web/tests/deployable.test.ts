@@ -259,6 +259,14 @@ describe("dist/node/main.mjs", () => {
       expect(await reactions.json()).toEqual({
         counts: { heart: 0, laugh: 0, wow: 0, thinking: 0, sad: 0, clap: 0 },
       });
+      // And the profiles routes, whose report read account_profiles as
+      // abolish_app: a missing table or grant would be a 500.
+      const report = await fetch(`${at}/profiles/report`, {
+        method: "POST",
+        headers: { origin: "https://abolish.test", "content-type": "application/json" },
+        body: JSON.stringify({ handle: "a".repeat(16), reason: "spam" }),
+      });
+      expect(await report.json()).toEqual({ code: "UNKNOWN_PROFILE", status: 404 });
       // Its log: one line per request, by route class, written once each
       // answer is sent.
       await new Promise((r) => setTimeout(r, 100));
@@ -272,6 +280,7 @@ describe("dist/node/main.mjs", () => {
       expect(lines.map((l) => l.route)).toContain("phone");
       expect(lines.map((l) => l.route)).toContain("token");
       expect(lines.map((l) => l.route)).toContain("reactions");
+      expect(lines.map((l) => l.route)).toContain("profiles");
       // No start-up prune of the account tables failed as abolish_app.
       expect(web.out()).not.toContain("AccountPruneFailed");
       expect(web.out()).not.toContain("Tier0TokenDeadMarkFailed");

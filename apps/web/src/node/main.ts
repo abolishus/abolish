@@ -29,6 +29,7 @@ import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
 import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
+import { createProfilesHandler } from "./profiles.ts";
 import { createReactionsHandler } from "./reactions.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
 import { createTokenHandler } from "./token.ts";
@@ -393,6 +394,11 @@ const reactions = createReactionsHandler({
   accountOf: (headers) => accounts.accountOf(headers),
   origin,
 });
+const profiles = createProfilesHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  origin,
+});
 // A key retyped under its ID matches nothing made or rotated under the right
 // bytes, so through it an address or number another account holds would
 // verify again (T-01; the account-keys runbook): an instance holding one
@@ -426,6 +432,7 @@ const server = createWebServer({
   phone,
   token,
   reactions,
+  profiles,
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,

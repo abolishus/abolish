@@ -251,6 +251,123 @@ export const WriteAndSave: Story = {
   },
 };
 
+export const TopicAndPlace: Story = {
+  args: { client: fakeDrafts(), onCreated: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(await canvas.findByRole("textbox", { name: "Title" }), "Ferry name");
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "What do you want to ask?" }),
+      "What should the new ferry be called?",
+    );
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
+    await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
+    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+      target: { value: "2026-11-04" },
+    });
+    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
+    await expect(preview.getByText("Not under any topic or place.")).toBeVisible();
+    // Spacing as pasted is tidied to one line, as the draft will hold it.
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "Place (optional)" }),
+      "  Harbor   Ward ",
+    );
+    await userEvent.selectOptions(
+      canvas.getByRole("combobox", { name: "Topic (optional)" }),
+      "Transport",
+    );
+    await expect(preview.getByText("Harbor Ward")).toBeVisible();
+    await expect(preview.getByText("Transport")).toBeVisible();
+    // The review keeps where it is listed apart from what is recorded for good.
+    const review = within(canvas.getByRole("region", { name: "Check it through" }));
+    const terms = review.getAllByRole("term").map((d) => d.textContent);
+    await expect(terms).toEqual([
+      "Title",
+      "Questions",
+      "Who can answer",
+      "Closes",
+      "Place",
+      "Topic",
+    ]);
+    await expect(review.getByText("November 4, 2026 at 3:00 PM UTC")).toBeVisible();
+    await expect(review.getByText("Harbor Ward")).toBeVisible();
+    await userEvent.click(review.getByRole("link", { name: "Change Topic" }));
+    await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveFocus();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(writes(args.client)[0]![2]).toMatchObject({
+      title: "Ferry name",
+      topic: "transport",
+      place: "Harbor Ward",
+    });
+    // Choosing no topic again sends none.
+    await userEvent.selectOptions(
+      canvas.getByRole("combobox", { name: "Topic (optional)" }),
+      "No topic",
+    );
+    await userEvent.clear(canvas.getByRole("textbox", { name: "Place (optional)" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    const second = writes(args.client)[1]![2];
+    await expect(second).not.toHaveProperty("topic");
+    await expect(second).not.toHaveProperty("place");
+  },
+};
+
+export const PlaceRefused: Story = {
+  args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const place = await canvas.findByRole("textbox", { name: "Place (optional)" });
+    // T-67: a text-direction override could make the place read as other words.
+    fireEvent.change(place, { target: { value: "\u202eedisreviR" } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
+    await expect(
+      within(summary)
+        .getAllByRole("link")
+        .map((l) => l.textContent),
+    ).toEqual([
+      "This holds a hidden character or a text-direction mark a place can't have. Retype it.",
+    ]);
+    await expect(place).toHaveAttribute("aria-invalid", "true");
+    await expect(writes(args.client)).toEqual([]);
+    fireEvent.change(place, { target: { value: "x".repeat(81) } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(
+      within(await canvas.findByRole("region", { name: "Your draft wasn't saved" })).getByRole(
+        "link",
+      ),
+    ).toHaveTextContent("A place can be up to 80 letters long.");
+    await expect(writes(args.client)).toEqual([]);
+  },
+};
+
+export const TaggedDraftReadsBack: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: { ...SAVED, topic: "education", place: "Harbor Ward" } },
+    }),
+    id: ID,
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("textbox", { name: "Place (optional)" })).toHaveValue(
+      "Harbor Ward",
+    );
+    await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveValue(
+      "education",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    await expect(writes(args.client)).toEqual([
+      ["update", ID, { ...SAVED, topic: "education", place: "Harbor Ward" }],
+    ]);
+  },
+};
+
 const editsADraft: Story["play"] = async ({ canvasElement, args }) => {
   const canvas = within(canvasElement);
   await expect(

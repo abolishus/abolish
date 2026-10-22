@@ -1,6 +1,7 @@
 // apps/web's own strings. Every locale's catalog has `en-US`'s type, so a
 // missing key fails type-checking (@abolishus/ui, i18n).
 
+import type { PollTopic } from "@abolishus/core/poll-draft-rules";
 import type { PollFailure } from "@abolishus/core/poll-failures";
 import type { Message } from "@abolishus/ui";
 
@@ -856,6 +857,14 @@ const enUS = {
   pollFormDescriptionLabel: "Description",
   pollFormOptional: "(optional)",
   pollFormDescriptionHelp: "Background people need to answer fairly.",
+  pollFormPlaceLabel: "Place",
+  pollFormPlaceHelp:
+    "A town, a neighbourhood, a school. Anyone can see it, so name somewhere public rather than your own address.",
+  pollFormTopicLabel: "Topic",
+  pollFormTopicHelp: "Helps people find your poll.",
+  pollFormTopicNone: "No topic",
+  pollFormTagsNote:
+    "The place and topic only decide where your poll is listed. They aren't part of the poll itself, and moderation can change them if they don't fit.",
   pollFormQuestionsMark: "Questions",
   pollFormQuestionsTitle: "What are you asking?",
   pollFormQuestionsLede:
@@ -909,6 +918,29 @@ const enUS = {
   pollFormPreviewRule_exactly: "Choose exactly {count}.",
   pollFormPreviewRule_between: "Choose {min} to {max}.",
   pollFormPreviewOptional: "You can leave this question blank.",
+  pollFormPreviewListed: "Where it's listed",
+  pollFormPreviewNotListed: "Not under any topic or place.",
+  pollFormReviewTitle: "Check it through",
+  pollFormReviewLede:
+    "This is what you're submitting. Change anything on this page, then save before you submit.",
+  pollFormReviewPermanent: "Recorded for good",
+  pollFormReviewPermanentLede:
+    "These go on the public record when you submit. Nobody can change them afterwards, you or us.",
+  pollFormReviewListing: "Where it's listed",
+  pollFormReviewListingLede:
+    "These aren't part of the poll. They decide where people find it, and moderation can change them.",
+  pollFormReviewTitleRow: "Title",
+  pollFormReviewQuestions: "Questions",
+  pollFormReviewQuestionCount: { one: "{count} question", other: "{count} questions" },
+  pollFormReviewWho: "Who can answer",
+  pollFormReviewCloses: "Closes",
+  pollFormReviewPlace: "Place",
+  pollFormReviewTopic: "Topic",
+  pollFormReviewNone: "None",
+  pollFormReviewNotSet: "Not set",
+  pollFormReviewClosesAt: "{when} UTC",
+  pollFormReviewUntitled: "No title yet",
+  pollFormReviewChange: "Change",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",
   pollFormSubmitMark: "Submit",
@@ -933,6 +965,9 @@ const enUS = {
   pollForm_titleMissing: "Give your poll a title.",
   pollForm_tooLong: "This is too long.",
   pollForm_unstorable: "This holds a character that can't be saved. Retype it.",
+  pollForm_placeTooLong: "A place can be up to 80 letters long.",
+  pollForm_placeRefused:
+    "This holds a hidden character or a text-direction mark a place can't have. Retype it.",
   pollForm_questionMissing: "Write the question.",
   pollForm_questionRepeated:
     "Another question already asks this. Each question needs its own words.",
@@ -949,6 +984,20 @@ const enUS = {
   pollForm_closesTooLate: "Choose a time no more than a year from now.",
   pollForm_draftTooLong: "Your poll is too long altogether. Shorten its text or remove a question.",
   pollForm_draftRefused: "Your poll breaks a rule the form couldn't point at. Check it through.",
+  pollTopic_community: "Community",
+  pollTopic_culture: "Culture",
+  pollTopic_economy: "Economy",
+  pollTopic_education: "Education",
+  pollTopic_environment: "Environment",
+  pollTopic_food: "Food",
+  pollTopic_government: "Government",
+  pollTopic_health: "Health",
+  pollTopic_housing: "Housing",
+  pollTopic_safety: "Safety",
+  pollTopic_science: "Science",
+  pollTopic_sport: "Sport",
+  pollTopic_technology: "Technology",
+  pollTopic_transport: "Transport",
   verifyEyebrow: "Account · Verification",
   verifyTitle: "Verify your e-mail and phone",
   verifyLede:
@@ -1067,6 +1116,28 @@ export const POLL_FAILURE_MESSAGES: Readonly<Record<PollFailure, keyof Messages>
   "open-mismatch": "pollFailure_openMismatch",
   "ceremony-timeout": "pollFailure_ceremonyTimeout",
   "open-timeout": "pollFailure_openTimeout",
+};
+
+/**
+ * The words for each topic a poll can be filed under (ADR 0041, rule 1), so
+ * the page never shows the code itself. A topic core adds without a message
+ * here fails type-checking.
+ */
+export const POLL_TOPIC_MESSAGES: Readonly<Record<PollTopic, keyof Messages>> = {
+  community: "pollTopic_community",
+  culture: "pollTopic_culture",
+  economy: "pollTopic_economy",
+  education: "pollTopic_education",
+  environment: "pollTopic_environment",
+  food: "pollTopic_food",
+  government: "pollTopic_government",
+  health: "pollTopic_health",
+  housing: "pollTopic_housing",
+  safety: "pollTopic_safety",
+  science: "pollTopic_science",
+  sport: "pollTopic_sport",
+  technology: "pollTopic_technology",
+  transport: "pollTopic_transport",
 };
 
 export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };

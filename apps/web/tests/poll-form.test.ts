@@ -3,7 +3,10 @@ import {
   draftDisplayText,
   MAX_CLOSE_SECONDS,
   MAX_DRAFT_TEXT,
+  MAX_PLACE_LENGTH,
   MIN_OPEN_SECONDS,
+  placeIsWellFormed,
+  POLL_TOPICS,
   type PollDraft,
   pollDraftProblem,
   SETUP_SECONDS,
@@ -23,6 +26,7 @@ import {
   formOf,
   newPollForm,
   type PollForm,
+  tidyPlace,
 } from "../src/account/poll-form.ts";
 
 // The poll form's model: that its field checks agree with the rules the
@@ -89,10 +93,40 @@ const formQuestion = fc.record({
   }),
 });
 
+// Places that are mostly fine, sometimes untidy (which the form tidies), and
+// sometimes holding what no tidying fixes: a bidi mark, an invisible
+// character, U+0000, a lone surrogate half, or one letter too many.
+const place = fc.oneof(
+  {
+    weight: 8,
+    arbitrary: fc.constantFrom("", "Riverside", "São Paulo", "North  Ward ", "\tElm St\n"),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.constantFrom(
+      "Elm\u200bStreet",
+      "\u202eedisreviR",
+      "a\u00adb",
+      "a\0b",
+      "\uDC00",
+      "x".repeat(MAX_PLACE_LENGTH),
+      "x".repeat(MAX_PLACE_LENGTH + 1),
+      "é".repeat(MAX_PLACE_LENGTH),
+      "e\u0301".repeat(MAX_PLACE_LENGTH),
+      "   ",
+    ),
+  },
+  { weight: 1, arbitrary: fc.string({ maxLength: 8, unit: "binary" }) },
+);
+
+const topic = fc.constantFrom("" as const, ...POLL_TOPICS);
+
 const anyForm = fc.record({
   language: fc.constant("en"),
   title: text(1024),
   description: text(8192),
+  place,
+  topic,
   questions: fc.oneof(
     { weight: 20, arbitrary: fc.array(formQuestion, { maxLength: 3 }) },
     { weight: 1, arbitrary: fc.array(formQuestion, { minLength: 33, maxLength: 34 }) },
@@ -188,6 +222,8 @@ const brokenForm = fc
       maxLength: 3,
       selector: (q) => q.question,
     }),
+    place,
+    topic,
     which: fc.nat({ max: BREAKS.length - 1 }),
     n: fc.nat(),
   })
@@ -250,6 +286,44 @@ describe("the poll form's checks", () => {
     // Bounds are the codec's, in UTF-8 bytes: 512 two-byte letters is 1024.
     expect(problems(form({ title: "é".repeat(512) }))).toEqual([]);
     expect(problems(form({ title: "é".repeat(513) }))).toEqual(["tooLong"]);
+  });
+
+  test("tidy a place's spacing and name what tidying can't fix", () => {
+    expect(fieldErrors(form({ place: "  Riverside \n North  " }))).toEqual([]);
+    expect(draftOf(form({ place: "  Riverside \n North  " }))?.place).toBe("Riverside North");
+    // Only spaces is no place, as an empty field is.
+    expect(draftOf(form({ place: " \t " }))).not.toHaveProperty("place");
+    expect(draftOf(form({ place: "" }))).not.toHaveProperty("place");
+    // Composed to NFC, so two spellings of one letter are one place.
+    expect(draftOf(form({ place: "Sa\u0303o Paulo" }))?.place).toBe("São Paulo");
+    expect(problems(form({ place: "x".repeat(MAX_PLACE_LENGTH) }))).toEqual([]);
+    expect(fieldErrors(form({ place: "x".repeat(MAX_PLACE_LENGTH + 1) }))).toEqual([
+      { id: fieldId.place, problem: "placeTooLong" },
+    ]);
+    // Counted in code points after composing: 80 decomposed é are 80 letters.
+    expect(problems(form({ place: "e\u0301".repeat(MAX_PLACE_LENGTH) }))).toEqual([]);
+    for (const refused of ["Elm\u200bStreet", "\u202eedisreviR", "a\u00adb", "\u2066x\u2069"])
+      expect(problems(form({ place: refused }))).toEqual(["placeRefused"]);
+    expect(problems(form({ place: "a\0b" }))).toEqual(["unstorable"]);
+    expect(problems(form({ place: "\uD800" }))).toEqual(["unstorable"]);
+  });
+
+  test("tidy any place to its own tidy form, which the handler's rule accepts when short and clean", () => {
+    fc.assert(
+      fc.property(fc.string({ unit: "binary", maxLength: 40 }), (raw) => {
+        const tidy = tidyPlace(raw);
+        expect(tidyPlace(tidy)).toBe(tidy);
+        // Whatever the field doesn't name is a place the handler accepts.
+        const named = fieldErrors(form({ place: raw })).some((e) => e.id === fieldId.place);
+        if (!named && tidy !== "") expect(placeIsWellFormed(tidy)).toBe(true);
+      }),
+      runs,
+    );
+  });
+
+  test("send a topic only when one is chosen", () => {
+    expect(draftOf(form())).not.toHaveProperty("topic");
+    for (const topic of POLL_TOPICS) expect(draftOf(form({ topic }))?.topic).toBe(topic);
   });
 
   test("count options across every question, as definition version 5 does", () => {
@@ -332,10 +406,14 @@ const savedDraft: fc.Arbitrary<PollDraft> = fc
       { minLength: 1, maxLength: 4, selector: (q) => q.question },
     ),
     minutes: fc.bigInt({ min: 0n, max: 4_000_000_000n / 60n }),
+    topic: fc.option(fc.constantFrom(...POLL_TOPICS), { nil: undefined }),
+    place: fc.option(fc.string({ minLength: 1, maxLength: 20 }), { nil: undefined }),
   })
-  .map(({ questions, minutes, ...rest }) => ({
+  .map(({ questions, minutes, topic, place, ...rest }) => ({
     language: "en",
     ...rest,
+    ...(topic === undefined ? {} : { topic }),
+    ...(place === undefined ? {} : { place }),
     questions: questions.map(({ lo, hi, ...q }) => {
       const m = q.options.length;
       const max = 1 + (hi % m);

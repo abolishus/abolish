@@ -699,6 +699,8 @@ describe("verifyPhoneCode", () => {
   });
 
   test("a move racing its old account's change of number never frees the new number unheld", async () => {
+    // Thirty races through the database: seconds on a shared runner, past the
+    // default 5 s, and a timed-out loop would keep writing into later tests.
     for (let i = 0; i < 30; i++) {
       const [n, m] = [fresh(), fresh()];
       const a = await newAccount();
@@ -715,7 +717,7 @@ describe("verifyPhoneCode", () => {
       expect(await readAccountPhone(app, a)).toBeDefined();
       expect(await code(verified(await newAccount(), m))).toBe("number-held");
     }
-  });
+  }, 60_000);
 
   test("refuses a malformed number", async () => {
     expect(await code(enter(await newAccount(), "12345", CODE, { p: provider() }))).toBe(
@@ -895,6 +897,7 @@ describe("rotatePhoneHashes", () => {
   });
 
   test("racing answers never fails a move, frees a number unheld or lets one verify twice", async () => {
+    // Twenty races through the database: seconds on a shared runner (as above).
     for (let i = 0; i < 20; i++) {
       const [n, m] = [fresh(), fresh()];
       const a = await newAccount();
@@ -916,7 +919,7 @@ describe("rotatePhoneHashes", () => {
       expect(await code(verified(c, n, { keys: TWO }))).toBe("number-held");
       expect(await code(verified(c, m, { keys: TWO }))).toBe("number-held");
     }
-  });
+  }, 60_000);
 
   test("rotates nothing while a key's bytes differ from those its ID was first seen with", async () => {
     const [M1, M2] = [hexKey(), hexKey()];

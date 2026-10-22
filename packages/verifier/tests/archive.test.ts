@@ -27,7 +27,7 @@ import {
   type TransactionSource,
   walkArchive,
 } from "../src/index.ts";
-import { anchorState, stored, word } from "./state.ts";
+import { ANCHOR_NAMESPACE, anchorState, locatorStorage, stored, word } from "./state.ts";
 
 // The chain from a locator (docs/spec/archive.md, The chain from a locator;
 // verifier 4.3): manifests written here through packages/crypto's encoder
@@ -649,35 +649,12 @@ describe("walkArchive", () => {
 });
 
 describe("latestLocatorFromState", () => {
-  const A = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00n;
-  // keccak256(abi.encode(A + 2)), by `cast keccak` (Foundry 1.8.5).
-  const DATA = 0x98e4c54e8fbc2d40e1a48de253a98da3caaf11e620b9ccfdfa738212a2915a9an;
+  const A = ANCHOR_NAMESPACE;
   const state = (entries: readonly (readonly [Uint8Array, Uint8Array])[]) => {
     const { header, nodes } = anchorState(ANCHOR, entries, { number: 9n, timestamp: 1000n });
     return { header: decodeHeader(header), anchor: ANCHOR, nodes: new NodePool(nodes) };
   };
-  const words = (bytes: Uint8Array) => {
-    const out: [Uint8Array, Uint8Array][] = [];
-    for (let i = 0; i * 32 < bytes.length; i++) {
-      const w = new Uint8Array(32);
-      w.set(bytes.subarray(i * 32, i * 32 + 32));
-      if (w.some((x) => x !== 0)) out.push([word(DATA + BigInt(i)), stored(w)]);
-    }
-    return out;
-  };
-  // Solidity's layout for a `bytes` value at A + 2.
-  const layout = (bytes: Uint8Array, count: bigint) => {
-    const entries: [Uint8Array, Uint8Array][] = [];
-    if (count > 0n) entries.push([word(A + 3n), stored(word(count))]);
-    if (bytes.length <= 31) {
-      const w = new Uint8Array(32);
-      w.set(bytes);
-      w[31] = 2 * bytes.length;
-      if (bytes.length > 0) entries.push([word(A + 2n), stored(w)]);
-    } else
-      entries.push([word(A + 2n), stored(word(2n * BigInt(bytes.length) + 1n))], ...words(bytes));
-    return entries;
-  };
+  const layout = locatorStorage;
 
   test("reads the latest locator, short or long, and the count", () => {
     // The helper's trie needs a leaf: an unrelated slot.

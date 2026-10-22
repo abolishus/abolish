@@ -20,7 +20,8 @@
 // close.ts) are implemented, under a live definition once 7.1 passes the
 // releases (7.5, 7.6; live.ts), and, for formats 3 to 5, 4.4's event and
 // L1-origin checks over the board's contract-event records, which can fail
-// 4.4 but never pass it;
+// 4.4 but never pass it, and, for a run that read the archive
+// (`readArchive`), 4.3, which can pass but never fail;
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
@@ -31,6 +32,7 @@ import {
   type AsyncBlockSource,
   BoardError,
   type BoardEntryVersion,
+  countedCheckpoints,
   boardPayloadTypes,
   type BoardErrorAt,
   type BoardErrorCode,
@@ -70,7 +72,17 @@ import {
   type AvailabilityEvidenceCode,
   type AvailabilityReport,
 } from "./availability.ts";
-import type { Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
+import {
+  type ArchiveFinding,
+  DEFAULT_MANIFEST_BUDGET,
+  DEFAULT_OBJECT_READS,
+  type ListedFinding,
+  listedTargets,
+  readListedObjects,
+  type TransactionSource,
+  walkArchive,
+} from "./archive.ts";
+import type { ArchiveRead, Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import {
@@ -104,6 +116,7 @@ import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
+  latestLocatorFromState,
   type L1Evidence,
   L1Error,
   type L1ErrorCode,
@@ -131,6 +144,9 @@ export type CheckCode =
   | EventCode
   | ReleaseRowCode
   | AvailabilityEvidenceCode
+  | ArchiveFinding["code"]
+  | ListedFinding["code"]
+  | "locator-none"
   | "unavailable"
   | "decode"
   | "membership-key"
@@ -213,6 +229,8 @@ export interface Report {
   readonly releases?: ReleasesReport;
   /** A format-6 bundle's availability check, once the board's accumulator replayed (4.6). */
   readonly availability?: AvailabilityReport;
+  /** A format-3 to 6 bundle's archive read, once the run read the archive (4.3). */
+  readonly archive?: Plain<ArchiveRead>;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -235,6 +253,31 @@ export interface Report {
 }
 
 export const REPORT_FORMAT = "abolish-verifier-report/1";
+
+/** A value as the report's JSON gives it: bytes as hex, integers as decimal strings. */
+export type Plain<T> = T extends Uint8Array
+  ? string
+  : T extends bigint
+    ? string
+    : T extends readonly (infer U)[]
+      ? readonly Plain<U>[]
+      : T extends object
+        ? { readonly [K in keyof T]: Plain<T[K]> }
+        : T;
+
+function plain<T>(x: T): Plain<T>;
+function plain(x: unknown): unknown {
+  if (x instanceof Uint8Array) return bytesToHex(x);
+  if (typeof x === "bigint") return x.toString();
+  if (Array.isArray(x)) return x.map(plain);
+  if (typeof x === "object" && x !== null)
+    return Object.fromEntries(
+      Object.entries(x)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, plain(v)]),
+    );
+  return x;
+}
 
 type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 
@@ -551,6 +594,147 @@ function runBoard(
   }
 }
 
+/** The archive read's budgets (docs/spec/archive.md; T-52). */
+export interface ArchiveReadOptions {
+  /** Manifest reads; default `DEFAULT_MANIFEST_BUDGET`. */
+  readonly maxManifests?: number;
+  /** Bytes the listed objects' answers may cost; default 1 GiB. */
+  readonly maxBytes?: number;
+  /** Transactions the listed objects' reads may ask; default `DEFAULT_OBJECT_READS`. */
+  readonly maxReads?: number;
+}
+
+const DEFAULT_ARCHIVE_BYTES = 2 ** 30;
+
+/**
+ * Reads the permanent archive for a format-3 to 6 bundle (docs/spec/
+ * verifier.md, Archive; 4.3): the latest locator from the board anchor's
+ * state, proven under the bundle's L1 header at the definition's anchor;
+ * the chain of manifests from it (`walkArchive`, under the definition's
+ * `l1_chain_id` and anchor); and, where the board checks' steps 1 and 2 fix
+ * the counted checkpoints, the objects they name (`readListedObjects`).
+ * Returns the bundle with how the read came out, which `verifyBundle`
+ * reports as 4.3's row and the report's `archive`, and the objects' blocks,
+ * which `readBoardByCid` asks beside its other sources.
+ *
+ * The anchors are read as `verifyBundle` reads them: from the copy where the
+ * bundle holds one, else every anchored word needs its checkpoint in
+ * `l1.checkpoints`. Nothing read here is trusted beyond being the bytes its
+ * CID names: a source or the archive's authority can leave the archive
+ * short, which 4.3 reports, never change what the board checks judge
+ * (T-49, T-51, T-53).
+ */
+export async function readArchive(
+  bundle: Bundle,
+  source: TransactionSource,
+  options: ArchiveReadOptions = {},
+): Promise<{ readonly bundle: Bundle; readonly blocks: AsyncBlockSource }> {
+  if (
+    bundle.format === "abolish-verifier-bundle/1" ||
+    bundle.format === "abolish-verifier-bundle/2"
+  )
+    throw new TypeError("the archive is read for a definition's deployment: format 3 or later");
+  if (bundle.archive !== undefined) throw new TypeError("the bundle's archive was already read");
+  const maxManifests = options.maxManifests ?? DEFAULT_MANIFEST_BUDGET;
+  const maxBytes = options.maxBytes ?? DEFAULT_ARCHIVE_BYTES;
+  const maxReads = options.maxReads ?? DEFAULT_OBJECT_READS;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new RangeError("maxBytes must be a positive integer");
+  const none: AsyncBlockSource = async () => [];
+  const done = (archive: ArchiveRead, blocks = none) => ({
+    bundle: { ...bundle, archive },
+    blocks,
+  });
+  const definition = fromDefinition(bundle);
+  // No definition to name the deployment, so no anchor and no chain.
+  if ("rows" in definition || definition.definition === undefined || !("l1" in definition.inputs))
+    return done({ stopped: "not-reached" });
+  const d = definition.definition.value;
+  let state;
+  try {
+    state = latestLocatorFromState(definition.inputs.l1);
+  } catch (e) {
+    if (!(e instanceof L1Error)) throw e;
+    return done({ stopped: e.code });
+  }
+  if (state.kind === "none") return done({ stopped: "locator-none", count: state.count });
+  // The counted checkpoints name the objects; where the anchors or steps 1
+  // and 2 stop the board checks, there are none to look for.
+  let targets;
+  const input = anchoring(bundle, definition.inputs);
+  if (!(input instanceof L1Error))
+    try {
+      targets = listedTargets(
+        countedCheckpoints(d.election_id, input.anchors, bundle.clock, input.now),
+      );
+    } catch (e) {
+      if (!(e instanceof BoardError)) throw e;
+    }
+  const walk =
+    state.kind === "locator"
+      ? await walkArchive(
+          state.locator,
+          { l1ChainId: d.l1_chain_id, anchor: d.l1_anchor },
+          source,
+          { maxManifests, ...(targets !== undefined && { objects: targets.map((t) => t.cid) }) },
+        )
+      : // A length word no locator has: reported as the anchor's framing
+        // refuses it, and nothing is read (docs/spec/archive.md, step 1).
+        {
+          latest: undefined,
+          manifests: [],
+          listings: new Map<string, readonly Uint8Array[]>(),
+          findings: [{ code: "locator-framing", locator: "latest" } as const],
+          reads: 0,
+        };
+  const objects =
+    targets === undefined
+      ? undefined
+      : await readListedObjects(targets, walk.listings, source, maxBytes, maxReads);
+  return done(
+    {
+      count: state.count,
+      walk: {
+        latest: walk.latest,
+        manifests: walk.manifests.length,
+        reads: walk.reads,
+        findings: walk.findings,
+      },
+      ...(objects !== undefined &&
+        targets !== undefined && {
+          objects: {
+            targets: targets.length,
+            read: objects.objects.size,
+            reads: objects.reads,
+            spent: objects.spent,
+            findings: objects.findings,
+          },
+        }),
+    },
+    objects?.blocks,
+  );
+}
+
+/**
+ * 4.3's row from the archive read (docs/spec/verifier.md, Archive): a pass
+ * only where the chain from the latest locator was read whole and every
+ * listed object was read, and otherwise unverifiable with the first report,
+ * never a failure: a source that withheld a transaction and an authority
+ * that cut the archive look alike to a reader, and the board checks judge
+ * the bytes wherever they came from (docs/spec/archive.md; T-53).
+ */
+function archiveRow(read: ArchiveRead): Outcome {
+  if ("stopped" in read)
+    return read.stopped === "not-reached"
+      ? NOT_REACHED
+      : { status: "unverifiable", code: read.stopped, at: {} };
+  const first = read.walk.findings[0] ?? read.objects?.findings[0];
+  if (first !== undefined) return { status: "unverifiable", code: first.code, at: {} };
+  // Without counted checkpoints there is no object to look for, and so no pass.
+  if (read.objects === undefined) return NOT_REACHED;
+  return PASS;
+}
+
 /**
  * Reads the board copy of a bundle parsed without one from a local block
  * store, gateways over the network, or both, the store asked first for each
@@ -571,11 +755,12 @@ export async function readBoardByCid(
   store: BlockStore | undefined,
   maxBytes: number,
   gateways?: Gateways,
+  archived?: AsyncBlockSource,
 ): Promise<Bundle> {
   if (bundle.entries.length !== 0 || bundle.unreadableBytes !== 0 || bundle.byCid !== undefined)
     throw new TypeError("the bundle already holds a board copy");
-  if (store === undefined && gateways === undefined)
-    throw new TypeError("a read by CID needs a store or gateways");
+  if (store === undefined && gateways === undefined && archived === undefined)
+    throw new TypeError("a read by CID needs a store, gateways or archived objects");
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
     throw new RangeError("maxBytes must be a positive integer");
   // Taken once the read is over, so the gateways' counts cover all of it.
@@ -592,11 +777,15 @@ export async function readBoardByCid(
   if ("rows" in definition) return notReached();
   const input = anchoring(bundle, definition.inputs);
   if (input instanceof L1Error) return notReached();
-  // The store first: a block it holds costs no request, and tells no gateway
-  // what is being read (T-11).
+  // The store first, then the objects already read from the archive: a
+  // block either holds costs no request, and tells no gateway what is being
+  // read (T-11).
   const source: AsyncBlockSource = async (cid, limit) => {
-    const held = store === undefined ? [] : await store.source(cid, limit);
-    return held.length !== 0 || gateways === undefined ? held : gateways.source(cid, limit);
+    for (const local of [store?.source, archived]) {
+      const held = local === undefined ? [] : await local(cid, limit);
+      if (held.length !== 0) return held;
+    }
+    return gateways === undefined ? [] : gateways.source(cid, limit);
   };
   let copy;
   try {
@@ -952,6 +1141,10 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       }
     }
   }
+  // The archive is read before the checks run, whatever they found: a run
+  // that read none leaves 4.3 not implemented (docs/spec/verifier.md, Archive).
+  if (bundle.archive !== undefined)
+    implemented = new Map<string, Outcome>([...implemented, ["4.3", archiveRow(bundle.archive)]]);
   const checks = CHECKS.map((c): CheckResult => ({
     id: c.id,
     kind: c.kind,
@@ -977,6 +1170,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
     ...(counted?.close !== undefined && { close: counted.close }),
     ...(releases !== undefined && { releases }),
     ...(availability !== undefined && { availability }),
+    ...(bundle.archive !== undefined && { archive: plain(bundle.archive) }),
     board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

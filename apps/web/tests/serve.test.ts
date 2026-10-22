@@ -15,8 +15,20 @@ import {
   type TurnstileVerdict,
   moderate,
   newAccountId,
+  parseTier0IssuerKeys,
+  tier0Issuer,
   type TurnstileAction,
 } from "@abolishus/core";
+import {
+  generateTier0TokenKeyPair,
+  tier0TokenBlind,
+  tier0TokenEvaluate,
+  tier0TokenFinalize,
+  tier0TokenInfo,
+  tier0TokenInput,
+  tier0TokenKeyId,
+  tier0TokenKeyPeriod,
+} from "@abolishus/crypto";
 import { SoftAuthenticator } from "@abolishus/core/test-authenticator";
 import { addModerators, newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
@@ -26,6 +38,7 @@ import { request as rawRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import {
@@ -41,6 +54,7 @@ import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
+import { createTokenHandler } from "../src/node/token.ts";
 
 const ORIGIN = "https://abolish.test";
 const RP_ID = "abolish.test";
@@ -81,6 +95,22 @@ const provider: { send: "sent" | "unavailable" | "hang"; verdict: TurnstileVerdi
 const emailChecks: [string | null, TurnstileAction][] = [];
 const ring = (id: string) => parseKeyring(`${id}:${randomBytes(32).toString("hex")}`);
 const EMAIL_KEYS = emailKeys(ring("h1"), ring("b1"));
+
+/** The token handler's issuer: the key of NOW's period, and its deployment. */
+const PERIOD = tier0TokenKeyPeriod(NOW.getTime() / 1000);
+const ISSUER_KEY = generateTier0TokenKeyPair();
+const DEPLOYMENT = {
+  chainId: 421_614n,
+  groupRegistry: Uint8Array.from(randomBytes(20)),
+  groupId: 7n,
+};
+const ISSUER = tier0Issuer({
+  keys: parseTier0IssuerKeys(`${PERIOD}:${Buffer.from(ISSUER_KEY.secretKey).toString("hex")}`),
+  chainId: DEPLOYMENT.chainId,
+  groupRegistry: DEPLOYMENT.groupRegistry,
+  groups: new Map([[0, DEPLOYMENT.groupId]]),
+  now: NOW,
+});
 
 /** The one code the phone handler's stand-in provider sends and approves. */
 const PHONE_CODE = "246810";
@@ -226,6 +256,13 @@ beforeAll(async () => {
       },
       origin: ORIGIN,
       log: (line) => logged.push(line),
+      now: () => NOW,
+    }),
+    token: createTokenHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      issuer: ISSUER,
+      origin: ORIGIN,
       now: () => NOW,
     }),
     clientDir,
@@ -1503,6 +1540,202 @@ describe("an account's phone number under /phone", () => {
   });
 });
 
+describe("an account's Tier 0 token under /token", () => {
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  const KEY_ID = tier0TokenKeyId(PERIOD, ISSUER_KEY.publicKey);
+  const INFO = tier0TokenInfo(DEPLOYMENT);
+
+  /** A signed-in browser and its account, verified by e-mail and phone unless told otherwise. */
+  async function signedIn({ verified = true } = {}) {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const account = (await accounts.accountOf(new Headers({ cookie })))!;
+    if (verified) {
+      await sql`
+        INSERT INTO account_emails VALUES (${account}, ${randomBytes(32)}, 'h1', ${randomBytes(40)}, 'b1', now())`;
+      await sql`
+        INSERT INTO account_phones VALUES (${account}, ${randomBytes(32)}, 'p1',
+          date_trunc('day', now(), 'UTC'))`;
+    }
+    return { browser, account };
+  }
+
+  /** The ballot client's side of Issuance, step 1, for a fresh commitment. */
+  function blind() {
+    const c = Uint8Array.from(randomBytes(32));
+    c[0] = c[0]! & 0x0f;
+    const input = tier0TokenInput(KEY_ID, c);
+    const b = tier0TokenBlind(input, ISSUER_KEY.publicKey, INFO);
+    return {
+      input,
+      ...b,
+      body: { keyId: hex(KEY_ID), region: 0, blindedElement: hex(b.blindedElement) },
+    };
+  }
+
+  test("a verified account takes its token, retries it, and takes no second one", async () => {
+    const { browser } = await signedIn();
+    const c = blind();
+    const res = await browser.call("POST", "/token", c.body);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const answer = (await res.json()) as { evaluationElement: string; proof: string };
+    expect(Object.keys(answer).sort()).toEqual(["evaluationElement", "proof"]);
+    const token = tier0TokenFinalize({
+      input: c.input,
+      info: INFO,
+      publicKey: ISSUER_KEY.publicKey,
+      blind: c.blind,
+      blindedElement: c.blindedElement,
+      evaluationElement: Buffer.from(answer.evaluationElement, "hex"),
+      proof: Buffer.from(answer.proof, "hex"),
+    });
+    expect(hex(token)).toBe(hex(tier0TokenEvaluate(ISSUER_KEY.secretKey, c.input, INFO)));
+
+    // A lost answer is retried with the same B; any other B is a second token.
+    const again = await browser.call("POST", "/token", c.body);
+    expect(((await again.json()) as typeof answer).evaluationElement).toBe(
+      answer.evaluationElement,
+    );
+    const second = await browser.call("POST", "/token", blind().body);
+    expect(await second.json()).toEqual({ code: "TOKEN_TAKEN", status: 409 });
+
+    // T-10, T-11, T-67: the log has the route class, never B, the key or the answer.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "token", status: 409 });
+    const log = JSON.stringify(logged);
+    for (const value of [c.body.blindedElement, c.body.keyId, answer.evaluationElement])
+      expect(log).not.toContain(value);
+  });
+
+  test("refuses what core refuses, with its code", async () => {
+    const { browser } = await signedIn();
+    const refusal = async (body: object) => (await browser.call("POST", "/token", body)).json();
+    const { body } = blind();
+    expect(await refusal({ ...body, keyId: "00".repeat(32) })).toEqual({
+      code: "KEY_NOT_ISSUING",
+      status: 409,
+    });
+    expect(await refusal({ ...body, region: 1 })).toEqual({ code: "REGION_UNKNOWN", status: 422 });
+    expect(await refusal({ ...body, blindedElement: "00".repeat(32) })).toEqual({
+      code: "BLINDED_ELEMENT",
+      status: 422,
+    });
+    const unverified = await signedIn({ verified: false });
+    expect(await (await unverified.browser.call("POST", "/token", body)).json()).toEqual({
+      code: "ACCOUNT_UNVERIFIED",
+      status: 403,
+    });
+  });
+
+  test("refuses a malformed request before core sees it", async () => {
+    const { browser } = await signedIn();
+    const { body } = blind();
+    for (const bad of [
+      { ...body, keyId: body.keyId.toUpperCase() },
+      { ...body, keyId: body.keyId.slice(2) },
+      { ...body, blindedElement: `${body.blindedElement}00` },
+      { ...body, region: -1 },
+      { ...body, region: 0.5 },
+      { ...body, region: "0" },
+      { ...body, extra: 1 },
+      { keyId: body.keyId, region: 0 },
+    ])
+      expect(await (await browser.call("POST", "/token", bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    // Nothing was recorded, so the account can still take its token.
+    expect((await browser.call("POST", "/token", body)).status).toBe(200);
+  });
+
+  test("refuses a request signed out, from another origin, or of another type or path", async () => {
+    const { body } = blind();
+    const signedOut = await new Browser().call("POST", "/token", body);
+    expect(await signedOut.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+    const { browser } = await signedIn();
+    const elsewhere = await browser.call("POST", "/token", body, { origin: "https://evil.test" });
+    expect(await elsewhere.json()).toEqual({ code: "FORBIDDEN_ORIGIN", status: 403 });
+    const text = await fetch(`${base}/token`, {
+      method: "POST",
+      headers: {
+        origin: ORIGIN,
+        "content-type": "text/plain",
+        cookie: [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; "),
+      },
+      body: JSON.stringify(body),
+    });
+    expect(await text.json()).toEqual({ code: "UNSUPPORTED_MEDIA_TYPE", status: 415 });
+    expect((await browser.call("GET", "/token")).status).toBe(404);
+    expect((await browser.call("POST", "/token/x", body)).status).toBe(404);
+    expect((await browser.call("POST", "/token?x=1", body)).status).toBe(404);
+  });
+
+  test("answers 503 where the deployment has no issuer", async () => {
+    const handler = createTokenHandler({
+      sql,
+      accountOf: async () => newAccountId(),
+      issuer: undefined,
+      origin: ORIGIN,
+    });
+    const res = await handler(
+      new Request(`${ORIGIN}/token`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify(blind().body),
+      }),
+    );
+    expect(await res.json()).toEqual({ code: "TOKEN_UNAVAILABLE", status: 503 });
+  });
+
+  test("leaves a database error to the front's generic 500, logged by kind only", async () => {
+    // A database that refuses every query: here, none of the tables.
+    const broken = postgres(process.env["TEST_DATABASE_URL"] ?? "", {
+      max: 1,
+      onnotice: () => {},
+      connection: { search_path: "no_such_schema" },
+    });
+    const lines: Parameters<Log>[0][] = [];
+    const front = createWebServer({
+      start: { fetch: async () => new Response() },
+      accounts: async () => new Response(),
+      drafts: async () => new Response(),
+      email: async () => new Response(),
+      phone: async () => new Response(),
+      token: createTokenHandler({
+        sql: broken,
+        accountOf: async () => newAccountId(),
+        issuer: ISSUER,
+        origin: ORIGIN,
+        now: () => NOW,
+      }),
+      clientDir,
+      origin: ORIGIN,
+      log: (line) => lines.push(line),
+    });
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    try {
+      const { body } = blind();
+      const res = await fetch(`http://127.0.0.1:${(front.address() as AddressInfo).port}/token`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(500);
+      expect(await res.text()).toBe("500\n");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Drizzle's wrapper, by name only: its message quotes the query.
+      expect(lines).toEqual([
+        { error: "Error" },
+        { method: "POST", route: "token", status: 500, ms: expect.any(Number) },
+      ]);
+    } finally {
+      await new Promise((resolve) => front.close(resolve));
+      await broken.end();
+    }
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -1520,6 +1753,7 @@ describe("limits", () => {
       drafts: async () => new Response(null, { status: 404 }),
       email: async () => new Response(null, { status: 404 }),
       phone: async () => new Response(null, { status: 404 }),
+      token: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1545,6 +1779,7 @@ describe("limits", () => {
       drafts: async () => new Response(),
       email: async () => new Response(),
       phone: async () => new Response(),
+      token: async () => new Response(),
       clientDir,
       log: () => {},
     };

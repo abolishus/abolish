@@ -12,6 +12,9 @@ import {
   emailKeys,
   type Keyring,
   parseKeyring,
+  parseTier0IssuerKeys,
+  type Tier0Issuer,
+  tier0Issuer,
 } from "@abolishus/core";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
@@ -24,6 +27,7 @@ import { createEmailHandler, type EmailService } from "./email.ts";
 import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
+import { createTokenHandler } from "./token.ts";
 
 const Env = z
   .strictObject({
@@ -78,6 +82,24 @@ const Env = z
     TWILIO_KEY_SECRET: z.string().min(1).optional(),
     TWILIO_VERIFY_SERVICE_SID: z.string().min(1).optional(),
     PHONE_DAILY_CEILING: z.coerce.number().int().min(1).optional(),
+    // The Tier 0 token issuer (src/node/token.ts; [[tier0-token]]): its keys
+    // (`period:hex,…`, each period's `skS`, held here apart from every other
+    // secret, T-74), and the deployment record's L2 chain ID, group registry
+    // and region 0's Tier 0 group, which every token's group `info` binds.
+    // All four or none: without them POST /token answers 503.
+    TIER0_ISSUER_KEYS: z.string().min(1).optional(),
+    TIER0_CHAIN_ID: z
+      .string()
+      .regex(/^(0|[1-9][0-9]{0,19})$/)
+      .optional(),
+    TIER0_GROUP_REGISTRY: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]{40}$/)
+      .optional(),
+    TIER0_GROUP: z
+      .string()
+      .regex(/^(0|[1-9][0-9]{0,19})$/)
+      .optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -118,6 +140,18 @@ const Env = z
       message:
         "PHONE_HASH_KEYS, TWILIO_KEY_SID, TWILIO_KEY_SECRET, TWILIO_VERIFY_SERVICE_SID and PHONE_DAILY_CEILING go together",
     },
+  )
+  .refine(
+    (env) =>
+      new Set(
+        [env.TIER0_ISSUER_KEYS, env.TIER0_CHAIN_ID, env.TIER0_GROUP_REGISTRY, env.TIER0_GROUP].map(
+          (v) => v === undefined,
+        ),
+      ).size === 1,
+    {
+      message:
+        "TIER0_ISSUER_KEYS, TIER0_CHAIN_ID, TIER0_GROUP_REGISTRY and TIER0_GROUP go together",
+    },
   );
 
 const env = Env.parse({
@@ -142,6 +176,10 @@ const env = Env.parse({
   TWILIO_KEY_SECRET: process.env["TWILIO_KEY_SECRET"] || undefined,
   TWILIO_VERIFY_SERVICE_SID: process.env["TWILIO_VERIFY_SERVICE_SID"] || undefined,
   PHONE_DAILY_CEILING: process.env["PHONE_DAILY_CEILING"] || undefined,
+  TIER0_ISSUER_KEYS: process.env["TIER0_ISSUER_KEYS"] || undefined,
+  TIER0_CHAIN_ID: process.env["TIER0_CHAIN_ID"] || undefined,
+  TIER0_GROUP_REGISTRY: process.env["TIER0_GROUP_REGISTRY"] || undefined,
+  TIER0_GROUP: process.env["TIER0_GROUP"] || undefined,
 });
 
 /** Runs `make`, naming `name` and never the value in any failure: a key or a token (T-65). */
@@ -224,6 +262,32 @@ function phoneService(): PhoneService | undefined {
   };
 }
 
+/**
+ * The Tier 0 token issuer, if configured. Its keys' errors name an entry's
+ * position, never its text, which is a key (T-65, T-74); a key past its
+ * redemption window is refused here, at start.
+ */
+function tokenIssuer(): Tier0Issuer | undefined {
+  const { TIER0_ISSUER_KEYS, TIER0_CHAIN_ID, TIER0_GROUP_REGISTRY, TIER0_GROUP } = env;
+  if (
+    TIER0_ISSUER_KEYS === undefined ||
+    TIER0_CHAIN_ID === undefined ||
+    TIER0_GROUP_REGISTRY === undefined ||
+    TIER0_GROUP === undefined
+  )
+    return undefined;
+  const keys = attempt("TIER0_ISSUER_KEYS", () => parseTier0IssuerKeys(TIER0_ISSUER_KEYS));
+  return attempt("TIER0_ISSUER_KEYS, TIER0_CHAIN_ID or TIER0_GROUP", () =>
+    tier0Issuer({
+      keys,
+      chainId: BigInt(TIER0_CHAIN_ID),
+      groupRegistry: Uint8Array.from(Buffer.from(TIER0_GROUP_REGISTRY.slice(2), "hex")),
+      groups: new Map([[0, BigInt(TIER0_GROUP)]]),
+      now: new Date(),
+    }),
+  );
+}
+
 const write = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
 // Beside this file in dist/: node/main.mjs, server/server.js, client/.
@@ -272,6 +336,12 @@ const phone = createPhoneHandler({
   origin,
   log: write,
 });
+const token = createTokenHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  issuer: tokenIssuer(),
+  origin,
+});
 const prune = startAccountPrune({
   sql,
   log: write,
@@ -292,6 +362,7 @@ const server = createWebServer({
   drafts,
   email,
   phone,
+  token,
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,

@@ -2,8 +2,8 @@
 // server functions, the account handler from @abolishus/core under /auth, an
 // author's poll drafts under /drafts (src/node/drafts.ts), an account's
 // e-mail address under /email (src/node/email.ts), its phone number under
-// /phone (src/node/phone.ts), and the client's hashed
-// assets from disk.
+// /phone (src/node/phone.ts), its Tier 0 token under /token
+// (src/node/token.ts), and the client's hashed assets from disk.
 //
 // The account system lives here, on apps/web's origin, so its host-only
 // session cookie never reaches the API or the ballot client's host (T-10,
@@ -43,6 +43,9 @@ export type EmailHandler = (request: Request) => Promise<Response>;
 /** The phone handler (`createPhoneHandler(...)` from src/node/phone.ts). */
 export type PhoneHandler = (request: Request) => Promise<Response>;
 
+/** The token handler (`createTokenHandler(...)` from src/node/token.ts). */
+export type TokenHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -51,6 +54,7 @@ export type RouteClass =
   | "drafts"
   | "email"
   | "phone"
+  | "token"
   | "asset"
   | "ingest"
   | "refused";
@@ -97,6 +101,7 @@ export interface WebServerOptions {
   readonly drafts: DraftsHandler;
   readonly email: EmailHandler;
   readonly phone: PhoneHandler;
+  readonly token: TokenHandler;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -150,13 +155,20 @@ async function readBody(req: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> 
 }
 
 /** The route classes whose handlers get the account cookie. */
-const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set(["auth", "drafts", "email", "phone"]);
+const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
+  "auth",
+  "drafts",
+  "email",
+  "phone",
+  "token",
+]);
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
   if (path === "/drafts" || path.startsWith("/drafts/")) return "drafts";
   if (path === "/email" || path.startsWith("/email/")) return "email";
   if (path === "/phone" || path.startsWith("/phone/")) return "phone";
+  if (path === "/token" || path.startsWith("/token/")) return "token";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
@@ -224,6 +236,7 @@ export function createWebServer({
   drafts,
   email,
   phone,
+  token,
   clientDir,
   origin,
   log,
@@ -309,11 +322,19 @@ export function createWebServer({
       ...(body === undefined ? {} : { body }),
     });
     if (!ACCOUNT_ROUTES.has(route)) return send(res, await start.fetch(request), method === "HEAD");
-    // The account, drafts, e-mail and phone handlers answer JSON and set
+    // The account, drafts, e-mail, phone and token handlers answer JSON and set
     // few headers of their own (src/security.ts covers pages). A copy: a
     // response's own headers can be immutable.
     const handler =
-      route === "auth" ? accounts : route === "drafts" ? drafts : route === "email" ? email : phone;
+      route === "auth"
+        ? accounts
+        : route === "drafts"
+          ? drafts
+          : route === "email"
+            ? email
+            : route === "phone"
+              ? phone
+              : token;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");
@@ -388,8 +409,11 @@ export function createWebServer({
           route = "refused";
           return refuse(res, e.status);
         }
-        // A client that went away mid-request isn't a server failure.
-        if (req.destroyed || res.destroyed) return void res.destroy();
+        // A client that went away mid-request isn't a server failure. Its
+        // socket says so, not the request: a request whose body was read
+        // is destroyed once it ends, and a failure after that still gets
+        // its 500.
+        if (req.socket.destroyed || res.destroyed) return void res.destroy();
         const name = e instanceof Error ? e.name : typeof e;
         log({ error: name });
         analytics.exception("server", {

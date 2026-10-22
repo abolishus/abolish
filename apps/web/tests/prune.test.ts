@@ -1,8 +1,9 @@
 // The account tables' timer (src/node/prune.ts) against Postgres as the app
 // role: an expired e-mail or phone code is gone after a run, a live one
 // stays, phone-hash chains are extended to the current key where the phone
-// service is configured, and a failed run is logged by kind and retried on
-// the next tick.
+// service is configured, a Tier 0 token record whose key stopped redeeming
+// is marked dead, and a failed run is logged by kind and retried on the
+// next tick.
 
 import {
   emailKeys,
@@ -13,6 +14,7 @@ import {
   verifyPhoneCode,
 } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { tier0TokenKeyPeriod } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
@@ -156,4 +158,29 @@ test("extends verified numbers' chains to the current phone-hash key, only where
     VALUES (${randomBytes(32)}, 'gone', '2026-10-22T00:00:00Z')`;
   expect(await run(two)).toEqual([{ error: "PhoneHashKeyMissing" }]);
   expect(await keyOf()).toBe("q2");
+});
+
+test("marks dead the Tier 0 token records whose key stopped redeeming", async () => {
+  const now = new Date("2026-10-22T12:00:00Z");
+  const current = tier0TokenKeyPeriod(now.getTime() / 1000);
+  const withToken = async (period: number) => {
+    const account = await newAccount();
+    await sql`
+      INSERT INTO account_tokens VALUES (${account}, 1, ${randomBytes(20)}, 0,
+        ${randomBytes(32)}, ${period}, ${randomBytes(32)})`;
+    return account;
+  };
+  const dead = await withToken(current - 2);
+  const redeeming = await withToken(current - 1);
+  const lines: { error: string }[] = [];
+  const prune = startAccountPrune({ sql, log: (l) => lines.push(l), everyMs: 20, now: () => now });
+  await new Promise((r) => setTimeout(r, 60));
+  await prune.stop();
+  const period = async (account: string) =>
+    (await sql`SELECT key_period FROM account_tokens WHERE user_id = ${account}`)[0]?.[
+      "key_period"
+    ];
+  expect(await period(dead)).toBeNull();
+  expect(await period(redeeming)).toBe(String(current - 1));
+  expect(lines).toEqual([]);
 });

@@ -2,16 +2,19 @@
 // the account tables (T-10: the worker's roles never are): expired WebAuthn
 // challenges (T-52), expired e-mail codes, sends and recipients, so an
 // abandoned code's ciphertext doesn't outlive its 15 minutes by much (T-73),
-// and expired phone codes, sends and recipients and ended holds. Where the
-// phone service is configured, it also extends every stored phone-hash chain
-// to the keyring's current key, so a rotation is done within one tick of the
-// deploy that makes a new key current (packages/core, rotatePhoneHashes;
-// docs/runbooks/account-keys.md; T-73).
+// expired phone codes, sends and recipients and ended holds, and the dead
+// mark on Tier 0 token records whose key stopped redeeming, so a record
+// keeps no period past its key's window ([[tier0-token]], Issuance, step 3).
+// Where the phone service is configured, it also extends every stored
+// phone-hash chain to the keyring's current key, so a rotation is done within
+// one tick of the deploy that makes a new key current (packages/core,
+// rotatePhoneHashes; docs/runbooks/account-keys.md; T-73).
 // Every instance runs it; the deletes and rewrites are idempotent, so two at
 // once only repeat each other.
 
 import {
   type Keyring,
+  markDeadTier0Tokens,
   pruneAccountEmails,
   pruneAccountPhones,
   pruneAccountVerifications,
@@ -69,6 +72,7 @@ export function startAccountPrune({
             },
             () => log({ error: "PhoneHashRotationFailed" }),
           );
+        await markDeadTier0Tokens(sql, at).catch(() => log({ error: "Tier0TokenDeadMarkFailed" }));
       } catch {
         log({ error: "AccountPruneFailed" });
       } finally {

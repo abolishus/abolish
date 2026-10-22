@@ -4,6 +4,7 @@
 // assets and the account handler.
 
 import { shortCode } from "@abolishus/core/short-codes";
+import { generateTier0TokenKeyPair, tier0TokenKeyPeriod } from "@abolishus/crypto";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -101,6 +102,19 @@ const PHONE = {
   PHONE_DAILY_CEILING: "1000",
 };
 
+/** A period's issuer key as TIER0_ISSUER_KEYS lists it. */
+const issuerKey = (period: number) =>
+  `${period}:${Buffer.from(generateTier0TokenKeyPair().secretKey).toString("hex")}`;
+const PERIOD = tier0TokenKeyPeriod(Math.floor(Date.now() / 1000));
+
+/** A whole Tier 0 issuer configuration: this period's key and the next. */
+const TIER0 = {
+  TIER0_ISSUER_KEYS: `${issuerKey(PERIOD)},${issuerKey(PERIOD + 1)}`,
+  TIER0_CHAIN_ID: "421614",
+  TIER0_GROUP_REGISTRY: `0x${randomBytes(20).toString("hex")}`,
+  TIER0_GROUP: "7",
+};
+
 describe("dist/node/main.mjs", () => {
   test("serves pages, their assets and the account handler, from the bundle alone", async () => {
     const port = await freePort();
@@ -115,6 +129,7 @@ describe("dist/node/main.mjs", () => {
       TURNSTILE_SITE_KEY: SITE_KEY,
       ...EMAIL,
       ...PHONE,
+      ...TIER0,
       WEB_PORT: String(port),
     });
     try {
@@ -165,6 +180,13 @@ describe("dist/node/main.mjs", () => {
       // So are the phone routes.
       const phone = await fetch(`${at}/phone`);
       expect(await phone.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+      // And the token route.
+      const token = await fetch(`${at}/token`, {
+        method: "POST",
+        headers: { origin: "https://abolish.test", "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(await token.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
       // Its log: one line per request, by route class, written once each
       // answer is sent.
       await new Promise((r) => setTimeout(r, 100));
@@ -176,8 +198,10 @@ describe("dist/node/main.mjs", () => {
       expect(lines.map((l) => l.route)).toContain("auth");
       expect(lines.map((l) => l.route)).toContain("email");
       expect(lines.map((l) => l.route)).toContain("phone");
+      expect(lines.map((l) => l.route)).toContain("token");
       // No start-up prune of the account tables failed as abolish_app.
       expect(web.out()).not.toContain("AccountPruneFailed");
+      expect(web.out()).not.toContain("Tier0TokenDeadMarkFailed");
       expect(web.out()).not.toContain("abolish.test");
     } finally {
       if (web.child.exitCode === null) {
@@ -360,6 +384,46 @@ describe("dist/node/main.mjs", () => {
       for (const [variable, value] of Object.entries(configured))
         if (variable !== "EMAIL_FROM" && variable !== "PHONE_DAILY_CEILING")
           expect(web.err()).not.toContain(value.slice(3));
+    },
+    30_000,
+  );
+
+  test.each([
+    [
+      "part of a Tier 0 issuer configuration",
+      { TIER0_GROUP: undefined },
+      "TIER0_GROUP go together",
+    ],
+    ["a malformed issuer key", { TIER0_ISSUER_KEYS: `${PERIOD}:0123` }, "TIER0_ISSUER_KEYS"],
+    [
+      "an issuer key past its redemption window",
+      { TIER0_ISSUER_KEYS: `${issuerKey(PERIOD - 2)},${issuerKey(PERIOD)}` },
+      `period ${PERIOD - 2} no longer redeems`,
+    ],
+    [
+      "a registry that isn't an address",
+      { TIER0_GROUP_REGISTRY: "0x0123" },
+      "TIER0_GROUP_REGISTRY",
+    ],
+  ])(
+    "refuses %s, naming the variable and quoting no key",
+    async (_, change, name) => {
+      const configured = { ...TIER0, ...change };
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...Object.fromEntries(
+          Object.entries(configured).filter((e): e is [string, string] => e[1] !== undefined),
+        ),
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain(name);
+      for (const entry of (configured.TIER0_ISSUER_KEYS ?? "").split(","))
+        expect(web.err()).not.toContain(entry.split(":")[1]!.slice(0, 8));
     },
     30_000,
   );

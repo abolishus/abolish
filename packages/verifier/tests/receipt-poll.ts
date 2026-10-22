@@ -8,7 +8,14 @@
 // were made for the vector's, so they are boarded here without admission.
 // Each receipt is signed by the seat's own key over the statement the spec
 // gives, with @abolishus/crypto's signing, never with the check under test.
-// For tests/receipt-admission.test.ts and packages/core's receipt tests.
+// Postings (`postedBallot`) need each seat's ML-KEM message, which the
+// vector's ballots don't come with: such a ballot is a vector ballot with its
+// VSS commitments and share hashes replaced by a fresh sharing's, encrypted
+// here to the seats' registered keys with @abolishus/crypto's encryption.
+// Its proofs are the vector's, so it decodes but isn't admitted, which the
+// posting judge doesn't check (the board's simulation does).
+// For tests/receipt-admission.test.ts, tests/posting-admission.test.ts and
+// packages/core's receipt and posting tests.
 
 import { readFileSync } from "node:fs";
 import {
@@ -20,6 +27,7 @@ import {
   checkCeremonyTranscript,
   decodeBallot,
   decodeBoardEntry,
+  decode,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
@@ -28,14 +36,18 @@ import {
   encodeBoardEntry,
   encodeCeremonyTranscript,
   encodeElectionDefinitionV5,
+  encodeSharePosting,
   encodeShareReceipt,
+  encryptShares,
   identityKey,
   keysMessage,
   type Panel,
   panelId,
   RECORD_TYPES,
   revealsMessage,
+  SHARE_CIPHERTEXT,
   shareReceiptStatement,
+  shareVote,
   signStatement,
 } from "@abolishus/crypto";
 import { splitEntries } from "../src/index.ts";
@@ -163,5 +175,71 @@ export function receiptFor(ballot: Ballot, seat: number, fields: ReceiptFields =
       "abolish/v1/sig/share-receipt",
       shareReceiptStatement(statement),
     ),
+  });
+}
+
+/** A ballot of this election with every seat's ciphertext and ML-KEM message, as the client keeps them. */
+export interface PostedBallot extends Ballot {
+  readonly ciphertexts: readonly Uint8Array[];
+  readonly messages: readonly Uint8Array[];
+}
+
+/** `ballot` re-encrypted to this election's seats: a ballot whose postings can pass the public check. */
+export function postedBallot(ballot: Ballot): PostedBallot {
+  const record = decodeBallot(ballot.payload, 3);
+  const optionCount = record.committed_vote.vss.length;
+  const sharing = shareVote(
+    {
+      optionCount,
+      minSelections: 0,
+      maxSelections: optionCount,
+      threshold: definition.threshold,
+      panelSize: definition.panel_size,
+    },
+    Array.from({ length: optionCount }, () => 0),
+  );
+  const encrypted = encryptShares(
+    { definitionHash },
+    sharing,
+    seats.map((s) => s.kem.publicKey),
+  );
+  const vote = { ...record.committed_vote, vss: sharing.vss, share_hashes: encrypted.hashes };
+  const own = { ...record, committed_vote: vote };
+  return {
+    payload: encodeBallotV3(own),
+    hash: ballotHashV3({ definitionHash, cell: own.cell, nullifier: own.nullifier }, vote),
+    cell: own.cell,
+    nullifier: own.nullifier,
+    shareHashes: encrypted.hashes,
+    ciphertexts: encrypted.ciphertexts,
+    messages: encrypted.randomness.map((r) => r.m),
+  };
+}
+
+/** A share posting's fields, each defaulting to what `seat`'s honest posting of `ballot` names. */
+export interface PostingFields {
+  readonly definitionHash?: Uint8Array;
+  readonly ballotHash?: Uint8Array;
+  readonly seat?: number;
+  readonly m?: Uint8Array;
+  /** The seat whose ciphertext is posted; by default the seat the record names. */
+  readonly ciphertextOf?: number;
+}
+
+/** The share posting record (`0x000d` version 1) a client makes for `seat` of `ballot`. */
+export function postingFor(
+  ballot: PostedBallot,
+  seat: number,
+  fields: PostingFields = {},
+): Uint8Array {
+  const ciphertext = ballot.ciphertexts[(fields.ciphertextOf ?? seat) - 1];
+  const m = fields.m ?? ballot.messages[seat - 1];
+  if (ciphertext === undefined || m === undefined) throw new Error(`no seat ${seat}`);
+  return encodeSharePosting({
+    definition_hash: fields.definitionHash ?? definitionHash,
+    ballot_hash: fields.ballotHash ?? ballot.hash,
+    seat: fields.seat ?? seat,
+    m,
+    ciphertext: decode(SHARE_CIPHERTEXT, ciphertext),
   });
 }

@@ -357,6 +357,25 @@ export class BallotAdmissions {
   }
 
   /**
+   * What the posting relay judges `electionId`'s postings by
+   * (docs/spec/posting-relay.md, Answers, steps 4 and 5): the window its
+   * definition sets and the verifier's posting judge against its registered
+   * key set, from the same cached admission ballots use, so a request costs
+   * its own public check, never the ceremony's. `undefined` when none of
+   * its ballots can be judged; throws `SubmitError` (`unknown-election`)
+   * when no definition is stored for it.
+   */
+  async postings(
+    client: Sql,
+    electionId: Uint8Array,
+  ): Promise<Pick<ElectionAdmission, "closesAt" | "l1InclusionBound" | "posting"> | undefined> {
+    if (!isBytes(electionId) || electionId.length !== 32)
+      throw new TypeError("electionId must be 32 bytes");
+    const admission = await this.#admission(client, new Uint8Array(electionId));
+    return admission.ok ? admission : undefined;
+  }
+
+  /**
    * 5.8 for one admitted ballot, as far as the finalized chain decides it: a
    * rejection, or how it stands. Only the node's own chain is judged: a
    * definition naming another L1 is left to the verifier.

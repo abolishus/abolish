@@ -7,7 +7,7 @@
 // from it, and nothing here names one (T-10).
 
 import type { AppealOutcome, ModerationState, PollState } from "@abolishus/core";
-import type { DraftQuestion, PollDraft } from "@abolishus/core/poll-draft-rules";
+import type { DraftQuestion, PollDraft, PollTopic } from "@abolishus/core/poll-draft-rules";
 import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
 import { TURNSTILE_HEADER } from "@abolishus/core/turnstile";
 
@@ -293,6 +293,9 @@ function draftOf(value: unknown): PollDraft {
       return t as number;
     }),
     closesAt: BigInt(d.closesAt),
+    // Which topics there are is core's, and the form's to word.
+    ...(d.topic === undefined ? {} : { topic: text(d.topic) as PollTopic }),
+    ...(d.place === undefined ? {} : { place: text(d.place) }),
   };
 }
 

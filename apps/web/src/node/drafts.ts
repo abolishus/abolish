@@ -37,6 +37,7 @@ import {
   PollDraftError,
   type PollDraftErrorCode,
   type PollModeration,
+  type PollTopic,
   readAccountPoll,
   readPollModeration,
   retryableFailure,
@@ -102,6 +103,10 @@ const Draft = z.strictObject({
   tiers: z.array(z.int().min(0).max(255)).max(3),
   /** UNIX seconds, as a canonical decimal `u64`. */
   closesAt: z.string().regex(/^(?:0|[1-9][0-9]{0,19})$/),
+  // Above the longest topic code, and a place's `MAX_PLACE_LENGTH` code
+  // points as UTF-16 (ADR 0041).
+  topic: z.string().max(16).optional(),
+  place: z.string().max(160).optional(),
 });
 const PollId = z.string().regex(/^[a-z0-9]{32}$/);
 
@@ -117,7 +122,13 @@ const Inputs = {
   "POST /drafts/appeal": z.strictObject({ id: PollId }),
 } as const;
 
-const toDraft = (d: z.infer<typeof Draft>): PollDraft => ({ ...d, closesAt: BigInt(d.closesAt) });
+const toDraft = ({ topic, place, ...d }: z.infer<typeof Draft>): PollDraft => ({
+  ...d,
+  closesAt: BigInt(d.closesAt),
+  // Core refuses a topic outside `POLL_TOPICS` (`topic`).
+  ...(topic === undefined ? {} : { topic: topic as PollTopic }),
+  ...(place === undefined ? {} : { place }),
+});
 
 const fromDraft = (d: PollDraft) => ({ ...d, closesAt: d.closesAt.toString() });
 

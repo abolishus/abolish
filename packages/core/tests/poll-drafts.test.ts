@@ -16,6 +16,8 @@ import {
   accountPolls,
   createPollDraft,
   deletePollDraft,
+  draftDisplayText,
+  draftQuestions,
   type DraftQuestion,
   listAccountPolls,
   MAX_CLOSE_SECONDS,
@@ -23,10 +25,14 @@ import {
   MAX_DRAFTS,
   MAX_POLLS_IN_SETUP,
   MAX_SUBMISSIONS_PER_DAY,
+  MAX_PLACE_LENGTH,
   MIN_OPEN_SECONDS,
   newAccountId,
+  placeIsWellFormed,
+  POLL_TOPICS,
   type PollDraft,
   PollDraftError,
+  type PollTopic,
   pollDraftProblem,
   readAccountPoll,
   SETUP_SECONDS,
@@ -118,8 +124,105 @@ describe("pollDraftProblem", () => {
     for (const tiers of [[], [1, 0], [0, 0], [3], [0.5]])
       expect(rule(draft({ tiers }))).toEqual({ rule: "tiers" });
     expect(rule(draft({ tiers: [0, 1, 2] }))).toBeUndefined();
+    // A stored or sent draft is JSON: its topic can be any string.
+    expect(rule(draft({ topic: "sports" as PollTopic }))).toEqual({ rule: "topic" });
+    expect(rule(draft({ topic: "" as PollTopic }))).toEqual({ rule: "topic" });
+    expect(rule(draft({ place: "" }))).toEqual({ rule: "place" });
+    expect(rule(draft({ place: " Riverside" }))).toEqual({ rule: "place" });
+    // The text rule comes first, as for every other string.
+    expect(rule(draft({ place: "\ud800" }))).toEqual({ rule: "text" });
+    expect(rule(draft({ topic: "transport", place: "Riverside" }))).toBeUndefined();
     expect(rule(draft({ closesAt: -1n }))).toEqual({ rule: "closes-at" });
     expect(rule(draft({ closesAt: 1n << 64n }))).toEqual({ rule: "closes-at" });
+  });
+
+  test("accepts every topic in the list and nothing else", () => {
+    for (const topic of POLL_TOPICS) expect(rule(draft({ topic }))).toBeUndefined();
+    fc.assert(
+      fc.property(fc.string(), (topic) => {
+        const known = (POLL_TOPICS as readonly string[]).includes(topic);
+        expect(rule(draft({ topic: topic as PollTopic }))).toEqual(
+          known ? undefined : { rule: "topic" },
+        );
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a place is one line of single-spaced words, up to its length in code points", () => {
+    for (const place of [
+      "Riverside",
+      "Alder County",
+      "São Paulo",
+      "東京",
+      "Bahnhofstraße 3",
+      // A name some scripts spell with the zero-width non-joiner.
+      "می\u200cخواهم",
+    ])
+      expect(placeIsWellFormed(place)).toBe(true);
+    // A stored draft is JSON, so a place can be anything.
+    for (const place of [null, 1, {}, ["Riverside"]])
+      expect(rule(draft({ place: place as unknown as string }))).toEqual({ rule: "place" });
+    // Counted in code points, so a place outside the BMP isn't cut short.
+    expect(placeIsWellFormed("𝔸".repeat(MAX_PLACE_LENGTH))).toBe(true);
+    expect(placeIsWellFormed("a".repeat(MAX_PLACE_LENGTH + 1))).toBe(false);
+    for (const place of [
+      "",
+      " ",
+      "Riverside ",
+      "Alder  County",
+      "Alder\u00a0County",
+      "Alder\tCounty",
+      "Alder\nCounty",
+      "Alder\u2028County",
+      "Alder\u2029County",
+      "\u202eedisreviR",
+      "Riverside\u2066x\u2069",
+      "a\u0000b",
+      "a\u0085b",
+      "Rive\u200frside",
+      "Rive\u200erside",
+      "\u061cRiverside",
+      "Rivers\u200bide",
+      "River\u00adside",
+      "River\u2060side",
+      "\ufeffRiverside",
+      // Decomposed: the same place as "São Paulo" in NFC.
+      "Sa\u0303o Paulo",
+    ])
+      expect(placeIsWellFormed(place), JSON.stringify(place)).toBe(false);
+  });
+
+  test("a well-formed place is its own normal form, and any place normalises to one", () => {
+    const normal = (s: string) => s.trim().replace(/\s+/gu, " ");
+    fc.assert(
+      fc.property(fc.string({ unit: "grapheme", maxLength: 100 }), (place) => {
+        if (placeIsWellFormed(place)) expect(normal(place)).toBe(place);
+        const fixed = Array.from(normal(place)).slice(0, MAX_PLACE_LENGTH).join("").trim();
+        // What the form would send after tidying: well formed unless it is
+        // empty or holds a character no place may.
+        if (
+          fixed !== "" &&
+          fixed === fixed.normalize("NFC") &&
+          !/[\p{Cc}\p{Zl}\p{Zp}\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u.test(
+            fixed,
+          )
+        )
+          expect(placeIsWellFormed(fixed)).toBe(true);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("the topic and place stay out of everything the definition commits to", () => {
+    const salt = new Uint8Array(32).fill(7);
+    const plain = draft();
+    const filed = draft({ topic: "transport", place: "Harbor" });
+    expect(draftDisplayText(filed, salt)).toEqual(draftDisplayText(plain, salt));
+    expect(encodeDisplayTextV2(draftDisplayText(filed, salt))).toEqual(
+      encodeDisplayTextV2(draftDisplayText(plain, salt)),
+    );
+    expect(draftQuestions(filed)).toEqual(draftQuestions(plain));
   });
 
   test("refuses text that encodes to more than MAX_DRAFT_TEXT", () => {
@@ -316,13 +419,16 @@ describe("account_polls", () => {
 
   test("submits a draft once its token passes, and then it can't be edited, deleted or resubmitted", async () => {
     const author = await newAccount();
-    const id = await createPollDraft(app, author, draft(), NOW);
+    // Tagged, so submission's second check reads the stored tags back too.
+    const filed = draft({ topic: "health", place: "Northfield" });
+    const id = await createPollDraft(app, author, filed, NOW);
     const { calls, turnstile } = passing();
     await submitPollDraft(app, author, id, { turnstile, token: "t", now: NOW });
     expect(calls).toEqual([["t", "poll-create"]]);
     expect(await readAccountPoll(app, author, id)).toMatchObject({
       state: "submitted",
       submittedAt: NOW,
+      draft: filed,
     });
     expect(await code(updatePollDraft(app, author, id, draft(), NOW))).toBe("not-editable");
     expect(await code(deletePollDraft(app, author, id))).toBe("not-editable");
@@ -352,6 +458,22 @@ describe("account_polls", () => {
     // The no-join test reads column names only, so it can't see inside `draft` (T-10).
     const author = await newAccount();
     const id = await createPollDraft(app, author, draft(), NOW);
+    const filed = draft({ topic: "transport", place: "Harbor" });
+    const tagged = await createPollDraft(app, author, filed, NOW);
+    expect((await readAccountPoll(app, author, tagged))?.draft).toEqual(filed);
+    const [keys] = await db.admin`
+      SELECT array_agg(k ORDER BY k) AS keys FROM account_polls, jsonb_object_keys(draft) AS k
+      WHERE id = ${tagged}`;
+    expect(keys!["keys"]).toEqual([
+      "closesAt",
+      "description",
+      "language",
+      "place",
+      "questions",
+      "tiers",
+      "title",
+      "topic",
+    ]);
     const [row] = await db.admin`
       SELECT array_agg(k ORDER BY k) AS keys FROM account_polls, jsonb_object_keys(draft) AS k
       WHERE id = ${id}`;

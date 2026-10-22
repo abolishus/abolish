@@ -103,6 +103,8 @@ const store = (d: PollDraft): StoredDraft => ({
   })),
   tiers: [...d.tiers],
   closesAt: d.closesAt.toString(),
+  ...(d.topic === undefined ? {} : { topic: d.topic }),
+  ...(d.place === undefined ? {} : { place: d.place }),
 });
 
 const load = (d: StoredDraft): PollDraft => ({ ...d, closesAt: BigInt(d.closesAt) });

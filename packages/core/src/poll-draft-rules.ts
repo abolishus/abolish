@@ -37,10 +37,40 @@ export interface DraftQuestion {
 }
 
 /**
+ * The topics a poll can be filed under ([[0041-poll-topics-and-places]]): a
+ * fixed list the website words in its own messages, so no author's words
+ * name a topic and a topic's page is the same in every language (T-67).
+ * Codes are only ever added: a poll keeps the code it was filed under, so
+ * none is renamed or removed.
+ */
+export const POLL_TOPICS = [
+  "community",
+  "culture",
+  "economy",
+  "education",
+  "environment",
+  "food",
+  "government",
+  "health",
+  "housing",
+  "safety",
+  "science",
+  "sport",
+  "technology",
+  "transport",
+] as const;
+export type PollTopic = (typeof POLL_TOPICS)[number];
+
+/** Most code points in a poll's place. */
+export const MAX_PLACE_LENGTH = 80;
+
+/**
  * What an author writes: one translation of display text version 2, who can
- * answer and when the poll closes. Everything else in the definition (the
- * election identifier, the electorate's roots, the panel, `opens_at`) is the
- * worker's, set during setup (ADR 0032, rules 8 to 11).
+ * answer and when the poll closes, and the topic and place the poll is
+ * listed under, which the definition doesn't commit to (ADR 0041).
+ * Everything else in the definition (the election identifier, the
+ * electorate's roots, the panel, `opens_at`) is the worker's, set during
+ * setup (ADR 0032, rules 8 to 11).
  */
 export interface PollDraft {
   /** A BCP 47 tag in lower case, as display text requires. */
@@ -52,6 +82,10 @@ export interface PollDraft {
   readonly tiers: readonly number[];
   /** UNIX time in seconds. */
   readonly closesAt: bigint;
+  /** What the poll is about; none if the author picked none. */
+  readonly topic?: PollTopic;
+  /** Where it is about, in the author's words (`placeIsWellFormed`); none if not given. */
+  readonly place?: string;
 }
 
 /**
@@ -91,7 +125,8 @@ export type PollState = (typeof POLL_STATES)[number];
  * (`questions`, `option-count`, `selections`, the last two naming the first
  * failing question), `too-long` (a field over its codec bound, or the whole
  * text over `MAX_DRAFT_TEXT`), display text version 2's shape rules
- * (`language-tag`, `question`, `labels`, `question-texts`), `tiers`, and at
+ * (`language-tag`, `question`, `labels`, `question-texts`), `tiers`, `topic`
+ * (not one of `POLL_TOPICS`), `place` (not `placeIsWellFormed`), and at
  * submission only, `closes-at`.
  */
 export type PollDraftRule =
@@ -102,6 +137,8 @@ export type PollDraftRule =
   | "too-long"
   | Exclude<DisplayTextV2Rule, "commitment" | "translations" | "question-count">
   | "tiers"
+  | "topic"
+  | "place"
   | "closes-at";
 
 export interface PollDraftProblem {
@@ -118,7 +155,38 @@ const U64_MAX = (1n << 64n) - 1n;
  */
 const UNSTORABLE = /[\p{Cs}\0]/u;
 
+/**
+ * What a place may not hold: control characters, line and paragraph
+ * separators, which would break the one line a card gives it; the bidi
+ * marks, embeddings, overrides and isolates, which could make it display as
+ * other words or reorder the text around it; and the invisible characters
+ * (soft hyphen, zero-width space, word joiner and invisible operators, byte
+ * order mark), which would make two places that look alike different
+ * strings (T-67). The zero-width joiner and non-joiner stay, since some
+ * scripts need them to spell a name.
+ */
+const PLACE_REFUSED =
+  /[\p{Cc}\p{Zl}\p{Zp}\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
+
+/**
+ * Whether `place` is a place a draft can hold: a string of 1 to
+ * `MAX_PLACE_LENGTH` code points in NFC, none of them `PLACE_REFUSED`, with
+ * no space at either end and words separated by single ordinary spaces, so
+ * places that look alike are, short of confusable letters, the same string.
+ */
+export function placeIsWellFormed(place: string): boolean {
+  return (
+    typeof place === "string" &&
+    place.length > 0 &&
+    Array.from(place).length <= MAX_PLACE_LENGTH &&
+    !PLACE_REFUSED.test(place) &&
+    place === place.normalize("NFC") &&
+    place === place.trim().replace(/\s+/gu, " ")
+  );
+}
+
 const strings = (d: PollDraft) => [
+  ...(d.place === undefined ? [] : [d.place]),
   d.language,
   d.title,
   d.description,
@@ -206,6 +274,10 @@ export function pollDraftProblem(draft: PollDraft, now?: bigint): PollDraftProbl
     )
   )
     return { rule: "tiers" };
+  // A stored or sent draft is JSON, so the type alone doesn't hold these.
+  if (draft.topic !== undefined && !(POLL_TOPICS as readonly string[]).includes(draft.topic))
+    return { rule: "topic" };
+  if (draft.place !== undefined && !placeIsWellFormed(draft.place)) return { rule: "place" };
   if (draft.closesAt < 0n || draft.closesAt > U64_MAX) return { rule: "closes-at" };
   if (
     now !== undefined &&

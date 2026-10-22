@@ -85,10 +85,14 @@ const logs: unknown[] = [];
 let connection: Redis;
 const workers: RunningWorker[] = [];
 const queues: BallotQueue[] = [];
+// Each run's own, so cleaning up never takes another file's or process's
+// keys from under its running queues.
+const prefixes: string[] = [];
 
 /** A worker judging ballots for `sql`, and the API's queue to it, under a prefix of their own. */
 async function judging(sql: Sql, epoch = definition.opens_at) {
   const prefix = `abolish-test-api-${Buffer.from(randomBytes(6)).toString("hex")}`;
+  prefixes.push(prefix);
   workers.push(
     await startWorker({
       connection,
@@ -132,7 +136,8 @@ afterAll(async () => {
   await new Promise((r) => server?.close(r));
   for (const q of queues) await q.close();
   for (const w of workers) await w.close();
-  for (const key of await connection.keys("abolish-test-api-*")) await connection.del(key);
+  for (const prefix of prefixes)
+    for (const key of await connection.keys(`${prefix}:*`)) await connection.del(key);
   connection?.disconnect();
   await db?.close();
 });

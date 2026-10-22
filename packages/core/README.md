@@ -119,6 +119,19 @@ Reports of polls to the moderators: one row per election and removal ground, `el
 
 Reports never change a poll's state or the public log (a test checks this): report volume is never a ground.
 
+### `account_profiles`, `account_profile_polls`, `account_profile_namings` and `profile_handles` (T-10, T-52, T-75)
+
+Creator profiles ([[0040-creator-profiles]]; [[P2-27]] part 1b): `account_profiles` holds one profile per account, its handle and the name its author chose; `account_profile_polls` which of the account's own polls (`account_polls`, by `(id, user_id)`) the profile shows; `account_profile_namings` the UTC day the account last set a name, kept when the profile is deleted; `profile_handles` every handle ever issued and nothing else, which `abolish_app` may add to, never change or remove. All account-side. `abolish_app` may update a profile's name, never its handle, and make or take back a choice, never change one in place. Operational: a wipe loses every profile and choice, and polls are rebuilt anonymous. Nothing is shown before moderation of profiles (part 1c).
+
+`src/profiles.ts`:
+
+- `profileName(name)`: the stored form of a name (spaces collapsed, trimmed, NFC, 1 to `MAX_PROFILE_NAME` code points), or `undefined` for one holding a control, format, private-use, unassigned, surrogate or separator character but the space.
+- `makeProfile(sql, accountId, name, { now })` returns the new handle (`newProfileHandle`, 80 CSPRNG bits in base32). `ProfileError` refuses, in order, a bad name (`invalid-name`), an account with no verified phone (`account`), one with a profile (`exists`) and one that set a name this UTC day (`too-soon`).
+- `renameProfile(sql, accountId, name, { now })` says whether the name changed: `invalid-name`, `no-profile`, `too-soon`. `deleteProfile(sql, accountId)` deletes the profile and its choices and retires its handle.
+- `showOnProfile(sql, accountId, pollId, on)` makes or takes back one poll's choice, at any state of the poll: `no-profile`, `not-found` (not the account's poll).
+- `readOwnProfile(sql, accountId, { now })`: the account's own handle, name, the day it can rename and the polls it chose.
+- `readProfile(sql, handle)`: the public profile, its name and the newest `MAX_PROFILE_POLLS` chosen polls with a stored definition and no delist or hide standing. `askedBy(sql, electionId)`: the profile a poll's author chose to show it on, none for a hidden poll.
+
 ### `account_reactions` and `account_reaction_hours` (T-10, T-11, T-52, T-68)
 
 Reactions on a poll ([[P2-25]] part 5): `account_reactions` holds one row per account, `election_id` and reaction, one of the fixed `REACTIONS` (no agree or disagree, so no count reads as a tally), with no time; `account_reaction_hours` counts each account's changes per UTC hour, with no poll. Both are account-side; `abolish_app` may set and take back a reaction, never change one in place. Operational: a wipe loses reactions and changes no result.

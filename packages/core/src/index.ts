@@ -132,6 +132,9 @@ export {
   accountModerators,
   accountPolls,
   accountPollSubmissions,
+  accountProfileNamings,
+  accountProfilePolls,
+  accountProfiles,
   accountReactionHours,
   accountReactions,
   accountSessions,
@@ -156,6 +159,7 @@ export {
   moderationActions,
   moderationReports,
   pollCreationTxs,
+  profileHandles,
   TABLE_CLASSES,
 } from "./db/schema/index.ts";
 export {
@@ -474,6 +478,25 @@ export {
   report,
   reviewReports,
 } from "./reports.ts";
+export {
+  type AskedBy,
+  askedBy,
+  deleteProfile,
+  makeProfile,
+  MAX_PROFILE_NAME,
+  MAX_PROFILE_POLLS,
+  newProfileHandle,
+  type OwnProfile,
+  PROFILE_HANDLE,
+  ProfileError,
+  type ProfileErrorCode,
+  profileName,
+  type PublicProfile,
+  readOwnProfile,
+  readProfile,
+  renameProfile,
+  showOnProfile,
+} from "./profiles.ts";
 export {
   MAX_REACTION_CHANGES_PER_HOUR,
   pruneReactionHours,

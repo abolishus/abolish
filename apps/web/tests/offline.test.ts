@@ -258,11 +258,15 @@ describe("the offline shell's worker", () => {
         fc.boolean(),
         async (p, method, mode, destination, online) => {
           s.online(online);
-          // A rejected answer is the browser's own network error: a font it
-          // doesn't hold, fetched while offline.
+          // A rejected answer is the browser's own network error, and only a
+          // font it doesn't hold, fetched while offline, may get one.
           const answer = await s
             .request(p, { method, mode, destination })
-            .catch(() => Response.error());
+            .catch((error: unknown) => {
+              expect(!online && mode !== "navigate" && p.endsWith(".woff2")).toBe(true);
+              expect(error).toEqual(new TypeError("Failed to fetch"));
+              return Response.error();
+            });
           // It answers only a page opened in a tab, or a file it keeps.
           if (answer !== undefined)
             expect(

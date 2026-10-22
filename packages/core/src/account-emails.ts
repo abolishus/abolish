@@ -562,6 +562,37 @@ export interface EmailKeyRotation {
 }
 
 /**
+ * How many of `keys`' keys don't reproduce the check value stored for their
+ * keyring and ID, storing the check of any not seen before (the first
+ * instance to hold a key writes it). A hash key retyped under its ID matches
+ * no address hashed or rotated under the right bytes, so an address another
+ * account holds would verify again through it (T-01); a box key opens
+ * nothing. The website refuses to start with one, and a rotation rewrites
+ * nothing while one is held.
+ */
+export async function checkEmailKeys(client: Sql, keys: EmailKeys): Promise<number> {
+  const db = drizzle({ client });
+  const checksOf = (keyring: "hash" | "box", ring: Keyring, label: Uint8Array) =>
+    ring.keys.map(({ id, key }) => ({
+      keyring,
+      keyId: id,
+      keyCheck: createHmac("sha256", key).update(label).digest(),
+    }));
+  const checks = [
+    ...checksOf("hash", keys.hash, HASH_CHECK_LABEL),
+    ...checksOf("box", keys.box, BOX_CHECK_LABEL),
+  ];
+  await db.insert(accountEmailKeyChecks).values(checks).onConflictDoNothing();
+  const stored = new Map(
+    (await db.select().from(accountEmailKeyChecks)).map((row) => [
+      `${row.keyring}:${row.keyId}`,
+      Buffer.from(row.keyCheck),
+    ]),
+  );
+  return checks.filter((c) => !stored.get(`${c.keyring}:${c.keyId}`)?.equals(c.keyCheck)).length;
+}
+
+/**
  * Rewrites every verified address under the keyrings' current keys,
  * re-hashed and re-sealed, and every waiting code's address re-sealed
  * ([[0038-verified-accounts]], Email): an address can be read back, unlike a
@@ -583,26 +614,7 @@ export interface EmailKeyRotation {
  */
 export async function rotateEmailKeys(client: Sql, keys: EmailKeys): Promise<EmailKeyRotation> {
   const db = drizzle({ client });
-  const checksOf = (keyring: "hash" | "box", ring: Keyring, label: Uint8Array) =>
-    ring.keys.map(({ id, key }) => ({
-      keyring,
-      keyId: id,
-      keyCheck: createHmac("sha256", key).update(label).digest(),
-    }));
-  const checks = [
-    ...checksOf("hash", keys.hash, HASH_CHECK_LABEL),
-    ...checksOf("box", keys.box, BOX_CHECK_LABEL),
-  ];
-  await db.insert(accountEmailKeyChecks).values(checks).onConflictDoNothing();
-  const stored = new Map(
-    (await db.select().from(accountEmailKeyChecks)).map((row) => [
-      `${row.keyring}:${row.keyId}`,
-      Buffer.from(row.keyCheck),
-    ]),
-  );
-  const mismatchedKeys = checks.filter(
-    (c) => !stored.get(`${c.keyring}:${c.keyId}`)?.equals(c.keyCheck),
-  ).length;
+  const mismatchedKeys = await checkEmailKeys(client, keys);
 
   const ids = (ring: Keyring) => ring.keys.map((k) => k.id);
   /** The ring's keys up to and including the current one: those a row may be rewritten from. */
@@ -639,8 +651,10 @@ export async function rotateEmailKeys(client: Sql, keys: EmailKeys): Promise<Ema
           continue;
         }
         const outcome = await db.transaction(async (tx) => {
-          // As a request or an answer for the address takes them, so no
-          // account verifies it while its row is between hashes.
+          // The account's lock, then the address's, as a request or an
+          // answer takes them: no account verifies the address while its row
+          // is between hashes, and no lock waits in a cycle with an answer.
+          await lockAccount(tx, row.userId);
           await lockAddress(tx, keys, address);
           const addressHash = hashUnder(keys.hash.current.key, address);
           const [taken] = await tx

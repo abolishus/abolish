@@ -5,6 +5,8 @@
 
 import {
   assertDistinctKeyrings,
+  checkEmailKeys,
+  checkPhoneKeys,
   createAccounts,
   createPostmarkSender,
   createTurnstile,
@@ -343,6 +345,16 @@ const token = createTokenHandler({
   issuer: tokenIssuer(),
   origin,
 });
+// A key retyped under its ID matches nothing made or rotated under the right
+// bytes, so through it an address or number another account holds would
+// verify again (T-01; the account-keys runbook): an instance holding one
+// doesn't start.
+if (emailVerification !== undefined && (await checkEmailKeys(sql, emailVerification.keys)) > 0)
+  throw new Error(
+    "EMAIL_HASH_KEYS or EMAIL_BOX_KEYS: a key differs from the one its ID was first seen with",
+  );
+if (phoneVerification !== undefined && (await checkPhoneKeys(sql, phoneVerification.keys)) > 0)
+  throw new Error("PHONE_HASH_KEYS: a key differs from the one its ID was first seen with");
 const prune = startAccountPrune({
   sql,
   log: write,

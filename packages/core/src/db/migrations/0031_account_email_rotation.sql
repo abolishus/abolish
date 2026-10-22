@@ -20,3 +20,7 @@ CREATE TABLE account_email_key_checks (
 );
 REVOKE ALL ON account_email_key_checks FROM PUBLIC;
 GRANT SELECT, INSERT ON account_email_key_checks TO abolish_app;
+
+-- The rotation finds the rows not yet under the current keys by their key
+-- IDs: few distinct values, nearly every row under the current ones.
+CREATE INDEX account_email_keys ON account_emails (hash_key, box_key);

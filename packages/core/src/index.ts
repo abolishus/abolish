@@ -186,6 +186,7 @@ export {
   pruneAccountVerifications,
 } from "./accounts.ts";
 export {
+  checkEmailKeys,
   EMAIL_CODE_DIGITS,
   EMAIL_CODE_SECONDS,
   EMAIL_CODE_TRIES,
@@ -220,6 +221,7 @@ export {
   PHONE_COUNTRIES,
   PHONE_HOLD_DAYS,
   PHONE_LINE_TYPES,
+  checkPhoneKeys,
   type PhoneChannel,
   type PhoneHashRotation,
   PhoneVerificationError,

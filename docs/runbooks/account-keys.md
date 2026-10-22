@@ -20,7 +20,7 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
 
 - **Never drop, reorder or insert a phone-hash key.** (E-mail keys differ: an old one leaves its keyring once nothing is stored under it; see The e-mail keyrings.) Add new keys at the end only, and keep every one for good. A number's chain runs through every key in order; a keyring missing one, or with two swapped, computes a different chain and stops matching every value made under it, which lets that number verify a second account (T-01). Each key is useless without the later ones and the table, so keeping old ones costs nothing.
 - **Two deploys for every new key**, in every keyring: first listed but not current, then current. An instance that doesn't hold a key can't match values made under it, so a key made current while some instance still runs without it could let one number, or one address, verify two accounts.
-- **Never change a key's bytes under its ID, and never roll the variables back past step 1 once step 2 is live.** A rotation is one way: once every chain runs through a key, only those exact bytes match them. Each instance stores a check value for every phone-hash and e-mail key the first time it sees the ID, and refuses to rotate while any of its keys fails its check (`PhoneHashKeyMismatch`, `EmailKeyMismatch`), but an instance with a wrong key still verifies new numbers and addresses under it until it is fixed.
+- **Never change a key's bytes under its ID, and never roll the variables back past step 1 once step 2 is live.** A rotation is one way: once every chain runs through a key, only those exact bytes match them. The first instance to hold a phone-hash or e-mail key stores a check value for its ID, and an instance whose keys don't all reproduce their checks refuses to start (`PHONE_HASH_KEYS: a key differs …`, `EMAIL_HASH_KEYS or EMAIL_BOX_KEYS: a key differs …`): once rows have rotated, a wrong key matches none of them, so through it every number and address another account holds would verify again (T-01).
 - **Rotate the phone-hash key after any suspected exposure** of the key, the environment, a host or a backup, and otherwise once a year.
 
 ## Rotating the phone-hash key
@@ -41,7 +41,7 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
 
 5. **Watch the log** for these lines, by kind only; none names a key or a row:
    - `PhoneHashRotationFailed`: a run failed; the next tick tries again. If it repeats, look at the database.
-   - `PhoneHashKeyMismatch`: a key's bytes differ from the ones its ID was first seen with, so nothing is rotated. Put back the exact key; never "fix" it by giving the new bytes a new ID in the same position. If it was the first instance to see the ID that held the wrong bytes (a mistyped staging deploy, say), the stored check is the wrong one; see Fixing a stored check.
+   - `PhoneHashKeyMismatch`: a key's bytes differ from the ones its ID was first seen with, so nothing is rotated (an instance that started before the check was stored; a new one would refuse to start). Put back the exact key; never "fix" it by giving the new bytes a new ID in the same position. If it was the first instance to see the ID that held the wrong bytes (a mistyped staging deploy, say), the stored check is the wrong one; see Fixing a stored check.
    - `PhoneHashKeyMissing`: some row is under a key this instance's keyring doesn't hold. A key was dropped or its ID mistyped, and must be put back exactly as it was, or this instance runs an old configuration.
    - `PhoneHashConflict`: two accounts hold one number, which only an instance missing a key can have let happen; that number's older row is left unrotated. Find the two rows with the step 4 query's tables and delete one account's `account_phones` row without holding the number, so that account can verify another one; deleting it plainly would hold the number for 90 days through the table's trigger:
 
@@ -58,7 +58,7 @@ What it buys: once step 4 shows no old key, a dump of the database taken from th
 
 ## Fixing a stored check
 
-Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) is written by the first instance to hold its ID, and the app can't change it. If that instance held wrong bytes, every correct instance reports a mismatch and nothing rotates. Look at the step 4 query (or the e-mail one below) first: if no row is under that key ID, nothing was made with the wrong bytes, and a login role granted `abolish_migrator` can delete the check (`DELETE FROM account_phone_key_checks WHERE key_id = '<id>'`, or from `account_email_key_checks` with its `keyring`) so the next tick stores the right one. If rows are under it, they were made with the wrong bytes: put those bytes back under that ID, let a rotation move every row to a new key, and only then retire the ID. Never give one ID two sets of bytes.
+Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) is written by the first instance to hold its ID, and the app can't change it. If that instance held wrong bytes, every correct instance reports a mismatch and nothing rotates. First fix or stop the instance holding the wrong bytes, or it stores its check again on its next tick. Then look at the step 4 query (or the e-mail one below): if no row is under that key ID, nothing was made with the wrong bytes, and a login role granted `abolish_migrator` can delete the check (`DELETE FROM account_phone_key_checks WHERE key_id = '<id>'`, or from `account_email_key_checks` with its `keyring`) so the next tick stores the right one. If rows are under it, they were made with the wrong bytes: put those bytes back under that ID, let a rotation move every row to a new key, and only then retire the ID. Never give one ID two sets of bytes.
 
 ## The e-mail keyrings
 
@@ -72,10 +72,15 @@ Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) 
    UNION ALL SELECT 'account_email_codes', code_key, box_key, count(*) FROM account_email_codes GROUP BY code_key, box_key;
    ```
 
-   Every verified address should show the current keys. A waiting code keeps its code's hash under the hash key it was made with (the code itself isn't kept) and is gone 15 minutes later, after the next prune.
+   Every verified address should show the current keys. A waiting code keeps its code's hash under the hash key it was made with (the code itself isn't kept) and is gone 15 minutes later, after the next prune. To find the rows still under older keys, by account:
 
-3. **Retire the old key** once nothing shows it, and not before a day after the second deploy: the per-address send counts aren't keyed and can't be rewritten, so they count under the old hash key until they age out, and a key dropped sooner lets an address be sent a few more messages that day. Remove it from the keyring and deploy. An instance that still meets a row under a removed key fails to open or match it: put the key back.
-4. **Watch the log**: `EmailKeyRotationFailed` (the next tick tries again), `EmailKeyMismatch` (as `PhoneHashKeyMismatch`), `EmailKeyMissing` (a row under a key this instance lacks: a key retired too early, or an old configuration) and `EmailKeyRotationSkipped` (a verified address whose box didn't open under its key, or one two accounts hold, left as it is: find it with the query above and settle it by hand, as with `PhoneHashConflict`).
+   ```sql
+   SELECT 'account_emails' AS t, user_id FROM account_emails WHERE hash_key <> '<current hash ID>' OR box_key <> '<current box ID>'
+   UNION ALL SELECT 'account_email_codes', user_id FROM account_email_codes WHERE box_key <> '<current box ID>';
+   ```
+
+3. **Retire the old key** once nothing shows it, and not before 25 hours after the second deploy has fully rolled out: the per-address send counts are hashed but don't record their key, so they can't be rewritten; they count under the old hash key until they age out (timed to the hour, kept a day), and a key dropped sooner lets an address be sent a few more messages that day. Remove it from the keyring and deploy. An instance that still meets a row under a removed key fails to open or match it: put the key back.
+4. **Watch the log**: `EmailKeyRotationFailed` (the next tick tries again), `EmailKeyMismatch` (as `PhoneHashKeyMismatch`), `EmailKeyMissing` (a row under a key this instance lacks: a key retired too early, or an old configuration) and `EmailKeyRotationSkipped` (a verified address or waiting code whose box didn't open under its key, or an address two accounts hold, left as it is: find it with the query in step 2, and settle it by deleting the unrotated `account_emails` or `account_email_codes` row; that account verifies its address again).
 
 After an exposure, the same limits as the phone hash apply: older backups, dead row versions until `VACUUM FULL` on `account_emails`, `account_email_codes` and `account_email_recipients`, and the provider's recovery log. An exposed box key opens every address sealed under it in those; an exposed hash key lets a guessed address be confirmed.
 

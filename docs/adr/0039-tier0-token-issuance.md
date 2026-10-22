@@ -68,6 +68,7 @@ What would change it: if the owner wants VOPRF mode literally, B is a drop-in re
 - A new threat, T-74: the issuer key mints identities if stolen, and a per-account key would link accounts to commitments if clients didn't check it.
 - One identity per account for good: a token lost before redemption, or an identity lost without a backup after it, isn't replaced from the same account (Known-weak in [[tier0-token]]).
 - **Precondition:** tokens must not replace Turnstile in [[registration]] until the redemption is sealed to the signing service ([[tier0-token]], Redemption), or a self-paid copy of a waiting commitment, made by anyone who sees it in transit, would shut its account out for good.
+- **Precondition:** nor until the client has a guard against the issuer's active stall of a quiet region ([[tier0-token]], Security notes), which otherwise lets the operator join a chosen account to its commitment (T-10, T-13).
 - Follow-ups in [[P2-30]]: `packages/crypto` (part 2), the issuer, its keys and the deployment record's key list (part 3), the relay and the ballot client (part 4), and redemption in the signing service in place of Turnstile (part 5).
 
 ## Decision

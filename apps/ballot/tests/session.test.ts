@@ -11,8 +11,13 @@
 
 import {
   BABYJUBJUB_ORDER,
+  ceremonyTranscriptHash,
+  checkCeremonyTranscript,
   checkChallengeOpeningV2,
+  decodeElectionDefinitionV5,
   decodeOpening,
+  electionStubV5Hash,
+  encodeElectionDefinitionV5,
   identityBackupLocator,
   openIdentityBackup,
   type Panel,
@@ -31,6 +36,7 @@ import {
   type CheckElectionRequest,
   type CommitmentRequest,
   type FindCellRequest,
+  type IntakeRequest,
   PROTOCOL_VERSION,
   type SealRequest,
   type Tier0OutcomeRequest,
@@ -50,6 +56,7 @@ import {
   registeredHash,
   registrars,
   registryWith,
+  transcript,
 } from "./poll.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -145,6 +152,65 @@ describe("a version-5 poll's ceremony", () => {
       registeredHash: new Uint8Array(32),
     });
     expect(check).toMatchObject({ ok: false, problem: "unregistered-definition" });
+  });
+});
+
+describe("what each seat's intake takes beside a ballot", () => {
+  const intake = (definitionHash = registeredHash): IntakeRequest => ({
+    v: PROTOCOL_VERSION,
+    id: 18,
+    kind: "intake",
+    definitionHash,
+  });
+
+  test("is the poll's stub and the transcript that checked, as a seat's node opens them", () => {
+    const result = holding().intake(intake());
+    if (!result.ok) throw new Error(result.problem);
+    expect(result.transcript).toEqual(transcript);
+    // The node's path (apps/trustee-node, stub.ts and intake.ts): the stub
+    // decodes with no transcript hash, the transcript checks under its stub
+    // hash, and the two make exactly the registered definition.
+    const stub = decodeElectionDefinitionV5(result.stub);
+    expect(stub.ceremony_transcript_hash).toEqual(new Uint8Array(32));
+    const checked = checkCeremonyTranscript(
+      {
+        l2ChainId: stub.l2_chain_id,
+        trusteeRegistry: stub.trustee_registry,
+        electionId: stub.election_id,
+        stubHash: electionStubV5Hash(stub),
+        panel,
+      },
+      result.transcript,
+      1,
+    );
+    expect(checked.ok).toBe(true);
+    expect(
+      encodeElectionDefinitionV5({
+        ...stub,
+        ceremony_transcript_hash: ceremonyTranscriptHash(result.transcript),
+      }),
+    ).toEqual(definitionBytes);
+  });
+
+  test("hands out copies: changing them changes nothing the worker holds", () => {
+    const session = holding();
+    const first = session.intake(intake());
+    if (!first.ok) throw new Error(first.problem);
+    first.stub.fill(0);
+    first.transcript.fill(0);
+    const again = session.intake(intake());
+    if (!again.ok) throw new Error(again.problem);
+    expect(again.transcript).toEqual(transcript);
+    expect(decodeElectionDefinitionV5(again.stub).election_id).toEqual(definition.election_id);
+  });
+
+  test("is nothing for another poll, for none, or after a refused check", () => {
+    const none = { ok: false, problem: "no-election" };
+    expect(holding().intake(intake(new Uint8Array(32).fill(1)))).toEqual(none);
+    expect(new BallotSession().intake(intake())).toEqual(none);
+    const session = holding();
+    session.checkElection(checkRequest({ panels: [] }));
+    expect(session.intake(intake())).toEqual(none);
   });
 });
 

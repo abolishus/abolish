@@ -128,10 +128,13 @@ describe("the frame under the client's CSP", () => {
           cast: () => new Promise<never>(() => {}),
           casts: () => new Promise<never>(() => {}),
           record: () => new Promise<never>(() => {}),
+          intake: () => new Promise<never>(() => {}),
+          deliver: () => new Promise<never>(() => {}),
+          receipt: () => new Promise<never>(() => {}),
+          keepReceipt: () => new Promise<never>(() => {}),
           send: () => new Promise<never>(() => {}),
           keepBoarded: () => new Promise<never>(() => {}),
           registrar: undefined,
-          delivers: false,
         },
         languages: ["en-US"],
         onRestart: () => {},
@@ -153,9 +156,11 @@ describe("the frame under the client's CSP", () => {
       render(createElement(Working, { poll: POLL, kind: "finding" })),
       render(createElement(Working, { poll: POLL, kind: "sealing" })),
       render(createElement(Working, { poll: POLL, kind: "opening" })),
+      render(createElement(Working, { poll: POLL, kind: "delivering" })),
       render(createElement(Working, { poll: POLL, kind: "sending" })),
-      ...(["busy", "unavailable", "unreachable", "unconfirmed"] as const).map((reason) =>
-        render(createElement(Unsent, { poll: POLL, trackingCode: code, reason, onSend: none })),
+      ...(["undelivered", "busy", "unavailable", "unreachable", "unconfirmed"] as const).map(
+        (reason) =>
+          render(createElement(Unsent, { poll: POLL, trackingCode: code, reason, onSend: none })),
       ),
       render(createElement(Sent, { poll: POLL, trackingCode: code, index: 41n, onAgain: none })),
       render(createElement(Sent, { poll: POLL, trackingCode: code, onAgain: none })),
@@ -179,7 +184,6 @@ describe("the frame under the client's CSP", () => {
       ...(
         [
           "cant-seal-version",
-          "no-delivery",
           "no-identity",
           "identity-unreadable",
           "unregistered",

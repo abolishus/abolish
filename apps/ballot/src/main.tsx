@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
-import { castAsAsked, readCasts, recordBoarded, recordCast } from "./casts.ts";
+import { castAsAsked, readCasts, recordBoarded, recordCast, recordReceipt } from "./casts.ts";
 import type { Backer } from "./backup-offer.tsx";
 import { confirming, STAGING, tier0Region } from "./deployment.ts";
 import {
@@ -23,6 +23,7 @@ import {
   restoreIdentity,
   saveBackupCredential,
 } from "./identity.ts";
+import { deliverShare } from "./intake.ts";
 import { parseLink } from "./link.ts";
 import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
@@ -253,13 +254,17 @@ const source: ElectionSource = {
   casts: (electionId, tier) => readCasts(electionId, tier),
   record: async (electionId, tier, ballot, shares, asked) =>
     castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot, shares) : "not-asked",
+  intake: (definitionHash) => withWorker((used) => used.intake(definitionHash)),
+  deliver: (seat, delivery) =>
+    deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
+  receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
+  keepReceipt: (electionId, tier, ballot, checked) =>
+    recordReceipt(electionId, tier, ballot, checked),
   send: (electionId, ballot) =>
     sendBallot(STAGING, electionId, ballot, (url, init) => fetch(url, init)),
   keepBoarded: (electionId, tier, ballot, boarded) =>
     recordBoarded(electionId, tier, ballot, boarded),
   registrar,
-  // Delivery to the trustees' intake comes before any build sends (P2-8 part 3c).
-  delivers: false,
 };
 
 async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {

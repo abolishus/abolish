@@ -24,6 +24,7 @@ import {
   DecodeError,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
+  encodeElectionStubV5,
   finishSealV3,
   identityBackupLocator,
   IdentityBackupError,
@@ -61,6 +62,8 @@ import {
   type CommitmentResult,
   type FindCellRequest,
   type FindCellResult,
+  type IntakeRequest,
+  type IntakeResult,
   type PostingRequest,
   type PostingResult,
   PROVER_TIMEOUT_MS,
@@ -81,6 +84,8 @@ export class BallotSession {
         readonly definitionHash: string;
         readonly definition: ElectionDefinitionV5;
         readonly election: QuestionBallotElection;
+        /** The ceremony transcript `election`'s keys came from, for each seat's intake. */
+        readonly transcript: Uint8Array;
       }
     | undefined;
   /** The voter's cell in the poll, found by `findCell`: what `cast` proves with. */
@@ -129,6 +134,7 @@ export class BallotSession {
       definitionHash: check.election.definitionHash,
       definition,
       election: sealing.election,
+      transcript: sealing.transcript,
     };
     return check;
   }
@@ -465,6 +471,24 @@ export class BallotSession {
       if (receiptSealV3(sealed, request.ballot, request.receipt) !== undefined) break;
     }
     return { ok: true, seat };
+  }
+
+  /**
+   * The held poll's stub and ceremony transcript, as each seat's intake
+   * takes them beside a ballot ([[delivery]], Client rule 4): the
+   * transcript `sealingElectionV5` checked, so a delivery names the keys its
+   * shares were sealed to (T-37). Copies, so nothing the page does to them
+   * reaches the poll held here.
+   */
+  intake(request: IntakeRequest): IntakeResult {
+    const poll = this.#poll;
+    if (poll === undefined || poll.definitionHash !== toHex(request.definitionHash))
+      return { ok: false, problem: "no-election" };
+    return {
+      ok: true,
+      stub: encodeElectionStubV5(poll.definition),
+      transcript: poll.transcript.slice(),
+    };
   }
 
   /**

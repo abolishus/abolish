@@ -594,6 +594,34 @@ describe("receipt requests", () => {
   });
 });
 
+describe("intake requests", () => {
+  const intake = () => ({
+    v: PROTOCOL_VERSION,
+    id: 17,
+    kind: "intake",
+    definitionHash: new Uint8Array(32).fill(6),
+  });
+
+  test("accepts a well-formed request as it is", () => {
+    expect(parseRequest(intake())).toEqual(intake());
+  });
+
+  test.each([
+    ["a definition hash of 31 bytes", { definitionHash: new Uint8Array(31) }],
+    ["a definition hash of 33 bytes", { definitionHash: new Uint8Array(33) }],
+    ["a definition hash as hex", { definitionHash: "06".repeat(32) }],
+    ["an extra key", { ballot: new Uint8Array(1) }],
+  ])("refuses one with %s", (_, change) => {
+    expect(parseRequest({ ...intake(), ...change })).toBeUndefined();
+  });
+
+  test("refuses one without its definition hash", () => {
+    const r: Record<string, unknown> = intake();
+    delete r["definitionHash"];
+    expect(parseRequest(r)).toBeUndefined();
+  });
+});
+
 describe("posting requests", () => {
   const posting = () => ({
     v: PROTOCOL_VERSION,
@@ -648,6 +676,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 14, kind: "backup-open", result: {} })).toBe(14);
     expect(responseId({ v: PROTOCOL_VERSION, id: 15, kind: "receipt", result: {} })).toBe(15);
     expect(responseId({ v: PROTOCOL_VERSION, id: 16, kind: "posting", result: {} })).toBe(16);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 17, kind: "intake", result: {} })).toBe(17);
   });
 
   test("ignores another version's response or kind", () => {

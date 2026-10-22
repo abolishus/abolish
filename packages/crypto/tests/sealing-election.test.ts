@@ -133,6 +133,7 @@ describe("sealingElectionV5", () => {
   test("seals to every seat a ceremony of the pinned panel registered", () => {
     const result = sealingElectionV5(honest.definition, [honest.panel], [transcriptEntry]);
     if (!result.ok) throw new Error(result.code);
+    expect(result.transcript).toEqual(honest.transcript);
     expect([...result.election.qualified]).toEqual(
       Array.from({ length: base.panel_size }, (_, i) => i + 1),
     );

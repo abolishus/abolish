@@ -112,8 +112,7 @@ const STORE = "casts";
 /**
  * The stored record's version: another is unreadable, never migrated by
  * guessing. Version 1 kept no shares and version 2 no receipts; no build
- * wrote either, since none records a cast before it delivers (open.tsx,
- * `delivers`).
+ * wrote either, since none recorded a cast before it delivered.
  */
 const RECORD_VERSION = 3;
 

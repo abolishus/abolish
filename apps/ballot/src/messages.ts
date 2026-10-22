@@ -255,9 +255,6 @@ const enUS = {
   castFaultyTitle: "Your ballot didn't pass this device's check",
   castFaulty:
     "This device checks every ballot before it is sent, and this one was wrong, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
-  noDeliveryTitle: "This ballot can't send your ballot yet",
-  noDelivery:
-    "A cast ballot counts only once its parts reach the poll's trustees, and this version of the ballot can't deliver them yet. Your ballot wasn't made and nothing was sent.",
   castsUnreadableTitle: "This device's record of your ballots can't be read",
   castsUnreadable:
     "This device keeps a record of every ballot it sends, so a new one never cancels an earlier one, and that record can't be read now. Nothing was sent. Check that this browser keeps site data, then answer again.",
@@ -267,7 +264,13 @@ const enUS = {
   notNewerTitle: "Wait a moment, then answer again",
   notNewer:
     "Your last ballot from this device is so recent that a new one now would cancel it instead of replacing it. Nothing was sent. Answer again in a minute.",
-  // Sending a cast ballot (sealed.tsx).
+  // Delivering and sending a cast ballot (sealed.tsx).
+  deliveringTitle: "Handing your ballot to the poll's trustees",
+  delivering:
+    "This device recorded your sealed ballot and is giving each of the poll's trustees its sealed part. Keep this page open.",
+  unsentUndeliveredTitle: "Your ballot hasn't reached every trustee yet",
+  unsentUndelivered:
+    "A ballot counts only once each of the poll's trustees has its sealed part, and some didn't take theirs this time. Nothing was sent to the board, so your earlier ballot, if any, still stands. Send it again in a minute.",
   sendingTitle: "Sending your ballot",
   sending:
     "This device recorded your sealed ballot and is sending it to the public board. Keep this page open.",

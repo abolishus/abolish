@@ -32,6 +32,7 @@ const WORKING = {
   finding: { title: "findingTitle", detail: "finding" },
   sealing: { title: "sealingTitle", detail: "sealing" },
   opening: { title: "openingTitle", detail: "opening" },
+  delivering: { title: "deliveringTitle", detail: "delivering" },
   sending: { title: "sendingTitle", detail: "sending" },
 } as const satisfies Record<
   string,
@@ -211,12 +212,13 @@ export function Opened({
 }
 
 /** Why a recorded cast isn't confirmed on the board yet: each one is answered by sending the same bytes again. */
-export type UnsentReason = "busy" | "unavailable" | "unreachable" | "unconfirmed";
+export type UnsentReason = "undelivered" | "busy" | "unavailable" | "unreachable" | "unconfirmed";
 
 const UNSENT: Record<
   UnsentReason,
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
+  undelivered: { title: "unsentUndeliveredTitle", detail: "unsentUndelivered" },
   busy: { title: "unsentBusyTitle", detail: "unsentBusy" },
   unavailable: { title: "unsentUnavailableTitle", detail: "unsentUnavailable" },
   unreachable: { title: "unsentUnreachableTitle", detail: "unsentUnreachable" },
@@ -326,7 +328,6 @@ export function Sent({
 
 const STOPPED: Record<
   | "cant-seal-version"
-  | "no-delivery"
   | "no-identity"
   | "identity-unreadable"
   | "unregistered"
@@ -350,7 +351,6 @@ const STOPPED: Record<
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 > = {
   "cant-seal-version": { title: "cantSealTitle", detail: "cantSealVersion" },
-  "no-delivery": { title: "noDeliveryTitle", detail: "noDelivery" },
   "no-identity": { title: "noIdentityTitle", detail: "noIdentity" },
   "identity-unreadable": { title: "identityUnreadableTitle", detail: "identityUnreadable" },
   unregistered: { title: "unregisteredTitle", detail: "unregistered" },

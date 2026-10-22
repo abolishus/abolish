@@ -240,10 +240,16 @@ export const router = os.router({
         // Read from the board, never taken on the worker's word: the entry
         // carries the bytes sent, or, for an earlier receipt, whatever the
         // board holds there, which the sender checks against its ballot.
+        // An earlier entry must at least be a record of the type and
+        // version sent (its 3-byte header), so a worker's wrong position
+        // never hands the sender a ballot or another record as its receipt.
         const index = BigInt(outcome.index);
-        const boarded = outcome.earlier
-          ? await readEntryAt(context.sql, id, index)
-          : await readBoardedEntry(context.sql, id, index, record);
+        let boarded;
+        if (outcome.earlier) {
+          const at = await readEntryAt(context.sql, id, index);
+          const header = (b: Uint8Array) => Buffer.from(b.subarray(0, 3)).toString("hex");
+          if (at !== undefined && header(at.payload) === header(record)) boarded = at;
+        } else boarded = await readBoardedEntry(context.sql, id, index, record);
         if (boarded === undefined) throw new Error("the board doesn't carry the boarded receipt");
         return { entry: toHex(boarded.entry), link: toHex(boarded.link), earlier: outcome.earlier };
       }

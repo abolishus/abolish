@@ -222,7 +222,7 @@ describe("receipts.submit with the board path's rules", { timeout: 60_000 }, () 
     expect(await readBoard(app, electionId)).toHaveLength(ballots.length + 1);
   });
 
-  test("after s_D a receipt is ELECTION_NOT_OPEN; up to it, it is boarded", async () => {
+  test("after s_D a receipt is ELECTION_NOT_OPEN; up to it, it is boarded, and its retry found after", async () => {
     const app = await election();
     const submit = await api(app, await judging(app));
     now = clock.epoch + (S_D + 1n) * clock.period;
@@ -231,7 +231,11 @@ describe("receipts.submit with the board path's rules", { timeout: 60_000 }, () 
     expect(late.body["code"]).toBe("ELECTION_NOT_OPEN");
     expect(await readBoard(app, electionId)).toHaveLength(ballots.length + 1);
     now = clock.epoch + (S_D + 1n) * clock.period - 1n;
-    expect((await submit(receiptFor(first, 1))).status).toBe(201);
+    const boarded = await submit(receiptFor(first, 1));
+    expect(boarded.status).toBe(201);
+    // A retry of those bytes after s_D, its answer lost, still finds them.
+    now += 1n;
+    expect(await submit(receiptFor(first, 1))).toEqual(boarded);
   });
 
   test("an election this server doesn't hold is ELECTION_NOT_FOUND, never queued", async () => {
@@ -280,6 +284,17 @@ describe("receipts.submit with the board path's rules", { timeout: 60_000 }, () 
       submit: async () => ({ ok: true, index: "999", earlier: true }),
     });
     expect((await beyond(receiptFor(first, 1))).status).toBe(500);
+    // And so is an earlier entry that isn't a share receipt: entry 1 is a ballot.
+    const ballot = await api(app, {
+      submit: async () => ({ ok: true, index: "1", earlier: true }),
+    });
+    expect((await ballot(receiptFor(first, 1))).status).toBe(500);
+    // Even one small enough for the answer's bound.
+    const small = await appendEntry(app, electionId, 0, Uint8Array.of(0x00, 0x05, 1));
+    const record = await api(app, {
+      submit: async () => ({ ok: true, index: small.index.toString(), earlier: true }),
+    });
+    expect((await record(receiptFor(first, 1))).status).toBe(500);
   });
 });
 

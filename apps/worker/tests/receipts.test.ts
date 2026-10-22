@@ -149,6 +149,22 @@ test("a receipt is boarded and answered by its position, and no receipt stays in
   expect(mine).toHaveLength(records.length + 1);
 });
 
+test("a seat the board path carries comes back as earlier, by position alone", async () => {
+  const { app, receipts } = await setUp();
+  const other = Uint8Array.from(receiptFor(first, 3));
+  other[other.length - 1] = (other[other.length - 1] as number) ^ 1;
+  const earlier = await appendEntry(app, electionId, 0, other, {
+    receipt: { ballotHash: first.hash, panel: 1, seat: 3 },
+  });
+  expect(await receipts.submit(electionId, receiptFor(first, 3))).toEqual({
+    ok: true,
+    index: earlier.index.toString(),
+    earlier: true,
+  });
+  await expectNoKeyHolds(hex(other).slice(0, 64));
+  expect(await readBoard(app, electionId)).toHaveLength(ballots.length + 2);
+});
+
 test("with no worker judging receipts, after the timeout, and the job leaves the queue", async () => {
   const { app, receipts } = await setUp({ pins: false, timeoutMs: 300 });
   expect(await receipts.submit(electionId, receiptFor(first, 1))).toEqual({

@@ -189,6 +189,23 @@ describe("refuses, writing nothing", { timeout: 60_000 }, () => {
     expect(
       await verdict(admissions().submitReceipt(app, electionId, receiptFor(first, 1), lastSecond)),
     ).toBe("boarded");
+    // A retry of the boarded bytes after s_D still returns their entry,
+    // writing nothing; other bytes are still refused.
+    const boarded = await admissions().submitReceipt(
+      app,
+      electionId,
+      receiptFor(first, 1),
+      lastSecond,
+    );
+    expect(
+      await admissions().submitReceipt(app, electionId, receiptFor(first, 1), lastSecond + 1n),
+    ).toEqual(boarded);
+    expect(
+      await verdict(
+        admissions().submitReceipt(app, electionId, receiptFor(first, 2), lastSecond + 1n),
+      ),
+    ).toBe("not-open");
+    expect(await readBoard(app, electionId)).toHaveLength(3);
     // A later-labelled entry would raise the receipt past s_D.
     const late = await election([first]);
     await appendEntry(late, electionId, Number(S_D) + 1, Uint8Array.of(0x00, 0x05, 1));

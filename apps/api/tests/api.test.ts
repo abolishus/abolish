@@ -463,6 +463,80 @@ describe("elections.list (T-68)", () => {
       }
     });
   });
+
+  describe("answered (P2-23)", () => {
+    // A server of its own, with the boards' anchoring clock and a fixed
+    // clock far from every other test's polls.
+    const clock = { epoch: 0n, period: 3600n };
+    const now = 7_000_000_000n;
+    const segment = now / clock.period - 1n;
+    let ranked: Server;
+    let rankedBase: string;
+    beforeAll(async () => {
+      ranked = createApiServer({ sql: app, log: () => {}, now: () => now, boardClock: clock });
+      await new Promise<void>((r) => ranked.listen(0, "127.0.0.1", r));
+      rankedBase = `http://127.0.0.1:${(ranked.address() as AddressInfo).port}`;
+    });
+    afterAll(() => new Promise((r) => ranked?.close(r)));
+
+    /** A poll open at `now` with `voters` distinct voters boarded last period, one re-voting. */
+    async function answeredBy(voters: number) {
+      const id = b32();
+      await storeDefinition(
+        app,
+        encodeElectionDefinition({
+          ...typical,
+          election_id: id,
+          opens_at: now - 60n,
+          closes_at: now + 60n,
+        }),
+      );
+      const nullifiers = Array.from({ length: voters }, (_, v) => BigInt(v + 1));
+      for (const nullifier of voters > 0 ? [...nullifiers, 1n] : [])
+        await appendEntry(app, id, Number(segment), Uint8Array.of(0, 2, 1, ...randomBytes(8)), {
+          ballot: { tier: 0, nullifier, message: b32() },
+        });
+      return hex(id);
+    }
+
+    test("lists the polls open now by voters this week, a page at a time", async () => {
+      const [one, three, none] = [await answeredBy(1), await answeredBy(3), await answeredBy(0)];
+      const mine = [one, three, none];
+      for (const limit of ["1", "256"]) {
+        const all: string[] = [];
+        let after: string | undefined;
+        for (;;) {
+          const query = { sort: "answered", limit, ...(after !== undefined && { after }) };
+          const r = await fetch(`${rankedBase}/elections?${new URLSearchParams(query).toString()}`);
+          expect(r.status).toBe(200);
+          const page = (await json(r))["elections"] as string[];
+          all.push(...page);
+          if (page.length < Number(limit)) break;
+          after = page.at(-1);
+        }
+        expect(all.filter((id) => mine.includes(id))).toEqual([three, one, none]);
+      }
+    });
+
+    test("is SORT_UNAVAILABLE without the anchoring clock, and refuses a cursor it can't place", async () => {
+      const r = await get("/elections", { sort: "answered", limit: "1" });
+      expect(r.status).toBe(503);
+      expect((await json(r))["code"]).toBe("SORT_UNAVAILABLE");
+      const stray = await fetch(
+        `${rankedBase}/elections?${new URLSearchParams({ sort: "answered", after: "ff".repeat(32), limit: "1" }).toString()}`,
+      );
+      expect(stray.status).toBe(400);
+      expect((await json(stray))["code"]).toBe("CURSOR_NOT_FOUND");
+    });
+
+    test("a malformed clock is refused at start", () => {
+      for (const boardClock of [
+        { epoch: 0n, period: 0n },
+        { epoch: -1n, period: 1n },
+      ])
+        expect(() => createApiServer({ sql: app, log: () => {}, boardClock })).toThrow(TypeError);
+    });
+  });
 });
 
 describe("elections.resolveCode and elections.getCode (P2-18; T-49, T-53, T-67)", () => {

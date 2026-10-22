@@ -92,7 +92,7 @@ const listElections = oc
     path: "/elections",
     summary: "A page of the polls this server lists",
     description:
-      "Election IDs of the polls our front ends list for discovery: at most `limit`, after the poll `after` in the order `sort` names (or from the first without it). Fewer than `limit` means the listing ends there for now. `id`, the default, lists every listed poll, open or closed, in ascending order of election ID, and `after` need not name a poll. `new` lists the polls open now (the definition's `opens_at` at or before the server's clock and `closes_at` after it), the latest registered on L2 first; `closing` lists the polls open now, the soonest `closes_at` first, then by election ID. Both orders are public chain data, the same for everyone and moved by nothing a voter or an account does; under them `after` must be a poll the order can place, one stored here and, for `new`, with its registration recorded, though it may have closed since (`CURSOR_NOT_FOUND` otherwise). A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
+      "Election IDs of the polls our front ends list for discovery: at most `limit`, after the poll `after` in the order `sort` names (or from the first without it). Fewer than `limit` means the listing ends there for now. `id`, the default, lists every listed poll, open or closed, in ascending order of election ID, and `after` need not name a poll. `new` lists the polls open now (the definition's `opens_at` at or before the server's clock and `closes_at` after it), the latest registered on L2 first; `closing` lists the polls open now, the soonest `closes_at` first, then by election ID. Both orders are public chain data, the same for everyone and moved by nothing a voter or an account does. `answered` lists the polls open now, the most answered this week first, then by election ID: the count is of distinct voters (each tier and nullifier once, so a re-vote never counts twice) whose ballots the board holds in the whole anchoring periods of the last seven days before the current one, so it moves once a period and anyone can recompute it from the public board, whose entries carry their segments; it needs the anchoring clock, without which it is `SORT_UNAVAILABLE`. Under these three orders `after` must be a poll the order can place, one stored here and, for `new`, with its registration recorded, though it may have closed since (`CURSOR_NOT_FOUND` otherwise); under `answered` a poll whose count passes the cursor's between pages can be skipped or repeated. A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
     tags: ["elections"],
   })
   .errors({
@@ -100,12 +100,13 @@ const listElections = oc
       status: 400,
       message: "`after` names no poll this order can place.",
     },
+    SORT_UNAVAILABLE: { status: 503, message: "This order is unavailable here for now." },
   })
   .input(
     z.strictObject({
       after: z.optional(Hash32),
       limit: PageSize,
-      sort: z.optional(z.enum(["id", "new", "closing"])),
+      sort: z.optional(z.enum(["id", "new", "closing", "answered"])),
     }),
   )
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));

@@ -6,16 +6,20 @@
 // verifies from chain + IPFS (G-9), and anyone can enumerate the registry's
 // events to find every poll (T-68).
 //
-// The stream's ways in (P2-23) are sorts over public chain data only: the
-// registry's order and the definition's own times. None reads a ballot, the
-// board or anything an account did, so no order can be bought by answering,
-// and none is personalised or ranked by engagement.
+// The stream's ways in (P2-23) are sorts over public data only: the
+// registry's order, the definition's own times and, for `answered`, a count
+// of the public board. None reads anything an account did, so none is
+// personalised, and the one count is of distinct voters, never of views,
+// reactions or shares.
 
-import { and, asc, desc, eq, gt, lte, sql as q } from "drizzle-orm";
+import type { PeriodClock } from "@abolishus/crypto";
+import { and, asc, desc, eq, gt, lte, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import {
+  boardBallotKeys,
+  boardEntries,
   electionDefinitions,
   electionRegistrations,
   electionSchedules,
@@ -28,14 +32,20 @@ export const MAX_LISTING_PAGE = 1000;
 /**
  * The listing's orders. `id`: every listed poll, open or not, by election ID.
  * `new`: the polls open now, the latest registered on L2 first. `closing`:
- * the polls open now, the soonest to close first.
+ * the polls open now, the soonest to close first. `answered`: the polls open
+ * now, the most answered in the last week first.
  */
-export const LISTING_SORTS = ["id", "new", "closing"] as const;
+export const LISTING_SORTS = ["id", "new", "closing", "answered"] as const;
+
+/** `answered`'s window: the anchoring periods ending in the last seven days. */
+export const ANSWERED_WINDOW_SECONDS = 7n * 24n * 3600n;
 
 export type ListingOrder =
   | { readonly sort: "id" }
   /** `now` in UNIX seconds, compared with each definition's `opens_at` and `closes_at`. */
-  | { readonly sort: "new" | "closing"; readonly now: bigint };
+  | { readonly sort: "new" | "closing"; readonly now: bigint }
+  /** `clock`: the anchoring clock by which our boards label each entry's segment. */
+  | { readonly sort: "answered"; readonly now: bigint; readonly clock: PeriodClock };
 
 export class ListingError extends Error {
   override readonly name = "ListingError";
@@ -47,6 +57,39 @@ export class ListingError extends Error {
 }
 
 const U64_MAX = (1n << 64n) - 1n;
+const MAX_SEGMENT = 2n ** 32n - 1n;
+
+/**
+ * The segments `answered` counts at `now`: the last whole periods covering
+ * `ANSWERED_WINDOW_SECONDS`, up to the one before `now`'s. The current period
+ * is left out, so the order moves once a period, not with each ballot, and
+ * the counts are of segments every board copy will hold once anchored.
+ * `from > to` is an empty window (before the clock's epoch, say).
+ */
+export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint; to: bigint } {
+  if (typeof now !== "bigint" || now < 0n || now > U64_MAX)
+    throw new TypeError("now must be a u64 bigint");
+  if (
+    typeof clock !== "object" ||
+    clock === null ||
+    typeof clock.epoch !== "bigint" ||
+    clock.epoch < 0n ||
+    clock.epoch > U64_MAX ||
+    typeof clock.period !== "bigint" ||
+    clock.period < 1n ||
+    clock.period > U64_MAX
+  )
+    throw new TypeError("clock must be a u64 epoch and a period of at least 1");
+  if (now < clock.epoch) return { from: 0n, to: -1n };
+  const current = (now - clock.epoch) / clock.period;
+  const periods = (ANSWERED_WINDOW_SECONDS + clock.period - 1n) / clock.period;
+  const to = current - 1n;
+  const from = current > periods ? current - periods : 0n;
+  // Board segments are u32s: past the last one, nothing is counted.
+  return from > MAX_SEGMENT
+    ? { from: 0n, to: -1n }
+    : { from, to: to > MAX_SEGMENT ? MAX_SEGMENT : to };
+}
 
 /**
  * Up to `limit` listed polls after the poll `after` in `order` (or from the
@@ -66,6 +109,17 @@ const U64_MAX = (1n << 64n) - 1n;
  * everyone. The cursor must be a stored poll the order can place (a
  * `ListingError` otherwise), though it may since have closed, been delisted
  * or been hidden.
+ *
+ * Under `answered` the polls open at `now` are ordered by how many voters
+ * answered in `answeredWindow`, most first, then by election ID: the
+ * distinct (tier, nullifier) pairs of the ballots boarded in those
+ * segments. A re-vote is the same voter again, so a voter counts once
+ * however often they cast, and a poll climbs only by more voters (T-01).
+ * Every input is on the public board, where each entry already carries its
+ * segment, so the count keeps no time of its own and anyone can recompute it
+ * from a copy of the board (T-11). The cursor is a stored poll placed by its
+ * count now; a poll whose count crosses the cursor's between pages may be
+ * seen twice or not at all, which the period-long window keeps rare.
  */
 export async function listPolls(
   client: Sql,
@@ -84,6 +138,7 @@ export async function listPolls(
     (typeof order.now !== "bigint" || order.now < 0n || order.now > U64_MAX)
   )
     throw new TypeError("now must be a u64 bigint");
+  const window = order.sort === "answered" ? answeredWindow(order.now, order.clock) : undefined;
   const cursor = after === undefined ? undefined : new Uint8Array(after);
   const db = drizzle({ client });
   // The newest decision about each poll, through moderation_actions_by_election.
@@ -142,6 +197,51 @@ export async function listPolls(
       )
       .where(and(open, listed, from))
       .orderBy(desc(electionRegistrations.l2Block), desc(electionRegistrations.logIndex))
+      .limit(limit);
+    return rows.map((r) => new Uint8Array(r.electionId));
+  }
+
+  if (window !== undefined) {
+    // Voters, not ballots: each (tier, nullifier) once, through the keys
+    // the board stores with each ballot it boards, and the entries'
+    // segments through board_entries_by_segment.
+    const answered = q<number>`(SELECT count(*)::int FROM (SELECT DISTINCT ${boardBallotKeys.tier}, ${boardBallotKeys.nullifier} FROM ${boardBallotKeys} JOIN ${boardEntries} ON ${boardEntries.electionId} = ${boardBallotKeys.electionId} AND ${boardEntries.idx} = ${boardBallotKeys.idx} WHERE ${boardBallotKeys.electionId} = ${electionDefinitions.electionId} AND ${boardEntries.segment} BETWEEN ${window.from} AND ${window.to}) AS voters)`;
+    let from;
+    if (cursor !== undefined) {
+      const [at] = await db
+        .select({ answered })
+        .from(electionDefinitions)
+        .innerJoin(
+          electionSchedules,
+          eq(electionSchedules.electionId, electionDefinitions.electionId),
+        )
+        .where(eq(electionDefinitions.electionId, cursor));
+      if (at === undefined) throw new ListingError();
+      from = { answered: at.answered, cursor };
+    }
+    const ranked = db.$with("ranked").as(
+      db
+        .select({ electionId: electionDefinitions.electionId, answered: answered.as("answered") })
+        .from(electionDefinitions)
+        .innerJoin(
+          electionSchedules,
+          eq(electionSchedules.electionId, electionDefinitions.electionId),
+        )
+        .where(and(open, listed)),
+    );
+    const rows = await db
+      .with(ranked)
+      .select({ electionId: ranked.electionId })
+      .from(ranked)
+      .where(
+        from === undefined
+          ? undefined
+          : or(
+              q`${ranked.answered} < ${from.answered}`,
+              and(q`${ranked.answered} = ${from.answered}`, gt(ranked.electionId, from.cursor)),
+            ),
+      )
+      .orderBy(desc(ranked.answered), asc(ranked.electionId))
       .limit(limit);
     return rows.map((r) => new Uint8Array(r.electionId));
   }

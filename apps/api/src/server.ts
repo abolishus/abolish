@@ -1,6 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
-import { ACCOUNT_COOKIE_PREFIX, type Tier0Registrations, type Tier1Relay } from "@abolishus/core";
+import {
+  ACCOUNT_COOKIE_PREFIX,
+  answeredWindow,
+  type Tier0Registrations,
+  type Tier1Relay,
+} from "@abolishus/core";
+import type { PeriodClock } from "@abolishus/crypto";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -202,6 +208,12 @@ export interface ApiOptions {
   /** The Tier 1 relay; without it the route answers `RELAY_UNAVAILABLE`. */
   readonly tier1?: Tier1Relay;
   /**
+   * The anchoring clock by which the worker labels each board entry's
+   * segment (docs/spec/board.md, Timing), the worker's own; without it the
+   * listing's `answered` order answers `SORT_UNAVAILABLE`.
+   */
+  readonly boardClock?: PeriodClock;
+  /**
    * Most requests handled at once, from the first byte to the last: past it,
    * a request is refused with 503 before anything is read. Each page of the
    * board can hold `MAX_PAGE_BYTES` and costs several times that in memory,
@@ -257,6 +269,7 @@ export function createApiServer({
   now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
   tier1,
+  boardClock,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
@@ -267,6 +280,8 @@ export function createApiServer({
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
   const allowedOrigins = corsOriginSet(corsOrigins);
+  // A malformed clock is refused here, at start, not on a request.
+  if (boardClock !== undefined) answeredWindow(0n, boardClock);
   const coordinator =
     ceremony === undefined
       ? undefined
@@ -364,7 +379,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, now, tier0, tier1 },
+          context: { sql, ballots, now, tier0, tier1, boardClock },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

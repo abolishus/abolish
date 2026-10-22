@@ -101,6 +101,8 @@ export {
   type PostOutcome,
 } from "./ceremony-coordinator.ts";
 export {
+  ANSWERED_WINDOW_SECONDS,
+  answeredWindow,
   LISTING_SORTS,
   ListingError,
   type ListingOrder,

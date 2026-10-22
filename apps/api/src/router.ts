@@ -29,6 +29,7 @@ import {
   type Tier1Relay,
   Tier1RelayError,
 } from "@abolishus/core";
+import type { PeriodClock } from "@abolishus/crypto";
 import { implement, ORPCError } from "@orpc/server";
 import type { BallotQueue } from "@abolishus/worker/ballot-queue";
 import type { Sql } from "postgres";
@@ -39,7 +40,7 @@ import type { Sql } from "postgres";
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
 // The context holds the database, the worker's ballot queue, Tier 0
-// registration, the Tier 1 relay and the clock, and nothing of the request: no handler can see a request's
+// registration, the Tier 1 relay, the clock and the boards' anchoring clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
 
@@ -56,6 +57,8 @@ export interface Context {
   readonly tier0?: Tier0Registrations | undefined;
   /** Absent when this server isn't configured for the Tier 1 relay: it then queues nothing. */
   readonly tier1?: Tier1Relay | undefined;
+  /** The anchoring clock our boards' segments follow; absent, the `answered` order is unavailable. */
+  readonly boardClock?: PeriodClock | undefined;
 }
 
 const os = implement(contract).$context<Context>();
@@ -86,7 +89,11 @@ export const router = os.router({
     list: os.elections.list.handler(async ({ input, context, errors }) => {
       const after = input.after === undefined ? undefined : fromHex(input.after);
       const sort = input.sort ?? "id";
-      const order: ListingOrder = sort === "id" ? { sort } : { sort, now: context.now() };
+      let order: ListingOrder;
+      if (sort === "id") order = { sort };
+      else if (sort !== "answered") order = { sort, now: context.now() };
+      else if (context.boardClock === undefined) throw errors.SORT_UNAVAILABLE();
+      else order = { sort, now: context.now(), clock: context.boardClock };
       try {
         const elections = await listPolls(context.sql, after, Number(input.limit), order);
         return { elections: elections.map(toHex) };

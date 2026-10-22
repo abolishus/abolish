@@ -14,6 +14,7 @@ import type { Backer } from "./backup-offer.tsx";
 import type {
   CastsRead,
   CheckedReceipt,
+  EraseSharesOutcome,
   KeptShare,
   RecordBoardedOutcome,
   RecordCastOutcome,
@@ -23,7 +24,7 @@ import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
 import type { IntakeAnswer } from "./intake.ts";
 import { parseLink } from "./link.ts";
-import type { Loaded, LoadedBoard, LoadedRegistry } from "./load.ts";
+import type { Loaded, LoadedBoard, LoadedChainTime, LoadedRegistry } from "./load.ts";
 import type { ProverArtifacts } from "./prover-artifacts.ts";
 import {
   type ArtifactProblem,
@@ -75,6 +76,7 @@ const ELECTION: CheckedElection = {
   boardEntryVersion: undefined,
   opensAt: 1_790_000_000n,
   closesAt: 1_792_000_000n,
+  l1InclusionBound: 3_600n,
   translations: [
     {
       language: "en",
@@ -223,7 +225,18 @@ interface Voter {
   readonly receiptAnswers: (receipt: Uint8Array, call: number) => ReceiptAnswer | "fail" | "hold";
   /** What keeping a receipt's checked entry answers. */
   readonly keptReceiptEntry: RecordReceiptOutcome;
+  /** This device's clock, in milliseconds. */
+  readonly now: number;
+  /** The L2's finalized head's timestamp, as `loadChainTime` reads it. */
+  readonly chainTime: LoadedChainTime;
+  /** What erasing the unreceipted shares answers. */
+  readonly erased: EraseSharesOutcome;
+  /** This device's casts once the shares were erased, when they aren't `held`. */
+  readonly heldAfterErase?: CastsRead;
 }
+
+/** Before every story poll's posting cutoff, by both clocks. */
+const BEFORE_CUTOFF = 1_760_000_000n;
 
 const VOTER: Voter = {
   identity: IDENTITY,
@@ -244,6 +257,9 @@ const VOTER: Voter = {
   // The stories' stand-in receipts aren't records a board entry can carry.
   receiptAnswers: () => ({ kind: "unavailable" }),
   keptReceiptEntry: "recorded",
+  now: Number(BEFORE_CUTOFF) * 1000,
+  chainTime: { ok: true, timestamp: BEFORE_CUTOFF },
+  erased: "erased",
 };
 
 type Mock<F extends (...args: never[]) => unknown> = F & ReturnType<typeof fn<F>>;
@@ -268,6 +284,8 @@ const MOCKS = new WeakMap<
     readonly keepBoarded: Mock<ElectionSource["keepBoarded"]>;
     readonly submitReceipt: Mock<ElectionSource["submitReceipt"]>;
     readonly keepReceiptBoarded: Mock<ElectionSource["keepReceiptBoarded"]>;
+    readonly eraseShares: Mock<ElectionSource["eraseShares"]>;
+    readonly chainTime: Mock<ElectionSource["chainTime"]>;
     /** Each secret the page handed on, as given, and a copy taken when it was. */
     readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
     /** Finishes a held cast. */
@@ -315,6 +333,10 @@ function source(
     heldAfterSend,
     receiptAnswers,
     keptReceiptEntry,
+    now,
+    chainTime: chainTimeRead,
+    erased,
+    heldAfterErase,
   } = {
     ...VOTER,
     ...voter,
@@ -343,9 +365,21 @@ function source(
     return new Promise((resolve) => (release = () => resolve(CAST)));
   });
   let sent = 0;
+  let erasures = 0;
   const casts = fn<ElectionSource["casts"]>(() =>
-    Promise.resolve(sent > 0 && heldAfterSend !== undefined ? heldAfterSend : held),
+    Promise.resolve(
+      sent > 0 && heldAfterSend !== undefined
+        ? heldAfterSend
+        : erasures > 0 && heldAfterErase !== undefined
+          ? heldAfterErase
+          : held,
+    ),
   );
+  const eraseShares = fn<ElectionSource["eraseShares"]>(() => {
+    erasures++;
+    return Promise.resolve(erased);
+  });
+  const chainTime = fn<ElectionSource["chainTime"]>(() => Promise.resolve(chainTimeRead));
   const record = fn<ElectionSource["record"]>(() => Promise.resolve(recorded));
   const intake = fn<ElectionSource["intake"]>(() => answer(intakeResult));
   const deliveries = new Map<number, number>();
@@ -399,6 +433,10 @@ function source(
     keepBoarded,
     submitReceipt,
     keepReceiptBoarded,
+    eraseShares,
+    chainTime,
+    now: () => now,
+    forcedInclusion: 46_800n,
     registrar,
     delivers,
   };
@@ -419,6 +457,8 @@ function source(
     keepBoarded,
     submitReceipt,
     keepReceiptBoarded,
+    eraseShares,
+    chainTime,
     secrets,
     release: () => release(),
   });
@@ -1758,6 +1798,105 @@ export const NothingToResumeWithoutDelivery: Story = {
     const canvas = within(canvasElement);
     await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(mocks(args.source).casts).not.toHaveBeenCalled();
+  },
+};
+
+// The story polls' posting cutoff, `c_D = closes_at + l1_inclusion_bound +
+// DELIVERY_WINDOW − F` ([[delivery]], Client rule 4), and a time past it.
+const CUTOFF = ELECTION.closesAt + ELECTION.l1InclusionBound + 172_800n - 46_800n;
+const PAST_CUTOFF = {
+  now: Number(CUTOFF + 1n) * 1000,
+  chainTime: { ok: true, timestamp: CUTOFF + 1n },
+} as const;
+/** `RECORDED_SHARES` once the cutoff passed: the first seat's `ct_i` and `m_i` erased. */
+const ERASED_SHARES: KeptShare[] = [{ seat: 1, erased: true }, ...RECORDED_SHARES.slice(1)];
+
+export const ErasedPastCutoff: Story = {
+  name: "Past the posting cutoff, an unsent cast's unreceipted shares are erased and nothing is resumed",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      ...PAST_CUTOFF,
+      heldAfterErase: {
+        kind: "read",
+        casts: [{ ballot: RECORDED, l1Number: 7n, shares: ERASED_SHARES }],
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(mocks(args.source).chainTime).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).eraseShares).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).eraseShares).toHaveBeenCalledWith(fromHex(ELECTION_ID), 0);
+    await expect(canvas.queryByRole("heading", { name: ANSWER_OR_SEND })).toBeNull();
+    await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const KeptBeforeCutoff: Story = {
+  name: "Before the posting cutoff by this device's clock, the chain isn't read and nothing is erased",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      chainTime: PAST_CUTOFF.chainTime,
+      now: Number(CUTOFF) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(mocks(args.source).chainTime).not.toHaveBeenCalled();
+    await expect(mocks(args.source).eraseShares).not.toHaveBeenCalled();
+  },
+};
+
+export const KeptOnTheChainsWord: Story = {
+  name: "Past the cutoff on this device but not on the chain, or with no answer from it, nothing is erased",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      now: PAST_CUTOFF.now,
+      chainTime: { ok: true, timestamp: CUTOFF },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(mocks(args.source).chainTime).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).eraseShares).not.toHaveBeenCalled();
+  },
+};
+
+export const KeptWithoutTheChain: Story = {
+  name: "Past the cutoff on this device with the chain unreadable, nothing is erased",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      now: PAST_CUTOFF.now,
+      chainTime: { ok: false, problem: "unreachable" },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(mocks(args.source).eraseShares).not.toHaveBeenCalled();
+  },
+};
+
+export const NothingToErase: Story = {
+  name: "Past the cutoff, a cast every trustee receipted reads no chain and erases nothing",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      ...PAST_CUTOFF,
+      held: {
+        kind: "read",
+        casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES.slice(1) }],
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(mocks(args.source).chainTime).not.toHaveBeenCalled();
+    await expect(mocks(args.source).eraseShares).not.toHaveBeenCalled();
   },
 };
 

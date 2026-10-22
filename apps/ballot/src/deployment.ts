@@ -90,6 +90,15 @@ export interface Deployment {
    * ([[0017-identity-recovery-backup]], Consequences; T-20).
    */
   readonly backups: boolean;
+  /**
+   * `F`, in seconds: the longest a contract-path record can take to land,
+   * forced through L1 if the sequencer censors it ([[delivery]], Direct
+   * submit). A posting is sent by `c_D = t_D − F` so its submission time is
+   * at or before the delivery deadline `t_D`, and once `c_D` passes the
+   * client erases what one would need (Client rule 4; T-18). The release's,
+   * as every trustee node's intake cutoff is, never a client's own setting.
+   */
+  readonly forcedInclusion: bigint;
 }
 
 /**
@@ -138,4 +147,7 @@ export const STAGING: Deployment = {
   backupRpId: "ballot-staging.up.railway.app",
   // Staging serves the client from the RP ID's own host.
   backups: true,
+  // The trustee node's (`RELEASE_WINDOWS`): Base's 12-hour forced-inclusion
+  // delay and an hour of missed slots.
+  forcedInclusion: 46_800n,
 };

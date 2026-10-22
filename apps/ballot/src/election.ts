@@ -84,6 +84,8 @@ export interface CheckedElection {
   /** Seconds since the Unix epoch. */
   readonly opensAt: bigint;
   readonly closesAt: bigint;
+  /** Seconds after `closesAt` a ballot may still be included on L1 ([[election-definition]]), which the delivery deadline counts from. */
+  readonly l1InclusionBound: bigint;
   /** At least one, sorted by language tag, each with exactly the definition's questions and option counts. */
   readonly translations: readonly Translation[];
 }
@@ -161,6 +163,7 @@ export function checkElection(
         boardEntryVersion: undefined,
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
+        l1InclusionBound: BigInt(definition.l1_inclusion_bound),
         translations: displayText.translations.map((t) => ({
           language: text(t.language),
           title: "",
@@ -196,6 +199,7 @@ export function checkElection(
       boardEntryVersion: boardEntryVersion as BoardEntryVersion,
       opensAt: definition.opens_at,
       closesAt: definition.closes_at,
+      l1InclusionBound: BigInt(definition.l1_inclusion_bound),
       translations: displayText.translations.map((t) => ({
         language: text(t.language),
         title: text(t.title),

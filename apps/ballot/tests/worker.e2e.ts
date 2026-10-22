@@ -1133,6 +1133,7 @@ describe("the device's records of its casts", () => {
       link: string,
     ): Promise<string>;
     readCasts(electionId: string, tier: number): Promise<string>;
+    eraseShares(electionId: string, tier: number): Promise<string>;
     restampCasts(electionId: string, tier: number, version: number): Promise<void>;
   };
   const election = "5e".repeat(32);
@@ -1294,6 +1295,43 @@ describe("the device's records of its casts", () => {
       kind: "read",
       casts: [castOf(naming(10n), "10")],
     });
+  });
+
+  test("lose every unreceipted seat's ct and m at the posting cutoff, in every cast, across loads", async () => {
+    const erase = (tier: number) =>
+      page.evaluate(
+        ([e, t]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.eraseShares(e, t),
+        [election, tier] as const,
+      );
+    await expect(erase(0)).resolves.toBe("none");
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    await expect(record(0, naming(11n))).resolves.toBe("recorded");
+    await expect(record(1, naming(10n))).resolves.toBe("recorded");
+    await expect(erase(0)).resolves.toBe("erased");
+    const erased = shares.map(({ seat }) => ({ seat, erased: true }));
+    const kept = {
+      kind: "read",
+      casts: [
+        { ballot: naming(10n), l1Number: "10", shares: erased },
+        { ballot: naming(11n), l1Number: "11", shares: erased },
+      ],
+    };
+    await expect(read(0)).resolves.toEqual(kept);
+    await page.reload();
+    await page.locator("#root[data-ready]").waitFor({ state: "attached" });
+    await expect(read(0)).resolves.toEqual(kept);
+    await expect(erase(0)).resolves.toBe("none");
+    // Another tier's casts are its own.
+    await expect(read(1)).resolves.toEqual({ kind: "read", casts: [castOf(naming(10n), "10")] });
+    // Casts this device can't read are never replaced.
+    await page.evaluate(
+      ([e]) =>
+        (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.restampCasts(e, 1, 4),
+      [election] as const,
+    );
+    await expect(erase(1)).resolves.toBe("unreadable");
+    await expect(read(1)).resolves.toEqual({ kind: "unreadable" });
   });
 
   test("are unreadable, never replaced or read as none, once the record is of another version", async () => {

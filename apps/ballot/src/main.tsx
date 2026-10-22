@@ -12,6 +12,7 @@ import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
 import {
   castAsAsked,
+  eraseShares,
   readCasts,
   recordBoarded,
   recordCast,
@@ -32,7 +33,7 @@ import {
 } from "./identity.ts";
 import { deliverShare } from "./intake.ts";
 import { type Link, parseLink } from "./link.ts";
-import { loadBoard, loadElection, loadGroupRegistry } from "./load.ts";
+import { loadBoard, loadChainTime, loadElection, loadGroupRegistry } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
 import type { Recoverer } from "./recover.tsx";
@@ -266,6 +267,10 @@ const source: ElectionSource = {
   deliver: (seat, delivery) =>
     deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
   receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
+  eraseShares: (electionId, tier) => eraseShares(electionId, tier),
+  chainTime: () => loadChainTime(STAGING, (url, init) => fetch(url, init)),
+  now: () => Date.now(),
+  forcedInclusion: STAGING.forcedInclusion,
   keepReceipt: (electionId, tier, ballot, checked) =>
     recordReceipt(electionId, tier, ballot, checked),
   send: (electionId, ballot) =>

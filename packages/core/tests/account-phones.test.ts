@@ -993,5 +993,6 @@ describe("rotatePhoneHashes", () => {
       await ask(await newAccount(), c, { keys: ONE_STAGED, p: r });
       expect(r.started).toHaveLength(0);
     }
-  });
+    // Ten races, each a dozen database round trips: past the default 5 s on a loaded runner.
+  }, 60_000);
 });

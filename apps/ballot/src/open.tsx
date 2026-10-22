@@ -12,6 +12,7 @@ import {
   type RecordBoardedOutcome,
   type RecordCastOutcome,
   type RecordReceiptOutcome,
+  unboardedReceipts,
   unsentCast,
 } from "./casts.ts";
 import { ArrivalCheck, ElectionRefused } from "./check.tsx";
@@ -25,6 +26,7 @@ import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
 import { AnswerQuestions } from "./questions.tsx";
+import { checkReceiptEntry, type ReceiptAnswer } from "./receipts.ts";
 import { type Held, Register, type Registrar, RegisterWaiting } from "./register.tsx";
 import {
   Opened,
@@ -156,6 +158,19 @@ export interface ElectionSource {
     ballot: Uint8Array,
     boarded: Boarded,
   ): Promise<RecordBoardedOutcome>;
+  /** Submits a kept receipt through the operator's board path (`submitReceipt`). */
+  submitReceipt(electionId: Uint8Array, receipt: Uint8Array): Promise<ReceiptAnswer>;
+  /**
+   * Keeps the operator's checked board entry for a receipt beside the
+   * seat's receipt in the recorded casts (`recordReceiptBoarded`).
+   */
+  keepReceiptBoarded(
+    electionId: Uint8Array,
+    tier: number,
+    ballot: Uint8Array,
+    checked: CheckedReceipt,
+    boarded: Boarded,
+  ): Promise<RecordReceiptOutcome>;
   /**
    * Tier 0 registration, for a voter whose identity is in none of a poll's
    * tiers where the poll admits Tier 0, or `undefined` while the build can't
@@ -792,17 +807,18 @@ export function Ballot({
         const kept = await source
           .keepBoarded(electionId, tier, ballot, checked)
           .catch(() => "unwritable" as const);
-        return kept === "conflict"
-          ? stopped("answer-conflict")
-          : { kind: "sent", trackingCode, index: checked.index };
+        if (kept === "conflict") return stopped("answer-conflict");
+        await boardReceipts(tier, ballot);
+        return { kind: "sent", trackingCode, index: checked.index };
       }
       // A copy of this ballot is already on the board: it counts as this
       // one, never as a failed cast that needs a new ballot ([[revoting]],
-      // Keyed by content).
+      // Keyed by content). It carries the same ballot hash, so its
+      // receipts are this one's.
       case "rejected":
-        return answer.code === "repeat"
-          ? { kind: "sent", trackingCode }
-          : stopped("send-rejected", answer.code);
+        if (answer.code !== "repeat") return stopped("send-rejected", answer.code);
+        await boardReceipts(tier, ballot);
+        return { kind: "sent", trackingCode };
       case "not-open":
         return stopped("not-open");
       case "malformed":
@@ -812,6 +828,40 @@ export function Ballot({
       case "unavailable":
       case "unreachable":
         return unsent(answer.kind);
+    }
+  }
+
+  /**
+   * Submits each receipt kept for a recorded cast whose ballot is boarded
+   * through the operator's board path, and keeps the entry the operator
+   * answers with once it passes ([[delivery]], Client rule 3; [[receipts]],
+   * Checks at cast), so a later drop is attributable. Whatever the entry
+   * carries, the voter's receipt or an earlier one the board path held for
+   * the seat (Boarding, rule 5), is kept only once the worker passes it for
+   * exactly this ballot and seat under the poll's registered keys, as the
+   * voter's own receipt passed (Client rule 1; T-38). Nothing here changes
+   * what the voter is shown: the ballot is on the board, and every seat
+   * receipted it before it was sent; a receipt not seen onto the board
+   * stays kept without an entry, and the seat's node boards its own too.
+   */
+  async function boardReceipts(tier: number, ballot: Uint8Array): Promise<void> {
+    const { boardEntryVersion } = election;
+    if (boardEntryVersion === undefined) return;
+    const read = await source.casts(electionId, tier).catch(() => undefined);
+    if (read?.kind !== "read") return;
+    for (const { seat, receipt } of unboardedReceipts(read.casts, ballot)) {
+      const answer = await source.submitReceipt(electionId, receipt).catch(() => undefined);
+      if (answer?.kind !== "boarded") continue;
+      const entry = checkReceiptEntry(answer, { electionId, receipt, boardEntryVersion });
+      if (entry === undefined) continue;
+      const checked = await source.receipt(ballot, entry.payload).catch(() => undefined);
+      // The worker stopped: no later entry can be checked either.
+      if (checked === undefined) return;
+      if (!checked.ok || checked.checked.seat !== seat) continue;
+      const kept = await source
+        .keepReceiptBoarded(electionId, tier, ballot, checked.checked, entry)
+        .catch((): RecordReceiptOutcome => "unwritable");
+      if (kept !== "recorded") return;
     }
   }
 

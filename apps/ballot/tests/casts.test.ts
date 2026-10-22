@@ -21,17 +21,20 @@ import {
   newestBlock,
   parseStoredCasts,
   storedCasts,
+  unboardedReceipts,
   unsentCast,
   withCast,
   withReceipt,
+  withReceiptBoarded,
 } from "../src/casts.ts";
 
 // The record of this device's casts in one election and tier (src/casts.ts;
 // [[revoting]], Client rule 3): read back only as this client writes it, a
 // version-3 ballot record per cast in strictly ascending order of its L1
 // block, each with its qualified seats' shares (`ct_i` and `m_i`, or the
-// seat's receipt once one passed, [[delivery]], Client rules 2 and 4) and
-// its checked board entry or none, so a damaged record
+// seat's receipt once one passed, [[delivery]], Client rules 2 and 4, with
+// the checked board entry carrying it once the operator answered, Client
+// rule 3) and its checked board entry or none, so a damaged record
 // can never read as fewer casts than were made (T-45, T-38). Storing them
 // in IndexedDB is tests/worker.e2e.ts's.
 
@@ -74,7 +77,7 @@ const BALLOT = encodeBallotV3({
 const shares = () =>
   SHARES.map(({ seat, ciphertext, m }) => ({ seat, ciphertext: ciphertext.slice(), m: m.slice() }));
 /** `shares()` as stored: each with no receipt yet. */
-const kept = () => shares().map((share) => ({ ...share, receipt: null }));
+const kept = () => shares().map((share) => ({ ...share, receipt: null, boarded: null }));
 
 const DECODED = decodeBallot(BALLOT, 3);
 /** The ballot hash every cast of this ballot carries, whatever L1 block it names. */
@@ -126,6 +129,16 @@ const boardedFor = (ballot: Uint8Array, electionId = ELECTION) => ({
   entry: encodeBoardEntry({ election_id: electionId, index: 1n, segment: 0, payload: ballot }, 5),
   link: new Uint8Array(32).fill(9),
 });
+/** The operator's checked answer for `receipt`: an entry carrying it, after the ballot's. */
+const receiptBoardedFor = (receipt: Uint8Array, electionId = ELECTION) => ({
+  entry: encodeBoardEntry({ election_id: electionId, index: 2n, segment: 0, payload: receipt }, 5),
+  link: new Uint8Array(32).fill(8),
+});
+/** `receipted()` with the first seat's receipt seen onto the board. */
+const receiptedBoarded = (): KeptShare[] =>
+  receipted().map((share) =>
+    "receipt" in share ? { ...share, boarded: receiptBoardedFor(share.receipt) } : share,
+  );
 
 // Distinct blocks in ascending order, each cast boarded or not.
 const casts = fc
@@ -135,9 +148,9 @@ const casts = fc
       ...blocks
         .toSorted((a, b) => (a < b ? -1 : 1))
         .map((n) =>
-          fc.tuple(fc.boolean(), fc.boolean()).map(([boarded, receipt]): CastRecord => {
+          fc.tuple(fc.boolean(), fc.constantFrom(0, 1, 2)).map(([boarded, receipt]): CastRecord => {
             const ballot = naming(n);
-            const list = receipt ? receipted() : shares();
+            const list = [shares, receipted, receiptedBoarded][receipt]!();
             return boarded
               ? { ballot, l1Number: n, shares: list, boarded: boardedFor(ballot) }
               : { ballot, l1Number: n, shares: list };
@@ -147,7 +160,7 @@ const casts = fc
   );
 
 const record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  v: 3,
+  v: 4,
   casts: [{ ballot: naming(10n), shares: kept(), boarded: null }],
   ...over,
 });
@@ -161,7 +174,12 @@ function sharesRefused(): [string, unknown][] {
     b[0] = (b[0] as number) ^ 1;
     return b;
   };
-  const first = { ...(SHARES[0] as (typeof SHARES)[number]), receipt: null };
+  const first = { ...(SHARES[0] as (typeof SHARES)[number]), receipt: null, boarded: null };
+  const second = (SHARES[1] as CastShare).seat;
+  // The first seat receipted, its receipt's board entry `boarded`.
+  const entry = (boarded: unknown) =>
+    with_(0, { m: null, receipt: receiptFor(first.seat), boarded });
+  const ownEntry = receiptBoardedFor(receiptFor(first.seat));
   return [
     ["shares that aren't a list", {}],
     ["no shares", []],
@@ -174,6 +192,31 @@ function sharesRefused(): [string, unknown][] {
     ["a share with a key more", with_(0, { panel: 0 })],
     ["a share without its m", kept().map(({ seat, ciphertext }) => ({ seat, ciphertext }))],
     ["a share without its receipt", shares()],
+    [
+      "a share without its board entry",
+      kept().map(({ seat, ciphertext, m, receipt }) => ({ seat, ciphertext, m, receipt })),
+    ],
+    ["a board entry beside an m", with_(0, { boarded: ownEntry })],
+    ["a receipt's board entry that isn't an object", entry("x")],
+    ["a receipt's board entry with a key more", entry({ ...ownEntry, index: 2n })],
+    [
+      "a receipt's board entry with a link of 31 bytes",
+      entry({ ...ownEntry, link: new Uint8Array(31) }),
+    ],
+    [
+      "a receipt's board entry carrying another seat's receipt",
+      entry(receiptBoardedFor(receiptFor(second))),
+    ],
+    [
+      "a receipt's board entry carrying a receipt for another ballot",
+      entry(receiptBoardedFor(receiptFor(first.seat, { ballot_hash: new Uint8Array(32) }))),
+    ],
+    ["a receipt's board entry carrying the ballot", entry(boardedFor(naming(10n)))],
+    [
+      "a receipt's board entry with a byte past its payload",
+      entry({ ...ownEntry, entry: Uint8Array.of(...ownEntry.entry, 0) }),
+    ],
+    ["a receipt's board entry cut short", entry({ ...ownEntry, entry: new Uint8Array(50) })],
     ["a share with neither its m nor a receipt", with_(0, { m: null })],
     ["a share with both its m and a receipt", with_(0, { receipt: receiptFor(first.seat) })],
     [
@@ -261,8 +304,9 @@ describe("the stored casts", () => {
     ["not an object", "casts"],
     ["a list", []],
     ["another version", record({ v: 2 })],
-    ["version as a string", record({ v: "3" })],
-    ["a key missing", { v: 3 }],
+    ["version as a string", record({ v: "4" })],
+    ["version 3, which kept no receipts' entries", record({ v: 3 })],
+    ["a key missing", { v: 4 }],
     ["a key more", record({ tier: 0 })],
     ["casts not a list", record({ casts: {} })],
     ["a list with a hole", record({ casts: HOLED })],
@@ -383,6 +427,30 @@ describe("the stored casts", () => {
         ],
       }),
     ],
+    [
+      "a receipt's entry naming another election than the ballot's",
+      record({
+        casts: [
+          {
+            ballot,
+            shares: kept().map((share, i) =>
+              i === 0
+                ? {
+                    ...share,
+                    m: null,
+                    receipt: receiptFor(share.seat),
+                    boarded: receiptBoardedFor(
+                      receiptFor(share.seat),
+                      new Uint8Array(32).fill(0x5f),
+                    ),
+                  }
+                : share,
+            ),
+            boarded: boardedFor(ballot),
+          },
+        ],
+      }),
+    ],
   ])("%s is unreadable", (_, value) => {
     expect(parseStoredCasts(value)).toBeUndefined();
   });
@@ -402,18 +470,29 @@ describe("the stored casts", () => {
     ).toThrow(TypeError);
     // Storing copies only the fields it writes, so an extra key or property
     // isn't stored at all; every other refused list throws.
-    const copiedAway = new Set(["a share with a key more", "a list with an extra property"]);
-    // In memory, a share without a receipt has no receipt key.
+    // A board entry is written only beside a receipt.
+    const copiedAway = new Set([
+      "a share with a key more",
+      "a list with an extra property",
+      "a board entry beside an m",
+      "a receipt's board entry with a key more",
+    ]);
+    // In memory, a share without a receipt or a board entry has no such key.
     const inMemory = (list: unknown) =>
       Array.isArray(list)
         ? list.map((share: unknown) => {
-            if (typeof share !== "object" || share === null || !("receipt" in share)) return share;
-            const { receipt, ...rest } = share as Record<string, unknown>;
-            return receipt === null ? rest : share;
+            if (typeof share !== "object" || share === null) return share;
+            const copy = { ...(share as Record<string, unknown>) };
+            for (const key of ["receipt", "boarded"]) if (copy[key] === null) delete copy[key];
+            return copy;
           })
         : list;
+    const sameInMemory = new Set([
+      "a share without its receipt",
+      "a share without its board entry",
+    ]);
     for (const [name, list] of sharesRefused())
-      if (!copiedAway.has(name) && name !== "a share without its receipt")
+      if (!copiedAway.has(name) && !sameInMemory.has(name))
         expect(() =>
           storedCasts([
             { ballot: naming(10n), l1Number: 10n, shares: inMemory(list) as KeptShare[] },
@@ -728,5 +807,161 @@ describe("an unsent cast", () => {
       }),
       { numRuns },
     );
+  });
+});
+
+describe("a receipt's board entry in the casts", () => {
+  const cast = (n: bigint, list = receipted()): CastRecord => ({
+    ballot: naming(n),
+    l1Number: n,
+    shares: list,
+  });
+  const second = (SHARES[1] as CastShare).seat;
+  const own = receiptFor(FIRST);
+  /** An earlier receipt for the seat in other bytes, as the board path may already carry (Boarding, rule 5). */
+  const earlier = receiptFor(FIRST, { signature: new Uint8Array(64).fill(2) });
+
+  test("is kept beside the seat's receipt in the cast it receipts and every recast of it", () => {
+    const held = [cast(10n), cast(11n)];
+    const changed = withReceiptBoarded(
+      held,
+      naming(10n),
+      checkedOf(FIRST, own),
+      receiptBoardedFor(own),
+    );
+    if (changed === "missing") throw new Error("expected the casts");
+    for (const at of [0, 1]) {
+      expect(changed[at]?.shares[0]).toEqual({
+        seat: FIRST,
+        ciphertext: (SHARES[0] as CastShare).ciphertext,
+        receipt: own,
+        boarded: receiptBoardedFor(own),
+      });
+      expect(changed[at]?.shares.slice(1)).toEqual(receipted().slice(1));
+    }
+    expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+  });
+
+  test("keeps an earlier receipt's entry beside the seat's own receipt", () => {
+    const changed = withReceiptBoarded(
+      [cast(10n)],
+      naming(10n),
+      checkedOf(FIRST, earlier),
+      receiptBoardedFor(earlier),
+    );
+    if (changed === "missing") throw new Error("expected the casts");
+    expect(changed[0]?.shares[0]).toMatchObject({
+      receipt: own,
+      boarded: receiptBoardedFor(earlier),
+    });
+    expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+  });
+
+  test("keeps the first entry kept for a seat", () => {
+    const once = withReceiptBoarded(
+      [cast(10n)],
+      naming(10n),
+      checkedOf(FIRST, own),
+      receiptBoardedFor(own),
+    );
+    if (once === "missing") throw new Error("expected the casts");
+    expect(
+      withReceiptBoarded(once, naming(10n), checkedOf(FIRST, earlier), receiptBoardedFor(earlier)),
+    ).toEqual(once);
+  });
+
+  test("doesn't reach another seal's cast", () => {
+    const otherSeal = BALLOT.slice();
+    otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
+    new DataView(otherSeal.buffer).setBigUint64(L1_AT, 11n);
+    const theirs: CastRecord = { ballot: otherSeal, l1Number: 11n, shares: shares() };
+    const changed = withReceiptBoarded(
+      [cast(10n), theirs],
+      naming(10n),
+      checkedOf(FIRST, own),
+      receiptBoardedFor(own),
+    );
+    if (changed === "missing") throw new Error("expected the casts");
+    expect(changed[1]).toEqual(theirs);
+  });
+
+  test("is missing for a ballot no cast has, or a seat not receipted in it", () => {
+    const entry = receiptBoardedFor(own);
+    expect(withReceiptBoarded([cast(11n)], naming(10n), checkedOf(FIRST, own), entry)).toBe(
+      "missing",
+    );
+    expect(withReceiptBoarded([], naming(10n), checkedOf(FIRST, own), entry)).toBe("missing");
+    expect(
+      withReceiptBoarded([cast(10n, shares())], naming(10n), checkedOf(FIRST, own), entry),
+    ).toBe("missing");
+  });
+
+  test("throws for an entry that doesn't carry exactly the checked receipt, or a receipt not for this ballot's seat", () => {
+    const held = [cast(10n)];
+    expect(() =>
+      withReceiptBoarded(held, naming(10n), checkedOf(FIRST, own), receiptBoardedFor(earlier)),
+    ).toThrow(TypeError);
+    expect(() =>
+      withReceiptBoarded(held, naming(10n), checkedOf(FIRST, own), boardedFor(naming(10n))),
+    ).toThrow(TypeError);
+    expect(() =>
+      withReceiptBoarded(held, naming(10n), checkedOf(FIRST, own), {
+        ...receiptBoardedFor(own),
+        link: new Uint8Array(31),
+      }),
+    ).toThrow(TypeError);
+    const theirs = receiptFor(second);
+    expect(() =>
+      withReceiptBoarded(held, naming(10n), checkedOf(FIRST, theirs), receiptBoardedFor(theirs)),
+    ).toThrow(TypeError);
+    const otherBallot = receiptFor(FIRST, { ballot_hash: new Uint8Array(32) });
+    expect(() =>
+      withReceiptBoarded(
+        held,
+        naming(10n),
+        checkedOf(FIRST, otherBallot),
+        receiptBoardedFor(otherBallot),
+      ),
+    ).toThrow(TypeError);
+  });
+
+  test("carries over to a recast recorded after it", () => {
+    const once = withReceiptBoarded(
+      [cast(10n)],
+      naming(10n),
+      checkedOf(FIRST, own),
+      receiptBoardedFor(own),
+    );
+    if (once === "missing") throw new Error("expected the casts");
+    const recast = withCast(once, naming(11n), shares());
+    if (typeof recast === "string") throw new Error(recast);
+    expect(recast[1]?.shares[0]).toEqual(once[0]?.shares[0]);
+    expect(recast[1]?.shares.slice(1)).toEqual(shares().slice(1));
+  });
+});
+
+describe("a cast's unboarded receipts", () => {
+  const own = receiptFor(FIRST);
+
+  test("are its receipted seats whose receipt no kept entry carries, in seat order", () => {
+    const held: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: receipted() }];
+    expect(unboardedReceipts(held, naming(10n))).toEqual([{ seat: FIRST, receipt: own }]);
+    const boarded: CastRecord[] = [
+      { ballot: naming(10n), l1Number: 10n, shares: receiptedBoarded() },
+    ];
+    expect(unboardedReceipts(boarded, naming(10n))).toEqual([]);
+  });
+
+  test("are none for a cast with no receipt, or a ballot no cast has", () => {
+    const held: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: shares() }];
+    expect(unboardedReceipts(held, naming(10n))).toEqual([]);
+    expect(unboardedReceipts(held, naming(11n))).toEqual([]);
+    expect(unboardedReceipts([], naming(10n))).toEqual([]);
+  });
+
+  test("hand out copies", () => {
+    const held: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: receipted() }];
+    unboardedReceipts(held, naming(10n))[0]?.receipt.fill(0);
+    expect(unboardedReceipts(held, naming(10n))).toEqual([{ seat: FIRST, receipt: own }]);
   });
 });

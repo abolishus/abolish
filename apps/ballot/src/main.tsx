@@ -10,7 +10,14 @@ import { createRoot } from "react-dom/client";
 
 import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
-import { castAsAsked, readCasts, recordBoarded, recordCast, recordReceipt } from "./casts.ts";
+import {
+  castAsAsked,
+  readCasts,
+  recordBoarded,
+  recordCast,
+  recordReceipt,
+  recordReceiptBoarded,
+} from "./casts.ts";
 import type { Backer } from "./backup-offer.tsx";
 import { confirming, STAGING, tier0Region } from "./deployment.ts";
 import {
@@ -33,6 +40,7 @@ import { recover } from "./recovery.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
 import { castBallot } from "./prover-client.ts";
 import type { Registrar } from "./register.tsx";
+import { submitReceipt } from "./receipts.ts";
 import { sendTier0Request } from "./registration.ts";
 import { sendBallot } from "./send.ts";
 import { BallotWorker, WorkerFailure } from "./worker-client.ts";
@@ -264,6 +272,10 @@ const source: ElectionSource = {
     sendBallot(STAGING, electionId, ballot, (url, init) => fetch(url, init)),
   keepBoarded: (electionId, tier, ballot, boarded) =>
     recordBoarded(electionId, tier, ballot, boarded),
+  submitReceipt: (electionId, receipt) =>
+    submitReceipt(STAGING, electionId, receipt, (url, init) => fetch(url, init)),
+  keepReceiptBoarded: (electionId, tier, ballot, checked, boarded) =>
+    recordReceiptBoarded(electionId, tier, ballot, checked, boarded),
   registrar,
   // Only the operator's relay so far: the route that bypasses it and the
   // posting offer come first (P2-8 part 3c-1b-2b-2b-2c).

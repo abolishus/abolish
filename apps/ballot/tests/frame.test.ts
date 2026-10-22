@@ -134,6 +134,8 @@ describe("the frame under the client's CSP", () => {
           keepReceipt: () => new Promise<never>(() => {}),
           send: () => new Promise<never>(() => {}),
           keepBoarded: () => new Promise<never>(() => {}),
+          submitReceipt: () => new Promise<never>(() => {}),
+          keepReceiptBoarded: () => new Promise<never>(() => {}),
           registrar: undefined,
           delivers: false,
         },

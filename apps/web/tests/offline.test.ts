@@ -235,6 +235,9 @@ describe("the offline shell's worker", () => {
     const other = "/assets/oxanium-greek-wght-normal-Zz9.woff2";
     expect((await s.request(other))!.status).toBe(404);
     expect(s.fetched).toEqual([other]);
+    // Offline it fails as the network does, which the browser reports as its own error.
+    s.online(false);
+    await expect(s.request(other)).rejects.toThrow("Failed to fetch");
   });
 
   test("never stores what a visitor opens or fetches", async () => {
@@ -255,7 +258,11 @@ describe("the offline shell's worker", () => {
         fc.boolean(),
         async (p, method, mode, destination, online) => {
           s.online(online);
-          const answer = await s.request(p, { method, mode, destination });
+          // A rejected answer is the browser's own network error: a font it
+          // doesn't hold, fetched while offline.
+          const answer = await s
+            .request(p, { method, mode, destination })
+            .catch(() => Response.error());
           // It answers only a page opened in a tab, or a file it keeps.
           if (answer !== undefined)
             expect(

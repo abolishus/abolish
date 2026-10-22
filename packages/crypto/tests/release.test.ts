@@ -130,6 +130,43 @@ describe("release record codec and rules (docs/spec/release.md)", () => {
     expect(releaseRecordRule(typical)).toBeUndefined();
   });
 
+  // Boundaries the vector file leaves between its cases.
+  const withCsp = (value: string): DecodedReleaseRecord =>
+    withSite(0, {
+      headers: (typical.value.sites[0]?.headers ?? []).map((h) =>
+        Buffer.from(h.name).toString() === "content-security-policy"
+          ? { ...h, value: ascii(value) }
+          : h,
+      ),
+    });
+
+  test.each([" v", "v\x7f", "\x7f"])("refuses the header value %j", (value) => {
+    expect(releaseRecordRule(withCsp(value))).toEqual({ rule: "header-value", site: 0 });
+  });
+
+  test("takes a header value of every printable byte, a space only inside", () => {
+    expect(releaseRecordRule(withCsp("~ !"))).toBeUndefined();
+  });
+
+  test("takes a file of exactly MAX_RELEASE_FILE bytes", () => {
+    const [index] = asFiles(["index.html"]);
+    if (index === undefined) throw new Error("unreachable");
+    expect(
+      releaseRecordRule(withSite(0, { files: [{ ...index, length: 2n ** 28n }] })),
+    ).toBeUndefined();
+  });
+
+  test.each(["+x/plain", "text/-x", "text/.x", "text/plain; charset=UTF-8", "/plain"])(
+    "refuses the media type %j",
+    (media) => {
+      const [index] = asFiles(["index.html"]);
+      if (index === undefined) throw new Error("unreachable");
+      expect(
+        releaseRecordRule(withSite(0, { files: [{ ...index, media_type: ascii(media) }] })),
+      ).toEqual({ rule: "media-type", site: 0 });
+    },
+  );
+
   test("finds a path that is a directory of another anywhere in the list", () => {
     // `-` sorts between a path and its directory's entries, so a conflict
     // isn't always between neighbours.

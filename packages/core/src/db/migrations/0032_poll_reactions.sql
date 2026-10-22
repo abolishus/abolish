@@ -9,10 +9,10 @@
 -- reaches election_definitions (no-join test: no key touches a board table);
 -- core checks the election exists before a reaction is set.
 --
--- T-11: no row keeps a time, so a reaction can't be lined up with a ballot
--- boarded at the same moment. `account_reaction_hours` keeps how many changes
--- an account made in each UTC hour, for its limit (T-52), and never which
--- poll or reaction.
+-- T-11: no column keeps a time. The database still orders and dates rows
+-- (`xmin`, the WAL, backups, statement logs), the residual T-11 states.
+-- `account_reaction_hours` keeps how many changes an account made in each
+-- UTC hour, for its limit (T-52), and never which poll or reaction.
 --
 -- Operational: a wipe loses reactions, never a result.
 

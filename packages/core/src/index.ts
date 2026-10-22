@@ -219,6 +219,7 @@ export {
   PHONE_HOLD_DAYS,
   PHONE_LINE_TYPES,
   type PhoneChannel,
+  type PhoneHashRotation,
   PhoneVerificationError,
   type PhoneVerificationErrorCode,
   type PhoneVerifier,
@@ -226,6 +227,7 @@ export {
   readAccountPhone,
   requestPhoneCode,
   type RequestPhoneCodeOptions,
+  rotatePhoneHashes,
   verifyPhoneCode,
 } from "./account-phones.ts";
 export {

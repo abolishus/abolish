@@ -2,7 +2,8 @@
 // of 32-byte keys with IDs, read from apps/web's environment, never from the
 // database or a log. The current key is the one new values are made under;
 // the others stay so values made under them can still be read or matched
-// until the rotation job (P2-31 part 3) rewrites them.
+// until a rotation rewrites them (`rotatePhoneHashes`; the account-keys
+// runbook).
 //
 // The text form is `id:hex,id:hex,…`, oldest first, with the last key current
 // unless one entry ends in `*`, which makes that one current instead. A new

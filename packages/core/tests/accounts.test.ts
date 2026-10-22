@@ -183,8 +183,8 @@ describe("schema", () => {
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_phone_codes", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_phone_holds", "DELETE,INSERT,SELECT,UPDATE"],
-      // Never updated; pruned past the daily window (account-phones.test.ts).
-      ["account_phone_recipients", "DELETE,INSERT,SELECT"],
+      // Updated only by the hash rotation; pruned past the daily window (account-phones.test.ts).
+      ["account_phone_recipients", "DELETE,INSERT,SELECT,UPDATE"],
       // Never updated; pruned past the daily window (account-phones.test.ts).
       ["account_phone_sends", "DELETE,INSERT,SELECT"],
       ["account_phones", "DELETE,INSERT,SELECT,UPDATE"],

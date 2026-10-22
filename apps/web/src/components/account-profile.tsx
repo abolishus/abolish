@@ -89,12 +89,16 @@ export function AccountProfile({
   const fieldId = useId();
   const failureId = `${fieldId}-failure`;
 
+  // Counts the profile's reads, so only the newest one's answer is shown.
+  const reads = useRef(0);
   const refresh = useCallback(async () => {
+    const read = ++reads.current;
     const profile = await client.own();
+    if (read !== reads.current) return;
     if (profile === undefined) return setView({ kind: "none" });
     // The moderation is read apart, so a failure there still shows the profile.
     const moderation = await client.moderation().catch(() => undefined);
-    setView({ kind: "profile", profile, moderation });
+    if (read === reads.current) setView({ kind: "profile", profile, moderation });
   }, [client]);
 
   const failed = useCallback(

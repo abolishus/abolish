@@ -873,6 +873,9 @@ const enUS = {
   byNote:
     "Which polls a profile shows is what its author told this website. It isn't part of any poll, and no one outside this website can check it.",
   byPolls: "Polls it asked",
+  askedBy: "Asked by",
+  askedByNote:
+    "Who asked is what the poll's author told this website. It isn't part of the poll, and no one outside this website can check it.",
   byEmpty: "No polls to show",
   byEmptyLede: "This profile doesn't show any poll that's listed right now.",
   byMore: "More polls",

@@ -25,6 +25,7 @@ import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { offlineWorkerConfig } from "../src/app/offline.ts";
+import type { AskedBy } from "../src/poll.ts";
 import type { ProfileRecord } from "../src/server/load.ts";
 import type { StartRequestContext } from "../src/start.ts";
 import { fromHex, toHex } from "../src/values.ts";
@@ -530,13 +531,36 @@ const profiles = new Map<string, ProfileRecord>([
 /** Every handle the reader was asked for, in order. */
 const profileReads: unknown[] = [];
 
-/** Every request goes through Start as the front sends it, with the profiles' reader. */
+/**
+ * Who asked each poll, as the front's reader gives it (src/node/main.ts):
+ * the typical poll, the stream's version-5 poll (which the profile shows
+ * too) and the hidden poll, which core never names but the page must not
+ * either. The questions poll's read fails, and the stream's version-1 poll's
+ * handle is one core never issues.
+ */
+const ASKER: AskedBy = { handle: PROFILE_HANDLE, name: PROFILE_NAME };
+const askers = new Map<string, AskedBy>([
+  [ID, ASKER],
+  [STREAM_V5, ASKER],
+  [HIDDEN_ID, ASKER],
+  [STREAM_V1, { handle: "../account", name: "Mallory" }],
+]);
+const FAILING_ASKER = QUESTIONS_ID;
+/** Every argument the asked-by reader was given, in order. */
+const askedByReads: unknown[] = [];
+
+/** Every request goes through Start as the front sends it, with the account side's readers. */
 function get(path: string, headers: Record<string, string> = {}): Promise<Response> {
   return handler.fetch(new Request(`http://localhost${path}`, { headers }), {
     context: {
       readProfile: async (...args) => {
         profileReads.push(...args);
         return profiles.get(args[0]);
+      },
+      readAskedBy: async (...args) => {
+        askedByReads.push(...args);
+        if (args[0] === FAILING_ASKER) throw new Error("connection lost");
+        return askers.get(args[0]);
       },
     },
   });
@@ -810,6 +834,63 @@ describe("poll page", () => {
     const response = await get(`/polls/${id}`);
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("There is no page at this address");
+  });
+});
+
+describe("asked by", () => {
+  const asked = (html: string) =>
+    new RegExp(
+      `Asked by(?:<!-- -->)? <a [^>]*href="/by/${PROFILE_HANDLE}"[^>]*><bdi>${PROFILE_NAME}</bdi></a>`,
+    ).test(html);
+
+  test("a poll's page names the profile its author chose, isolated and linked, as the website's word", async () => {
+    const html = await (await get(`/polls/${ID}`)).text();
+    // The name in its own isolate, so a right-to-left name can't reorder the page (T-75).
+    expect(asked(html)).toBe(true);
+    expect(html).toContain("It isn&#x27;t part of the poll");
+    // The page's preview is unchanged: who asked isn't in what others copy of it.
+    expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
+  });
+
+  test("a poll no profile shows, a hidden poll, a failed read and a handle core never issues name no one", async () => {
+    for (const id of [FILLER[0], HIDDEN_ID, QUESTIONS_ID]) {
+      const response = await get(`/polls/${id}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).not.toContain("Asked by");
+      expect(html).not.toContain(PROFILE_NAME);
+    }
+    // The version-1 stream poll's handle reads as a path, so it would link off the profiles.
+    const html = await (await get(`/polls/${STREAM_V1}`)).text();
+    expect(html).not.toContain("Asked by");
+    expect(html).not.toContain("Mallory");
+  });
+
+  test("the stream's cards name who asked, and a profile's own page doesn't repeat it", async () => {
+    const stream = await (await get("/discover")).text();
+    expect(stream.match(/Asked by/g)).toHaveLength(1);
+    expect(asked(stream)).toBe(true);
+    expect(stream).not.toContain("Mallory");
+    const profile = await (await get(`/by/${PROFILE_HANDLE}`)).text();
+    expect(profile).not.toContain("Asked by");
+  });
+
+  test("the reader is asked for poll IDs only, never anything of the visitor's", async () => {
+    askedByReads.length = 0;
+    await get(`/polls/${ID}`, { cookie: "__Secure-abolish-account.session_token=secret" });
+    await get("/discover");
+    expect(askedByReads.length).toBeGreaterThan(1);
+    for (const read of askedByReads) expect(read).toMatch(/^[0-9a-f]{64}$/);
+    expect(askedByReads).toContain(ID);
+    expect(askedByReads).toContain(STREAM_V5);
+  });
+
+  test("a front with no reader names no one, and still serves the page", async () => {
+    const response = await handler.fetch(new Request(`http://localhost/polls/${ID}`), {
+      context: {},
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("Asked by");
   });
 });
 

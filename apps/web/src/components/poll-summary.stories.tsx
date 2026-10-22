@@ -209,6 +209,46 @@ export const Delisted: Story = {
   },
 };
 
+const ASKED_BY = { handle: "k7qa2mzr5xw3bn4d", name: "Riverside Neighbours" };
+
+/**
+ * Its author chose to show it on their profile: "Asked by" the name, a link
+ * to the profile, and a note that it's the website's word, not the poll's (T-75).
+ */
+export const AskedBy: Story = {
+  args: { askedBy: ASKED_BY },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("link", { name: ASKED_BY.name })).toHaveAttribute(
+      "href",
+      `/by/${ASKED_BY.handle}`,
+    );
+    await expect(canvas.getByText(/It isn't part of the poll/)).toBeVisible();
+  },
+};
+
+/** A hidden poll names no one, whatever it was given: nothing beside withheld text (T-68). */
+export const HiddenAskedBy: Story = {
+  args: {
+    askedBy: ASKED_BY,
+    share: undefined,
+    moderation: {
+      state: "hidden",
+      latest: {
+        seq: "7",
+        action: "hide",
+        reason: "personal-data",
+        decidedAt: "2026-10-01T12:00:00.000Z",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText(/Asked by/)).toBeNull();
+    await expect(canvas.queryByText(ASKED_BY.name)).toBeNull();
+  },
+};
+
 const TAGS = { topic: "housing", place: "حي الزيتون" } as const;
 
 /**

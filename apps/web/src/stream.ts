@@ -3,7 +3,7 @@
 // here imports a decoder, so the pages' script doesn't carry one (P2-28
 // part 2b).
 
-import type { DefinitionProblem, PollTags, PollView } from "./poll.ts";
+import type { AskedBy, DefinitionProblem, PollTags, PollView } from "./poll.ts";
 import type { StreamFilter } from "./server/load.ts";
 
 /** The stream's orders, as `GET /elections` names them: each lists only the polls open now. */
@@ -133,6 +133,8 @@ export type StreamCard =
       readonly poll: PollView;
       readonly text: CardText;
       readonly tags: PollTags;
+      /** Who asked it, where the card says so (the stream's); none on a profile's own page. */
+      readonly askedBy?: AskedBy | undefined;
     }
   | { readonly kind: "unavailable"; readonly electionId: string; readonly problem: CardProblem };
 

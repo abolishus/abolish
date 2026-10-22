@@ -12,18 +12,19 @@ import {
   workerHeaders,
 } from "./security.ts";
 import { WORKER_PATH } from "./app/offline.ts";
-import type { ReadProfile } from "./server/load.ts";
+import type { ReadAskedBy, ReadProfile } from "./server/load.ts";
 
 /**
  * What the front (src/node/serve.ts) hands every request it passes to Start:
  * readers of the account side's public records, which the server functions
  * can't reach through the API, since the API reads no account table (T-10).
- * Each reads by a public key only (a handle), never by a session: pages
- * never get the account cookie. Optional, so a front without the database
- * (a test's) renders every other page.
+ * Each reads by a public key only (a handle, a poll's ID), never by a
+ * session: pages never get the account cookie. Optional, so a front without
+ * the database (a test's) renders every other page.
  */
 export interface StartRequestContext {
   readonly readProfile?: ReadProfile;
+  readonly readAskedBy?: ReadAskedBy;
 }
 
 declare module "@tanstack/react-start" {

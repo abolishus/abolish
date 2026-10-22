@@ -4,6 +4,7 @@
 // listens.
 
 import {
+  askedBy,
   assertDistinctKeyrings,
   checkEmailKeys,
   checkPhoneKeys,
@@ -24,8 +25,8 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
 
-import type { ReadProfile } from "../server/load.ts";
-import { ballotBase, isSiteKey, toHex } from "../values.ts";
+import type { ReadAskedBy, ReadProfile } from "../server/load.ts";
+import { ballotBase, fromHex, isSiteKey, toHex } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
@@ -409,6 +410,9 @@ const publicProfile: ReadProfile = async (handle) => {
   if (p === undefined || p.state === "hidden") return p;
   return { state: "visible", handle: p.handle, name: p.name, polls: p.polls.map(toHex) };
 };
+// A poll's page and card say who asked it, read by the poll's public ID
+// alone, as the profile is by its handle (T-10).
+const pollAskedBy: ReadAskedBy = (electionId) => askedBy(sql, fromHex(electionId));
 // A key retyped under its ID matches nothing made or rotated under the right
 // bytes, so through it an address or number another account holds would
 // verify again (T-01; the account-keys runbook): an instance holding one
@@ -443,7 +447,7 @@ const server = createWebServer({
   token,
   reactions,
   profiles,
-  context: { readProfile: publicProfile },
+  context: { readProfile: publicProfile, readAskedBy: pollAskedBy },
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,

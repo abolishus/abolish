@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { ReactionsClient } from "../account/reactions.ts";
 import { catalogs, type Messages, tierMessage } from "../messages.ts";
 import {
+  type AskedBy as Asker,
   type Instant,
   instructionOf,
   pollStatus,
@@ -13,6 +14,7 @@ import {
   type PollView,
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
+import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
@@ -35,6 +37,8 @@ export interface PollSummaryProps {
   reactions?: ReactionsClient | undefined;
   /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
   phoneVerification: boolean;
+  /** Who asked it, if its author chose to say; never shown while it's hidden. */
+  askedBy?: Asker | undefined;
 }
 
 const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
@@ -107,6 +111,7 @@ export function PollSummary({
   share,
   reactions,
   phoneVerification,
+  askedBy,
 }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
@@ -142,6 +147,17 @@ export function PollSummary({
             </StatusMark>
           )}
         </div>
+
+        {/* The loader names no one for a hidden poll; the guard keeps this
+            component from naming anyone beside withheld text either way (T-68). */}
+        {askedBy === undefined || moderation.state === "hidden" ? null : (
+          <div className="grid gap-1">
+            <p className="m-0 text-base">
+              <AskedBy askedBy={askedBy} />
+            </p>
+            <p className="m-0 max-w-prose text-sm text-muted-foreground">{t("askedByNote")}</p>
+          </div>
+        )}
 
         {moderation.state !== "visible" && latest !== undefined ? (
           <p role="note" className="m-0 max-w-prose border-l-4 border-pending pl-4">

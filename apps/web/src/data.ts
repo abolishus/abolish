@@ -46,7 +46,9 @@ export const fetchPoll = createServerFn({ method: "GET" })
     if (!isElectionId(electionId)) throw new TypeError("expected an election ID");
     return electionId;
   })
-  .handler(({ data }) => opaque(() => loadPoll(api(), data)));
+  // Who asked it is read through the front's reader in the request's
+  // context (src/start.ts), never the API (T-10); without one, no poll says.
+  .handler(({ data, context }) => opaque(() => loadPoll(api(), data, context.readAskedBy)));
 
 export const fetchBoardPage = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
@@ -112,7 +114,7 @@ export const fetchStream = createServerFn({ method: "GET" })
       place,
     };
   })
-  .handler(({ data }) =>
+  .handler(({ data, context }) =>
     opaque(async () => ({
       stream: await loadStream(
         api(),
@@ -124,6 +126,7 @@ export const fetchStream = createServerFn({ method: "GET" })
           place: data.place === "" ? undefined : data.place,
         },
         LOCALE,
+        context.readAskedBy,
       ),
       ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
     })),

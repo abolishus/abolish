@@ -17,6 +17,7 @@ import {
   type StreamSort,
 } from "../stream.ts";
 import { ballotLink } from "../values.ts";
+import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PageHeader } from "./page-parts.tsx";
 import { When } from "./when.tsx";
@@ -174,7 +175,8 @@ function SearchForm({
 }
 
 /**
- * One question in the stream: its words, when it closes, where it's listed,
+ * One question in the stream: who asked it, where its author chose to say,
+ * its words, when it closes, where it's listed,
  * and its first question's answers, each a way into the ballot client, which
  * opens the poll with that answer chosen from the link's fragment. Text an
  * asker wrote carries its own language and direction.
@@ -218,6 +220,7 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
       className="grid content-start gap-5 border border-border p-5 sm:p-6"
     >
       <p className="m-0 flex flex-wrap justify-between gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {card.askedBy === undefined ? null : <AskedBy askedBy={card.askedBy} />}
         <span>
           {t("streamCloses")} <When instant={poll.closesAt} />
         </span>

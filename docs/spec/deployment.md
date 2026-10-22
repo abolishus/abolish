@@ -8,7 +8,7 @@ What this page doesn't cover:
 
 - **The operators' deployment file.** `packages/contracts/deployments/<chain-id>.json` records each deployment for the people running it: besides everything here, who holds each registrar key, the anchoring Safe's owners and threshold at deployment, the registration paymaster, account and EntryPoint, and each contract's creation transaction ([[contracts]]). Those are checked by the release Safe's signers and the runbooks, never by a client, so they aren't in the record.
 - **What the verifier's own release pins.** The verification keys of every proof system, the L2's derivation rules, the trustees' names and the release registry itself are pinned by the verifier's release ([[verifier]], Pinned trust roots). A verifier release compares the deployment records it accepts with its own pins (part 2c); this record doesn't replace them.
-- **Reading it.** `packages/crypto`'s codec and rules and the client's build from the record are [[P4-4]] part 2c; until then only the generator checks these rules.
+- **Reading it.** `packages/crypto` decodes both versions, computes the deployment hash and checks Well-formedness, Well-formedness (version 2) and Across releases (`decodeDeploymentRecord`, `deploymentRecordRule`, `deploymentAcrossRule`; [[P2-30]] part 3c-2a). The rules against a release (Against its release) and the client's build from the record are [[P4-4]] part 2c; until then only the generator checks those.
 
 ## Not a result-critical record
 

@@ -4,10 +4,10 @@ import { DecodeError, ds, H, PanelError, panelId, UNPINNED } from "../src/index.
 import { buildSchema, hex, SPEC_VECTORS, type Vector, type VectorFile } from "./spec-vectors.ts";
 
 // docs/spec/vectors/deployment-record.json, printed by
-// scripts/deployment-record-vectors.py (P4-4 part 2b-3). Until the deployment
-// record's codec and rules are in this package (part 2c), the file's own
+// scripts/deployment-record-vectors.py (P4-4 part 2b-3). The file's own
 // type descriptors decode each vector, so this checks the file against
-// itself and the spec's framing: every vector round-trips under its
+// itself and the spec's framing (deployment.test.ts checks this package's
+// codec and rules against it): every vector round-trips under its
 // deployment hash, its panels are the ones this package's panel check
 // accepts or refuses, and every pair's release names its deployment's hash
 // exactly when the pair passes that rule (T-31, T-36, T-37, T-41).

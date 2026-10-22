@@ -54,6 +54,7 @@ import {
   accountProfiles,
   profileHandles,
 } from "./profiles.ts";
+import { pollTags } from "./poll-tags.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
 
@@ -104,6 +105,7 @@ export {
   moderationActions,
   moderationReports,
   pollCreationTxs,
+  pollTags,
   profileHandles,
   profileModerationActions,
   profileReports,
@@ -180,6 +182,7 @@ export const TABLE_CLASSES = {
     "moderation_actions",
     "moderation_reports",
     "poll_creation_txs",
+    "poll_tags",
     "profile_moderation_actions",
     "profile_reports",
     "schema_migrations",

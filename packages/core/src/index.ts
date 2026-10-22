@@ -112,9 +112,17 @@ export {
   LISTING_SORTS,
   ListingError,
   type ListingOrder,
+  type ListingTags,
   listPolls,
   MAX_LISTING_PAGE,
 } from "./listing.ts";
+export {
+  fillPollTags,
+  insertPollTags,
+  placeKey,
+  type PollTags,
+  storedPollTags,
+} from "./poll-tags.ts";
 export {
   fillDisplayTextSearch,
   MAX_SEARCH_QUERY,
@@ -160,6 +168,7 @@ export {
   moderationActions,
   moderationReports,
   pollCreationTxs,
+  pollTags,
   profileHandles,
   profileModerationActions,
   profileReports,

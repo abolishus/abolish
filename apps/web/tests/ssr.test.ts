@@ -2023,6 +2023,8 @@ describe("offline shell", () => {
     expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/[\w-]+\.css"\/>/);
     // Every link stays on the site.
     expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
+    // And none goes to another page, which would fail offline as this one did.
+    expect([...html.matchAll(/<a href="([^"]*)"/g)].map((m) => m[1])).toEqual(["#main", ""]);
     expect(await (await get("/offline")).text()).toBe(html);
   });
 

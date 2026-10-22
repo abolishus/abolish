@@ -19,7 +19,7 @@ function OfflineDocument({ stylesheet }: { stylesheet: string }) {
         <link rel="icon" href={ICON_SVG_PATH} type="image/svg+xml" />
       </head>
       <body>
-        <SiteLayout>
+        <SiteLayout links={false}>
           <Offline />
         </SiteLayout>
       </body>
@@ -28,9 +28,9 @@ function OfflineDocument({ stylesheet }: { stylesheet: string }) {
 }
 
 /**
- * The offline page's HTML (src/app/offline.ts): the site's frame and the
- * notice, with no script, the same bytes for every visitor and every request
- * so the worker's cache can be named by its hash.
+ * The offline page's HTML (src/app/offline.ts): the site's frame, without
+ * its links, and the notice, with no script, the same bytes for every visitor
+ * and every request so the worker's cache can be named by its hash.
  */
 export const offlinePage = (stylesheet: string): string =>
   `<!doctype html>${renderToStaticMarkup(

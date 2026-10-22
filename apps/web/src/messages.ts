@@ -622,8 +622,8 @@ const enUS = {
   navSite: "Site",
   navHome: "Home",
   navDiscoverNote: "Search the questions people are asking",
-  navPollsNote: "Every poll this server lists",
-  navModerationNote: "Every moderation decision, with its reason",
+  navPollsNote: "Every poll listed on this site",
+  navModerationNote: "Why a poll was hidden or left out of search",
   navHomeNote: "Start again from the front page",
   footerClaim: "Non-binding, run by citizens, and every count can be checked.",
   footerRecord: "Every poll here is on a public board that anyone can download and count again.",
@@ -640,12 +640,11 @@ const enUS = {
     "The server sent a definition that doesn't decode under the protocol, so this page won't show it.",
   definitionMismatch:
     "The server sent the definition of another poll for this ID, so this page won't show it.",
-  errorCode: "Error",
   errorTitle: "Something went wrong on our side",
-  error:
-    "This page couldn't be shown. Try again in a moment, or go somewhere else below. This website never handles ballots: if you were voting, your ballot and receipt are safe in the ballot app on your device.",
+  error: "This page couldn't be shown. Try again in a moment, or go somewhere else below.",
+  errorBallot:
+    "This website never handles ballots: if you were voting, your ballot and receipt are safe in the ballot app on your device.",
   errorRetry: "Try again",
-  offlineCode: "Offline",
   offlineTitle: "You're offline",
   offline:
     "This device can't reach Abolish right now, so the page you opened couldn't load. It will open as usual once you're connected again.",

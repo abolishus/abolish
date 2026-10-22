@@ -34,6 +34,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "/discover",
   );
   await expect(within(ways).getAllByRole("link")).toHaveLength(4);
+  // Everyday words: a lost visitor knows a site, not a server.
+  await expect(ways).not.toHaveTextContent(/server/);
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/64-character|board entries/);
   await userEvent.tab();
   await expect(canvas.getByRole("link", { name: "Skip to content" })).toHaveFocus();
@@ -69,6 +71,11 @@ export const Error: Story = {
       /\b(5\d\d|stack|exception|request id|trace)\b/i,
     );
     await expect(canvas.getByRole("button", { name: "Try again" })).toBeEnabled();
+    // The ballot reassurance is its own paragraph, under the plain account.
+    await expect(canvas.getByText(/never handles ballots/).tagName).toBe("P");
+    await expect(canvas.getByText(/^This page couldn't be shown/)).not.toHaveTextContent(/ballot/);
+    // No label above the title repeating it.
+    await expect(canvasElement.querySelector("main .font-mono")).toBeNull();
   },
 };
 
@@ -83,8 +90,14 @@ const offline: Story["play"] = async ({ canvasElement }) => {
     "/polls?after=3",
   );
   await expect(canvas.queryByRole("button")).toBeNull();
-  // Offline, every other page fails as this one did, so it offers none.
-  await expect(canvas.queryByRole("navigation", { name: "Other places to go" })).toBeNull();
+  // Offline, every other page fails as this one did, so it offers none:
+  // not in the body, nor in the frame's header and footer.
+  await expect(canvas.queryByRole("navigation")).toBeNull();
+  await expect(canvas.getAllByRole("link").map((a) => a.textContent)).toEqual([
+    "Skip to content",
+    "Try again",
+  ]);
+  await expect(canvas.getByText("Abolish")).toBeVisible();
   await expect(getComputedStyle(canvas.getByRole("link", { name: "Try again" })).fontSize).toBe(
     "16px",
   );
@@ -92,12 +105,12 @@ const offline: Story["play"] = async ({ canvasElement }) => {
 
 /** What the offline shell shows when a page can't be fetched (src/app/offline.ts). */
 export const OfflinePage: Story = {
-  args: { children: <Offline retry="/polls?after=3" /> },
+  args: { links: false, children: <Offline retry="/polls?after=3" /> },
   play: offline,
 };
 
 export const OfflineDark: Story = {
-  args: { children: <Offline retry="/polls?after=3" /> },
+  args: { links: false, children: <Offline retry="/polls?after=3" /> },
   parameters: { theme: "dark" },
   play: offline,
 };

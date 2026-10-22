@@ -251,7 +251,11 @@ const enUS = {
   discoverTitle: "What people are asking",
   discoverLede:
     "Open questions from neighbours, groups and schools. Answer any of them in the voting app. Nothing here is ranked by clicks, by arguments or by anything about you: every order below is the same for everyone.",
+  discoverTopicLede:
+    "Open questions their askers filed under this topic. Nothing here is ranked by clicks, by arguments or by anything about you.",
   discoverSorts: "Order",
+  discoverTopics: "Topics",
+  topicAll: "All topics",
   sort_new: "New",
   sort_closing: "Closing soon",
   sort_answered: "Most answered this week",
@@ -288,6 +292,19 @@ const enUS = {
     "Try fewer words, or shorter ones: a question matches only when it holds every one.",
   streamSearchRefusedTitle: "That search can't be run",
   streamSearchRefused: "A search is one to {words} words, in at most {characters} characters.",
+  streamTagsNote:
+    "Askers choose their poll's topic and place. They aren't part of the poll, and moderation can change them if they don't fit.",
+  streamPlaceLabel: "Place",
+  streamPlaceHint:
+    "A town, neighbourhood or school, as askers write it. Capitals and spacing don't matter, but the whole name must match.",
+  streamPlaceFiltering: "Only the questions filed at the place you entered.",
+  streamPlaceClear: "Clear the place",
+  streamFilterEmpty: "No open question is filed here",
+  streamFilterEmptyLede:
+    "Only polls whose askers chose this topic or place are listed. Try without one of them.",
+  streamShowEverything: "Show everything",
+  streamPlaceRefusedTitle: "That place can't be looked up",
+  streamPlaceRefused: "A place is one to {characters} characters, as an asker would write it.",
   listTitle: "Listed polls",
   listLede:
     "Polls this server lists, in order of their IDs. Polls that moderation has delisted or hidden aren't listed but stay open by ID, and the election registry on chain names every poll, whatever this list shows.",

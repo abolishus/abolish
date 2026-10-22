@@ -55,6 +55,44 @@ export function isStreamSearch(q: string): boolean {
   return query.kind === "search" && query.q === q;
 }
 
+/**
+ * The longest place a listing filters by, as `GET /elections` bounds it; a
+ * test ties this copy to @abolishus/api-contract's.
+ */
+export const MAX_STREAM_PLACE = 80;
+
+/**
+ * What a stream's `place` asks for: no filter when it is absent or only
+ * whitespace; a filter by it single-spaced and trimmed, as the API keys a
+ * place (packages/core, `placeKey`), when that is at most
+ * `MAX_STREAM_PLACE` code points and something is left of it once
+ * normalised; and a refusal otherwise, which the page says without asking
+ * the API. So every place sent is one the API takes, and a refusal from it
+ * is the search's.
+ */
+export type StreamPlace =
+  | { readonly kind: "none" }
+  | { readonly kind: "place"; readonly place: string }
+  | { readonly kind: "refused" };
+
+const spaced = (s: string) => s.replace(/\s+/gu, " ").trim();
+
+export function streamPlace(place: string | undefined): StreamPlace {
+  const tidy = spaced(place ?? "");
+  if (tidy === "") return { kind: "none" };
+  if (Array.from(tidy).length > MAX_STREAM_PLACE) return { kind: "refused" };
+  // The API's normalisation (packages/core, `normalizeSearchText`): control
+  // characters alone, which `\s` doesn't match, leave no place to match.
+  if (spaced(tidy.normalize("NFKC").replace(/\p{Cc}/gu, " ")) === "") return { kind: "refused" };
+  return { kind: "place", place: tidy };
+}
+
+/** A place exactly as `streamPlace` hands one on: what a server function takes as a filter. */
+export function isStreamPlace(place: string): boolean {
+  const filter = streamPlace(place);
+  return filter.kind === "place" && filter.place === place;
+}
+
 /** One language's words for a card. */
 export interface CardText {
   /** The translation's tag, lowercase BCP 47, as the record holds it. */

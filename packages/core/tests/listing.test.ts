@@ -193,12 +193,17 @@ describe("listPolls", () => {
 let block = 1_000n;
 
 /** A stored poll open from `opensAt` to `closesAt`, registered at the next position if `registered`. */
-async function timed(opensAt: bigint, closesAt: bigint, registered: boolean): Promise<Uint8Array> {
+async function timed(
+  opensAt: bigint,
+  closesAt: bigint,
+  registered: boolean,
+  id = new Uint8Array(randomBytes(32)),
+): Promise<Uint8Array> {
   const { electionId, definitionHash } = await storeDefinition(
     app,
     encodeElectionDefinition({
       ...typical,
-      election_id: new Uint8Array(randomBytes(32)),
+      election_id: id,
       opens_at: opensAt,
       closes_at: closesAt,
     }),
@@ -471,10 +476,16 @@ describe("listPolls, answered", () => {
   });
 
   test("counts a voter once per tier, at the window's edges", async () => {
-    const tiers = await timed(now - 10n, now + 100n, false);
+    // `tiers` has the higher election ID, so it lists first only by its
+    // count: two, if both tiers and both edges count, against `one`'s one.
+    const low = new Uint8Array(randomBytes(32));
+    low[0] = 0x00;
+    const high = new Uint8Array(randomBytes(32));
+    high[0] = 0xff;
+    const tiers = await timed(now - 10n, now + 100n, false, high);
     await cast(tiers, current - 168n, 1n, 0);
     await cast(tiers, current - 1n, 1n, 1);
-    const one = await timed(now - 10n, now + 100n, false);
+    const one = await timed(now - 10n, now + 100n, false, low);
     await cast(one, current - 1n, 1n);
     const mine = [tiers, one].map(hex);
     expect((await listAll(MAX_LISTING_PAGE, answered)).filter((id) => mine.includes(id))).toEqual(

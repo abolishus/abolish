@@ -62,8 +62,9 @@ const MAX_SEGMENT = 2n ** 32n - 1n;
 /**
  * The segments `answered` counts at `now`: the last whole periods covering
  * `ANSWERED_WINDOW_SECONDS`, up to the one before `now`'s. The current period
- * is left out, so the order moves once a period, not with each ballot, and
- * the counts are of segments every board copy will hold once anchored.
+ * is left out, so the order settles once a period rather than moving with
+ * each ballot: only a ballot labelled just before a boundary and boarded just
+ * after it still lands in the window late.
  * `from > to` is an empty window (before the clock's epoch, say).
  */
 export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint; to: bigint } {
@@ -117,9 +118,14 @@ export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint;
  * however often they cast, and a poll climbs only by more voters (T-01).
  * Every input is on the public board, where each entry already carries its
  * segment, so the count keeps no time of its own and anyone can recompute it
- * from a copy of the board (T-11). The cursor is a stored poll placed by its
- * count now; a poll whose count crosses the cursor's between pages may be
- * seen twice or not at all, which the period-long window keeps rare.
+ * from a copy of the board, counting the ballots our API boarded (T-11).
+ * Direct-submitted ballots, boarded as contract events, aren't counted yet.
+ * The cursor is a stored poll placed by its count now; a poll whose count
+ * crosses the cursor's between pages may be seen twice or not at all.
+ *
+ * Each call counts every open poll's ballots in the window, whatever
+ * `limit` is: a cost the API's slots and deadline bound (T-52), until the
+ * counts, which change only around each period's boundary, are cached.
  */
 export async function listPolls(
   client: Sql,
@@ -203,9 +209,9 @@ export async function listPolls(
 
   if (window !== undefined) {
     // Voters, not ballots: each (tier, nullifier) once, through the keys
-    // the board stores with each ballot it boards, and the entries'
-    // segments through board_entries_by_segment.
-    const answered = q<number>`(SELECT count(*)::int FROM (SELECT DISTINCT ${boardBallotKeys.tier}, ${boardBallotKeys.nullifier} FROM ${boardBallotKeys} JOIN ${boardEntries} ON ${boardEntries.electionId} = ${boardBallotKeys.electionId} AND ${boardEntries.idx} = ${boardBallotKeys.idx} WHERE ${boardBallotKeys.electionId} = ${electionDefinitions.electionId} AND ${boardEntries.segment} BETWEEN ${window.from} AND ${window.to}) AS voters)`;
+    // the board stores with each ballot it boards. Driven from the poll's
+    // entries in the window, which board_entries_by_segment reaches by range.
+    const answered = q<number>`(SELECT count(*)::int FROM (SELECT DISTINCT ${boardBallotKeys.tier}, ${boardBallotKeys.nullifier} FROM ${boardEntries} JOIN ${boardBallotKeys} ON ${boardBallotKeys.electionId} = ${boardEntries.electionId} AND ${boardBallotKeys.idx} = ${boardEntries.idx} WHERE ${boardEntries.electionId} = ${electionDefinitions.electionId} AND ${boardEntries.segment} BETWEEN ${window.from} AND ${window.to}) AS voters)`;
     let from;
     if (cursor !== undefined) {
       const [at] = await db

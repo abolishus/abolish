@@ -1131,7 +1131,7 @@ const enUS = {
   verifyFailure_checkUnavailable:
     "We couldn't check the code just now. No try was spent: try again shortly.",
   verifyFailure_addressTaken:
-    "Another account has verified this address, so it can't verify this one.",
+    "This address can't verify this account: another account has verified it, or one let it go less than 90 days ago.",
   verifyFailure_numberHeld:
     "This number can't verify this account: another account holds it, or one let it go less than 90 days ago.",
   verifyFailure_failed: "That didn't work. Nothing changed; try again shortly.",

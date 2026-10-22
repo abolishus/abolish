@@ -174,6 +174,8 @@ describe("schema", () => {
       ["account_appeals", "INSERT,SELECT"],
       ["account_credentials", "DELETE,SELECT"],
       ["account_email_codes", "DELETE,INSERT,SELECT,UPDATE"],
+      // Never updated: a hold can't be re-hashed; pruned once it ends (account-emails.test.ts).
+      ["account_email_holds", "DELETE,INSERT,SELECT"],
       // Never updated or deleted: a key's check stands for good (account-emails.test.ts).
       ["account_email_key_checks", "INSERT,SELECT"],
       // Never updated; pruned past the daily window (account-emails.test.ts).

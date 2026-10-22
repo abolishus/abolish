@@ -16,6 +16,15 @@
 // so the route can't be used to learn who has an account (T-11, T-73). Only
 // someone reading that mailbox learns it.
 //
+// An address an account let go, by its deletion (the table's trigger) or a
+// change of address, is held for `EMAIL_HOLD_DAYS`, as a number is: while
+// phone verification is off the address is all a second account costs, so
+// one address mustn't verify account after account, each taking a Tier 0
+// token (T-01). A held address is answered as one another account holds,
+// with a notice of its own. The hold keeps only the address's hash under the
+// key it was made with, which can't be rewritten, so a hash key stays in its
+// keyring until the holds under it end (the account-keys runbook).
+//
 // T-52: every request costs a Turnstile solve for `email-code`, and an
 // account is sent at most `MAX_SENDS_PER_HOUR` codes an hour and
 // `MAX_SENDS_PER_DAY` a day. An address is sent at most
@@ -38,11 +47,12 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { domainToASCII } from "node:url";
-import { and, asc, eq, gt, inArray, lt, ne, notInArray, or, sql as q } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, lte, ne, notInArray, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import {
   accountEmailCodes,
+  accountEmailHolds,
   accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
@@ -63,6 +73,8 @@ export const MAX_SENDS_PER_HOUR = 5;
 export const MAX_SENDS_PER_DAY = 10;
 /** Messages one address may be sent in any 24 hours, whichever accounts asked. */
 export const MAX_SENDS_PER_ADDRESS = 5;
+/** Days, counted from the UTC day it was let go, that an address stays unverifiable by any account. */
+export const EMAIL_HOLD_DAYS = 90;
 /** An address's largest UTF-8 length (RFC 5321's path limit, less its brackets). */
 export const MAX_EMAIL_BYTES = 254;
 
@@ -92,7 +104,9 @@ export type EmailMessage =
   /** A code for `to`, which an account asked to verify. */
   | { readonly kind: "email-code"; readonly to: string; readonly code: string }
   /** `to` is another account's address: no code, just the fact that someone asked. */
-  | { readonly kind: "email-held"; readonly to: string };
+  | { readonly kind: "email-held"; readonly to: string }
+  /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
+  | { readonly kind: "email-on-hold"; readonly to: string };
 
 /**
  * The sending service, shared with notifications (P2-27). `unavailable`:
@@ -129,6 +143,15 @@ export function renderEmail(message: EmailMessage): {
           "No code was sent and nothing changed. If it was you, sign in with the account that already has this address.",
         ].join("\n"),
       };
+    case "email-on-hold":
+      return {
+        subject: "Someone tried to add this address to Abolish",
+        text: [
+          "Someone asked to verify this address for an Abolish account, but an account that had it verified let it go less than 90 days ago.",
+          "",
+          "An address can't be verified again until 90 days after an account lets it go, so no code was sent and nothing changed.",
+        ].join("\n"),
+      };
   }
 }
 
@@ -149,7 +172,10 @@ export type EmailVerificationErrorCode =
   | "wrong-code"
   /** Not the code sent, for the last time: the code is gone. */
   | "too-many-tries"
-  /** The right code, but another account verified the address since it was sent. */
+  /**
+   * The right code, but another account verified the address since it was
+   * sent, or an account let it go less than `EMAIL_HOLD_DAYS` ago.
+   */
   | "address-taken";
 
 export class EmailVerificationError extends Error {
@@ -291,21 +317,42 @@ async function lockAddress(tx: Tx, keys: EmailKeys, address: string): Promise<vo
   for (const id of ids) await tx.execute(q`SELECT pg_advisory_xact_lock(${id.toString()}::bigint)`);
 }
 
-/** Whether an account other than `accountId` holds `address`, under any hash key. */
-async function heldElsewhere(
-  db: Db | Tx,
+const dayOf = (now: Date) => new Date(Math.floor(now.getTime() / DAY) * DAY);
+/** Holds freed on or before this day are `EMAIL_HOLD_DAYS` or more before `now`'s, and have ended. */
+const holdEnded = (now: Date) => new Date(dayOf(now).getTime() - EMAIL_HOLD_DAYS * DAY);
+
+/**
+ * Whether an account other than `accountId` holds `address` (`account`), or
+ * else an account let it go and its hold hasn't ended (`hold`), under any
+ * hash key. One statement, so an account's deletion or change of address
+ * committing meanwhile is seen either as its row or as its hold, never as
+ * neither.
+ */
+async function addressHeld(
+  tx: Tx,
   keys: EmailKeys,
   accountId: string,
   address: string,
-): Promise<boolean> {
-  const held = await db.$count(
-    accountEmails,
-    and(
-      inArray(accountEmails.addressHash, hashesOf(keys, address)),
-      ne(accountEmails.userId, accountId),
-    ),
+  now: Date,
+): Promise<"account" | "hold" | undefined> {
+  const hashes = hashesOf(keys, address);
+  const account = tx
+    .select({ one: q`1` })
+    .from(accountEmails)
+    .where(and(inArray(accountEmails.addressHash, hashes), ne(accountEmails.userId, accountId)));
+  const hold = tx
+    .select({ one: q`1` })
+    .from(accountEmailHolds)
+    .where(
+      and(
+        inArray(accountEmailHolds.addressHash, hashes),
+        gt(accountEmailHolds.freedOn, holdEnded(now)),
+      ),
+    );
+  const [held] = await tx.execute<{ account: boolean; hold: boolean }>(
+    q`SELECT EXISTS (${account}) AS account, EXISTS (${hold}) AS hold`,
   );
-  return held > 0;
+  return held?.account === true ? "account" : held?.hold === true ? "hold" : undefined;
 }
 
 /**
@@ -389,7 +436,7 @@ export async function requestEmailCode(
     const again = await limitReached(tx, accountId, now);
     if (again !== undefined) throw new EmailVerificationError(again);
     await lockAddress(tx, keys, address);
-    const held = await heldElsewhere(tx, keys, accountId, address);
+    const held = await addressHeld(tx, keys, accountId, address, now);
     const capped = await addressCapped(tx, keys, address, now);
     const row = {
       addressBox: seal(keys, accountId, address),
@@ -397,7 +444,8 @@ export async function requestEmailCode(
       codeKey: keys.hash.current.id,
       // A held address gets no code: a random hash, which no answer
       // matches, so the requester can't tell (T-11).
-      codeHash: held ? randomBytes(32) : codeHash(keys.hash.current.key, accountId, code),
+      codeHash:
+        held !== undefined ? randomBytes(32) : codeHash(keys.hash.current.key, accountId, code),
       tries: 0,
       expiresAt: new Date(now.getTime() + EMAIL_CODE_SECONDS * 1000),
     };
@@ -410,7 +458,9 @@ export async function requestEmailCode(
     await tx
       .insert(accountEmailRecipients)
       .values({ addressHash: hashUnder(keys.hash.current.key, address), sentAt: hourOf(now) });
-    return held ? { kind: "email-held", to: address } : { kind: "email-code", to: address, code };
+    if (held === "account") return { kind: "email-held", to: address };
+    if (held === "hold") return { kind: "email-on-hold", to: address };
+    return { kind: "email-code", to: address, code };
   });
   if (message !== undefined && (await sender.send(message)) !== "sent")
     throw new EmailVerificationError("send-unavailable");
@@ -428,7 +478,9 @@ type Verdict =
  * account's verified one (replacing any earlier one) and spending the code.
  * A wrong answer costs a try, and the last try the code; an answer in any
  * other shape than 8 digits is a wrong one. `address-taken` spends the code
- * too: the address can't be verified until the other account lets it go.
+ * too: the address can't be verified until the other account lets it go and
+ * its hold ends. An earlier address of the account's is held for
+ * `EMAIL_HOLD_DAYS`.
  */
 export async function verifyEmailCode(
   client: Sql,
@@ -474,8 +526,19 @@ export async function verifyEmailCode(
     await spend();
     const address = unseal(keys, accountId, waiting.addressBox, waiting.boxKey);
     await lockAddress(tx, keys, address);
-    if (await heldElsewhere(tx, keys, accountId, address))
+    if ((await addressHeld(tx, keys, accountId, address, now)) !== undefined)
       return { ok: false, code: "address-taken" };
+    // Read under the account's lock, which a rotation takes before rewriting
+    // the row, so its hash and key are the ones stored.
+    const [mine] = await tx
+      .select({ addressHash: accountEmails.addressHash, hashKey: accountEmails.hashKey })
+      .from(accountEmails)
+      .where(eq(accountEmails.userId, accountId));
+    const hashes = hashesOf(keys, address);
+    if (mine !== undefined && !hashes.some((h) => Buffer.from(h).equals(mine.addressHash)))
+      await tx
+        .insert(accountEmailHolds)
+        .values({ addressHash: mine.addressHash, hashKey: mine.hashKey, freedOn: dayOf(now) });
     const row = {
       addressHash: hashUnder(keys.hash.current.key, address),
       hashKey: keys.hash.current.id,
@@ -511,14 +574,20 @@ export async function readAccountEmail(
 }
 
 /**
- * Deletes codes that expired before `now`, and sends and recipients older
- * than the daily window, returning how many of each. A scheduled job (P2-4) runs it, so an
- * abandoned code's ciphertext doesn't outlive its 15 minutes by much.
+ * Deletes codes that expired before `now`, sends and recipients older than
+ * the daily window, and holds that have ended, returning how many of each. A
+ * scheduled job (P2-4) runs it, so an abandoned code's ciphertext doesn't
+ * outlive its 15 minutes by much.
  */
 export async function pruneAccountEmails(
   client: Sql,
   now: Date,
-): Promise<{ readonly codes: number; readonly sends: number; readonly recipients: number }> {
+): Promise<{
+  readonly codes: number;
+  readonly sends: number;
+  readonly recipients: number;
+  readonly holds: number;
+}> {
   const db = drizzle({ client });
   const codes = await db
     .delete(accountEmailCodes)
@@ -532,7 +601,16 @@ export async function pruneAccountEmails(
     .delete(accountEmailRecipients)
     .where(lt(accountEmailRecipients.sentAt, new Date(hourOf(now).getTime() - DAY)))
     .returning({ id: accountEmailRecipients.id });
-  return { codes: codes.length, sends: sends.length, recipients: recipients.length };
+  const holds = await db
+    .delete(accountEmailHolds)
+    .where(lte(accountEmailHolds.freedOn, holdEnded(now)))
+    .returning({ id: accountEmailHolds.id });
+  return {
+    codes: codes.length,
+    sends: sends.length,
+    recipients: recipients.length,
+    holds: holds.length,
+  };
 }
 
 /** Rows a rotation reads at a time. */
@@ -547,8 +625,9 @@ export interface EmailKeyRotation {
   readonly rotated: number;
   /**
    * Rows under a key the keyrings don't hold, left as they are: the keyring
-   * dropped a key still in use, or another instance's holds one this one
-   * lacks. This instance can't match or open them.
+   * dropped a key still in use (a hold's included, which nothing rewrites),
+   * or another instance's holds one this one lacks. This instance can't match
+   * or open them.
    */
   readonly unknownKeys: number;
   /**
@@ -603,7 +682,8 @@ export async function checkEmailKeys(client: Sql, keys: EmailKeys): Promise<numb
  *
  * A waiting code's hash stays under the hash key it was made with, since the
  * code itself isn't kept; it lasts `EMAIL_CODE_SECONDS`. The per-address
- * counts aren't keyed and can't be read back; they last a day.
+ * counts aren't keyed and can't be read back; they last a day. A hold's hash
+ * stays too, since its address isn't kept; it lasts `EMAIL_HOLD_DAYS`.
  *
  * Idempotent and safe beside requests, answers and other instances: a
  * verified address is rewritten under its address's locks, which requests
@@ -751,6 +831,7 @@ export async function rotateEmailKeys(client: Sql, keys: EmailKeys): Promise<Ema
         notInArray(accountEmailCodes.boxKey, ids(keys.box)),
         notInArray(accountEmailCodes.codeKey, ids(keys.hash)),
       ),
-    ));
+    )) +
+    (await db.$count(accountEmailHolds, notInArray(accountEmailHolds.hashKey, ids(keys.hash))));
   return { rotated, unknownKeys, skipped, mismatchedKeys };
 }

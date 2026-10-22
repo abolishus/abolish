@@ -2,11 +2,12 @@ import { bigint, pgTable, primaryKey, smallint, text, timestamp } from "drizzle-
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0025_account_emails.sql and 0031; a test checks
-// they agree. All five are in the account class: an account's address, kept
-// only as ciphertext and a keyed hash, the code waiting to verify one, when
-// each account was sent codes, when each address hash was sent messages, and
-// each e-mail key's check value (ADR 0038; T-10).
+// Drizzle view of migrations/0025_account_emails.sql, 0031 and 0037; a test
+// checks they agree. All six are in the account class: an account's address,
+// kept only as ciphertext and a keyed hash, the code waiting to verify one,
+// when each account was sent codes, when each address hash was sent messages,
+// each e-mail key's check value, and the hashes of addresses let go less than
+// 90 days ago (ADR 0038; T-10).
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -45,6 +46,13 @@ export const accountEmailRecipients = pgTable("account_email_recipients", {
   id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
   addressHash: bytea("address_hash").notNull(),
   sentAt: at("sent_at").notNull(),
+});
+
+export const accountEmailHolds = pgTable("account_email_holds", {
+  id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+  addressHash: bytea("address_hash").notNull(),
+  hashKey: text("hash_key").notNull(),
+  freedOn: at("freed_on").notNull(),
 });
 
 export const accountEmailKeyChecks = pgTable(

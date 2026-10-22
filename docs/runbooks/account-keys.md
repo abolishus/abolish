@@ -69,20 +69,30 @@ Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) 
 
    ```sql
    SELECT 'account_emails' AS t, hash_key, box_key, count(*) FROM account_emails GROUP BY hash_key, box_key
-   UNION ALL SELECT 'account_email_codes', code_key, box_key, count(*) FROM account_email_codes GROUP BY code_key, box_key;
+   UNION ALL SELECT 'account_email_codes', code_key, box_key, count(*) FROM account_email_codes GROUP BY code_key, box_key
+   UNION ALL SELECT 'account_email_holds', hash_key, NULL, count(*) FROM account_email_holds GROUP BY hash_key;
    ```
 
-   Every verified address should show the current keys. A waiting code keeps its code's hash under the hash key it was made with (the code itself isn't kept) and is gone 15 minutes later, after the next prune. To find the rows still under older keys, by account:
+   Every verified address should show the current keys. A waiting code keeps its code's hash under the hash key it was made with (the code itself isn't kept) and is gone 15 minutes later, after the next prune. A hold on an address an account let go keeps its hash under the key it was made with for its 90 days, since nothing keeps the address to re-hash it. To find the rows still under older keys, by account:
 
    ```sql
    SELECT 'account_emails' AS t, user_id FROM account_emails WHERE hash_key <> '<current hash ID>' OR box_key <> '<current box ID>'
    UNION ALL SELECT 'account_email_codes', user_id FROM account_email_codes WHERE box_key <> '<current box ID>';
    ```
 
-3. **Retire the old key** once nothing shows it, and not before 25 hours after the second deploy has fully rolled out: the per-address send counts are hashed but don't record their key, so they can't be rewritten; they count under the old hash key until they age out (timed to the hour, kept a day), and a key dropped sooner lets an address be sent a few more messages that day. Remove it from the keyring and deploy. An instance that still meets a row under a removed key fails to open or match it: put the key back.
-4. **Watch the log**: `EmailKeyRotationFailed` (the next tick tries again), `EmailKeyMismatch` (as `PhoneHashKeyMismatch`), `EmailKeyMissing` (a row under a key this instance lacks: a key retired too early, or an old configuration) and `EmailKeyRotationSkipped` (a verified address or waiting code whose box didn't open under its key, or an address two accounts hold, left as it is: find it with the query in step 2, and settle it by deleting the unrotated `account_emails` or `account_email_codes` row; that account verifies its address again).
+3. **Retire the old key** once nothing shows it. An old box key goes once no verified address or waiting code is under it. An old hash key goes no sooner than 91 days after the second deploy has fully rolled out, once its holds have ended and the next prune has deleted them: a hold can't be rewritten, so a hash key dropped sooner frees every address held under it at once, and each could verify another account (T-01). The per-address send counts are hashed under it too and don't record their key; they age out within the day. Remove it from the keyring and deploy. An instance that still meets a row under a removed key fails to open or match it: put the key back.
+4. **Watch the log**: `EmailKeyRotationFailed` (the next tick tries again), `EmailKeyMismatch` (as `PhoneHashKeyMismatch`), `EmailKeyMissing` (a row under a key this instance lacks: a key retired too early, or an old configuration) and `EmailKeyRotationSkipped` (a verified address or waiting code whose box didn't open under its key, or an address two accounts hold, left as it is: find it with the query in step 2, and settle it by deleting the unrotated `account_emails` or `account_email_codes` row without holding the address, so that account can verify it again; deleting an `account_emails` row plainly would hold the address for 90 days through the table's trigger:
 
-After an exposure, the same limits as the phone hash apply: older backups, dead row versions until `VACUUM FULL` on `account_emails`, `account_email_codes` and `account_email_recipients`, and the provider's recovery log. An exposed box key opens every address sealed under it in those; an exposed hash key lets a guessed address be confirmed.
+   ```sql
+   BEGIN;
+   SET LOCAL abolish.email_unheld = 'on';
+   DELETE FROM account_emails WHERE user_id = '<account>';
+   COMMIT;
+   ```
+
+   For an address two accounts hold, delete the unrotated row the same way; the other account keeps the address. Either way the address is then free to any account that verifies it first, not only the one settled).
+
+After an exposure, the same limits as the phone hash apply: older backups, dead row versions until `VACUUM FULL` on `account_emails`, `account_email_codes` and `account_email_recipients`, and the provider's recovery log. An exposed box key opens every address sealed under it in those; an exposed hash key lets a guessed address be confirmed, and, in the live `account_email_holds` too, for up to 90 days after the rotation, since a hold stays under its key until it ends.
 
 ## Verify service settings
 

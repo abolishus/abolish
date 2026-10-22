@@ -19,6 +19,7 @@ import {
   readIdentityBackup,
   readInclusionProof,
   readBoardedEntry,
+  readEntryAt,
   readModerationLog,
   report,
   SearchQueryError,
@@ -33,7 +34,7 @@ import {
 } from "@abolishus/core";
 import type { PeriodClock } from "@abolishus/crypto";
 import { implement, ORPCError } from "@orpc/server";
-import type { BallotQueue } from "@abolishus/worker/ballot-queue";
+import type { BallotQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
 import type { Sql } from "postgres";
 
 // The contract's procedures (packages/api-contract). Each handler parses its
@@ -41,7 +42,7 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, the worker's ballot queue, Tier 0
+// The context holds the database, the worker's ballot and receipt queues, Tier 0
 // registration, the Tier 1 relay, the clock and the boards' anchoring clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
@@ -49,10 +50,15 @@ import type { Sql } from "postgres";
 /** What `ballots.submit` needs of the worker's queue. */
 export type BallotSubmitter = Pick<BallotQueue, "submit">;
 
+/** What `receipts.submit` needs of the worker's queue. */
+export type ReceiptSubmitter = Pick<ReceiptQueue, "submit">;
+
 export interface Context {
   readonly sql: Sql;
   /** Absent when this server has no ballot queue: it then boards no ballot. */
   readonly ballots?: BallotSubmitter | undefined;
+  /** Absent when this server has no receipt queue: it then boards no share receipt. */
+  readonly receipts?: ReceiptSubmitter | undefined;
   /** UNIX time in seconds. */
   readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
@@ -217,6 +223,39 @@ export const router = os.router({
           throw errors.BALLOT_REJECTED({ data: { code: outcome.admission ?? "decode" } });
         case "unavailable":
           throw errors.BALLOTS_UNAVAILABLE();
+      }
+    }),
+  },
+  receipts: {
+    // The board path for share receipts (docs/spec/delivery.md, Boarding):
+    // judged in the worker by core's submitReceipt, which calls the
+    // verifier's checks, never here (T-17, T-52). A server without the queue
+    // boards none; the receipt still has the contract path (T-25).
+    submit: os.receipts.submit.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      if (context.receipts === undefined) throw errors.ELECTION_NOT_OPEN();
+      const record = fromHex(input.record);
+      const outcome = await context.receipts.submit(id, record);
+      if (outcome.ok) {
+        // Read from the board, never taken on the worker's word: the entry
+        // carries the bytes sent, or, for an earlier receipt, whatever the
+        // board holds there, which the sender checks against its ballot.
+        const index = BigInt(outcome.index);
+        const boarded = outcome.earlier
+          ? await readEntryAt(context.sql, id, index)
+          : await readBoardedEntry(context.sql, id, index, record);
+        if (boarded === undefined) throw new Error("the board doesn't carry the boarded receipt");
+        return { entry: toHex(boarded.entry), link: toHex(boarded.link), earlier: outcome.earlier };
+      }
+      switch (outcome.code) {
+        case "unknown-election":
+          throw errors.ELECTION_NOT_FOUND();
+        case "not-open":
+          throw errors.ELECTION_NOT_OPEN();
+        case "rejected":
+          throw errors.RECEIPT_REJECTED({ data: { code: outcome.rejection ?? "decode" } });
+        case "unavailable":
+          throw errors.RECEIPTS_UNAVAILABLE();
       }
     }),
   },

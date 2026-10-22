@@ -15,6 +15,8 @@ import {
   MAX_PAGE,
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
+  MAX_SHARE_RECEIPT,
+  MAX_SHARE_RECEIPT_ENTRY,
   PageSize,
   RegionCode,
   TurnstileResponse,
@@ -256,6 +258,43 @@ const submitBallot = oc
   })
   .input(z.strictObject({ electionId: Hash32, ballot: hexBytes(MAX_BOARD_PAYLOAD) }))
   .output(z.strictObject({ entry: hexBytes(MAX_BOARD_ENTRY), link: Hash32 }));
+
+const submitReceipt = oc
+  .route({
+    method: "POST",
+    path: "/receipts",
+    successStatus: 201,
+    summary: "Board a trustee's share receipt",
+    description:
+      "Appends one share receipt record (0x000c) to the board by the board path's rules (docs/spec/delivery.md, Boarding): it names this election's definition and a registered seat, the ballot whose hash it names is already on the board, it is in time (no later than the delivery segment `s_D`, else `ELECTION_NOT_OPEN`), and its signature attributes it to the seat against that ballot. A seat's node and the voter's client both send it, and neither needs an account or session (T-10). Returns the board entry that carries it and the chain link after it, as for a ballot. The same bytes again return their entry. When the board path already carries a passing receipt for that seat of that ballot in other bytes, nothing is written and `earlier` is true: the entry returned carries that earlier receipt, which the caller checks against its ballot as it would its own, and keeps instead (Client rules 3). A receipt this server refuses still has the contract path (T-25).",
+    tags: ["receipts"],
+  })
+  .errors({
+    ...electionNotFound,
+    ELECTION_NOT_OPEN: {
+      status: 409,
+      message: "The election is not accepting share receipts.",
+    },
+    RECEIPT_REJECTED: {
+      status: 422,
+      message: "The share receipt failed decoding or a boarding rule.",
+      data: z.strictObject({ code: ErrorCode }),
+    },
+    RATE_LIMITED: { status: 429, message: "Too many requests; retry later." },
+    // The receipt may still be boarded: the same bytes again return its entry.
+    RECEIPTS_UNAVAILABLE: {
+      status: 503,
+      message: "The share receipt couldn't be judged in time; submit the same bytes again.",
+    },
+  })
+  .input(z.strictObject({ electionId: Hash32, record: hexBytes(MAX_SHARE_RECEIPT) }))
+  .output(
+    z.strictObject({
+      entry: hexBytes(MAX_SHARE_RECEIPT_ENTRY),
+      link: Hash32,
+      earlier: z.boolean(),
+    }),
+  );
 
 // Moderation (docs/moderation-policy.md; T-68). The log is public, so anyone
 // can see what we did to a poll's display text and why; it never names the
@@ -503,6 +542,7 @@ export const contract = {
   elections: { list: listElections, getDefinition, getDisplayText, resolveCode, getCode },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
+  receipts: { submit: submitReceipt },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
   registrations: { tier0: registerTier0, tier1: relayTier1 },

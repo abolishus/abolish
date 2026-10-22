@@ -1,5 +1,5 @@
 import { createTurnstile, Tier0Registrations, Tier1Relay } from "@abolishus/core";
-import { BallotQueue } from "@abolishus/worker/ballot-queue";
+import { BallotQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import * as z from "zod";
@@ -15,8 +15,9 @@ const Env = z.strictObject({
   API_HOST: z.string().min(1).default("127.0.0.1"),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
   // The Redis (or Dragonfly) the worker reads: ballots go to its
-  // `{ballot-submit}` queue, judged by the worker in batches (T-52). Without
-  // it the server boards no ballot.
+  // `{ballot-submit}` queue, judged by the worker in batches, and share
+  // receipts to its `{receipt-submit}` queue (T-52). Without it the server
+  // boards no ballot and no receipt.
   REDIS_URL: z.url({ protocol: /^rediss?$/ }).optional(),
   // Tier 0 registration (docs/spec/registration.md), all three or none, and
   // REDIS_URL, which holds its queue: the published group of region 0 as the
@@ -75,6 +76,7 @@ const env = Env.parse({
 
 let redis: Redis | undefined;
 let ballots: BallotQueue | undefined;
+let receipts: ReceiptQueue | undefined;
 if (env.REDIS_URL !== undefined) {
   // Fail fast while Redis is down or stalled, so a request answers
   // unavailable within a second rather than hold one of the server's slots
@@ -88,6 +90,7 @@ if (env.REDIS_URL !== undefined) {
   // can quote a command's arguments, a commitment or a ballot among them (T-11).
   redis.on("error", () => process.stdout.write(`${JSON.stringify({ error: "redis" })}\n`));
   ballots = await BallotQueue.open({ connection: redis });
+  receipts = await ReceiptQueue.open({ connection: redis });
 }
 
 const tier0Env = [env.API_TIER0_GROUP, env.TURNSTILE_SECRET_KEY, env.API_CHALLENGE_HOST];
@@ -160,6 +163,7 @@ const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
 const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
+  ...(receipts !== undefined && { receipts }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
   ...(boardClock !== undefined && { boardClock }),
@@ -172,5 +176,11 @@ server.listen(env.API_PORT, env.API_HOST);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, () => {
-    server.close(() => void Promise.all([sql.end(), ballots?.close().then(() => redis?.quit())]));
+    server.close(
+      () =>
+        void Promise.all([
+          sql.end(),
+          Promise.all([ballots?.close(), receipts?.close()]).then(() => redis?.quit()),
+        ]),
+    );
   });

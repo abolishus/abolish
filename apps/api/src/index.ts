@@ -1,4 +1,4 @@
-export { type BallotSubmitter, type Context, router } from "./router.ts";
+export { type BallotSubmitter, type Context, type ReceiptSubmitter, router } from "./router.ts";
 export {
   type ApiOptions,
   createApiServer,

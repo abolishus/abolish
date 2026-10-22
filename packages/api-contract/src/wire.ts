@@ -28,6 +28,17 @@ const BOARD_ENTRY_OVERHEAD = 3 + 32 + 8 + 4 + 4;
 /** The largest encoded board entry the API carries. */
 export const MAX_BOARD_ENTRY = MAX_BOARD_PAYLOAD + BOARD_ENTRY_OVERHEAD;
 
+/**
+ * Bound on a share receipt record (`0x000c`, docs/spec/delivery.md) as the
+ * receipt route carries it: every version is a fixed size of under 200
+ * bytes, so this only keeps a request small before the verifier decodes it
+ * strictly (T-52). A test ties it to each version's size.
+ */
+export const MAX_SHARE_RECEIPT = 256;
+
+/** The largest board entry carrying a share receipt. */
+export const MAX_SHARE_RECEIPT_ENTRY = MAX_SHARE_RECEIPT + BOARD_ENTRY_OVERHEAD;
+
 /** Most entries one page of the board returns. */
 export const MAX_PAGE = 256;
 

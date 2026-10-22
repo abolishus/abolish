@@ -248,6 +248,7 @@ test("every key the worker uses is under its queue's hash tag", async () => {
           ...TIER0_QUEUES,
           ...TIER1_QUEUES,
           "ballotSubmit",
+          "receiptSubmit",
           "registrySync",
           "pollCreate",
           "pollRoot",
@@ -308,6 +309,9 @@ test("a handler's own error message is neither logged nor kept, the events strea
       pollOpen: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
+        throw new Error(`params: ${MARKER}`);
+      },
+      receiptSubmit: async () => {
         throw new Error(`params: ${MARKER}`);
       },
     },

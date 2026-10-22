@@ -11,8 +11,8 @@ import * as z from "zod";
 //   `tests/no-join.test.ts` checks every schema here.
 // - Job data is a strict object, parsed before it is queued and again before
 //   it is handled, so no field the schema doesn't name reaches Redis or a
-//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`,
-//   never derived from the data.
+//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`
+//   and `{receipt-submit}`, never derived from the data.
 //
 // Every key a queue uses is `abolish:{<queue>}:…`, so the braces are a hash
 // tag: Dragonfly (and Redis Cluster) keep each queue's keys in one slot,
@@ -20,6 +20,12 @@ import * as z from "zod";
 // separate threads or shards.
 
 export const KEY_PREFIX = "abolish";
+
+/**
+ * Bound on a share receipt record in a `{receipt-submit}` job: the API
+ * contract's `MAX_SHARE_RECEIPT`, which a test of apps/api ties to this.
+ */
+export const MAX_SHARE_RECEIPT = 256;
 
 export type Side = "board" | "account" | "operational";
 
@@ -157,6 +163,26 @@ export const QUEUES = {
         .string()
         .max(2 * MAX_BOARD_PAYLOAD)
         // As the contract's: an empty ballot is the verifier's to refuse (decode).
+        .regex(/^(?:[0-9a-f]{2})*$/),
+    }),
+  },
+  /**
+   * Share receipts the API received, to judge and board by the board path's
+   * rules (core's BallotAdmissions.submitReceipt; docs/spec/delivery.md,
+   * Boarding; T-17, T-52). Queued by the API's `receipts.submit` through
+   * `ReceiptQueue` and run beside `{ballot-submit}`, with the same
+   * admissions. A job carries the election and the receipt record's bytes,
+   * never who sent them (T-10), and returns only the outcome
+   * (`RECEIPT_OUTCOME`).
+   */
+  receiptSubmit: {
+    name: "{receipt-submit}",
+    side: "board",
+    data: z.strictObject({
+      electionId: z.string().regex(/^[0-9a-f]{64}$/),
+      record: z
+        .string()
+        .max(2 * MAX_SHARE_RECEIPT)
         .regex(/^(?:[0-9a-f]{2})*$/),
     }),
   },

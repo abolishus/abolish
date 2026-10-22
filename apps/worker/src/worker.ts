@@ -22,7 +22,7 @@ import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
 import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
-import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
+import { BALLOT_BATCH, BallotBatches, ReceiptSubmissions } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES, TIER1_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
@@ -69,8 +69,9 @@ export interface WorkerOptions {
     readonly boundaryEveryMs?: number;
   };
   /**
-   * Ballot admission for the API's `{ballot-submit}` queue (T-52); without
-   * it, nothing takes that queue's jobs and the API answers each ballot
+   * Ballot admission for the API's `{ballot-submit}` queue (T-52), and its
+   * admissions for `{receipt-submit}`'s share receipts; without it, nothing
+   * takes those queues' jobs and the API answers each ballot or receipt
    * unavailable once it times out.
    */
   readonly ballots?: {
@@ -141,6 +142,13 @@ export interface WorkerOptions {
     readonly everyMs?: number;
   };
 }
+
+/**
+ * Share receipts judged at once. Each holds a database connection for a
+ * few reads and, if it passes, the board's lock for its append, so this
+ * bounds what a flood of receipts takes from the ballots beside it (T-52).
+ */
+export const RECEIPT_CONCURRENCY = 8;
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
@@ -248,6 +256,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const handlers = options.handlers ?? HANDLERS;
   const now = options.now ?? (() => new Date());
   const batch = options.ballots?.batch ?? BALLOT_BATCH;
+  const unixNow = () => BigInt(Math.floor(now().getTime() / 1000));
   const ctx = {
     sql,
     log,
@@ -276,10 +285,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           ballots: new BallotBatches({
             sql,
             admissions: options.ballots.admissions,
-            now: () => BigInt(Math.floor(now().getTime() / 1000)),
+            now: unixNow,
             batch,
             log,
             ...(options.ballots.waitMs === undefined ? {} : { waitMs: options.ballots.waitMs }),
+          }),
+          receipts: new ReceiptSubmissions({
+            sql,
+            admissions: options.ballots.admissions,
+            now: unixNow,
           }),
         }),
   };
@@ -288,7 +302,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
       ? key === "pollCreate"
       : key === "pollCreate"
         ? false
-        : key === "ballotSubmit"
+        : key === "ballotSubmit" || key === "receiptSubmit"
           ? options.ballots !== undefined
           : key === "registrySync"
             ? options.registry !== undefined
@@ -313,7 +327,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         if (!data.success || job.name !== key) throw new JobError("invalid-job-data");
         // By the system clock, as the API stamped it: a ballot whose API gave
         // up on it is never judged late (T-10, T-25).
-        if (key === "ballotSubmit" && Date.now() - job.timestamp > BALLOT_MAX_AGE_MS)
+        if (
+          (key === "ballotSubmit" || key === "receiptSubmit") &&
+          Date.now() - job.timestamp > BALLOT_MAX_AGE_MS
+        )
           throw new JobError("stale-job");
         try {
           // The data was parsed by this key's schema, so it is this key's.
@@ -334,8 +351,11 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         connection,
         prefix,
         autorun: false,
-        // The ballots handled at once are what a batch gathers (T-52).
-        concurrency: key === "ballotSubmit" ? batch : 1,
+        // The ballots handled at once are what a batch gathers (T-52); a
+        // receipt costs one signature check, and these bound how many share
+        // the database at once.
+        concurrency:
+          key === "ballotSubmit" ? batch : key === "receiptSubmit" ? RECEIPT_CONCURRENCY : 1,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 0 },
       },

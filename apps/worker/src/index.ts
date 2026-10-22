@@ -34,12 +34,17 @@ export {
   BallotQueue,
   type BallotQueueOptions,
   type BallotUnavailable,
+  RECEIPT_OUTCOME,
+  type ReceiptOutcome,
+  ReceiptQueue,
+  type ReceiptUnavailable,
 } from "./ballot-queue.ts";
 export {
   BALLOT_BATCH,
   BALLOT_BATCH_WAIT_MS,
   type BallotBatchOptions,
   BallotBatches,
+  ReceiptSubmissions,
 } from "./ballots.ts";
 export {
   checkCreationAnchorsDeployment,
@@ -104,6 +109,7 @@ export {
   JOB_OPTIONS,
   type JobData,
   KEY_PREFIX,
+  MAX_SHARE_RECEIPT,
   QUEUES,
   type QueueKey,
   type QueueSpec,
@@ -159,6 +165,7 @@ export {
   POLL_ROOT_EVERY_MS,
   POLL_STUB_EVERY_MS,
   PRUNE_EVERY_MS,
+  RECEIPT_CONCURRENCY,
   REGISTRY_SYNC_EVERY_MS,
   type RunningWorker,
   startWorker,

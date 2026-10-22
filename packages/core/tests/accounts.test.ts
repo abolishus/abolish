@@ -196,6 +196,8 @@ describe("schema", () => {
       // Append-only: a submission counts for its 24 hours (poll-failures.test.ts).
       ["account_poll_submissions", "INSERT,SELECT"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
+      // Plus UPDATE of some columns (profile-moderation.test.ts).
+      ["account_profile_appeals", "INSERT,SELECT"],
       // Never deleted: the day outlives the profile (profiles.test.ts).
       ["account_profile_namings", "INSERT,SELECT,UPDATE"],
       // Made or taken back, never changed in place (profiles.test.ts).

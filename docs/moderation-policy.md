@@ -1,6 +1,6 @@
 # Moderation policy
 
-How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`, `listPolls`, `report`, `readReportQueue`, `reviewReports`; P2-10), the public API (`GET /elections`, the listing, which leaves out delisted and hidden polls; `GET /moderation/log`, `GET /moderation/status`, `POST /moderation/reports`) and the operator's commands in `apps/admin-cli` (`moderation queue`, `review`, `decide`, `status`, `log`).
+How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam), T-75 (creator profile misuse). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`, `listPolls`, `report`, `readReportQueue`, `reviewReports`; P2-10), the public API (`GET /elections`, the listing, which leaves out delisted and hidden polls; `GET /moderation/log`, `GET /moderation/status`, `POST /moderation/reports`) and the operator's commands in `apps/admin-cli` (`moderation queue`, `review`, `decide`, `status`, `log`).
 
 Status: written by the agent under rule A (P2-10 part 1); Open polls narrowed by the owner's decision of 2026-10-12 (P2-10 part 5). The parts that are legal matters are the owner's and are marked **Owner** below; until the owner answers them, they say what we do in the meantime.
 
@@ -77,6 +77,14 @@ The poll's creator can appeal any decision once, from their account. A different
 
 In the tooling (`packages/core` `src/appeals.ts`, the `apps/admin-cli` commands `appeals` and `appeal-decide`): `fileAppeal`, `readAppealQueue` and `decideAppeal`. A creator files one from their account on the website, where the account lives, never through the API ([[T-10]]): `POST /drafts/appeal` on `apps/web`'s origin appeals their poll's newest decision, and `POST /drafts/moderation` shows them the poll's state, its newest decision, whether it can be appealed and their appeals with each outcome (`readPollModeration`), never a moderator. The account page shows this under each of the author's polls, with the appeal's button while the newest decision can be appealed.
 
+## Profiles
+
+A creator's profile ([[0040-creator-profiles]]) is moderated under the same grounds (Reasons), by the same moderators, in the same log, with appeals as above. The one removal is `hide`: our pages show the reason code instead of the profile's name and polls, and none of its polls says "Asked by" while it stands. A `restore` brings it back. A hide leaves the author's polls listed: their content is moderated as polls, separately. There is no `delist` for a profile, which is reached only through its polls, and no open-poll rule, since hiding a profile stops nobody voting. A rename doesn't lift a hide.
+
+The log names a profile by its public handle where it names a poll by its election ID, never its account. Profile decisions take their numbers from the poll log's own sequence under the same lock, so the two read as one log in commit order. Anyone can report a profile under a removal ground, counted per handle and ground as for polls; its author appeals a hide from their account, and a moderator whose account holds the profile neither decides on it nor reviews its appeal.
+
+In the tooling (`packages/core` `src/profile-moderation.ts`): `moderateProfile`, `profileModerationStatus`, `readProfileModerationLog`, `reportProfile`, `readProfileReportQueue`, `reviewProfileReports`, `fileProfileAppeal`, `readProfileModeration`, `readProfileAppealQueue` and `decideProfileAppeal`. The API's log and reports, the operator's commands and the author's appeal route come with [[P2-27]] part 1c-2, and no profile is shown anywhere before then.
+
 ## Moderators
 
 Moderators act through the tooling only, under handles. They never see or handle ballots, voting identities or anything from the ballot path, and the tooling gives them nothing from it. A moderator who created, or has a stake in, a poll doesn't decide on it.
@@ -107,5 +115,6 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 - A moderator can keep closing appeals as superseded by switching a closed poll between delisted and hidden. Each switch is a decision in the public log, so the pattern is visible, but nothing stops it.
 - Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
 - A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
+- A hidden profile's author can delete it and make another, under a new handle and at most one name a day, which sheds the hide; the new profile links none of the old one's polls until its author chooses each again. A decision judges the name it saw: a rename after a restore isn't looked at again unless someone reports it.
 
 See [[THREAT_MODEL]], [[display-text]], [[0005-permanent-archive]].

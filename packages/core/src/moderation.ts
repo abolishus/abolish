@@ -73,10 +73,14 @@ export type ModerationErrorCode =
   | "invalid"
   /** No definition is stored for the election, so there is no poll to moderate. */
   | "unknown-election"
+  /** No profile has the handle now: never made, or deleted (src/profile-moderation.ts). */
+  | "unknown-profile"
   /** The handle isn't a moderator's: never added, or retired (src/appeals.ts). */
   | "unknown-moderator"
   /** The moderator's account created the poll (docs/moderation-policy.md, Moderators). */
   | "own-poll"
+  /** The moderator's account has the profile (src/profile-moderation.ts). */
+  | "own-profile"
   /** A restore citing `appeal-upheld` outside an appeal's review (`decideAppeal`). */
   | "appeal-only"
   /** Hiding a poll that hasn't closed, for a reason outside `OPEN_POLL_HIDE_REASONS`. */

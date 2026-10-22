@@ -24,7 +24,12 @@ import {
   accountEmailSends,
 } from "./emails.ts";
 import { identityBackups } from "./identity-backups.ts";
-import { moderationActions, moderationReports } from "./moderation.ts";
+import {
+  moderationActions,
+  moderationReports,
+  profileModerationActions,
+  profileReports,
+} from "./moderation.ts";
 import {
   accountPhoneCodes,
   accountPhoneHolds,
@@ -43,6 +48,7 @@ import {
   pollCreationTxs,
 } from "./polls.ts";
 import {
+  accountProfileAppeals,
   accountProfileNamings,
   accountProfilePolls,
   accountProfiles,
@@ -69,6 +75,7 @@ export {
   accountPolls,
   accountPollSubmissions,
   accountPasskeys,
+  accountProfileAppeals,
   accountProfileNamings,
   accountProfilePolls,
   accountProfiles,
@@ -98,6 +105,8 @@ export {
   moderationReports,
   pollCreationTxs,
   profileHandles,
+  profileModerationActions,
+  profileReports,
   tier0TokenIssuances,
 };
 
@@ -148,6 +157,7 @@ export const TABLE_CLASSES = {
     "account_phones",
     "account_poll_submissions",
     "account_polls",
+    "account_profile_appeals",
     "account_profile_namings",
     "account_profile_polls",
     "account_profiles",
@@ -170,6 +180,8 @@ export const TABLE_CLASSES = {
     "moderation_actions",
     "moderation_reports",
     "poll_creation_txs",
+    "profile_moderation_actions",
+    "profile_reports",
     "schema_migrations",
     "tier0_token_issuances",
   ],

@@ -66,7 +66,9 @@ export type AppealErrorCode =
   /** The reviewer made the appealed decision. */
   | "same-moderator"
   /** The reviewer's account created the poll. */
-  | "own-poll";
+  | "own-poll"
+  /** The reviewer's account has the profile (src/profile-moderation.ts). */
+  | "own-profile";
 
 export class AppealError extends Error {
   override readonly name = "AppealError";

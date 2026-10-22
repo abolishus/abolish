@@ -27,6 +27,16 @@ import { ds } from "./domain-separation.ts";
 import { element, H } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { type DecodedRecord, RECORD_TYPES, RecordSchema, recordType, UNPINNED } from "./record.ts";
+// The origin and host grammar is release.md's (Well-formedness).
+import {
+  ascending,
+  distinct,
+  isHost,
+  isOrigin,
+  isZero,
+  ORIGIN_PREFIX,
+  sameBytes,
+} from "./release.ts";
 import { PanelError, panelId } from "./trustee.ts";
 
 /** The record's bounds (docs/spec/deployment.md, Record and Record (version 2)). */
@@ -439,48 +449,9 @@ export function deploymentAcrossRule(
   return undefined;
 }
 
-// [[release]]'s origin grammar (Well-formedness): "https://" host [":"
-// port], a lower-case A-label host of at least two labels whose last label
-// starts with a letter (so no IPv4 address is one), and a port from 1 to
-// 65535 other than 443, with no leading zero. Each origin has one listing,
-// equal as bytes to what a browser reports (T-31, T-43).
-const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const PORT = /^[1-9][0-9]{0,4}$/;
-const PREFIX = "https://";
-
-function ascii(b: Uint8Array): string | undefined {
-  return b.every((x) => x < 0x80) ? String.fromCharCode(...b) : undefined;
-}
-
-function isHostText(host: string): boolean {
-  if (host.length < 1 || host.length > 253) return false;
-  const labels = host.split(".");
-  if (labels.length < 2 || !labels.every((l) => LABEL.test(l))) return false;
-  const last = labels[labels.length - 1] as string;
-  return last[0] !== undefined && last[0] >= "a" && last[0] <= "z";
-}
-
-function isOrigin(b: Uint8Array): boolean {
-  const s = ascii(b);
-  if (s === undefined || !s.startsWith(PREFIX)) return false;
-  const rest = s.slice(PREFIX.length);
-  const colon = rest.indexOf(":");
-  if (colon >= 0) {
-    const port = rest.slice(colon + 1);
-    if (!PORT.test(port) || Number(port) > 65535 || port === "443") return false;
-  }
-  return isHostText(colon >= 0 ? rest.slice(0, colon) : rest);
-}
-
-// An RP ID: an origin's host, with nothing after it.
-function isHost(b: Uint8Array): boolean {
-  const s = ascii(b);
-  return s !== undefined && !s.includes(":") && isHostText(s);
-}
-
 // Only called on origins that passed `isOrigin`.
 function hostOf(origin: Uint8Array): Uint8Array {
-  const rest = origin.subarray(PREFIX.length);
+  const rest = origin.subarray(ORIGIN_PREFIX.length);
   const colon = rest.indexOf(0x3a);
   return colon < 0 ? rest : rest.subarray(0, colon);
 }
@@ -500,28 +471,4 @@ function isElement(b: Uint8Array): boolean {
     if (e instanceof DecodeError) return false;
     throw e;
   }
-}
-
-function isZero(b: Uint8Array): boolean {
-  return b.every((x) => x === 0);
-}
-
-function compareBytes(a: Uint8Array, b: Uint8Array): number {
-  for (let i = 0; i < a.length && i < b.length; i++) {
-    const d = (a[i] as number) - (b[i] as number);
-    if (d !== 0) return d;
-  }
-  return a.length - b.length;
-}
-
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && compareBytes(a, b) === 0;
-
-// Strictly ascending in byte order, so no entry appears twice.
-function ascending(xs: readonly Uint8Array[]): boolean {
-  return xs.every((x, i) => i === 0 || compareBytes(xs[i - 1] as Uint8Array, x) < 0);
-}
-
-function distinct(xs: readonly Uint8Array[]): boolean {
-  return xs.every((x, i) => !xs.slice(0, i).some((y) => sameBytes(x, y)));
 }

@@ -875,6 +875,24 @@ export {
   PANEL_KINDS,
 } from "./deployment.ts";
 export {
+  type DecodedReleaseRecord,
+  decodeReleaseRecord,
+  encodeReleaseRecord,
+  type ReleaseFailure,
+  type ReleaseFile,
+  type ReleaseHeader,
+  releaseHash,
+  RELEASE_LIMITS,
+  RELEASE_RECORD,
+  RELEASE_RULES,
+  RELEASE_SITE_RULES,
+  type ReleaseRecord,
+  releaseRecordRule,
+  type ReleaseSite,
+  type ReleaseSiteRule,
+  SITE_KINDS,
+} from "./release.ts";
+export {
   checkNullifierOutput,
   checkNullifierQuery,
   decodeNullifierOutput,

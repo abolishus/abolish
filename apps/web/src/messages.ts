@@ -292,6 +292,7 @@ const enUS = {
     "Try fewer words, or shorter ones: a question matches only when it holds every one.",
   streamSearchRefusedTitle: "That search can't be run",
   streamSearchRefused: "A search is one to {words} words, in at most {characters} characters.",
+  listedUnder: "Where it's listed",
   streamTagsNote:
     "Askers choose their poll's topic and place. They aren't part of the poll, and moderation can change them if they don't fit.",
   streamPlaceLabel: "Place",

@@ -13,32 +13,13 @@ import {
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   STREAM_SORTS,
+  streamHref,
   type StreamSort,
 } from "../stream.ts";
 import { ballotLink } from "../values.ts";
+import { ListedUnder } from "./listed-under.tsx";
 import { PageHeader } from "./page-parts.tsx";
 import { When } from "./when.tsx";
-
-/**
- * The stream's address for `sort` narrowed by `filter`, from just after
- * `after`. `new` is the default, so its first page is plain `/discover`.
- * Orders and topics are from fixed lists and `after` is canonical hex, so
- * only the query and the place need escaping.
- */
-export function streamHref(
-  sort: StreamSort,
-  { q, topic, place }: StreamFilter = {},
-  after?: string,
-): string {
-  const search = [
-    ...(sort === "new" ? [] : [`sort=${sort}`]),
-    ...(topic === undefined ? [] : [`topic=${topic}`]),
-    ...(place === undefined ? [] : [`place=${encodeURIComponent(place)}`]),
-    ...(q === undefined ? [] : [`q=${encodeURIComponent(q)}`]),
-    ...(after === undefined ? [] : [`after=${after}`]),
-  ];
-  return search.length === 0 ? "/discover" : `/discover?${search.join("&")}`;
-}
 
 const SORT_LABEL = {
   new: "sort_new",
@@ -193,9 +174,9 @@ function SearchForm({
 }
 
 /**
- * One question in the stream: its words, when it closes, and its first
- * question's answers, each a way into the ballot client, which opens the
- * poll with that answer chosen from the link's fragment. Text an
+ * One question in the stream: its words, when it closes, where it's listed,
+ * and its first question's answers, each a way into the ballot client, which
+ * opens the poll with that answer chosen from the link's fragment. Text an
  * asker wrote carries its own language and direction.
  */
 export function StreamCard({ card, ballot }: { card: Card; ballot: string | null }) {
@@ -259,6 +240,8 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
           </p>
         )}
       </div>
+      {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
+      <ListedUnder tags={card.tags} linked />
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (

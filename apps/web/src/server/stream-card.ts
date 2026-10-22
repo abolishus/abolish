@@ -13,6 +13,7 @@
 
 import { checkElectionRecordToShow } from "@abolishus/crypto";
 
+import type { PollTags } from "../poll.ts";
 import { pickTranslation, type StreamCard } from "../stream.ts";
 import { fromHex } from "../values.ts";
 import { definitionView } from "./definition.ts";
@@ -25,13 +26,14 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 /**
  * The card for `electionId` from the hex the API served: `definitionHex`,
  * and `displayTextHex` unless the API had none to serve. `locale` picks the
- * translation.
+ * translation; `tags` are where the poll is listed, as `loadStream` checked them.
  */
 export function streamCard(
   electionId: string,
   definitionHex: string,
   displayTextHex: string | undefined,
   locale: string,
+  tags: PollTags,
 ): StreamCard {
   const view = definitionView(electionId, definitionHex);
   if (!view.ok) return { kind: "unavailable", electionId, problem: view.problem };
@@ -79,5 +81,5 @@ export function streamCard(
     };
   })();
   if (text === undefined) return { kind: "unavailable", electionId, problem: "text" };
-  return { kind: "poll", poll, text };
+  return { kind: "poll", poll, text, tags };
 }

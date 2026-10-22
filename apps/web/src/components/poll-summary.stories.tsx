@@ -194,6 +194,82 @@ export const Delisted: Story = {
   },
 };
 
+const TAGS = { topic: "housing", place: "حي الزيتون" } as const;
+
+/**
+ * Filed under a topic and a place: each a way into the stream narrowed to
+ * it, the place in its own direction, and a note that both are the asker's
+ * and moderation can change them (T-68).
+ */
+export const Tagged: Story = {
+  args: { tags: TAGS },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const listed = within(canvas.getByRole("list", { name: "Where it's listed" }));
+    await expect(listed.getByRole("link", { name: "Housing" })).toHaveAttribute(
+      "href",
+      "/discover?topic=housing",
+    );
+    const place = listed.getByRole("link", { name: TAGS.place });
+    await expect(place).toHaveAttribute(
+      "href",
+      `/discover?place=${encodeURIComponent(TAGS.place)}`,
+    );
+    await expect(place.querySelector("bdi")).toHaveTextContent(TAGS.place);
+    await expect(canvas.getByText(/moderation can change them/)).toBeVisible();
+  },
+};
+
+/** Filed under a place only: the topic isn't named. */
+export const PlaceOnly: Story = {
+  args: { tags: { topic: undefined, place: "Eastside" } },
+  play: async ({ canvasElement }) => {
+    const listed = within(within(canvasElement).getByRole("list", { name: "Where it's listed" }));
+    await expect(listed.getAllByRole("listitem")).toHaveLength(1);
+    await expect(listed.getByRole("link")).toHaveAccessibleName("Eastside");
+  },
+};
+
+/** A delisted poll keeps its tags, but as words: the stream they'd link to leaves it out. */
+export const DelistedTagged: Story = {
+  args: {
+    tags: TAGS,
+    moderation: {
+      state: "delisted",
+      latest: { seq: "3", action: "delist", reason: "spam", decidedAt: "2026-10-01T12:00:00.000Z" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const listed = within(within(canvasElement).getByRole("list", { name: "Where it's listed" }));
+    await expect(listed.getByText("Housing")).toBeVisible();
+    await expect(listed.getByText(TAGS.place)).toBeVisible();
+    await expect(listed.queryByRole("link")).toBeNull();
+  },
+};
+
+/** A hidden poll shows no tags, whatever it was given: they are withheld with its text (T-68). */
+export const HiddenTagged: Story = {
+  args: {
+    tags: TAGS,
+    share: undefined,
+    moderation: {
+      state: "hidden",
+      latest: {
+        seq: "7",
+        action: "hide",
+        reason: "personal-data",
+        decidedAt: "2026-10-01T12:00:00.000Z",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByRole("list", { name: "Where it's listed" })).toBeNull();
+    await expect(canvas.queryByText(TAGS.place)).toBeNull();
+    await expect(canvas.queryByText(/moderation can change them/)).toBeNull();
+  },
+};
+
 export const IllFormed: Story = {
   args: {
     poll: { ...poll, counting: "approval", illFormed: { rule: "panel", question: undefined } },

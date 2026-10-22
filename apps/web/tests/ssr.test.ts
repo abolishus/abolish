@@ -303,6 +303,15 @@ const TOPICS = new Map([
   ["transport", [STREAM_V1]],
 ]);
 const PLACES = new Map([["riverside park", [STREAM_V5]]]);
+/** A listed poll whose place the stub serves with a bidi override, which no draft could hold (T-67). */
+const OVERRIDE_ID = FILLER[3]!;
+/** Where the stub files each poll, as `GET /elections/tags` serves it; the rest have no tags. */
+const TAGS = new Map<string, { topic?: string; place?: string }>([
+  [ID, { topic: "housing", place: "Old Town" }],
+  [STREAM_V5, { topic: "community", place: "Riverside Park" }],
+  [STREAM_V1, { topic: "transport" }],
+  [OVERRIDE_ID, { topic: "food", place: "Main \u202eteertS" }],
+]);
 
 function stubApi(): Server {
   return createServer((req, res) => {
@@ -434,6 +443,17 @@ function stubApi(): Server {
           200,
           electionId === HIDDEN_ID ? { state: "hidden", latest: LATEST } : { state: "visible" },
         );
+      case "/elections/tags":
+        if (electionId === CODE_FAILS_ID) return json(500, {});
+        if (electionId === HIDDEN_ID)
+          return json(451, {
+            defined: true,
+            code: "TAGS_WITHHELD",
+            status: 451,
+            message:
+              "This poll's tags are withheld under the moderation policy; see GET /moderation/status.",
+          });
+        return json(200, TAGS.get(electionId) ?? {});
       case "/elections/code": {
         if (electionId === CODE_FAILS_ID) return json(500, {});
         const code = codes.get(electionId);
@@ -674,7 +694,7 @@ describe("poll page", () => {
       "x-forwarded-for": "203.0.113.9",
       "user-agent": "visitor-agent",
     });
-    expect(seen.length).toBe(4);
+    expect(seen.length).toBe(5);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(headers.authorization).toBeUndefined();
@@ -683,6 +703,37 @@ describe("poll page", () => {
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
       expect(JSON.stringify(headers)).not.toContain("visitor-agent");
     }
+  });
+
+  test("shows where the poll is listed, each tag a link into the stream", async () => {
+    const html = await (await get(`/polls/${ID}`)).text();
+    const listed = /<ul aria-label="Where it&#x27;s listed"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1];
+    expect(listed).toMatch(/<a [^>]*href="\/discover\?topic=housing"[^>]*>Housing<\/a>/);
+    expect(listed).toMatch(
+      /<a [^>]*href="\/discover\?place=Old%20Town"[^>]*><bdi>Old Town<\/bdi><\/a>/,
+    );
+    expect(html).toContain("moderation can change them");
+  });
+
+  test.each([
+    ["no tags", FILLER[1]!],
+    ["an API that fails to answer the tags", CODE_FAILS_ID],
+    ["tags withheld while the poll is hidden (T-68)", HIDDEN_ID],
+  ])("shows no tags for %s, and the page stands", async (_, id) => {
+    const response = await get(`/polls/${id}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("Where it&#x27;s listed");
+    expect(html).not.toContain("moderation can change them");
+  });
+
+  test("shows no place a draft couldn't hold, such as one with a bidi override (T-67)", async () => {
+    const html = await (await get(`/polls/${OVERRIDE_ID}`)).text();
+    const listed = /<ul aria-label="Where it&#x27;s listed"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1];
+    expect(listed).toContain(">Food</a>");
+    expect(listed).not.toContain("<bdi>");
+    expect(html).not.toContain("\u202e");
+    expect(html).not.toContain("teertS");
   });
 
   test("a hidden poll says so, with the reason, and is kept out of search engines", async () => {
@@ -1283,6 +1334,23 @@ describe("stream", () => {
     expect(html).toContain(`href="/discover?after=${streamed[9]}"`);
   });
 
+  test("shows where each card's poll is listed, each tag a link into the stream", async () => {
+    const html = await (await get("/discover")).text();
+    const listed = [
+      ...html.matchAll(/<ul aria-label="Where it&#x27;s listed"[^>]*>([\s\S]*?)<\/ul>/g),
+    ].map((m) => [...(m[1] ?? "").matchAll(/href="([^"]*)"/g)].map((h) => h[1]));
+    // In stream order: the version-5 poll's topic and place, the version-1
+    // poll's topic alone, and nothing on a card with no words or no tags.
+    expect(listed).toEqual([
+      ["/discover?topic=community", "/discover?place=Riverside%20Park"],
+      ["/discover?topic=transport"],
+    ]);
+    expect(html).toContain("<bdi>Riverside Park</bdi>");
+    // The card's place link finds the poll, as the API keys it.
+    const place = await (await get("/discover?place=Riverside%20Park")).text();
+    expect(cards(place)).toEqual([STREAM_V5]);
+  });
+
   test("pages and orders as the API does, never with an endless scroll", async () => {
     const second = await (await get(`/discover?after=${streamed[9]}`)).text();
     expect(cards(second)).toEqual(streamed.slice(10, 20));
@@ -1428,6 +1496,7 @@ describe("stream", () => {
     expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(10);
+    expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(10);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");

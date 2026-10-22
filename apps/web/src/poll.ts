@@ -3,6 +3,7 @@
 // what the pages read of it. Nothing here imports a decoder, so the pages'
 // script doesn't carry one (P2-28 part 2b).
 
+import type { PollTopic } from "@abolishus/core/poll-topics";
 import type { ElectionDefinitionV5Rule } from "@abolishus/crypto";
 
 export type Tier = 0 | 1 | 2;
@@ -63,6 +64,19 @@ export interface PollView {
   readonly opensAt: Instant;
   readonly closesAt: Instant;
 }
+
+/**
+ * Where a poll is listed: the topic and place our server files it under, its
+ * author's or moderation's once it refiled the poll
+ * ([[0041-poll-topics-and-places]]). They sit beside the poll, which doesn't
+ * commit to them, so they are the server's claim (T-68).
+ */
+export interface PollTags {
+  readonly topic: PollTopic | undefined;
+  readonly place: string | undefined;
+}
+
+export const NO_TAGS: PollTags = { topic: undefined, place: undefined };
 
 /** Why a definition the API served isn't shown. */
 export type DefinitionProblem = "undecodable" | "another-election";

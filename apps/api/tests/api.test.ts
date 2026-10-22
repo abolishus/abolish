@@ -2,6 +2,9 @@ import {
   BOARD_TREE,
   checkBoard,
   checkElectionToShow,
+  type DisplayText,
+  displayTextCommitment,
+  encodeDisplayText,
   encodeElectionDefinition,
   identityBackupId,
   merkleRoot,
@@ -18,6 +21,8 @@ import {
   IDENTITY_BACKUP_ENVELOPE_LENGTH,
   IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
+  MAX_SEARCH_QUERY as CORE_MAX_SEARCH_QUERY,
+  MAX_SEARCH_TERMS as CORE_MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH as CORE_MAX_SHORT_CODE_LENGTH,
   moderate,
   readBoard,
@@ -25,18 +30,24 @@ import {
   recordRegistration,
   REMOVAL_REASONS as CORE_REMOVAL_REASONS,
   RESTORE_REASONS as CORE_RESTORE_REASONS,
+  SearchQueryError,
+  searchTerms,
   shortCode,
   storeDefinition,
   storeDisplayText,
 } from "@abolishus/core";
 import {
+  contract,
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  MAX_SEARCH_QUERY,
+  MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH,
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
 import { addModerators, type TestDb, testDb, typical } from "@abolishus/core/test-db";
+import fc from "fast-check";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -58,6 +69,7 @@ import { createApiServer, MAX_REQUEST_BODY, type RequestLogLine } from "../src/i
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const unhex = (s: string) => new Uint8Array(Buffer.from(s, "hex"));
 const b32 = () => new Uint8Array(randomBytes(32));
+const utf8 = (s: string) => new TextEncoder().encode(s);
 
 let db: TestDb;
 let app: Sql;
@@ -535,6 +547,136 @@ describe("elections.list (T-68)", () => {
         { epoch: -1n, period: 1n },
       ])
         expect(() => createApiServer({ sql: app, log: () => {}, boardClock })).toThrow(TypeError);
+    });
+  });
+
+  describe("search (P2-23 part 4)", () => {
+    /** A stored poll asking `question` in English, its display text stored. */
+    async function asking(question: string) {
+      const id = b32();
+      const text: DisplayText = {
+        salt: b32(),
+        translations: [
+          {
+            language: utf8("en"),
+            question: utf8(question),
+            description: new Uint8Array(0),
+            options: ["Yes", "No", "Abstain"].map((l) => ({
+              label: utf8(l),
+              description: new Uint8Array(0),
+            })),
+          },
+        ],
+      };
+      await storeDefinition(
+        app,
+        encodeElectionDefinition({
+          ...typical,
+          election_id: id,
+          display_text_commitment: displayTextCommitment(text),
+        }),
+      );
+      await storeDisplayText(app, id, encodeDisplayText(text));
+      return hex(id);
+    }
+
+    /** Every poll matching `q`, a page of `limit` at a time. */
+    async function found(q: string, limit = "256", sort = "id") {
+      const all: string[] = [];
+      let after: string | undefined;
+      for (;;) {
+        const r = await get("/elections", {
+          q,
+          limit,
+          sort,
+          ...(after !== undefined && { after }),
+        });
+        expect(r.status).toBe(200);
+        const page = (await json(r))["elections"] as string[];
+        all.push(...page);
+        if (page.length < Number(limit)) return all;
+        after = page.at(-1);
+      }
+    }
+
+    test("the contract's bounds are core's", () => {
+      expect([MAX_SEARCH_QUERY, MAX_SEARCH_TERMS]).toEqual([
+        CORE_MAX_SEARCH_QUERY,
+        CORE_MAX_SEARCH_TERMS,
+      ]);
+    });
+
+    test("lists only the polls whose question holds every term, in the order asked, a page at a time", async () => {
+      const [ferry, ferries, bridge] = [
+        await asking("Should the Harbourline ferry run at night?"),
+        await asking("More HARBOURLINE ferries on weekends?"),
+        await asking("A new Harbourline bridge?"),
+      ];
+      const hidden = await asking("Harbourline ferry fares?");
+      await moderate(app, unhex(hidden), { action: "hide", reason: "illegal", moderator: "mod-1" });
+      for (const limit of ["1", "256"]) {
+        expect(await found("harbourline", limit)).toEqual([ferry, ferries, bridge].sort());
+        expect(await found("Harbourline FERR", limit)).toEqual([ferry, ferries].sort());
+        expect(await found("harbourline night", limit)).toEqual([ferry]);
+        expect(await found("harbourline tunnel", limit)).toEqual([]);
+      }
+      // A filter on the other orders too: these polls closed in January 2026.
+      expect(await found("harbourline", "256", "closing")).toEqual([]);
+    });
+
+    test("refuses an empty query, too many terms and too many characters", async () => {
+      const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+      for (const q of ["", "  ", words(MAX_SEARCH_TERMS + 1), "a".repeat(MAX_SEARCH_QUERY + 1)])
+        expect((await get("/elections", { q, limit: "1" })).status, q).toBe(400);
+      for (const q of [words(MAX_SEARCH_TERMS), "a".repeat(MAX_SEARCH_QUERY), " a "])
+        expect((await get("/elections", { q, limit: "1" })).status, q).toBe(200);
+    });
+
+    test("the contract admits exactly the queries core reads, and those blank once normalised", () => {
+      const input = contract.elections.list["~orpc"].inputSchema!;
+      const admits = (q: string) => {
+        const result = input["~standard"].validate({ limit: "1", q });
+        if (result instanceof Promise) throw new Error("the contract validates synchronously");
+        return result.issues === undefined;
+      };
+      const piece = fc.oneof(
+        fc.string({ unit: "binary", maxLength: 6 }),
+        fc.constantFrom(" ", "\t", "\n", "\u3000", "\u00a0", "\u2028", "\ufeff", "\u180e"),
+        fc.constantFrom("\u0085", "\u0001", "\u009f"),
+      );
+      fc.assert(
+        fc.property(fc.array(piece, { maxLength: 60 }), (pieces) => {
+          const q = pieces.join("");
+          let read: "terms" | "blank" | "refused" = "terms";
+          try {
+            searchTerms(q);
+          } catch (e) {
+            read = e instanceof SearchQueryError ? "blank" : "refused";
+          }
+          expect(admits(q), JSON.stringify(q)).toBe(read !== "refused");
+        }),
+        { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) },
+      );
+    });
+
+    test("a query blank once normalised is refused, quoting nothing", async () => {
+      for (const q of ["\u0085", "\u0001 \u009f"]) {
+        const r = await get("/elections", { q, limit: "1" });
+        expect(r.status, JSON.stringify(q)).toBe(400);
+        expect(JSON.stringify(await json(r))).not.toContain(q);
+      }
+      // A blank term beside a real one is dropped.
+      expect(searchTerms("park \u0085")).toEqual(["park"]);
+    });
+
+    test("the query is never logged", async () => {
+      const secret = `unusualword${hex(b32()).slice(0, 12)}`;
+      logs.length = 0;
+      await get("/elections", { q: secret, limit: "1" });
+      await get("/elections", { q: `${secret} ${"x ".repeat(20)}`, limit: "1" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(logs).toHaveLength(2);
+      expect(JSON.stringify(logs)).not.toContain(secret);
     });
   });
 });

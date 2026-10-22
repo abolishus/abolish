@@ -10,16 +10,19 @@
 // registry's order, the definition's own times and, for `answered`, a count
 // of the public board. None reads anything an account did, so none is
 // personalised, and the one count is of distinct voters, never of views,
-// reactions or shares.
+// reactions or shares. Search (src/search.ts) only filters an order: it
+// ranks nothing.
 
 import type { PeriodClock } from "@abolishus/crypto";
-import { and, asc, desc, eq, gt, lte, or, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, lte, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
+import { MAX_SEARCH_TERMS } from "./search.ts";
 import {
   boardBallotKeys,
   boardEntries,
+  displayTextSearch,
   electionDefinitions,
   electionRegistrations,
   electionSchedules,
@@ -126,12 +129,18 @@ export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint;
  * Each call counts every open poll's ballots in the window, whatever
  * `limit` is: a cost the API's slots and deadline bound (T-52), until the
  * counts, which change only around each period's boundary, are cached.
+ *
+ * With `terms` (from `searchTerms`), only the polls whose search text
+ * contains every term are listed, in the same order; the cursor is placed as
+ * without them, so it need not match. A poll whose display text was never
+ * stored, or has been deleted, matches no search.
  */
 export async function listPolls(
   client: Sql,
   after: Uint8Array | undefined,
   limit: number,
   order: ListingOrder = { sort: "id" },
+  terms: readonly string[] = [],
 ): Promise<Uint8Array[]> {
   if (after !== undefined && (!isBytes(after) || after.length !== 32))
     throw new TypeError("after must be 32 bytes");
@@ -144,6 +153,12 @@ export async function listPolls(
     (typeof order.now !== "bigint" || order.now < 0n || order.now > U64_MAX)
   )
     throw new TypeError("now must be a u64 bigint");
+  if (
+    !Array.isArray(terms) ||
+    terms.length > MAX_SEARCH_TERMS ||
+    !terms.every((t) => typeof t === "string" && t !== "")
+  )
+    throw new TypeError(`terms must be up to ${MAX_SEARCH_TERMS} non-empty strings`);
   const window = order.sort === "answered" ? answeredWindow(order.now, order.clock) : undefined;
   const cursor = after === undefined ? undefined : new Uint8Array(after);
   const db = drizzle({ client });
@@ -154,7 +169,23 @@ export async function listPolls(
     .where(eq(moderationActions.electionId, electionDefinitions.electionId))
     .orderBy(desc(moderationActions.seq))
     .limit(1);
-  const listed = q`coalesce((${newest}), 'restore') = 'restore'`;
+  const restored = q`coalesce((${newest}), 'restore') = 'restore'`;
+  // Every term somewhere in the text, through the row's primary key.
+  const matched =
+    terms.length === 0
+      ? undefined
+      : exists(
+          db
+            .select({ one: q`1` })
+            .from(displayTextSearch)
+            .where(
+              and(
+                eq(displayTextSearch.electionId, electionDefinitions.electionId),
+                ...terms.map((t) => q`strpos(${displayTextSearch.searchText}, ${t}) > 0`),
+              ),
+            ),
+        );
+  const listed = and(restored, matched);
 
   if (order.sort === "id") {
     const rows = await db

@@ -86,13 +86,25 @@ const getDisplayText = oc
   .input(ElectionQuery)
   .output(z.strictObject({ displayText: hexBytes(MAX_DISPLAY_TEXT) }));
 
+/** The longest search query and its most terms; a test ties these copies to `@abolishus/core`. */
+export const MAX_SEARCH_QUERY = 200;
+export const MAX_SEARCH_TERMS = 8;
+
+/** One to `MAX_SEARCH_TERMS` whitespace-separated terms, at most `MAX_SEARCH_QUERY` characters. */
+const SearchQuery = z
+  .string()
+  .check(
+    z.maxLength(MAX_SEARCH_QUERY),
+    z.regex(new RegExp(`^\\s*\\S+(?:\\s+\\S+){0,${MAX_SEARCH_TERMS - 1}}\\s*$`, "u")),
+  );
+
 const listElections = oc
   .route({
     method: "GET",
     path: "/elections",
     summary: "A page of the polls this server lists",
     description:
-      "Election IDs of the polls our front ends list for discovery: at most `limit`, after the poll `after` in the order `sort` names (or from the first without it). Fewer than `limit` means the listing ends there for now. `id`, the default, lists every listed poll, open or closed, in ascending order of election ID, and `after` need not name a poll. `new` lists the polls open now (the definition's `opens_at` at or before the server's clock and `closes_at` after it), the latest registered on L2 first; `closing` lists the polls open now, the soonest `closes_at` first, then by election ID. Both orders are public chain data, the same for everyone and moved by nothing a voter or an account does. `answered` lists the polls open now, the most answered this week first, then by election ID: the count is of distinct voters (each tier and nullifier once, so a re-vote never counts twice) whose ballots this server boarded in the whole anchoring periods of the last seven days before the current one (direct-submitted ballots aren't counted yet), so it settles once a period and anyone can recompute it from the public board, whose entries carry their segments; it needs the anchoring clock, without which it is `SORT_UNAVAILABLE`. Under these three orders `after` must be a poll the order can place, one stored here and, for `new`, with its registration recorded, though it may have closed since (`CURSOR_NOT_FOUND` otherwise); under `answered` a poll whose count passes the cursor's between pages can be skipped or repeated. A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
+      "Election IDs of the polls our front ends list for discovery: at most `limit`, after the poll `after` in the order `sort` names (or from the first without it). Fewer than `limit` means the listing ends there for now. `id`, the default, lists every listed poll, open or closed, in ascending order of election ID, and `after` need not name a poll. `new` lists the polls open now (the definition's `opens_at` at or before the server's clock and `closes_at` after it), the latest registered on L2 first; `closing` lists the polls open now, the soonest `closes_at` first, then by election ID. Both orders are public chain data, the same for everyone and moved by nothing a voter or an account does. `answered` lists the polls open now, the most answered this week first, then by election ID: the count is of distinct voters (each tier and nullifier once, so a re-vote never counts twice) whose ballots this server boarded in the whole anchoring periods of the last seven days before the current one (direct-submitted ballots aren't counted yet), so it settles once a period and anyone can recompute it from the public board, whose entries carry their segments; it needs the anchoring clock, without which it is `SORT_UNAVAILABLE`. Under these three orders `after` must be a poll the order can place, one stored here and, for `new`, with its registration recorded, though it may have closed since (`CURSOR_NOT_FOUND` otherwise); under `answered` a poll whose count passes the cursor's between pages can be skipped or repeated. A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. With `q`, only the polls whose question text (each translation's title and questions, compared after NFKC normalisation and lower-casing) contains every whitespace-separated term are listed, in the same order and with `after` placed as without it; nothing is ranked by relevance, and a poll whose display text is taken down matches nothing. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
     tags: ["elections"],
   })
   .errors({
@@ -107,6 +119,7 @@ const listElections = oc
       after: z.optional(Hash32),
       limit: PageSize,
       sort: z.optional(z.enum(["id", "new", "closing", "answered"])),
+      q: z.optional(SearchQuery),
     }),
   )
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));

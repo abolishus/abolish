@@ -10,7 +10,7 @@ import { Redis } from "ioredis";
 import postgres from "postgres";
 import * as z from "zod";
 import { CEREMONY_ENV, ceremonyFromEnv } from "./ceremony-env.ts";
-import { POSTING_ENV, postingFromEnv } from "./posting-env.ts";
+import { POSTING_ENV, postingFromEnv, sameRedisInstance } from "./posting-env.ts";
 import { createApiServer } from "./server.ts";
 
 // Entry point: reads the environment, connects as a user granted abolish_app
@@ -181,11 +181,7 @@ let postings: PostingRelay | undefined;
 if (postingConfig !== undefined) {
   if (boardClock === undefined)
     throw new Error("the posting relay needs BALLOT_ANCHOR_EPOCH and BALLOT_ANCHOR_PERIOD");
-  // By host and port, whatever the database, path or credentials: persistence
-  // is the instance's (T-18). An alias of the same host still gets through;
-  // the posting worker's runbook sets the store up.
-  const hostOf = (url: string) => new URL(url).host.toLowerCase();
-  if (env.REDIS_URL !== undefined && hostOf(postingConfig.redisUrl) === hostOf(env.REDIS_URL))
+  if (env.REDIS_URL !== undefined && sameRedisInstance(postingConfig.redisUrl, env.REDIS_URL))
     throw new Error("API_POSTING_REDIS_URL must be a store of its own, not REDIS_URL's");
   // Failing fast, as the worker's Redis above.
   postingRedis = new Redis(postingConfig.redisUrl, {

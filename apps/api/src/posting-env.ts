@@ -78,3 +78,18 @@ export function postingFromEnv(env: PostingEnv): PostingConfig | undefined {
     }
   return { redisUrl: parsed.data.API_POSTING_REDIS_URL, panels: pinned };
 }
+
+/**
+ * Whether two Redis URLs name the same host and port, whatever the database,
+ * path or credentials: persistence is the instance's (T-18). `redis:` isn't a
+ * special scheme to `URL`, so an absent port is Redis's default here. An
+ * alias of the same host still gets through; the posting worker's runbook
+ * sets the store up.
+ */
+export function sameRedisInstance(a: string, b: string): boolean {
+  const at = (url: string) => {
+    const u = new URL(url);
+    return `${u.hostname.toLowerCase()}:${u.port === "" ? "6379" : u.port}`;
+  };
+  return at(a) === at(b);
+}

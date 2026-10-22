@@ -39,6 +39,7 @@ import {
   POSTING_ENV,
   postingFromEnv,
   type RequestLogLine,
+  sameRedisInstance,
 } from "../src/index.ts";
 
 // `postings.submit`, the posting relay's route, over HTTP against a live
@@ -397,5 +398,19 @@ describe("the posting bound and configuration", () => {
     }
     const notAPanel = JSON.stringify([{ threshold: 9, keys: panel.keys.map(hex) }]);
     expect(() => postingFromEnv({ ...full, BALLOT_PINNED_PANELS: notAPanel })).toThrow(/isn't one/);
+  });
+
+  test("the relay's store is the same instance as REDIS_URL's by host and port alone", () => {
+    for (const [a, b] of [
+      ["redis://h", "redis://h:6379"],
+      ["redis://H:6380/1", "rediss://user:pw@h:6380/0"],
+      ["redis://h:6379/", "redis://h"],
+    ] as const)
+      expect(sameRedisInstance(a, b)).toBe(true);
+    for (const [a, b] of [
+      ["redis://h", "redis://h:6380"],
+      ["redis://h", "redis://g"],
+    ] as const)
+      expect(sameRedisInstance(a, b)).toBe(false);
   });
 });

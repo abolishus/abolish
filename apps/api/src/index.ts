@@ -16,4 +16,4 @@ export {
   MAX_INTAKE_ANSWER,
   MAX_INTAKE_SEATS,
 } from "./intake.ts";
-export { POSTING_ENV, postingFromEnv } from "./posting-env.ts";
+export { POSTING_ENV, postingFromEnv, sameRedisInstance } from "./posting-env.ts";

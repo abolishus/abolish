@@ -4,13 +4,14 @@
 // check of the board's events: versions 2 to 8 frame ballot versions 1 to 3
 // and the version-1 delivery records, and version 9 adds ballot version 4 and
 // the version-2 delivery records, which name their seat's panel (What the
-// board frames (version 9); Ballots (version 4); Delivery records (version 2)). It runs the contract's framing, and
-// none of its shape checks (seat 0, counts that disagree, a posting's length),
-// and decodes nothing the contract doesn't: a ristretto255 element is only
-// checked to be an even value below 2²⁵⁵ − 19 and not 0, never decoded, since
-// the board admits a member's ballot whose elements aren't points and the
-// verifier rejects it later (T-53). Checking more here would let any member
-// fail a deployment's events by direct-submitting such a ballot (T-17, T-31).
+// board frames (version 9); Ballots (version 4); Delivery records (version
+// 2)). It runs the contract's framing, and none of its shape checks (seat
+// 0, counts that disagree, a posting's length), and decodes nothing the
+// contract doesn't: a ristretto255 element is only checked to be an even
+// value below 2²⁵⁵ − 19 and not 0, never decoded, since the board admits a
+// member's ballot whose elements aren't points and the verifier rejects it
+// later (T-53). Checking more here would let any member fail a deployment's
+// events by direct-submitting such a ballot (T-17, T-31).
 
 import {
   bytesFixed,

@@ -2,7 +2,14 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { frameBallot, frameDelivery } from "../src/direct-submit.ts";
+import {
+  decodeShareComplaint,
+  decodeShareComplaintBatch,
+  decodeSharePosting,
+  decodeShareReceipt,
+} from "../src/delivery.ts";
+import { frameBallot, frameComplaintBatch, frameDelivery } from "../src/direct-submit.ts";
+import { DecodeError } from "../src/codec.ts";
 import { RECORD_TYPES } from "../src/record.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -222,4 +229,83 @@ describe("framing properties", () => {
       { numRuns },
     );
   });
+
+  // The framing is never stricter than the strict decoders (T-53): every
+  // version-2 record a decoder accepts, an honest one's mutations included,
+  // frames under version 9 as its own type.
+  test(
+    "every version-2 delivery record and complaint batch that decodes frames under version 9",
+    { timeout: 120_000 },
+    () => {
+      const seeds = [
+        ...load<DeliveryFile>("delivery-v2.json").records,
+        ...load<DeliveryFile>("delivery-batch-v2.json").records.filter((r) =>
+          r.encoding.startsWith("0017"),
+        ),
+      ].map((r) => hex(r.encoding));
+      const decoders: ReadonlyMap<number, (b: Uint8Array) => unknown> = new Map<
+        number,
+        (b: Uint8Array) => unknown
+      >([
+        [RECORD_TYPES.shareReceipt, (b) => decodeShareReceipt(b, 2)],
+        [RECORD_TYPES.sharePosting, (b) => decodeSharePosting(b, 2)],
+        [RECORD_TYPES.shareComplaint, (b) => decodeShareComplaint(b, 2)],
+        [RECORD_TYPES.shareComplaintBatch, (b) => decodeShareComplaintBatch(b, 2)],
+      ]);
+      const mutated = fc
+        .tuple(fc.nat({ max: seeds.length - 1 }), fc.nat(), fc.integer({ min: 0, max: 255 }))
+        .map(([which, at, value]) => {
+          const b = new Uint8Array(seeds[which] ?? []);
+          b[at % b.length] = value;
+          return b;
+        });
+      fc.assert(
+        fc.property(mutated, (b) => {
+          const type = ((b[0] ?? 0) << 8) | (b[1] ?? 0);
+          const strict = decoders.get(type);
+          if (strict === undefined) return;
+          try {
+            strict(b);
+          } catch (e) {
+            if (e instanceof DecodeError) return;
+            throw e;
+          }
+          if (type === RECORD_TYPES.shareComplaintBatch)
+            expect(frameComplaintBatch(b, 9)).toBeDefined();
+          else expect(frameDelivery(type, b, 9)).toBeDefined();
+        }),
+        { numRuns },
+      );
+    },
+  );
+
+  // Seeded with version-4 ballots: a changed byte outside the proof and the
+  // L1 reference is refused or changes the hash, as for version 1.
+  test(
+    "a one-byte change to a version-4 ballot changes its hash or is refused under version 9",
+    { timeout: 120_000 },
+    () => {
+      const v4 = load<BallotFile>("ballot-v4-records.json").ballots.map((b) => hex(b.encoding));
+      fc.assert(
+        fc.property(
+          fc.nat({ max: v4.length - 1 }),
+          fc.nat(),
+          fc.integer({ min: 1, max: 255 }),
+          (which, at, flip) => {
+            const original = v4[which] ?? new Uint8Array();
+            const i = at % original.length;
+            if (i >= 68 && i < 364) return;
+            const b = new Uint8Array(original);
+            b[i] = (b[i] ?? 0) ^ flip;
+            const after = frameBallot(b, 9);
+            if (after !== undefined)
+              expect(bytesToHex(after.ballotHash)).not.toBe(
+                bytesToHex(frameBallot(original, 9)?.ballotHash ?? new Uint8Array()),
+              );
+          },
+        ),
+        { numRuns },
+      );
+    },
+  );
 });

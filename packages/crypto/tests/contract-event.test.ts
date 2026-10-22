@@ -6,6 +6,9 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   checkContractEvent,
   checkEventAccumulatorProof,
+  COMPLAINT_BATCH_MAX,
+  decodeShareComplaintBatch,
+  encodeShareComplaintBatchV2,
   CONTRACT_EVENT_SIGNATURES,
   type ContractEvent,
   contractEventLog,
@@ -986,6 +989,38 @@ describe("contract-event version 9 against version 8", () => {
       const record = { ...recordOf(v.fields), contract: v8.electionRegistry };
       expect(checkContractEvent(record, v8, 8)).toEqual({ ok: false, error: "unknown-event" });
     }
+  });
+
+  // The largest batch either panel's seat can send, one byte past version
+  // 1's bound for its panel byte: a check whose bound left the byte out would
+  // refuse a batch the board emits, and so fail every election on the board
+  // (T-53).
+  test("a version-2 complaint batch of COMPLAINT_BATCH_MAX entries passes under version 9", () => {
+    const v = FILES[9].records.find((r) => r.id === "delivery-batch-v2-complaint-batch-author");
+    if (v === undefined) throw new Error("no version-2 complaint batch");
+    const passed = checkContractEvent(recordOf(v.fields), v9, 9);
+    if (!passed.ok || passed.event.event !== "ShareComplaintBatchSubmitted")
+      throw new Error("the honest batch doesn't pass");
+    const base = decodeShareComplaintBatch(passed.event.record, 2);
+    const proof = base.complaints[0]?.proof;
+    if (proof === undefined) throw new Error("an empty batch");
+    const complaints = Array.from({ length: COMPLAINT_BATCH_MAX }, (_, i) => ({
+      ballot_hash: uintWord(i + 1),
+      proof,
+    }));
+    const record = encodeShareComplaintBatchV2({ ...base, complaints });
+    expect(record.length).toBe(105 + 128 * COMPLAINT_BATCH_MAX);
+    const full = {
+      ...recordOf(v.fields),
+      topics: [
+        sigTopic("ShareComplaintBatchSubmitted(bytes32,uint8,bytes)"),
+        base.definition_hash,
+        uintWord(base.seat),
+      ],
+      data: concat([uintWord(32), tail(record)]),
+    };
+    const result = checkContractEvent(full, v9, 9);
+    expect(result.ok && result.event.event).toBe("ShareComplaintBatchSubmitted");
   });
 
   // The board frames an author element, a version-2 complaint's `D` and a

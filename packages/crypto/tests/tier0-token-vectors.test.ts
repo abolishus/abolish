@@ -1,18 +1,31 @@
-import { ristretto255, ristretto255_hasher, ristretto255_oprf } from "@noble/curves/ed25519.js";
-import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { ds, TAG_REGISTRY } from "../src/index.ts";
+import {
+  decodeTier0TokenBlindedElement,
+  TAG_REGISTRY,
+  Tier0TokenError,
+  tier0TokenEvaluate,
+  tier0TokenFinalize,
+  tier0TokenInfo,
+  tier0TokenInput,
+  tier0TokenKeyId,
+  tier0TokenKeyIssues,
+  tier0TokenKeyRedeems,
+  tier0TokenMatches,
+  tier0TokenPublicKey,
+  TOKEN_KEY_PERIOD,
+  TOKEN_REDEEM_DELAY,
+  TOKEN_VERSION,
+} from "../src/index.ts";
+import { tier0TokenBlindEvaluateWith, tier0TokenBlindWith } from "../src/tier0-token.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/tier0-token.json comes from an independent Python
 // implementation of RFC 9497's POPRF mode (scripts/tier0-token-vectors.py,
-// itself checked against RFC 9497 Appendix A.1.3). Until packages/crypto has
-// its own token code (P2-30 part 2), these tests check the file against
-// @noble/curves' RFC 9497 implementation and our `DS` framing, so the spec's
-// vectors are confirmed by two implementations before anything is built on
-// them (T-74).
+// itself checked against RFC 9497 Appendix A.1.3), so these tests check the
+// package's own token code against an implementation that shares none of it
+// (T-74). tier0-token.test.ts runs the same code on RFC 9497's own vectors.
 
 interface Issuance {
   readonly id: string;
@@ -29,6 +42,7 @@ interface Issuance {
   readonly blind: string;
   readonly blindedElement: string;
   readonly tweakedKey: string;
+  readonly proofRandomScalar: string;
   readonly evaluationElement: string;
   readonly proof: string;
   readonly token: string;
@@ -92,28 +106,26 @@ interface Vectors {
 
 const V = JSON.parse(readFileSync(new URL("tier0-token.json", SPEC_VECTORS), "utf8")) as Vectors;
 
-// BN254's scalar field order, the bound on a field<bn254> commitment.
-const R = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001n;
 const ascii = (s: string) => new TextEncoder().encode(s);
-const beBytes = (n: bigint, len: number) =>
-  hexToBytes(
-    n
-      .toString(16)
-      .padStart(2 * len, "0")
-      .slice(-2 * len),
-  );
-
-const keyId = (period: bigint, publicKey: Uint8Array) =>
-  sha256(ds("abolish/v1/tier0-token/key", concatBytes(beBytes(period, 4), publicKey)));
-const groupInfo = (chainId: bigint, registry: Uint8Array, groupId: bigint) =>
-  sha256(
-    ds(
-      "abolish/v1/tier0-token/info",
-      concatBytes(beBytes(chainId, 8), registry, beBytes(groupId, 8)),
-    ),
-  );
-const tokenInput = (kid: Uint8Array, commitment: Uint8Array) =>
-  sha256(ds("abolish/v1/tier0-token/input", concatBytes(Uint8Array.of(1), kid, commitment)));
+const scalarLe = (hex: string) => {
+  let v = 0n;
+  for (const x of hexToBytes(hex).reverse()) v = (v << 8n) | BigInt(x);
+  return v;
+};
+const code = (run: () => unknown): string => {
+  try {
+    run();
+    return "ok";
+  } catch (e) {
+    if (e instanceof Tier0TokenError) return e.code;
+    throw e;
+  }
+};
+const group = (v: { chainId: string; groupRegistry: string; groupId: string }) => ({
+  chainId: BigInt(v.chainId),
+  groupRegistry: hexToBytes(v.groupRegistry),
+  groupId: BigInt(v.groupId),
+});
 
 describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
   test("parses every list", () => {
@@ -127,7 +139,7 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
       V.blindedElements.length,
       V.periods.length,
       V.redemptions.length,
-    ]).toEqual([4, 5, 5, 4, 10, 7, 6, 12]);
+    ]).toEqual([4, 5, 8, 4, 10, 7, 6, 12]);
   });
 
   test("the suite is RFC 9497's POPRF mode over ristretto255-SHA512", () => {
@@ -138,72 +150,63 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
         concatBytes(ascii("OPRFV1-"), Uint8Array.of(2), ascii("-ristretto255-SHA512")),
       ),
     });
-    expect(ristretto255_oprf.name).toBe("ristretto255-SHA512");
   });
 
-  test("the three tags are registered as specified plain hashes", () => {
+  test("the three tags are registered and the values are the package's", () => {
     for (const tag of Object.values(V.tags))
       expect(TAG_REGISTRY).toContainEqual({ tag, primitive: "plain", status: "specified" });
-    expect(V.inputVersion).toBe(1);
-    expect(V.keyPeriod).toBe("2592000");
-    expect(V.redeemDelay).toBe("86400");
+    expect(V.inputVersion).toBe(TOKEN_VERSION);
+    expect(V.keyPeriod).toBe(String(TOKEN_KEY_PERIOD));
+    expect(V.redeemDelay).toBe(String(TOKEN_REDEEM_DELAY));
   });
 
   test.each(V.keys.map((v) => [v.id, v] as const))("key identifier %s", (_id, v) => {
-    expect(bytesToHex(keyId(BigInt(v.period), hexToBytes(v.publicKey)))).toBe(v.keyId);
+    expect(bytesToHex(tier0TokenKeyId(Number(v.period), hexToBytes(v.publicKey)))).toBe(v.keyId);
   });
 
   test.each(V.infos.map((v) => [v.id, v] as const))("group info %s", (_id, v) => {
-    const info = groupInfo(BigInt(v.chainId), hexToBytes(v.groupRegistry), BigInt(v.groupId));
-    expect(bytesToHex(info)).toBe(v.info);
+    expect(bytesToHex(tier0TokenInfo(group(v)))).toBe(v.info);
   });
 
   test.each(V.inputs.map((v) => [v.id, v] as const))("token input %s", (_id, v) => {
-    const canonical = BigInt(`0x${v.commitment}`) < R;
-    if (v.error !== undefined) {
-      expect([canonical, v.error]).toEqual([false, "non-canonical"]);
-      return;
-    }
-    expect(canonical).toBe(true);
-    expect(bytesToHex(tokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment)))).toBe(v.input);
+    const run = () => tier0TokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment));
+    if (v.error !== undefined) expect(code(run)).toBe(v.error);
+    else expect(bytesToHex(run())).toBe(v.input);
   });
 
   test.each(V.issuances.map((v) => [v.id, v] as const))("issuance %s", (_id, v) => {
     const sk = hexToBytes(v.secretKey);
-    const pk = ristretto255.Point.BASE.multiply(ristretto255.Point.Fn.fromBytes(sk));
-    expect(pk.toHex()).toBe(v.publicKey);
-    expect(bytesToHex(keyId(BigInt(v.period), pk.toBytes()))).toBe(v.keyId);
-    const info = groupInfo(BigInt(v.chainId), hexToBytes(v.groupRegistry), BigInt(v.groupId));
+    const pk = tier0TokenPublicKey(sk);
+    expect(bytesToHex(pk)).toBe(v.publicKey);
+    expect(bytesToHex(tier0TokenKeyId(Number(v.period), pk))).toBe(v.keyId);
+    const info = tier0TokenInfo(group(v));
     expect(bytesToHex(info)).toBe(v.info);
-    const input = tokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment));
+    const input = tier0TokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment));
     expect(bytesToHex(input)).toBe(v.input);
 
-    // Blind: blind · HashToGroup(input), under RFC 9497's own DST.
-    const dst = concatBytes(ascii("HashToGroup-"), hexToBytes(V.suite.contextString));
-    const blinded = ristretto255_hasher
-      .hashToCurve(input, { DST: dst })
-      .multiply(ristretto255.Point.Fn.fromBytes(hexToBytes(v.blind)));
-    expect(blinded.toHex()).toBe(v.blindedElement);
-
-    const poprf = ristretto255_oprf.poprf(info);
-    expect(bytesToHex(poprf.blind(input, pk.toBytes()).tweakedKey)).toBe(v.tweakedKey);
-    // Finalize checks the issuer's proof against the tweaked key.
-    const token = poprf.finalize(
-      input,
-      hexToBytes(v.blind),
-      hexToBytes(v.evaluationElement),
-      hexToBytes(v.blindedElement),
-      hexToBytes(v.proof),
-      hexToBytes(v.tweakedKey),
+    const blinding = tier0TokenBlindWith(input, pk, info, hexToBytes(v.blind));
+    expect(bytesToHex(blinding.blindedElement)).toBe(v.blindedElement);
+    expect(bytesToHex(blinding.tweakedKey)).toBe(v.tweakedKey);
+    // The issuer's answer, proof included, under the vector's proof randomness.
+    const answer = tier0TokenBlindEvaluateWith(
+      sk,
+      blinding.blindedElement,
+      info,
+      scalarLe(v.proofRandomScalar),
     );
+    expect(bytesToHex(answer.evaluationElement)).toBe(v.evaluationElement);
+    expect(bytesToHex(answer.proof)).toBe(v.proof);
+    const token = tier0TokenFinalize({
+      input,
+      info,
+      publicKey: pk,
+      blind: blinding.blind,
+      blindedElement: blinding.blindedElement,
+      ...answer,
+    });
     expect(bytesToHex(token)).toBe(v.token);
     // The issuer's evaluation without the client gives the same token.
-    expect(bytesToHex(poprf.evaluate(sk, input))).toBe(v.token);
-    // Its evaluation of the blinded element is the vector's (the proof's
-    // randomness differs, so only the element is compared).
-    expect(bytesToHex(poprf.blindEvaluate(sk, hexToBytes(v.blindedElement)).evaluated)).toBe(
-      v.evaluationElement,
-    );
+    expect(bytesToHex(tier0TokenEvaluate(sk, input, info))).toBe(v.token);
   });
 
   test("every issuance's token differs", () => {
@@ -211,56 +214,30 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
   });
 
   test.each(V.finalizations.map((v) => [v.id, v] as const))("finalization %s", (_id, v) => {
-    const poprf = ristretto255_oprf.poprf(hexToBytes(v.info));
-    const input = hexToBytes(v.input ?? "");
-    if (v.error === "tweaked-key-identity") {
-      expect(() => poprf.blind(input, hexToBytes(v.publicKey))).toThrow();
-      return;
-    }
-    // Z's own decoding, so a `proof` vector can only fail at the proof's
-    // scalars or its check, never at an element the client would refuse first.
-    const z = () => {
-      const p = ristretto255.Point.fromHex(v.evaluationElement ?? "");
-      if (p.is0()) throw new Error("identity");
-      return p;
-    };
-    if (v.error === "evaluation-element") {
-      expect(z).toThrow();
-      return;
-    }
-    expect(z().toHex()).toBe(v.evaluationElement);
     const run = () =>
-      poprf.finalize(
-        input,
-        hexToBytes(v.blind ?? ""),
-        hexToBytes(v.evaluationElement ?? ""),
-        hexToBytes(v.blindedElement ?? ""),
-        hexToBytes(v.proof ?? ""),
-        poprf.blind(input, hexToBytes(v.publicKey)).tweakedKey,
-      );
+      tier0TokenFinalize({
+        input: hexToBytes(v.input ?? ""),
+        info: hexToBytes(v.info),
+        publicKey: hexToBytes(v.publicKey),
+        blind: hexToBytes(v.blind ?? ""),
+        blindedElement: hexToBytes(v.blindedElement ?? ""),
+        evaluationElement: hexToBytes(v.evaluationElement ?? ""),
+        proof: hexToBytes(v.proof ?? ""),
+      });
     if (v.error === undefined) expect(bytesToHex(run())).toBe(v.token);
-    else {
-      expect(v.error).toBe("proof");
-      expect(run).toThrow();
-    }
+    else expect(code(run)).toBe(v.error);
   });
 
   test.each(V.blindedElements.map((v) => [v.id, v] as const))("blinded element %s", (_id, v) => {
-    const decode = () => {
-      const p = ristretto255.Point.fromHex(v.encoding);
-      if (p.is0()) throw new Error("identity");
-      return p;
-    };
-    if (v.error === undefined) expect(decode().toHex()).toBe(v.encoding);
-    else expect(decode).toThrow();
+    const run = () => decodeTier0TokenBlindedElement(hexToBytes(v.encoding));
+    if (v.error === undefined) expect(bytesToHex(run())).toBe(v.encoding);
+    else expect(code(run)).toBe(v.error);
   });
 
   test.each(V.periods.map((v) => [v.id, v] as const))("key period %s", (_id, v) => {
-    const now = BigInt(v.now);
-    const q = BigInt(v.keyPeriod);
-    const current = now / BigInt(V.keyPeriod);
-    expect(current === q).toBe(v.issues);
-    expect(current === q || current === q + 1n).toBe(v.redeems);
+    const [now, q] = [Number(v.now), Number(v.keyPeriod)];
+    expect(tier0TokenKeyIssues(q, now)).toBe(v.issues);
+    expect(tier0TokenKeyRedeems(q, now)).toBe(v.redeems);
   });
 
   test.each(V.redemptions.map((v) => [v.id, v] as const))("redemption %s", (_id, v) => {
@@ -275,16 +252,16 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
     const redeem = (): string => {
       const key = held.get(v.keyId);
       if (key === undefined) return "key-unknown";
-      const current = BigInt(v.now) / BigInt(V.keyPeriod);
-      const q = BigInt(key.period);
-      if (current !== q && current !== q + 1n) return "key-period";
-      const expected = ristretto255_oprf
-        .poprf(hexToBytes(v.info))
-        .evaluate(
-          hexToBytes(key.secretKey),
-          tokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment)),
-        );
-      return bytesToHex(expected) === v.token ? "accepted" : "token";
+      if (!tier0TokenKeyRedeems(Number(key.period), Number(v.now))) return "key-period";
+      const input = tier0TokenInput(hexToBytes(v.keyId), hexToBytes(v.commitment));
+      return tier0TokenMatches(
+        hexToBytes(key.secretKey),
+        input,
+        hexToBytes(v.info),
+        hexToBytes(v.token),
+      )
+        ? "accepted"
+        : "token";
     };
     expect(redeem()).toBe(v.accepted === true ? "accepted" : v.error);
   });

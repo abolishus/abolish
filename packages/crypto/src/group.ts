@@ -39,6 +39,19 @@ export const IDENTITY: Element = Point.ZERO;
 const isZero = (b: Uint8Array) => b.every((x) => x === 0);
 
 /**
+ * `x⁻¹ mod ℓ` as `x^(ℓ − 2)` by @noble/curves' field: the exponent is public,
+ * so the control flow doesn't depend on `x`, unlike the extended Euclid of
+ * `Fn.inv`, whose loop count would leak bits of a secret `x` such as an
+ * issuer's tweaked key, inverted on every redemption (T-74). `x` must be a
+ * scalar other than 0.
+ */
+export function scalarInverse(x: bigint): bigint {
+  if (typeof x !== "bigint" || x <= 0n || x >= GROUP_ORDER)
+    throw new RangeError("scalarInverse: expected a scalar from 1 to ℓ - 1");
+  return Point.Fn.pow(x, GROUP_ORDER - 2n);
+}
+
+/**
  * `scalar`: 32 bytes little-endian, value below ℓ (RFC 9497 `SerializeScalar`).
  * A value at or above ℓ is rejected, never reduced, so each scalar has exactly
  * one encoding (T-31).

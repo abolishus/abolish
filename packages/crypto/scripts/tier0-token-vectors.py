@@ -42,6 +42,8 @@ G = grp.BASE
 
 # BN254's scalar field, the range of a field<bn254> commitment (docs/spec/notation.md).
 R = 0x30644E72E131A029B85045B68181585D2833E84879B9709143E1F593F0000001
+# Poseidon2(0, 1), the commitment no member may have (docs/spec/membership.md).
+POSEIDON2_0_1 = 0x1BD20834F5DE9830C643778A2E88A3A1363C8B9AC083D36D75BF87C49953E65E
 
 KEY_TAG = b"abolish/v1/tier0-token/key"
 INFO_TAG = b"abolish/v1/tier0-token/info"
@@ -260,6 +262,8 @@ def group_info(chain_id, registry, group_id):
 def token_input(kid, commitment):
     if commitment >= R:
         raise Refused("non-canonical")
+    if commitment in (0, 1, POSEIDON2_0_1):
+        raise Refused("forbidden-commitment")
     return sha256(ds(INPUT_TAG, bytes([INPUT_VERSION]) + kid + i2osp(commitment, 32)))
 
 
@@ -361,7 +365,13 @@ def main():
         input_vectors.append(
             {"id": vid, "keyId": h(kid_a), "commitment": h(i2osp(c, 32)), "input": h(token_input(kid_a, c))}
         )
-    for vid, c in [("input-commitment-r", R), ("input-commitment-max-bytes", 2**256 - 1)]:
+    for vid, c in [
+        ("input-commitment-r", R),
+        ("input-commitment-max-bytes", 2**256 - 1),
+        ("input-commitment-zero", 0),
+        ("input-commitment-one", 1),
+        ("input-commitment-poseidon2-zero-one", POSEIDON2_0_1),
+    ]:
         try:
             token_input(kid_a, c)
             raise AssertionError(vid)

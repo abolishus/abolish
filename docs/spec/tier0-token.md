@@ -76,7 +76,7 @@ The client chooses its identity first, and binds its commitment `C` ([[membershi
 input = H(DS("abolish/v1/tier0-token/input", u8(TOKEN_VERSION) ‖ key_id ‖ field<bn254>(C)))
 ```
 
-`C` MUST be below `r` (`non-canonical` otherwise) and MUST NOT be forbidden ([[membership]]); the client checks both before it blinds. Binding `C` means a token registers only that commitment: anyone who sees a redemption in transit (T-11) can't register another commitment with it, and a token redeemed twice registers the same commitment twice, which the queue already treats as one ([[registration]], Answers, step 8), so the service keeps no set of spent tokens.
+`C` MUST be below `r` (`non-canonical` otherwise) and MUST NOT be forbidden ([[membership]]; `forbidden-commitment` otherwise); the client checks both before it blinds. Binding `C` means a token registers only that commitment: anyone who sees a redemption in transit (T-11) can't register another commitment with it, and a token redeemed twice registers the same commitment twice, which the queue already treats as one ([[registration]], Answers, step 8), so the service keeps no set of spent tokens.
 
 ## Issuance
 
@@ -126,6 +126,7 @@ The codes the checks above use, which the vectors label:
 | Code                   | Where                                                                                                      |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `non-canonical`        | Token input: `C` isn't below `r`.                                                                          |
+| `forbidden-commitment` | Token input: `C` is forbidden ([[membership]]).                                                            |
 | `tweaked-key-identity` | Issuance, step 1: `T` is the identity.                                                                     |
 | `account`              | Issuance, step 2.1: the account may not take a token.                                                      |
 | `key-not-issuing`      | Issuance, step 2.2: the key named doesn't issue now and the request isn't a retry.                         |
@@ -142,7 +143,7 @@ The codes the checks above use, which the vectors label:
 
 ## Test vectors
 
-`docs/spec/vectors/tier0-token.json` ([[vectors/README|vectors]], Tier 0 token vectors) covers key identifiers, group info, token inputs, issuances end to end, the client's `Finalize` checks, the issuer's decoding of `B`, key periods and redemptions, from an independent Python implementation (`packages/crypto/scripts/tier0-token-vectors.py`) checked against RFC 9497 Appendix A.1.3; `packages/crypto` also checks the file against `@noble/curves`' RFC 9497 implementation.
+`docs/spec/vectors/tier0-token.json` ([[vectors/README|vectors]], Tier 0 token vectors) covers key identifiers, group info, token inputs, issuances end to end, the client's `Finalize` checks, the issuer's decoding of `B`, key periods and redemptions, from an independent Python implementation (`packages/crypto/scripts/tier0-token-vectors.py`) checked against RFC 9497 Appendix A.1.3; `packages/crypto`'s own token code (`src/tier0-token.ts`) is checked against the file and against Appendix A.1.3 itself.
 
 ## Security notes
 

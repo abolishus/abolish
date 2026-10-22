@@ -463,6 +463,37 @@ export {
   tierTreeRoot,
   tierTreeZeros,
 } from "./tier-tree.ts";
+// Not exported: `tier0TokenBlindWith` and `tier0TokenBlindEvaluateWith`, the
+// test seams that take their randomness, so production code can't reuse a
+// blind or a proof's nonce.
+export {
+  decodeTier0TokenBlindedElement,
+  generateTier0TokenKeyPair,
+  type Tier0TokenBlinding,
+  tier0TokenBlind,
+  tier0TokenBlindedFrom,
+  tier0TokenBlindEvaluate,
+  Tier0TokenError,
+  type Tier0TokenErrorCode,
+  type Tier0TokenEvaluation,
+  tier0TokenEvaluate,
+  tier0TokenFinalize,
+  type Tier0TokenFinalization,
+  type Tier0TokenGroup,
+  tier0TokenInfo,
+  tier0TokenInput,
+  tier0TokenKeyId,
+  tier0TokenKeyIssues,
+  type Tier0TokenKeyPair,
+  tier0TokenKeyPeriod,
+  tier0TokenKeyRedeems,
+  tier0TokenMatches,
+  tier0TokenPublicKey,
+  TOKEN_KEY_PERIOD,
+  TOKEN_LEN,
+  TOKEN_REDEEM_DELAY,
+  TOKEN_VERSION,
+} from "./tier0-token.ts";
 export { PARAMETERS } from "./parameters.ts";
 export {
   checkElectionRecordToShow,

@@ -29,6 +29,8 @@ import {
   readModerationLog,
   readPollTags,
   readProfileModerationLog,
+  readPublicModerationLog,
+  MAX_MODERATION_PAGE,
   type RefileDecision,
   REFILE_REASONS,
   refilePoll,
@@ -633,15 +635,18 @@ describe("refiling", () => {
           let model: PollTags | undefined =
             author.topic === undefined && author.place === undefined ? undefined : author;
           const want: Record<string, unknown>[] = [];
+          const published: Record<string, unknown>[] = [];
           for (const [tags, reason] of refilings) {
             const topicSet = model === undefined || tags.topic !== model.topic;
             const placeSet = model === undefined || tags.place !== model.place;
             const result = await refilePoll(app, id, { tags, reason, moderator: "mod-1" }).then(
-              () => "ok",
+              ({ seq }) => seq,
               (e: unknown) => (e as ModerationError).code,
             );
-            expect(result).toBe(topicSet || placeSet ? "ok" : "no-change");
-            if (!topicSet && !placeSet) continue;
+            expect(typeof result === "bigint" ? "ok" : result).toBe(
+              topicSet || placeSet ? "ok" : "no-change",
+            );
+            if (typeof result !== "bigint") continue;
             model = tags;
             want.push({
               topic_set: topicSet,
@@ -651,8 +656,25 @@ describe("refiling", () => {
               reason,
               moderator: "mod-1",
             });
+            published.push({
+              target: "refiling",
+              seq: result,
+              electionId: id,
+              reason,
+              decidedAt: expect.any(Date),
+              ...(topicSet ? { topic: tags.topic ?? null } : {}),
+              ...(placeSet ? { place: tags.place === undefined ? "cleared" : "changed" } : {}),
+            });
           }
           expect(await logged(id)).toEqual(want);
+          // The public log says what each refiling changed, never a place.
+          const first = published[0]?.["seq"] as bigint | undefined;
+          if (first !== undefined) {
+            const log = await readPublicModerationLog(app, first - 1n, MAX_MODERATION_PAGE);
+            expect(
+              log.filter((e) => e.target === "refiling" && hex(e.electionId) === hex(id)),
+            ).toEqual(published);
+          }
           const view = await readPollTags(app, id);
           expect(view).toEqual({ state: "visible", tags: model ?? {} });
         },
@@ -662,6 +684,123 @@ describe("refiling", () => {
     // Fifty runs of up to seven database writes each can outlast the default
     // timeout on a CI runner shared with the other test files.
   }, 60_000);
+});
+
+describe("the public log", () => {
+  test("shows each refiling in its place among decisions, with its topic and what it did to the place, never the place or the moderator", async () => {
+    const place = `14 Elm Street ${hex(randomBytes(4))}`;
+    const id = await poll({ topic: "food", place });
+    const a = await moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    const b = await refilePoll(app, id, {
+      tags: { topic: "housing", place: `Ward ${hex(randomBytes(4))}` },
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    const c = await refilePoll(app, id, {
+      tags: { topic: "housing" },
+      reason: "personal-data",
+      moderator: "mod-2",
+    });
+    const d = await refilePoll(app, id, { tags: {}, reason: "misfiled", moderator: "mod-2" });
+    const e = await moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" });
+    const log = await readPublicModerationLog(app, a.seq - 1n, MAX_MODERATION_PAGE);
+    const at = (seq: bigint) => log.find((x) => x.seq === seq)?.decidedAt;
+    expect(log.map((x) => x.seq)).toEqual([a.seq, b.seq, c.seq, d.seq, e.seq]);
+    expect(log.slice(1, 4)).toEqual([
+      {
+        target: "refiling",
+        seq: b.seq,
+        electionId: id,
+        reason: "misfiled",
+        decidedAt: at(b.seq),
+        topic: "housing",
+        place: "changed",
+      },
+      {
+        target: "refiling",
+        seq: c.seq,
+        electionId: id,
+        reason: "personal-data",
+        decidedAt: at(c.seq),
+        place: "cleared",
+      },
+      {
+        target: "refiling",
+        seq: d.seq,
+        electionId: id,
+        reason: "misfiled",
+        decidedAt: at(d.seq),
+        topic: null,
+      },
+    ]);
+    expect(log[0]?.target).toBe("poll");
+    const served = JSON.stringify(log, (_, v: unknown) =>
+      typeof v === "bigint" ? v.toString() : v,
+    );
+    expect(served).not.toContain("Elm Street");
+    expect(served).not.toContain("Ward");
+    expect(served).not.toContain("mod-");
+    // A page holds `limit` entries of every kind.
+    expect((await readPublicModerationLog(app, a.seq, 2)).map((x) => x.seq)).toEqual([
+      b.seq,
+      c.seq,
+    ]);
+    expect((await readPublicModerationLog(app, c.seq, 1)).map((x) => x.seq)).toEqual([d.seq]);
+  });
+
+  test("leaves out a topic written past refilePoll, rather than failing every page that holds it", async () => {
+    const id = await poll({ topic: "food" });
+    const [row] = await app<{ seq: string }[]>`
+      INSERT INTO poll_tag_actions (seq, election_id, topic_set, topic, place_set, reason, moderator, decided_at)
+      VALUES (0, ${id}, true, 'weather', false, 'misfiled', 'mod-1', now()) RETURNING seq`;
+    await app`UPDATE poll_tags SET topic = 'weather' WHERE election_id = ${id}`;
+    const seq = BigInt(row!.seq);
+    const [entry] = await readPublicModerationLog(app, seq - 1n, 1);
+    expect(entry).toEqual({
+      target: "refiling",
+      seq,
+      electionId: id,
+      reason: "misfiled",
+      decidedAt: entry!.decidedAt,
+    });
+    expect(await readPollTags(app, id)).toEqual({ state: "visible", tags: {} });
+  });
+
+  test("paging the whole log at any page size returns every decision and refiling once, in order (fast-check)", async () => {
+    const id = await poll({ topic: "food" });
+    const steps = [
+      () => moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" }),
+      () =>
+        refilePoll(app, id, { tags: { topic: "sport" }, reason: "misfiled", moderator: "mod-1" }),
+      () => moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" }),
+      () =>
+        refilePoll(app, id, {
+          tags: { place: "Mill Lane" },
+          reason: "misfiled",
+          moderator: "mod-2",
+        }),
+      () => refilePoll(app, id, { tags: {}, reason: "personal-data", moderator: "mod-2" }),
+      () => moderate(app, id, { action: "hide", reason: "threat", moderator: "mod-2" }),
+    ];
+    const written: bigint[] = [];
+    for (const step of steps) written.push((await step()).seq);
+    const start = written[0]! - 1n;
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 7 }), async (limit) => {
+        const seen: bigint[] = [];
+        let after = start;
+        for (;;) {
+          const page = await readPublicModerationLog(app, after, limit);
+          expect(page.length).toBeLessThanOrEqual(limit);
+          seen.push(...page.map((e) => e.seq));
+          if (page.length < limit) break;
+          after = page.at(-1)!.seq;
+        }
+        expect(seen.filter((s) => s <= written.at(-1)!)).toEqual(written);
+      }),
+      { numRuns: Math.min(numRuns, 30) },
+    );
+  });
 });
 
 describe("a poll's tags, as its page reads them", () => {

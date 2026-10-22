@@ -253,17 +253,32 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
         typeof after === "string" ? bigintArg(after, 0n, "--after") : 0n,
         limit,
       );
-      // The whole public log, polls' and profiles' decisions in one
-      // numbering, as GET /moderation/log serves it: no moderator, and a
-      // profile by its handle, never its name or account.
-      for (const e of entries)
-        io.out({
-          seq: String(e.seq),
-          ...(e.target === "poll" ? { electionId: hex(e.electionId) } : { handle: e.handle }),
-          action: e.action,
-          reason: e.reason,
-          decidedAt: e.decidedAt.toISOString(),
-        });
+      // The whole public log, polls' decisions, refilings and profiles'
+      // decisions in one numbering, as GET /moderation/log serves it: no
+      // moderator, a profile by its handle, never its name or account, and a
+      // refiling's place only as changed or cleared, never its words (T-17).
+      for (const e of entries) {
+        const common = { seq: String(e.seq) };
+        const when = { reason: e.reason, decidedAt: e.decidedAt.toISOString() };
+        switch (e.target) {
+          case "poll":
+            io.out({ ...common, electionId: hex(e.electionId), action: e.action, ...when });
+            break;
+          case "refiling":
+            io.out({
+              ...common,
+              electionId: hex(e.electionId),
+              action: "refile",
+              ...when,
+              ...(e.topic === undefined ? {} : { topic: e.topic }),
+              ...(e.place === undefined ? {} : { place: e.place }),
+            });
+            break;
+          case "profile":
+            io.out({ ...common, handle: e.handle, action: e.action, ...when });
+            break;
+        }
+      }
       const last = entries.at(-1);
       if (entries.length === limit && last !== undefined) io.out({ next: String(last.seq) });
     },

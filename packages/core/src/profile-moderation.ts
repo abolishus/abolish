@@ -42,6 +42,7 @@ import {
   RESTORE_REASONS,
   type RestoreReason,
 } from "./moderation.ts";
+import { type PublicRefilingEntry, refilingLogOf } from "./poll-tags.ts";
 import { PROFILE_HANDLE } from "./profiles.ts";
 import { MAX_REPORT_QUEUE } from "./reports.ts";
 
@@ -279,18 +280,24 @@ async function profileModerationLogOf(
   }));
 }
 
-/** One entry of the whole public log: a decision about a poll or about a profile. */
+/**
+ * One entry of the whole public log: a decision about a poll, a refiling of
+ * one, or a decision about a profile.
+ */
 export type PublicLogEntry =
   | ({ readonly target: "poll" } & PublicModerationEntry)
+  | ({ readonly target: "refiling" } & PublicRefilingEntry)
   | ({ readonly target: "profile" } & PublicProfileModerationEntry);
 
 /**
- * Up to `limit` decisions about polls and profiles with a sequence number
- * above `after`, oldest first: the whole public log, as `GET /moderation/log`
- * serves it (docs/moderation-policy.md, Profiles). Both halves are read from
- * one snapshot, so a decision committed between the two reads can't land on
- * this page while an earlier-numbered one waits for the next, which `after`
- * would then skip (T-68). Neither half names a moderator or an account.
+ * Up to `limit` decisions about polls and profiles, and refilings, with a
+ * sequence number above `after`, oldest first: the whole public log, as
+ * `GET /moderation/log` serves it (docs/moderation-policy.md, Profiles and
+ * Refiling). Its three tables are read from one snapshot, so a decision
+ * committed between two reads can't land on this page while an
+ * earlier-numbered one waits for the next, which `after` would then skip
+ * (T-68). None names a moderator or an account, and no entry carries a
+ * place's words (T-17).
  */
 export async function readPublicModerationLog(
   client: Sql,
@@ -300,15 +307,17 @@ export async function readPublicModerationLog(
   if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
     throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
-  const [polls, profiles] = await drizzle({ client }).transaction(
+  const [polls, refilings, profiles] = await drizzle({ client }).transaction(
     async (tx) => [
       await moderationLogOf(tx, after, limit),
+      await refilingLogOf(tx, after, limit),
       await profileModerationLogOf(tx, after, limit),
     ],
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
   const entries: PublicLogEntry[] = [
     ...polls.map((e) => ({ target: "poll" as const, ...e })),
+    ...refilings.map((e) => ({ target: "refiling" as const, ...e })),
     ...profiles.map((e) => ({ target: "profile" as const, ...e })),
   ];
   // Every number comes from one sequence, so no two entries share one.

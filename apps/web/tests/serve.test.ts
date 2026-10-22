@@ -1028,6 +1028,25 @@ describe("failures", () => {
     for (const request of started) expect(request.headers.get("cookie")).toBeNull();
   });
 
+  test("the offline shell's page and worker reach Start without the cookie, logged as the shell's (P2-28 part 1b)", async () => {
+    started.length = 0;
+    logged.length = 0;
+    await raw("/offline", { headers: { cookie: `${SESSION}=tok` } });
+    await raw("/sw.js", { method: "HEAD", headers: { cookie: `${SESSION}=tok` } });
+    expect(started.map((r) => [new URL(r.url).pathname, r.headers.get("cookie")])).toEqual([
+      ["/offline", null],
+      ["/sw.js", null],
+    ]);
+    expect(logged.map((l) => ("route" in l ? l.route : l.error))).toEqual(["offline", "offline"]);
+    // Anything else is a page as before.
+    await raw("/offline/x");
+    await raw("/sw.js", { method: "POST", body: Buffer.from("{}") });
+    expect(logged.slice(2).map((l) => ("route" in l ? l.route : l.error))).toEqual([
+      "page",
+      "page",
+    ]);
+  });
+
   test("the reaction counts never get the account cookie; own and set do", async () => {
     const seen: [string, string | null][] = [];
     const front = createWebServer({
@@ -1147,6 +1166,9 @@ describe("analytics", () => {
     await raw("/assets/index-AbC_12-x.js");
     await raw("/manifest.webmanifest");
     await raw("/icons/icon-192.png");
+    // The offline shell's worker fetches these as it installs (P2-28 part 1b).
+    await raw("/offline");
+    await raw("/sw.js");
     await raw("/auth/get-session");
     await raw("/_serverFn/abc", { method: "POST", body: Buffer.from("{}") });
     await raw("//evil.test/");

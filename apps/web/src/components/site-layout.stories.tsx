@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 
-import { Failed, NotFound, SiteLayout } from "./site-layout.tsx";
+import { Failed, NotFound, Offline, SiteLayout } from "./site-layout.tsx";
 
 const meta = {
   component: SiteLayout,
@@ -63,4 +63,29 @@ export const Error: Story = {
     );
     await expect(canvas.getByRole("button", { name: "Try again" })).toBeEnabled();
   },
+};
+
+const offline: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("You're offline");
+  await expect(canvas.getByText(/keeps only this page and its fonts/)).toBeVisible();
+  // Served with no script, trying again is a link to the address in the bar
+  // (tests/ssr.test.ts has the served page's own, empty, `href`).
+  await expect(canvas.getByRole("link", { name: "Try again" })).toHaveAttribute(
+    "href",
+    "/polls?after=3",
+  );
+  await expect(canvas.queryByRole("button")).toBeNull();
+};
+
+/** What the offline shell shows when a page can't be fetched (src/app/offline.ts). */
+export const OfflinePage: Story = {
+  args: { children: <Offline retry="/polls?after=3" /> },
+  play: offline,
+};
+
+export const OfflineDark: Story = {
+  args: { children: <Offline retry="/polls?after=3" /> },
+  parameters: { theme: "dark" },
+  play: offline,
 };

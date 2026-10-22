@@ -15,10 +15,18 @@
 // and the page loads it only when the author submits or asks for a code
 // (src/account/challenge.ts; T-43, T-55).
 //
-// The other: a poll's embed, `/embed/p/<code>` (P2-24 part 3), which other
+// Another: a poll's embed, `/embed/p/<code>` (P2-24 part 3), which other
 // sites frame (docs/design/sharing.md, The embed decision). It is the only
 // page any site may frame, and it has no script at all, so its policy has no
 // `script-src` and sandboxes the document whatever the host's iframe says.
+//
+// And the offline shell (P2-28 part 1b, src/app/offline.ts): its page has no
+// script either, and its service worker may fetch only from this origin.
+
+import { OFFLINE_PATH, WORKER_PATH } from "./app/offline.ts";
+
+const PERMISSIONS_POLICY =
+  "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()";
 
 /** A fresh nonce for one response's inline scripts: 128 bits from the platform CSPRNG. */
 export function newNonce(): string {
@@ -37,6 +45,11 @@ export const CHALLENGE_ORIGIN = "https://challenges.cloudflare.com";
  */
 export function isChallengePage(pathname: string): boolean {
   return pathname === "/account/verify" || /^\/account\/polls\/[a-z0-9]+$/.test(pathname);
+}
+
+/** Whether `pathname` is the offline shell's page or its worker (src/app/offline.ts). */
+export function isOfflineShell(pathname: string): boolean {
+  return pathname === OFFLINE_PATH || pathname === WORKER_PATH;
 }
 
 /** Whether `pathname` is a poll's embed, `/embed/p/<code>`, and so frameable. */
@@ -68,6 +81,9 @@ export function contentSecurityPolicy(
     // Server functions are fetched from our own origin; nothing else is.
     "connect-src 'self'",
     "manifest-src 'self'",
+    // The offline shell's worker, `/sw.js`, and nothing else: no other path
+    // here answers with a script but our own hashed bundles (T-43).
+    "worker-src 'self'",
     "base-uri 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'",
@@ -91,8 +107,7 @@ export function securityHeaders(
     "cache-control": "no-store",
     // Ignored over plain HTTP; the proxy in front (P2-11) terminates TLS.
     "strict-transport-security": "max-age=31536000",
-    "permissions-policy":
-      "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()",
+    "permissions-policy": PERMISSIONS_POLICY,
   };
 }
 
@@ -160,7 +175,51 @@ export function embedHeaders(): Readonly<Record<string, string>> {
     "cross-origin-resource-policy": "cross-origin",
     "cache-control": "public, max-age=60",
     "strict-transport-security": "max-age=31536000",
-    "permissions-policy":
-      "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()",
+    "permissions-policy": PERMISSIONS_POLICY,
+  };
+}
+
+/**
+ * The headers on the offline page (src/app/offline.ts). It has no script, so
+ * its policy has no `script-src`; it loads only our stylesheet, fonts and
+ * icon, posts nowhere and may not be framed. Every visitor gets the same
+ * bytes, but the worker keeps its own copy, so no HTTP cache needs one.
+ */
+export function offlineHeaders(): Readonly<Record<string, string>> {
+  return {
+    "content-security-policy": [
+      "default-src 'none'",
+      "style-src 'self'",
+      "font-src 'self'",
+      "img-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
+    "cache-control": "no-store",
+    "strict-transport-security": "max-age=31536000",
+    "permissions-policy": PERMISSIONS_POLICY,
+  };
+}
+
+/**
+ * The headers on the offline shell's service worker, `/sw.js`. A worker's
+ * policy is its own response's, not the page's: it may fetch from this
+ * origin alone (the pages it passes on, the files it keeps) and load no
+ * other script. `no-cache` with the page's `updateViaCache: "none"` means a
+ * browser asks for it afresh whenever it checks for a new one (T-43).
+ */
+export function workerHeaders(): Readonly<Record<string, string>> {
+  return {
+    "content-security-policy": "default-src 'none'; connect-src 'self'",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cross-origin-resource-policy": "same-origin",
+    "cache-control": "no-cache",
+    "strict-transport-security": "max-age=31536000",
   };
 }

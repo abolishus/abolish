@@ -14,6 +14,8 @@ import { Route as AccountRouteImport } from "./routes/account.tsx";
 import { Route as DiscoverRouteImport } from "./routes/discover.tsx";
 import { Route as HowItWorksRouteImport } from "./routes/how-it-works.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
+import { Route as OfflineRouteImport } from "./routes/offline.tsx";
+import { Route as SwDotjsRouteImport } from "./routes/sw[.]js.ts";
 import { Route as AccountVerifyRouteImport } from "./routes/account_.verify.tsx";
 import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
@@ -48,6 +50,16 @@ const HowItWorksRoute = HowItWorksRouteImport.update({
 const ModerationRoute = ModerationRouteImport.update({
   id: "/moderation",
   path: "/moderation",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const OfflineRoute = OfflineRouteImport.update({
+  id: "/offline",
+  path: "/offline",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SwDotjsRoute = SwDotjsRouteImport.update({
+  id: "/sw.js",
+  path: "/sw.js",
   getParentRoute: () => rootRouteImport,
 } as any);
 const AccountVerifyRoute = AccountVerifyRouteImport.update({
@@ -107,6 +119,8 @@ export interface FileRoutesByFullPath {
   "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
+  "/offline": typeof OfflineRoute;
+  "/sw.js": typeof SwDotjsRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -124,6 +138,8 @@ export interface FileRoutesByTo {
   "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
+  "/offline": typeof OfflineRoute;
+  "/sw.js": typeof SwDotjsRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -142,6 +158,8 @@ export interface FileRoutesById {
   "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
+  "/offline": typeof OfflineRoute;
+  "/sw.js": typeof SwDotjsRoute;
   "/account_/verify": typeof AccountVerifyRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -161,6 +179,8 @@ export interface FileRouteTypes {
     | "/discover"
     | "/how-it-works"
     | "/moderation"
+    | "/offline"
+    | "/sw.js"
     | "/account/verify"
     | "/p/$code"
     | "/polls/$electionId"
@@ -178,6 +198,8 @@ export interface FileRouteTypes {
     | "/discover"
     | "/how-it-works"
     | "/moderation"
+    | "/offline"
+    | "/sw.js"
     | "/account/verify"
     | "/p/$code"
     | "/polls/$electionId"
@@ -195,6 +217,8 @@ export interface FileRouteTypes {
     | "/discover"
     | "/how-it-works"
     | "/moderation"
+    | "/offline"
+    | "/sw.js"
     | "/account_/verify"
     | "/p/$code"
     | "/polls/$electionId"
@@ -213,6 +237,8 @@ export interface RootRouteChildren {
   DiscoverRoute: typeof DiscoverRoute;
   HowItWorksRoute: typeof HowItWorksRoute;
   ModerationRoute: typeof ModerationRoute;
+  OfflineRoute: typeof OfflineRoute;
+  SwDotjsRoute: typeof SwDotjsRoute;
   AccountVerifyRoute: typeof AccountVerifyRoute;
   PCodeRoute: typeof PCodeRoute;
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
@@ -259,6 +285,20 @@ declare module "@tanstack/react-router" {
       path: "/moderation";
       fullPath: "/moderation";
       preLoaderRoute: typeof ModerationRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/offline": {
+      id: "/offline";
+      path: "/offline";
+      fullPath: "/offline";
+      preLoaderRoute: typeof OfflineRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/sw.js": {
+      id: "/sw.js";
+      path: "/sw.js";
+      fullPath: "/sw.js";
+      preLoaderRoute: typeof SwDotjsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/account_/verify": {
@@ -352,6 +392,8 @@ const rootRouteChildren: RootRouteChildren = {
   DiscoverRoute: DiscoverRoute,
   HowItWorksRoute: HowItWorksRoute,
   ModerationRoute: ModerationRoute,
+  OfflineRoute: OfflineRoute,
+  SwDotjsRoute: SwDotjsRoute,
   AccountVerifyRoute: AccountVerifyRoute,
   PCodeRoute: PCodeRoute,
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,

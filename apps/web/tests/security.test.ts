@@ -5,8 +5,11 @@ import {
   isEmbedPage,
   contentSecurityPolicy,
   isChallengePage,
+  isOfflineShell,
   newNonce,
+  offlineHeaders,
   securityHeaders,
+  workerHeaders,
 } from "../src/security.ts";
 
 function directives(csp: string): Map<string, string> {
@@ -52,6 +55,10 @@ describe("content security policy", () => {
 
   test("connects to our own origin only (T-10, T-67)", () => {
     expect(csp.get("connect-src")).toBe("'self'");
+  });
+
+  test("starts workers from our own origin only: the offline shell's (T-43)", () => {
+    expect(csp.get("worker-src")).toBe("'self'");
   });
 
   test.each(["", "abc", "'none'; script-src *", `${nonce} `, `${nonce}'`])(
@@ -166,5 +173,41 @@ describe("embed pages", () => {
   test.each(["/embed", "/embed/p", "/embed/p/", "/embed/p/a/b", "/x/embed/p/a", "/p/3j55dw1"])(
     "%s isn't",
     (path) => expect(isEmbedPage(path)).toBe(false),
+  );
+});
+
+describe("the offline shell's headers (P2-28 part 1b)", () => {
+  test("the offline page runs no script, posts nowhere and can't be framed (T-43)", () => {
+    const headers = offlineHeaders();
+    const csp = directives(headers["content-security-policy"]!);
+    expect(csp.get("default-src")).toBe("'none'");
+    expect(csp.has("script-src")).toBe(false);
+    expect(csp.has("connect-src")).toBe(false);
+    expect(csp.get("form-action")).toBe("'none'");
+    expect(csp.get("frame-ancestors")).toBe("'none'");
+    for (const name of ["style-src", "font-src", "img-src"]) expect(csp.get(name)).toBe("'self'");
+    expect(headers["referrer-policy"]).toBe("no-referrer");
+    expect(headers["cross-origin-resource-policy"]).toBe("same-origin");
+  });
+
+  test("the worker fetches from our own origin only and is always asked for afresh", () => {
+    const headers = workerHeaders();
+    expect(directives(headers["content-security-policy"]!)).toEqual(
+      new Map([
+        ["default-src", "'none'"],
+        ["connect-src", "'self'"],
+      ]),
+    );
+    expect(headers["cache-control"]).toBe("no-cache");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  test.each(["/offline", "/sw.js"])("%s is the shell", (path) =>
+    expect(isOfflineShell(path)).toBe(true),
+  );
+
+  test.each(["/offline/", "/Offline", "/sw.js/", "/x/sw.js", "/assets/sw.js", "/sw.json", "/"])(
+    "%s isn't",
+    (path) => expect(isOfflineShell(path)).toBe(false),
   );
 });

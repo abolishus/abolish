@@ -1,4 +1,4 @@
-import { Button, cn, useTranslate } from "@abolishus/ui";
+import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { ArrowRight, RotateCw } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 
@@ -177,6 +177,30 @@ export function NotFound() {
     <SystemPage code={t("notFoundCode")} title={t("notFoundTitle")}>
       <p className="m-0">{t("notFound")}</p>
       <p className="m-0 text-base">{t("notFoundPoll")}</p>
+    </SystemPage>
+  );
+}
+
+/**
+ * What the offline shell shows when a page can't be fetched (P2-28 part 1b,
+ * src/app/offline.ts). It is served in place of whatever page was asked for,
+ * with no script, so "Try again" is a plain link to the address in the
+ * browser's bar: the empty `retry` the server renders is this document's own
+ * URL. (React's browser renderer drops an empty `href`, so a story passes
+ * an address of its own.)
+ */
+export function Offline({ retry = "" }: { retry?: string }) {
+  const t = useTranslate(catalogs);
+  return (
+    <SystemPage code={t("offlineCode")} title={t("offlineTitle")}>
+      <p className="m-0">{t("offline")}</p>
+      <p className="m-0 text-base">{t("offlineKept")}</p>
+      <div>
+        <a href={retry} className={buttonVariants({ size: "lg" })}>
+          <RotateCw aria-hidden="true" data-icon="inline-start" />
+          {t("offlineRetry")}
+        </a>
+      </div>
     </SystemPage>
   );
 }

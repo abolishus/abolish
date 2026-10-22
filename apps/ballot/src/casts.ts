@@ -24,6 +24,7 @@ import {
   ballotHashV3,
   type BallotRecordV3,
   type CastShare,
+  cellCoreHash,
   decodeBallot,
   decodeShareReceipt,
   MAX_BOARD_PAYLOAD,
@@ -385,6 +386,55 @@ export function storedCasts(casts: readonly CastRecord[]): Record<string, unknow
 /** The newest L1 block any of `casts` names, or `undefined` for none. */
 export function newestBlock(casts: readonly CastRecord[]): bigint | undefined {
   return casts.at(-1)?.l1Number;
+}
+
+/** A recorded cast the board hasn't confirmed, as `unsentCast` finds it. */
+export interface UnsentCast {
+  /** The record's bytes, exactly as recorded: every send of it sends them. */
+  readonly ballot: Uint8Array;
+  /** Its tracking code, the core hash the voter was shown before casting it ([[challenge]], Core and tracking code). */
+  readonly trackingCode: Uint8Array;
+  /** Its qualified seats with no receipt kept, each with its `ct_i`, in seat order. */
+  readonly undelivered: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+}
+
+/**
+ * The newest of `casts` if no checked answer of the board is kept for it,
+ * so a page that went away after recording it (a reload, a crash, a closed
+ * tab) can still deliver its unreceipted seats and send it, with the same
+ * bytes ([[revoting]], Client rule 3; [[delivery]], Client rule 4). Only
+ * the newest: an older one is outranked by it wherever both are boarded, so
+ * sending it could only matter if the newest never went, and then the
+ * newest is the voter's last choice. `undefined` when the newest is
+ * boarded or none is held; `other-election` for a newest cast that isn't
+ * a version-3 record naming `definitionHash`, which the poll's own casts
+ * never are, so nothing is sent from them (T-25, T-45).
+ */
+export function unsentCast(
+  casts: readonly CastRecord[],
+  definitionHash: Uint8Array,
+): UnsentCast | "other-election" | undefined {
+  const newest = casts.at(-1);
+  if (newest === undefined || newest.boarded !== undefined) return undefined;
+  const record = decodedOf(newest.ballot);
+  if (record === undefined || !equalBytes(record.definition_hash, definitionHash))
+    return "other-election";
+  return {
+    ballot: newest.ballot.slice(),
+    trackingCode: cellCoreHash({
+      definitionHash: record.definition_hash,
+      ballotVersion: BALLOT_VERSION,
+      cell: record.cell,
+      vss: record.committed_vote.vss,
+      shareHashes: record.committed_vote.share_hashes,
+    }),
+    // A receipted seat's `m_i` is gone, so it is never delivered or posted
+    // again; every other seat is, with the `ct_i` recorded before the
+    // ballot first left (Client rules 2 and 4).
+    undelivered: newest.shares.flatMap((share) =>
+      "m" in share ? [{ seat: share.seat, ciphertext: share.ciphertext.slice() }] : [],
+    ),
+  };
 }
 
 /**

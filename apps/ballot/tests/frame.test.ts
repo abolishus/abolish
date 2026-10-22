@@ -154,14 +154,25 @@ describe("the frame under the client's CSP", () => {
     const code = "9c1e77a04b2d3f60e8a5c1d27b9043fe6a18c5d2e7f04b3a96c8d1e2f3a4b5c6";
     const none = () => {};
     for (const html of [
+      render(createElement(Working, { poll: POLL, kind: "resuming" })),
       render(createElement(Working, { poll: POLL, kind: "finding" })),
       render(createElement(Working, { poll: POLL, kind: "sealing" })),
       render(createElement(Working, { poll: POLL, kind: "opening" })),
       render(createElement(Working, { poll: POLL, kind: "delivering" })),
       render(createElement(Working, { poll: POLL, kind: "sending" })),
-      ...(["undelivered", "busy", "unavailable", "unreachable", "unconfirmed"] as const).map(
-        (reason) =>
-          render(createElement(Unsent, { poll: POLL, trackingCode: code, reason, onSend: none })),
+      ...(
+        ["earlier", "undelivered", "busy", "unavailable", "unreachable", "unconfirmed"] as const
+      ).map((reason) =>
+        render(createElement(Unsent, { poll: POLL, trackingCode: code, reason, onSend: none })),
+      ),
+      render(
+        createElement(Unsent, {
+          poll: POLL,
+          trackingCode: code,
+          reason: "earlier",
+          onSend: none,
+          onAgain: none,
+        }),
       ),
       render(createElement(Sent, { poll: POLL, trackingCode: code, index: 41n, onAgain: none })),
       render(createElement(Sent, { poll: POLL, trackingCode: code, onAgain: none })),

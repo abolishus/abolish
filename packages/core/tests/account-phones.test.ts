@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   accountPhoneCodes,
   accountPhoneHolds,
+  accountPhoneKeyChecks,
   accountPhoneRecipients,
   accountPhones,
   accountPhoneSends,
@@ -206,6 +207,7 @@ describe("schema", () => {
       accountPhoneCodes,
       accountPhoneSends,
       accountPhoneRecipients,
+      accountPhoneKeyChecks,
     ]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
@@ -950,5 +952,41 @@ describe("rotatePhoneHashes", () => {
     expect(await phoneOf(a)).toEqual({ phone_hash: first(n), hash_key: "r1" });
     expect(await phoneOf(c)).toEqual({ phone_hash: mac(R2, first(m)), hash_key: "r2" });
     await db.admin`DELETE FROM account_users WHERE id IN (${a}, ${b})`;
+  });
+
+  test("a key's check value is the HMAC of its label, as stored for good", async () => {
+    await rotatePhoneHashes(app, parseKeyring(`kp:${"00".repeat(31)}03`));
+    const [row] = await db.admin`
+      SELECT encode(key_check, 'hex') AS c FROM account_phone_key_checks WHERE key_id = 'kp'`;
+    // Pinned: a change to the label or the construction would refuse every
+    // rotation under keys already in use.
+    expect(row!["c"]).toBe("cca577666eed0346d8ea86858d996d05ec691e36d2131f2fa39ab8f1d38b2cc8");
+  });
+
+  test("an instance with the new key only staged keeps holding and capping numbers through a rotation", async () => {
+    for (let i = 0; i < 10; i++) {
+      const [n, c] = [fresh(), fresh()];
+      const a = await newAccount();
+      await verified(a, n, { keys: ONE });
+      for (let j = 1; j < MAX_SENDS_PER_NUMBER; j++)
+        await ask(await newAccount(), c, { keys: ONE });
+      const p = provider();
+      const b = await newAccount();
+      await ask(b, n, { keys: ONE_STAGED, p });
+      const q = provider();
+      const [rotation, answer, last] = await Promise.allSettled([
+        rotatePhoneHashes(app2, TWO),
+        enter(b, n, CODE, { keys: ONE_STAGED, p, client: app }),
+        ask(await newAccount(), c, { keys: ONE_STAGED, p: q }),
+      ]);
+      expect(rotation.status).toBe("fulfilled");
+      expect(answer.status === "rejected" && answer.reason.code).toBe("number-held");
+      expect(last.status).toBe("fulfilled");
+      // The cap's last code went; the next is held back, whichever chain the rows are under.
+      expect(q.started).toHaveLength(1);
+      const r = provider();
+      await ask(await newAccount(), c, { keys: ONE_STAGED, p: r });
+      expect(r.started).toHaveLength(0);
+    }
   });
 });

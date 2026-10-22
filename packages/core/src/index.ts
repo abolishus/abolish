@@ -189,6 +189,7 @@ export {
   EMAIL_CODE_DIGITS,
   EMAIL_CODE_SECONDS,
   EMAIL_CODE_TRIES,
+  type EmailKeyRotation,
   type EmailKeys,
   emailKeys,
   type EmailMessage,
@@ -206,6 +207,7 @@ export {
   renderEmail,
   requestEmailCode,
   type RequestEmailCodeOptions,
+  rotateEmailKeys,
   verifyEmailCode,
 } from "./account-emails.ts";
 export {

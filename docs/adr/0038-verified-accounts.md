@@ -146,3 +146,11 @@ The phone-hash rotation, as built; none changes a decision.
 - **A row under a key the keyring lacks** is left alone and logged by kind (`PhoneHashKeyMissing`), since it means a dropped or mistyped key, which only putting the key back fixes.
 - **A check value per key.** A rotation is one way, so a key's bytes changed under its ID would leave every rotated chain matching no number. The first instance to hold a key stores `HMAC(key, "abolish/phone/keycheck/v1")` for its ID, and an instance whose keys don't all reproduce their checks rotates nothing (`PhoneHashKeyMismatch`). The check reveals nothing about a 256-bit key.
 - **Two accounts on one number** (only possible after an instance ran without a key) leave that number's older row unrotated and logged (`PhoneHashConflict`), rather than failing the run.
+
+## Amendment (P2-31 part 3d, 2026-10-22)
+
+The e-mail keyrings' rotation, as built; none changes a decision.
+
+- **Re-hashed and re-sealed on the same timer.** Each website instance rewrites every verified address under the current hash and box keys, and re-seals every waiting code's address, so an old e-mail key leaves its keyring once nothing is under it, as option B said. Rows under a key listed after the current one are left alone, so an instance on an older configuration never rewrites a newer one's rows back.
+- **What can't be rewritten**: a waiting code's hash (the code isn't kept), for its 15 minutes, and the per-address send counts (not keyed), for their day. So an old hash key is retired no sooner than a day after it stopped being current ([[account-keys]]).
+- **A check value per e-mail key**, as per phone key (part 3c), in its own table keyed by keyring and ID, so a key retyped under its ID stops the rotation instead of rewriting every address under bytes other instances lack.

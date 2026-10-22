@@ -38,11 +38,12 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { domainToASCII } from "node:url";
-import { and, eq, gt, inArray, lt, ne, sql as q } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, ne, notInArray, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import {
   accountEmailCodes,
+  accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
   accountEmailSends,
@@ -233,7 +234,7 @@ function seal(keys: EmailKeys, accountId: string, address: string): Uint8Array {
 
 function unseal(keys: EmailKeys, accountId: string, box: Uint8Array, keyId: string): string {
   const key = keys.box.get(keyId);
-  // The rotation job drops a key only once no row is under it.
+  // A key is retired only once no row is under it (the account-keys runbook).
   if (key === undefined) throw new Error(`email box key ${keyId} is not in the keyring`);
   const decipher = createDecipheriv("aes-256-gcm", key, box.subarray(0, 12));
   decipher.setAAD(boundTo(BOX_LABEL, accountId));
@@ -452,7 +453,7 @@ export async function verifyEmailCode(
       return { ok: false, code: "expired" };
     }
     const codeKey = keys.hash.get(waiting.codeKey);
-    // The rotation job drops a key only once nothing is under it.
+    // A key is retired only once nothing is under it (the account-keys runbook).
     if (codeKey === undefined)
       throw new Error(`email hash key ${waiting.codeKey} is not in the keyring`);
     const right =
@@ -532,4 +533,210 @@ export async function pruneAccountEmails(
     .where(lt(accountEmailRecipients.sentAt, new Date(hourOf(now).getTime() - DAY)))
     .returning({ id: accountEmailRecipients.id });
   return { codes: codes.length, sends: sends.length, recipients: recipients.length };
+}
+
+/** Rows a rotation reads at a time. */
+const ROTATION_BATCH = 500;
+
+const HASH_CHECK_LABEL = new TextEncoder().encode("abolish/email/keycheck/v1");
+const BOX_CHECK_LABEL = new TextEncoder().encode("abolish/email-box/keycheck/v1");
+
+/** What `rotateEmailKeys` did. */
+export interface EmailKeyRotation {
+  /** Verified addresses and waiting codes rewritten under the current keys. */
+  readonly rotated: number;
+  /**
+   * Rows under a key the keyrings don't hold, left as they are: the keyring
+   * dropped a key still in use, or another instance's holds one this one
+   * lacks. This instance can't match or open them.
+   */
+  readonly unknownKeys: number;
+  /**
+   * Verified addresses left as they are: another account's row already holds
+   * the address under the current key (two accounts on one address), or the
+   * box didn't open under the key its row names.
+   */
+  readonly skipped: number;
+  /** Keys whose bytes don't reproduce the check stored for their ID: nothing was rotated. */
+  readonly mismatchedKeys: number;
+}
+
+/**
+ * Rewrites every verified address under the keyrings' current keys,
+ * re-hashed and re-sealed, and every waiting code's address re-sealed
+ * ([[0038-verified-accounts]], Email): an address can be read back, unlike a
+ * phone number, so once a rotation has run no row needs an older key, and
+ * the key can leave its keyring for good (T-73). Rows under a key listed
+ * after the current one (staged by a newer instance) are left alone, so an
+ * instance still on an older configuration never rewrites them back.
+ *
+ * A waiting code's hash stays under the hash key it was made with, since the
+ * code itself isn't kept; it lasts `EMAIL_CODE_SECONDS`. The per-address
+ * counts aren't keyed and can't be read back; they last a day.
+ *
+ * Idempotent and safe beside requests, answers and other instances: a
+ * verified address is rewritten under its address's locks, which requests
+ * and answers hold while they check who holds it, and only if its row still
+ * holds what was read; a code's only if it still holds the box read.
+ *
+ * Rotates nothing while any key fails its stored check (`mismatchedKeys`).
+ */
+export async function rotateEmailKeys(client: Sql, keys: EmailKeys): Promise<EmailKeyRotation> {
+  const db = drizzle({ client });
+  const checksOf = (keyring: "hash" | "box", ring: Keyring, label: Uint8Array) =>
+    ring.keys.map(({ id, key }) => ({
+      keyring,
+      keyId: id,
+      keyCheck: createHmac("sha256", key).update(label).digest(),
+    }));
+  const checks = [
+    ...checksOf("hash", keys.hash, HASH_CHECK_LABEL),
+    ...checksOf("box", keys.box, BOX_CHECK_LABEL),
+  ];
+  await db.insert(accountEmailKeyChecks).values(checks).onConflictDoNothing();
+  const stored = new Map(
+    (await db.select().from(accountEmailKeyChecks)).map((row) => [
+      `${row.keyring}:${row.keyId}`,
+      Buffer.from(row.keyCheck),
+    ]),
+  );
+  const mismatchedKeys = checks.filter(
+    (c) => !stored.get(`${c.keyring}:${c.keyId}`)?.equals(c.keyCheck),
+  ).length;
+
+  const ids = (ring: Keyring) => ring.keys.map((k) => k.id);
+  /** The ring's keys up to and including the current one: those a row may be rewritten from. */
+  const upToCurrent = (ring: Keyring) => ids(ring).slice(0, ids(ring).indexOf(ring.current.id) + 1);
+  const hashFrom = upToCurrent(keys.hash);
+  const boxFrom = upToCurrent(keys.box);
+
+  let rotated = 0;
+  let skipped = 0;
+  if (mismatchedKeys === 0) {
+    for (let after: string | undefined; ;) {
+      const rows = await db
+        .select()
+        .from(accountEmails)
+        .where(
+          and(
+            inArray(accountEmails.hashKey, hashFrom),
+            inArray(accountEmails.boxKey, boxFrom),
+            or(
+              ne(accountEmails.hashKey, keys.hash.current.id),
+              ne(accountEmails.boxKey, keys.box.current.id),
+            ),
+            after === undefined ? undefined : gt(accountEmails.userId, after),
+          ),
+        )
+        .orderBy(asc(accountEmails.userId))
+        .limit(ROTATION_BATCH);
+      for (const row of rows) {
+        let address: string;
+        try {
+          address = unseal(keys, row.userId, row.addressBox, row.boxKey);
+        } catch {
+          skipped++;
+          continue;
+        }
+        const outcome = await db.transaction(async (tx) => {
+          // As a request or an answer for the address takes them, so no
+          // account verifies it while its row is between hashes.
+          await lockAddress(tx, keys, address);
+          const addressHash = hashUnder(keys.hash.current.key, address);
+          const [taken] = await tx
+            .select({ userId: accountEmails.userId })
+            .from(accountEmails)
+            .where(
+              and(eq(accountEmails.addressHash, addressHash), ne(accountEmails.userId, row.userId)),
+            );
+          // Two accounts on one address, which only an instance without a
+          // key could have let happen: left for the operator, never sent to
+          // the database to refuse, whose log would carry the hash.
+          if (taken !== undefined) return "skipped";
+          const done = await tx
+            .update(accountEmails)
+            .set({
+              addressHash,
+              hashKey: keys.hash.current.id,
+              addressBox: seal(keys, row.userId, address),
+              boxKey: keys.box.current.id,
+            })
+            .where(
+              and(
+                eq(accountEmails.userId, row.userId),
+                eq(accountEmails.addressHash, row.addressHash),
+                eq(accountEmails.addressBox, row.addressBox),
+              ),
+            )
+            .returning({ userId: accountEmails.userId });
+          return done.length === 1 ? "rotated" : "gone";
+        });
+        if (outcome === "rotated") rotated++;
+        if (outcome === "skipped") skipped++;
+      }
+      if (rows.length < ROTATION_BATCH) break;
+      after = rows[rows.length - 1]!.userId;
+    }
+
+    for (let after: string | undefined; ;) {
+      const rows = await db
+        .select({
+          userId: accountEmailCodes.userId,
+          addressBox: accountEmailCodes.addressBox,
+          boxKey: accountEmailCodes.boxKey,
+        })
+        .from(accountEmailCodes)
+        .where(
+          and(
+            inArray(accountEmailCodes.boxKey, boxFrom),
+            ne(accountEmailCodes.boxKey, keys.box.current.id),
+            after === undefined ? undefined : gt(accountEmailCodes.userId, after),
+          ),
+        )
+        .orderBy(asc(accountEmailCodes.userId))
+        .limit(ROTATION_BATCH);
+      for (const row of rows) {
+        let address: string;
+        try {
+          address = unseal(keys, row.userId, row.addressBox, row.boxKey);
+        } catch {
+          skipped++;
+          continue;
+        }
+        // An answer reads the code under its row lock and changes only its
+        // tries or deletes it, so this waits for it, then finds the box it
+        // read or nothing.
+        const done = await db
+          .update(accountEmailCodes)
+          .set({ addressBox: seal(keys, row.userId, address), boxKey: keys.box.current.id })
+          .where(
+            and(
+              eq(accountEmailCodes.userId, row.userId),
+              eq(accountEmailCodes.addressBox, row.addressBox),
+            ),
+          )
+          .returning({ userId: accountEmailCodes.userId });
+        rotated += done.length;
+      }
+      if (rows.length < ROTATION_BATCH) break;
+      after = rows[rows.length - 1]!.userId;
+    }
+  }
+
+  const unknownKeys =
+    (await db.$count(
+      accountEmails,
+      or(
+        notInArray(accountEmails.hashKey, ids(keys.hash)),
+        notInArray(accountEmails.boxKey, ids(keys.box)),
+      ),
+    )) +
+    (await db.$count(
+      accountEmailCodes,
+      or(
+        notInArray(accountEmailCodes.boxKey, ids(keys.box)),
+        notInArray(accountEmailCodes.codeKey, ids(keys.hash)),
+      ),
+    ));
+  return { rotated, unknownKeys, skipped, mismatchedKeys };
 }

@@ -319,10 +319,11 @@ const drafts = createDraftsHandler({
   turnstile,
   origin,
 });
+const emailVerification = emailService();
 const email = createEmailHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
-  service: emailService(),
+  service: emailVerification,
   turnstile,
   origin,
   log: write,
@@ -346,6 +347,7 @@ const prune = startAccountPrune({
   sql,
   log: write,
   ...(phoneVerification === undefined ? {} : { phoneKeys: phoneVerification.keys }),
+  ...(emailVerification === undefined ? {} : { emailKeys: emailVerification.keys }),
 });
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined

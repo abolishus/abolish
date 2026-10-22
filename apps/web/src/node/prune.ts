@@ -5,19 +5,22 @@
 // expired phone codes, sends and recipients and ended holds, and the dead
 // mark on Tier 0 token records whose key stopped redeeming, so a record
 // keeps no period past its key's window ([[tier0-token]], Issuance, step 3).
-// Where the phone service is configured, it also extends every stored
-// phone-hash chain to the keyring's current key, so a rotation is done within
-// one tick of the deploy that makes a new key current (packages/core,
-// rotatePhoneHashes; docs/runbooks/account-keys.md; T-73).
+// Where each service is configured, it also rewrites what is stored under its
+// keyrings' current keys: every phone-hash chain extended, every e-mail
+// address re-hashed and re-sealed, so a rotation is done within one tick of
+// the deploy that makes a new key current (packages/core, rotatePhoneHashes
+// and rotateEmailKeys; docs/runbooks/account-keys.md; T-73).
 // Every instance runs it; the deletes and rewrites are idempotent, so two at
 // once only repeat each other.
 
 import {
+  type EmailKeys,
   type Keyring,
   markDeadTier0Tokens,
   pruneAccountEmails,
   pruneAccountPhones,
   pruneAccountVerifications,
+  rotateEmailKeys,
   rotatePhoneHashes,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
@@ -31,6 +34,8 @@ export interface AccountPruneOptions {
   readonly log: (line: { readonly error: string }) => void;
   /** The phone-hash keyring, if the phone service is configured: its chains are rotated each run. */
   readonly phoneKeys?: Keyring;
+  /** The e-mail keyrings, if the e-mail service is configured: its rows are rotated each run. */
+  readonly emailKeys?: EmailKeys;
   readonly everyMs?: number;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
@@ -41,6 +46,7 @@ export function startAccountPrune({
   sql,
   log,
   phoneKeys,
+  emailKeys,
   everyMs = PRUNE_EVERY_MS,
   now = () => new Date(),
 }: AccountPruneOptions): { stop(): Promise<void> } {
@@ -71,6 +77,15 @@ export function startAccountPrune({
               if (conflicts > 0) log({ error: "PhoneHashConflict" });
             },
             () => log({ error: "PhoneHashRotationFailed" }),
+          );
+        if (emailKeys !== undefined)
+          await rotateEmailKeys(sql, emailKeys).then(
+            ({ unknownKeys, skipped, mismatchedKeys }) => {
+              if (mismatchedKeys > 0) log({ error: "EmailKeyMismatch" });
+              if (unknownKeys > 0) log({ error: "EmailKeyMissing" });
+              if (skipped > 0) log({ error: "EmailKeyRotationSkipped" });
+            },
+            () => log({ error: "EmailKeyRotationFailed" }),
           );
         await markDeadTier0Tokens(sql, at).catch(() => log({ error: "Tier0TokenDeadMarkFailed" }));
       } catch {

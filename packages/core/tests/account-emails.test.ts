@@ -5,6 +5,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   accountEmailCodes,
+  accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
   accountEmailSends,
@@ -27,6 +28,7 @@ import {
   readAccountEmail,
   renderEmail,
   requestEmailCode,
+  rotateEmailKeys,
   type Turnstile,
   type TurnstileAction,
   type TurnstileVerdict,
@@ -144,6 +146,7 @@ describe("schema", () => {
       accountEmailCodes,
       accountEmailSends,
       accountEmailRecipients,
+      accountEmailKeyChecks,
     ]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
@@ -729,5 +732,127 @@ describe("emailKeys", () => {
     expect(() => emailKeys(parseKeyring(`h:${hex}`), parseKeyring(`b:${hex}`))).toThrow(
       /more than one keyring/,
     );
+  });
+});
+
+describe("rotateEmailKeys", () => {
+  const hex = () => randomBytes(32).toString("hex");
+  const [H1, H2, B1, B2] = [hex(), hex(), hex(), hex()];
+  const keysOf = (hash: string, box: string) => emailKeys(parseKeyring(hash), parseKeyring(box));
+  const OLD = keysOf(`r1:${H1}`, `s1:${B1}`);
+  const STAGED = keysOf(`r1:${H1}*,r2:${H2}`, `s1:${B1}*,s2:${B2}`);
+  const NEW = keysOf(`r1:${H1},r2:${H2}`, `s1:${B1},s2:${B2}`);
+  /** The new keys alone: what is left once the old ones are retired. */
+  const RETIRED = keysOf(`r2:${H2}`, `s2:${B2}`);
+  const rowOf = async (account: string) =>
+    (await db.admin`SELECT hash_key, box_key FROM account_emails WHERE user_id = ${account}`)[0];
+
+  test("re-hashes and re-seals a verified address, so the older keys can be retired", async () => {
+    const [a, address] = [await newAccount(), fresh()];
+    await verified(a, address, OLD);
+    expect(await rowOf(a)).toEqual({ hash_key: "r1", box_key: "s1" });
+    const result = await rotateEmailKeys(app, NEW);
+    expect(result.rotated).toBeGreaterThanOrEqual(1);
+    expect(result.mismatchedKeys).toBe(0);
+    expect(await rowOf(a)).toEqual({ hash_key: "r2", box_key: "s2" });
+    // With only the new keys, the address still reads back and is still held.
+    expect(await readAccountEmail(app, a, RETIRED)).toMatchObject({ address });
+    const b = await newAccount();
+    expect((await ask(b, address.toUpperCase(), { keys: RETIRED })).kind).toBe("email-held");
+    // And a second run has nothing left to do for it.
+    await rotateEmailKeys(app, NEW);
+    expect(await rowOf(a)).toEqual({ hash_key: "r2", box_key: "s2" });
+  });
+
+  test("re-seals a waiting code's address, which still verifies", async () => {
+    const [a, address] = [await newAccount(), fresh()];
+    const sent = await ask(a, address, { keys: OLD });
+    await rotateEmailKeys(app, NEW);
+    expect(
+      await db.admin`SELECT box_key, code_key FROM account_email_codes WHERE user_id = ${a}`,
+    ).toEqual([{ box_key: "s2", code_key: "r1" }]);
+    await verifyEmailCode(app, a, codeOf(sent), { keys: NEW, now: NOW });
+    expect(await readAccountEmail(app, a, RETIRED)).toMatchObject({ address });
+  });
+
+  test("leaves rows under the current keys, and never rewrites a staged key's rows back", async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    await verified(a, fresh(), OLD);
+    await verified(b, fresh(), NEW);
+    await rotateEmailKeys(app, STAGED);
+    expect(await rowOf(a)).toEqual({ hash_key: "r1", box_key: "s1" });
+    expect(await rowOf(b)).toEqual({ hash_key: "r2", box_key: "s2" });
+  });
+
+  test("rotates nothing while a key's bytes differ from those its ID was first seen with", async () => {
+    const [M1, M2, N1, N2] = [hex(), hex(), hex(), hex()];
+    const a = await newAccount();
+    await verified(a, fresh(), keysOf(`m1:${M1}`, `n1:${N1}`));
+    await rotateEmailKeys(app, keysOf(`m1:${M1}*,m2:${M2}`, `n1:${N1}*,n2:${N2}`));
+    const wrong = await rotateEmailKeys(app, keysOf(`m1:${M1},m2:${hex()}`, `n1:${N1},n2:${N2}`));
+    expect(wrong).toMatchObject({ rotated: 0, mismatchedKeys: 1 });
+    expect(await rowOf(a)).toEqual({ hash_key: "m1", box_key: "n1" });
+    const right = await rotateEmailKeys(app, keysOf(`m1:${M1},m2:${M2}`, `n1:${N1},n2:${N2}`));
+    expect(right.mismatchedKeys).toBe(0);
+    expect(await rowOf(a)).toEqual({ hash_key: "m2", box_key: "n2" });
+  });
+
+  test("a key's check value is the HMAC of its label, as stored for good", async () => {
+    const key = "00".repeat(31) + "01";
+    await rotateEmailKeys(app, keysOf(`kh:${key}`, `kb:${"00".repeat(31)}02`));
+    const rows = await db.admin`
+      SELECT keyring, encode(key_check, 'hex') AS c FROM account_email_key_checks
+      WHERE key_id IN ('kh', 'kb') ORDER BY keyring`;
+    // Pinned: a change to the labels or the construction would refuse every
+    // rotation under keys already in use.
+    expect(rows.map((r) => [r["keyring"], r["c"]])).toEqual([
+      ["box", "0d5f143722cf2cd7c50c0d612088859a30027a2e04f46c445522eb4b5502a59b"],
+      ["hash", "c99dc2b86aa8d4be48017fd292357dd3773da99d987ce3e29c79bd4cb8e6499e"],
+    ]);
+  });
+
+  test("leaves rows under keys the keyrings lack, and counts them", async () => {
+    const a = await newAccount();
+    await verified(a, fresh(), KEYS);
+    const result = await rotateEmailKeys(app, NEW);
+    expect(await rowOf(a)).toEqual({ hash_key: "h1", box_key: "b1" });
+    expect(result.unknownKeys).toBeGreaterThanOrEqual(1);
+  });
+
+  test("skips a box that doesn't open, and an address two accounts hold, and rotates the rest", async () => {
+    const [a, b, c] = [await newAccount(), await newAccount(), await newAccount()];
+    const [address, other] = [fresh(), fresh()];
+    await verified(a, address, OLD);
+    await verified(c, other, OLD);
+    // As an instance without r1 could have let happen: b holds the address under r2.
+    await verified(b, address, RETIRED);
+    const unreadable = await newAccount();
+    await verified(unreadable, fresh(), OLD);
+    await db.admin`
+      UPDATE account_emails SET address_box = ${randomBytes(48)} WHERE user_id = ${unreadable}`;
+    const result = await rotateEmailKeys(app, NEW);
+    expect(result.skipped).toBe(2);
+    expect(await rowOf(a)).toEqual({ hash_key: "r1", box_key: "s1" });
+    expect(await rowOf(unreadable)).toEqual({ hash_key: "r1", box_key: "s1" });
+    expect(await rowOf(c)).toEqual({ hash_key: "r2", box_key: "s2" });
+    await db.admin`DELETE FROM account_users WHERE id IN (${a}, ${b}, ${unreadable})`;
+  });
+
+  test("racing another account's verification of the address, one account holds it", async () => {
+    for (let i = 0; i < 20; i++) {
+      const [a, b, address] = [await newAccount(), await newAccount(), fresh()];
+      // Both sent real codes before either verifies; a verifies first.
+      const forA = await ask(a, address, { keys: OLD });
+      const forB = await ask(b, address, { keys: NEW });
+      await verifyEmailCode(app, a, codeOf(forA), { keys: OLD, now: NOW });
+      const [rotation, answer] = await Promise.allSettled([
+        rotateEmailKeys(app2, NEW),
+        verifyEmailCode(app, b, codeOf(forB), { keys: NEW, now: NOW }),
+      ]);
+      expect(rotation.status).toBe("fulfilled");
+      expect(answer.status === "rejected" && answer.reason.code).toBe("address-taken");
+      expect(await readAccountEmail(app, a, NEW)).toMatchObject({ address });
+      expect(await readAccountEmail(app, b, NEW)).toBeUndefined();
+    }
   });
 });

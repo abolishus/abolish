@@ -18,6 +18,7 @@ import { electionDefinitions, electionRegistrations, electionSchedules } from ".
 import { displayTexts, displayTextSearch } from "./display-texts.ts";
 import {
   accountEmailCodes,
+  accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
   accountEmailSends,
@@ -47,6 +48,7 @@ export {
   accountAppeals,
   accountCredentials,
   accountEmailCodes,
+  accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
   accountEmailSends,
@@ -117,6 +119,7 @@ export const TABLE_CLASSES = {
     "account_appeals",
     "account_credentials",
     "account_email_codes",
+    "account_email_key_checks",
     "account_email_recipients",
     "account_email_sends",
     "account_emails",

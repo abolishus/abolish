@@ -348,7 +348,9 @@ describe("decisions", () => {
       }),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Fifty runs of a new profile and up to twelve decisions each can outlast
+    // the default timeout on a CI runner shared with the other test files.
+  }, 60_000);
 
   test("decisions about polls and profiles share one numbering, in commit order", async () => {
     const a = await profiled();

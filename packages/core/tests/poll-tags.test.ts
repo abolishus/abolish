@@ -561,6 +561,40 @@ describe("refiling", () => {
     }
   });
 
+  test("a refiling keeping the place, racing one clearing it, never puts the place back", async () => {
+    for (let i = 0; i < 5; i++) {
+      const id = await poll({ topic: "food", place: "Mill Lane" });
+      const other = await db.as("abolish_app");
+      const outcome = (p: Promise<unknown>) =>
+        p.then(
+          () => "ok",
+          (e: unknown) => (e as ModerationError).code,
+        );
+      const [kept, cleared] = await Promise.all([
+        outcome(
+          refilePoll(app, id, {
+            tags: { topic: "sport" },
+            keep: ["place"],
+            reason: "misfiled",
+            moderator: "mod-1",
+          }),
+        ),
+        outcome(
+          refilePoll(other, id, {
+            tags: {},
+            keep: ["topic"],
+            reason: "personal-data",
+            moderator: "mod-2",
+          }),
+        ),
+      ]);
+      await other.end();
+      expect([kept, cleared]).toEqual(["ok", "ok"]);
+      // Whichever ran second read the first's row under the lock.
+      expect(await row(id)).toEqual([{ topic: "sport", place: null, place_key: null }]);
+    }
+  });
+
   test("takes its number from the poll log's sequence, between decisions about polls and profiles", async () => {
     const id = await poll({ topic: "food" });
     const a = await moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" });
@@ -654,8 +688,11 @@ describe("refiling", () => {
       },
     ]);
     const ok = { tags: {}, reason: "misfiled", moderator: "mod-1" } as const;
-    await refused(id, { ...ok, keep: ["topic", "place"] }, "no-change");
     for (const decision of [
+      { ...ok, keep: ["topic", "place"] },
+      // A hole, which `every` and `some` would skip.
+      // eslint-disable-next-line no-sparse-arrays
+      { ...ok, keep: [,] },
       { ...ok, tags: { topic: "sport" }, keep: ["topic"] },
       { ...ok, tags: { place: "Mill Lane" }, keep: ["place"] },
       { ...ok, keep: ["topic", "topic"] },
@@ -664,6 +701,11 @@ describe("refiling", () => {
       { ...ok, keep: null },
     ])
       await refused(id, decision as unknown as RefileDecision, "invalid");
+    // Keeping both is no refiling, even of a poll with no row, which it would
+    // otherwise file under nothing for good.
+    const bare = await poll({});
+    await refused(bare, { ...ok, keep: ["topic", "place"] }, "invalid");
+    expect(await row(bare)).toEqual([]);
     // A poll filed under nothing has nothing to keep: the refiling files it under none.
     const unfiled = await poll({});
     await refilePoll(app, unfiled, {
@@ -690,7 +732,7 @@ describe("refiling", () => {
           fc.tuple(
             tagsArb,
             fc.constantFrom(...REFILE_REASONS),
-            fc.subarray<PollTagName>(["topic", "place"]),
+            fc.subarray<PollTagName>(["topic", "place"], { maxLength: 1 }),
           ),
           { minLength: 1, maxLength: 6 },
         ),

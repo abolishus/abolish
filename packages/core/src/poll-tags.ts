@@ -99,11 +99,18 @@ function checkElectionId(electionId: unknown): asserts electionId is Uint8Array 
     throw new TypeError("electionId must be 32 bytes");
 }
 
-/** Whether `keep` is malformed: not a list of distinct tag names, or naming a tag `tags` gives. */
+/**
+ * Whether `keep` is malformed: not a list of distinct tag names, naming a tag
+ * `tags` gives, or naming both, which is no refiling at all (yet on a poll
+ * with no row would file it under nothing, for good).
+ */
 function keepProblem(keep: unknown, tags: PollTags): boolean {
   if (keep === undefined) return false;
-  if (!Array.isArray(keep) || new Set(keep).size !== keep.length) return true;
-  return keep.some((k) => (k !== "topic" && k !== "place") || tags[k as PollTagName] !== undefined);
+  if (!Array.isArray(keep) || keep.length > 1) return true;
+  // Array.from turns a sparse array's hole into `undefined`, which `every` would skip.
+  return !Array.from(keep).every(
+    (k) => (k === "topic" || k === "place") && tags[k as PollTagName] === undefined,
+  );
 }
 
 /** `tags` as a row of `poll_tags` holds them, for tags `tagsProblem` passes. */
@@ -157,8 +164,8 @@ export interface RefileDecision {
    * The tags left as the poll is filed under them now, read under the lock,
    * so a moderator changing one tag needn't know or retype the other (a
    * hidden poll's place is withheld from every read), and a refiling racing
-   * another can't put back a place the other cleared. Never a tag `tags`
-   * also gives.
+   * another can't put back a place the other cleared. At most one tag, and
+   * never one `tags` also gives.
    */
   readonly keep?: readonly PollTagName[];
   readonly reason: RefileReason;

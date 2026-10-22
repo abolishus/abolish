@@ -238,7 +238,7 @@ describe("moderation decisions", () => {
     await insertPollTags(app, bytes(id), { topic: "food" });
     const before = (await cli("moderation", "log", "--limit", "1000")).out.length;
     for (const [args, code] of [
-      [[id, "misfiled", "--keep-topic", "--keep-place", "--moderator", "mod-1"], "no-change"],
+      [[id, "misfiled", "--keep-topic", "--keep-place", "--moderator", "mod-1"], "invalid"],
       [[id, "misfiled", "--topic", "food", "--no-place", "--moderator", "mod-1"], "no-change"],
       [
         ["00".repeat(32), "misfiled", "--no-topic", "--no-place", "--moderator", "mod-1"],
@@ -271,6 +271,9 @@ describe("moderation decisions", () => {
       [id, ...ok],
       [id, "misfiled", "extra", ...ok],
       [id, "misfiled", "--no-topic=yes", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "A", "--place", "B", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--no-place", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--no-place", "--moderator", "mod-1", "--moderator", "mod-7"],
     ]) {
       const r = await cli("moderation", "refile", ...args);
       expect(r.code, args.join(" ")).toBe(2);

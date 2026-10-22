@@ -74,10 +74,15 @@ export async function run(argv: readonly string[], connect: () => Sql, io: CliIo
         options: command.options ?? {},
         allowPositionals: true,
         strict: true,
+        tokens: true,
       });
     } catch {
       throw new UsageError("malformed arguments");
     }
+    // parseArgs keeps an option's last value, so `--place A --place B` would
+    // file B without a word; an option given twice is a typo to refuse.
+    const names = parsed.tokens.flatMap((t) => (t.kind === "option" ? [t.name] : []));
+    if (new Set(names).size !== names.length) throw new UsageError("an option is given twice");
     if (parsed.positionals.length !== command.positionals)
       throw new UsageError("wrong number of arguments");
     if ("offline" in command) await command.run(parsed.positionals, parsed.values, io);

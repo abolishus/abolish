@@ -11,9 +11,12 @@ import {
   loadModerationLog,
   loadPoll,
   loadPollList,
+  loadStream,
   resolveShortLink,
 } from "./server/load.ts";
-import { isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
+import { STREAM_SORTS, type StreamSort } from "./stream.ts";
+import { LOCALE } from "./messages.ts";
+import { ballotBase, isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
 
 /**
  * Runs `load`, replacing any failure with one fixed error. A server
@@ -72,6 +75,27 @@ export const fetchFirstPolls = createServerFn({ method: "GET" })
     return limit as number;
   })
   .handler(({ data }) => opaque(() => loadPollList(api(), "", data)));
+
+/**
+ * A page of the stream, with the ballot client's address (`BALLOT_URL`)
+ * its cards link to, or `null` if none is set, where the cards link only to
+ * each poll's page.
+ */
+export const fetchStream = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const { sort, after } = (input ?? {}) as { sort?: unknown; after?: unknown };
+    if (!STREAM_SORTS.some((s) => s === sort)) throw new TypeError("expected a stream order");
+    // `""` starts the stream, as for the register.
+    if (after !== "" && !isElectionId(after))
+      throw new TypeError("expected an election ID or an empty string");
+    return { sort: sort as StreamSort, after };
+  })
+  .handler(({ data }) =>
+    opaque(async () => ({
+      stream: await loadStream(api(), data.sort, data.after, LOCALE),
+      ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
+    })),
+  );
 
 export const fetchShortLink = createServerFn({ method: "GET" })
   .inputValidator((code: unknown) => {

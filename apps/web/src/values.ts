@@ -56,3 +56,27 @@ export function searchText(value: unknown): string | undefined {
 export function isSiteKey(value: unknown): value is string {
   return typeof value === "string" && /^[0-9A-Za-z_-]{1,100}$/.test(value);
 }
+
+/**
+ * The ballot client's address as `BALLOT_URL` gives it, in its parsed
+ * form: an https URL with no credentials, query or fragment, since a ballot
+ * link puts the poll in the fragment (apps/ballot, `parseLink`). `undefined`
+ * for anything else.
+ */
+export function ballotBase(value: unknown): string | undefined {
+  if (typeof value !== "string" || !URL.canParse(value)) return undefined;
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return undefined;
+  // A `?` or `#` with nothing after it parses to an empty search or hash, so test the text too.
+  if (url.search !== "" || url.hash !== "" || /[?#]/.test(value)) return undefined;
+  return url.href;
+}
+
+/**
+ * The ballot client's link to `electionId`: the poll rides in the fragment,
+ * which a browser never sends, so neither the client's host nor a gateway
+ * learns which poll was opened (T-10, T-11).
+ */
+export function ballotLink(base: string, electionId: string): string {
+  return `${base}#election=${electionId}`;
+}

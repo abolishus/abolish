@@ -4,6 +4,7 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { type BoardRow, boardRows } from "../board.ts";
+import { type StreamCard, streamCard, type StreamSort } from "../stream.ts";
 import { fromHex } from "../values.ts";
 import {
   definitionView,
@@ -293,5 +294,94 @@ export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): 
     asOf: now(),
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
     next: elections.length === limit ? elections.at(-1) : undefined,
+  };
+}
+
+/**
+ * Polls per page of the stream: each costs the page a definition and a
+ * display text, and a display text may be up to 4 MiB (T-52).
+ */
+export const STREAM_PAGE = 10;
+
+export type Stream =
+  | {
+      readonly kind: "stream";
+      readonly cards: readonly StreamCard[];
+      /** Where the next page starts, if this one was full. */
+      readonly next: string | undefined;
+    }
+  /** The API can't sort this way just now (`answered` without the anchoring clock). */
+  | { readonly kind: "sort-unavailable" }
+  /** `after` names no poll this order can place. */
+  | { readonly kind: "cursor-not-found" };
+
+const listingError = (error: unknown, code: "SORT_UNAVAILABLE" | "CURSOR_NOT_FOUND") =>
+  error instanceof ORPCError && error.defined && error.code === code;
+
+/**
+ * The display text the API serves for `electionId`, or `undefined` if it
+ * holds none or withholds it under the moderation policy: either way the
+ * card has no words to show (a hidden poll isn't listed, so withheld text
+ * here is one hidden since the listing).
+ */
+async function displayTextOf(api: Api, electionId: string): Promise<string | undefined> {
+  try {
+    return (await api.elections.getDisplayText({ electionId })).displayText;
+  } catch (error) {
+    if (
+      error instanceof ORPCError &&
+      error.defined &&
+      (error.code === "DISPLAY_TEXT_NOT_FOUND" || error.code === "DISPLAY_TEXT_WITHHELD")
+    )
+      return undefined;
+    throw error;
+  }
+}
+
+/**
+ * A page of the stream in the order `sort`, from just after `after` (an
+ * election ID, or `""` from the start), each poll's text in `locale`. The API
+ * leaves out delisted and hidden polls (T-68) and orders by public data only
+ * (packages/api-contract, `elections.list`); each card's definition and text
+ * are checked here (src/stream.ts). A poll the database lost between the
+ * listing and its definition drops out of the page.
+ */
+export async function loadStream(
+  api: Api,
+  sort: StreamSort,
+  after: string,
+  locale: string,
+): Promise<Stream> {
+  let elections;
+  try {
+    ({ elections } = await api.elections.list({
+      sort,
+      ...(after === "" ? {} : { after }),
+      limit: String(STREAM_PAGE),
+    }));
+  } catch (error) {
+    if (listingError(error, "SORT_UNAVAILABLE")) return { kind: "sort-unavailable" };
+    if (listingError(error, "CURSOR_NOT_FOUND")) return { kind: "cursor-not-found" };
+    throw error;
+  }
+  const cards = await Promise.all(
+    elections.map(async (electionId) => {
+      try {
+        const [{ definition }, displayText] = await Promise.all([
+          api.elections.getDefinition({ electionId }),
+          displayTextOf(api, electionId),
+        ]);
+        return streamCard(electionId, definition, displayText, locale);
+      } catch (error) {
+        if (notFound(error)) return undefined;
+        throw error;
+      }
+    }),
+  );
+  return {
+    kind: "stream",
+    cards: cards.filter((card) => card !== undefined),
+    // The listing's own cursor, as the register's, so a dropped poll doesn't end the stream.
+    next: elections.length === STREAM_PAGE ? elections.at(-1) : undefined,
   };
 }

@@ -7,6 +7,7 @@
 /** Every page, as a template: a poll page is `/polls/:id`, never its ID. */
 export const PAGES = [
   "/",
+  "/discover",
   "/polls",
   "/polls/:id",
   "/polls/:id/board",
@@ -25,6 +26,8 @@ export type Page = (typeof PAGES)[number];
 export function pageOf(pathname: string): Page {
   if (pathname === "/" || pathname === "/polls" || pathname === "/moderation") return pathname;
   if (pathname === "/account" || pathname === "/how-it-works") return pathname;
+  // Its order and page are in the query, never kept.
+  if (pathname === "/discover") return pathname;
   // Any single segment: a malformed ID is still a poll page's 404, and the
   // segment itself is never kept.
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";

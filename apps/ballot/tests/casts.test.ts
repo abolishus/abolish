@@ -25,6 +25,7 @@ import {
   unboardedReceipts,
   unsentCast,
   withCast,
+  withPostingDeclined,
   withReceipt,
   withReceiptBoarded,
   withSharesErased,
@@ -1070,5 +1071,71 @@ describe("the shares erased at the posting cutoff", () => {
     const recast = withCast(list, naming(11n), shares()) as CastRecord[];
     expect(recast[1]?.shares[0]).toEqual(erased()[0]);
     expect(recast[1]?.shares.slice(1)).toEqual(shares().slice(1));
+  });
+});
+
+describe("the shares erased once the voter declines a posting", () => {
+  test("are the declined cast's seats still holding an m, in it and every cast of the same seal (fast-check)", () => {
+    fc.assert(
+      fc.property(
+        casts.filter((list) => list.length > 0),
+        fc.nat(),
+        (list, pick) => {
+          const declined = list[pick % list.length] as CastRecord;
+          const changed = withPostingDeclined(list, declined.ballot);
+          if (changed === "missing") throw new Error("expected casts");
+          const seats = new Set(declined.shares.flatMap((s) => ("m" in s ? [s.seat] : [])));
+          expect(changed).toHaveLength(list.length);
+          changed.forEach((cast, i) => {
+            const before = list[i] as CastRecord;
+            expect(cast.ballot).toEqual(before.ballot);
+            expect(cast.boarded).toEqual(before.boarded);
+            // Every cast here is of one seal, so its shares are the declined one's.
+            expect(cast.shares).toEqual(
+              before.shares.map((share) =>
+                "m" in share && seats.has(share.seat) ? { seat: share.seat, erased: true } : share,
+              ),
+            );
+          });
+          expect(changed[pick % list.length]?.shares.some((s) => "m" in s)).toBe(false);
+          expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+        },
+      ),
+      { numRuns },
+    );
+  }, 600_000);
+
+  test("leave receipted seats and another seal's casts as they were, and the declined cast unresumed", () => {
+    // Another seal: other ciphertexts, so other share hashes in its ballot.
+    const otherShares = SHARES.map(({ seat, m }) => ({
+      seat,
+      ciphertext: new Uint8Array(40 + seat).fill(0x40 + seat),
+      m: m.slice(),
+    }));
+    const other = encodeBallotV3({
+      ...vector,
+      committed_vote: {
+        ...vector.committed_vote,
+        share_hashes: vector.committed_vote.share_hashes.map((_, i) => {
+          const share = otherShares.find((s) => s.seat === i + 1);
+          return share === undefined ? new Uint8Array(32) : shareCiphertextHash(share.ciphertext);
+        }),
+      },
+    });
+    new DataView(other.buffer).setBigUint64(L1_AT, 9n);
+    const older: CastRecord = { ballot: other, l1Number: 9n, shares: otherShares };
+    const declined: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: receipted() };
+    const changed = withPostingDeclined([older, declined], naming(10n));
+    if (changed === "missing") throw new Error("expected casts");
+    expect(changed[0]).toEqual(older);
+    expect(changed[1]?.shares).toEqual(erased());
+    expect(unsentCast(changed, DECODED.definition_hash)).toBeUndefined();
+    expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+  });
+
+  test("are missing for a ballot no cast has, and change nothing", () => {
+    expect(withPostingDeclined([], naming(10n))).toBe("missing");
+    const list: CastRecord[] = [{ ballot: naming(11n), l1Number: 11n, shares: shares() }];
+    expect(withPostingDeclined(list, naming(10n))).toBe("missing");
   });
 });

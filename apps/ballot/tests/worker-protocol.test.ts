@@ -659,6 +659,32 @@ describe("posting requests", () => {
   });
 });
 
+describe("decline requests", () => {
+  const decline = () => ({
+    v: PROTOCOL_VERSION,
+    id: 18,
+    kind: "decline",
+    ballot: new Uint8Array(40).fill(2),
+  });
+
+  test("accepts a well-formed request as it is: the bytes are the session's to judge", () => {
+    expect(parseRequest(decline())).toEqual(decline());
+  });
+
+  test.each([
+    ["a ballot that isn't bytes", { ballot: [2, 2] }],
+    ["an extra key", { seat: 1 }],
+  ])("refuses one with %s", (_, change) => {
+    expect(parseRequest({ ...decline(), ...change })).toBeUndefined();
+  });
+
+  test("refuses one without its ballot", () => {
+    const r: Record<string, unknown> = decline();
+    delete r["ballot"];
+    expect(parseRequest(r)).toBeUndefined();
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -677,6 +703,7 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 15, kind: "receipt", result: {} })).toBe(15);
     expect(responseId({ v: PROTOCOL_VERSION, id: 16, kind: "posting", result: {} })).toBe(16);
     expect(responseId({ v: PROTOCOL_VERSION, id: 17, kind: "intake", result: {} })).toBe(17);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 18, kind: "decline", result: {} })).toBe(18);
   });
 
   test("ignores another version's response or kind", () => {

@@ -51,6 +51,8 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
       return { v, id, kind: "intake", result: session.intake(request) };
     case "posting":
       return { v, id, kind: "posting", result: session.posting(request) };
+    case "decline":
+      return { v, id, kind: "decline", result: session.decline(request) };
   }
 }
 

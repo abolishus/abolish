@@ -427,6 +427,7 @@ export {
   castReceiptSeatV3,
   castSealV3,
   challengeSealV3,
+  declineSealV3,
   finishSealV3,
   receiptSealV3,
   type L1Reference,

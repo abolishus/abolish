@@ -297,6 +297,39 @@ const enUS = {
   unsentUnconfirmedTitle: "The board's answer doesn't show your ballot",
   unsentUnconfirmed:
     "It answered with something other than your ballot, so this device can't tell whether it took it. Send it again, or later open the ballot from abolishus.eth or another address Abolish lists.",
+  // The posting offer for a ballot some trustees didn't take (posting-offer.tsx).
+  checkingPostingTitle: "Checking what this device kept",
+  checkingPosting:
+    "Before offering you a choice, this device is checking that the parts it kept for these trustees are the ones your ballot sealed.",
+  postingOfferTitle: "Some trustees haven't taken your ballot",
+  postingOffer: {
+    one: "Your ballot counts only once each of the poll's trustees has its sealed part, and one didn't take theirs. This device sent nothing to the board. Choose what to do.",
+    other:
+      "Your ballot counts only once each of the poll's trustees has its sealed part, and {count} didn't take theirs. This device sent nothing to the board. Choose what to do.",
+  },
+  postingRetry: "Try the trustees again",
+  postingRetryTitle: "Try again",
+  postingRetryExplained:
+    "This device hands the same sealed parts to the trustees again, so nothing counts twice. Wait a minute first.",
+  postingPostTitle: "Post the missing parts publicly",
+  postingPostExplained:
+    "The missing parts go on the public record with the key to their outer seal, so the trustees can open them without having taken them. Your vote stays secret today, but those parts lose their long-term protection: anyone who later breaks today's encryption can read them, and if enough of your ballot's parts are posted to open it, they can read your whole ballot. This can't be undone.",
+  postingPost: "Post publicly, then send",
+  postingDeclineTitle: "Leave this ballot",
+  postingDeclineExplained:
+    "This device erases the parts it kept for these trustees, and this ballot won't count. Whoever passed the parts on could still put it on the board, where it would replace your earlier ballot without counting, so answer again while the poll is open.",
+  postingDecline: "Leave this ballot",
+  postingFailedTitle: "The posting didn't go through",
+  postingFailed:
+    "Nothing was posted or sent to the board. Try posting again in a minute, or choose another way.",
+  declinedTitle: "This ballot won't count",
+  declined:
+    "This device erased the parts it kept for the trustees that didn't take theirs. Answer again while the poll is open: your new ballot replaces this one, and your earlier one, wherever they reach the board.",
+  decliningTitle: "Leaving this ballot",
+  declining: "This device is erasing the parts it kept for this ballot.",
+  postingTitle: "Posting the missing parts",
+  posting:
+    "This device is posting the missing parts publicly, then sending your ballot. Keep this page open.",
   sentTitle: "Your ballot is on the board",
   sent: "The public board took your sealed ballot, and this device checked that the board's answer carries exactly the ballot it sent.",
   sentCopy: "The public board already holds a copy of your sealed ballot, which stands for yours.",

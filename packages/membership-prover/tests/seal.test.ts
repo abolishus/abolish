@@ -5,6 +5,7 @@ import {
   ceremonyKeygen,
   ceremonyTranscriptHash,
   challengeSealV3,
+  declineSealV3,
   challengesMessage,
   checkBallotV3,
   checkPosting,
@@ -274,6 +275,43 @@ describe("a seat's receipt for a cast seal", () => {
       expect(one.m?.length).toBe(32);
       expect(receiptSealV3(sealed, recast.ballot, receipt)).toBe(one.seat);
       expect(held(await recastAt(otherSealed, 9_000_003n))).toEqual(held(otherCast));
+    },
+    6 * PROOF_TIMEOUT,
+  );
+});
+
+describe("the voter's decline of a posting for a cast seal", () => {
+  test(
+    "erases every m_i the seal keeps only for a cast of it, so no recast hands one out",
+    async () => {
+      const secret = members[3] as Uint8Array;
+      const l1 = { number: 9_100_000n, hash: new Uint8Array(32).fill(0xcd) };
+      const sealed = sealBallotV3(election, 0, [...VOTES]);
+      expect(() => declineSealV3(sealed, new Uint8Array(0))).toThrow(/wasn't cast/);
+      const prove = async (s: typeof sealed, n: bigint) => {
+        const casting = castSealV3(s, secret, cell0, { number: n, hash: l1.hash });
+        return finishSealV3(casting, await proveMembership(casting.witness, artifacts));
+      };
+      const cast = await prove(sealed, l1.number);
+      const otherSealed = sealBallotV3(election, 0, [...VOTES]);
+      const otherCast = await prove(otherSealed, l1.number);
+      const held = (c: CastBallotV3) => c.ciphertexts.map(({ seat, m }) => [seat, m && toHex(m)]);
+      // Another seal's ballot erases nothing of this one, nor its own of it.
+      expect(declineSealV3(sealed, otherCast.ballot)).toBeUndefined();
+      expect(declineSealV3(otherSealed, cast.ballot)).toBeUndefined();
+      expect(() => declineSealV3(sealed, cast.ballot.subarray(1))).toThrow();
+      const before = held(cast);
+      expect(held(await prove(sealed, l1.number + 1n))).toEqual(before);
+
+      const seatsOf = cast.ciphertexts.map(({ seat }) => seat);
+      expect(declineSealV3(sealed, cast.ballot)).toEqual(seatsOf);
+      const recast = await prove(sealed, l1.number + 2n);
+      for (const share of recast.ciphertexts) expect(share).not.toHaveProperty("m");
+      // Any record of the seal is its cast; nothing is left to erase twice.
+      expect(declineSealV3(sealed, recast.ballot)).toEqual([]);
+      // The cast handed out earlier keeps its own copy; the other seal kept every m_i.
+      expect(cast.ciphertexts.every(({ m }) => m?.length === 32)).toBe(true);
+      expect(held(await prove(otherSealed, l1.number + 3n))).toEqual(held(otherCast));
     },
     6 * PROOF_TIMEOUT,
   );

@@ -48,6 +48,7 @@ INFO_TAG = b"abolish/v1/tier0-token/info"
 INPUT_TAG = b"abolish/v1/tier0-token/input"
 INPUT_VERSION = 1
 KEY_PERIOD = 2_592_000
+REDEEM_DELAY = 86_400
 
 MODE_POPRF = 2
 CONTEXT = b"OPRFV1-" + bytes([MODE_POPRF]) + b"-ristretto255-SHA512"
@@ -262,6 +263,14 @@ def token_input(kid, commitment):
     return sha256(ds(INPUT_TAG, bytes([INPUT_VERSION]) + kid + i2osp(commitment, 32)))
 
 
+def decode_evaluated(b):
+    """The client's decoding of Z: canonical and not the identity."""
+    p = grp.decode(b) if len(b) == 32 else None
+    if p is None or is_identity(p):
+        raise Refused("evaluation-element")
+    return p
+
+
 def decode_blinded(b):
     if len(b) != 32:
         raise Refused("blinded-element")
@@ -424,16 +433,19 @@ def main():
     def flip(bs, i):
         return bs[:i] + bytes([bs[i] ^ 1]) + bs[i + 1 :]
 
+    ev_ok = ser(evaluated)
     finals = []
     for vid, desc, ev, pf, pkey, inf in [
-        ("finalize-ok", "issue-launch's answer", evaluated, proof, pk, info),
-        ("finalize-proof-c-altered", "A bit of the proof's c flipped", evaluated, flip(proof, 0), pk, info),
-        ("finalize-proof-s-altered", "A bit of the proof's s flipped", evaluated, flip(proof, 32), pk, info),
-        ("finalize-proof-c-unreduced", "The proof's c replaced by c + l", evaluated,
+        ("finalize-ok", "issue-launch's answer", ev_ok, proof, pk, info),
+        ("finalize-proof-c-altered", "A bit of the proof's c flipped", ev_ok, flip(proof, 0), pk, info),
+        ("finalize-proof-s-altered", "A bit of the proof's s flipped", ev_ok, flip(proof, 32), pk, info),
+        ("finalize-proof-c-unreduced", "The proof's c replaced by c + l", ev_ok,
          (int.from_bytes(proof[:32], "little") + L).to_bytes(32, "little") + proof[32:], pk, info),
-        ("finalize-other-evaluation", "Another element evaluated", grp.mul(2, evaluated), proof, pk, info),
-        ("finalize-other-key", "Checked against another listed key: a key per account would fail here", evaluated, proof, other_pk, info),
-        ("finalize-other-group", "Checked against another group's info", evaluated, proof, pk, other_info),
+        ("finalize-other-evaluation", "Another element evaluated", ser(grp.mul(2, evaluated)), proof, pk, info),
+        ("finalize-evaluation-identity", "Z is the identity", bytes(32), proof, pk, info),
+        ("finalize-evaluation-non-canonical", "Z is a non-canonical encoding", bytes.fromhex("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), proof, pk, info),
+        ("finalize-other-key", "Checked against another listed key: a key per account would fail here", ev_ok, proof, other_pk, info),
+        ("finalize-other-group", "Checked against another group's info", ev_ok, proof, pk, other_info),
     ]:
         entry = {
             "id": vid,
@@ -443,11 +455,12 @@ def main():
             "input": base["input"],
             "blind": base["blind"],
             "blindedElement": base["blindedElement"],
-            "evaluationElement": h(ser(ev)),
+            "evaluationElement": h(ev),
             "proof": h(pf),
         }
         try:
-            entry["token"] = h(finalize(inp, b, ev, blinded, pf, inf, tweaked_key(inf, pkey)))
+            T = tweaked_key(inf, pkey)
+            entry["token"] = h(finalize(inp, b, decode_evaluated(ev), blinded, pf, inf, T))
         except Refused as e:
             entry["error"] = e.code
         finals.append(entry)
@@ -465,6 +478,7 @@ def main():
                 "description": "A key whose tweak for this group cancels it (sk = −m): refused before blinding",
                 "publicKey": h(ser(bad_pk)),
                 "info": h(info),
+                "input": base["input"],
                 "error": e.code,
             }
         )
@@ -565,6 +579,7 @@ def main():
         "tags": {"key": KEY_TAG.decode(), "info": INFO_TAG.decode(), "input": INPUT_TAG.decode()},
         "inputVersion": INPUT_VERSION,
         "keyPeriod": str(KEY_PERIOD),
+        "redeemDelay": str(REDEEM_DELAY),
         "keys": key_vectors,
         "infos": info_vectors,
         "inputs": input_vectors,

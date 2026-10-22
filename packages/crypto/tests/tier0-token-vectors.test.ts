@@ -40,6 +40,7 @@ interface Vectors {
   readonly tags: { readonly key: string; readonly info: string; readonly input: string };
   readonly inputVersion: number;
   readonly keyPeriod: string;
+  readonly redeemDelay: string;
   readonly keys: readonly { id: string; period: string; publicKey: string; keyId: string }[];
   readonly infos: readonly {
     id: string;
@@ -126,7 +127,7 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
       V.blindedElements.length,
       V.periods.length,
       V.redemptions.length,
-    ]).toEqual([4, 5, 5, 4, 8, 7, 6, 12]);
+    ]).toEqual([4, 5, 5, 4, 10, 7, 6, 12]);
   });
 
   test("the suite is RFC 9497's POPRF mode over ristretto255-SHA512", () => {
@@ -145,6 +146,7 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
       expect(TAG_REGISTRY).toContainEqual({ tag, primitive: "plain", status: "specified" });
     expect(V.inputVersion).toBe(1);
     expect(V.keyPeriod).toBe("2592000");
+    expect(V.redeemDelay).toBe("86400");
   });
 
   test.each(V.keys.map((v) => [v.id, v] as const))("key identifier %s", (_id, v) => {
@@ -210,11 +212,23 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
 
   test.each(V.finalizations.map((v) => [v.id, v] as const))("finalization %s", (_id, v) => {
     const poprf = ristretto255_oprf.poprf(hexToBytes(v.info));
+    const input = hexToBytes(v.input ?? "");
     if (v.error === "tweaked-key-identity") {
-      expect(() => poprf.blind(ascii("x"), hexToBytes(v.publicKey))).toThrow();
+      expect(() => poprf.blind(input, hexToBytes(v.publicKey))).toThrow();
       return;
     }
-    const input = hexToBytes(v.input ?? "");
+    // Z's own decoding, so a `proof` vector can only fail at the proof's
+    // scalars or its check, never at an element the client would refuse first.
+    const z = () => {
+      const p = ristretto255.Point.fromHex(v.evaluationElement ?? "");
+      if (p.is0()) throw new Error("identity");
+      return p;
+    };
+    if (v.error === "evaluation-element") {
+      expect(z).toThrow();
+      return;
+    }
+    expect(z().toHex()).toBe(v.evaluationElement);
     const run = () =>
       poprf.finalize(
         input,

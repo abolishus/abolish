@@ -788,13 +788,13 @@ The honest vectors' `outputRoot` is the game's `rootClaim` and their block numbe
 
 ## Tier 0 token vectors
 
-`tier0-token.json` covers [[tier0-token]] with its own format, `abolish-tier0-token-vectors/1`, and the same top-level fields, plus `suite` (`name`, `mode` 2 and `contextString` in hex, RFC 9497's), `tags` (the three registered tags), `inputVersion`, `keyPeriod` (seconds, decimal), and:
+`tier0-token.json` covers [[tier0-token]] with its own format, `abolish-tier0-token-vectors/1`, and the same top-level fields, plus `suite` (`name`, `mode` 2 and `contextString` in hex, RFC 9497's), `tags` (the three registered tags), `inputVersion`, `keyPeriod` and `redeemDelay` (seconds, decimal), and:
 
 - `keys`: `id`, `period` (decimal), `publicKey` and `keyId` (hex).
 - `infos`: `id`, `chainId` and `groupId` (decimal), `groupRegistry` and `info` (hex).
 - `inputs`: `id`, `keyId` and `commitment` (32 bytes, hex), and either `input` or `error` (`non-canonical`).
 - `issuances`: `id`, `description`, the issuer's `secretKey`, `publicKey`, `period` and `keyId`; the group's `chainId`, `groupRegistry`, `groupId` and `info`; the client's `commitment`, `input`, `blind` and `blindedElement`; `tweakedKey`; the issuer's `proofRandomScalar`, `evaluationElement` and `proof` (`c ‖ s`); and `token`, the 64-byte output, which `Evaluate` with `secretKey` also gives. Every key, blind and proof scalar is SHA-512 of a fixed label reduced mod `l`: test data, never keys.
-- `finalizations`: the client's `Finalize` of `issue-launch`'s answer with one thing changed. Each has `id`, `description`, `publicKey`, `info` and either `token` or `error` (`proof`, `tweaked-key-identity`); all but the last carry `input`, `blind`, `blindedElement`, `evaluationElement` and `proof`.
+- `finalizations`: the client's `Finalize` of `issue-launch`'s answer with one thing changed. Each has `id`, `description`, `publicKey`, `info` `input`, and either `token` or `error` (`proof`, `evaluation-element`, `tweaked-key-identity`); all but the last carry `blind`, `blindedElement`, `evaluationElement` and `proof`.
 - `blindedElements`: `id`, `encoding` (hex) and, if the issuer refuses it, `error` (`blinded-element`).
 - `periods`: `id`, `now` (UNIX seconds), `keyPeriod`, and booleans `issues` and `redeems`, whether that period's key issues and redeems at `now`.
 - `redemptionKeys`: the `keyId`s of the keys the signing service holds in `redemptions`, each an issuance's.

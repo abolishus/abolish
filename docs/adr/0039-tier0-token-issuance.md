@@ -13,7 +13,7 @@ What is one-way: a token's group, mode and input layout are frozen once the ball
 
 Two requirements decide most of it:
 
-- **One token per account per group.** The issuer must know which group a token is for, or one account's token registers in every group. In plain OPRF or VOPRF mode the input is hidden from the issuer, so a group written into it binds nothing the issuer can check.
+- **One token per account, for one group.** The owner's line says one identity per account per group. Tier 0 has one published group per region, and a tier's electorate is the union of its regional groups ([[0019-regional-cells]]), so one identity per group would give an account a vote per region in any poll that spans regions. This ADR reads the owner's intent (one person can't vote again from another device) as one token per account, for the group of its region, which is the same rule while only region 0 is served. The issuer must know which group a token is for, or one account's token registers in every group. In plain OPRF or VOPRF mode the input is hidden from the issuer, so a group written into it binds nothing the issuer can check.
 - **The same key for everyone.** If the issuer can answer one account under a key of its own, that account's token is recognisable at redemption, and with it the commitment registered (T-10). Verifiability helps only if the client checks the proof against a key it got from somewhere every client sees.
 
 ## Options
@@ -41,7 +41,7 @@ POPRF is RFC 9497's verifiable, partially oblivious mode: the input is hidden an
 
 - Pros:
   - One published key per period for all groups, so every token issued in a period is in one anonymity set, and the client checks one key against the deployment record.
-  - The issuer knows the group at issuance and can enforce one token per account per group; a token for one group is useless for another.
+  - The issuer knows the group at issuance and can enforce one token per account, for one group; a token for one group is useless for another.
   - ristretto255-SHA512 is the protocol's group already, and `packages/crypto` already checks RFC 9497 Appendix A.1's vectors for all three modes ([[group]], Test vectors), so no new primitive or group is added.
   - Still RFC 9497, and still Privacy Pass's model: the issuer redeems with its own `Evaluate`.
 - Cons:
@@ -62,10 +62,11 @@ What would change it: if the owner wants VOPRF mode literally, B is a drop-in re
 
 ## Consequences
 
-- [[tier0-token]] specifies the keys and their periods (30 days; a key issues in its period and redeems in it and the next), the group's `info`, the token input, issuance with the issuer's per-account-and-group rule and retry, redemption, timing and errors, with vectors from an independent Python implementation.
-- The redemption delay: a client redeems at a random instant of the registration period after the one it got its token in, so issuance and redemption fall in different periods in an order unrelated to each other (T-11, T-13).
+- [[tier0-token]] specifies the keys and their periods (30 days; a key issues in its period and redeems in it and the next), the group's `info`, the token input, issuance with the issuer's one-token-per-account rule, its atomic record and retry, redemption, timing and errors, with vectors from an independent Python implementation.
+- The redemption delay: a client redeems at a uniformly random instant of the day after it got its token, and takes its token at verification rather than at its first vote. A commitment's join time is public on L2 (T-13), so the anonymity set of a new commitment is the accounts of its region that took a token in the day before it: large in a busy region, small in a quiet one (T-11, T-10).
+- A period has one key for good: a later release never lists another key for a period an earlier one listed, and a key retired early isn't replaced in its period, so the issuer can't split clients by release (T-74).
 - A new threat, T-74: the issuer key mints identities if stolen, and a per-account key would link accounts to commitments if clients didn't check it.
-- One identity per account per group for good: a token lost before redemption, or an identity lost without a backup after it, isn't replaced from the same account (Known-weak in [[tier0-token]]).
+- One identity per account for good: a token lost before redemption, or an identity lost without a backup after it, isn't replaced from the same account (Known-weak in [[tier0-token]]).
 - Follow-ups in [[P2-30]]: `packages/crypto` (part 2), the issuer, its keys and the deployment record's key list (part 3), the relay and the ballot client (part 4), and redemption in the signing service in place of Turnstile (part 5).
 
 ## Decision

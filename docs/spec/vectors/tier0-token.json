@@ -15,6 +15,7 @@
   },
   "inputVersion": 1,
   "keyPeriod": "2592000",
+  "redeemDelay": "86400",
   "keys": [
     {
       "id": "key-period-zero",
@@ -258,6 +259,30 @@
       "error": "proof"
     },
     {
+      "id": "finalize-evaluation-identity",
+      "description": "Z is the identity",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "0000000000000000000000000000000000000000000000000000000000000000",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "evaluation-element"
+    },
+    {
+      "id": "finalize-evaluation-non-canonical",
+      "description": "Z is a non-canonical encoding",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "evaluation-element"
+    },
+    {
       "id": "finalize-other-key",
       "description": "Checked against another listed key: a key per account would fail here",
       "publicKey": "7e1ee4368179aae610ddf1f7529bd8d4ae502bcdd38ad61341e06ba83d43a80a",
@@ -286,6 +311,7 @@
       "description": "A key whose tweak for this group cancels it (sk = −m): refused before blinding",
       "publicKey": "888dca04ccab8baf3b775241ba2e8d694527860e837cedd478fe89770916c549",
       "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
       "error": "tweaked-key-identity"
     }
   ],

@@ -24,16 +24,17 @@ RFC 9497's names are used below: `Blind`, `BlindEvaluate`, `Finalize` and `Evalu
 
 ## Values
 
-| Name               | Value     | Meaning                                                                                                                                              |
-| ------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TOKEN_KEY_PERIOD` | 2,592,000 | Seconds in a key period (30 days). Key period `q` is `[2,592,000 · q, 2,592,000 · (q + 1))` in UNIX time.                                            |
-| `TOKEN_VERSION`    | 1         | The version of the token input's layout (Token input). A different layout is a new version, and a service accepts only the versions this page lists. |
+| Name                 | Value     | Meaning                                                                                                                                              |
+| -------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOKEN_KEY_PERIOD`   | 2,592,000 | Seconds in a key period (30 days). Key period `q` is `[2,592,000 · q, 2,592,000 · (q + 1))` in UNIX time.                                            |
+| `TOKEN_VERSION`      | 1         | The version of the token input's layout (Token input). A different layout is a new version, and a service accepts only the versions this page lists. |
+| `TOKEN_REDEEM_DELAY` | 86,400    | Seconds (one day) over which the client spreads its redemption after `Finalize` (Timing).                                                            |
 
 They are values of this page, not of any record: changing one changes the issuer, the signing service and the ballot client, never an election.
 
 ## Keys
 
-The issuer holds one key pair per key period: `skS` a uniformly random non-zero scalar from a CSPRNG (RFC 9497 `GenerateKeyPair`), `pkS = skS · g`. A key **issues** only during its own period `q`, and **redeems** during `q` and `q + 1`, so a token taken late in a period can still be redeemed; at the end of `q + 1` its `skS` is destroyed. The current period is `floor(now / TOKEN_KEY_PERIOD)`, with `now` the UNIX time in seconds.
+The issuer holds one key pair per key period: `skS` a uniformly random non-zero scalar from a CSPRNG (RFC 9497 `GenerateKeyPair`), `pkS = skS · g`. A key **issues** new tokens only during its own period `q` (it also answers a retry while it redeems, Issuance, step 2.5), and **redeems** during `q` and `q + 1`, so a token taken late in a period can still be redeemed; at the end of `q + 1` its `skS` is destroyed. The current period is `floor(now / TOKEN_KEY_PERIOD)`, with `now` the UNIX time in seconds.
 
 The key's identifier is
 
@@ -45,6 +46,8 @@ with `pkS` its 32-byte encoding.
 
 **Every client sees the same key.** A client takes `pkS` for period `q` only from the deployment record of the release it runs, which lists the key of each period the release covers, published before that period starts; it never accepts a key the API offers alone. An issuer that answered one account under a key of its own would otherwise mark that account's token, and through it the commitment it registers (T-74, T-10). A release carries the keys of the periods it may run in, so the issuer generates keys ahead; P2-30 part 3 sets how far.
 
+**A period has one key, for good.** Once a release lists a key for period `q`, every later release lists the same `pkS` for `q` or none; a key retired early (T-74) is never replaced within its period, which then issues nothing. Two keys for one period would split its tokens into two sets the issuer chose, and a release served to one account would mark it. The releases are on L1 ([[release]]), so anyone can check this across them; the verifier's report checks it ([[P1-19]], with P2-30 part 3's deployment-record version).
+
 ## Group info
 
 A token admits to one Tier 0 group, the published group of the region the account asked for ([[registration]], Groups). The group enters as POPRF's public `info`:
@@ -53,7 +56,7 @@ A token admits to one Tier 0 group, the published group of the region the accoun
 info = H(DS("abolish/v1/tier0-token/info", u64(chain_id) ‖ bytes[20](group_registry) ‖ u64(group_id)))
 ```
 
-with `chain_id` the L2's chain ID, `group_registry` the group registry's address and `group_id` the group's identifier ([[contracts]], Group registry), all from the deployment record. The issuer sees `info`, and refuses a second token for the same account and group (Issuance); the client can't turn a token for one group into one for another, since POPRF's evaluation and `Finalize` both depend on `info` (T-16).
+with `chain_id` the L2's chain ID, `group_registry` the group registry's address and `group_id` the group's identifier ([[contracts]], Group registry), all from the deployment record. The issuer sees `info`, and gives an account tokens for one group only (Issuance); the client can't turn a token for one group into one for another, since POPRF's evaluation and `Finalize` both depend on `info` (T-16).
 
 ## Token input
 
@@ -67,51 +70,62 @@ input = H(DS("abolish/v1/tier0-token/input", u8(TOKEN_VERSION) ‖ key_id ‖ fi
 
 ## Issuance
 
-1. **Blind.** The client checks that `T = HashToScalar("Info" ‖ I2OSP(len(info), 2) ‖ info) · g + pkS` isn't the identity (`tweaked-key-identity`; RFC 9497's `Blind` checks it too), then computes `(blind, B) = Blind(input, pkS, info)` with a fresh random `blind` from a CSPRNG, and sends the issuer `key_id`, its region and `B` (32 bytes), with the account's session.
-2. **The issuer's checks.** The issuer answers only:
-   1. an account that may take a token ([[P2-31]]; P2-30 part 3);
-   2. for `key_id` the key that issues now (Keys), or, for a retry (item 5), the stored key while it still redeems;
-   3. for a region with a published group, whose `info` it computes;
-   4. for `B` that decodes ([[group]], Encodings) to an element other than the identity (`blinded-element`);
-   5. if the account has no token for this group, or has one whose stored `key_id` and `B` are exactly these and whose key still redeems: a retry, so a client whose answer was lost doesn't lose its token. Any other request for a group the account has a token for is refused.
-3. **Record.** Before answering, the issuer records, on the account's side of the no-join tests (T-10), that the account took a token for this group, with `key_id` and `B`, and no time finer than the key period. `B` is `blind · HashToGroup(input)` with `blind` uniform, so it reveals nothing about `input` or `C`.
-4. **Evaluate.** The issuer computes `(Z, proof) = BlindEvaluate(skS, B, info)` with fresh proof randomness, and answers `Z` (32 bytes) and `proof` (`c ‖ s`, 64 bytes). If `skS + m = 0` for this `info` (`inverse`, RFC 9497's `InverseError`, probability about 2⁻²⁵²), the issuer answers no token for the group under this key; the client waits for the next period's key.
-5. **Finalize.** The client computes `token = Finalize(input, blind, Z, B, proof, info, T)` (64 bytes), which checks `proof` against `T` and fails on any other key, group or evaluation (`proof`). On failure it keeps nothing and tells the voter the issuer's answer didn't check; it never retries with another key.
+An account takes tokens for **one Tier 0 group**, the first region it asks for: a tier's electorate is the union of its regional groups ([[0019-regional-cells]]), so a token per group would give one account an identity, and a vote, per region. Moving to another region is not defined yet and is refused; it needs a rule that retires the old identity (P2-30 part 3).
 
-The client keeps `key_id`, `C`, the region and `token` until it sees `C` in the group on chain ([[registration]], Outcome), and nothing else: `blind`, `input` and `Z` are discarded once `Finalize` succeeds.
+The client takes its token once the account is verified and the voter has an identity, not when the voter first wants to vote, so the redemption delay (Timing) has usually passed before the first poll.
+
+1. **Blind.** The client checks that `T = HashToScalar("Info" ‖ I2OSP(len(info), 2) ‖ info) · g + pkS` isn't the identity (`tweaked-key-identity`; RFC 9497's `Blind` checks it too), then computes `(blind, B) = Blind(input, pkS, info)` with a fresh random `blind` from a CSPRNG. It stores `key_id`, `C`, the region, `blind` and `B` durably **before** it sends anything, so a crash or a lost answer can be retried with the same `B`, then sends the issuer `key_id`, the region and `B` (32 bytes), with the account's session.
+2. **The issuer's checks.** The issuer answers only:
+   1. an account that may take a token ([[P2-31]]; P2-30 part 3), else `account`;
+   2. for `key_id` the key that issues now (Keys), or, for a retry (item 5), the stored key while it still redeems, else `key-not-issuing`;
+   3. for a region with a published group, whose `info` it computes, else `region-unknown`;
+   4. for `B` that decodes ([[group]], Encodings) to an element other than the identity, else `blinded-element`;
+   5. if the account has no token yet, or has one whose stored region, `key_id` and `B` are exactly these and whose key still redeems: a retry, so a client whose answer was lost or corrupted doesn't lose its token. Anything else is refused (`token-taken`).
+3. **Record.** Before evaluating, the issuer records the account's token, its region, `key_id` and `B`, on the account's side of the no-join tests (T-10), with no time, in one atomic insert-if-absent keyed on the account (a unique key, say), so two concurrent requests with different `B` can't both pass item 5 (T-01). `B` is `blind · HashToGroup(input)` with `blind` uniform, so it reveals nothing about `input` or `C`; the issuer deletes `B` and `key_id` once the key stops redeeming, keeping only that the account took its token and for which region.
+4. **Evaluate.** The issuer computes `(Z, proof) = BlindEvaluate(skS, B, info)` with fresh proof randomness, and answers `Z` (32 bytes) and `proof` (`c ‖ s`, 64 bytes). If `skS + m = 0` for this `info` (`inverse`, RFC 9497's `InverseError`, probability about 2⁻²⁵²), the issuer answers no token under this key and removes its record; the client waits for the next period's key.
+5. **Finalize.** The client decodes `Z` ([[group]], Encodings: canonical and not the identity, else `evaluation-element`) and `c` and `s` as scalars below `l` (else `proof`), then computes `token = Finalize(input, blind, Z, B, proof, info, T)` (64 bytes), which checks `proof` against `T` and fails on any other key, group or evaluation (`proof`). On failure it tells the voter the issuer's answer didn't check, and keeps its stored values to retry with the same `B` under the same published key (item 2.5), which reveals nothing new; it never asks under another key.
+
+Once `Finalize` succeeds, the client discards `blind`, `B` and `Z`, and keeps `key_id`, `C`, the region and `token` until it sees `C` in the group on chain ([[registration]], Outcome).
 
 ## Redemption
 
 The ballot client sends `key_id`, `C`, the region and `token` on the ballot path, with no account credential ([[registration]], Request, in P2-30 part 5). The signing service:
 
 1. finds the key `key_id` names among the keys it holds, and refuses an unknown one (`key-unknown`) or one that doesn't redeem now (`key-period`);
-2. computes `info` from the region's published group, and `input` from `key_id` and `C` (Token input);
+2. computes `info` from the region's published group (`region-unknown` if it has none), and `input` from `key_id` and `C` (Token input);
 3. computes `expected = Evaluate(skS, input, info)` and accepts only if `token` is 64 bytes equal to `expected`, compared in constant time (`token`).
 
 It logs and stores nothing about a redemption but what [[registration]] already keeps (the queued commitment). The issuer and the signing service hold the same `skS`, so they are the same trust domain: the operator.
 
 ## Timing
 
-The account's issuance and the commitment's redemption must not be joinable by when they happened (T-11, T-13):
+The account's issuance and the commitment's redemption must not be joinable by when they happened (T-11, T-13). A commitment's addition is on L2 with its batch's time for good (T-13), so the redemption's time is public to within a registration period or two ([[registration]], The batch), and any record of when an account took its token (a request log, the account's verification) is a candidate to join it with:
 
-- The client sends the redemption at a uniformly random instant of the registration period (`REGISTRATION_PERIOD`, [[registration]], Values) after the one in which `Finalize` succeeded, never sooner, so every token issued in one period for a group is redeemed in the next, in an order unrelated to issuance. A client offline then redeems when it next can, within its key's redemption window.
-- Neither the issuer's record nor the queue keeps a time (Issuance, step 3; [[registration]], Queue), so a copy of either can't be timed against the other.
-- What this can't hide is the request times the API, its proxy and the platform see in transit, which P2-30 part 5 tests and T-11 records.
+- The client sends the redemption at an instant drawn uniformly from the `TOKEN_REDEEM_DELAY` after `Finalize` succeeded. Someone who knows when every account took its token and when a commitment joined its group can narrow the commitment to the accounts of that region that took a token in the day before: in a busy region many, in a quiet one few (Security notes). A client offline at its instant redeems when it next can, within its key's redemption window.
+- The issuer's record keeps no time (Issuance, step 3), nor does the queue ([[registration]], Queue). Account-side records that do (the account's creation and verification, [[P2-31]]) are the join's input, and P2-30 part 5's tests check that no record keeps the time of issuance itself.
+- What this can't hide is the request times and addresses the API's proxy and platform see in transit: the same address at issuance and at redemption a day later links them (T-11), unless the voter changes networks or uses Tor.
+
+The cost is latency: a new voter's identity joins its group up to a day after their token, plus the batch's wait, which is why the client takes its token at verification (Issuance).
 
 ## Errors
 
 The codes the checks above use, which the vectors label:
 
-| Code                   | Where                                                                    |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `non-canonical`        | Token input: `C` isn't below `r`.                                        |
-| `tweaked-key-identity` | Issuance, step 1: `T` is the identity.                                   |
-| `blinded-element`      | Issuance, step 2: `B` isn't 32 bytes encoding an element other than 0.   |
-| `inverse`              | Issuance, step 4: `skS + m = 0` for this `info`.                         |
-| `proof`                | Issuance, step 5: the proof doesn't check against `T`.                   |
-| `key-unknown`          | Redemption, step 1: no key held has this identifier.                     |
-| `key-period`           | Redemption, step 1: the key doesn't redeem now.                          |
-| `token`                | Redemption, step 3: `token` isn't 64 bytes equal to the issuer's output. |
+| Code                   | Where                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `non-canonical`        | Token input: `C` isn't below `r`.                                                     |
+| `tweaked-key-identity` | Issuance, step 1: `T` is the identity.                                                |
+| `account`              | Issuance, step 2.1: the account may not take a token.                                 |
+| `key-not-issuing`      | Issuance, step 2.2: the key named doesn't issue now and the request isn't a retry.    |
+| `region-unknown`       | Issuance, step 2.3, and Redemption, step 2: the region has no published group.        |
+| `blinded-element`      | Issuance, step 2.4: `B` isn't 32 bytes encoding an element other than 0.              |
+| `token-taken`          | Issuance, step 2.5: the account has its token and this isn't a retry of it.           |
+| `inverse`              | Issuance, step 4: `skS + m = 0` for this `info`.                                      |
+| `evaluation-element`   | Issuance, step 5: `Z` isn't 32 bytes encoding an element other than 0.                |
+| `proof`                | Issuance, step 5: `c` or `s` isn't below `l`, or the proof doesn't check against `T`. |
+| `key-unknown`          | Redemption, step 1: no key held has this identifier.                                  |
+| `key-period`           | Redemption, step 1: the key doesn't redeem now.                                       |
+| `token`                | Redemption, step 3: `token` isn't 64 bytes equal to the issuer's output.              |
 
 ## Test vectors
 
@@ -119,8 +133,8 @@ The codes the checks above use, which the vectors label:
 
 ## Security notes
 
-- **What the operator learns.** Which accounts took a token, for which region, in which key period; and, separately, which commitments were redeemed for which region. POPRF's blinding makes the two unlinkable whatever the issuer does, as long as every client uses the published key (Keys) and checks the proof; timing is the remaining link (Timing).
-- **A stolen key mints identities.** Whoever holds `skS` computes tokens for any commitment and any group, with no account, until the key stops redeeming. The keys are held apart from every other secret, and the number of commitments redeemed per key and group, which the service can count without linking anything, must not exceed the tokens issued per key and group; a larger count is a compromise (T-74).
-- **One identity per account and group, for good.** The issuer refuses a second token for a group, so a voter who loses an identity before backing it up ([[identity-backup]]) and after redeeming can't register another in that group from the same account (T-18). A token lost before redemption is lost too; retries cover only a lost answer (Issuance, step 2.5).
+- **What the operator learns.** Which accounts took their token, for which region; and, separately, which commitments were redeemed for which region. POPRF's blinding makes the two unlinkable whatever the issuer does, as long as every client uses the published key (Keys) and checks the proof; timing is the remaining link (Timing): in a region where few accounts take tokens in a day, the day-long delay leaves few candidates for each new commitment.
+- **A stolen key mints identities.** Whoever holds `skS` computes tokens for any commitment and any group, with no account, until the key stops redeeming. The keys are held apart from every other secret, and the number of commitments newly queued by redemption per key and group, which the service can count without linking anything, must not exceed the tokens issued per key and group by more than the commitments dropped from the queue and redeemed again ([[registration]], The batch), a slack the service also counts; a larger count is a compromise (T-74).
+- **One identity per account, for good.** The issuer refuses a second token, so a voter who loses an identity before backing it up ([[identity-backup]]) and after redeeming can't register another from the same account (T-18), nor move to another region. A token lost after `Finalize` and before redemption is lost too; retries cover only a lost or corrupted answer (Issuance, step 2.5).
 - **A token can be sold.** An account holder can blind a buyer's commitment and hand the buyer the token; nothing on this page stops it. A token costs a verified account, so a Sybil pays what a verified account costs ([[P2-31]], T-01).
 - **POPRF's assumption.** POPRF's obliviousness and one-more unpredictability rest on the 3HashSDHI assumption (Tyagi et al., above), a q-type assumption stronger than the one-more Gap DH that VOPRF mode rests on ([[0039-tier0-token-issuance]], Cons).

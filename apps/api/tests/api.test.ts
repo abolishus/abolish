@@ -494,7 +494,7 @@ describe("elections.list (T-68)", () => {
       const nullifiers = Array.from({ length: voters }, (_, v) => BigInt(v + 1));
       for (const nullifier of voters > 0 ? [...nullifiers, 1n] : [])
         await appendEntry(app, id, Number(segment), Uint8Array.of(0, 2, 1, ...randomBytes(8)), {
-          ballot: { tier: 0, nullifier, message: b32() },
+          ballot: { tier: 0, nullifier, message: b32(), ballotHash: b32() },
         });
       return hex(id);
     }

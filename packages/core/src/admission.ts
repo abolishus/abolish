@@ -9,13 +9,30 @@
 // ballot whose L1 reference 5.8 already rejects isn't boarded at all.
 // Nothing here sees who submitted: no account, session or address reaches
 // this module (T-10).
+//
+// Share receipts take the board path here too (docs/spec/delivery.md,
+// Boarding): the verifier's admission judges rules 1 and 4 against the
+// ballot the receipt names, found among the boarded ballots by the ballot
+// hash admission stored with each (rule 2), in a segment no later than
+// `s_D` (rule 3), and the board carries at most one passing receipt per
+// seat of a ballot hash (rule 5), so a receipt adds no chosen bytes beyond a
+// registered trustee's signature nonce (T-17, T-52). A seat's node and the
+// voter's client both send it, so a receipted ballot is delivered whichever
+// of them the operator hears from (Client rules 3; T-25).
 
-import { MAX_BOARD_PAYLOAD, type Panel, panelId, type PeriodClock } from "@abolishus/crypto";
+import {
+  deliverySegments,
+  MAX_BOARD_PAYLOAD,
+  type Panel,
+  panelId,
+  type PeriodClock,
+} from "@abolishus/crypto";
 import {
   type AdmissionCode,
   type ElectionAdmission,
   electionAdmission,
   type L1RefCode,
+  type ReceiptAdmissionCode,
 } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import {
@@ -23,6 +40,7 @@ import {
   type AppendedEntry,
   AppendError,
   BOARD_ENTRY_OVERHEAD,
+  readBallotByHash,
   readEntries,
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
@@ -69,6 +87,41 @@ export class SubmitError extends Error {
  * all but the first later; nothing here changes what counts.
  */
 export type L1Check = "admitted" | "pending" | "unchecked" | "off";
+
+/**
+ * Why a share receipt was refused: the verifier's code for rule 1 (`decode`
+ * with its decoding error, `receipt-definition`, `receipt-seat`, or
+ * `unsupported-version` for a definition version whose receipts this
+ * release doesn't board yet), `receipt-ballot` when no boarded ballot has
+ * the ballot hash it names (rule 2), and `share-receipt` when it doesn't
+ * pass against that ballot (rule 4).
+ */
+export type ReceiptRejectionCode = ReceiptAdmissionCode | "receipt-ballot" | "share-receipt";
+
+export class ReceiptError extends Error {
+  override readonly name = "ReceiptError";
+  /** As for ballots; `not-open` also once rule 3's last segment, `s_D`, has passed. */
+  readonly code: SubmitErrorCode;
+  /** Under `rejected`: why. */
+  readonly rejection?: ReceiptRejectionCode;
+  constructor(code: SubmitErrorCode, rejection?: ReceiptRejectionCode) {
+    super(`share receipt refused: ${code}${rejection === undefined ? "" : ` (${rejection})`}`);
+    this.code = code;
+    if (rejection !== undefined) this.rejection = rejection;
+  }
+}
+
+/**
+ * A share receipt's outcome from `BallotAdmissions.submitReceipt`: the entry
+ * that carries it, or, when the board path already carries a passing
+ * receipt for that seat of that ballot hash in other bytes (rule 5), that
+ * receipt's entry, which the sender checks and keeps instead (Client rules 3).
+ */
+export interface ReceiptOutcome {
+  readonly boarded: AppendedEntry;
+  /** True when `boarded` carries an earlier receipt, not the one submitted. */
+  readonly earlier: boolean;
+}
 
 /** One ballot's outcome from `BallotAdmissions.submitAll`. */
 export type SubmitOutcome =
@@ -211,7 +264,12 @@ export class BallotAdmissions {
       try {
         const boarded = await appendEntry(client, id, Number(segment), ballot, {
           raiseToPrevious: true,
-          ballot: { tier: verdict.tier, nullifier: verdict.nullifier, message: verdict.message },
+          ballot: {
+            tier: verdict.tier,
+            nullifier: verdict.nullifier,
+            message: verdict.message,
+            ballotHash: verdict.ballotHash,
+          },
         });
         outcomes.push({ ok: true, boarded, l1 });
       } catch (e) {
@@ -220,6 +278,73 @@ export class BallotAdmissions {
       }
     }
     return outcomes;
+  }
+
+  /**
+   * Judges `receipt` (a share receipt record's bytes) for `electionId` at
+   * UNIX time `now` by the board path's rules (docs/spec/delivery.md,
+   * Boarding) and, if it passes, appends it to the board in the segment
+   * current at `now`, never after `s_D`. Throws `ReceiptError` for a
+   * refusal, with nothing written. The same bytes again return the entry
+   * that carries them; a passing receipt in other bytes for a seat whose
+   * receipt the board path already carries returns that entry instead, as
+   * `earlier`, writing nothing.
+   */
+  async submitReceipt(
+    client: Sql,
+    electionId: Uint8Array,
+    receipt: Uint8Array,
+    now: bigint,
+  ): Promise<ReceiptOutcome> {
+    if (!isBytes(electionId) || electionId.length !== 32)
+      throw new TypeError("electionId must be 32 bytes");
+    if (!isBytes(receipt)) throw new TypeError("receipt must be bytes");
+    if (typeof now !== "bigint" || now < 0n) throw new TypeError("now must be a bigint ≥ 0");
+    const id = new Uint8Array(electionId);
+    const own = new Uint8Array(receipt);
+    let admission;
+    try {
+      admission = await this.#admission(client, id);
+    } catch (e) {
+      if (e instanceof SubmitError) throw new ReceiptError(e.code);
+      throw e;
+    }
+    if (!admission.ok) throw new ReceiptError("not-open");
+    const { epoch, period } = this.#clock;
+    // 2.6 fails a definition opening before the clock's epoch, and a
+    // receipt needs a boarded ballot, so before it nothing is in time.
+    if (now < epoch || admission.closesAt + admission.l1InclusionBound < epoch)
+      throw new ReceiptError("not-open");
+    const last = deliverySegments(
+      this.#clock,
+      admission.closesAt,
+      admission.l1InclusionBound,
+    ).delivery;
+    const segment = (now - epoch) / period;
+    // Rule 3: a board-path receipt boarded after `s_D` is outside its window
+    // and delivers nothing, so it isn't boarded at all.
+    if (segment > last || segment > 0xffffffffn) throw new ReceiptError("not-open");
+    const verdict = admission.receipt(own);
+    if (!verdict.ok) throw new ReceiptError("rejected", verdict.code);
+    const ballot = await readBallotByHash(client, id, verdict.ballotHash);
+    if (ballot === undefined) throw new ReceiptError("rejected", "receipt-ballot");
+    if (!verdict.check(ballot)) throw new ReceiptError("rejected", "share-receipt");
+    try {
+      const boarded = await appendEntry(client, id, Number(segment), own, {
+        raiseToPrevious: true,
+        lastSegment: Number(last > 0xffffffffn ? 0xffffffffn : last),
+        // Version-1 delivery records, the only ones judged yet, name no
+        // panel: their seats are the default panel's.
+        receipt: { ballotHash: verdict.ballotHash, panel: 1, seat: verdict.seat },
+      });
+      return { boarded, earlier: false };
+    } catch (e) {
+      if (!(e instanceof AppendError)) throw e;
+      if (e.code === "receipt-present" && e.existing !== undefined)
+        return { boarded: e.existing, earlier: true };
+      if (e.code === "segment-late") throw new ReceiptError("not-open");
+      throw e;
+    }
   }
 
   /**

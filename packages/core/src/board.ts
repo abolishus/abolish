@@ -28,9 +28,11 @@ import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import { decodeStoredDefinition } from "./definitions.ts";
 import {
+  boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,
   boardEntries,
+  boardShareReceipts,
   boardSubtrees,
   electionDefinitions,
 } from "./db/schema/index.ts";
@@ -69,14 +71,25 @@ export type AppendErrorCode =
    * The payload is to be the board's first entry, and the board already
    * starts with another (admission reads only entry 0 for the transcript).
    */
-  | "not-first";
+  | "not-first"
+  /**
+   * A share receipt for a seat of a ballot hash whose receipt the board path
+   * already carries in other bytes (docs/spec/delivery.md, Boarding, rule
+   * 5): `existing` is that entry.
+   */
+  | "receipt-present"
+  /** The entry would land in a segment after the latest the caller allows. */
+  | "segment-late";
 
 export class AppendError extends Error {
   override readonly name = "AppendError";
   readonly code: AppendErrorCode;
-  constructor(code: AppendErrorCode, options?: { cause?: unknown }) {
+  /** Under `receipt-present`: the entry that carries the earlier receipt. */
+  readonly existing?: AppendedEntry;
+  constructor(code: AppendErrorCode, options?: { cause?: unknown; existing?: AppendedEntry }) {
     super(`board append refused: ${code}`, options);
     this.code = code;
+    if (options?.existing !== undefined) this.existing = options.existing;
   }
 }
 
@@ -202,6 +215,24 @@ export interface BallotKey {
   readonly tier: number;
   readonly nullifier: bigint;
   readonly message: Uint8Array;
+  /**
+   * The ballot hash admission recomputed from the payload: not part of the
+   * key (a ballot cast again after a reorganisation has another `M` and the
+   * same hash), but stored with it, so a share receipt finds its ballot
+   * (docs/spec/delivery.md, Boarding, rule 2).
+   */
+  readonly ballotHash: Uint8Array;
+}
+
+/**
+ * What a share receipt receipts (docs/spec/delivery.md, Boarding, rule 5):
+ * the ballot hash, the seat's panel (1, the default; 2, an author panel)
+ * and the seat, as the verifier's check read them from the record.
+ */
+export interface ReceiptKey {
+  readonly ballotHash: Uint8Array;
+  readonly panel: number;
+  readonly seat: number;
 }
 
 /** `ν` as 32 big-endian bytes; a field<bn254> element, below `r`. */
@@ -271,6 +302,18 @@ export async function appendEntry(
      * else it is refused as `not-first`, never appended after it.
      */
     readonly first?: boolean;
+    /**
+     * The payload is a share receipt the caller checked against a ballot
+     * the board carries under this key's ballot hash (docs/spec/delivery.md,
+     * Boarding, rules 2 and 4): the key is stored with the entry, and the
+     * board path carries one receipt per ballot hash, panel and seat (rule
+     * 5; T-17, T-52). The same bytes return the entry that carries them, so
+     * a retry gets its entry; other bytes are refused as `receipt-present`,
+     * naming the entry that does (Client rules 3).
+     */
+    readonly receipt?: ReceiptKey;
+    /** The latest segment the entry may land in, else `segment-late` (rule 3's `s_D`). */
+    readonly lastSegment?: number;
   } = {},
 ): Promise<AppendedEntry> {
   if (!Number.isInteger(segment) || segment < 0 || segment > MAX_SEGMENT)
@@ -283,6 +326,7 @@ export async function appendEntry(
   const id = new Uint8Array(electionId);
   const body = new Uint8Array(payload);
   let key: { tier: number; nullifier: Uint8Array; message: Uint8Array } | undefined;
+  let ballotHash: Uint8Array | undefined;
   if (options.ballot !== undefined) {
     const { tier, nullifier, message } = options.ballot;
     if (
@@ -291,11 +335,35 @@ export async function appendEntry(
       tier < 0 ||
       tier > 255 ||
       !isBytes(message) ||
-      message.length !== 32
+      message.length !== 32 ||
+      !isBytes(options.ballot.ballotHash) ||
+      options.ballot.ballotHash.length !== 32
     )
       throw new AppendError("invalid-entry");
     key = { tier, nullifier: nullifierBytes(nullifier), message: new Uint8Array(message) };
+    ballotHash = new Uint8Array(options.ballot.ballotHash);
   }
+  let receipt: { ballotHash: Uint8Array; panel: number; seat: number } | undefined;
+  if (options.receipt !== undefined) {
+    const { ballotHash: hash, panel, seat } = options.receipt;
+    if (
+      recordTypeOf(body) !== RECORD_TYPES.shareReceipt ||
+      !isBytes(hash) ||
+      hash.length !== 32 ||
+      (panel !== 1 && panel !== 2) ||
+      !Number.isInteger(seat) ||
+      seat < 1 ||
+      seat > 255
+    )
+      throw new AppendError("invalid-entry");
+    receipt = { ballotHash: new Uint8Array(hash), panel, seat };
+  }
+  const { lastSegment } = options;
+  if (
+    lastSegment !== undefined &&
+    (!Number.isInteger(lastSegment) || lastSegment < 0 || lastSegment > MAX_SEGMENT)
+  )
+    throw new AppendError("invalid-entry");
   return drizzle({ client }).transaction(
     async (tx) => {
       await lockBoard(tx, id);
@@ -341,6 +409,47 @@ export async function appendEntry(
             entryHash: new Uint8Array(seen.entryHash),
             link: new Uint8Array(seen.link),
           };
+        }
+      }
+      if (receipt !== undefined) {
+        // Read under the lock, so two receipts racing in can't both be boarded.
+        const [seen] = await tx
+          .select({
+            idx: boardEntries.idx,
+            segment: boardEntries.segment,
+            payload: boardEntries.payload,
+            entryHash: boardEntries.entryHash,
+            link: boardEntries.link,
+          })
+          .from(boardShareReceipts)
+          .innerJoin(
+            boardEntries,
+            and(
+              eq(boardEntries.electionId, boardShareReceipts.electionId),
+              eq(boardEntries.idx, boardShareReceipts.idx),
+            ),
+          )
+          .where(
+            and(
+              eq(boardShareReceipts.electionId, id),
+              eq(boardShareReceipts.ballotHash, receipt.ballotHash),
+              eq(boardShareReceipts.panel, receipt.panel),
+              eq(boardShareReceipts.seat, receipt.seat),
+            ),
+          );
+        if (seen !== undefined) {
+          const payload = new Uint8Array(seen.payload);
+          const existing: AppendedEntry = {
+            entry: encodeBoardEntry(
+              { election_id: id, index: seen.idx, segment: Number(seen.segment), payload },
+              version,
+            ),
+            index: seen.idx,
+            entryHash: new Uint8Array(seen.entryHash),
+            link: new Uint8Array(seen.link),
+          };
+          if (equalBytes(payload, body)) return existing;
+          throw new AppendError("receipt-present", { existing });
         }
       }
       if (options.first === true) {
@@ -397,6 +506,7 @@ export async function appendEntry(
         )
           throw new AppendError("opening-order");
       }
+      if (lastSegment !== undefined && segment > lastSegment) throw new AppendError("segment-late");
       const index = prev === undefined ? 0n : prev.idx + 1n;
       const entry: BoardEntry = { election_id: id, index, segment, payload: body };
       let encoded: Uint8Array;
@@ -420,6 +530,10 @@ export async function appendEntry(
       });
       if (key !== undefined)
         await tx.insert(boardBallotKeys).values({ electionId: id, idx: index, ...key });
+      if (ballotHash !== undefined)
+        await tx.insert(boardBallotHashes).values({ electionId: id, idx: index, ballotHash });
+      if (receipt !== undefined)
+        await tx.insert(boardShareReceipts).values({ electionId: id, idx: index, ...receipt });
       // The subtrees this entry completes, from the ones covering the board
       // before it, in the same transaction: heads and proofs then never read
       // more than O(log n) of them (T-52).
@@ -668,6 +782,42 @@ export async function readBoardedEntry(
     await storedBoardVersion(client, id),
   );
   return { entry, index, entryHash: new Uint8Array(row.entryHash), link: new Uint8Array(row.link) };
+}
+
+/**
+ * The payload of the first ballot boarded under `ballotHash` (as admission
+ * recomputed it, stored by `appendEntry`), if any: the ballot a share
+ * receipt naming that hash is checked against (docs/spec/delivery.md,
+ * Boarding, rule 2). One read, whatever the board holds (T-52); every ballot
+ * of one ballot hash has the same share hashes, since the hash binds them.
+ */
+export async function readBallotByHash(
+  client: Sql,
+  electionId: Uint8Array,
+  ballotHash: Uint8Array,
+): Promise<Uint8Array | undefined> {
+  const id = checkId(electionId);
+  if (!isBytes(ballotHash) || ballotHash.length !== 32)
+    throw new TypeError("ballotHash must be 32 bytes");
+  const [row] = await drizzle({ client })
+    .select({ payload: boardEntries.payload })
+    .from(boardBallotHashes)
+    .innerJoin(
+      boardEntries,
+      and(
+        eq(boardEntries.electionId, boardBallotHashes.electionId),
+        eq(boardEntries.idx, boardBallotHashes.idx),
+      ),
+    )
+    .where(
+      and(
+        eq(boardBallotHashes.electionId, id),
+        eq(boardBallotHashes.ballotHash, new Uint8Array(ballotHash)),
+      ),
+    )
+    .orderBy(asc(boardBallotHashes.idx))
+    .limit(1);
+  return row === undefined ? undefined : new Uint8Array(row.payload);
 }
 
 /**

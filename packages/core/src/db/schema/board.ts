@@ -50,6 +50,38 @@ export const boardBallotKeys = pgTable(
   ],
 );
 
+// Drizzle view of migrations/0026_board_share_receipts.sql: each boarded
+// ballot's ballot hash, by which a share receipt finds the ballot it names
+// (docs/spec/delivery.md, Boarding, rule 2; T-52). Append-only like the board.
+export const boardBallotHashes = pgTable(
+  "board_ballot_hashes",
+  {
+    electionId: bytea("election_id").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+    ballotHash: bytea("ballot_hash").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.electionId, t.idx] })],
+);
+
+// The same migration's other table: each share receipt boarded through the
+// board path, by the (ballot hash, panel, seat) it receipts, so at most one
+// passing receipt per seat of a boarded ballot is boarded that way (rule 5;
+// T-17, T-52). Append-only like the board.
+export const boardShareReceipts = pgTable(
+  "board_share_receipts",
+  {
+    electionId: bytea("election_id").notNull(),
+    ballotHash: bytea("ballot_hash").notNull(),
+    panel: smallint("panel").notNull(),
+    seat: smallint("seat").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.electionId, t.ballotHash, t.panel, t.seat] }),
+    unique().on(t.electionId, t.idx),
+  ],
+);
+
 // Drizzle view of migrations/0009_board_checkpoints.sql: each checkpoint the
 // anchoring job took, append-only like the board; taking one fences its
 // segment (T-24).

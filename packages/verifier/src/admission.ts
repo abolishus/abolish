@@ -10,16 +10,29 @@
 // What it can't decide from the definition, the panel and the transcript
 // alone stays with the caller or the verifier: the L1 reference (5.8), the
 // close rule (5.5), repeats (5.7) and the L2 side of 3.1.
+//
+// It also judges a share receipt the operator is asked to board, by the
+// receipt's own rules of Boarding (docs/spec/delivery.md, rules 1 and 4):
+// the record decodes strictly, names this definition and a seat of the
+// registered key set, and passes `share-receipt` against the boarded ballot
+// its ballot hash names, with that ballot's own share hash for the seat. So
+// the operator boards only receipts the delivery check reads as passing
+// (T-17, T-52). Finding the ballot (rule 2), the window (rule 3) and an
+// earlier passing receipt (rule 5) are the board's, which the caller holds.
 
 import {
   type BallotCheck,
   type BallotCheckV2,
   type BallotStep,
+  castReceiptSeatV3,
   DecodeError,
   type DecodeErrorCode,
+  decodeShareReceipt,
   finishBallotSteps,
   pinnedVersion,
   profileCombinationRule,
+  type QuestionBallotElection,
+  questionBallotElection,
   RECORD_TYPES,
   type Panel,
 } from "@abolishus/crypto";
@@ -68,6 +81,42 @@ export type BallotAdmission =
       readonly decodeError?: DecodeErrorCode;
     };
 
+/** Why a share receipt can't be boarded for an election (docs/spec/delivery.md, Boarding). */
+export type ReceiptAdmissionCode =
+  /** It doesn't decode strictly as the share receipt the election's ballot version fixes. */
+  | "decode"
+  /** This release boards no receipt for the election's definition version yet. */
+  | "unsupported-version"
+  /** It names another definition than the election's (rule 1). */
+  | "receipt-definition"
+  /** Its seat isn't one of the registered key set's (rule 1). */
+  | "receipt-seat";
+
+/**
+ * A share receipt's verdict by rule 1: refused with its code, or the ballot
+ * hash and seat it names, and `check`, rule 4 against a boarded ballot.
+ */
+export type ReceiptAdmission =
+  | {
+      readonly ok: true;
+      /** The ballot hash the record names: the ballot the caller finds on the board (rule 2). */
+      readonly ballotHash: Uint8Array;
+      readonly seat: number;
+      /**
+       * Whether the receipt passes `share-receipt` against `ballot`, a
+       * ballot record the board carries (rule 4): the ballot hash
+       * recomputed from it and its own share hash for the seat are the
+       * record's, and the signature verifies under that seat's registered
+       * signing key. False for bytes that aren't a ballot of this election.
+       */
+      readonly check: (ballot: Uint8Array) => boolean;
+    }
+  | {
+      readonly ok: false;
+      readonly code: ReceiptAdmissionCode;
+      readonly decodeError?: DecodeErrorCode;
+    };
+
 /** An election whose ballots can be judged, with the window its definition sets. */
 export interface ElectionAdmission {
   readonly ok: true;
@@ -76,6 +125,8 @@ export interface ElectionAdmission {
   readonly closesAt: bigint;
   /** The L1 chain its ballots name blocks of (5.8). */
   readonly l1ChainId: bigint;
+  /** The definition's `l1_inclusion_bound`: with `closesAt`, where the delivery windows end. */
+  readonly l1InclusionBound: bigint;
   /** Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never throws on its bytes. */
   readonly admit: (payload: Uint8Array) => BallotAdmission;
   /**
@@ -86,6 +137,8 @@ export interface ElectionAdmission {
    * batch of 64 the gain from batching (T-52). Never throws on the bytes.
    */
   readonly admitAll: (payloads: readonly Uint8Array[]) => BallotAdmission[];
+  /** Rule 1 for a share receipt's bytes, with rule 4 to run against its ballot; never throws on them. */
+  readonly receipt: (payload: Uint8Array) => ReceiptAdmission;
 }
 
 /**
@@ -206,13 +259,62 @@ export function electionAdmission(
       results[at] = verdict(finished[i] as BallotCheck | BallotCheckV2);
     return results as BallotAdmission[];
   };
+  // Only definition version 5's receipts (ballot version 3, the one the
+  // ballot client casts) are judged yet; another version's are refused,
+  // never judged under the wrong ballot hash (T-36).
+  const questions =
+    record.version === 5 ? questionBallotElection(record.value, registered) : undefined;
+  const seats = new Set(registered.map((k) => k.index));
   return {
     ok: true,
     electionId: new Uint8Array(d.election_id),
     opensAt: d.opens_at,
     closesAt: d.closes_at,
     l1ChainId: d.l1_chain_id,
+    l1InclusionBound: BigInt(d.l1_inclusion_bound),
     admit: (payload) => admitAll([payload])[0] as BallotAdmission,
     admitAll,
+    receipt: (payload) =>
+      questions === undefined
+        ? { ok: false, code: "unsupported-version" }
+        : receiptAdmission(questions, seats, payload),
   };
 }
+
+/** Rule 1 for a version-1 share receipt (ballot version 3's), and its rule 4. */
+function receiptAdmission(
+  election: QuestionBallotElection,
+  seats: ReadonlySet<number>,
+  payload: Uint8Array,
+): ReceiptAdmission {
+  const own = new Uint8Array(payload);
+  let decoded;
+  try {
+    decoded = decodeShareReceipt(own, 1);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return { ok: false, code: "decode", decodeError: e.code };
+  }
+  if (!equal(decoded.definition_hash, election.definitionHash))
+    return { ok: false, code: "receipt-definition" };
+  const { seat } = decoded;
+  if (!seats.has(seat)) return { ok: false, code: "receipt-seat" };
+  return {
+    ok: true,
+    ballotHash: new Uint8Array(decoded.ballot_hash),
+    seat,
+    check: (ballot) => {
+      try {
+        return castReceiptSeatV3(election, ballot, own) === seat;
+      } catch (e) {
+        // A ballot that doesn't decode, or is another election's: no ballot
+        // this receipt can stand for (castReceiptSeatV3 throws on both).
+        if (e instanceof DecodeError || e instanceof TypeError) return false;
+        throw e;
+      }
+    },
+  };
+}
+
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);

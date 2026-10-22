@@ -446,7 +446,12 @@ describe("listPolls, answered", () => {
       Number(segment),
       Uint8Array.of(0x00, 0x02, 1, ...randomBytes(8)),
       {
-        ballot: { tier, nullifier, message: new Uint8Array(randomBytes(32)) },
+        ballot: {
+          tier,
+          nullifier,
+          message: new Uint8Array(randomBytes(32)),
+          ballotHash: new Uint8Array(randomBytes(32)),
+        },
       },
     );
   }

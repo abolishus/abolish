@@ -160,7 +160,11 @@ export const BUNDLE_FORMAT_L2 = "abolish-verifier-bundle/6";
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
 
-function object(value: unknown, keys: readonly string[], what: string): Record<string, unknown> {
+export function object(
+  value: unknown,
+  keys: readonly string[],
+  what: string,
+): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new BundleError(`${what}: expected an object`);
   const o = value as Record<string, unknown>;
@@ -170,7 +174,7 @@ function object(value: unknown, keys: readonly string[], what: string): Record<s
   return o;
 }
 
-function hexBytes(value: unknown, what: string, length?: number): Uint8Array {
+export function hexBytes(value: unknown, what: string, length?: number): Uint8Array {
   if (
     typeof value !== "string" ||
     !/^(?:[0-9a-f]{2})+$/.test(value) ||
@@ -228,7 +232,7 @@ function parseAnchor(value: unknown, j: number): Anchor {
   };
 }
 
-function array(value: unknown, what: string): readonly unknown[] {
+export function array(value: unknown, what: string): readonly unknown[] {
   if (!Array.isArray(value)) throw new BundleError(`${what}: expected an array`);
   return value;
 }
@@ -273,7 +277,7 @@ function parsePanel(value: unknown): Panel {
   return panel;
 }
 
-function header(value: unknown, what: string): L1Header {
+export function header(value: unknown, what: string): L1Header {
   const raw = hexBytes(value, what);
   try {
     return decodeHeader(raw);
@@ -372,7 +376,7 @@ export function splitEntries(board: Uint8Array): {
  * name. `JSON.parse` keeps the last of them, and another reader might keep
  * the first, so two verifiers could judge different inputs from one file.
  */
-function rejectDuplicateMembers(json: string): void {
+export function rejectDuplicateMembers(json: string, file = "bundle.json"): void {
   // One frame per open object or array: the member names seen so far, or
   // null for an array.
   const frames: (Set<string> | null)[] = [];
@@ -385,7 +389,7 @@ function rejectDuplicateMembers(json: string): void {
       const names = frames.at(-1);
       if (expectName && names instanceof Set) {
         const name = JSON.parse(json.slice(i, j + 1)) as string;
-        if (names.has(name)) throw new BundleError(`bundle.json: duplicate member ${name}`);
+        if (names.has(name)) throw new BundleError(`${file}: duplicate member ${name}`);
         names.add(name);
         expectName = false;
       }

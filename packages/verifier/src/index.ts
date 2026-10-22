@@ -76,7 +76,38 @@ export {
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { type PanelKind, PINNED_PANELS, type PinnedPanel, type PinnedSeat } from "./panels.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
-export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
+export { type CliContext, type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
+export {
+  KEYS_EVIDENCE_FORMAT,
+  KEYS_REPORT_FORMAT,
+  type KeysAt,
+  type KeysCode,
+  type KeysEvidence,
+  type KeysFinding,
+  type KeysPeriodRow,
+  type KeysReleaseRow,
+  type KeysReport,
+  type KeysResult,
+  keysSummary,
+  MAX_KEYS_FINDINGS,
+  parseKeysEvidence,
+  runKeys,
+} from "./keys.ts";
+export {
+  checkFresh,
+  MAX_L1_STALENESS,
+  PINNED_RELEASE_REGISTRY,
+  type PublishedRelease,
+  type RegistryCode,
+  RegistryError,
+  registryWords,
+  releaseAt,
+  releaseCount,
+  releaseHashSlot,
+  RELEASE_REGISTRY_NAMESPACE,
+  type ReleaseRegistryPin,
+  releaseTimesSlot,
+} from "./registry.ts";
 export { readBlockStore, type BlockStore } from "./blocks.ts";
 export { DEFAULT_MAX_BOARD_BYTES, loadBundle, readBundle } from "./files.ts";
 export {
@@ -92,6 +123,8 @@ export {
   anchorsFromState,
   checkpointSlot,
   checkpointWords,
+  contractAccount,
+  type ContractAccount,
   decodeHeader,
   decodeRlp,
   L1Error,

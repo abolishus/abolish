@@ -421,18 +421,31 @@ export interface DeploymentAcrossFailure {
  * `earlier` being the one named by the release published first on L1, or
  * `undefined`. A period's key is fixed once a release lists it and belongs
  * to that period alone, and a retirement stands (T-74, T-10). A version-1
- * record lists no key, so has nothing to compare: pass only version 2.
+ * record lists no key, so has nothing to compare: pass only version 2, and
+ * only records `deploymentRecordRule` accepted.
  */
 export function deploymentAcrossRule(
   earlier: DeploymentRecordV2,
   later: DeploymentRecordV2,
 ): DeploymentAcrossFailure | undefined {
+  // The caller checked both with deploymentRecordRule. Only the shape the
+  // comparison relies on is checked again (one key per consecutive period,
+  // no key twice), so a verifier comparing every pair of releases doesn't
+  // redo every rule's point decoding for each pair (T-52).
   for (const [name, r] of [
     ["earlier", earlier],
     ["later", later],
-  ] as const)
-    if (v2Rule(r) !== undefined)
+  ] as const) {
+    const keys = r.tier0_token_keys;
+    if (
+      keys.length === 0 ||
+      !keys.every(
+        (k, i) => i === 0 || k.period === (keys[i - 1] as DeploymentTokenKey).period + 1,
+      ) ||
+      !keys.every((k, i) => keys.slice(0, i).every((e) => !sameBytes(e.key, k.key)))
+    )
       throw new RangeError(`deploymentAcrossRule: the ${name} record is ill formed`);
+  }
   const before = new Map(earlier.tier0_token_keys.map((k) => [k.period, k]));
   // Well formed, so the later's periods ascend: the first hit is the lowest.
   for (const k of later.tier0_token_keys) {

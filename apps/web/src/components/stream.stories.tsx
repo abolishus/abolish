@@ -344,9 +344,7 @@ export const Place: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(within(canvas.getByRole("search")).getByRole("textbox")).toHaveValue(
-      " Old  Town",
-    );
+    await expect(within(canvas.getByRole("search")).getByRole("textbox")).toHaveValue(" Old  Town");
     await expect(canvas.getByText(/filed at the place you entered/)).toBeVisible();
     await expect(canvas.getByRole("link", { name: "Clear the place" })).toHaveAttribute(
       "href",

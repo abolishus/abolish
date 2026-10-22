@@ -4,7 +4,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { reactionsClient } from "../account/reactions.ts";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
-import { fetchPoll } from "../data.ts";
+import { fetchPhoneVerification, fetchPoll } from "../data.ts";
 import { embedHeight } from "../embed.ts";
 import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
@@ -38,7 +38,7 @@ export const Route = createFileRoute("/polls/$electionId")({
             embed: { page: `${origin}/embed/p/${page.code}`, height: embedHeight(page.poll) },
           }
         : undefined;
-    return { page, preview, share };
+    return { page, preview, share, phoneVerification: await fetchPhoneVerification() };
   },
   head: ({ loaderData }) => {
     const page = loaderData?.page;
@@ -71,9 +71,16 @@ export const Route = createFileRoute("/polls/$electionId")({
   },
   component: function Poll() {
     const t = useTranslate(catalogs);
-    const { page, share } = Route.useLoaderData();
+    const { page, share, phoneVerification } = Route.useLoaderData();
     if (page.kind === "poll")
-      return <PollSummary {...page} share={share} reactions={reactionsClient} />;
+      return (
+        <PollSummary
+          {...page}
+          share={share}
+          reactions={reactionsClient}
+          phoneVerification={phoneVerification}
+        />
+      );
     return (
       <Notice title={t("unavailableTitle")}>
         {t(page.problem === "undecodable" ? "definitionUndecodable" : "definitionMismatch")}

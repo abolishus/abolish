@@ -37,13 +37,11 @@ import {
   selectionRange,
   tidyPlace,
 } from "../account/poll-form.ts";
-import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
 const FIELD = "min-h-12 px-3 text-base md:text-base";
-
-const TIER_NAMES: Readonly<Record<number, keyof Messages>> = { 0: "tier0", 1: "tier1", 2: "tier2" };
 
 function move<T>(list: readonly T[], from: number, to: number): T[] {
   const next = [...list];
@@ -60,6 +58,12 @@ const topicOf = (value: string): PollTopic | "" =>
 type Unavailable = "signedOut" | "gone" | "notDraft" | "unloaded";
 
 type Translate = ReturnType<typeof useTranslate<Messages>>;
+
+/** A tier's name, or its number for one that has none. */
+const tierName = (t: Translate, tier: number, phoneVerification: boolean) => {
+  const key = tierMessage(tier, phoneVerification);
+  return key === undefined ? String(tier) : t(key);
+};
 
 /** A problem's words, saying which question it is in. */
 const say = (t: Translate, e: FieldError) => {
@@ -563,10 +567,12 @@ function ReviewList({
 function PollReview({
   t,
   form,
+  phoneVerification,
   onJump,
 }: {
   t: Translate;
   form: PollForm;
+  phoneVerification: boolean;
   onJump: (event: SyntheticEvent, target: string) => void;
 }) {
   const { locale } = useI18n();
@@ -603,9 +609,7 @@ function PollReview({
     },
     {
       label: t("pollFormReviewWho"),
-      value: form.tiers
-        .map((tier) => (TIER_NAMES[tier] === undefined ? String(tier) : t(TIER_NAMES[tier])))
-        .join(", "),
+      value: form.tiers.map((tier) => tierName(t, tier, phoneVerification)).join(", "),
     },
     {
       label: t("pollFormReviewCloses"),
@@ -687,6 +691,8 @@ export interface PollFormPageProps {
   readonly challenge?: Challenge | undefined;
   /** Called once the draft is submitted for setup, with its poll's ID. */
   readonly onSubmitted?: (id: string) => void;
+  /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
+  readonly phoneVerification: boolean;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
   /** The author's own time zone, for the local time beside the UTC one; the browser's by default. */
@@ -711,6 +717,7 @@ export function PollFormPage({
   onCreated,
   challenge,
   onSubmitted,
+  phoneVerification,
   now = () => new Date(),
   timeZone,
 }: PollFormPageProps) {
@@ -1151,7 +1158,7 @@ export function PollFormPage({
             <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
               {form.tiers.map((tier) => (
                 <li key={tier} className="border-b border-border py-3 text-base font-semibold">
-                  {TIER_NAMES[tier] === undefined ? String(tier) : t(TIER_NAMES[tier])}
+                  {tierName(t, tier, phoneVerification)}
                 </li>
               ))}
             </ul>
@@ -1238,7 +1245,7 @@ export function PollFormPage({
             }
           >
             <div className="grid gap-4">
-              <PollReview t={t} form={form} onJump={jump} />
+              <PollReview t={t} form={form} phoneVerification={phoneVerification} onJump={jump} />
               <div>
                 <Button
                   type="button"

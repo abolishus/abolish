@@ -2,10 +2,10 @@ import { useTranslate } from "@abolishus/ui";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { reactionsClient } from "../account/reactions.ts";
-import { embedHeight } from "../components/poll-embed.tsx";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
 import { fetchPoll } from "../data.ts";
+import { embedHeight } from "../embed.ts";
 import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { previewMeta } from "../og/poll.ts";

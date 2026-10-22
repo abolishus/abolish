@@ -1,4 +1,4 @@
-// The stream's cards (src/stream.ts): a poll's words reach a card only when
+// The stream's cards (src/server/stream-card.ts): a poll's words reach a card only when
 // its display text passes the ballot client's checks against the definition
 // beside it (T-34, T-41), in the translation the page's locale picks.
 
@@ -29,10 +29,10 @@ import {
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   pickTranslation,
-  streamCard,
   streamPlace,
   streamQuery,
 } from "../src/stream.ts";
+import { streamCard } from "../src/server/stream-card.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };

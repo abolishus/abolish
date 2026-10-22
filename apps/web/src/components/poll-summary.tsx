@@ -1,4 +1,4 @@
-import { cn, Count, Fingerprint, Hash, useI18n, useTranslate } from "@abolishus/ui";
+import { cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
 import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -13,10 +13,10 @@ import {
   type Tier,
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
-import { formatUtc } from "./format.ts";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
+import { When } from "./when.tsx";
 
 export interface PollSummaryProps {
   poll: PollView;
@@ -33,18 +33,6 @@ export interface PollSummaryProps {
 }
 
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
-
-/** An instant from the definition, or its raw seconds past what `Date` holds. */
-export function When({ instant }: { instant: Instant }) {
-  const t = useTranslate(catalogs);
-  const { locale } = useI18n();
-  if (instant.iso === undefined) return <span className="tabular-nums">{instant.seconds}</span>;
-  return (
-    <time dateTime={instant.iso} suppressHydrationWarning>
-      {t("utcTime", { time: formatUtc(locale, new Date(instant.iso)) })}
-    </time>
-  );
-}
 
 const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
 

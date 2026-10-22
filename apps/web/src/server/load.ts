@@ -5,16 +5,13 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { type BoardRow, boardRows } from "../board.ts";
-import { type CardText, type StreamCard, streamCard, type StreamSort } from "../stream.ts";
+import { BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex } from "../values.ts";
-import {
-  definitionView,
-  type DefinitionProblem,
-  type Instant,
-  instant,
-  type PollView,
-} from "../poll.ts";
+import { type DefinitionProblem, type Instant, instant, type PollView } from "../poll.ts";
 import type { Api } from "./api.ts";
+import { definitionView } from "./definition.ts";
+import { streamCard } from "./stream-card.ts";
 
 export interface BoardHead {
   /** Entries on the board, as a canonical decimal `u64`. */
@@ -126,13 +123,6 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
   return { kind: "poll", electionId };
 }
 
-/**
- * Entries per page of the board page. Pages start only at multiples of it,
- * so a visit tells our server which window of the board was read, never
- * which entry (T-10).
- */
-export const BOARD_PAGE = 25;
-
 export type BoardPage =
   | {
       readonly kind: "board";
@@ -218,18 +208,12 @@ export async function loadBoardPage(
   return { kind: "board", poll: view.poll, head, from, rows };
 }
 
-/** Decisions per page of the moderation log. */
-export const LOG_PAGE = 50;
-
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;
 
 /** The moderation log after sequence number `after` (a canonical decimal `u64`). */
 export async function loadModerationLog(api: Api, after: string): Promise<ModerationLog> {
   return api.moderation.getLog({ after, limit: String(LOG_PAGE) });
 }
-
-/** Polls per page of the discovery list: each costs the page one definition fetch. */
-export const LIST_PAGE = 20;
 
 export type ListedPoll =
   | { readonly kind: "poll"; readonly poll: PollView }
@@ -372,7 +356,7 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * in `locale`. The API
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
- * are checked here (src/stream.ts). A poll the database lost between the
+ * are checked here (src/server/stream-card.ts). A poll the database lost between the
  * listing and its definition drops out of the page.
  */
 export async function loadStream(
@@ -438,7 +422,7 @@ export type EmbedPage =
  * (docs/design/sharing.md, Embed): resolved as `/p/<code>` resolves it, then
  * loaded and checked as the poll page is, which must print the same code
  * (T-34), with its display text checked as the stream checks a card's
- * (src/stream.ts). Nothing of the reader's is passed on (T-10, T-11).
+ * (src/server/stream-card.ts). Nothing of the reader's is passed on (T-10, T-11).
  */
 export async function loadEmbed(api: Api, code: string, locale: string): Promise<EmbedPage> {
   const link = await resolveShortLink(api, code);

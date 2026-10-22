@@ -20,6 +20,10 @@ import {
   TIERS,
 } from "@abolishus/crypto";
 
+import { POLL_TOPICS, type PollTopic } from "./poll-topics.ts";
+
+export { POLL_TOPICS, type PollTopic };
+
 /** One option of a question, in the author's words. */
 export interface DraftOption {
   readonly label: string;
@@ -35,31 +39,6 @@ export interface DraftQuestion {
   readonly minSelections: number;
   readonly maxSelections: number;
 }
-
-/**
- * The topics a poll can be filed under ([[0041-poll-topics-and-places]]): a
- * fixed list the website words in its own messages, so no author's words
- * name a topic and a topic's page is the same in every language (T-67).
- * Codes are only ever added: a poll keeps the code it was filed under, so
- * none is renamed or removed.
- */
-export const POLL_TOPICS = [
-  "community",
-  "culture",
-  "economy",
-  "education",
-  "environment",
-  "food",
-  "government",
-  "health",
-  "housing",
-  "safety",
-  "science",
-  "sport",
-  "technology",
-  "transport",
-] as const;
-export type PollTopic = (typeof POLL_TOPICS)[number];
 
 /** Most code points in a poll's place. */
 export const MAX_PLACE_LENGTH = 80;

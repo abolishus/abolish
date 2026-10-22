@@ -5,14 +5,14 @@ import { PollBoard } from "../components/poll-board.tsx";
 import { Notice } from "../components/site-layout.tsx";
 import { fetchBoardPage } from "../data.ts";
 import { catalogs } from "../messages.ts";
-import { BOARD_PAGE } from "../server/load.ts";
+import { BOARD_PAGE } from "../page-sizes.ts";
 import { isCanonicalU64, isElectionId, searchText } from "../values.ts";
 
 // A poll's board, `/polls/<id>/board?from=<entry>`: not nested in the poll
 // page, which is a page of its own.
 export const Route = createFileRoute("/polls/$electionId_/board")({
   // Always sets `from`, as in moderation.tsx: anything but a canonical u64
-  // that starts a page (src/server/load.ts, `BOARD_PAGE`) starts the board
+  // that starts a page (src/page-sizes.ts, `BOARD_PAGE`) starts the board
   // from its first entry.
   validateSearch: (search: Record<string, unknown>): { from: string | undefined } => {
     const from = searchText(search["from"]);

@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./poll-draft-rules": "./src/poll-draft-rules.ts",
     "./poll-failures": "./src/poll-failures.ts",
+    "./poll-topics": "./src/poll-topics.ts",
     "./short-codes": "./src/short-codes.ts",
     "./turnstile": "./src/turnstile.ts",
     "./test-db": "./tests/db.ts",

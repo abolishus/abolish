@@ -53,7 +53,7 @@ export function PollBoard({ poll, head, from, rows, pageSize }: PollBoardProps) 
   const start = BigInt(from);
   const end = start + BigInt(rows?.length ?? 0);
   const page = BigInt(pageSize);
-  // Pages start only at multiples of the page size (src/server/load.ts).
+  // Pages start only at multiples of the page size (src/page-sizes.ts).
   const latest = size === 0n ? 0n : ((size - 1n) / page) * page;
   const earlier = start > 0n ? (start - page < latest ? start - page : latest) : undefined;
   const later = rows !== undefined && rows.length === pageSize && end < size ? end : undefined;

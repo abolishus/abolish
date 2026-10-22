@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ModerationLog } from "../components/moderation-log.tsx";
 import { fetchModerationLog } from "../data.ts";
 import { isCanonicalU64, searchText } from "../values.ts";
-import { LOG_PAGE } from "../server/load.ts";
+import { LOG_PAGE } from "../page-sizes.ts";
 
 export const Route = createFileRoute("/moderation")({
   // Always sets `after`, as in polls.index.tsx: anything but a canonical

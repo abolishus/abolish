@@ -5,7 +5,7 @@ import { catalogs } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll, PollList as List } from "../server/load.ts";
 import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
-import { When } from "./poll-summary.tsx";
+import { When } from "./when.tsx";
 
 /** A listed poll's ID, which names its row: a definition carries no title of its own. */
 function idOf(entry: ListedPoll): string {

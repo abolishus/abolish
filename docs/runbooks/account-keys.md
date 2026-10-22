@@ -37,7 +37,7 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
    UNION ALL SELECT 'account_phone_recipients', hash_key, count(*) FROM account_phone_recipients GROUP BY hash_key;
    ```
 
-   Every row should show the new key's ID. A per-number count with no key (`NULL`) predates migration 0029 and is pruned within a day; nothing else should remain.
+   Every row should show the new key's ID. A per-number count with no key (`NULL`) predates migration 0030 and is pruned within a day; nothing else should remain.
 
 5. **Watch the log** for these lines, by kind only; none names a key or a row:
    - `PhoneHashRotationFailed`: a run failed; the next tick tries again. If it repeats, look at the database.

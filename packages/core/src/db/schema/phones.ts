@@ -2,7 +2,7 @@ import { bigint, pgTable, smallint, text, timestamp } from "drizzle-orm/pg-core"
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0026_account_phones.sql and 0029; a test checks
+// Drizzle view of migrations/0026_account_phones.sql and 0030; a test checks
 // they agree. All six are in the account class: an account's number, kept
 // only as a keyed hash, the numbers held after an account let them go, the
 // code waiting to verify one, when each account asked for codes, when each
@@ -48,7 +48,7 @@ export const accountPhoneRecipients = pgTable("account_phone_recipients", {
   id: bigint("id", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
   phoneHash: bytea("phone_hash").notNull(),
   sentAt: at("sent_at").notNull(),
-  // Null only on rows from before migrations/0029, gone within a day.
+  // Null only on rows from before migrations/0030, gone within a day.
   hashKey: text("hash_key"),
 });
 

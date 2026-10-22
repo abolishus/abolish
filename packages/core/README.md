@@ -125,7 +125,7 @@ Creator profiles ([[0040-creator-profiles]]; [[P2-27]] part 1b): `account_profil
 
 `src/profiles.ts`:
 
-- `profileName(name)`: the stored form of a name (spaces collapsed, trimmed, NFC, 1 to `MAX_PROFILE_NAME` code points), or `undefined` for one holding a control, format, private-use, unassigned, surrogate or separator character but the space.
+- `profileName(name)`: the stored form of a name (spaces collapsed, trimmed, NFC, 1 to `MAX_PROFILE_NAME` code points), or `undefined` for one holding a control, format, private-use, unassigned, surrogate, default-ignorable or separator character but the space, or nothing visible.
 - `makeProfile(sql, accountId, name, { now })` returns the new handle (`newProfileHandle`, 80 CSPRNG bits in base32). `ProfileError` refuses, in order, a bad name (`invalid-name`), an account with no verified phone (`account`), one with a profile (`exists`) and one that set a name this UTC day (`too-soon`).
 - `renameProfile(sql, accountId, name, { now })` says whether the name changed: `invalid-name`, `no-profile`, `too-soon`. `deleteProfile(sql, accountId)` deletes the profile and its choices and retires its handle.
 - `showOnProfile(sql, accountId, pollId, on)` makes or takes back one poll's choice, at any state of the poll: `no-profile`, `not-found` (not the account's poll).

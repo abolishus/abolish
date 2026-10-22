@@ -15,9 +15,9 @@
 // handle is 80 bits from the CSPRNG, never derived from the account, the name
 // or anything else, never chosen by the author and never issued twice
 // (`profile_handles` keeps each). The name is the author's, unverified and not
-// unique; `profileName` admits no control, format, private-use, unassigned or
-// separator characters but the space, so no bidi override or invisible
-// character hides in it. Look-alike letters pass, and only `impersonation`
+// unique; `profileName` admits no control, format, private-use, unassigned,
+// default-ignorable or separator characters but the space, and needs one
+// visible character, so no bidi override or invisible character hides in it. Look-alike letters pass, and only `impersonation`
 // moderation answers them. A name is set at most once a UTC day, making a
 // profile included, and the day outlives the profile, so deleting and making
 // one again doesn't flip a name faster (T-52, T-75).
@@ -88,17 +88,23 @@ const dayOf = (now: Date) => {
 
 // T-75: controls (tabs and newlines included), format characters (bidi
 // overrides, zero-width joiners), private use, unassigned code points, lone
-// surrogates, line and paragraph separators, and every space but U+0020.
-const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]|[^\P{Zs} ]/u;
+// surrogates, line and paragraph separators, every space but U+0020, and the
+// letters and marks that render as nothing: default-ignorable code points
+// (Hangul fillers, the combining grapheme joiner, variation selectors) and
+// the blank Braille pattern.
+const FORBIDDEN =
+  /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800]|[^\P{Zs} ]/u;
+/** Something a reader sees: a name of combining marks and spaces alone is blank. */
+const VISIBLE = /[\p{L}\p{N}\p{S}\p{P}]/u;
 
 /**
  * `name` as a profile stores it, or `undefined` if it can't be one: refused
- * if it holds a `FORBIDDEN` character; otherwise runs of spaces collapsed to
+ * if it holds a `FORBIDDEN` character or nothing `VISIBLE`; otherwise runs of spaces collapsed to
  * one, the ends trimmed and the whole in Unicode NFC, then 1 to
  * `MAX_PROFILE_NAME` code points.
  */
 export function profileName(name: unknown): string | undefined {
-  if (typeof name !== "string" || FORBIDDEN.test(name)) return undefined;
+  if (typeof name !== "string" || FORBIDDEN.test(name) || !VISIBLE.test(name)) return undefined;
   const n = name.replace(/ {2,}/g, " ").trim().normalize("NFC");
   const length = Array.from(n).length;
   return length >= 1 && length <= MAX_PROFILE_NAME ? n : undefined;
@@ -214,11 +220,15 @@ export async function renameProfile(
  */
 export async function deleteProfile(client: Sql, accountId: string): Promise<boolean> {
   checkId(accountId, "an account ID");
-  const rows = await drizzle({ client })
-    .delete(accountProfiles)
-    .where(eq(accountProfiles.userId, accountId))
-    .returning({ one: q<number>`1` });
-  return rows.length > 0;
+  return drizzle({ client }).transaction(async (tx) => {
+    // So a choice being made sees the profile gone and is refused as such.
+    await lock(tx, accountId);
+    const rows = await tx
+      .delete(accountProfiles)
+      .where(eq(accountProfiles.userId, accountId))
+      .returning({ one: q<number>`1` });
+    return rows.length > 0;
+  });
 }
 
 /**

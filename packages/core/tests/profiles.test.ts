@@ -274,6 +274,15 @@ describe("profileName", () => {
       "\ue000", // private use
       "\ud800", // lone surrogate
       "\u0378", // unassigned
+      "\u3164", // Hangul filler
+      "\uffa0", // halfwidth Hangul filler
+      "\u115f", // Hangul choseong filler
+      "\u034f", // combining grapheme joiner
+      "\ufe0f", // variation selector
+      "\u{e0100}", // supplementary variation selector
+      "\u180b", // Mongolian free variation selector
+      "\u17b4", // Khmer inherent vowel
+      "\u2800", // Braille blank
     ])
       expect(profileName(`Riverside${c}Neighbours`), JSON.stringify(c)).toBeUndefined();
   });
@@ -281,6 +290,8 @@ describe("profileName", () => {
   test("refuses an empty name, a blank one and one too long", () => {
     expect(profileName("")).toBeUndefined();
     expect(profileName("    ")).toBeUndefined();
+    expect(profileName("\u0301\u0301")).toBeUndefined();
+    expect(profileName(" \u0301 ")).toBeUndefined();
     expect(profileName("x".repeat(MAX_PROFILE_NAME + 1))).toBeUndefined();
     expect(profileName(42)).toBeUndefined();
   });

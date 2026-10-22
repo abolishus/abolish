@@ -979,6 +979,11 @@ const enUS = {
   pollFormPreviewOptional: "You can leave this question blank.",
   pollFormPreviewListed: "Where it's listed",
   pollFormPreviewNotListed: "Not under any topic or place.",
+  pollFormPreviewViews: "Show the preview as",
+  pollFormPreviewPage: "Its page",
+  pollFormPreviewCard: "Its card in Discover",
+  pollFormPreviewCardNote:
+    "Discover shows the first question on the card. Once your poll is open, each answer there opens the voting app with it chosen.",
   pollFormReviewTitle: "Check it through",
   pollFormReviewLede:
     "This is what you're submitting. Change anything on this page, then save before you submit.",

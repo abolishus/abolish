@@ -17,7 +17,7 @@ import {
   type StreamSort,
 } from "../stream.ts";
 import { ballotLink } from "../values.ts";
-import { ListedUnder } from "./listed-under.tsx";
+import { CARD_ANSWER, CardFace } from "./card-face.tsx";
 import { PageHeader } from "./page-parts.tsx";
 import { When } from "./when.tsx";
 
@@ -213,35 +213,16 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
   const { poll, text } = card;
   const questions = poll.questions.length;
   return (
-    <article
-      aria-labelledby={titleId}
-      className="grid content-start gap-5 border border-border p-5 sm:p-6"
+    <CardFace
+      titleId={titleId}
+      closes={<When instant={poll.closesAt} />}
+      questions={questions}
+      text={text}
+      tags={card.tags}
+      href={`/polls/${poll.electionId}`}
+      // The stream lists only polls that aren't delisted or hidden (T-68).
+      linked
     >
-      <p className="m-0 flex flex-wrap justify-between gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        <span>
-          {t("streamCloses")} <When instant={poll.closesAt} />
-        </span>
-        {questions > 1 ? <span>{t("questionCount", { count: questions })}</span> : null}
-      </p>
-      <div className="grid gap-2">
-        <h3
-          id={titleId}
-          lang={text.language}
-          dir="auto"
-          className="m-0 font-heading text-2xl leading-tight font-semibold text-balance break-words sm:text-3xl"
-        >
-          <a href={`/polls/${poll.electionId}`} className="underline-offset-4 hover:underline">
-            {text.heading}
-          </a>
-        </h3>
-        {text.question === undefined ? null : (
-          <p lang={text.language} dir="auto" className="m-0 text-lg text-pretty break-words">
-            {text.question}
-          </p>
-        )}
-      </div>
-      {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
-      <ListedUnder tags={card.tags} linked />
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
@@ -257,7 +238,10 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
                 <a
                   href={ballotLink(ballot, poll.electionId, option)}
                   aria-describedby={titleId}
-                  className="flex min-h-12 items-center justify-between gap-3 border border-input px-4 py-2 text-base font-medium hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                  className={cn(
+                    CARD_ANSWER,
+                    "hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none",
+                  )}
                 >
                   <span lang={text.language} dir="auto" className="min-w-0 break-words">
                     {label}
@@ -269,7 +253,7 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
           </ul>
         </div>
       )}
-    </article>
+    </CardFace>
   );
 }
 

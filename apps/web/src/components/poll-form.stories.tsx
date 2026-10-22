@@ -368,6 +368,74 @@ export const TaggedDraftReadsBack: Story = {
   },
 };
 
+const showsTheCard: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(await canvas.findByRole("textbox", { name: "Title" })).toHaveValue(
+    "Harbor library hours",
+  );
+  const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
+  const views = within(preview.getByRole("radiogroup", { name: "Show the preview as" }));
+  await expect(views.getByRole("radio", { name: "Its page" })).toBeChecked();
+  await userEvent.click(views.getByRole("radio", { name: "Its card in Discover" }));
+  // The card as the stream draws it: the title, the first question and its
+  // options, when it closes, how many questions, and where it's listed.
+  const card = within(await preview.findByRole("article", { name: "Harbor library hours" }));
+  await expect(card.getByText("Should the harbor library open on Sundays?")).toBeVisible();
+  await expect(card.getByText("2 questions")).toBeVisible();
+  await expect(card.getByText(/November 4, 2026/)).toBeVisible();
+  await expect(
+    within(card.getByRole("list", { name: /Choose an answer to question 1 of 2/ }))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["Yes", "No"]);
+  await expect(
+    within(card.getByRole("list", { name: "Where it's listed" }))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["Education", "Harbor Ward"]);
+  // There's no poll yet, so nothing on the card leads anywhere.
+  await expect(card.queryAllByRole("link")).toEqual([]);
+  // The page's preview isn't drawn beside it, so nothing is read out twice.
+  await expect(preview.queryByText("Choose one.")).toBeNull();
+  // It follows the form as the author edits.
+  const option = canvas.getAllByRole("textbox", { name: "Option 1" })[0]!;
+  await userEvent.clear(option);
+  await expect(card.getByText("An option")).toBeVisible();
+  await userEvent.type(option, "Yes, every Sunday");
+  await expect(card.getByText("Yes, every Sunday")).toBeVisible();
+  await userEvent.clear(canvas.getByRole("textbox", { name: "Place (optional)" }));
+  await expect(
+    within(card.getByRole("list", { name: "Where it's listed" }))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["Education"]);
+  // And back to the page's preview, with the edit in it.
+  await userEvent.click(views.getByRole("radio", { name: "Its page" }));
+  await expect(preview.getByText("Yes, every Sunday")).toBeVisible();
+  await expect(preview.queryByRole("article")).toBeNull();
+};
+
+export const CardPreview: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: { ...SAVED, topic: "education", place: "Harbor Ward" } },
+    }),
+    id: ID,
+  },
+  play: showsTheCard,
+};
+
+export const CardPreviewDark: Story = {
+  args: {
+    client: fakeDrafts({
+      read: { summary: SUMMARY, draft: { ...SAVED, topic: "education", place: "Harbor Ward" } },
+    }),
+    id: ID,
+  },
+  parameters: { theme: "dark" },
+  play: showsTheCard,
+};
+
 const editsADraft: Story["play"] = async ({ canvasElement, args }) => {
   const canvas = within(canvasElement);
   await expect(

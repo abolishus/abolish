@@ -6,12 +6,13 @@ import { Label } from "@abolishus/ui/ui/label";
 import { NativeSelect, NativeSelectOption } from "@abolishus/ui/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@abolishus/ui/ui/radio-group";
 import { Textarea } from "@abolishus/ui/ui/textarea";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Plus, Trash2 } from "lucide-react";
 import {
   type FormEvent,
   type ReactNode,
   type SyntheticEvent,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -38,8 +39,12 @@ import {
   tidyPlace,
 } from "../account/poll-form.ts";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import { instant } from "../poll.ts";
+import type { CardText } from "../stream.ts";
+import { CARD_ANSWER, CardFace } from "./card-face.tsx";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
+import { When } from "./when.tsx";
 
 const FIELD = "min-h-12 px-3 text-base md:text-base";
 
@@ -507,6 +512,123 @@ function ListingPreview({ t, form }: { t: Translate; form: PollForm }) {
         </li>
       )}
     </ul>
+  );
+}
+
+/**
+ * The poll's card in the stream, redrawn from the form by the stream's own
+ * face (`CardFace`): the title, the first question and its options, and
+ * where it's listed. On a listed poll's card each option opens the ballot
+ * client with it chosen; here there is no poll yet, so they lead nowhere.
+ */
+function CardPreview({ t, form }: { t: Translate; form: PollForm }) {
+  const titleId = useId();
+  const answersId = useId();
+  const closesAt = closesAtOf(form);
+  const place = tidyPlace(form.place);
+  const [first] = form.questions;
+  const options = first?.options ?? [];
+  const text: CardText = {
+    language: form.language,
+    heading: form.title === "" ? t("pollFormPreviewEmpty") : form.title,
+    question:
+      first === undefined
+        ? undefined
+        : first.question === ""
+          ? t("pollFormPreviewQuestionEmpty")
+          : first.question,
+    options: options.map((o) => (o.label === "" ? t("pollFormPreviewOptionEmpty") : o.label)),
+  };
+  return (
+    <div className="grid gap-3">
+      <CardFace
+        titleId={titleId}
+        closes={closesAt === undefined ? null : <When instant={instant(closesAt)} />}
+        questions={form.questions.length}
+        text={text}
+        tags={{
+          topic: form.topic === "" ? undefined : form.topic,
+          place: place === "" ? undefined : place,
+        }}
+        href={undefined}
+        linked={false}
+      >
+        <div className="grid gap-3">
+          <p id={answersId} className="m-0 text-sm text-pretty text-muted-foreground">
+            {t("streamPick", { count: form.questions.length })}
+          </p>
+          <ul aria-labelledby={answersId} className="m-0 grid list-none gap-2 p-0">
+            {options.map((o, i) => (
+              <li key={o.key} className={CARD_ANSWER}>
+                <span lang={text.language} dir="auto" className="min-w-0 break-words">
+                  {text.options[i]}
+                </span>
+                <ArrowRight aria-hidden="true" className="size-4 shrink-0" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </CardFace>
+      <p className="m-0 text-sm text-muted-foreground">{t("pollFormPreviewCardNote")}</p>
+    </div>
+  );
+}
+
+const PREVIEWS = ["page", "card"] as const;
+
+type PreviewView = (typeof PREVIEWS)[number];
+
+const PREVIEW_NAMES = {
+  page: "pollFormPreviewPage",
+  card: "pollFormPreviewCard",
+} as const satisfies Record<PreviewView, keyof Messages>;
+
+/**
+ * The poll's page or its card in the stream, as the author chooses. Only the
+ * chosen one is drawn, so its words aren't read out twice. A radio group, as
+ * for the form's other choices: the form's script carries it already.
+ */
+function Previews({ t, form }: { t: Translate; form: PollForm }) {
+  const [view, setView] = useState<PreviewView>("page");
+  const legend = useId();
+  return (
+    <>
+      <div className="grid gap-2">
+        <p id={legend} className="m-0 text-sm font-semibold">
+          {t("pollFormPreviewViews")}
+        </p>
+        <RadioGroup
+          aria-labelledby={legend}
+          value={view}
+          onValueChange={(value) => setView(value === "card" ? "card" : "page")}
+          className="flex flex-wrap gap-2"
+        >
+          {PREVIEWS.map((v) => (
+            <Label
+              key={v}
+              className={cn(
+                "flex min-h-12 items-center gap-3 border px-4 text-sm leading-tight font-normal",
+                view === v ? "border-2 border-primary px-[15px] font-semibold" : "border-border",
+              )}
+            >
+              <RadioGroupItem value={v} />
+              {t(PREVIEW_NAMES[v])}
+            </Label>
+          ))}
+        </RadioGroup>
+      </div>
+      {view === "page" ? (
+        <>
+          <PollPreview t={t} form={form} />
+          <p className="m-0 font-mono text-xs tracking-widest uppercase">
+            {t("pollFormPreviewListed")}
+          </p>
+          <ListingPreview t={t} form={form} />
+        </>
+      ) : (
+        <CardPreview t={t} form={form} />
+      )}
+    </>
   );
 }
 
@@ -1285,11 +1407,7 @@ export function PollFormPage({
             <h2 id="poll-form-preview" className="m-0 font-heading text-2xl font-semibold">
               {t("pollFormPreviewTitle")}
             </h2>
-            <PollPreview t={t} form={form} />
-            <p className="m-0 font-mono text-xs tracking-widest uppercase">
-              {t("pollFormPreviewListed")}
-            </p>
-            <ListingPreview t={t} form={form} />
+            <Previews t={t} form={form} />
           </div>
         </aside>
       </form>

@@ -61,6 +61,8 @@ describe("profiles client", () => {
       Response.json({ deleted: true }),
       Response.json(HIDDEN),
       Response.json({ decisionSeq: "41" }, { status: 201 }),
+      Response.json({ changed: true }),
+      Response.json({ changed: false }),
     );
     expect(await profilesClient.own()).toEqual({ ...OWN, renamableOn: undefined });
     expect(await profilesClient.make("Sam")).toBe(HANDLE);
@@ -68,6 +70,8 @@ describe("profiles client", () => {
     await profilesClient.remove();
     expect((await profilesClient.moderation()).state).toBe("hidden");
     await profilesClient.appeal();
+    expect(await profilesClient.show(POLL, true)).toBe(true);
+    expect(await profilesClient.show(POLL, false)).toBe(false);
     expect(calls.map((c) => c.url)).toEqual([
       "/profiles/own",
       "/profiles/make",
@@ -75,12 +79,23 @@ describe("profiles client", () => {
       "/profiles/delete",
       "/profiles/moderation",
       "/profiles/appeal",
+      "/profiles/show",
+      "/profiles/show",
     ]);
     // Every one is a route the handler serves; the report, which goes without
     // the session, is never the account page's (T-10, T-11).
     for (const { url } of calls) expect(PROFILE_ROUTES).toContain(`POST ${url}`);
     const bodies = calls.map((c) => JSON.parse(c.init.body as string) as unknown);
-    expect(bodies).toEqual([{}, { name: "Sam" }, { name: "Sam R." }, {}, {}, {}]);
+    expect(bodies).toEqual([
+      {},
+      { name: "Sam" },
+      { name: "Sam R." },
+      {},
+      {},
+      {},
+      { pollId: POLL, on: true },
+      { pollId: POLL, on: false },
+    ]);
     for (const { init } of calls) {
       expect(init.method).toBe("POST");
       expect(init.credentials).toBe("same-origin");
@@ -96,9 +111,23 @@ describe("profiles client", () => {
     expect((await refused(profilesClient.rename("Sam"))).failure).toBe("changed");
     serve(refusal(404, "NO_PROFILE"));
     expect((await refused(profilesClient.moderation())).failure).toBe("changed");
+    serve(refusal(404, "NO_PROFILE"));
+    expect((await refused(profilesClient.show(POLL, true))).failure).toBe("changed");
+    // A poll deleted or discarded since the page read it.
+    serve(refusal(404, "NOT_FOUND"));
+    expect((await refused(profilesClient.show(POLL, true))).failure).toBe("changed");
     // Nothing to delete: another tab got there first.
     serve(Response.json({ deleted: false }));
     expect((await refused(profilesClient.remove())).failure).toBe("changed");
+  });
+
+  test("takes exactly a boolean from show", async () => {
+    for (const answer of [{}, { changed: "yes" }, { changed: true, extra: 1 }, [true]]) {
+      serve(Response.json(answer));
+      expect((await refused(profilesClient.show(POLL, true))).failure).toBe("failed");
+    }
+    serve(refusal(401, "SIGNED_OUT"));
+    expect((await refused(profilesClient.show(POLL, true))).failure).toBe("signedOut");
   });
 
   test("reads the day a name can change again", async () => {

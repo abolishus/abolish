@@ -9,10 +9,12 @@ import {
   type DraftsFailure,
   type PollSummary,
 } from "../account/drafts.ts";
+import type { OwnProfileView, ProfilesClient } from "../account/profiles.ts";
 import { catalogs, type Messages, POLL_FAILURE_MESSAGES } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 import { Section } from "./page-parts.tsx";
 import { PollModeration } from "./poll-moderation.tsx";
+import { ProfileChoice } from "./profile-choice.tsx";
 
 type Shown = "drafted" | "setup" | "open" | "failed";
 
@@ -47,6 +49,12 @@ export interface AccountPollsProps {
   readonly index: string;
   /** Called when the session turns out to have ended. */
   readonly onSignedOut?: () => void;
+  /** The account's profile, for each poll's choice of whether it shows the poll; none to offer no choice. */
+  readonly profiles?: ProfilesClient;
+  /** Bumped when the profile may have changed elsewhere on the page, so it is read again. */
+  readonly profileRevision?: number;
+  /** Called after each poll's choice is sent, so the rest of the page reads the profile again. */
+  readonly onProfileChanged?: () => void;
 }
 
 /**
@@ -55,9 +63,18 @@ export interface AccountPollsProps {
  * author can do about it (ADR 0032, rule 14). A failed poll that can be
  * retried goes back to its draft or is discarded; one whose election is
  * registered stays, as an open poll does. Under each poll past its draft,
- * what moderation decided about it and the author's appeal.
+ * what moderation decided about it and the author's appeal. Where the
+ * account has a profile, each poll has its choice of whether the profile
+ * shows it (P2-27 part 1d-3).
  */
-export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) {
+export function AccountPolls({
+  client,
+  index,
+  onSignedOut,
+  profiles,
+  profileRevision = 0,
+  onProfileChanged,
+}: AccountPollsProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [polls, setPolls] = useState<readonly PollSummary[] | undefined>();
@@ -65,6 +82,9 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
   const [done, setDone] = useState<Done | undefined>();
   const [failure, setFailure] = useState<DraftsFailure | "unlisted" | undefined>();
   const [confirming, setConfirming] = useState<Confirming | undefined>();
+  const [profile, setProfile] = useState<OwnProfileView | undefined>();
+  // Bumped after a poll's choice changed, so the profile is read again here too.
+  const [chosen, setChosen] = useState(0);
   // An action removes or replaces the buttons that had focus: focus goes
   // back to the section's heading, so keyboard users keep their place.
   const heading = useRef<HTMLHeadingElement>(null);
@@ -85,6 +105,25 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
       .catch((e: unknown) => failed(e, "unlisted"))
       .finally(() => setBusy(false));
   }, [refresh, failed]);
+
+  // The profile's own section says when it can't be read; here a failed
+  // read keeps the boxes as last read, and none before a first read.
+  useEffect(() => {
+    if (profiles === undefined) return;
+    let live = true;
+    profiles
+      .own()
+      .then((p) => live && setProfile(p))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [profiles, profileRevision, chosen]);
+
+  const choiceChanged = () => {
+    setChosen((n) => n + 1);
+    onProfileChanged?.();
+  };
 
   /** Runs one action, then shows the list as the server now has it. */
   const act = (action: () => Promise<void>, then: Done) => async () => {
@@ -269,6 +308,18 @@ export function AccountPolls({ client, index, onSignedOut }: AccountPollsProps) 
                     </p>
                   )}
                   {confirming?.id === p.id ? confirm(p, title, confirming.action) : null}
+                  {profiles === undefined || profile === undefined ? null : (
+                    <div className="md:col-span-full">
+                      <ProfileChoice
+                        client={profiles}
+                        profile={profile}
+                        pollId={p.id}
+                        describedBy={`poll-${p.id}-title`}
+                        onChanged={choiceChanged}
+                        {...(onSignedOut === undefined ? {} : { onSignedOut })}
+                      />
+                    </div>
+                  )}
                   {/* A draft has no election, so nothing to moderate. */}
                   {shown === "drafted" ? null : (
                     <PollModeration

@@ -5,17 +5,10 @@ import {
   type OwnProfileView,
   type ProfileModerationView,
   ProfilesError,
-  type ProfilesClient,
 } from "../account/profiles.ts";
 import { AccountProfile } from "./account-profile.tsx";
+import { fakeProfiles, HANDLE } from "./profiles-fake.ts";
 
-const HANDLE = "k7tq2mxa4vb3pz6r";
-const VISIBLE: ProfileModerationView = {
-  state: "visible",
-  latest: undefined,
-  appealable: false,
-  appeals: [],
-};
 const HIDDEN: ProfileModerationView = {
   state: "hidden",
   latest: {
@@ -27,63 +20,6 @@ const HIDDEN: ProfileModerationView = {
   appealable: true,
   appeals: [],
 };
-
-/** A profiles handler in memory: the section's calls, with no network. */
-function fakeProfiles({
-  profile,
-  moderation = VISIBLE,
-  refuse,
-}: {
-  profile?: OwnProfileView;
-  moderation?: ProfileModerationView;
-  /** Every change ends this way. */
-  refuse?: ProfilesError;
-} = {}): ProfilesClient & { calls: string[] } {
-  let own = profile;
-  let m = moderation;
-  const calls: string[] = [];
-  const act = (call: string) => {
-    calls.push(call);
-    if (refuse !== undefined) throw refuse;
-  };
-  return {
-    calls,
-    own: async () => own,
-    make: async (name) => {
-      act(`make ${name}`);
-      own = { handle: HANDLE, name, renamableOn: "2026-10-23", pollIds: [] };
-      return HANDLE;
-    },
-    rename: async (name) => {
-      act(`rename ${name}`);
-      if (own === undefined) throw new ProfilesError("changed");
-      if (own.name === name) return false;
-      own = { ...own, name, renamableOn: "2026-10-23" };
-      return true;
-    },
-    remove: async () => {
-      act("remove");
-      own = undefined;
-    },
-    moderation: async () => m,
-    appeal: async () => {
-      act("appeal");
-      if (m.latest === undefined) throw new ProfilesError("changed");
-      m = {
-        ...m,
-        appealable: false,
-        appeals: [
-          {
-            decisionSeq: m.latest.seq,
-            filedAt: "2026-10-21T09:30:00.000Z",
-            outcome: undefined,
-            reviewedAt: undefined,
-          },
-        ],
-      };
-    },
-  };
-}
 
 const PROFILE: OwnProfileView = {
   handle: HANDLE,
@@ -183,7 +119,7 @@ const showsProfile: Story["play"] = async ({ canvasElement }) => {
   // T-75: the name is isolated from the text around it.
   await expect(name.tagName).toBe("BDI");
   await expect(canvas.getByText(`/by/${HANDLE}`)).toBeVisible();
-  await expect(canvas.getByText(/^2\. You choose, poll by poll/)).toBeVisible();
+  await expect(canvas.getByText(/^2\. You choose under each of your polls/)).toBeVisible();
   await expect(canvas.getByRole("button", { name: "Change name" })).toBeVisible();
   await expect(canvas.getByRole("button", { name: "Delete profile…" })).toBeVisible();
   // Nothing was ever decided about it, so no moderation shows.

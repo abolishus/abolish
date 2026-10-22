@@ -1,6 +1,7 @@
 import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
   BoardReadError,
+  checkPostingRequest,
   deleteIdentityBackup,
   hasDefinition,
   IdentityBackupStoreError,
@@ -29,6 +30,8 @@ import {
   parseTier0Request,
   placeKey,
   parseTier1Request,
+  type PostingRelay,
+  PostingRelayError,
   Tier0RegistrationError,
   type Tier0Registrations,
   type Tier1Relay,
@@ -45,7 +48,8 @@ import type { Sql } from "postgres";
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
 // The context holds the database, the worker's ballot and receipt queues, Tier 0
-// registration, the Tier 1 relay, the clock and the boards' anchoring clock, and nothing of the request: no handler can see a request's
+// registration, the Tier 1 relay, the posting relay, the clock and the boards'
+// anchoring clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
 
@@ -67,6 +71,8 @@ export interface Context {
   readonly tier0?: Tier0Registrations | undefined;
   /** Absent when this server isn't configured for the Tier 1 relay: it then queues nothing. */
   readonly tier1?: Tier1Relay | undefined;
+  /** Absent when this server isn't configured for the posting relay: it then queues nothing. */
+  readonly postings?: Pick<PostingRelay, "relay"> | undefined;
   /** The anchoring clock our boards' segments follow; absent, the `answered` order is unavailable. */
   readonly boardClock?: PeriodClock | undefined;
 }
@@ -279,6 +285,42 @@ export const router = os.router({
           throw errors.RECEIPT_REJECTED({ data: { code: outcome.rejection ?? "decode" } });
         case "unavailable":
           throw errors.RECEIPTS_UNAVAILABLE();
+      }
+    }),
+  },
+  postings: {
+    // The posting relay (docs/spec/posting-relay.md, Answers): core checks
+    // steps 2 to 7 in order. A server without the relay is unavailable once
+    // the records' own checks pass, as the registration routes are.
+    submit: os.postings.submit.handler(async ({ input, context, errors }) => {
+      try {
+        if (context.postings === undefined) {
+          checkPostingRequest(input);
+          throw new PostingRelayError("unavailable");
+        }
+        const { transaction, layer } = await context.postings.relay(input);
+        return { transaction: toHex(transaction), layer };
+      } catch (e) {
+        if (!(e instanceof PostingRelayError)) throw e;
+        switch (e.code) {
+          case "form":
+            // The pair's calldata over its bound: the contract's schema
+            // checks each field alone, core the two together.
+            throw new ORPCError("BAD_REQUEST");
+          case "malformed":
+            throw errors.POSTING_REFUSED({
+              data: { code: "malformed", ...(e.malformed !== undefined && { check: e.malformed }) },
+            });
+          case "unknown-election":
+          case "too-late":
+            throw errors.POSTING_REFUSED({ data: { code: e.code } });
+          case "refused":
+            throw errors.POSTING_REFUSED({ data: { code: e.refusal ?? "refused" } });
+          case "unavailable":
+            throw errors.RELAY_UNAVAILABLE();
+          case "busy":
+            throw errors.RELAY_BUSY();
+        }
       }
     }),
   },

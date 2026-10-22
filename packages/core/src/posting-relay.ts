@@ -346,13 +346,11 @@ export class PostingRelay {
    * Outcome).
    */
   async relay(input: PostingRequestInput): Promise<PostingSent> {
-    const { posting, ballot } = parsePostingRequest(input);
-    const form = postingForm(posting, ballot);
-    if (!form.ok) throw new PostingRelayError("malformed", form.code);
+    const { posting, ballot, definitionHash } = checkPostingRequest(input);
     if (this.#active >= POSTING_MAX_CONCURRENT) throw new PostingRelayError("busy");
     this.#active++;
     try {
-      return await this.#relay(posting, ballot, form.definitionHash);
+      return await this.#relay(posting, ballot, definitionHash);
     } finally {
       this.#active--;
     }
@@ -462,6 +460,22 @@ export function parsePostingRequest(input: PostingRequestInput): {
   if (postingCalldataLength(posting.length / 2, ballot.length / 2) > POSTING_MAX_DATA)
     throw new PostingRelayError("form");
   return { posting: fromHex(posting), ballot: fromHex(ballot) };
+}
+
+/**
+ * Steps 2 and 3, which need nothing but the request: the fields' forms and
+ * the calldata's bound, then the records' own checks (the verifier's
+ * `postingForm`). Throws `PostingRelayError` (`form` or `malformed`).
+ */
+export function checkPostingRequest(input: PostingRequestInput): {
+  readonly posting: Uint8Array;
+  readonly ballot: Uint8Array;
+  readonly definitionHash: Uint8Array;
+} {
+  const { posting, ballot } = parsePostingRequest(input);
+  const form = postingForm(posting, ballot);
+  if (!form.ok) throw new PostingRelayError("malformed", form.code);
+  return { posting, ballot, definitionHash: form.definitionHash };
 }
 
 function fromHex(hex: string): Uint8Array {

@@ -4,6 +4,7 @@ export {
   createApiServer,
   type ErrorLogLine,
   type Log,
+  MAX_POSTING_BODY,
   MAX_REQUEST_BODY,
   type RequestLogLine,
 } from "./server.ts";
@@ -15,3 +16,4 @@ export {
   MAX_INTAKE_ANSWER,
   MAX_INTAKE_SEATS,
 } from "./intake.ts";
+export { POSTING_ENV, postingFromEnv, sameRedisInstance } from "./posting-env.ts";

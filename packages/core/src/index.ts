@@ -565,6 +565,7 @@ export {
   setReaction,
 } from "./reactions.ts";
 export {
+  checkPostingRequest,
   parsePostingIndex,
   parsePostingOutcome,
   parsePostingPair,

@@ -3,6 +3,7 @@ import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
 import {
   ACCOUNT_COOKIE_PREFIX,
   answeredWindow,
+  type PostingRelay,
   type Tier0Registrations,
   type Tier1Relay,
 } from "@abolishus/core";
@@ -43,6 +44,16 @@ export type Log = (line: RequestLogLine | ErrorLogLine) => void;
 
 /** A ballot of `MAX_BOARD_PAYLOAD` bytes as hex, its election ID and the JSON around them. */
 export const MAX_REQUEST_BODY = 2 * MAX_BOARD_PAYLOAD + 1024;
+
+/**
+ * The posting route's own bound (docs/spec/posting-relay.md, Request): above
+ * twice `POSTING_MAX_DATA` in hex and the JSON around it, and well below the
+ * ballot route's, since every posting the relay sends fits (T-52).
+ */
+export const MAX_POSTING_BODY = 256 * 1024;
+
+/** Routes whose body bound is below `MAX_REQUEST_BODY`. */
+const BODY_BOUNDS: ReadonlyMap<string, number> = new Map([["POST /postings", MAX_POSTING_BODY]]);
 
 const METHODS = new Set(["GET", "POST", "OPTIONS"]);
 
@@ -155,16 +166,12 @@ function carriesAccountCredential(req: IncomingMessage): boolean {
 }
 
 /**
- * Reads a JSON body of at most `MAX_REQUEST_BODY` bytes. oRPC's own reader
+ * Reads a JSON body of at most `bound` bytes. oRPC's own reader
  * accepts any size and any content type (multipart and files included), so
  * the body is read here and handed over parsed; oRPC then uses it as is.
  */
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const body = await readBody(
-    req,
-    /^application\/json(?:\s*;\s*charset=utf-8)?$/i,
-    MAX_REQUEST_BODY,
-  );
+async function readJsonBody(req: IncomingMessage, bound: number): Promise<unknown> {
+  const body = await readBody(req, /^application\/json(?:\s*;\s*charset=utf-8)?$/i, bound);
   let text: string;
   let parsed: unknown;
   try {
@@ -209,6 +216,8 @@ export interface ApiOptions {
   readonly tier0?: Tier0Registrations;
   /** The Tier 1 relay; without it the route answers `RELAY_UNAVAILABLE`. */
   readonly tier1?: Tier1Relay;
+  /** The posting relay; without it the route answers `RELAY_UNAVAILABLE`. */
+  readonly postings?: Pick<PostingRelay, "relay">;
   /**
    * The anchoring clock by which the worker labels each board entry's
    * segment (docs/spec/board.md, Timing), the worker's own; without it the
@@ -272,6 +281,7 @@ export function createApiServer({
   now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
   tier1,
+  postings,
   boardClock,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
@@ -373,7 +383,19 @@ export function createApiServer({
           // A POST takes its input from the body alone, so nothing that keys on
           // the URL (a cache, a rate limiter) sees a different request (T-31).
           if (req.url?.includes("?")) return refuse(res, 400);
-          (req as IncomingMessage & { body?: unknown }).body = await readJsonBody(req);
+          (req as IncomingMessage & { body?: unknown }).body = await readJsonBody(
+            req,
+            BODY_BOUNDS.get(route) ?? MAX_REQUEST_BODY,
+          );
+          // The posting route waits up to POSTING_WAIT for the relay's worker
+          // with nothing crossing the socket, longer than the idle timeout
+          // allows; once its body is in, the deadline alone bounds it.
+          // Restored for whatever the connection carries next.
+          if (route === "POST /postings") {
+            const socket = req.socket;
+            socket.setTimeout(deadlineMs);
+            res.once("finish", () => socket.setTimeout(idleTimeoutMs));
+          }
         } else if (
           req.headers["content-length"] !== undefined ||
           req.headers["transfer-encoding"]
@@ -382,7 +404,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, receipts, now, tier0, tier1, boardClock },
+          context: { sql, ballots, receipts, now, tier0, tier1, postings, boardClock },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

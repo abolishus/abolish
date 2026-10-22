@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 import { generateOpenApi, renderOpenApi } from "../scripts/openapi.ts";
-import { contract, MAX_BOARD_PAYLOAD, MAX_DISPLAY_TEXT } from "../src/index.ts";
+import { contract, MAX_BOARD_PAYLOAD, MAX_DISPLAY_TEXT, POSTING_MAX_DATA } from "../src/index.ts";
 
 const root = join(import.meta.dirname, "..");
 const repo = join(root, "../..");
@@ -191,6 +191,39 @@ describe("the Tier 1 relay (docs/spec/tier1-relay.md, Request)", () => {
   });
 });
 
+describe("the posting relay (docs/spec/posting-relay.md, Request)", () => {
+  const input = contract.postings.submit["~orpc"].inputSchema;
+  const valid = { posting: "000d01", ballot: "000203" };
+  const issues = async (value: unknown) => (await input?.["~standard"].validate(value))?.issues;
+
+  test("a POST, so nothing of the request sits in a URL", () => {
+    expect(contract.postings.submit["~orpc"].route.method).toBe("POST");
+  });
+
+  test("takes exactly a posting and a ballot, each lowercase hex within POSTING_MAX_DATA", async () => {
+    expect(await issues(valid)).toBeUndefined();
+    const most = "00".repeat(POSTING_MAX_DATA);
+    expect(await issues({ posting: most, ballot: most })).toBeUndefined();
+    for (const bad of [
+      { ...valid, posting: `${most}00` },
+      { ...valid, ballot: `${most}00` },
+      { ...valid, posting: "000D01" },
+      { ...valid, ballot: "0x000203" },
+      { ...valid, posting: "000d0" },
+      { ...valid, electionId: "00".repeat(32) },
+      { posting: valid.posting },
+      { ballot: valid.ballot },
+    ])
+      expect(await issues(bad)).toBeDefined();
+  });
+
+  test("POSTING_MAX_DATA matches docs/spec/posting-relay.md", () => {
+    const table = readFileSync(join(repo, "docs/spec/posting-relay.md"), "utf8");
+    const row = /^\|\s*`POSTING_MAX_DATA`\s*\|\s*([\d,]+)\s*\|/m.exec(table);
+    expect(row?.[1]?.replaceAll(",", "")).toBe(String(POSTING_MAX_DATA));
+  });
+});
+
 describe("the generated OpenAPI document", () => {
   test("is deterministic", async () => {
     expect(await renderOpenApi()).toBe(await renderOpenApi());
@@ -215,6 +248,7 @@ describe("the generated OpenAPI document", () => {
       "POST /backups/fetch",
       "POST /ballots",
       "POST /moderation/reports",
+      "POST /postings",
       "POST /receipts",
       "POST /registrations/tier0",
       "POST /registrations/tier1",

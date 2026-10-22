@@ -39,6 +39,15 @@ export const MAX_SHARE_RECEIPT = 256;
 /** The largest board entry carrying a share receipt. */
 export const MAX_SHARE_RECEIPT_ENTRY = MAX_SHARE_RECEIPT + BOARD_ENTRY_OVERHEAD;
 
+/**
+ * `POSTING_MAX_DATA` from docs/spec/posting-relay.md (Values): the most bytes
+ * of `submitPosting` calldata the posting relay sends. Each record the
+ * posting route takes is bounded by it here, so a request stays small before
+ * core checks the pair's calldata against it exactly (T-52). A test ties it
+ * to the spec's table and to core's copy.
+ */
+export const POSTING_MAX_DATA = 120_000;
+
 /** Most entries one page of the board returns. */
 export const MAX_PAGE = 256;
 

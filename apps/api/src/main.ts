@@ -1,9 +1,16 @@
-import { createTurnstile, Tier0Registrations, Tier1Relay } from "@abolishus/core";
+import {
+  BallotAdmissions,
+  createTurnstile,
+  PostingRelay,
+  Tier0Registrations,
+  Tier1Relay,
+} from "@abolishus/core";
 import { BallotQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import * as z from "zod";
 import { CEREMONY_ENV, ceremonyFromEnv } from "./ceremony-env.ts";
+import { POSTING_ENV, postingFromEnv, sameRedisInstance } from "./posting-env.ts";
 import { createApiServer } from "./server.ts";
 
 // Entry point: reads the environment, connects as a user granted abolish_app
@@ -48,7 +55,8 @@ const Env = z.strictObject({
   // The anchoring clock the worker labels board segments by, both or
   // neither, with the worker's own values: the epoch and period of the
   // anchor contract our definitions name (docs/spec/board.md, Timing).
-  // Without them the listing's `answered` order answers SORT_UNAVAILABLE.
+  // Without them the listing's `answered` order answers SORT_UNAVAILABLE,
+  // and the posting relay, which judges by the same clock, can't be set.
   BALLOT_ANCHOR_EPOCH: z
     .string()
     .regex(/^(0|[1-9][0-9]{0,19})$/)
@@ -160,12 +168,46 @@ const boardClock =
     : { epoch: BigInt(env.BALLOT_ANCHOR_EPOCH), period: BigInt(env.BALLOT_ANCHOR_PERIOD) };
 
 const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
+
+// The posting relay (docs/spec/posting-relay.md): judged under the panels the
+// release pins, by the anchoring clock above, with its queue in a store of
+// its own (posting-env.ts; T-18). Without its variables the route answers
+// RELAY_UNAVAILABLE.
+const postingConfig = postingFromEnv(
+  Object.fromEntries(POSTING_ENV.map((name) => [name, process.env[name]])),
+);
+let postingRedis: Redis | undefined;
+let postings: PostingRelay | undefined;
+if (postingConfig !== undefined) {
+  if (boardClock === undefined)
+    throw new Error("the posting relay needs BALLOT_ANCHOR_EPOCH and BALLOT_ANCHOR_PERIOD");
+  if (env.REDIS_URL !== undefined && sameRedisInstance(postingConfig.redisUrl, env.REDIS_URL))
+    throw new Error("API_POSTING_REDIS_URL must be a store of its own, not REDIS_URL's");
+  // Failing fast, as the worker's Redis above.
+  postingRedis = new Redis(postingConfig.redisUrl, {
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 1,
+    commandTimeout: 1000,
+  });
+  // Its errors can quote a script's arguments, a pair among them (T-11, T-18).
+  postingRedis.on("error", () =>
+    process.stdout.write(`${JSON.stringify({ error: "posting-redis" })}\n`),
+  );
+  postings = new PostingRelay({
+    sql,
+    redis: postingRedis,
+    admissions: new BallotAdmissions({ panels: postingConfig.panels, clock: boardClock }),
+    now: () => Math.floor(Date.now() / 1000),
+  });
+}
+
 const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
   ...(receipts !== undefined && { receipts }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
+  ...(postings !== undefined && { postings }),
   ...(boardClock !== undefined && { boardClock }),
   ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
   ...(ceremony !== undefined && { ceremony: { deployment: ceremony } }),
@@ -181,6 +223,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
         void Promise.all([
           sql.end(),
           Promise.all([ballots?.close(), receipts?.close()]).then(() => redis?.quit()),
+          postingRedis?.quit(),
         ]),
     );
   });

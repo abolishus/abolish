@@ -249,10 +249,13 @@ describe("setting and taking back", () => {
 });
 
 describe("refusals", () => {
-  test("an account not verified by e-mail can't set or take back a reaction", async () => {
-    const [account, id] = [await newAccount({ verified: false }), await election()];
-    expect(await refusedWith(setReaction(app, account, id, "heart", true, at))).toBe("account");
-    expect(await refusedWith(setReaction(app, account, id, "heart", false, at))).toBe("account");
+  test("an account not verified by e-mail can't set a reaction, but can take one back", async () => {
+    const [account, id] = [await newAccount(), await election()];
+    await setReaction(app, account, id, "heart", true, at);
+    // Its address unlinked since.
+    await db.admin`DELETE FROM account_emails WHERE user_id = ${account}`;
+    expect(await refusedWith(setReaction(app, account, id, "laugh", true, at))).toBe("account");
+    expect(await setReaction(app, account, id, "heart", false, at)).toBe(true);
     expect(await rowsOf(account)).toHaveLength(0);
   });
 
@@ -353,16 +356,22 @@ describe("the hour's limit (T-52)", () => {
   test("the hour is kept truncated, and pruning deletes the hours gone by", async () => {
     const [account, id] = [await newAccount(), await election()];
     await setReaction(app, account, id, "heart", true, { now: new Date("2026-10-22T10:59:59Z") });
+    await setReaction(app, account, id, "wow", true, { now: new Date("2026-10-22T11:15:00Z") });
     await setReaction(app, account, id, "sad", true, at);
     const hours = async () =>
       (
         await db.admin`SELECT hour FROM account_reaction_hours WHERE user_id = ${account} ORDER BY hour`
       ).map((r) => (r["hour"] as Date).toISOString());
-    expect(await hours()).toEqual(["2026-10-22T10:00:00.000Z", "2026-10-22T12:00:00.000Z"]);
+    expect(await hours()).toEqual([
+      "2026-10-22T10:00:00.000Z",
+      "2026-10-22T11:00:00.000Z",
+      "2026-10-22T12:00:00.000Z",
+    ]);
     expect(await pruneReactionHours(app, NOW)).toBeGreaterThanOrEqual(1);
-    expect(await hours()).toEqual(["2026-10-22T12:00:00.000Z"]);
+    // The hour before stays, so a clock running ahead never wipes this one.
+    expect(await hours()).toEqual(["2026-10-22T11:00:00.000Z", "2026-10-22T12:00:00.000Z"]);
     // Pruning the hours never touches the reactions.
-    expect(await rowsOf(account)).toHaveLength(2);
+    expect(await rowsOf(account)).toHaveLength(3);
   });
 });
 

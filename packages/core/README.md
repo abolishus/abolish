@@ -125,10 +125,10 @@ Reactions on a poll ([[P2-25]] part 5): `account_reactions` holds one row per ac
 
 `src/reactions.ts`:
 
-- `setReaction(sql, accountId, electionId, reaction, on, { now })` sets or takes back one reaction and says whether anything changed. `ReactionError` refuses, in order, a reaction outside the set (`invalid`), an account not verified by e-mail (`account`), and when setting, an unknown election (`unknown-election`) or a hidden poll (`hidden`); then a change past `MAX_REACTION_CHANGES_PER_HOUR` (`too-many-this-hour`).
+- `setReaction(sql, accountId, electionId, reaction, on, { now })` sets or takes back one reaction and says whether anything changed. `ReactionError` refuses, in order, a reaction outside the set (`invalid`), and when setting, an account not verified by e-mail (`account`), an unknown election (`unknown-election`) or a hidden poll (`hidden`); then a change past `MAX_REACTION_CHANGES_PER_HOUR` (`too-many-this-hour`).
 - `readReactionCounts(sql, electionId)`: the public count of each reaction, refused for a hidden poll.
 - `readOwnReactions(sql, accountId, electionId)`: the account's own, for its own page only.
-- `pruneReactionHours(sql, now)` drops hours gone by; the website's account prune runs it.
+- `pruneReactionHours(sql, now)` drops hours before the last one; the website's account prune runs it.
 
 ### `identity_backups` (T-20, T-10, T-11, T-52, T-66)
 

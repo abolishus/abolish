@@ -12,11 +12,15 @@
 // exists. Reacting is not answering and says nothing about it. The counts
 // are public; which account set which is read only by that account.
 //
-// T-11: no reaction keeps a time. T-52: one row per account, poll and
-// reaction bounds the table by the accounts, and an account may make
+// T-11: no reaction has a time column. The database still orders and dates
+// one (`xmin`, the WAL, backups, statement logs) for whoever holds them, and
+// a reaction made just after answering can then be lined up with a ballot
+// boarded moments before: a residual T-11 states. T-52: one row per account,
+// poll and reaction bounds the table by the accounts, and an account may make
 // `MAX_REACTION_CHANGES_PER_HOUR` changes in each UTC hour, counted per hour
 // with no poll. A hidden poll takes no new reactions and shows no counts
-// (T-68); one taken back is always allowed.
+// (T-68). Taking one back is always allowed, by any account, so one whose
+// address is later unlinked, or whose poll is hidden, can still withdraw it.
 
 import { and, eq, lt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -24,7 +28,7 @@ import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import { accountEmails, accountReactionHours, accountReactions } from "./db/schema/index.ts";
 import { hasDefinition } from "./definitions.ts";
-import { moderationStatus } from "./moderation.ts";
+import { moderationStatus, statusOf } from "./moderation.ts";
 
 /** The reactions an account may set on a poll, in the order they are shown. */
 export const REACTIONS = ["heart", "laugh", "wow", "thinking", "sad", "clap"] as const;
@@ -80,10 +84,10 @@ const hourOf = (now: Date) => {
  * signed-in `accountId`, and returns whether anything changed: setting one
  * already set, or taking back one not set, changes nothing and isn't counted
  * against the hour. Refused, with nothing written, in this order: a reaction
- * outside `REACTIONS` (`invalid`), an account not verified by e-mail
- * (`account`), and, when setting, an election with no stored definition
- * (`unknown-election`) or a hidden poll (`hidden`); then a change past the
- * hour's limit (`too-many-this-hour`).
+ * outside `REACTIONS` (`invalid`), and, when setting, an account not
+ * verified by e-mail (`account`), an election with no stored definition
+ * (`unknown-election`) or a hidden poll (`hidden`, judged in the write's own
+ * transaction); then a change past the hour's limit (`too-many-this-hour`).
  */
 export async function setReaction(
   client: Sql,
@@ -100,13 +104,14 @@ export async function setReaction(
   if (!isReaction(reaction)) throw new ReactionError("invalid");
   const id = new Uint8Array(electionId);
   const db = drizzle({ client });
-  if ((await db.$count(accountEmails, eq(accountEmails.userId, accountId))) === 0)
-    throw new ReactionError("account");
   if (on) {
+    if ((await db.$count(accountEmails, eq(accountEmails.userId, accountId))) === 0)
+      throw new ReactionError("account");
     if (!(await hasDefinition(client, id))) throw new ReactionError("unknown-election");
-    if ((await moderationStatus(client, id)).state === "hidden") throw new ReactionError("hidden");
   }
   return db.transaction(async (tx) => {
+    // In the transaction, so a poll hidden since the checks above is seen.
+    if (on && (await statusOf(tx, id)).state === "hidden") throw new ReactionError("hidden");
     const r = accountReactions;
     const changed = on
       ? await tx
@@ -188,11 +193,13 @@ export async function readOwnReactions(
 }
 
 /**
- * Deletes the change counts of hours before `now`'s, returning how many.
- * Run with the other account prunes on their timer.
+ * Deletes the change counts of hours before the one before `now`'s,
+ * returning how many. The hour's margin keeps an instance whose clock runs
+ * ahead from wiping the current hour's counts, and every account's limit with
+ * them. Run with the other account prunes on their timer.
  */
 export async function pruneReactionHours(client: Sql, now: Date): Promise<number> {
-  const hour = hourOf(now);
+  const hour = new Date(hourOf(now).getTime() - 3_600_000);
   const rows = await drizzle({ client })
     .delete(accountReactionHours)
     .where(lt(accountReactionHours.hour, hour))

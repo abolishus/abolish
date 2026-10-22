@@ -1,6 +1,6 @@
 // The account tables' timer (src/node/prune.ts) against Postgres as the app
 // role: an expired e-mail or phone code is gone after a run, a live one
-// stays, as do this hour's reaction counts and not earlier hours',
+// stays, as do the last two hours' reaction counts and not earlier ones,
 // phone-hash chains are extended to the current key where the phone service
 // is configured, a Tier 0 token record whose key stopped redeeming is marked
 // dead, and a failed run is logged by kind and retried on the next tick.
@@ -97,8 +97,8 @@ test("deletes expired codes and keeps live ones, every tick", async () => {
   const live = await codeSentAt(new Date(now.getTime() - 60 * 1000));
   const expiredPhone = await phoneCodeSentAt(new Date(now.getTime() - 60 * 60 * 1000));
   const livePhone = await phoneCodeSentAt(new Date(now.getTime() - 60 * 1000));
-  const pastHour = await reactedAt(new Date("2026-10-22T11:00:00Z"));
-  const thisHour = await reactedAt(new Date("2026-10-22T12:00:00Z"));
+  const pastHour = await reactedAt(new Date("2026-10-22T10:00:00Z"));
+  const lastHour = await reactedAt(new Date("2026-10-22T11:00:00Z"));
   const lines: { error: string }[] = [];
   const prune = startAccountPrune({ sql, log: (l) => lines.push(l), everyMs: 20, now: () => now });
   await new Promise((r) => setTimeout(r, 60));
@@ -107,7 +107,7 @@ test("deletes expired codes and keeps live ones, every tick", async () => {
   expect(await codes()).not.toContain(expired);
   expect(await phoneCodes()).toContain(livePhone);
   expect(await phoneCodes()).not.toContain(expiredPhone);
-  expect(await reactionHours()).toContain(thisHour);
+  expect(await reactionHours()).toContain(lastHour);
   expect(await reactionHours()).not.toContain(pastHour);
   expect(lines).toEqual([]);
 });

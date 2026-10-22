@@ -226,7 +226,8 @@ describe("Tier 0 token inputs and keys (Token input, Keys)", () => {
   });
 
   test("a key identifier names a valid public key only", () => {
-    expect(code(() => tier0TokenKeyId(0, new Uint8Array(32)))).toBe("non-canonical");
+    expect(() => tier0TokenKeyId(0, new Uint8Array(32))).toThrow(RangeError);
+    expect(() => tier0TokenBlind(new Uint8Array(32), new Uint8Array(32), INFO)).toThrow(RangeError);
     expect(tier0TokenKeyId(1, KEY.publicKey)).not.toEqual(tier0TokenKeyId(2, KEY.publicKey));
   });
 
@@ -254,6 +255,19 @@ describe("Tier 0 token inputs and keys (Token input, Keys)", () => {
     );
     expect(() => tier0TokenKeyPeriod(-1)).toThrow(RangeError);
     expect(() => tier0TokenKeyPeriod(1.5)).toThrow(RangeError);
+  });
+
+  test("a token differing in any one byte doesn't redeem", () => {
+    const f = issue(encode(fieldBn254, 32n));
+    const token = tier0TokenFinalize(f);
+    fc.assert(
+      fc.property(fc.nat({ max: 63 }), fc.integer({ min: 1, max: 255 }), (i, x) => {
+        const t = Uint8Array.from(token);
+        t[i] = (t[i] ?? 0) ^ x;
+        expect(tier0TokenMatches(KEY.secretKey, f.input, INFO, t)).toBe(false);
+      }),
+      { numRuns },
+    );
   });
 
   test("a token is compared whole: truncated or longer tokens don't redeem", () => {

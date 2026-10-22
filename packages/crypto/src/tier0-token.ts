@@ -100,6 +100,18 @@ function decodeElement(b: unknown, what: string, code: Tier0TokenErrorCode): Ele
   }
 }
 
+// `pkS` comes from the deployment record, so a bad one is a configuration
+// fault, never one of the spec's codes (which a client would act on).
+function decodePublicKey(b: unknown): Element {
+  try {
+    return decodeElement(b, "public key", "non-canonical");
+  } catch (e) {
+    if (e instanceof Tier0TokenError)
+      throw new RangeError("public key must be a canonical element other than the identity");
+    throw e;
+  }
+}
+
 /** A scalar's 32-byte encoding, below ℓ and not 0: a key or a blind. */
 function decodeSecretScalar(b: unknown, what: string): bigint {
   const bytes = bytesOf(b, what, SCALAR_LEN);
@@ -208,7 +220,7 @@ export function tier0TokenKeyRedeems(period: number, now: number): boolean {
 /** `key_id = H(DS("abolish/v1/tier0-token/key", u32(q) ‖ pkS))`. */
 export function tier0TokenKeyId(period: number, publicKey: Uint8Array): Uint8Array {
   // pkS is checked as an element, so no identifier names a key no one holds.
-  const pk = ser(decodeElement(publicKey, "public key", "non-canonical"));
+  const pk = ser(decodePublicKey(publicKey));
   return H(ds("abolish/v1/tier0-token/key", concatBytes(encode(u32, period), pk)));
 }
 
@@ -263,7 +275,7 @@ export interface Tier0TokenBlinding {
 // RFC 9497 §3.3.3: T = HashToScalar(framedInfo) · g + pkS, refused when it is
 // the identity (InvalidInputError), since no evaluation under it exists.
 function tweakedKey(publicKey: Uint8Array, info: Uint8Array): Element {
-  const pk = decodeElement(publicKey, "public key", "non-canonical");
+  const pk = decodePublicKey(publicKey);
   const t = mul(G, tweak(info)).add(pk);
   if (t.is0()) throw new Tier0TokenError("tweaked-key-identity");
   return t;
@@ -376,7 +388,10 @@ export interface Tier0TokenFinalization {
  * no other key or group can pass, and gives the 64-byte token. Throws
  * `evaluation-element` for a `Z` that isn't a canonical element other than
  * the identity, and `proof` for scalars at or above `ℓ`, a proof of another
- * length or one that doesn't check.
+ * length or one that doesn't check. The caller derives `input`'s `key_id`
+ * and `publicKey` from the same published (`q`, `pkS`): nothing here can
+ * check that pairing, and a mismatched pair finalizes a token the signing
+ * service never accepts.
  */
 export function tier0TokenFinalize(f: Tier0TokenFinalization): Uint8Array {
   const input = bytesOf(f.input, "input");

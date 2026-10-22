@@ -139,7 +139,7 @@ describe("Tier 0 token vectors (docs/spec/tier0-token.md)", () => {
       V.blindedElements.length,
       V.periods.length,
       V.redemptions.length,
-    ]).toEqual([4, 5, 5, 4, 10, 7, 6, 12]);
+    ]).toEqual([4, 5, 8, 4, 10, 7, 6, 12]);
   });
 
   test("the suite is RFC 9497's POPRF mode over ristretto255-SHA512", () => {

@@ -23,6 +23,7 @@ import {
   newAccountId,
   placeKey,
   POLL_TOPICS,
+  type PollTagName,
   type PollTags,
   pollTagActions,
   pollTags,
@@ -613,7 +614,68 @@ describe("refiling", () => {
     await refilePoll(app, id, ok);
   });
 
-  test("ends with the poll filed under its last refiling, refusing only refilings that change nothing", async () => {
+  test("keeps a tag as the poll is filed under it, unseen, and refuses a tag both kept and given", async () => {
+    const place = `14 Elm Street ${hex(randomBytes(4))}`;
+    const id = await poll({ topic: "food", place });
+    await moderate(app, id, { action: "hide", reason: "threat", moderator: "mod-1" });
+    // The hidden poll's place is withheld from every read, and needn't be known.
+    expect(await readPollTags(app, id)).toEqual({ state: "hidden" });
+    await refilePoll(app, id, {
+      tags: { topic: "housing" },
+      keep: ["place"],
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    expect(await row(id)).toEqual([{ topic: "housing", place, place_key: placeKey(place)! }]);
+    await refilePoll(app, id, {
+      tags: {},
+      keep: ["topic"],
+      reason: "personal-data",
+      moderator: "mod-2",
+    });
+    expect(await row(id)).toEqual([{ topic: "housing", place: null, place_key: null }]);
+    // A kept tag is logged as neither set nor its value.
+    expect(await logged(id)).toEqual([
+      {
+        topic_set: true,
+        topic: "housing",
+        place_set: false,
+        place: null,
+        reason: "misfiled",
+        moderator: "mod-1",
+      },
+      {
+        topic_set: false,
+        topic: null,
+        place_set: true,
+        place: null,
+        reason: "personal-data",
+        moderator: "mod-2",
+      },
+    ]);
+    const ok = { tags: {}, reason: "misfiled", moderator: "mod-1" } as const;
+    await refused(id, { ...ok, keep: ["topic", "place"] }, "no-change");
+    for (const decision of [
+      { ...ok, tags: { topic: "sport" }, keep: ["topic"] },
+      { ...ok, tags: { place: "Mill Lane" }, keep: ["place"] },
+      { ...ok, keep: ["topic", "topic"] },
+      { ...ok, keep: ["title"] },
+      { ...ok, keep: "topic" },
+      { ...ok, keep: null },
+    ])
+      await refused(id, decision as unknown as RefileDecision, "invalid");
+    // A poll filed under nothing has nothing to keep: the refiling files it under none.
+    const unfiled = await poll({});
+    await refilePoll(app, unfiled, {
+      tags: { topic: "sport" },
+      keep: ["place"],
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    expect(await row(unfiled)).toEqual([{ topic: "sport", place: null, place_key: null }]);
+  });
+
+  test("ends with the poll filed under its last refiling, kept tags included, refusing only refilings that change nothing", async () => {
     const tagsArb: fc.Arbitrary<PollTags> = fc.record(
       {
         topic: fc.constantFrom(...POLL_TOPICS.slice(0, 3)),
@@ -624,10 +686,14 @@ describe("refiling", () => {
     await fc.assert(
       fc.asyncProperty(
         tagsArb,
-        fc.array(fc.tuple(tagsArb, fc.constantFrom(...REFILE_REASONS)), {
-          minLength: 1,
-          maxLength: 6,
-        }),
+        fc.array(
+          fc.tuple(
+            tagsArb,
+            fc.constantFrom(...REFILE_REASONS),
+            fc.subarray<PollTagName>(["topic", "place"]),
+          ),
+          { minLength: 1, maxLength: 6 },
+        ),
         async (author, refilings) => {
           const id = await poll(author);
           // A poll filed under nothing has no row, so its first refiling
@@ -636,10 +702,28 @@ describe("refiling", () => {
             author.topic === undefined && author.place === undefined ? undefined : author;
           const want: Record<string, unknown>[] = [];
           const published: Record<string, unknown>[] = [];
-          for (const [tags, reason] of refilings) {
+          for (const [given, reason, keep] of refilings) {
+            // A kept tag is the poll's own, which `given` must leave out.
+            const keepTopic = keep.includes("topic");
+            const keepPlace = keep.includes("place");
+            const sent: PollTags = {
+              ...(keepTopic || given.topic === undefined ? {} : { topic: given.topic }),
+              ...(keepPlace || given.place === undefined ? {} : { place: given.place }),
+            };
+            const topic = keepTopic ? model?.topic : sent.topic;
+            const place = keepPlace ? model?.place : sent.place;
+            const tags: PollTags = {
+              ...(topic === undefined ? {} : { topic }),
+              ...(place === undefined ? {} : { place }),
+            };
             const topicSet = model === undefined || tags.topic !== model.topic;
             const placeSet = model === undefined || tags.place !== model.place;
-            const result = await refilePoll(app, id, { tags, reason, moderator: "mod-1" }).then(
+            const result = await refilePoll(app, id, {
+              tags: sent,
+              keep,
+              reason,
+              moderator: "mod-1",
+            }).then(
               ({ seq }) => seq,
               (e: unknown) => (e as ModerationError).code,
             );

@@ -99,6 +99,13 @@ function checkElectionId(electionId: unknown): asserts electionId is Uint8Array 
     throw new TypeError("electionId must be 32 bytes");
 }
 
+/** Whether `keep` is malformed: not a list of distinct tag names, or naming a tag `tags` gives. */
+function keepProblem(keep: unknown, tags: PollTags): boolean {
+  if (keep === undefined) return false;
+  if (!Array.isArray(keep) || new Set(keep).size !== keep.length) return true;
+  return keep.some((k) => (k !== "topic" && k !== "place") || tags[k as PollTagName] !== undefined);
+}
+
 /** `tags` as a row of `poll_tags` holds them, for tags `tagsProblem` passes. */
 const columns = ({ topic, place }: PollTags) => ({
   topic: topic ?? null,
@@ -139,10 +146,21 @@ export async function insertPollTags(
 export const REFILE_REASONS = ["misfiled", ...REMOVAL_REASONS] as const;
 export type RefileReason = (typeof REFILE_REASONS)[number];
 
+/** A tag a refiling can leave as it is. */
+export type PollTagName = "topic" | "place";
+
 /** A refiling: the tags a poll is filed under from now, under a ground, by a moderator. */
 export interface RefileDecision {
-  /** Either tag, both or neither: an absent tag is cleared. */
+  /** Either tag, both or neither: an absent tag is cleared, unless `keep` names it. */
   readonly tags: PollTags;
+  /**
+   * The tags left as the poll is filed under them now, read under the lock,
+   * so a moderator changing one tag needn't know or retype the other (a
+   * hidden poll's place is withheld from every read), and a refiling racing
+   * another can't put back a place the other cleared. Never a tag `tags`
+   * also gives.
+   */
+  readonly keep?: readonly PollTagName[];
   readonly reason: RefileReason;
   readonly moderator: string;
 }
@@ -154,8 +172,8 @@ export interface RefileDecision {
  * lock and dated by the database clock, as `moderate` does, so its number
  * orders it among every other decision. The log records only the tags it
  * set, never one it kept or the value it replaced (migration 0036), so a
- * moderator changing only the topic must pass the place back, and it isn't
- * logged. A poll refiled under neither tag
+ * moderator changing only the topic keeps the place (`keep`, or by passing it
+ * back), and it isn't logged. A poll refiled under neither tag
  * keeps an empty row, so a later opening step or `fillPollTags` never puts
  * its author's tags back. Refused, with nothing written, as `moderate`
  * refuses: malformed (`invalid`: tags no draft could hold, a reason outside
@@ -179,11 +197,14 @@ export async function refilePoll(
     !(REFILE_REASONS as readonly unknown[]).includes(decision.reason) ||
     typeof decision.moderator !== "string" ||
     !HANDLE.test(decision.moderator) ||
-    tagsProblem(decision.tags) !== undefined
+    tagsProblem(decision.tags) !== undefined ||
+    keepProblem(decision.keep, decision.tags)
   )
     throw new ModerationError("invalid");
   const id = new Uint8Array(electionId);
   const { reason, moderator } = decision;
+  const keepTopic = decision.keep?.includes("topic") === true;
+  const keepPlace = decision.keep?.includes("place") === true;
   // Only the two tags, whatever else the caller's object carries.
   const tags: PollTags = {
     ...(decision.tags.topic === undefined ? {} : { topic: decision.tags.topic }),
@@ -213,16 +234,23 @@ export async function refilePoll(
         .onConflictDoNothing({ target: pollTags.electionId })
         .returning({ electionId: pollTags.electionId });
       const [current] = await tx
-        .select({ topic: pollTags.topic, place: pollTags.place })
+        .select({ topic: pollTags.topic, place: pollTags.place, placeKey: pollTags.placeKey })
         .from(pollTags)
         .where(eq(pollTags.electionId, id))
         .for("update");
+      const given = columns(tags);
+      // A kept tag is the row's, with its key, as it stands under the lock.
+      const next = {
+        topic: keepTopic ? (current?.topic ?? null) : given.topic,
+        place: keepPlace ? (current?.place ?? null) : given.place,
+        placeKey: keepPlace ? (current?.placeKey ?? null) : given.placeKey,
+      };
       // A poll with no row is filed under nothing yet, so every refiling of
       // it sets both tags, even to none.
-      const topicSet = created.length > 0 || (current?.topic ?? undefined) !== tags.topic;
-      const placeSet = created.length > 0 || (current?.place ?? undefined) !== tags.place;
+      const topicSet = created.length > 0 || (current?.topic ?? null) !== next.topic;
+      const placeSet = created.length > 0 || (current?.place ?? null) !== next.place;
       if (!topicSet && !placeSet) throw new ModerationError("no-change");
-      await tx.update(pollTags).set(columns(tags)).where(eq(pollTags.electionId, id));
+      await tx.update(pollTags).set(next).where(eq(pollTags.electionId, id));
       const [row] = await tx
         .insert(pollTagActions)
         .values({
@@ -232,9 +260,9 @@ export async function refilePoll(
           // Only what changed: never a kept tag, or the value a set one
           // replaced (migration 0036).
           topicSet,
-          topic: topicSet ? (tags.topic ?? null) : null,
+          topic: topicSet ? next.topic : null,
           placeSet,
-          place: placeSet ? (tags.place ?? null) : null,
+          place: placeSet ? next.place : null,
           reason,
           moderator,
           decidedAt,

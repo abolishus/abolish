@@ -121,6 +121,7 @@ export {
   insertPollTags,
   placeKey,
   type PollTags,
+  type PollTagName,
   type PollTagsView,
   type PublicRefilingEntry,
   readPollTags,

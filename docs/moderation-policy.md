@@ -93,7 +93,7 @@ Refilings take their numbers from the poll log's sequence under the same lock, s
 
 The public log shows each refiling in its place among the decisions, with its ground, the topic it filed the poll under (or that it cleared the topic) and only whether it changed or cleared the place, never the place's words. The log carries no free text, and a place one refiling sets may be one a later refiling clears for personal data, which an entry naming it would keep public for good. The place a poll is filed under now is served beside it (`GET /elections/tags`), withheld while the poll is hidden.
 
-In the tooling: `refilePoll` and `readPollTags` in `packages/core` (`src/poll-tags.ts`; [[P2-26]] part 1c-2a); refilings in `GET /moderation/log` and on the website's `/moderation` page, and `GET /elections/tags` ([[P2-26]] part 1c-2b-1). The operator's command comes in part 1c-2b-2; until then no refiling is made.
+In the tooling: `refilePoll` and `readPollTags` in `packages/core` (`src/poll-tags.ts`; [[P2-26]] part 1c-2a); refilings in `GET /moderation/log` and on the website's `/moderation` page, and `GET /elections/tags` ([[P2-26]] part 1c-2b-1). The operator's command, `moderation refile` in `apps/admin-cli`, which takes each tag as set, cleared or kept, so a moderator never clears a tag by leaving it out and can keep a hidden poll's place without reading it ([[P2-26]] part 1c-2b-2).
 
 ## Moderators
 

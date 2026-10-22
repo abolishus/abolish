@@ -1,7 +1,8 @@
 // Moderation commands (docs/moderation-policy.md; T-68): the moderators' queue
 // of reports, reviewing them, recording decisions and reading the log, the
 // moderators' handles, and the creators' appeals, for polls and, under
-// `profile-`, for creator profiles (Profiles; T-75). Until
+// `profile-`, for creator profiles (Profiles; T-75), and refiling a poll's
+// listing tags (Refiling). Until
 // the owner names moderators, the operator of the deployment is the only one
 // (docs/moderation-policy.md, Moderators), so this tooling is a command line
 // on the operator's own connection rather than a page anyone can reach.
@@ -22,6 +23,12 @@ import {
   type ModerationDecision,
   ModerationError,
   moderationStatus,
+  placeIsWellFormed,
+  placeKey,
+  POLL_TOPICS,
+  type PollTagName,
+  type PollTags,
+  type PollTopic,
   PROFILE_HANDLE,
   profileModerationStatus,
   type ProfileModerationDecision,
@@ -31,6 +38,9 @@ import {
   readProfileReportQueue,
   readPublicModerationLog,
   readReportQueue,
+  REFILE_REASONS,
+  refilePoll,
+  type RefileReason,
   REMOVAL_REASONS,
   type RemovalReason,
   type ReportQueueCursor,
@@ -93,6 +103,44 @@ function restoreReason(s: string): RestoreReason {
   if (r === undefined)
     throw new UsageError(`a restore reason is one of ${RESTORE_REASONS.join(", ")}`);
   return r;
+}
+
+function refileReason(s: string): RefileReason {
+  const r = REFILE_REASONS.find((x) => x === s);
+  if (r === undefined)
+    throw new UsageError(`a refiling's reason is one of ${REFILE_REASONS.join(", ")}`);
+  return r;
+}
+
+function topicArg(s: string): PollTopic {
+  const t = POLL_TOPICS.find((x) => x === s);
+  if (t === undefined) throw new UsageError(`a topic is one of ${POLL_TOPICS.join(", ")}`);
+  return t;
+}
+
+/** A place as a draft holds it; never tidied here, so what is filed is what was typed. */
+function placeArg(s: string): string {
+  if (!placeIsWellFormed(s) || placeKey(s) === undefined)
+    throw new UsageError(
+      "a place is 1 to 80 characters in NFC, single-spaced, with no control, bidi or invisible characters",
+    );
+  return s;
+}
+
+/**
+ * What a refiling does to one tag: sets it (`--topic`), clears it
+ * (`--no-topic`) or keeps it (`--keep-topic`). One of the three is required,
+ * so a tag is never cleared by leaving it out (core clears an absent tag).
+ */
+function tagChoice(values: Readonly<Record<string, unknown>>, tag: PollTagName) {
+  const given = values[tag];
+  const clear = values[`no-${tag}`] === true;
+  const keep = values[`keep-${tag}`] === true;
+  if ((given !== undefined ? 1 : 0) + (clear ? 1 : 0) + (keep ? 1 : 0) !== 1)
+    throw new UsageError(`give one of --${tag} <${tag}>, --no-${tag} or --keep-${tag}`);
+  if (keep) return { keep: true } as const;
+  // parseArgs gives a string option a string.
+  return { keep: false, value: clear ? undefined : String(given) } as const;
 }
 
 /** Core's refusals become the operator's; anything else isn't theirs to fix. */
@@ -281,6 +329,42 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
       }
       const last = entries.at(-1);
       if (entries.length === limit && last !== undefined) io.out({ next: String(last.seq) });
+    },
+  },
+
+  refile: {
+    usage:
+      "<election-id> <reason> (--topic <topic> | --no-topic | --keep-topic) (--place <place> | --no-place | --keep-place) --moderator <handle>",
+    options: {
+      topic: { type: "string" },
+      "no-topic": { type: "boolean" },
+      "keep-topic": { type: "boolean" },
+      place: { type: "string" },
+      "no-place": { type: "boolean" },
+      "keep-place": { type: "boolean" },
+      moderator: { type: "string" },
+    },
+    positionals: 2,
+    async run(sql, [id, reason], values, io) {
+      const election = electionId(id!);
+      const ground = refileReason(reason!);
+      const topic = tagChoice(values, "topic");
+      const place = tagChoice(values, "place");
+      const moderator = moderatorArg(values["moderator"]);
+      const tags: PollTags = {
+        ...(topic.value === undefined ? {} : { topic: topicArg(topic.value) }),
+        ...(place.value === undefined ? {} : { place: placeArg(place.value) }),
+      };
+      const keep: PollTagName[] = [
+        ...(topic.keep ? (["topic"] as const) : []),
+        ...(place.keep ? (["place"] as const) : []),
+      ];
+      const { seq } = await refusable(
+        refilePoll(sql, election, { tags, keep, reason: ground, moderator }),
+      );
+      // Not the place: what a poll is filed under is read where it is served
+      // (GET /elections/tags), and the log never holds it (T-17).
+      io.out({ seq: String(seq), electionId: id });
     },
   },
 

@@ -5,6 +5,7 @@ import {
   newAccountId,
   newProfileHandle,
   insertPollTags,
+  readPollTags,
   refilePoll,
   report,
   reportProfile,
@@ -188,6 +189,103 @@ describe("moderation decisions", () => {
     expect(JSON.stringify(log)).not.toMatch(/Elm Street|mod-7/);
   });
 
+  test("refiles a poll, setting, clearing or keeping each tag, and logs it without the place", async () => {
+    const id = await election();
+    const place = `14 Elm Street ${randomBytes(4).toString("hex")}`;
+    await insertPollTags(app, bytes(id), { topic: "food", place });
+    const refile = (...args: string[]) =>
+      cli("moderation", "refile", id, ...args, "--moderator", "mod-1");
+
+    const moved = await refile("misfiled", "--topic", "housing", "--keep-place");
+    expect(moved).toEqual({ code: 0, out: [{ seq: expect.any(String), electionId: id }], err: [] });
+    expect(await readPollTags(app, bytes(id))).toEqual({
+      state: "visible",
+      tags: { topic: "housing", place },
+    });
+    // A hidden poll's place is withheld from every read, so keeping a tag
+    // needs no knowledge of it.
+    expect(
+      (await cli("moderation", "decide", id, "hide", "threat", "--moderator", "mod-1")).code,
+    ).toBe(0);
+    const cleared = await refile("personal-data", "--keep-topic", "--no-place");
+    expect(cleared.code).toBe(0);
+    // A place is filed as typed, even one spelling a choice's name.
+    expect((await refile("misfiled", "--no-topic", "--place", "keep")).code).toBe(0);
+    expect(
+      (await cli("moderation", "decide", id, "restore", "error", "--moderator", "mod-1")).code,
+    ).toBe(0);
+    expect(await readPollTags(app, bytes(id))).toEqual({
+      state: "visible",
+      tags: { place: "keep" },
+    });
+
+    const seq = BigInt(String(moved.out[0]!["seq"]));
+    const log = (await cli("moderation", "log", "--after", String(seq - 1n))).out.filter(
+      (e) => e["action"] === "refile",
+    );
+    expect(log).toEqual([
+      expect.objectContaining({ reason: "misfiled", topic: "housing" }),
+      expect.objectContaining({ reason: "personal-data", place: "cleared" }),
+      expect.objectContaining({ reason: "misfiled", topic: null, place: "changed" }),
+    ]);
+    expect(log[0]).not.toHaveProperty("place");
+    expect(log[1]).not.toHaveProperty("topic");
+    expect(JSON.stringify(log)).not.toMatch(/Elm Street|mod-1/);
+  });
+
+  test("a refiling core refuses, or one malformed, records nothing", async () => {
+    const id = await election();
+    await insertPollTags(app, bytes(id), { topic: "food" });
+    const before = (await cli("moderation", "log", "--limit", "1000")).out.length;
+    for (const [args, code] of [
+      [[id, "misfiled", "--keep-topic", "--keep-place", "--moderator", "mod-1"], "no-change"],
+      [[id, "misfiled", "--topic", "food", "--no-place", "--moderator", "mod-1"], "no-change"],
+      [
+        ["00".repeat(32), "misfiled", "--no-topic", "--no-place", "--moderator", "mod-1"],
+        "unknown-election",
+      ],
+      [[id, "misfiled", "--no-topic", "--no-place", "--moderator", "mod-9"], "unknown-moderator"],
+    ] as const)
+      expect(await cli("moderation", "refile", ...args)).toEqual({
+        code: 1,
+        out: [],
+        err: [{ error: code }],
+      });
+    const ok = ["--topic", "sport", "--no-place", "--moderator", "mod-1"];
+    for (const args of [
+      [id, "misfiled", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--topic", "sport", "--moderator", "mod-1"],
+      [id, "misfiled", "--topic", "sport", "--keep-topic", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--keep-topic", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "Mill Lane", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--topic", "weather", "--no-place", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", " Mill Lane", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "Mill  Lane", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "Mill\u202eLane", "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "a".repeat(81), "--moderator", "mod-1"],
+      [id, "misfiled", "--no-topic", "--place", "", "--moderator", "mod-1"],
+      [id, "error", ...ok],
+      [id, "appeal-upheld", ...ok],
+      [id, "misfiled", "--topic", "sport", "--no-place"],
+      [id.toUpperCase(), "misfiled", ...ok],
+      [id, ...ok],
+      [id, "misfiled", "extra", ...ok],
+      [id, "misfiled", "--no-topic=yes", "--no-place", "--moderator", "mod-1"],
+    ]) {
+      const r = await cli("moderation", "refile", ...args);
+      expect(r.code, args.join(" ")).toBe(2);
+      expect(r.out).toEqual([]);
+      expect(r.err).toEqual([
+        { error: "usage", detail: expect.any(String), usage: expect.any(String) },
+      ]);
+    }
+    expect((await cli("moderation", "log", "--limit", "1000")).out).toHaveLength(before);
+    expect(await readPollTags(app, bytes(id))).toEqual({
+      state: "visible",
+      tags: { topic: "food" },
+    });
+  });
+
   test("core's refusals come back as their codes, with nothing recorded", async () => {
     // Closes in 2100: hiding it is allowed only on the open-poll grounds.
     const open = await election(4_102_444_800n);
@@ -296,6 +394,17 @@ describe("moderators and appeals", () => {
     const mine = await poll(account);
     const own = await cli("moderation", "decide", mine.id, "delist", "spam", "--moderator", "ann");
     expect([own.code, own.err]).toEqual([1, [{ error: "own-poll" }]]);
+    const refiled = await cli(
+      "moderation",
+      "refile",
+      mine.id,
+      "misfiled",
+      "--no-topic",
+      "--no-place",
+      "--moderator",
+      "ann",
+    );
+    expect([refiled.code, refiled.err]).toEqual([1, [{ error: "own-poll" }]]);
     expect(await cli("moderation", "moderator-retire", "ann")).toEqual({
       code: 0,
       out: [{ handle: "ann", retired: true }],

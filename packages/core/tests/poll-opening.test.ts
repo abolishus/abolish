@@ -34,6 +34,7 @@ import {
   readBoard,
   readServedDisplayText,
   recordRegistration,
+  refilePoll,
   type RegisteredPoll,
   type StoredTierElectorate,
   storeDefinition,
@@ -41,7 +42,7 @@ import {
   submitPollDraft,
 } from "../src/index.ts";
 import { Seat } from "./ceremony-seats.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb } from "./db.ts";
 
 // The opening step of a poll's setup (ADR 0032, rules 12 to 14; P2-22 part
 // 5c), on polls whose ceremony the coordinator ran between three honest
@@ -246,6 +247,7 @@ beforeAll(async () => {
   app = await db.as("abolish_app");
   base = await registered(false);
   await clear();
+  await addModerators(app, "mod-1");
 }, 120_000);
 afterAll(() => db?.close());
 
@@ -322,6 +324,29 @@ describe("a registered poll", { timeout: 60_000 }, () => {
     // Not open yet: the step writes its tags when it opens it.
     expect(await tags(waiting.electionId)).toEqual([]);
     expect(await fillPollTags(app)).toBe(0);
+    await clear();
+  });
+
+  test("keeps moderation's filing: neither the step nor the fill puts the author's tags back", async () => {
+    const early = await registered(true, { ...DRAFT, topic: "food", place: "Mill Lane" });
+    // Refiled once registered and synced, before the step opened it.
+    await refilePoll(app, early.electionId, {
+      tags: { topic: "sport" },
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    const cleared = await registered(true, { ...DRAFT, place: "Old Town" });
+    expect(await run()).toEqual({ ...quiet, opened: 2 });
+    expect(await tags(early.electionId)).toEqual([
+      { topic: "sport", place: null, place_key: null },
+    ]);
+    await refilePoll(app, cleared.electionId, {
+      tags: {},
+      reason: "personal-data",
+      moderator: "mod-1",
+    });
+    expect(await fillPollTags(app)).toBe(0);
+    expect(await tags(cleared.electionId)).toEqual([{ topic: null, place: null, place_key: null }]);
     await clear();
   });
 

@@ -85,6 +85,14 @@ The log names a profile by its public handle where it names a poll by its electi
 
 In the tooling (`packages/core` `src/profile-moderation.ts`): `moderateProfile`, `profileModerationStatus`, `readProfileModerationLog`, `reportProfile`, `readProfileReportQueue`, `reviewProfileReports`, `fileProfileAppeal`, `readProfileModeration`, `readProfileAppealQueue` and `decideProfileAppeal`. The API's `GET /moderation/log` serves both halves of the log, read from one snapshot and merged by number (`readPublicModerationLog`; [[P2-27]] part 1c-2a). Reporting a profile and the author's appeal are routes on the website's origin, not the API's, since checking a handle reads an account table, which the API never does (T-10); they come in part 1c-2c, after the operator's commands (part 1c-2b), and no profile is shown anywhere before then.
 
+## Refiling
+
+A poll's topic and place ([[0041-poll-topics-and-places]]) are where it is listed, not words of the poll, so moderation can refile a poll without delisting or hiding it: change its topic, change its place, or clear either or both. A refiling cites one ground: `misfiled`, when a tag doesn't fit the poll (or an earlier refiling got it wrong), or a removal ground the place itself breaks, most often `personal-data` for a street address or a private person's name. The same limits hold as for every decision: never for a poll's viewpoint, subject or result (Reasons), never by a moderator whose account created the poll, and a refiling that changes nothing is refused. A refiling isn't a change of state: a delisted or hidden poll stays so, and a hidden poll can be refiled, since its place may be why it was hidden.
+
+Refilings take their numbers from the poll log's sequence under the same lock, so they sit in the one log in commit order. Each records the tags the poll is filed under from then on, never the ones it replaces, so a place cleared for personal data doesn't survive in the log. Once moderation has refiled a poll, nothing puts its author's tags back: a poll cleared of both keeps an empty filing. A hidden poll's tags are withheld with its text.
+
+In the tooling: `refilePoll` and `readPollTags` in `packages/core` (`src/poll-tags.ts`; [[P2-26]] part 1c-2a). The public log, the API's read route and the operator's command come in part 1c-2b; until then no refiling is made, and none appears in `GET /moderation/log`.
+
 ## Moderators
 
 Moderators act through the tooling only, under handles. They never see or handle ballots, voting identities or anything from the ballot path, and the tooling gives them nothing from it. A moderator who created, or has a stake in, a poll doesn't decide on it.
@@ -116,5 +124,6 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 - Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
 - A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
 - A hidden profile's author can delete it and make another, under a new handle and at most one name a day, which sheds the hide; the new profile links none of the old one's polls until its author chooses each again. A decision judges the name it saw: a rename after a restore isn't looked at again unless someone reports it.
+- A refiling can't be appealed yet, and it is the operator's word against the author's: the definition commits to neither tag, so an author can't prove what they chose, and a wipe loses both the tags and their refilings. An insider can write the tags directly, past the tooling's rules and its log (T-68).
 
 See [[THREAT_MODEL]], [[display-text]], [[0005-permanent-archive]].

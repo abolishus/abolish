@@ -2,10 +2,15 @@ import { readFile } from "node:fs/promises";
 import {
   type Checkpoint,
   decodeElectionDefinitionRecord,
+  decodeElectionDefinitionV5,
+  decodeElectionDefinitionV6,
   definitionMembers,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   type ElectionDefinition,
+  type ElectionDefinitionV5,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
   kemKeygen,
   type L1Origin,
   objectCid,
@@ -67,6 +72,10 @@ const record = decodeElectionDefinitionRecord(
 if (record.version !== 1) throw new Error("the first vector is a version-1 definition");
 const typical: ElectionDefinition = record.value;
 const v3 = ((await vector("election-definition-v3.json")) as Vectors).vectors[0]!;
+const v6 = ((await vector("election-definition-v6.json")) as Vectors).vectors[0]!;
+const typicalV5: ElectionDefinitionV5 = decodeElectionDefinitionV5(
+  hexToBytes(((await vector("election-definition-v5.json")) as Vectors).vectors[0]!.encoding),
+);
 
 const text = (s: string) => new TextEncoder().encode(s);
 const REGISTRY = keccak_256(text("election registry")).slice(12);
@@ -254,6 +263,47 @@ async function setup(
   };
 }
 
+/**
+ * `setup` for a version-5 definition (questions and cells, P2-14): the
+ * vector's, with the election, deployment and times `setup` gives version 1,
+ * registered and approved under its own hash, with `changes` to it.
+ */
+async function setupV5(
+  name: string,
+  closes: bigint,
+  changes: Partial<ElectionDefinitionV5> = {},
+): Promise<Setup & { readonly v5: ElectionDefinitionV5 }> {
+  let v5: ElectionDefinitionV5 | undefined;
+  const s = await setup(name, closes, {}, {}, (id, d, o) => {
+    v5 = {
+      ...typicalV5,
+      election_id: id,
+      election_registry: d.election_registry,
+      l1_anchor: d.l1_anchor,
+      l1_chain_id: d.l1_chain_id,
+      l2_chain_id: d.l2_chain_id,
+      opens_at: d.opens_at,
+      closes_at: d.closes_at,
+      ...changes,
+    };
+    return [
+      created(id, o),
+      registered(id, encodeElectionDefinitionV5(v5), electionDefinitionV5Hash(v5), o),
+    ];
+  });
+  if (v5 === undefined) throw new Error("setup builds the logs");
+  return {
+    ...s,
+    v5,
+    election: {
+      ...s.election,
+      definitionHash: electionDefinitionV5Hash(v5),
+      closesAt: v5.closes_at,
+      l1InclusionBound: BigInt(v5.l1_inclusion_bound),
+    },
+  };
+}
+
 const finalizedTime = async () =>
   BigInt(
     ((await chain.rpc.call("eth_getBlockByNumber", ["finalized", false])) as { timestamp: string })
@@ -279,6 +329,19 @@ describe("l1BoardAnchors", () => {
       lastSegment: Number(f + 2n),
     });
     expect(read.now).toBe(await finalizedTime());
+  });
+
+  test("reads a version-5 definition's anchors as version 1's, under the board-entry version it pins", async () => {
+    // Closing in period f + 1: s_A = f + 2.
+    const { f, v5, election, options } = await setupV5("questions", 600n);
+    await advanceTo(end(f + 3n) + 60n);
+    const cps = [0n, 1n, 2n, 3n].map((k) => checkpoint(election.electionId, f + k));
+    await chain.anchorAll(anchor, cps);
+    const reader = await l1BoardAnchors(options, election);
+    expect(reader.boardVersion).toBe(pinnedVersion(v5, RECORD_TYPES.boardEntry));
+    const read = await reader.read(election.electionId);
+    expect(read.anchors).toEqual(cps.slice(0, 3).map(anchored));
+    expect(read.clock.lastSegment).toBe(Number(f + 2n));
   });
 
   test("reads segments up to the last one ended while s_A is still to come", async () => {
@@ -422,14 +485,51 @@ describe("l1BoardAnchors refuses an election", () => {
     );
   });
 
+  test("whose registered version-5 definition isn't the approved one", async () => {
+    const s = await setupV5("swapped-v5", 600n);
+    // Its own hash approved under another layout, or another version-5 definition.
+    await refused(
+      { ...s, election: { ...s.election, definitionHash: electionDefinitionHash(s.d) } },
+      "definition-hash",
+    );
+    await refused(
+      { ...s, election: { ...s.election, definitionHash: new Uint8Array(32).fill(1) } },
+      "definition-hash",
+    );
+  });
+
   test("whose registered definition is of a version the node doesn't read", async () => {
-    const encoding = hexToBytes(v3.encoding);
-    const id = decodeElectionDefinitionRecord(encoding).value.election_id;
-    const s = await setup("v3", 600n, { election_id: id }, {}, (_, __, o) => [
-      created(id, o),
-      registered(id, encoding, hexToBytes(v3.hash as string), o),
-    ]);
-    await refused(s, "definition-version");
+    // Version 3 (cells without questions) and 6 (author panels) aren't read.
+    for (const [name, v] of [
+      ["v3", v3],
+      ["v6", v6],
+    ] as const) {
+      const encoding = hexToBytes(v.encoding);
+      const id = (
+        name === "v3"
+          ? decodeElectionDefinitionRecord(encoding).value
+          : decodeElectionDefinitionV6(encoding)
+      ).election_id;
+      const s = await setup(name, 600n, { election_id: id }, {}, (_, __, o) => [
+        created(id, o),
+        registered(id, encoding, hexToBytes(v.hash as string), o),
+      ]);
+      await refused(s, "definition-version");
+    }
+  });
+
+  test("whose version-5 definition pins a board-entry version the node doesn't read, or names another anchor", async () => {
+    const pins = typicalV5.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 2 } : p,
+    );
+    await refused(
+      await setupV5("board-v2-v5", 600n, { profile: { ...typicalV5.profile, pins } }),
+      "definition-version",
+    );
+    await refused(
+      await setupV5("anchor-v5", 600n, { l1_anchor: new Uint8Array(20).fill(9) }),
+      "definition-deployment",
+    );
   });
 
   test("whose definition pins a board-entry version the node doesn't read", async () => {

@@ -24,8 +24,10 @@
 -- The other types those versions add get theirs with their writers; the
 -- entry's encoder refuses any type its version doesn't allow either way
 -- (T-17). Every stored payload passes the old check, so the new one, its
--- superset, validates; the scan holds the table's lock for moments at this
--- stage.
+-- superset, validates. The migration runs in one transaction, so dropping
+-- the old check holds the table's lock through the scan whatever form the
+-- new one takes; the board is small enough at this stage for that to take
+-- moments, as for 0024's index.
 ALTER TABLE board_entries DROP CONSTRAINT board_entries_payload_check;
 ALTER TABLE board_entries ADD CONSTRAINT board_entries_payload_check CHECK (
   octet_length(payload) BETWEEN 3 AND 1048576

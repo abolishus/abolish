@@ -116,8 +116,10 @@ describe("boards a passing receipt once", { timeout: 60_000 }, () => {
   });
 
   test("a passing receipt for a seat the board path already carries returns that entry", async () => {
-    // Another receipt for the same ballot hash and seat, boarded around the
-    // check: the board path carries one, and the sender is handed it.
+    // Another receipt for the same ballot hash and seat, keyed directly
+    // (a second passing encoding can't be made here: signatures are RFC
+    // 6979, one per statement): whatever the board path carries for the
+    // seat, the sender is handed it, and nothing more is boarded.
     const app = await election();
     const other = Uint8Array.from(receiptFor(first, 3));
     other[other.length - 1] = (other[other.length - 1] as number) ^ 1;

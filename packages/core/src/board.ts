@@ -309,7 +309,10 @@ export async function appendEntry(
      * board path carries one receipt per ballot hash, panel and seat (rule
      * 5; T-17, T-52). The same bytes return the entry that carries them, so
      * a retry gets its entry; other bytes are refused as `receipt-present`,
-     * naming the entry that does (Client rules 3).
+     * naming the entry that does (Client rules 3). Only for a receipt the
+     * caller judged: the key is what makes the board path refuse every
+     * later receipt for that seat, and the table can't tell a passing
+     * receipt from a failing one.
      */
     readonly receipt?: ReceiptKey;
     /** The latest segment the entry may land in, else `segment-late` (rule 3's `s_D`). */
@@ -782,6 +785,34 @@ export async function readBoardedEntry(
     await storedBoardVersion(client, id),
   );
   return { entry, index, entryHash: new Uint8Array(row.entryHash), link: new Uint8Array(row.link) };
+}
+
+/**
+ * The entry that carries the board path's receipt for `key`, if it is
+ * exactly `payload`; otherwise `undefined`. One indexed read, so a receipt
+ * replayed from the public board is answered before it costs a ballot read
+ * and a signature check (T-52).
+ */
+export async function readBoardedReceipt(
+  client: Sql,
+  electionId: Uint8Array,
+  key: ReceiptKey,
+  payload: Uint8Array,
+): Promise<AppendedEntry | undefined> {
+  const id = checkId(electionId);
+  if (!isBytes(payload)) throw new TypeError("payload must be bytes");
+  const [row] = await drizzle({ client })
+    .select({ idx: boardShareReceipts.idx })
+    .from(boardShareReceipts)
+    .where(
+      and(
+        eq(boardShareReceipts.electionId, id),
+        eq(boardShareReceipts.ballotHash, new Uint8Array(key.ballotHash)),
+        eq(boardShareReceipts.panel, key.panel),
+        eq(boardShareReceipts.seat, key.seat),
+      ),
+    );
+  return row === undefined ? undefined : readBoardedEntry(client, id, row.idx, payload);
 }
 
 /**

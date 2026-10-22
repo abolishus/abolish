@@ -41,6 +41,7 @@ import {
   AppendError,
   BOARD_ENTRY_OVERHEAD,
   readBallotByHash,
+  readBoardedReceipt,
   readEntries,
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
@@ -326,6 +327,13 @@ export class BallotAdmissions {
     if (segment > last || segment > 0xffffffffn) throw new ReceiptError("not-open");
     const verdict = admission.receipt(own);
     if (!verdict.ok) throw new ReceiptError("rejected", verdict.code);
+    // Version-1 delivery records, the only ones judged yet, name no panel:
+    // their seats are the default panel's.
+    const key = { ballotHash: verdict.ballotHash, panel: 1, seat: verdict.seat };
+    // A receipt the board path already carries, replayed byte for byte from
+    // the public board, gets its entry before any ballot is read (T-52).
+    const boarded = await readBoardedReceipt(client, id, key, own);
+    if (boarded !== undefined) return { boarded, earlier: false };
     const ballot = await readBallotByHash(client, id, verdict.ballotHash);
     if (ballot === undefined) throw new ReceiptError("rejected", "receipt-ballot");
     if (!verdict.check(ballot)) throw new ReceiptError("rejected", "share-receipt");
@@ -333,9 +341,7 @@ export class BallotAdmissions {
       const boarded = await appendEntry(client, id, Number(segment), own, {
         raiseToPrevious: true,
         lastSegment: Number(last > 0xffffffffn ? 0xffffffffn : last),
-        // Version-1 delivery records, the only ones judged yet, name no
-        // panel: their seats are the default panel's.
-        receipt: { ballotHash: verdict.ballotHash, panel: 1, seat: verdict.seat },
+        receipt: key,
       });
       return { boarded, earlier: false };
     } catch (e) {

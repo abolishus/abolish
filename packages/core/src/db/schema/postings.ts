@@ -51,6 +51,7 @@ export const postingInFlight = pgTable("posting_in_flight", {
   transactions: bytea("transactions").notNull(),
   signedAt: bigint("signed_at", { mode: "bigint" }).notNull(),
   broadcastAt: bigint("broadcast_at", { mode: "bigint" }).notNull(),
+  deposit: numeric("deposit").notNull(),
   landedIn: bytea("landed_in"),
   paid: numeric("paid"),
 });

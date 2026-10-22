@@ -110,7 +110,7 @@ export interface PostingKeyChain {
 
 /** What one `tend` did, as counts only (T-11, T-13). */
 export interface PostingTendReport {
-  /** Entries a transaction of which is newly in a block at the latest head, their spend reduced to its receipt. */
+  /** Entries whose transactions in blocks at the latest head changed, their spend reduced to their receipts. */
   readonly landed: number;
   /** Entries whose transaction left the latest head (a reorganisation), counted at their most cost again. */
   readonly unlanded: number;
@@ -122,7 +122,7 @@ export interface PostingTendReport {
   readonly replaced: number;
   /** Postings whose nonce another transaction consumed without their event, signed again at the next nonce. */
   readonly resent: number;
-  /** Of those, postings the election's budget leaves unsent again. */
+  /** Postings whose nonce another transaction consumed without their event, which the election's budget leaves unsent again. */
   readonly held: number;
   /** Entries a node or store failure left for the next tend. */
   readonly failed: number;
@@ -400,46 +400,65 @@ export class PostgresPostingLedger implements PostingLedger {
         // Gone since the list was read: another worker's tend or the pruning.
         if (row === undefined) return NONE;
         const cost = BigInt(row.cost);
+        const deposit = BigInt(row.deposit);
         const paid = row.paid === null ? undefined : BigInt(row.paid);
+        // What the entry is counted at in its election's spend: its most
+        // cost, or what its receipts show on L2 with its deposit's reserve,
+        // which only the deposit's own settling releases.
+        const counted = paid === undefined ? cost : paid + deposit;
         const sentTo = (hash: Uint8Array) =>
           tx
             .update(postingSent)
             .set({ transaction: hash, layer: "l2" })
             .where(eq(postingSent.postingKey, key));
+        const readNonce = async () => {
+          const n = await this.#call(() => this.#chain.nonce());
+          if (!isWei(n) || n > U64_MAX)
+            throw new PostingLedgerError("the chain answered a nonce out of form");
+          return n;
+        };
 
-        // The key's count before the receipts: a transaction of this entry
-        // that consumed its nonce is then always seen below, so a nonce
-        // counted as consumed with no receipt was another transaction's.
-        const count = await this.#call(() => this.#chain.nonce());
-        if (!isWei(count) || count > U64_MAX)
-          throw new PostingLedgerError("the chain answered a nonce out of form");
-        let landed: { readonly hash: Uint8Array; readonly cost: bigint } | undefined;
-        for (const hash of hashesOf(new Uint8Array(row.transactions)).toReversed()) {
+        // The key's count before the receipts, so a transaction of this
+        // entry that consumed its nonce is seen below on one view of the
+        // chain; the count is read again before a consumed nonce is acted on.
+        const count = await readNonce();
+        // Every transaction that carried it and is in a block: replacements
+        // share a nonce, so one of each nonce at most, but a resend at a new
+        // nonce can land beside the one it followed, and each is paid for.
+        const landed: Uint8Array[] = [];
+        let landedCost = 0n;
+        for (const hash of hashesOf(new Uint8Array(row.transactions))) {
           const r = await this.#call(() => this.#chain.receipt(hash));
           if (r === undefined) continue;
           if (!isWei(r.gasUsed) || !isWei(r.effectiveGasPrice) || !isWei(r.l1Fee))
             throw new PostingLedgerError("the chain answered a receipt out of form");
-          landed = { hash, cost: r.gasUsed * r.effectiveGasPrice + r.l1Fee };
-          break;
+          landed.push(hash);
+          landedCost += r.gasUsed * r.effectiveGasPrice + r.l1Fee;
         }
 
-        if (landed !== undefined) {
-          if (row.landedIn !== null && equalBytes(new Uint8Array(row.landedIn), landed.hash))
+        if (landed.length > 0) {
+          const landedIn = Buffer.concat(landed);
+          if (
+            row.landedIn !== null &&
+            equalBytes(new Uint8Array(row.landedIn), landedIn) &&
+            paid === landedCost
+          )
             return NONE;
-          // Once included, the spend is reduced to what the receipt shows,
+          // Once included, the spend is reduced to what the receipts show,
           // from whatever it was counted at before (Sending).
-          await moveSpend(tx, row.electionId, landed.cost - (paid ?? cost));
+          await moveSpend(tx, row.electionId, landedCost + deposit - counted);
           await tx
             .update(postingInFlight)
-            .set({ landedIn: landed.hash, paid: landed.cost.toString() })
+            .set({ landedIn, paid: landedCost.toString() })
             .where(eq(postingInFlight.postingKey, key));
-          await sentTo(landed.hash);
+          // The newest of them: what a repeat is answered with.
+          await sentTo(landed[landed.length - 1] as Uint8Array);
           return { kind: "landed" };
         }
-        if (row.landedIn !== null && paid !== undefined) {
+        if (row.landedIn !== null) {
           // Its block left the latest head: counted at its most cost again
           // and tended as pending from the next tend.
-          await moveSpend(tx, row.electionId, cost - paid);
+          await moveSpend(tx, row.electionId, cost - counted);
           await tx
             .update(postingInFlight)
             .set({ landedIn: null, paid: null })
@@ -458,9 +477,14 @@ export class PostgresPostingLedger implements PostingLedger {
           const posted = await this.#call(() => this.#chain.posted(posting));
           if (typeof posted !== "boolean")
             throw new PostingLedgerError("the chain answered an event out of form");
+          // A count that moved while the receipts and the event were read is
+          // a view of the chain that changed under them (a reorganisation,
+          // or an endpoint behind a balancer): judged again at the next tend.
+          if ((await readNonce()) !== count) return NONE;
           if (posted) {
-            // None of its transactions ran, so it cost nothing on L2.
-            await moveSpend(tx, row.electionId, -cost);
+            // None of its transactions ran, so it cost nothing on L2; a
+            // deposit's reserve stays counted.
+            await moveSpend(tx, row.electionId, deposit - cost);
             await tx
               .update(postingInFlight)
               .set({ paid: "0" })
@@ -697,6 +721,7 @@ export class PostgresPostingLedger implements PostingLedger {
           maxFee: s.maxFee.toString(),
           priorityFee: s.priorityFee.toString(),
           cost: cost.toString(),
+          deposit: (forceable ? costs.deposit : 0n).toString(),
           signed: s.tx,
           transactions: s.hash,
           signedAt: BigInt(now),
@@ -750,10 +775,13 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 /** The election's spend moved by `delta` wei, either way. */
 async function moveSpend(tx: Tx, electionId: Uint8Array, delta: bigint): Promise<void> {
   if (delta === 0n) return;
-  await tx
+  const moved = await tx
     .update(postingSpend)
     .set({ spent: q`${postingSpend.spent} + ${delta.toString()}::numeric` })
-    .where(eq(postingSpend.electionId, electionId));
+    .where(eq(postingSpend.electionId, electionId))
+    .returning({ electionId: postingSpend.electionId });
+  // Every entry's election has its spend, written with the entry.
+  if (moved.length !== 1) throw new PostingLedgerError("the posting ledger's spend is missing");
 }
 
 /** What one entry's tend did, and the signed bytes to broadcast once it has committed. */

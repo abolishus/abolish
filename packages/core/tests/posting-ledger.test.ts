@@ -225,7 +225,7 @@ describe("schema", () => {
       db.admin`INSERT INTO posting_in_flight
         SELECT ${bytes32()}, posting, ballot, election_id, intake_cutoff, contract_cutoff,
           delivery_ends, first_sent, nonce, gas_limit, max_fee, priority_fee, cost, signed, transactions,
-          signed_at, broadcast_at, landed_in, paid
+          signed_at, broadcast_at, deposit, landed_in, paid
         FROM posting_in_flight`,
     ).rejects.toThrow(/posting_in_flight_nonce/);
   });
@@ -294,6 +294,11 @@ describe("send", () => {
       max_fee: String(FEE_CAP),
       priority_fee: "1000",
       cost: String(MOST),
+      deposit: String(COSTS.deposit),
+      signed_at: String(NOW),
+      broadcast_at: String(NOW),
+      landed_in: null,
+      paid: null,
     });
     expect(new Uint8Array(row!["posting"])).toEqual(p.posting);
     expect(new Uint8Array(row!["ballot"])).toEqual(p.ballot);
@@ -410,7 +415,7 @@ describe("send", () => {
       await db.admin`INSERT INTO posting_in_flight
         SELECT ${bytes32()}, posting, ballot, election_id, intake_cutoff, contract_cutoff,
           delivery_ends, first_sent, ${o.nonce.toString()}, gas_limit, max_fee, priority_fee,
-          cost, signed, transactions, signed_at, broadcast_at, landed_in, paid
+          cost, signed, transactions, signed_at, broadcast_at, deposit, landed_in, paid
         FROM posting_in_flight LIMIT 1`;
       return sign(posting, ballot, o);
     };
@@ -569,6 +574,13 @@ describe("caps", () => {
     const b = bytes32();
     await ledger(new FakeKey(), { now: edge + 1 }).send(toSend({ electionId: b }));
     expect(await spentOf(b)).toBe(MOST - COSTS.deposit);
+    // The entry keeps its deposit's reserve apart, for the tend.
+    const reserves = await db.admin`
+      SELECT election_id, deposit::text FROM posting_in_flight ORDER BY deposit DESC`;
+    expect(reserves.map((r) => [new Uint8Array(r["election_id"]), r["deposit"]])).toEqual([
+      [a, String(COSTS.deposit)],
+      [b, "0"],
+    ]);
   });
 
   test("a refused cap writes nothing", async () => {
@@ -729,7 +741,8 @@ describe("tend", () => {
     chain.receipts.set(hex(first), RECEIPT);
     at(3 * RESEND);
     expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
-    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST);
+    // The deposit's reserve stays counted until the deposit is settled.
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + COSTS.deposit);
     expect(await l.sent(p.key)).toEqual({ transaction: first, layer: "l2" });
     const r = await row();
     expect(new Uint8Array(r["landed_in"])).toEqual(first);
@@ -753,7 +766,8 @@ describe("tend", () => {
     chain.onBoard.add(hex(p.posting));
     at(RESEND);
     expect(await l.tend(HEAD)).toEqual(report({ posted: 1 }));
-    expect(await spentOf(ELECTION)).toBe(0n);
+    // Nothing of it ran on L2; a deposit's reserve stays counted.
+    expect(await spentOf(ELECTION)).toBe(COSTS.deposit);
     expect(await row()).toMatchObject({ landed_in: null, paid: "0" });
     at(10 * RESEND);
     expect(await l.tend(HEAD)).toEqual(report());
@@ -783,6 +797,38 @@ describe("tend", () => {
       signed_at: String(NOW + 5),
     });
     expect(new Uint8Array(r!["transactions"]).subarray(32)).toEqual(hash);
+  });
+
+  test("a resend and the transaction it followed both landing are both counted", async () => {
+    const { chain, l, p, first, at } = await sentOne();
+    chain.count = 1n;
+    at(5);
+    expect(await l.tend(HEAD)).toEqual(report({ resent: 1 }));
+    const again = chain.hashes.get(hex(chain.broadcasts[1]!))!;
+    // The resend lands, and so, on a view that had lost it, did the first.
+    chain.receipts.set(hex(again), RECEIPT);
+    expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + COSTS.deposit);
+    chain.receipts.set(hex(first), { ...RECEIPT, l1Fee: 1n });
+    expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + 600_001n + COSTS.deposit);
+    const r = await row();
+    expect(new Uint8Array(r["landed_in"])).toEqual(Uint8Array.from([...first, ...again]));
+    expect(await l.sent(p.key)).toEqual({ transaction: again, layer: "l2" });
+    expect(await l.tend(HEAD)).toEqual(report());
+  });
+
+  test("a count that moves while the receipts and the event are read sends nothing", async () => {
+    const { chain, l, p } = await sentOne();
+    let reads = 0;
+    chain.nonce = async () => (++reads === 1 ? 1n : 2n);
+    expect(await l.tend(HEAD)).toEqual(report());
+    chain.onBoard.add(hex(p.posting));
+    reads = 0;
+    expect(await l.tend(HEAD)).toEqual(report());
+    expect(chain.signed).toHaveLength(1);
+    expect(await spentOf(ELECTION)).toBe(MOST);
+    expect(await row()).toMatchObject({ paid: null });
   });
 
   test("past the send cutoff, or past the budget, a consumed nonce sends nothing new", async () => {
@@ -880,7 +926,7 @@ describe("tend", () => {
         fc.array(
           fc.record({
             pick: fc.nat({ max: 2 }),
-            event: fc.constantFrom("land", "drop", "consume", "board", "wait"),
+            event: fc.constantFrom("land", "land-last", "drop", "consume", "board", "wait"),
           }),
           { minLength: 1, maxLength: 12 },
         ),
@@ -900,13 +946,15 @@ describe("tend", () => {
               WHERE posting_key = ${Buffer.from(p.key, "hex")}`;
             const hashes = new Uint8Array(r[0]!["transactions"]);
             if (event === "land") chain.receipts.set(hex(hashes.subarray(0, 32)), RECEIPT);
+            if (event === "land-last") chain.receipts.set(hex(hashes.subarray(-32)), RECEIPT);
             if (event === "drop") chain.receipts.clear();
             if (event === "consume") chain.count = BigInt(r[0]!["nonce"] as string) + 1n;
             if (event === "board") chain.onBoard.add(hex(p.posting));
             t += RESEND;
             await l.tend(HEAD);
             const [sum] = await db.admin`
-              SELECT coalesce(sum(coalesce(paid, cost)), 0)::text AS s FROM posting_in_flight`;
+              SELECT coalesce(sum(coalesce(paid + deposit, cost)), 0)::text AS s
+              FROM posting_in_flight`;
             expect(await spentOf(ELECTION)).toBe(BigInt(sum!["s"] as string));
           }
         },

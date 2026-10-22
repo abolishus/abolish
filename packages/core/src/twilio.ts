@@ -20,6 +20,8 @@ export const TWILIO_LOOKUP = "https://lookups.twilio.com/v2/PhoneNumbers/";
 /** Verify v2's services endpoint; the service SID follows. */
 export const TWILIO_VERIFY = "https://verify.twilio.com/v2/Services/";
 
+/** Twilio's error code for a resource that isn't there: here, no verification waiting. */
+const NOT_FOUND = 20404;
 /** Verify's error code for a check past the verification's cap on checks. */
 const MAX_CHECKS_REACHED = 60202;
 
@@ -41,9 +43,12 @@ export interface TwilioOptions {
 const KEY_SID = /^(?:AC|SK)[0-9a-f]{32}$/;
 const SECRET = /^[A-Za-z0-9]{32}$/;
 const SERVICE_SID = /^VA[0-9a-f]{32}$/;
-// What core passes: a number in E.164, a code of 4 to 10 digits.
+// What core passes: a number in E.164, and a code of 4 to 10 digits, of
+// which only 6 or more are checked. T-01: with 5 codes a number a day and 5
+// checks a code, a Verify service set to 4-digit codes would allow 25
+// guesses in 10^4; one set below 6 digits verifies nothing here instead.
 const E164 = /^\+[1-9][0-9]{6,14}$/;
-const CODE = /^[0-9]{4,10}$/;
+const CODE = /^[0-9]{6,10}$/;
 
 type Json = Record<string, unknown>;
 
@@ -110,8 +115,6 @@ export function createTwilioVerifier({
         timeoutMs,
       );
       if (answer === undefined) return "unavailable";
-      // Lookup answers 404 for a number it can't parse at all.
-      if (answer.status === 404) return "invalid";
       const { status, body } = answer;
       if (status !== 200 || body === undefined) return "unavailable";
       if (body["valid"] === false) return "invalid";
@@ -153,8 +156,12 @@ export function createTwilioVerifier({
         return typeof body["status"] === "string" ? "wrong" : "unavailable";
       }
       // No verification waiting for the number (expired, approved or never
-      // sent, as for a capped number), or past its cap on checks.
-      if (status === 404 || (status === 429 && body?.["code"] === MAX_CHECKS_REACHED))
+      // sent, as for a capped number), or past its cap on checks. Any other
+      // 404 is a setup fault, not a wrong code, and spends no try.
+      if (
+        (status === 404 && body?.["code"] === NOT_FOUND) ||
+        (status === 429 && body?.["code"] === MAX_CHECKS_REACHED)
+      )
         return "wrong";
       return "unavailable";
     },

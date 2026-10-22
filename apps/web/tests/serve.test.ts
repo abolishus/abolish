@@ -90,7 +90,7 @@ const phones = {
   checked: [] as [string, string][],
   pending: new Map<string, number>(),
   lines: new Map<string, { country: string; lineType: string } | "invalid" | "unavailable">(),
-  start: "sent" as "sent" | "unavailable" | "hang",
+  start: "sent" as "sent" | "unavailable" | "throw" | "hang",
   check: undefined as "unavailable" | undefined,
   verdict: "passed" as TurnstileVerdict,
 };
@@ -104,6 +104,7 @@ const phoneVerifier: PhoneVerifier = {
   start: async (number, channel) => {
     phones.started.push([number, channel]);
     if (phones.start === "hang") return new Promise<never>(() => {});
+    if (phones.start === "throw") throw new Error(`send to ${number} failed`);
     if (phones.start === "sent") phones.pending.set(number, 1);
     return phones.start;
   },
@@ -1351,18 +1352,26 @@ describe("an account's phone number under /phone", () => {
     expect(await (await second.call("GET", "/phone")).json()).toEqual({});
   });
 
-  test("a send the provider didn't take is answered as a sent one, and logged by kind", async () => {
-    phones.start = "unavailable";
-    try {
-      const res = await ask(await signedIn(), fresh());
-      expect(res.status).toBe(202);
-      expect(await res.json()).toEqual({});
-    } finally {
-      phones.start = "sent";
-    }
-    await new Promise((r) => setTimeout(r, 20));
-    expect(logged.filter((l) => "error" in l)).toContainEqual({ error: "PhoneSendUnavailable" });
-  });
+  test.each(["unavailable", "throw"] as const)(
+    "a send the provider didn't take (%s) is answered as a sent one, and logged by kind",
+    async (outcome) => {
+      const errors = logged.filter((l) => "error" in l).length;
+      phones.start = outcome;
+      const number = fresh();
+      try {
+        const res = await ask(await signedIn(), number);
+        expect(res.status).toBe(202);
+        expect(await res.json()).toEqual({});
+      } finally {
+        phones.start = "sent";
+      }
+      await new Promise((r) => setTimeout(r, 20));
+      expect(logged.filter((l) => "error" in l).slice(errors)).toEqual([
+        { error: "PhoneSendUnavailable" },
+      ]);
+      expect(JSON.stringify(logged)).not.toContain(number.slice(2));
+    },
+  );
 
   test("answers before the provider's send does, so a capped number can't be told apart by time (T-11)", async () => {
     phones.start = "hang";

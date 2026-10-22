@@ -96,10 +96,8 @@ describe("lookup", () => {
     expect(await verifier.lookup(NUMBER)).toMatchObject({ lineType: "unknown" });
   });
 
-  test.each([
-    ["an invalid number", { status: 200, body: { ...LINE(null).body, valid: false } }],
-    ["a number Lookup can't find", { status: 404, body: { code: 20404 } }],
-  ])("answers invalid on %s", async (_, answer) => {
+  test("answers invalid on a number Lookup calls invalid", async () => {
+    const answer = { status: 200, body: { ...LINE(null).body, valid: false } };
     expect(await twilio(answer).verifier.lookup(NUMBER)).toBe("invalid");
   });
 
@@ -113,6 +111,8 @@ describe("lookup", () => {
   test.each<[string, Answer]>([
     ["an HTTP error", { status: 500, body: {} }],
     ["refused credentials", { status: 401, body: { code: 20003 } }],
+    // Lookup answers 200 with `valid: false` for a bad number: a 404 is a setup fault.
+    ["a 404", { status: 404, body: { code: 20404 } }],
     ["a rate limit", { status: 429, body: { code: 20429 } }],
     ["a body that isn't JSON", { status: 200, body: "OK" }],
     ["a body that isn't an object", { status: 200, body: [LINE("mobile").body] }],
@@ -182,6 +182,7 @@ describe("check", () => {
   test.each<[string, Answer]>([
     ["an HTTP error", { status: 503, body: {} }],
     ["a rate limit that isn't the cap on checks", { status: 429, body: { code: 20429 } }],
+    ["a 404 that isn't Twilio's not-found", { status: 404, body: "Not Found" }],
     ["refused credentials", { status: 401, body: { code: 20003 } }],
     ["a 200 without a status", { status: 200, body: { valid: true } }],
     ["a body that isn't JSON", { status: 200, body: "approved" }],
@@ -190,32 +191,38 @@ describe("check", () => {
     expect(await twilio(answer).verifier.check(NUMBER, "123456")).toBe("unavailable");
   });
 
-  test("asks nothing about a code that isn't 4 to 10 digits", async () => {
+  test("asks nothing about a code that isn't 6 to 10 digits, so none shorter is ever approved", async () => {
     const { sent, verifier } = twilio({ status: 200, body: { status: "approved", valid: true } });
-    for (const code of ["123", "12345678901", "12 34", "abcd"])
+    for (const code of ["1234", "12345", "12345678901", "123 456", "abcdef"])
       expect(await verifier.check(NUMBER, code)).toBe("wrong");
     expect(sent).toHaveLength(0);
   });
 
   test("gives up on a check after its own short timeout", async () => {
-    const signals: (AbortSignal | null | undefined)[] = [];
-    const fetch = (async (_: unknown, init?: RequestInit) => {
-      signals.push(init?.signal);
-      return new Promise<Response>((_, reject) =>
-        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
-      );
-    }) as typeof globalThis.fetch;
-    const verifier = createTwilioVerifier({
-      keySid: KEY,
-      keySecret: SECRET,
-      verifyServiceSid: SERVICE,
-      timeoutMs: 60_000,
-      checkTimeoutMs: 20,
-      fetch,
-    });
+    const verifier = hanging({ timeoutMs: 60_000, checkTimeoutMs: 20 });
     expect(await verifier.check(NUMBER, "123456")).toBe("unavailable");
-    expect(signals[0]?.aborted).toBe(true);
   });
+});
+
+/** A verifier over a Twilio that never answers, until the request's signal aborts it. */
+function hanging(timeouts: { readonly timeoutMs: number; readonly checkTimeoutMs: number }) {
+  const fetch = (async (_: unknown, init?: RequestInit) =>
+    new Promise<Response>((_, reject) =>
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+    )) as typeof globalThis.fetch;
+  return createTwilioVerifier({
+    keySid: KEY,
+    keySecret: SECRET,
+    verifyServiceSid: SERVICE,
+    ...timeouts,
+    fetch,
+  });
+}
+
+test("gives up on a lookup or a send after its timeout", async () => {
+  const verifier = hanging({ timeoutMs: 20, checkTimeoutMs: 60_000 });
+  expect(await verifier.lookup(NUMBER)).toBe("unavailable");
+  expect(await verifier.start(NUMBER, "sms")).toBe("unavailable");
 });
 
 describe("createTwilioVerifier", () => {

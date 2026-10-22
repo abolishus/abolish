@@ -13,7 +13,7 @@
 // record, and a repeat of the same mark succeeds, so a re-issuance whose
 // record write failed can be retried with the same commitment.
 
-import { isForbiddenCommitment } from "@abolishus/crypto";
+import { isForbiddenCommitment, TOKEN_KEY_PERIOD } from "@abolishus/crypto";
 import {
   commitmentKey,
   TIER0_INDEX_MAX_LAG,
@@ -28,7 +28,7 @@ import {
  * What the mark found:
  *
  * - `shown`: `C` was never added to a Tier 0 group, isn't in flight or
- *   queued, and is now marked (or already was, with at least `lapse`);
+ *   queued, and is now marked (or already was, with at least this lapse);
  * - `registered`: the index (the addition history of every Tier 0 group,
  *   signed or self-paid, removed since or not), an in-flight batch or the
  *   queue holds `C`, so the re-issuance is refused (`reissue-refused`);
@@ -88,18 +88,25 @@ export class Tier0ShownList {
   /**
    * Checks that `commitment` was never added to a Tier 0 group and is in no
    * in-flight batch or queue, and marks it so the route drops it until
-   * `TIER0_SHOWN_MARGIN` past `lapse`: the end of the dead token's key's
-   * period `q + 1`, also for a key retired early, since a signing service
-   * that hasn't yet loaded the retirement still redeems under it. Every
-   * token under the key shares that second, so it links nothing (T-10).
-   * Rejects a commitment that isn't canonical or is forbidden, and a lapse
-   * that isn't a safe integer: the caller decodes both first.
+   * `TIER0_SHOWN_MARGIN` past its lapse: the end of `period + 1`, with
+   * `period` the dead token's key's period `q`, also for a key retired
+   * early, since a signing service that hasn't yet loaded the retirement
+   * still redeems under it. The lapse is computed here, never taken from the
+   * caller, so no other second can make the mark end early. Every token
+   * under the key shares it, so it links nothing (T-10). Rejects a
+   * commitment that isn't canonical or is forbidden, and a period that isn't
+   * a `u32`: the caller decodes both first.
    */
-  async show(commitment: bigint, lapse: number): Promise<Tier0ShowOutcome> {
+  async show(commitment: bigint, period: number): Promise<Tier0ShowOutcome> {
     const c = commitmentKey(commitment);
     if (isForbiddenCommitment(commitment))
       throw new RangeError("a shown commitment isn't forbidden");
-    if (!Number.isSafeInteger(lapse) || lapse < 0) throw new RangeError("lapse is a UNIX second");
+    if (!Number.isInteger(period) || period < 0 || period > 0xffff_ffff)
+      throw new RangeError("period is a u32");
+    const lapse = TOKEN_KEY_PERIOD * (period + 2);
+    // Past about period 3.47 billion the second isn't exact in a double, nor
+    // in Lua's numbers.
+    if (!Number.isSafeInteger(lapse)) throw new RangeError("period is too far ahead");
     const k = this.#keys;
     let outcome: unknown;
     try {

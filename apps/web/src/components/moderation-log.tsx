@@ -1,5 +1,5 @@
 import { Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
-import { ArrowRight, Ban, EyeOff, ListX, RotateCcw } from "lucide-react";
+import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
@@ -67,7 +67,11 @@ function Boundary() {
   return (
     <div className="grid border-y-2 border-foreground md:grid-cols-2">
       <div className="grid content-start gap-4 border-b border-border py-8 md:border-e md:border-b-0 md:pe-8">
-        {side(t("moderationActsOn"), ["moderationActsOn_text", "moderationActsOn_listing"])}
+        {side(t("moderationActsOn"), [
+          "moderationActsOn_text",
+          "moderationActsOn_listing",
+          "moderationActsOn_profile",
+        ])}
       </div>
       <div className="grid content-start gap-4 py-8 md:ps-8">
         {side(
@@ -102,29 +106,50 @@ function Row({ entry }: { entry: Entry }) {
             {t("utcTime", { time: formatUtc(locale, new Date(entry.decidedAt)) })}
           </time>
         </dd>
-        <dt className={TERM}>{t("moderationPoll")}</dt>
-        <dd className="m-0 flex min-w-0 items-center gap-3">
-          {/* A seal only: the link names the same poll. */}
-          <span aria-hidden="true" className="contents">
-            <Fingerprint
-              value={entry.electionId}
-              label={t("fingerprintPoll", { prefix: entry.electionId.slice(0, 8) })}
-              size={28}
-            />
-          </span>
-          <a
-            className="font-mono text-sm underline underline-offset-4"
-            translate="no"
-            href={`/polls/${entry.electionId}`}
-          >
-            {t("shortId", { prefix: entry.electionId.slice(0, 16) })}
-          </a>
-        </dd>
-        <dt className={TERM}>{t("moderationAction")}</dt>
-        <dd className="m-0 flex items-center gap-2 text-sm">
-          <span aria-hidden="true">{ACTION_ICON[entry.action]}</span>
-          {t(`action_${entry.action}`)}
-        </dd>
+        {"electionId" in entry ? (
+          <>
+            <dt className={TERM}>{t("moderationPoll")}</dt>
+            <dd className="m-0 flex min-w-0 items-center gap-3">
+              {/* A seal only: the link names the same poll. */}
+              <span aria-hidden="true" className="contents">
+                <Fingerprint
+                  value={entry.electionId}
+                  label={t("fingerprintPoll", { prefix: entry.electionId.slice(0, 8) })}
+                  size={28}
+                />
+              </span>
+              <a
+                className="font-mono text-sm underline underline-offset-4"
+                translate="no"
+                href={`/polls/${entry.electionId}`}
+              >
+                {t("shortId", { prefix: entry.electionId.slice(0, 16) })}
+              </a>
+            </dd>
+            <dt className={TERM}>{t("moderationAction")}</dt>
+            <dd className="m-0 flex items-center gap-2 text-sm">
+              <span aria-hidden="true">{ACTION_ICON[entry.action]}</span>
+              {t(`action_${entry.action}`)}
+            </dd>
+          </>
+        ) : (
+          <>
+            <dt className={TERM}>{t("moderationProfile")}</dt>
+            {/* The handle only, never the name: a hidden name stays off every
+                page, and the log carries no free text (T-75, T-17). */}
+            <dd className="m-0 flex min-w-0 items-center gap-3">
+              <UserRound aria-hidden="true" className="size-7 shrink-0 p-1" />
+              <span className="font-mono text-sm break-all" translate="no">
+                {entry.handle}
+              </span>
+            </dd>
+            <dt className={TERM}>{t("moderationAction")}</dt>
+            <dd className="m-0 flex items-center gap-2 text-sm">
+              <span aria-hidden="true">{ACTION_ICON[entry.action]}</span>
+              {t(entry.action === "hide" ? "profileAction_hide" : "action_restore")}
+            </dd>
+          </>
+        )}
         <dt className={TERM}>{t("moderationReason")}</dt>
         <dd className="m-0 text-sm">{t(`reason_${entry.reason}`)}</dd>
       </dl>
@@ -139,8 +164,8 @@ export interface ModerationLogProps {
 }
 
 /**
- * The public moderation log (T-68): what was done to which poll and why,
- * never who did it or who reported it, with the policy's limits and grounds
+ * The public moderation log (T-68): what was done to which poll or profile
+ * and why, never who did it or who reported it, with the policy's limits and grounds
  * beside it. The log carries no free text, so a row can't carry personal
  * data (T-17); the page shows the API's rows as they come, oldest first.
  */
@@ -183,7 +208,7 @@ export function ModerationLog({ log, next }: ModerationLogProps) {
             >
               <span>{t("moderationSeq")}</span>
               <span>{t("moderationDecided")}</span>
-              <span>{t("moderationPoll")}</span>
+              <span>{t("moderationSubject")}</span>
               <span>{t("moderationAction")}</span>
               <span>{t("moderationReason")}</span>
             </div>

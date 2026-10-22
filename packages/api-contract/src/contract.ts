@@ -339,6 +339,12 @@ export const REMOVAL_REASONS = [
 /** The policy's grounds for restoring; a test ties this copy to `@abolishus/core`. */
 export const RESTORE_REASONS = ["appeal-upheld", "error", "notice-withdrawn"] as const;
 
+/**
+ * A creator profile's public handle ([[0040-creator-profiles]]): 16 lower-case
+ * base32 characters. A test ties this copy to `@abolishus/core`.
+ */
+export const PROFILE_HANDLE = /^[a-z2-7]{16}$/;
+
 const ModerationAction = z.enum(["delist", "hide", "restore"]);
 const ModerationReason = z.enum([...REMOVAL_REASONS, ...RESTORE_REASONS]);
 /** When a decision was recorded, by the database clock: UTC, to the millisecond. */
@@ -350,7 +356,7 @@ const getModerationLog = oc
     path: "/moderation/log",
     summary: "A page of the public moderation log",
     description:
-      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. Each decision delists a poll, hides its display text or restores it, under one of the policy's reason codes; none of them touches a poll's board, definition or result (docs/moderation-policy.md).",
+      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. Each cites one of the policy's reason codes, and the two kinds share one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
     tags: ["moderation"],
   })
   .input(z.strictObject({ after: U64, limit: PageSize }))
@@ -358,13 +364,22 @@ const getModerationLog = oc
     z.strictObject({
       entries: z
         .array(
-          z.strictObject({
-            seq: U64,
-            electionId: Hash32,
-            action: ModerationAction,
-            reason: ModerationReason,
-            decidedAt: Timestamp,
-          }),
+          z.union([
+            z.strictObject({
+              seq: U64,
+              electionId: Hash32,
+              action: ModerationAction,
+              reason: ModerationReason,
+              decidedAt: Timestamp,
+            }),
+            z.strictObject({
+              seq: U64,
+              handle: z.string().check(z.regex(PROFILE_HANDLE)),
+              action: z.enum(["hide", "restore"]),
+              reason: ModerationReason,
+              decidedAt: Timestamp,
+            }),
+          ]),
         )
         .check(z.maxLength(MAX_PAGE)),
     }),

@@ -33,8 +33,10 @@ import {
   lockModeration,
   MAX_MODERATION_PAGE,
   ModerationError,
+  moderationLogOf,
   moderatorAccount,
   type ModerationTx,
+  type PublicModerationEntry,
   REMOVAL_REASONS,
   type RemovalReason,
   RESTORE_REASONS,
@@ -245,9 +247,18 @@ export async function readProfileModerationLog(
   if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
     throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+  return profileModerationLogOf(drizzle({ client }), after, limit);
+}
+
+/** `readProfileModerationLog` in a transaction the caller holds, with arguments it has checked. */
+async function profileModerationLogOf(
+  db: Pick<ModerationTx, "select">,
+  after: bigint,
+  limit: number,
+): Promise<PublicProfileModerationEntry[]> {
   if (after >= INT8_MAX) return [];
   const t = profileModerationActions;
-  const rows = await drizzle({ client })
+  const rows = await db
     .select({
       seq: t.seq,
       handle: t.handle,
@@ -266,6 +277,42 @@ export async function readProfileModerationLog(
     reason: r.reason as RemovalReason | RestoreReason,
     decidedAt: r.decidedAt,
   }));
+}
+
+/** One entry of the whole public log: a decision about a poll or about a profile. */
+export type PublicLogEntry =
+  | ({ readonly target: "poll" } & PublicModerationEntry)
+  | ({ readonly target: "profile" } & PublicProfileModerationEntry);
+
+/**
+ * Up to `limit` decisions about polls and profiles with a sequence number
+ * above `after`, oldest first: the whole public log, as `GET /moderation/log`
+ * serves it (docs/moderation-policy.md, Profiles). Both halves are read from
+ * one snapshot, so a decision committed between the two reads can't land on
+ * this page while an earlier-numbered one waits for the next, which `after`
+ * would then skip (T-68). Neither half names a moderator or an account.
+ */
+export async function readPublicModerationLog(
+  client: Sql,
+  after: bigint,
+  limit: number,
+): Promise<PublicLogEntry[]> {
+  if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
+    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+  const [polls, profiles] = await drizzle({ client }).transaction(
+    async (tx) => [
+      await moderationLogOf(tx, after, limit),
+      await profileModerationLogOf(tx, after, limit),
+    ],
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+  const entries: PublicLogEntry[] = [
+    ...polls.map((e) => ({ target: "poll" as const, ...e })),
+    ...profiles.map((e) => ({ target: "profile" as const, ...e })),
+  ];
+  // Every number comes from one sequence, so no two entries share one.
+  return entries.sort((a, b) => (a.seq < b.seq ? -1 : 1)).slice(0, limit);
 }
 
 /**

@@ -29,6 +29,13 @@ const meta = {
           reason: "appeal-upheld",
           decidedAt: "2026-10-03T17:45:30.250Z",
         },
+        {
+          seq: "12",
+          handle: "k7qa2mzr5xw3bn4d",
+          action: "hide",
+          reason: "impersonation",
+          decidedAt: "2026-10-04T09:30:00.000Z",
+        },
       ],
     },
     next: undefined,
@@ -45,7 +52,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(reach).getByText("The count and the result")).toBeVisible();
   const log = canvas.getByRole("list", { name: "Decisions, oldest first" });
   const rows = within(log).getAllByRole("listitem");
-  await expect(rows).toHaveLength(3);
+  await expect(rows).toHaveLength(4);
   // Each row names its cells for assistive technology, whatever the width shows.
   await expect(within(rows[2]!).getByText("Ground")).toBeInTheDocument();
   await expect(within(log).getByText("Appeal upheld")).toBeVisible();
@@ -53,6 +60,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     `/polls/${"cd".repeat(32)}`,
   );
+  // A profile's row names it by handle alone, with no link and no name.
+  await expect(within(rows[3]!).getByText("Profile")).toBeInTheDocument();
+  await expect(within(rows[3]!).getByText("k7qa2mzr5xw3bn4d")).toBeVisible();
+  await expect(within(rows[3]!).getByText("Profile hidden")).toBeVisible();
+  await expect(within(rows[3]!).queryByRole("link")).toBeNull();
   // The fingerprint is a seal beside the link, not a second name for the poll.
   await expect(within(log).queryByRole("img")).toBeNull();
   await expect(canvas.getByText("October 1, 2026 at 12:00 PM UTC")).toBeVisible();

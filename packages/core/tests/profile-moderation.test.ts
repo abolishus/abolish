@@ -32,6 +32,7 @@ import {
   readProfileModeration,
   readProfileModerationLog,
   readProfileReportQueue,
+  readPublicModerationLog,
   REMOVAL_REASONS,
   type RemovalReason,
   renameProfile,
@@ -394,6 +395,93 @@ describe("the public log", () => {
     expect(
       (await readModerationLog(app, first.seq - 1n, 10)).some((e) => e.seq === first.seq),
     ).toBe(false);
+  });
+
+  test("the whole log merges both targets by number, and pages through them", async () => {
+    const { user, handle } = await profiled();
+    const poll = await shownPoll(user);
+    const a = await moderate(app, poll.electionId, {
+      action: "delist",
+      reason: "spam",
+      moderator: "mod-2",
+    });
+    const b = await moderateProfile(app, handle, hide("spam"));
+    const c = await moderateProfile(app, handle, restore());
+    const d = await moderate(app, poll.electionId, {
+      action: "restore",
+      reason: "error",
+      moderator: "mod-2",
+    });
+    const all = await readPublicModerationLog(app, a.seq - 1n, MAX_MODERATION_PAGE);
+    expect(all.map((e) => e.seq)).toEqual([a.seq, b.seq, c.seq, d.seq]);
+    expect(all[0]).toEqual({
+      target: "poll",
+      seq: a.seq,
+      electionId: poll.electionId,
+      action: "delist",
+      reason: "spam",
+      decidedAt: all[0]!.decidedAt,
+    });
+    expect(all[1]).toEqual({
+      target: "profile",
+      seq: b.seq,
+      handle,
+      action: "hide",
+      reason: "spam",
+      decidedAt: all[1]!.decidedAt,
+    });
+    for (const e of all) expect(Object.keys(e)).not.toContain("moderator");
+    // A page holds `limit` entries of both kinds, never more, whichever half
+    // has more after the cursor.
+    expect((await readPublicModerationLog(app, a.seq - 1n, 3)).map((e) => e.seq)).toEqual([
+      a.seq,
+      b.seq,
+      c.seq,
+    ]);
+    expect((await readPublicModerationLog(app, b.seq, 1)).map((e) => e.seq)).toEqual([c.seq]);
+    expect(await readPublicModerationLog(app, d.seq, 10)).toEqual([]);
+    expect(await readPublicModerationLog(app, (1n << 63n) - 1n, 10)).toEqual([]);
+    await expect(readPublicModerationLog(app, -1n, 10)).rejects.toThrow(TypeError);
+    await expect(readPublicModerationLog(app, 0n, 0)).rejects.toThrow(TypeError);
+    await expect(readPublicModerationLog(app, 0n, MAX_MODERATION_PAGE + 1)).rejects.toThrow(
+      TypeError,
+    );
+  });
+
+  test("paging the whole log at any page size returns every decision once, in order (fast-check)", async () => {
+    const { user, handle } = await profiled();
+    const poll = await shownPoll(user);
+    const start = (await readPublicModerationLog(app, 0n, MAX_MODERATION_PAGE)).at(-1)?.seq ?? 0n;
+    // Alternating decisions on each target, interleaved at random below.
+    const pollSteps = [
+      { action: "delist", reason: "spam" },
+      { action: "restore", reason: "error" },
+    ] as const;
+    const profileSteps = [hide(), restore()] as const;
+    const written: bigint[] = [];
+    let onPoll = 0;
+    let onProfile = 0;
+    for (const toPoll of [true, false, false, true, true, false, true, false]) {
+      const { seq } = toPoll
+        ? await moderate(app, poll.electionId, { ...pollSteps[onPoll++ % 2]!, moderator: "mod-2" })
+        : await moderateProfile(app, handle, profileSteps[onProfile++ % 2]!);
+      written.push(seq);
+    }
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 9 }), async (limit) => {
+        const seen: bigint[] = [];
+        let after = start;
+        for (;;) {
+          const page = await readPublicModerationLog(app, after, limit);
+          expect(page.length).toBeLessThanOrEqual(limit);
+          seen.push(...page.map((e) => e.seq));
+          if (page.length < limit) break;
+          after = page.at(-1)!.seq;
+        }
+        expect(seen).toEqual(written);
+      }),
+      { numRuns: Math.min(numRuns, 20) },
+    );
   });
 });
 

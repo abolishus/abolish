@@ -134,6 +134,28 @@ export async function latestRegistration(
   return latest;
 }
 
+/**
+ * The election whose recorded registration carries `definitionHash`, or
+ * `undefined` if none does: the registry as the indexer recorded it from
+ * finalized L2 blocks, so what the posting relay accepts never rests on a
+ * block that could be reorganised away (docs/spec/posting-relay.md,
+ * Answers, step 4).
+ */
+export async function registeredElection(
+  client: Sql,
+  definitionHash: Uint8Array,
+): Promise<Uint8Array | undefined> {
+  if (!isBytes(definitionHash) || definitionHash.length !== 32)
+    throw new TypeError("definitionHash must be 32 bytes");
+  const r = electionRegistrations;
+  const [row] = await drizzle({ client })
+    .select({ electionId: r.electionId })
+    .from(r)
+    .where(eq(r.definitionHash, new Uint8Array(definitionHash)))
+    .limit(1);
+  return row === undefined ? undefined : new Uint8Array(row.electionId);
+}
+
 /** A code's poll: its election ID and the code in its one canonical form. */
 export interface ShortCodeMatch {
   readonly electionId: Uint8Array;

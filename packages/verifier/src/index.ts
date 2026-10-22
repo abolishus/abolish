@@ -24,6 +24,11 @@ export {
   type ElectionAdmission,
   electionAdmission,
   type ElectionAdmissionCode,
+  type PostingAdmission,
+  type PostingAdmissionCode,
+  type PostingForm,
+  type PostingFormCode,
+  postingForm,
   type ReceiptAdmission,
   type ReceiptAdmissionCode,
 } from "./admission.ts";

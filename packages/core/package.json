@@ -25,6 +25,7 @@
     "@abolishus/crypto": "workspace:*",
     "@abolishus/verifier": "workspace:*",
     "@better-auth/passkey": "catalog:",
+    "@noble/hashes": "catalog:",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
     "postgres": "catalog:"

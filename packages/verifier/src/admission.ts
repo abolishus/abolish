@@ -19,21 +19,39 @@
 // the operator boards only receipts the delivery check reads as passing
 // (T-17, T-52). Finding the ballot (rule 2), the window (rule 3) and an
 // earlier passing receipt (rule 5) are the board's, which the caller holds.
+//
+// And it judges a share posting the operator's posting relay is asked to pay
+// for (docs/spec/posting-relay.md, Answers, steps 3 and 5): the posting
+// decodes strictly as the version the election's ballot version fixes,
+// names this definition, the ballot sent with it is a ballot record of the
+// election whose recomputed ballot hash is the posting's, its seat is in the
+// registered key set, and it passes the public check of a posting under that
+// seat's registered key against that ballot. So the relay pays only for
+// postings the delivery check reads as passing for the ballot they carry
+// (T-52). `postingForm` is the part that needs no election, step 3. The ballot's own admission (its membership proof) is left to the
+// board's `submitPosting`, which the relay simulates before it pays.
 
 import {
   type BallotCheck,
   type BallotCheckV2,
   type BallotStep,
+  ballotHashV3,
+  castPostingSeatV3,
   castReceiptSeatV3,
   DecodeError,
   type DecodeErrorCode,
+  decodeBallot,
+  decodeSharePosting,
   decodeShareReceipt,
+  encode,
   finishBallotSteps,
   pinnedVersion,
   profileCombinationRule,
+  type PostingCode,
   type QuestionBallotElection,
   questionBallotElection,
   RECORD_TYPES,
+  SHARE_CIPHERTEXT,
   type Panel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -117,6 +135,68 @@ export type ReceiptAdmission =
       readonly decodeError?: DecodeErrorCode;
     };
 
+/**
+ * Why a share posting and its ballot fail the posting relay's checks of
+ * their bytes alone (docs/spec/posting-relay.md, Answers, step 3).
+ */
+export type PostingFormCode =
+  /** The posting doesn't decode strictly as the share posting the ballot's version fixes. */
+  | "decode"
+  /** The ballot doesn't decode strictly as a ballot record. */
+  | "ballot-decode"
+  /** A ballot version whose postings this release doesn't relay yet. */
+  | "unsupported-version"
+  /** The posting names another definition than the ballot. */
+  | "posting-definition"
+  /** The ballot hash recomputed from the ballot isn't the posting's. */
+  | "posting-ballot";
+
+/** Why the posting relay won't pay for a share posting in an election (docs/spec/posting-relay.md, Answers). */
+export type PostingAdmissionCode =
+  | PostingFormCode
+  /** The ballot names no cell of the election (its definition is the election's: its hash is checked first). */
+  | "posting-cell"
+  /** The posting's seat isn't one of the registered key set's, or has no share hash in the ballot. */
+  | "posting-seat"
+  /** The public check of a posting failed (docs/spec/share-encryption.md, Public posting): its code. */
+  | PostingCode;
+
+/**
+ * A share posting and its ballot by their bytes alone: refused with its
+ * code, or the definition they name and what the relay counts them by, each
+ * recomputed from the ballot record, never a decoded field the sender could
+ * choose apart from it (docs/spec/posting-relay.md, Sending, step 1; Caps).
+ */
+export type PostingForm =
+  | {
+      readonly ok: true;
+      readonly definitionHash: Uint8Array;
+      readonly ballotHash: Uint8Array;
+      readonly seat: number;
+      readonly cell: number;
+      readonly nullifier: bigint;
+    }
+  | {
+      readonly ok: false;
+      readonly code: PostingFormCode;
+      readonly decodeError?: DecodeErrorCode;
+    };
+
+/** A share posting's verdict in an election: `PostingForm`'s, with the tier of the ballot's cell. */
+export type PostingAdmission =
+  | {
+      readonly ok: true;
+      readonly ballotHash: Uint8Array;
+      readonly seat: number;
+      readonly tier: number;
+      readonly nullifier: bigint;
+    }
+  | {
+      readonly ok: false;
+      readonly code: PostingAdmissionCode;
+      readonly decodeError?: DecodeErrorCode;
+    };
+
 /** An election whose ballots can be judged, with the window its definition sets. */
 export interface ElectionAdmission {
   readonly ok: true;
@@ -139,6 +219,8 @@ export interface ElectionAdmission {
   readonly admitAll: (payloads: readonly Uint8Array[]) => BallotAdmission[];
   /** Rule 1 for a share receipt's bytes, with rule 4 to run against its ballot; never throws on them. */
   readonly receipt: (payload: Uint8Array) => ReceiptAdmission;
+  /** A share posting's bytes with the ballot record's it delivers, as the posting relay judges them; never throws on them. */
+  readonly posting: (posting: Uint8Array, ballot: Uint8Array) => PostingAdmission;
 }
 
 /**
@@ -278,6 +360,10 @@ export function electionAdmission(
       questions === undefined
         ? { ok: false, code: "unsupported-version" }
         : receiptAdmission(questions, seats, payload),
+    posting: (posting, ballot) =>
+      questions === undefined
+        ? { ok: false, code: "unsupported-version" }
+        : postingAdmission(questions, seats, posting, ballot),
   };
 }
 
@@ -313,6 +399,95 @@ function receiptAdmission(
         throw e;
       }
     },
+  };
+}
+
+/**
+ * Step 3 of docs/spec/posting-relay.md (Answers) for a share posting and
+ * the ballot record it delivers, which needs no election: the ballot
+ * decodes strictly, the posting decodes strictly as the version the
+ * ballot's version fixes (docs/spec/delivery.md, Versions), and names the
+ * ballot's definition and the ballot hash recomputed from it. Only ballot
+ * version 3's postings (share posting version 1), the ones the ballot
+ * client casts, are judged yet; another version's are refused, never
+ * judged under the wrong ballot hash (T-36). Never throws on the bytes.
+ */
+export function postingForm(posting: Uint8Array, ballot: Uint8Array): PostingForm {
+  const refuse = (code: PostingFormCode, decodeError?: DecodeErrorCode): PostingForm =>
+    decodeError === undefined ? { ok: false, code } : { ok: false, code, decodeError };
+  const own = new Uint8Array(ballot);
+  // The ballot's own header names its version, so a record of another type
+  // or of a version not read yet is refused before any decoding.
+  if (own.length < 3 || ((own[0] as number) << 8) + (own[1] as number) !== RECORD_TYPES.ballot)
+    return refuse("ballot-decode", own.length < 3 ? "truncated" : "unexpected-record-type");
+  if (own[2] !== 3) return refuse("unsupported-version");
+  let record;
+  try {
+    record = decodeBallot(own, 3);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return refuse("ballot-decode", e.code);
+  }
+  let decoded;
+  try {
+    decoded = decodeSharePosting(new Uint8Array(posting), 1);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return refuse("decode", e.code);
+  }
+  if (!equal(decoded.definition_hash, record.definition_hash)) return refuse("posting-definition");
+  const ballotHash = ballotHashV3(
+    { definitionHash: record.definition_hash, cell: record.cell, nullifier: record.nullifier },
+    record.committed_vote,
+  );
+  if (!equal(decoded.ballot_hash, ballotHash)) return refuse("posting-ballot");
+  return {
+    ok: true,
+    definitionHash: new Uint8Array(record.definition_hash),
+    ballotHash,
+    seat: decoded.seat,
+    cell: record.cell,
+    nullifier: record.nullifier,
+  };
+}
+
+/**
+ * A version-1 share posting (ballot version 3's) with the version-3 ballot
+ * record it delivers, in a version-5 election: `postingForm`, the
+ * election's definition, a cell of it, a seat of the registered key set,
+ * and the public check under that seat's key against the ballot, as the
+ * board's `posting-ballot` check and the delivery check read it.
+ */
+function postingAdmission(
+  election: QuestionBallotElection,
+  seats: ReadonlySet<number>,
+  posting: Uint8Array,
+  ballot: Uint8Array,
+): PostingAdmission {
+  const own = new Uint8Array(posting);
+  const ownBallot = new Uint8Array(ballot);
+  const form = postingForm(own, ownBallot);
+  if (!form.ok) return form;
+  if (!equal(form.definitionHash, election.definitionHash))
+    return { ok: false, code: "posting-definition" };
+  const cell = election.cells[form.cell];
+  if (cell === undefined) return { ok: false, code: "posting-cell" };
+  const { seat } = form;
+  const record = decodeBallot(ownBallot, 3);
+  if (!seats.has(seat) || seat > record.committed_vote.share_hashes.length)
+    return { ok: false, code: "posting-seat" };
+  const decoded = decodeSharePosting(own, 1);
+  const checked = castPostingSeatV3(election, ownBallot, seat, {
+    ciphertext: encode(SHARE_CIPHERTEXT, decoded.ciphertext),
+    m: decoded.m,
+  });
+  if (!checked.ok) return { ok: false, code: checked.code };
+  return {
+    ok: true,
+    ballotHash: form.ballotHash,
+    seat,
+    tier: cell.tier,
+    nullifier: form.nullifier,
   };
 }
 

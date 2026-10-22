@@ -20,7 +20,7 @@ import {
   readInclusionProof,
   readBoardedEntry,
   readEntryAt,
-  readModerationLog,
+  readPublicModerationLog,
   report,
   SearchQueryError,
   searchTerms,
@@ -277,20 +277,25 @@ export const router = os.router({
   // (docs/moderation-policy.md; T-68). Nothing here names a moderator or a
   // reporter, and a report reaches no one but the moderators' queue.
   moderation: {
+    // Profiles' decisions name the public handle only, from the operational
+    // log table; the API still reads no account table (T-10).
     getLog: os.moderation.getLog.handler(async ({ input, context }) => {
-      const entries = await readModerationLog(
+      const entries = await readPublicModerationLog(
         context.sql,
         BigInt(input.after),
         Number(input.limit),
       );
       return {
-        entries: entries.map((e) => ({
-          seq: e.seq.toString(),
-          electionId: toHex(e.electionId),
-          action: e.action,
-          reason: e.reason,
-          decidedAt: e.decidedAt.toISOString(),
-        })),
+        entries: entries.map((e) => {
+          const common = {
+            seq: e.seq.toString(),
+            reason: e.reason,
+            decidedAt: e.decidedAt.toISOString(),
+          };
+          return e.target === "poll"
+            ? { ...common, electionId: toHex(e.electionId), action: e.action }
+            : { ...common, handle: e.handle, action: e.action };
+        }),
       };
     }),
     getStatus: os.moderation.getStatus.handler(async ({ input, context, errors }) => {

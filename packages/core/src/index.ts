@@ -525,11 +525,13 @@ export {
   type ProfileModerationState,
   type ProfileModerationStatus,
   type ProfileReportQueueCursor,
+  type PublicLogEntry,
   type PublicProfileModerationEntry,
   readProfileAppealQueue,
   readProfileModeration,
   readProfileModerationLog,
   readProfileReportQueue,
+  readPublicModerationLog,
   reportProfile,
   reviewProfileReports,
 } from "./profile-moderation.ts";

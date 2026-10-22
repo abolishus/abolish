@@ -353,10 +353,19 @@ export async function readModerationLog(
   if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
     throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+  return moderationLogOf(drizzle({ client }), after, limit);
+}
+
+/** `readModerationLog` in a transaction the caller holds, with arguments it has checked. */
+export async function moderationLogOf(
+  db: Pick<ModerationTx, "select">,
+  after: bigint,
+  limit: number,
+): Promise<PublicModerationEntry[]> {
   // Sequence numbers are Postgres `bigint`s: past the largest there is
   // nothing, and Postgres would refuse the comparison rather than say so.
   if (after >= INT8_MAX) return [];
-  const rows = await drizzle({ client })
+  const rows = await db
     .select({
       seq: moderationActions.seq,
       electionId: moderationActions.electionId,

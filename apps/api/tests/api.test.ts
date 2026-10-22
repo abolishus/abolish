@@ -26,8 +26,11 @@ import {
   MAX_SEARCH_QUERY as CORE_MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS as CORE_MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH as CORE_MAX_SHORT_CODE_LENGTH,
+  makeProfile,
   moderate,
   POLL_TOPICS as CORE_POLL_TOPICS,
+  moderateProfile,
+  PROFILE_HANDLE as CORE_PROFILE_HANDLE,
   readBoard,
   readReportQueue,
   recordRegistration,
@@ -48,10 +51,11 @@ import {
   MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH,
   POLL_TOPICS,
+  PROFILE_HANDLE,
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
-import { addModerators, type TestDb, testDb, typical } from "@abolishus/core/test-db";
+import { addModerators, newAccount, type TestDb, testDb, typical } from "@abolishus/core/test-db";
 import fc from "fast-check";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -1155,6 +1159,53 @@ describe("moderation (T-68)", () => {
       "restore",
     ]);
     expect(JSON.stringify([first, rest])).not.toContain("mod-");
+  });
+
+  test("the contract's profile handle is core's", () => {
+    expect(PROFILE_HANDLE.source).toBe(CORE_PROFILE_HANDLE.source);
+    expect(PROFILE_HANDLE.flags).toBe(CORE_PROFILE_HANDLE.flags);
+  });
+
+  test("the log carries profile decisions by handle, in one numbering with polls'", async () => {
+    const user = await newAccount(app);
+    // A stand-in for a verified phone, which making a profile needs.
+    await app`INSERT INTO account_phones VALUES (${user}, ${randomBytes(32)}, 'p1', '2026-10-01T00:00:00Z')`;
+    const handle = await makeProfile(app, user, "Riverside Neighbours", {
+      now: new Date("2026-10-22T12:00:00Z"),
+    });
+    const e = await election();
+    const before = await json(await get("/moderation/log", { after: "0", limit: "256" }));
+    const start = (before["entries"] as { seq: string }[]).at(-1)?.seq ?? "0";
+    const hid = { action: "hide", reason: "impersonation", moderator: "mod-secret" } as const;
+    await moderateProfile(app, handle, hid);
+    await moderate(app, e.id, { action: "delist", reason: "spam", moderator: "mod-secret" });
+    await moderateProfile(app, handle, {
+      action: "restore",
+      reason: "error",
+      moderator: "mod-other",
+    });
+    const body = await json(await get("/moderation/log", { after: start, limit: "256" }));
+    const entries = body["entries"] as Record<string, string>[];
+    expect(entries.map((x) => [x["handle"] ?? x["electionId"], x["action"], x["reason"]])).toEqual([
+      [handle, "hide", "impersonation"],
+      [e.idHex, "delist", "spam"],
+      [handle, "restore", "error"],
+    ]);
+    expect(Object.keys(entries[0]!).sort()).toEqual([
+      "action",
+      "decidedAt",
+      "handle",
+      "reason",
+      "seq",
+    ]);
+    const seqs = entries.map((x) => BigInt(x["seq"]!));
+    expect(seqs).toEqual([...seqs].sort((a, b) => (a < b ? -1 : 1)));
+    // A page of one ends at the profile's decision; the next starts after it.
+    const one = await json(await get("/moderation/log", { after: start, limit: "1" }));
+    expect((one["entries"] as Record<string, string>[]).map((x) => x["handle"])).toEqual([handle]);
+    // Neither the moderator nor the profile's account or name is served (T-10).
+    const served = JSON.stringify(body);
+    for (const secret of ["mod-", user, "Riverside"]) expect(served).not.toContain(secret);
   });
 
   test("the log refuses positions and page sizes outside its bounds", async () => {

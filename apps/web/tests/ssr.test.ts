@@ -53,6 +53,9 @@ const ID = typical.value.election_id;
 const SWAPPED_ID = "ab".repeat(32);
 const UNKNOWN_ID = "cd".repeat(32);
 const HEAD = { treeSize: "30", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
+/** A creator profile's public handle, as the log names it. */
+const PROFILE_HANDLE = "k7qa2mzr5xw3bn4d";
+
 const LATEST = {
   seq: "7",
   action: "hide",
@@ -308,7 +311,13 @@ function stubApi(): Server {
     const definition = definitions.get(electionId);
     if (url.pathname === "/moderation/log") {
       const after = BigInt(url.searchParams.get("after") ?? "0");
-      const entries = after < 7n ? [{ ...LATEST, electionId: HIDDEN_ID }] : [];
+      const entries =
+        after < 7n
+          ? [
+              { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
+              { ...LATEST, electionId: HIDDEN_ID },
+            ]
+          : [];
       return json(200, { entries });
     }
     if (url.pathname === "/elections/by-code") {
@@ -1335,6 +1344,14 @@ describe("moderation log", () => {
     expect(html).toContain("Text hidden");
     expect(html).toContain("Personal data");
     expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
+  });
+
+  test("lists a decision about a profile by its handle, linking nothing", async () => {
+    const html = await (await get("/moderation")).text();
+    expect(html).toContain("Profile hidden");
+    expect(html).toContain(PROFILE_HANDLE);
+    expect(html).not.toContain(`href="/by/`);
+    expect(html.indexOf(PROFILE_HANDLE)).toBeLessThan(html.indexOf(`href="/polls/${HIDDEN_ID}"`));
   });
 
   test.each(["?after=abc", "?after=99999999999999999999", "?after=1&after=2", "?after=-1"])(

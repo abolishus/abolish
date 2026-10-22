@@ -162,7 +162,8 @@ export function tier0Issuer({
  * held key the record doesn't list for its period, lists under another
  * `pkS`, or lists retired. A client finalises only under the keys its
  * release lists, so an answer under any other key is one no client takes,
- * and a key retired early must stop issuing everywhere at once (T-74).
+ * and a key retired early stops issuing at the next start with the record
+ * that retires it (T-74).
  * Keys the record lists and the issuer doesn't hold are left alone: a
  * period's key may be loaded only when it is near. Errors name a period or
  * a rule, never a key, though only public keys are compared here.

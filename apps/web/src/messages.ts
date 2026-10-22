@@ -11,6 +11,7 @@ const enUS = {
   homeLede:
     "Questions big and small, from your street to your county. Every answer is sealed on the voter's own device and posted to a public board, so anyone who downloads the board can count it again.",
   homeBrowse: "Browse polls",
+  appDescription: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeNonBinding: "Non-binding, and run by citizens.",
   homeLookupTitle: "Have a poll's ID?",
   homeListUnavailable:

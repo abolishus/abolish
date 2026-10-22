@@ -113,6 +113,23 @@ export function imageHeaders(): Readonly<Record<string, string>> {
 }
 
 /**
+ * The headers on the web app manifest and its icons (src/app/install.ts).
+ * Nothing in them runs, so the policy refuses everything; only our own pages
+ * load them. Their names carry no hash, so a browser keeps them a day and
+ * then asks again, and a changed icon reaches an installed app within that.
+ */
+export function appFileHeaders(): Readonly<Record<string, string>> {
+  return {
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cross-origin-resource-policy": "same-origin",
+    "strict-transport-security": "max-age=31536000",
+    "cache-control": "public, max-age=86400",
+  };
+}
+
+/**
  * The headers on a poll's embed (`isEmbedPage`). Any site may frame it, so
  * nothing in it may run or send anything: no `script-src` (so no script, ours
  * or injected), no form action, and the CSP's own sandbox, which holds even

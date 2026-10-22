@@ -64,6 +64,7 @@ const RP_ID = "abolish.test";
 const SECRET = "test-secret-test-secret-test-secret-0123456789";
 const SESSION = "__Secure-abolish-account.session_token";
 const SCRIPT = "export const a = 1;\n";
+const MANIFEST = '{"name":"Abolish"}\n';
 
 let db: TestDb;
 let sql: Awaited<ReturnType<TestDb["as"]>>;
@@ -190,6 +191,10 @@ beforeAll(async () => {
   mkdirSync(join(clientDir, "assets"));
   writeFileSync(join(clientDir, "assets", "index-AbC_12-x.js"), SCRIPT);
   writeFileSync(join(clientDir, "secret.txt"), "not an asset");
+  mkdirSync(join(clientDir, "icons"));
+  writeFileSync(join(clientDir, "manifest.webmanifest"), MANIFEST);
+  writeFileSync(join(clientDir, "icons", "icon-192.png"), "png");
+  writeFileSync(join(clientDir, "icons", "other.png"), "not served");
   server = createWebServer({
     start: {
       fetch: async (request) => {
@@ -918,6 +923,31 @@ describe("the front", () => {
     expect(started).toHaveLength(0);
   });
 
+  test("serves the manifest and its icons from the fixed list, and nothing beside them", async () => {
+    started.length = 0;
+    const manifest = await raw("/manifest.webmanifest");
+    expect(manifest.status).toBe(200);
+    expect(manifest.body).toBe(MANIFEST);
+    expect(manifest.headers["content-type"]).toBe("application/manifest+json");
+    expect(manifest.headers["cache-control"]).toBe("public, max-age=86400");
+    expect(manifest.headers["content-security-policy"]).toBe(
+      "default-src 'none'; frame-ancestors 'none'; sandbox",
+    );
+    expect(manifest.headers["x-content-type-options"]).toBe("nosniff");
+    expect(manifest.headers["cross-origin-resource-policy"]).toBe("same-origin");
+    const icon = await raw("/icons/icon-192.png", { method: "HEAD" });
+    expect([icon.status, icon.headers["content-type"], icon.body]).toEqual([200, "image/png", ""]);
+    expect(icon.headers["content-length"]).toBe("3");
+    // Listed but not built: a 404, never Start's page.
+    expect((await raw("/icons/icon-512.png")).status).toBe(404);
+    expect((await raw("/manifest.webmanifest?v=1")).status).toBe(404);
+    expect(started).toHaveLength(0);
+    // Any other name under /icons is a page path, which Start answers, never a file.
+    expect((await raw("/icons/other.png")).body).not.toContain("not served");
+    expect((await raw("/icons/../secret.txt")).body).not.toContain("not an asset");
+    expect((await raw("/manifest.webmanifest", { method: "POST" })).body).not.toBe(MANIFEST);
+  });
+
   test("builds every request on the configured origin, whatever Host or target says", async () => {
     started.length = 0;
     expect((await raw("/polls?id=ab", { headers: { host: "evil.test" } })).status).toBe(200);
@@ -1112,8 +1142,11 @@ describe("analytics", () => {
     await raw("/embed/p/3j55dw1?theme=dark");
     await raw("/somewhere/else");
     await raw("/broken");
-    // Not page views: assets, accounts, server functions, refusals, HEAD.
+    // Not page views: assets (the install's files too), accounts, server
+    // functions, refusals, HEAD.
     await raw("/assets/index-AbC_12-x.js");
+    await raw("/manifest.webmanifest");
+    await raw("/icons/icon-192.png");
     await raw("/auth/get-session");
     await raw("/_serverFn/abc", { method: "POST", body: Buffer.from("{}") });
     await raw("//evil.test/");

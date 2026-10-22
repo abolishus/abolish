@@ -57,8 +57,19 @@ export async function renderPreview(
   model: PollPreview,
   format: PreviewFormat,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const [svg] = await Promise.all([previewSvg(model, format), resvg()]);
-  const image = new Resvg(svg, { fitTo: { mode: "original" }, font: { loadSystemFonts: false } });
+  return rasterise(await previewSvg(model, format));
+}
+
+/**
+ * `svg` as a PNG, at its own size or `width` pixels wide. No system fonts:
+ * text is already paths, so a render is the same bytes on every machine.
+ */
+export async function rasterise(svg: string, width?: number): Promise<Uint8Array<ArrayBuffer>> {
+  await resvg();
+  const image = new Resvg(svg, {
+    fitTo: width === undefined ? { mode: "original" } : { mode: "width", value: width },
+    font: { loadSystemFonts: false },
+  });
   try {
     const rendered = image.render();
     try {

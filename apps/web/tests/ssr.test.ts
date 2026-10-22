@@ -525,6 +525,17 @@ describe("every page", () => {
     expect(await (await get("/nowhere")).text()).not.toContain('aria-current="page"');
   });
 
+  test("links the web app manifest and the icons from its head (P2-28 part 1a)", async () => {
+    const html = await (await get("/discover")).text();
+    const head = html.slice(0, html.indexOf("</head>"));
+    const links = [...head.matchAll(/<link rel="(manifest|icon|apple-touch-icon)" ([^>]*)\/>/g)];
+    expect(links.map(([, rel, attrs]) => [rel, attrs?.replace(/ nonce="[^"]*"/, "")])).toEqual([
+      ["manifest", 'href="/manifest.webmanifest"'],
+      ["icon", 'href="/icons/icon.svg" type="image/svg+xml"'],
+      ["apple-touch-icon", 'href="/icons/apple-touch-icon.png"'],
+    ]);
+  });
+
   test("each response gets a nonce of its own", async () => {
     const nonces = new Set<string>();
     for (let i = 0; i < 5; i++) nonces.add(cspNonce(await get("/")));

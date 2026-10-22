@@ -4,7 +4,8 @@
 // e-mail address under /email (src/node/email.ts), its phone number under
 // /phone (src/node/phone.ts), its Tier 0 token under /token
 // (src/node/token.ts), reactions on a poll under /reactions
-// (src/node/reactions.ts), and the client's hashed assets from disk.
+// (src/node/reactions.ts), and the client's hashed assets from disk, with
+// the web app manifest and its icons (src/app/install.ts).
 //
 // The account system lives here, on apps/web's origin, so its host-only
 // session cookie never reaches the API or the ballot client's host (T-10,
@@ -25,6 +26,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from "node:path";
 
 import { type ClientError, ERROR_NAME, pageOf, parseClientError } from "../analytics.ts";
+import { APP_FILES } from "../app/install.ts";
+import { appFileHeaders } from "../security.ts";
 import { type Analytics, noAnalytics } from "./analytics.ts";
 
 /** The built Start server (`dist/server/server.js`'s default export). */
@@ -186,7 +189,11 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
-  if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
+  if (
+    (path.startsWith("/assets/") || Object.hasOwn(APP_FILES, path)) &&
+    (method === "GET" || method === "HEAD")
+  )
+    return "asset";
   return "page";
 }
 
@@ -294,6 +301,22 @@ export function createWebServer({
     // would replace the origin the URL is built on.
     const url = urlOf(req);
     if (!METHODS.has(method) || url === undefined) throw new Refusal(400);
+
+    if (route === "asset" && Object.hasOwn(APP_FILES, url.pathname)) {
+      if (url.search !== "") throw new Refusal(404);
+      let file: Buffer;
+      try {
+        // A name from the fixed list, so this stays in the client's own files.
+        file = await readFile(join(clientDir, url.pathname));
+      } catch {
+        throw new Refusal(404);
+      }
+      res.statusCode = 200;
+      for (const [name, value] of Object.entries(appFileHeaders())) res.setHeader(name, value);
+      res.setHeader("content-type", APP_FILES[url.pathname]!);
+      res.setHeader("content-length", file.length);
+      return void res.end(method === "HEAD" ? undefined : file);
+    }
 
     if (route === "asset") {
       const match = ASSET.exec(url.pathname);

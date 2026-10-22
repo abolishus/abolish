@@ -398,6 +398,71 @@ describe("elections.list (T-68)", () => {
     const r = await get("/elections", { after: "ff".repeat(32), limit: "1" });
     expect(await json(r)).toEqual({ elections: [] });
   });
+
+  describe("new and closing (P2-23)", () => {
+    // Registration positions in L2 block 0, before every later test's in
+    // this file, which start at block 1: the table takes them in chain order.
+    let logIndex = 0;
+    const nowS = () => BigInt(Math.floor(Date.now() / 1000));
+
+    /** A poll open now for `seconds` more, its registration recorded at the next position. */
+    async function open(seconds: bigint) {
+      const id = b32();
+      const definition = encodeElectionDefinition({
+        ...typical,
+        election_id: id,
+        opens_at: nowS() - 60n,
+        closes_at: nowS() + seconds,
+      });
+      const { definitionHash } = await storeDefinition(app, definition);
+      await recordRegistration(app, {
+        electionId: id,
+        definitionHash,
+        l2Block: 0n,
+        logIndex: logIndex++,
+      });
+      return hex(id);
+    }
+
+    async function sorted(sort: string, mine: string[], limit: string) {
+      const all: string[] = [];
+      let after: string | undefined;
+      for (;;) {
+        const query = after === undefined ? { sort, limit } : { sort, after, limit };
+        const r = await get("/elections", query);
+        expect(r.status).toBe(200);
+        const page = (await json(r))["elections"] as string[];
+        all.push(...page);
+        if (page.length < Number(limit)) return all.filter((id) => mine.includes(id));
+        after = page.at(-1);
+      }
+    }
+
+    test("list the polls open by the server's clock, newest or soonest closing first", async () => {
+      const closed = (await election()).idHex;
+      const [a, b, c] = [await open(3_000n), await open(1_000n), await open(2_000n)];
+      const mine = [a, b, c, closed];
+      for (const limit of ["1", "256"]) {
+        expect(await sorted("new", mine, limit)).toEqual([c, b, a]);
+        expect(await sorted("closing", mine, limit)).toEqual([b, c, a]);
+      }
+      expect(await listed(mine)).toEqual([...mine].sort());
+    });
+
+    test("refuse an unknown sort, and a cursor the order can't place", async () => {
+      expect((await get("/elections", { sort: "popular", limit: "1" })).status).toBe(400);
+      const unregistered = (await election()).idHex;
+      for (const [sort, after] of [
+        ["new", "ff".repeat(32)],
+        ["closing", "ff".repeat(32)],
+        ["new", unregistered],
+      ] as const) {
+        const r = await get("/elections", { sort, after, limit: "1" });
+        expect(r.status).toBe(400);
+        expect((await json(r))["code"]).toBe("CURSOR_NOT_FOUND");
+      }
+    });
+  });
 });
 
 describe("elections.resolveCode and elections.getCode (P2-18; T-49, T-53, T-67)", () => {

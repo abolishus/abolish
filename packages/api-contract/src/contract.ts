@@ -92,10 +92,22 @@ const listElections = oc
     path: "/elections",
     summary: "A page of the polls this server lists",
     description:
-      "Election IDs of the polls our front ends list for discovery, in ascending order, from just above `after` (or from the first without it): at most `limit`. Fewer than `limit` means the listing ends there for now. A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
+      "Election IDs of the polls our front ends list for discovery: at most `limit`, after the poll `after` in the order `sort` names (or from the first without it). Fewer than `limit` means the listing ends there for now. `id`, the default, lists every listed poll, open or closed, in ascending order of election ID, and `after` need not name a poll. `new` lists the polls open now (the definition's `opens_at` at or before the server's clock and `closes_at` after it), the latest registered on L2 first; `closing` lists the polls open now, the soonest `closes_at` first, then by election ID. Both orders are public chain data, the same for everyone and moved by nothing a voter or an account does; under them `after` must be a poll the order can place, one stored here and, for `new`, with its registration recorded, though it may have closed since (`CURSOR_NOT_FOUND` otherwise). A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
     tags: ["elections"],
   })
-  .input(z.strictObject({ after: z.optional(Hash32), limit: PageSize }))
+  .errors({
+    CURSOR_NOT_FOUND: {
+      status: 400,
+      message: "`after` names no poll this order can place.",
+    },
+  })
+  .input(
+    z.strictObject({
+      after: z.optional(Hash32),
+      limit: PageSize,
+      sort: z.optional(z.enum(["id", "new", "closing"])),
+    }),
+  )
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));
 
 /** The longest short code (docs/design/sharing.md); a test ties this copy to `@abolishus/core`. */

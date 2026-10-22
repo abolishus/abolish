@@ -1,4 +1,4 @@
-import { bigint, integer, pgTable } from "drizzle-orm/pg-core";
+import { bigint, integer, numeric, pgTable } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0001_election_definitions.sql; a test checks the
@@ -17,4 +17,13 @@ export const electionRegistrations = pgTable("election_registrations", {
   definitionHash: bytea("definition_hash").notNull().unique(),
   l2Block: bigint("l2_block", { mode: "bigint" }).notNull(),
   logIndex: integer("log_index").notNull(),
+});
+
+// Drizzle view of migrations/0023_election_schedules.sql: each stored
+// definition's `opens_at` and `closes_at`, for discovery's sorts (P2-23;
+// T-68). Write-once like the definitions it is copied from.
+export const electionSchedules = pgTable("election_schedules", {
+  electionId: bytea("election_id").primaryKey(),
+  opensAt: numeric("opens_at", { precision: 20, scale: 0, mode: "bigint" }).notNull(),
+  closesAt: numeric("closes_at", { precision: 20, scale: 0, mode: "bigint" }).notNull(),
 });

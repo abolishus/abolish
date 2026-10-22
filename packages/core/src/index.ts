@@ -61,6 +61,7 @@ export {
 export {
   DefinitionError,
   type DefinitionErrorCode,
+  fillElectionSchedules,
   hasDefinition,
   readDefinition,
   storeDefinition,
@@ -99,7 +100,13 @@ export {
   postCeremonyMessage,
   type PostOutcome,
 } from "./ceremony-coordinator.ts";
-export { listPolls, MAX_LISTING_PAGE } from "./listing.ts";
+export {
+  LISTING_SORTS,
+  ListingError,
+  type ListingOrder,
+  listPolls,
+  MAX_LISTING_PAGE,
+} from "./listing.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
   accountCredentials,
@@ -122,6 +129,7 @@ export {
   displayTexts,
   electionDefinitions,
   electionRegistrations,
+  electionSchedules,
   identityBackups,
   moderationActions,
   moderationReports,

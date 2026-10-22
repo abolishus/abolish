@@ -321,6 +321,7 @@ export {
   type Tier0RequestInput,
   TURNSTILE_ACTION_TIER0,
 } from "./tier0-registration.ts";
+export { type Tier0ShowOutcome, Tier0ShownList, type Tier0ShownOptions } from "./tier0-shown.ts";
 export {
   checkTier0IssuerDeployment,
   generateTier0IssuerKey,

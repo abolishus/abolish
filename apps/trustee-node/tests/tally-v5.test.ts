@@ -373,6 +373,24 @@ describe("what the duty refuses to sum over under version 5", () => {
     expect(await refused({ counted: fixed(cells) })).toEqual(refusal("a voter counted twice"));
   });
 
+  test("a ballot relabelled to another cell finds no shares there (T-38)", async () => {
+    // Voter 2's vote re-encoded naming tier 0's first cell: it passes the
+    // cell check, but its ballot hash binds the cell, so no seat holds shares
+    // under it and none sends sums for that cell.
+    const cells = byCell();
+    cells[0] = [...cells[0]!, relabel(ballots[2]!, { cell: 0 })];
+    cells[1] = [];
+    const wire = new Wire();
+    expect(await duties(wire, { counted: fixed(cells) })[0]!.step()).toEqual({
+      state: "tallying",
+      cells: [
+        { state: "missing-shares", missing: 1, held: 0 },
+        { state: "combining", held: 1, sent: 2 },
+        { state: "combining", held: 1, sent: 2 },
+      ],
+    });
+  });
+
   test("a record of another ballot version, or none", async () => {
     // The same bytes under version 1's version byte: never read as version 3 (T-34).
     const v1 = Uint8Array.from(ballots[3]!.bytes);
@@ -396,6 +414,10 @@ describe("what the duty refuses to sum over under version 5", () => {
   });
 
   test("a definition other than the approved one", async () => {
+    // The version-5 definition tagged as version 1, hashed under version 1's layout (T-34).
+    expect(await refused({ definition: { version: 1, value: definition as never } })).toEqual(
+      refusal("the definition isn't the one the seat approved"),
+    );
     const later = { ...definition, closes_at: definition.closes_at + 1n };
     expect(await refused({ definition: { version: 5, value: later } })).toEqual(
       refusal("the definition isn't the one the seat approved"),

@@ -32,6 +32,7 @@ import {
   type CommittedVote,
   decodeBallot,
   DecodeError,
+  EncodeError,
   type ElectionDefinition,
   electionDefinitionHash,
   type ElectionDefinitionV5,
@@ -412,16 +413,22 @@ export class TallyDuty {
     // Implied by the approved definition hash, which the seat computed from
     // a stub its pins passed; checked so the transcript is read against them.
     // Each version is hashed under its own layout, so a definition read
-    // under another never matches (T-34).
-    if (
-      d.l2_chain_id !== this.#o.l2ChainId ||
-      !equal(d.trustee_registry, this.#o.trusteeRegistry) ||
-      !equal(
+    // under another never matches, and one tagged with a version whose
+    // layout it doesn't have doesn't encode (T-34).
+    let hash: Uint8Array | undefined;
+    try {
+      hash =
         definition.version === 1
           ? electionDefinitionHash(definition.value)
-          : electionDefinitionV5Hash(definition.value),
-        election.definitionHash,
-      )
+          : electionDefinitionV5Hash(definition.value);
+    } catch (e) {
+      if (!(e instanceof EncodeError)) throw e;
+    }
+    if (
+      hash === undefined ||
+      d.l2_chain_id !== this.#o.l2ChainId ||
+      !equal(d.trustee_registry, this.#o.trusteeRegistry) ||
+      !equal(hash, election.definitionHash)
     )
       throw new Refused("the definition isn't the one the seat approved");
     const transcriptHash = ceremonyTranscriptHash(transcript);

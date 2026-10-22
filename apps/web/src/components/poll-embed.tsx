@@ -6,7 +6,7 @@ import { catalogs } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { CardText } from "../stream.ts";
 import { ballotLink } from "../values.ts";
-import { When } from "./poll-summary.tsx";
+import { When } from "./when.tsx";
 
 export type EmbedTheme = "auto" | "light" | "dark";
 
@@ -175,16 +175,6 @@ export function EmbedNotice({ kind, url }: { kind: "hidden" | "not-found"; url?:
       )}
     </div>
   );
-}
-
-/**
- * A height that fits the card at the widths it's meant for (320 to 640
- * pixels): the frame can't size itself without script, so the snippet says
- * it, and the page scrolls inside past it.
- */
-export function embedHeight(poll: Pick<PollView, "questions">): number {
-  const [first] = poll.questions;
-  return poll.questions.length > 1 || first === undefined ? 640 : 420 + first.optionCount * 56;
 }
 
 /** The embed's address (`<origin>/embed/p/<code>`) in `theme`; the reader's own setting is the default. */

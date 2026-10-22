@@ -29,10 +29,10 @@ import {
   MAX_STREAM_QUERY,
   MAX_STREAM_TERMS,
   pickTranslation,
-  streamCard,
   streamPlace,
   streamQuery,
 } from "../src/stream.ts";
+import { streamCard } from "../src/server/stream-card.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };

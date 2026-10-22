@@ -1,13 +1,12 @@
 // Server functions: the only way a page gets data. They run on our server,
 // which calls the API (src/server/api.ts), so the browser never does.
 
-import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-draft-rules";
+import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-topics";
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
+import { BOARD_PAGE, LIST_PAGE } from "./page-sizes.ts";
 import {
-  BOARD_PAGE,
-  LIST_PAGE,
   loadBoardPage,
   loadModerationLog,
   loadPoll,

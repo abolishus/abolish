@@ -1,15 +1,10 @@
 import { Button, cn, Fingerprint, QrCode, useI18n, useTranslate } from "@abolishus/ui";
 import { ArrowLeft, Printer, ScanLine } from "lucide-react";
 
+import { INKS, type Ink, PAPERS, type Paper } from "../flyer.ts";
 import { catalogs } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import { formatUtc } from "./format.ts";
-
-export type Paper = "letter" | "a4";
-export type Ink = "color" | "mono";
-
-export const PAPERS = ["letter", "a4"] as const satisfies readonly Paper[];
-export const INKS = ["color", "mono"] as const satisfies readonly Ink[];
 
 export interface PollFlyerProps {
   poll: Pick<PollView, "definitionHash" | "questions" | "opensAt" | "closesAt">;

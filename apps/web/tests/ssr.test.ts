@@ -454,8 +454,17 @@ beforeAll(async () => {
   // Cloudflare's published test key, which always passes.
   process.env["TURNSTILE_SITE_KEY"] = SITE_KEY;
   process.env["BALLOT_URL"] = BALLOT;
-  const builder = await createBuilder({ root, logLevel: "warn" });
-  await builder.buildApp();
+  // Built as deployed: the test runner sets NODE_ENV to `test`, which the
+  // build would read as React's development bundle, so the budgets below
+  // would count a script no visitor gets.
+  const nodeEnv = process.env["NODE_ENV"];
+  process.env["NODE_ENV"] = "production";
+  try {
+    await (await createBuilder({ root, logLevel: "warn" })).buildApp();
+  } finally {
+    if (nodeEnv === undefined) delete process.env["NODE_ENV"];
+    else process.env["NODE_ENV"] = nodeEnv;
+  }
   const server = (await import(pathToFileURL(`${root}dist/server/server.js`).href)) as {
     default: typeof handler;
   };
@@ -1785,17 +1794,20 @@ const KB = 1024;
  * grows a page fails here and has to raise its number in the same diff; a
  * dependency that starts shipping far more than it did shows up the same way
  * (T-55). On a slow phone connection (1.6 Mbit/s, Lighthouse's mobile
- * throttling) every 100 KiB is about half a second.
+ * throttling) every 100 KiB is about half a second. Every page shares about
+ * 155 KiB of script (React, the router, the message catalog, the frame) and
+ * adds only its own (P2-28 part 2b): the poll page its share sheet and
+ * reactions, the poll form the draft rules and the codecs they check with.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 360, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 360, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 360, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 360, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 365, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 375, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 375, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 360, css: 40, fonts: 58 },
+  "/": { html: 10, js: 165, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 165, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 200, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 180, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 240, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 165, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

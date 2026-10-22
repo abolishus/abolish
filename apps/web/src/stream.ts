@@ -1,19 +1,9 @@
-// What a card in the stream shows of a poll, built from the API's answers.
-// The definition is read as on the poll page (src/poll.ts), and the display
-// text is checked with @abolishus/crypto's `checkElectionRecordToShow`, the
-// check the ballot client runs before it shows a question: the record
-// decodes, matches the definition's commitment and has exactly its questions
-// and options (docs/spec/display-text.md, Checks). So whoever serves the text
-// can't put words on a card that the poll it links to doesn't commit to
-// (T-34, T-41). The website reads no registry, so the hash checked against is
-// the served definition's own, shown on the poll's page for a reader to
-// compare, as there; the ballot client checks both records against the
-// registry on the L2 before anyone answers.
+// The stream's orders and filters, and what a card in it shows of a poll,
+// as the server checks and builds it (src/server/stream-card.ts). Nothing
+// here imports a decoder, so the pages' script doesn't carry one (P2-28
+// part 2b).
 
-import { checkElectionRecordToShow } from "@abolishus/crypto";
-
-import { definitionView, type DefinitionProblem, type PollView } from "./poll.ts";
-import { fromHex } from "./values.ts";
+import type { DefinitionProblem, PollView } from "./poll.ts";
 
 /** The stream's orders, as `GET /elections` names them: each lists only the polls open now. */
 export const STREAM_SORTS = ["new", "closing", "answered"] as const;
@@ -136,69 +126,4 @@ export function pickTranslation<T extends { readonly language: string }>(
     translations[0];
   if (choice === undefined) throw new RangeError("a display text has at least one translation");
   return choice;
-}
-
-// The codec already refuses ill-formed UTF-8, so this never throws on a
-// checked record; `fatal` keeps a replacement character from standing in for
-// bytes nobody checked.
-const utf8 = new TextDecoder("utf-8", { fatal: true });
-
-/**
- * The card for `electionId` from the hex the API served: `definitionHex`,
- * and `displayTextHex` unless the API had none to serve. `locale` picks the
- * translation.
- */
-export function streamCard(
-  electionId: string,
-  definitionHex: string,
-  displayTextHex: string | undefined,
-  locale: string,
-): StreamCard {
-  const view = definitionView(electionId, definitionHex);
-  if (!view.ok) return { kind: "unavailable", electionId, problem: view.problem };
-  const { poll } = view;
-  const text = (() => {
-    if (displayTextHex === undefined) return undefined;
-    let display;
-    try {
-      display = fromHex(displayTextHex);
-    } catch (error) {
-      if (error instanceof RangeError) return undefined;
-      throw error;
-    }
-    const checked = checkElectionRecordToShow(
-      fromHex(electionId),
-      fromHex(poll.definitionHash),
-      fromHex(definitionHex),
-      display,
-    );
-    if (!checked.ok) return undefined;
-    const tagged = <T extends { readonly language: Uint8Array }>(translations: readonly T[]) =>
-      pickTranslation(
-        translations.map((t) => ({ ...t, language: utf8.decode(t.language) })),
-        locale,
-      );
-    if (checked.version === 1) {
-      const t = tagged(checked.displayText.translations);
-      return {
-        language: t.language,
-        heading: utf8.decode(t.question),
-        question: undefined,
-        options: t.options.map((o) => utf8.decode(o.label)),
-      };
-    }
-    const t = tagged(checked.displayText.translations);
-    const title = utf8.decode(t.title);
-    // A checked text has exactly the definition's questions, and a well-formed definition one at least.
-    const first = t.questions[0]!;
-    const question = utf8.decode(first.question);
-    return {
-      language: t.language,
-      heading: title === "" ? question : title,
-      question: title === "" ? undefined : question,
-      options: first.options.map((o) => utf8.decode(o.label)),
-    };
-  })();
-  if (text === undefined) return { kind: "unavailable", electionId, problem: "text" };
-  return { kind: "poll", poll, text };
 }

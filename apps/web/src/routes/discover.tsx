@@ -1,4 +1,4 @@
-import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-draft-rules";
+import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-topics";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { StreamPage } from "../components/stream.tsx";

@@ -2,9 +2,10 @@ import { parseShortCode } from "@abolishus/core/short-codes";
 import { useTranslate } from "@abolishus/ui";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { INKS, type Ink, PAPERS, type Paper, PollFlyer } from "../components/poll-flyer.tsx";
+import { PollFlyer } from "../components/poll-flyer.tsx";
 import { Notice } from "../components/site-layout.tsx";
 import { fetchPoll, fetchShortLink } from "../data.ts";
+import { INKS, type Ink, PAPERS, type Paper } from "../flyer.ts";
 import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { pollPreview } from "../og/poll.ts";

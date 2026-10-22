@@ -3,19 +3,13 @@ import { ArrowRight } from "lucide-react";
 import { useId } from "react";
 
 import { catalogs } from "../messages.ts";
-import { type Counting, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
+import { type Counting, COUNTINGS, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
 import type { ListedPoll, PollList as List } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { LookupForm } from "./lookup-form.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollRows } from "./poll-list.tsx";
 import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
-
-export const COUNTINGS = [
-  "plurality",
-  "approval",
-  "questions",
-] as const satisfies readonly Counting[];
 
 /**
  * What the register shows of a page of the list: one value per group, or

@@ -24,9 +24,9 @@ import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { APP_FILES } from "../src/app/install.ts";
-import { definitionView } from "../src/poll.ts";
 import { fromHex } from "../src/values.ts";
 import { pollPreview } from "../src/og/poll.ts";
+import { definitionView } from "../src/server/definition.ts";
 import { renderPreview } from "../src/og/render.ts";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));

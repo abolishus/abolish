@@ -1,8 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { COUNTINGS, PollRegister, type RegisterFilters } from "../components/poll-register.tsx";
+import { PollRegister, type RegisterFilters } from "../components/poll-register.tsx";
 import { fetchPollList } from "../data.ts";
-import { POLL_STATUSES } from "../poll.ts";
+import { COUNTINGS, POLL_STATUSES } from "../poll.ts";
 import { isElectionId, normalizeElectionId, searchText } from "../values.ts";
 
 /** A filter's value if it is `"all"` or in `allowed`; anything else, a repeat included, is dropped. */

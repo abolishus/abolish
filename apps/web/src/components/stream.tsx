@@ -1,7 +1,7 @@
 import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
-import { POLL_TOPICS } from "@abolishus/core/poll-draft-rules";
+import { POLL_TOPICS } from "@abolishus/core/poll-topics";
 import { ArrowRight, Search } from "lucide-react";
 import { useId } from "react";
 
@@ -17,7 +17,7 @@ import {
 } from "../stream.ts";
 import { ballotLink } from "../values.ts";
 import { PageHeader } from "./page-parts.tsx";
-import { When } from "./poll-summary.tsx";
+import { When } from "./when.tsx";
 
 /**
  * The stream's address for `sort` narrowed by `filter`, from just after

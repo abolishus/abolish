@@ -5,16 +5,13 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { type BoardRow, boardRows } from "../board.ts";
-import { type CardText, type StreamCard, streamCard, type StreamSort } from "../stream.ts";
+import { BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex } from "../values.ts";
-import {
-  definitionView,
-  type DefinitionProblem,
-  type Instant,
-  instant,
-  type PollView,
-} from "../poll.ts";
+import { type DefinitionProblem, type Instant, instant, type PollView } from "../poll.ts";
 import type { Api } from "./api.ts";
+import { definitionView } from "./definition.ts";
+import { streamCard } from "./stream-card.ts";
 
 export interface BoardHead {
   /** Entries on the board, as a canonical decimal `u64`. */
@@ -126,13 +123,6 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
   return { kind: "poll", electionId };
 }
 
-/**
- * Entries per page of the board page. Pages start only at multiples of it,
- * so a visit tells our server which window of the board was read, never
- * which entry (T-10).
- */
-export const BOARD_PAGE = 25;
-
 export type BoardPage =
   | {
       readonly kind: "board";
@@ -218,18 +208,12 @@ export async function loadBoardPage(
   return { kind: "board", poll: view.poll, head, from, rows };
 }
 
-/** Decisions per page of the moderation log. */
-export const LOG_PAGE = 50;
-
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;
 
 /** The moderation log after sequence number `after` (a canonical decimal `u64`). */
 export async function loadModerationLog(api: Api, after: string): Promise<ModerationLog> {
   return api.moderation.getLog({ after, limit: String(LOG_PAGE) });
 }
-
-/** Polls per page of the discovery list: each costs the page one definition fetch. */
-export const LIST_PAGE = 20;
 
 export type ListedPoll =
   | { readonly kind: "poll"; readonly poll: PollView }

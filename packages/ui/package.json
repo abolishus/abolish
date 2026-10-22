@@ -5,6 +5,9 @@
   "description": "Shared UI components with Storybook stories, interaction tests and axe accessibility checks. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
   "imports": {
     "#/components/*": "./src/components/*.tsx",
     "#/lib/*": "./src/lib/*.ts",

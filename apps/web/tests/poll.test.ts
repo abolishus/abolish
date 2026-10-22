@@ -4,7 +4,8 @@ import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/c
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { definitionView, instant, instructionOf, pollStatus } from "../src/poll.ts";
+import { instant, instructionOf, pollStatus } from "../src/poll.ts";
+import { definitionView } from "../src/server/definition.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };

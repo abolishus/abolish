@@ -90,7 +90,7 @@ Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) 
    COMMIT;
    ```
 
-   For an address two accounts hold, delete the unrotated row the same way; the other account keeps the address).
+   For an address two accounts hold, delete the unrotated row the same way; the other account keeps the address. Either way the address is then free to any account that verifies it first, not only the one settled).
 
 After an exposure, the same limits as the phone hash apply: older backups, dead row versions until `VACUUM FULL` on `account_emails`, `account_email_codes` and `account_email_recipients`, and the provider's recovery log. An exposed box key opens every address sealed under it in those; an exposed hash key lets a guessed address be confirmed, and, in the live `account_email_holds` too, for up to 90 days after the rotation, since a hold stays under its key until it ends.
 

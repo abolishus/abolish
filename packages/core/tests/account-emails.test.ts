@@ -792,6 +792,34 @@ describe("an address an account lets go", () => {
     );
   });
 
+  test("an answer racing the deletion of the account holding the address sees its row or its hold", async () => {
+    const [a, b, c] = [await newAccount(), await newAccount(), await newAccount()];
+    const address = fresh();
+    const forB = codeOf(await ask(b, address));
+    const forC = codeOf(await ask(c, address));
+    await verified(a, address);
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    let deleted!: () => void;
+    const started = new Promise<void>((resolve) => (deleted = resolve));
+    // The deletion, with its hold, stays uncommitted while b answers: b sees
+    // a's row. c answers once it commits: c sees the hold.
+    const deletion = db.admin.begin(async (tx) => {
+      await tx`DELETE FROM account_users WHERE id = ${a}`;
+      deleted();
+      await open;
+    });
+    await started;
+    expect(await code(verifyEmailCode(app, b, forB, { keys: KEYS, now: NOW }))).toBe(
+      "address-taken",
+    );
+    release();
+    await deletion;
+    expect(await code(verifyEmailCode(app2, c, forC, { keys: KEYS, now: NOW }))).toBe(
+      "address-taken",
+    );
+  });
+
   test(`the hold ends ${EMAIL_HOLD_DAYS} days after the day it was freed, not before`, async () => {
     const [a, b] = [await newAccount(), await newAccount()];
     const address = fresh();

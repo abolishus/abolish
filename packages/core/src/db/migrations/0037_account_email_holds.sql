@@ -11,8 +11,11 @@
 -- let it go is gone or has moved on, so nothing may read the address back.
 -- Unlike a verified address, a held one can't be rewritten under a newer key,
 -- so an old hash key stays in its keyring until the holds under it have ended
--- (the account-keys runbook). No account column: who freed it is not kept.
--- Timed to the day, as the phone holds are (T-11, T-73).
+-- (the account-keys runbook). No account column, and timed to the day, as
+-- the phone holds are (T-11, T-73); but a change of address writes its hold
+-- beside the account's new `verified_at`, to the second, so on a quiet day a
+-- dump's row order can pair the two, and with the hash key confirm a guessed
+-- old address for that account (T-73, Known-weak in P2-31).
 --
 -- T-10: the account class. Names an address's hash and a day, never an
 -- account, a poll, a ballot or anyone's participation.
@@ -32,7 +35,8 @@ CREATE INDEX account_email_holds_address_hash ON account_email_holds (address_ha
 -- the code (verifyEmailCode), which only ever updates the row. An operator
 -- settling a row the rotation skipped sets `abolish.email_unheld` for the
 -- transaction, so that account can verify its own address again (the
--- account-keys runbook).
+-- account-keys runbook). Any session can set it, the app's included; that is
+-- no boundary the app lacks anyway, since it may delete holds.
 CREATE FUNCTION account_emails_hold_on_delete() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN

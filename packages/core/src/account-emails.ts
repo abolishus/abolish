@@ -73,7 +73,7 @@ export const MAX_SENDS_PER_HOUR = 5;
 export const MAX_SENDS_PER_DAY = 10;
 /** Messages one address may be sent in any 24 hours, whichever accounts asked. */
 export const MAX_SENDS_PER_ADDRESS = 5;
-/** Days an address an account let go stays unverifiable by any account. */
+/** Days, counted from the UTC day it was let go, that an address stays unverifiable by any account. */
 export const EMAIL_HOLD_DAYS = 90;
 /** An address's largest UTF-8 length (RFC 5321's path limit, less its brackets). */
 export const MAX_EMAIL_BYTES = 254;

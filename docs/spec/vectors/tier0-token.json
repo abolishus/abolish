@@ -1,0 +1,498 @@
+{
+  "format": "abolish-tier0-token-vectors/1",
+  "title": "Tier 0 tokens: key identifiers, group info, token input, issuance, the client's and issuer's checks, key periods and redemption",
+  "spec": "docs/spec/tier0-token.md",
+  "generator": "packages/crypto/scripts/tier0-token-vectors.py: an independent Python implementation (standard library only) of RFC 9497's POPRF mode over ristretto255-SHA512, checked against RFC 9497 Appendix A.1.3 (parsed from the vendored text), on group-vectors.py's ristretto255, expand_message_xmd and HashToScalar",
+  "suite": {
+    "name": "ristretto255-SHA512",
+    "mode": 2,
+    "contextString": "4f50524656312d022d72697374726574746f3235352d534841353132"
+  },
+  "tags": {
+    "key": "abolish/v1/tier0-token/key",
+    "info": "abolish/v1/tier0-token/info",
+    "input": "abolish/v1/tier0-token/input"
+  },
+  "inputVersion": 1,
+  "keyPeriod": "2592000",
+  "keys": [
+    {
+      "id": "key-period-zero",
+      "period": "0",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "keyId": "f8b68a984142ea6321af65c6d70fbb5a7c1feb23699806bed2fb537996b023b5"
+    },
+    {
+      "id": "key-period-launch",
+      "period": "687",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e"
+    },
+    {
+      "id": "key-period-max",
+      "period": "4294967295",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "keyId": "0b8746db52a7073983e2b93d7040751bfe074dc726d62ed6c8eab299d2307d29"
+    },
+    {
+      "id": "key-other-secret",
+      "period": "687",
+      "publicKey": "7e1ee4368179aae610ddf1f7529bd8d4ae502bcdd38ad61341e06ba83d43a80a",
+      "keyId": "60fe5a0a75a600fbf2714db879c0fa5d367de10a53f75d2277024cd611433a93"
+    }
+  ],
+  "infos": [
+    {
+      "id": "info-group-zero",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "0",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609"
+    },
+    {
+      "id": "info-group-one",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "1",
+      "info": "298819e2ae4eda0e8d254664ff8f4c78396b7f91482104847e6a46eb6ef38525"
+    },
+    {
+      "id": "info-other-chain",
+      "chainId": "84532",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "0",
+      "info": "991235fd287c4e3bbda866c5501aa426b6d0a4057f624bbd70d6997d5fb16ea0"
+    },
+    {
+      "id": "info-other-registry",
+      "chainId": "11155420",
+      "groupRegistry": "e7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "groupId": "0",
+      "info": "fb20acf349b16d393874eb49ecce99538e3d85bbf715405d724198c3d61b7a56"
+    },
+    {
+      "id": "info-max",
+      "chainId": "18446744073709551615",
+      "groupRegistry": "ffffffffffffffffffffffffffffffffffffffff",
+      "groupId": "18446744073709551615",
+      "info": "7f7f54a7e32c433d8a760eacae5e63d5e7884372b4a3a1763cc26a290006a9a3"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "input-commitment",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c"
+    },
+    {
+      "id": "input-commitment-two",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "commitment": "0000000000000000000000000000000000000000000000000000000000000002",
+      "input": "114c53d428616256e2e4ec9f153ef0ab6e8d435f32a75cd4cc4ff99f10e2d47e"
+    },
+    {
+      "id": "input-commitment-max",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "commitment": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "input": "407c8ee28c9143535cdff61a8d0ead09dbb2502b6da65d38fd26ab895c3d8f55"
+    },
+    {
+      "id": "input-commitment-r",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "commitment": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+      "error": "non-canonical"
+    },
+    {
+      "id": "input-commitment-max-bytes",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "commitment": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": "non-canonical"
+    }
+  ],
+  "issuances": [
+    {
+      "id": "issue-launch",
+      "description": "A key of period 687, group 0",
+      "secretKey": "8a78533226a3e3668642afb2ffd5ec11573677df94d609f222af3f85261bb400",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "period": "687",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "0",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "tweakedKey": "36d727b6bb4f389437b84f75f3eacc6d59f54f0a1354901b8c088d21916d1c10",
+      "proofRandomScalar": "9e79b2a5d4fa7edbff036adc17d3f8de80224e50eab441d1f413a9d782783f0b",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3"
+    },
+    {
+      "id": "issue-other-group",
+      "description": "The same key and commitment, group 1",
+      "secretKey": "8a78533226a3e3668642afb2ffd5ec11573677df94d609f222af3f85261bb400",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "period": "687",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "1",
+      "info": "298819e2ae4eda0e8d254664ff8f4c78396b7f91482104847e6a46eb6ef38525",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "1234c6b18ed9fc2152294f0a87a4b38c984ee4280bac177b644efd4da21fff05",
+      "blindedElement": "d42e58952476ba8bbb3d537587f52a657668afe02de7a5fcb00db5deab7be96f",
+      "tweakedKey": "6aaed11043055ff801f63a57916c99a6ba48ffe5e022f41240974346467bda07",
+      "proofRandomScalar": "eae6387d8002a859676442d361602acc62a0b9f554e0b4f5cd48d9f87a5e0803",
+      "evaluationElement": "c4b24d1d2808aba06aa67544e852e6fbe8c5e84f7902a4dfaf513d2bd0ba8161",
+      "proof": "0207b66afbacb6571acf29e3b414ebbc944b39fb6e64b20ee79ebaf2a396380282fa1469c98da42120b3770b61d1b76b52e64c74a594cfc6677eb5a543b29306",
+      "token": "925144bd05cffce257aa318a89b9c9dee9cb1524b46fe830a0337514d6c3dafb30396d41a8610403a73e884ac71242f176fb724a03538aa5d0a0f308780cf8ba"
+    },
+    {
+      "id": "issue-other-key",
+      "description": "Another key of period 687",
+      "secretKey": "2f3735af47269bccd14c74089fb90fe2cb9182fec5a5f1a129354da0bf0f6607",
+      "publicKey": "7e1ee4368179aae610ddf1f7529bd8d4ae502bcdd38ad61341e06ba83d43a80a",
+      "period": "687",
+      "keyId": "60fe5a0a75a600fbf2714db879c0fa5d367de10a53f75d2277024cd611433a93",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "0",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "input": "04e4d3a9b5a1f7df190f54a14e2d9869d9062f7a173f6eb801700b2b913105b1",
+      "blind": "8624f124b3aa3416f449d88a3c160b143624138a9355cb741dc731ea9001f105",
+      "blindedElement": "ce887aca3cd8aa13d5e29ead3aa17b236d2b49c73c0a0fde6be00b808b82636c",
+      "tweakedKey": "c8c84e30f950ba7cfa54c41604d59c588e7225191330a97e3855b32ab2e85337",
+      "proofRandomScalar": "85ab96045d1360cdfcfa9f4c449da2c541e839c48dc6a5ea11764c9f0a8d240a",
+      "evaluationElement": "fe33e2e642ee46b83e46db1bf1f188bf7fd3d43ee1432b8c959ba296921af32f",
+      "proof": "a42788c9de88d9816f037865906ac450ee16e3d7e9a01ee9fea19c762ac2f605007a8ed6439b46d36262e520dbb9ff20aefd0d4fbb4b025540e5d1137c07ab0e",
+      "token": "fca4ac22896a51165ea3a2ab751371dcbc91bad6da82eddcc1331f089503777f74b9097106b738485573dac79756dc80d7b4ab6fbb4a906cdbf5240bacb9cc80"
+    },
+    {
+      "id": "issue-commitment-two",
+      "description": "The commitment 2",
+      "secretKey": "8a78533226a3e3668642afb2ffd5ec11573677df94d609f222af3f85261bb400",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "period": "687",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "chainId": "11155420",
+      "groupRegistry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "groupId": "0",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "0000000000000000000000000000000000000000000000000000000000000002",
+      "input": "114c53d428616256e2e4ec9f153ef0ab6e8d435f32a75cd4cc4ff99f10e2d47e",
+      "blind": "42dbe64b5813fd122d993d013577906c5db80a6918dd42dc2157af7f3c765400",
+      "blindedElement": "7ef9b4c70843fd75065549b37089c8184fee3ac662ed0ec57828bc447cb1d738",
+      "tweakedKey": "36d727b6bb4f389437b84f75f3eacc6d59f54f0a1354901b8c088d21916d1c10",
+      "proofRandomScalar": "4eb06f1c6be53646678a2a455b0d6d86b06659ea3a915997e118f01dedd26a07",
+      "evaluationElement": "ca68517eef8215d2bf0bde6697d690d7f1f067d3910641b9e9772664d539e178",
+      "proof": "9ac0fd6f9f71cc98eadf1dc4800038e261811271f7cef8e19832e6e9bb85fc03eacab65ae33f7f2f29591dc0d1159dab8af13f5b56f58c972b4a755747d1b304",
+      "token": "148b420ecb0eb6d51bc74d5bac9c7bba31418bdc977adf52510d167a3b85bfbd0ad8a17ef563dc98f4382cad6b571e0a6be329d5f8b59a70d75599cfc6f6df6c"
+    }
+  ],
+  "finalizations": [
+    {
+      "id": "finalize-ok",
+      "description": "issue-launch's answer",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3"
+    },
+    {
+      "id": "finalize-proof-c-altered",
+      "description": "A bit of the proof's c flipped",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9e2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-proof-s-altered",
+      "description": "A bit of the proof's s flipped",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a150ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-proof-c-unreduced",
+      "description": "The proof's c replaced by c + l",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "8c03273aad3ba1b27a949c89537ec68a74b3dabe5d76b8bffab625f0dc17e11a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-other-evaluation",
+      "description": "Another element evaluated",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "e07cb3b56af2272db8f8018a9645c4b472dba24a51c16984eb251d887c210404",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-other-key",
+      "description": "Checked against another listed key: a key per account would fail here",
+      "publicKey": "7e1ee4368179aae610ddf1f7529bd8d4ae502bcdd38ad61341e06ba83d43a80a",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-other-group",
+      "description": "Checked against another group's info",
+      "publicKey": "3a478a81356d5bbdb768e334d6a0ccd59550957d7b7934ad5799596cfad0244b",
+      "info": "298819e2ae4eda0e8d254664ff8f4c78396b7f91482104847e6a46eb6ef38525",
+      "input": "24368fe5729f4d21ff524130241d4f73f4f0ea6b9d97f487841ebd399215dc0c",
+      "blind": "e055c2ddbca3cb6c015a958223dd10fb30c5807d2aa9245300fdff447dba9d09",
+      "blindedElement": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d",
+      "evaluationElement": "6ee0cf49c86441c57a0ce274a505830ec16fb18ef24f445e828f2ca02bf52829",
+      "proof": "9f2f31dd92d88e5aa4f7a4e67484e77574b3dabe5d76b8bffab625f0dc17e10a140ea6d3574123e2500f43985ee6a42b253f7f6a541f6098110b457684329e06",
+      "error": "proof"
+    },
+    {
+      "id": "finalize-tweaked-key-identity",
+      "description": "A key whose tweak for this group cancels it (sk = −m): refused before blinding",
+      "publicKey": "888dca04ccab8baf3b775241ba2e8d694527860e837cedd478fe89770916c549",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "error": "tweaked-key-identity"
+    }
+  ],
+  "blindedElements": [
+    {
+      "id": "blinded-ok",
+      "encoding": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d"
+    },
+    {
+      "id": "blinded-identity",
+      "encoding": "0000000000000000000000000000000000000000000000000000000000000000",
+      "error": "blinded-element"
+    },
+    {
+      "id": "blinded-non-canonical",
+      "encoding": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "error": "blinded-element"
+    },
+    {
+      "id": "blinded-odd",
+      "encoding": "0100000000000000000000000000000000000000000000000000000000000000",
+      "error": "blinded-element"
+    },
+    {
+      "id": "blinded-not-square",
+      "encoding": "26948d35ca62e643e26a83177332e6b6afeb9d08e4268b650f1f5bbd8d81d371",
+      "error": "blinded-element"
+    },
+    {
+      "id": "blinded-short",
+      "encoding": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe",
+      "error": "blinded-element"
+    },
+    {
+      "id": "blinded-long",
+      "encoding": "b885e57cb0d431af3d7357512397ad9e8117b8437e573897575fa638f14dbe5d00",
+      "error": "blinded-element"
+    }
+  ],
+  "periods": [
+    {
+      "id": "period-first-second",
+      "now": "1780704000",
+      "keyPeriod": "687",
+      "issues": true,
+      "redeems": true
+    },
+    {
+      "id": "period-before",
+      "now": "1780703999",
+      "keyPeriod": "687",
+      "issues": false,
+      "redeems": false
+    },
+    {
+      "id": "period-next-first-second",
+      "now": "1783296000",
+      "keyPeriod": "687",
+      "issues": false,
+      "redeems": true
+    },
+    {
+      "id": "period-next-last-second",
+      "now": "1785887999",
+      "keyPeriod": "687",
+      "issues": false,
+      "redeems": true
+    },
+    {
+      "id": "period-after-next",
+      "now": "1785888000",
+      "keyPeriod": "687",
+      "issues": false,
+      "redeems": false
+    },
+    {
+      "id": "period-mid",
+      "now": "1782000000",
+      "keyPeriod": "687",
+      "issues": true,
+      "redeems": true
+    }
+  ],
+  "redemptionKeys": [
+    "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+    "60fe5a0a75a600fbf2714db879c0fa5d367de10a53f75d2277024cd611433a93"
+  ],
+  "redemptions": [
+    {
+      "id": "redeem-ok",
+      "description": "issue-launch's token, in its key's period",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "accepted": true
+    },
+    {
+      "id": "redeem-next-period",
+      "description": "The same, in the next period",
+      "now": "1783296005",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "accepted": true
+    },
+    {
+      "id": "redeem-group-one",
+      "description": "issue-other-group's token for group 1",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "298819e2ae4eda0e8d254664ff8f4c78396b7f91482104847e6a46eb6ef38525",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "925144bd05cffce257aa318a89b9c9dee9cb1524b46fe830a0337514d6c3dafb30396d41a8610403a73e884ac71242f176fb724a03538aa5d0a0f308780cf8ba",
+      "accepted": true
+    },
+    {
+      "id": "redeem-other-key",
+      "description": "issue-other-key's token under its own key",
+      "now": "1782000000",
+      "keyId": "60fe5a0a75a600fbf2714db879c0fa5d367de10a53f75d2277024cd611433a93",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "fca4ac22896a51165ea3a2ab751371dcbc91bad6da82eddcc1331f089503777f74b9097106b738485573dac79756dc80d7b4ab6fbb4a906cdbf5240bacb9cc80",
+      "accepted": true
+    },
+    {
+      "id": "redeem-expired",
+      "description": "Two periods later",
+      "now": "1785888000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "key-period"
+    },
+    {
+      "id": "redeem-before-key",
+      "description": "Before its key's period",
+      "now": "1780703999",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "key-period"
+    },
+    {
+      "id": "redeem-unknown-key",
+      "description": "A key the service doesn't hold",
+      "now": "1782000000",
+      "keyId": "ba87c430931aa3a5589c968d95d4d413ed4f90a3569b8c2fdb19af962d03ac91",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "key-unknown"
+    },
+    {
+      "id": "redeem-other-group",
+      "description": "Group 0's token presented for group 1",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "298819e2ae4eda0e8d254664ff8f4c78396b7f91482104847e6a46eb6ef38525",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "token"
+    },
+    {
+      "id": "redeem-other-commitment",
+      "description": "The token presented with another commitment",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "0000000000000000000000000000000000000000000000000000000000000002",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "token"
+    },
+    {
+      "id": "redeem-wrong-key-id",
+      "description": "The token presented under the other key's identifier",
+      "now": "1782000000",
+      "keyId": "60fe5a0a75a600fbf2714db879c0fa5d367de10a53f75d2277024cd611433a93",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce3",
+      "error": "token"
+    },
+    {
+      "id": "redeem-bit-flipped",
+      "description": "A bit of the token flipped",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddce2",
+      "error": "token"
+    },
+    {
+      "id": "redeem-truncated",
+      "description": "The token one byte short",
+      "now": "1782000000",
+      "keyId": "8c276baf56adbda359b10a22391d530095fc457854cb08ed4cd9d012e9f1a45e",
+      "info": "c4804b0830c846c84b0c7fa63cd81dd5539241dfc050d77ccf211b4eb058d609",
+      "commitment": "2bc787f1a25f31e4d100cb4d0d8239bd45d8c1062fbf5a1d48f3929b600d7e62",
+      "token": "a957483de13920baf84bdd02bb8efa4230f716f517c2d4922a188d144707f1cc08b54cea4fb70f585fe1be955edc9f365dd0a546787cbb53b2eeabe70bbddc",
+      "error": "token"
+    }
+  ]
+}

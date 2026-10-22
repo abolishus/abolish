@@ -7,8 +7,9 @@ import { ORPCError } from "@orpc/client";
 import { type BoardRow, boardRows } from "../board.ts";
 import { BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
 import type { CardText, StreamCard, StreamSort } from "../stream.ts";
-import { fromHex } from "../values.ts";
+import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
+  type AskedBy,
   type DefinitionProblem,
   type Instant,
   instant,
@@ -42,6 +43,8 @@ export type PollPage =
       readonly code: string | undefined;
       /** Where it is listed, as `tagsOf` reads it. */
       readonly tags: PollTags;
+      /** Who asked it, as `askedByOf` reads it. */
+      readonly askedBy: AskedBy | undefined;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -49,8 +52,15 @@ export type PollPage =
 const notFound = (error: unknown) =>
   error instanceof ORPCError && error.defined && error.code === "ELECTION_NOT_FOUND";
 
-/** The poll page for `electionId`, which the caller has checked is canonical hex. */
-export async function loadPoll(api: Api, electionId: string): Promise<PollPage> {
+/**
+ * The poll page for `electionId`, which the caller has checked is canonical
+ * hex, saying who asked it as `readAskedBy` reads it.
+ */
+export async function loadPoll(
+  api: Api,
+  electionId: string,
+  readAskedBy?: ReadAskedBy,
+): Promise<PollPage> {
   let answers;
   try {
     answers = await Promise.all([
@@ -59,12 +69,13 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
       api.moderation.getStatus({ electionId }),
       codeOf(api, electionId),
       tagsOf(api, electionId),
+      askedByOf(readAskedBy, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation, claimed, tags] = answers;
+  const [{ definition }, board, moderation, claimed, tags, askedBy] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   // A claim, checked as `/p/<code>` checks it: the code must be a prefix of
@@ -76,7 +87,53 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
     shortCode(fromHex(view.poll.definitionHash), claimed.length) === claimed
       ? claimed
       : undefined;
-  return { kind: "poll", poll: view.poll, board, moderation, asOf: now(), code, tags };
+  return {
+    kind: "poll",
+    poll: view.poll,
+    board,
+    moderation,
+    asOf: now(),
+    code,
+    tags,
+    // Core names no one for a hidden poll; dropped here too, since the page's
+    // data reaches the browser whether or not it is shown (T-68).
+    askedBy: moderation.state === "hidden" ? undefined : askedBy,
+  };
+}
+
+/**
+ * Who asked `electionId` (packages/core's `askedBy`): the profile its author
+ * chose to show it on, none for a hidden poll or profile
+ * ([[0040-creator-profiles]]). An account table, so read by the front
+ * (src/node/main.ts) and handed to the server functions in the request's
+ * context by the poll's public ID alone, never asked of the API, which reads
+ * no account table (T-10).
+ */
+export type ReadAskedBy = (electionId: string) => Promise<AskedBy | undefined>;
+
+/**
+ * `readAskedBy`'s answer for `electionId`, or `undefined` without a reader
+ * (a front with no database) or when the read fails: "Asked by" is optional
+ * on a page, as the code and tags are, so a slow or failed read shows no
+ * name rather than taking the page down. A failure is logged by its kind
+ * only, as `opaque` logs (src/data.ts), so a broken grant doesn't go
+ * unnoticed. A handle that isn't one core could
+ * have issued was written past core's rules (T-68) and links nowhere, so it
+ * names no one.
+ */
+async function askedByOf(
+  readAskedBy: ReadAskedBy | undefined,
+  electionId: string,
+): Promise<AskedBy | undefined> {
+  if (readAskedBy === undefined) return undefined;
+  let read;
+  try {
+    read = await readAskedBy(electionId);
+  } catch (error) {
+    console.error({ error: error instanceof Error ? error.name : typeof error });
+    return undefined;
+  }
+  return read !== undefined && PROFILE_HANDLE.test(read.handle) ? read : undefined;
 }
 
 /**
@@ -388,8 +445,9 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/server/stream-card.ts), and its tags read as the poll
- * page reads them (`tagsOf`). A poll the database lost between the
- * listing and its definition drops out of the page.
+ * page reads them (`tagsOf`), and who asked it as `readAskedBy` reads it
+ * (`askedByOf`). A poll the database lost between the listing and its
+ * definition drops out of the page.
  */
 export async function loadStream(
   api: Api,
@@ -397,6 +455,7 @@ export async function loadStream(
   after: string,
   { q, topic, place }: StreamFilter,
   locale: string,
+  readAskedBy?: ReadAskedBy,
 ): Promise<Stream> {
   let elections;
   try {
@@ -417,12 +476,14 @@ export async function loadStream(
   const cards = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const [{ definition }, displayText, tags] = await Promise.all([
+        const [{ definition }, displayText, tags, askedBy] = await Promise.all([
           api.elections.getDefinition({ electionId }),
           displayTextOf(api, electionId),
           tagsOf(api, electionId),
+          askedByOf(readAskedBy, electionId),
         ]);
-        return streamCard(electionId, definition, displayText, locale, tags);
+        const card = streamCard(electionId, definition, displayText, locale, tags);
+        return card.kind === "poll" ? { ...card, askedBy } : card;
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;

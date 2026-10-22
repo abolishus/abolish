@@ -78,6 +78,16 @@ export interface PollTags {
 
 export const NO_TAGS: PollTags = { topic: undefined, place: undefined };
 
+/**
+ * Who asked a poll: the profile its author chose to show it on
+ * ([[0040-creator-profiles]]), by its handle and name. Our database's word,
+ * never part of the poll anyone can verify (T-75).
+ */
+export interface AskedBy {
+  readonly handle: string;
+  readonly name: string;
+}
+
 /** Why a definition the API served isn't shown. */
 export type DefinitionProblem = "undecodable" | "another-election";
 

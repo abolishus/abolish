@@ -57,6 +57,7 @@ const cards: StreamCard[] = [
       options: ["Better lighting", "Public toilets", "Basketball courts", "Street trees"],
     },
     tags: { topic: undefined, place: "Riverside Park" },
+    askedBy: { handle: "k7qa2mzr5xw3bn4d", name: "Riverside Neighbours" },
   },
   {
     kind: "poll",
@@ -105,6 +106,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(
     list.getByRole("heading", { name: "¿Debería el autobús 23 circular hasta la medianoche?" }),
   ).toHaveAttribute("lang", "es-419");
+
+  // A card names who asked only where its author chose to say, linking to
+  // their profile (T-75).
+  const asker = list.getByRole("link", { name: "Riverside Neighbours" });
+  await expect(asker).toHaveAttribute("href", "/by/k7qa2mzr5xw3bn4d");
+  await expect(list.getAllByText(/Asked by/)).toHaveLength(1);
 
   // Each answer opens the ballot client with it chosen, the poll and the
   // pick in the fragment only ([[first-answer]], step 1).

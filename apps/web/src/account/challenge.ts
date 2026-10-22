@@ -1,10 +1,12 @@
 // Cloudflare Turnstile in the browser: the token a poll's submission carries
-// (packages/core, Turnstile; ADR 0032; T-72). The server checks the token for
-// its action and this site's host; nothing here decides anything.
+// (packages/core, Turnstile; ADR 0032; T-72), and a request for an e-mail or
+// phone code (ADR 0038; T-52). The server checks the token for its action and
+// this site's host; nothing here decides anything.
 //
 // The script is third-party code running on our origin, so it is loaded only
-// when an author asks to submit, never with the page, and only on the pages
-// whose policy allows it (src/security.ts, `isChallengePage`; T-43, T-55).
+// when someone submits a poll or asks for a code, never with the page, and
+// only on the pages whose policy allows it (src/security.ts,
+// `isChallengePage`; T-43, T-55).
 // It is loaded from Cloudflare's own URL, as Cloudflare requires: it can't be
 // pinned or given an integrity hash, which is why it stays off every other
 // page.

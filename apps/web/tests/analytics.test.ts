@@ -96,6 +96,7 @@ describe("pages", () => {
     expect(pageOf("/account/polls/new")).toBe("/account/polls/:id");
     // Its setup's page keeps no ID either (P2-22 part 6d).
     expect(pageOf(`/account/polls/${"a".repeat(32)}/setup`)).toBe("/account/polls/:id/setup");
+    expect(pageOf("/account/verify")).toBe("/account/verify");
     for (const path of [
       "/polls/",
       "/polls/a/b",
@@ -106,6 +107,7 @@ describe("pages", () => {
       "/account/polls/",
       "/account/polls/a/b",
       "/account/polls//setup",
+      "/account/verify/",
       "/account/polls/a/setup/",
       "/account/polls/a/b/setup",
       "/moderation/",

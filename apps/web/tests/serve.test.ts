@@ -19,6 +19,7 @@ import {
   moderate,
   moderateProfile,
   newAccountId,
+  PROFILE_HANDLE,
   parseTier0IssuerKeys,
   readProfileReportQueue,
   tier0Issuer,
@@ -289,6 +290,7 @@ beforeAll(async () => {
       sql,
       accountOf: (headers) => accounts.accountOf(headers),
       origin: ORIGIN,
+      now: () => NOW,
     }),
     clientDir,
     origin: ORIGIN,
@@ -457,28 +459,28 @@ describe("accounts under /auth", () => {
   });
 });
 
-describe("poll drafts under /drafts", () => {
-  const closesAt = String(NOW.getTime() / 1000 + 7 * 24 * 3600);
-  const draft = {
-    language: "en",
-    title: "Lunch",
-    description: "",
-    questions: [
-      {
-        question: "Which day?",
-        description: "",
-        options: [
-          { label: "Thursday", description: "" },
-          { label: "Friday", description: "" },
-        ],
-        minSelections: 0,
-        maxSelections: 1,
-      },
-    ],
-    tiers: [0],
-    closesAt,
-  };
+const closesAt = String(NOW.getTime() / 1000 + 7 * 24 * 3600);
+const draft = {
+  language: "en",
+  title: "Lunch",
+  description: "",
+  questions: [
+    {
+      question: "Which day?",
+      description: "",
+      options: [
+        { label: "Thursday", description: "" },
+        { label: "Friday", description: "" },
+      ],
+      minSelections: 0,
+      maxSelections: 1,
+    },
+  ],
+  tiers: [0],
+  closesAt,
+};
 
+describe("poll drafts under /drafts", () => {
   test("an author saves, lists, edits and submits a draft, and only they see it", async () => {
     const author = new Browser();
     await register(author, new SoftAuthenticator(RP_ID), true);
@@ -1087,6 +1089,11 @@ describe("failures", () => {
         "/profiles/report",
         "/profiles/moderation",
         "/profiles/appeal",
+        "/profiles/own",
+        "/profiles/make",
+        "/profiles/rename",
+        "/profiles/delete",
+        "/profiles/show",
       ])
         await fetch(`http://127.0.0.1:${port}${path}`, {
           method: "POST",
@@ -1104,6 +1111,11 @@ describe("failures", () => {
         ["/profiles/report", null],
         ["/profiles/moderation", `${SESSION}=tok`],
         ["/profiles/appeal", `${SESSION}=tok`],
+        ["/profiles/own", `${SESSION}=tok`],
+        ["/profiles/make", `${SESSION}=tok`],
+        ["/profiles/rename", `${SESSION}=tok`],
+        ["/profiles/delete", `${SESSION}=tok`],
+        ["/profiles/show", `${SESSION}=tok`],
       ]);
     } finally {
       await new Promise((resolve) => front.close(resolve));
@@ -2357,6 +2369,190 @@ describe("a profile's reports and its author's appeals under /profiles", () => {
     expect(await (await browser.call("POST", "/profiles/moderation", {})).json()).toMatchObject({
       appealable: true,
       appeals: [],
+    });
+  });
+  test("an author makes, reads, renames and deletes their profile, one name a UTC day", async () => {
+    const { browser } = await author({ profile: false });
+    const own = async () => {
+      const res = await browser.call("POST", "/profiles/own", {});
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.json();
+    };
+    expect(await own()).toEqual({ code: "NO_PROFILE", status: 404 });
+    expect(await (await browser.call("POST", "/profiles/rename", { name: "A" })).json()).toEqual({
+      code: "NO_PROFILE",
+      status: 404,
+    });
+
+    const made = await browser.call("POST", "/profiles/make", { name: "  Riverside   Walkers " });
+    expect(made.status).toBe(201);
+    const { handle } = (await made.json()) as { handle: string };
+    expect(handle).toMatch(PROFILE_HANDLE);
+    // Core's rules shape the name; the day it can change again is tomorrow's.
+    expect(await own()).toEqual({
+      handle,
+      name: "Riverside Walkers",
+      renamableOn: "2026-10-18",
+      pollIds: [],
+    });
+    expect(await (await browser.call("POST", "/profiles/make", { name: "Other" })).json()).toEqual({
+      code: "PROFILE_EXISTS",
+      status: 409,
+    });
+    // The name it has changes nothing; another waits a day.
+    expect(
+      await (await browser.call("POST", "/profiles/rename", { name: "Riverside Walkers" })).json(),
+    ).toEqual({ changed: false });
+    expect(await (await browser.call("POST", "/profiles/rename", { name: "Hill" })).json()).toEqual(
+      {
+        code: "ONE_NAME_A_DAY",
+        status: 429,
+      },
+    );
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(browser) })))!;
+    await sql`UPDATE account_profile_namings SET named_on = named_on - interval '1 day'
+      WHERE user_id = ${account}`;
+    expect(await own()).toEqual({ handle, name: "Riverside Walkers", pollIds: [] });
+    for (const name of ["\u202eHill", "", " ", "x".repeat(61), "Hill\nTop"])
+      expect(await (await browser.call("POST", "/profiles/rename", { name })).json()).toEqual({
+        code: "INVALID_NAME",
+        status: 422,
+      });
+    expect(await (await browser.call("POST", "/profiles/rename", { name: "Hill" })).json()).toEqual(
+      {
+        changed: true,
+      },
+    );
+    expect(await own()).toEqual({ handle, name: "Hill", renamableOn: "2026-10-18", pollIds: [] });
+
+    expect(await (await browser.call("POST", "/profiles/delete", {})).json()).toEqual({
+      deleted: true,
+    });
+    expect(await own()).toEqual({ code: "NO_PROFILE", status: 404 });
+    expect(await (await browser.call("POST", "/profiles/delete", {})).json()).toEqual({
+      deleted: false,
+    });
+    // The day's naming outlives the profile, so a new one waits too.
+    expect(await (await browser.call("POST", "/profiles/make", { name: "Hill" })).json()).toEqual({
+      code: "ONE_NAME_A_DAY",
+      status: 429,
+    });
+    // T-10, T-11, T-67: the log has the route class, never the handle or the name.
+    expect(JSON.stringify(logged)).not.toMatch(new RegExp(`${handle}|Riverside|Hill`));
+  });
+
+  test("a profile needs a verified phone, and a hidden one keeps the name a moderator judged", async () => {
+    const phoneless = new Browser();
+    await register(phoneless, new SoftAuthenticator(RP_ID), true);
+    expect(await (await phoneless.call("POST", "/profiles/make", { name: "Hill" })).json()).toEqual(
+      { code: "PHONE_UNVERIFIED", status: 403 },
+    );
+    expect(await (await phoneless.call("POST", "/profiles/own", {})).json()).toEqual({
+      code: "NO_PROFILE",
+      status: 404,
+    });
+
+    const { browser, handle } = await author();
+    await moderateProfile(sql, handle!, {
+      action: "hide",
+      reason: "impersonation",
+      moderator: moderators[0]!,
+    });
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(browser) })))!;
+    await sql`UPDATE account_profile_namings SET named_on = named_on - interval '1 day'
+      WHERE user_id = ${account}`;
+    expect(await (await browser.call("POST", "/profiles/rename", { name: "Hill" })).json()).toEqual(
+      {
+        code: "HIDDEN",
+        status: 409,
+      },
+    );
+    expect(await (await browser.call("POST", "/profiles/own", {})).json()).toMatchObject({
+      name: "Riverside Neighbours",
+    });
+  });
+
+  test("an author shows and stops showing their own polls, and no one else's", async () => {
+    const { browser } = await author();
+    const { id } = (await (await browser.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    const show = async (b: Browser, body: unknown) =>
+      (await b.call("POST", "/profiles/show", body)).json();
+    expect(await show(browser, { pollId: id, on: true })).toEqual({ changed: true });
+    expect(await show(browser, { pollId: id, on: true })).toEqual({ changed: false });
+    expect(await (await browser.call("POST", "/profiles/own", {})).json()).toMatchObject({
+      pollIds: [id],
+    });
+
+    // Another author can't show it, and one with no profile shows nothing.
+    const other = await author();
+    expect(await show(other.browser, { pollId: id, on: true })).toEqual({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    expect(await show(other.browser, { pollId: id, on: false })).toEqual({ changed: false });
+    const none = await author({ profile: false });
+    expect(await show(none.browser, { pollId: id, on: true })).toEqual({
+      code: "NO_PROFILE",
+      status: 404,
+    });
+    expect(await (await browser.call("POST", "/profiles/own", {})).json()).toMatchObject({
+      pollIds: [id],
+    });
+
+    for (const bad of [
+      { pollId: id.toUpperCase(), on: true },
+      { pollId: id, on: "true" },
+      { pollId: id },
+      { pollId: id, on: true, handle: "a".repeat(16) },
+    ])
+      expect(await show(browser, bad)).toEqual({ code: "BAD_REQUEST", status: 400 });
+
+    expect(await show(browser, { pollId: id, on: false })).toEqual({ changed: true });
+    expect(await (await browser.call("POST", "/profiles/own", {})).json()).toMatchObject({
+      pollIds: [],
+    });
+    expect(JSON.stringify(logged)).not.toContain(id);
+  });
+
+  test("the author's profile routes refuse signed-out, malformed and cross-site calls", async () => {
+    const { browser } = await author();
+    const pollId = "a".repeat(32);
+    for (const [path, body, bad] of [
+      ["/profiles/own", {}, { name: "Hill" }],
+      ["/profiles/make", { name: "Hill" }, { name: 1 }],
+      ["/profiles/rename", { name: "Hill" }, {}],
+      ["/profiles/delete", {}, { handle: "a".repeat(16) }],
+      ["/profiles/show", { pollId, on: true }, { pollId, on: true, extra: 1 }],
+    ] as const) {
+      expect(await (await new Browser().call("POST", path, body)).json()).toEqual({
+        code: "SIGNED_OUT",
+        status: 401,
+      });
+      for (const wrong of [bad, []])
+        expect(await (await browser.call("POST", path, wrong)).json()).toEqual({
+          code: "BAD_REQUEST",
+          status: 400,
+        });
+      const post = (headers: Record<string, string>) =>
+        fetch(`${base}${path}`, {
+          method: "POST",
+          headers: { cookie: cookieOf(browser), ...headers },
+          body: JSON.stringify(body),
+        });
+      expect(
+        (await post({ origin: "https://elsewhere.test", "content-type": "application/json" }))
+          .status,
+      ).toBe(403);
+      expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+      expect((await browser.call("POST", `${path}?x=1`, body)).status).toBe(404);
+      expect((await browser.call("GET", path)).status).toBe(404);
+    }
+    // None of it touched the profile.
+    expect(await (await browser.call("POST", "/profiles/own", {})).json()).toMatchObject({
+      name: "Riverside Neighbours",
+      pollIds: [],
     });
   });
 });

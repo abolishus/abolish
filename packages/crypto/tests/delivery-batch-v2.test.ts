@@ -638,6 +638,8 @@ describe("version-2 batch and root encoding", () => {
         { numRuns },
       );
     },
+    // CI's FC_NUM_RUNS=1000 decodes a full batch per run: seconds on a shared runner.
+    60_000,
   );
 
   test("never encodes what it can't decode", () => {

@@ -68,7 +68,7 @@ async function draft(user: string): Promise<string> {
   return id;
 }
 
-let block = 1;
+const blocks = { next: 1 };
 
 /**
  * An open poll of `user`'s: its creator record, and unless `stored` is false
@@ -88,7 +88,7 @@ async function openPoll(user: string, { stored = true } = {}) {
   if (stored) {
     await storeDefinition(app, encodeElectionDefinition({ ...typical, election_id: electionId }));
     await db.admin`INSERT INTO election_registrations
-      VALUES (${electionId}, ${randomBytes(32)}, ${(block++).toString()}, 0)`;
+      VALUES (${electionId}, ${randomBytes(32)}, ${(blocks.next++).toString()}, 0)`;
   }
   return { id, electionId };
 }
@@ -326,7 +326,7 @@ describe("handles", () => {
 
   test("every character position takes every base32 character", () => {
     const at = Array.from({ length: 16 }, () => new Set<string>());
-    for (let i = 0; i < 2000; i++) [...newProfileHandle()].forEach((c, j) => at[j]!.add(c));
+    for (let i = 0; i < 2000; i++) Array.from(newProfileHandle()).forEach((c, j) => at[j]!.add(c));
     // 2000 draws miss one of 32 values with probability about 32·(31/32)^2000.
     for (const s of at) expect(s.size).toBe(32);
   });

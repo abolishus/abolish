@@ -152,7 +152,9 @@ export function decodeDeploymentRecord(bytes: Uint8Array): DecodedDeploymentReco
 /**
  * `deployment_hash = H(DS("abolish/v1/deployment", encode(record)))`, over
  * the whole encoding, header included, so a version-1 and a version-2 record
- * of one deployment have different hashes (Deployment hash).
+ * of one deployment have different hashes (Deployment hash). `encoding` is
+ * hashed as given: pass only bytes `decodeDeploymentRecord` accepted, so the
+ * hash is always of some record's one encoding (T-31).
  */
 export function deploymentHash(encoding: Uint8Array): Uint8Array {
   if (!(encoding instanceof Uint8Array))

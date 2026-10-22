@@ -137,6 +137,65 @@ describe("deployment record codec and rules (docs/spec/deployment.md)", () => {
     },
   );
 
+  test("reports a rule broken at two periods at the lower one", () => {
+    const typical = v2File.vectors.find((v) => v.id === "typical");
+    if (typical === undefined) throw new Error("missing vector");
+    const earlier = v2(typical.encoding);
+    const keys = earlier.tier0_token_keys.slice();
+    const [a, b] = [keys[2], keys[5]];
+    if (a === undefined || b === undefined) throw new Error("too few keys");
+    // Swapped keys: still well formed, and another key at both periods.
+    keys[2] = { ...a, key: b.key };
+    keys[5] = { ...b, key: a.key };
+    const later = { ...earlier, tier0_token_keys: keys };
+    expect(deploymentAcrossRule(earlier, later)).toEqual({
+      rule: "token-key-changed",
+      period: a.period,
+    });
+  });
+
+  // The origin grammar is release.md's: every origin a well-formed release
+  // vector lists passes `origin` as an endpoint, and each one only an
+  // `origin`-breaking release vector lists (port 0, a leading zero, a port
+  // over 65535, a 64-byte label, a 254-byte host, a hex or digit-led last
+  // label, userinfo, …) fails it (T-31, T-43).
+  const releaseFile = JSON.parse(
+    readFileSync(new URL("release-record.json", SPEC_VECTORS), "utf8"),
+  ) as {
+    readonly vectors: readonly (Vector & {
+      readonly value?: { readonly sites: readonly { readonly origins: readonly string[] }[] };
+    })[];
+  };
+  const originsOf = (v: (typeof releaseFile.vectors)[number]) =>
+    (v.value?.sites ?? []).flatMap((site) => site.origins);
+  const goodOrigins = new Set(
+    releaseFile.vectors.filter((v) => v.illFormed === undefined).flatMap(originsOf),
+  );
+  const badOrigins = releaseFile.vectors
+    .filter((v) => v.illFormed === "origin")
+    .map((v) => [v.id, originsOf(v).filter((o) => !goodOrigins.has(o))] as const);
+  const withApi = (origin: string): DecodedDeploymentRecord => {
+    const typical = v1File.vectors.find((v) => v.id === "typical");
+    if (typical === undefined) throw new Error("missing vector");
+    const d = decodeDeploymentRecord(hex(typical.encoding));
+    if (d.version !== 1) throw new Error("expected a version-1 record");
+    return { version: 1, value: { ...d.value, api: [hex(origin)] } };
+  };
+
+  test.each(badOrigins)("%s: its origin is refused as an endpoint", (_id, origins) => {
+    expect(origins.length).toBeGreaterThan(0);
+    for (const o of origins)
+      expect(deploymentRecordRule(withApi(o))).toEqual({ rule: "origin", list: "api" });
+  });
+
+  test("passes every origin a well-formed release lists", () => {
+    expect(goodOrigins.size).toBeGreaterThan(0);
+    for (const o of goodOrigins)
+      expect(deploymentRecordRule(withApi(o))?.rule, Buffer.from(hex(o)).toString()).not.toBe(
+        "origin",
+      );
+  });
+
   test("judges only well-formed records across releases", () => {
     const good = v2File.vectors.find((v) => v.id === "typical");
     const bad = v2File.vectors.find((v) => v.illFormed === "token-key-order");

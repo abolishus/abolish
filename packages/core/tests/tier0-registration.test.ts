@@ -10,6 +10,7 @@ import {
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
   TIER0_MAX_CONCURRENT,
+  TIER0_SHOWN_MARGIN,
   tier0Keys,
   Tier0RegistrationError,
   Tier0Registrations,
@@ -365,11 +366,19 @@ describe("Tier0Registrations", () => {
     expect(await redis.hlen(keys().queue)).toBe(TIER0_MAX_CONCURRENT + 1);
   });
 
-  test("answers alike whether a commitment is new, queued, live or in flight, and queues only a new one", async () => {
+  test("answers alike whether a commitment is new, queued, live, in flight or shown, and queues only a new one", async () => {
     await fc.assert(
       fc.asyncProperty(
         commitmentArb,
-        fc.constantFrom("new", "queued-here", "queued-elsewhere", "live", "inflight"),
+        fc.constantFrom(
+          "new",
+          "queued-here",
+          "queued-elsewhere",
+          "live",
+          "inflight",
+          "shown",
+          "shown-lapsed",
+        ),
         async (commitment, state) => {
           prefix = `test-tier0-${process.pid}-${Date.now()}-${run++}`;
           await fresh();
@@ -380,6 +389,12 @@ describe("Tier0Registrations", () => {
             await redis.hset(k.sizes, state === "queued-here" ? "7" : "9", "1");
           if (state === "live") await redis.sadd(k.live, commitment);
           if (state === "inflight") await redis.sadd(k.inflight, commitment);
+          // Shown at a re-issuance, its mark kept until a second after now,
+          // or only until now.
+          if (state === "shown")
+            await redis.zadd(k.shown, NOW - TIER0_SHOWN_MARGIN + 1, commitment);
+          if (state === "shown-lapsed")
+            await redis.zadd(k.shown, NOW - TIER0_SHOWN_MARGIN, commitment);
           const before = await redis.hgetall(k.queue);
           await expect(service().registrations.register(request(commitment))).resolves.toBe(
             undefined,
@@ -387,7 +402,8 @@ describe("Tier0Registrations", () => {
           const after = await redis.hgetall(k.queue);
           // Queued for the group it was first queued for, once; never queued
           // when the index or a batch already holds it.
-          if (state === "new") expect(after).toEqual({ [commitment]: "7" });
+          if (state === "new" || state === "shown-lapsed")
+            expect(after).toEqual({ [commitment]: "7" });
           else expect(after).toEqual(before);
           const sizes = await redis.hgetall(k.sizes);
           const counted: Record<string, number> = {};

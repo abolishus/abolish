@@ -34,6 +34,16 @@ export const TIER0_INDEX_MAX_SKEW = 5;
  * the board (T-52, T-25).
  */
 export const TIER0_MAX_CONCURRENT = 8;
+/**
+ * Seconds a shown commitment stays marked past its lapse. The mark is
+ * written on the issuer's clock and read on the signing service's, which can
+ * disagree, and a redemption's key check runs before Turnstile's round trip
+ * and this script, so a mark judged lapsed at its exact second would let a
+ * redemption the service still took queue a commitment whose account has
+ * already re-issued (docs/spec/tier0-token.md, Keys, item 4; T-74). An
+ * abandoned commitment costs nothing to keep marked longer.
+ */
+export const TIER0_SHOWN_MARGIN = 86_400;
 
 const U32_MAX = 2 ** 32 - 1;
 const U64_MAX = (1n << 64n) - 1n;
@@ -63,6 +73,10 @@ export interface Tier0Redis {
  *   may still sign, past every record of ours that landed;
  * - `boundary`: the number of the last period whose boundary ran;
  * - `next`: the index being rebuilt, swapped in for `live` once whole;
+ * - `shown`: a sorted set of the commitments shown at a token's
+ *   re-issuance, each scored by the UNIX second at which its dead key's
+ *   redemption window ends, its lapse, and kept `TIER0_SHOWN_MARGIN` past
+ *   it (tier0-shown.ts);
  * - `lock`: the batch job's lock, so one runner at a time writes the rest.
  *
  * Every commitment, in `queue`, `live` and `inflight` alike, is written as
@@ -73,7 +87,8 @@ export interface Tier0Redis {
  * script, since the queue's bound rests on it (T-52).
  *
  * The index, the in-flight batches and `held` are kept by the batch job
- * (tier0-batch.ts); the route only reads `live`, `inflight` and `indexed`.
+ * (tier0-batch.ts), and `shown` by re-issuance (tier0-shown.ts); the route
+ * only reads `live`, `inflight`, `shown` and `indexed`.
  */
 export function tier0Keys(prefix = "abolish") {
   // A brace in the prefix would change the hash tag, scattering the keys
@@ -91,6 +106,7 @@ export function tier0Keys(prefix = "abolish") {
     positions: at("positions"),
     boundary: at("boundary"),
     next: at("next"),
+    shown: at("shown"),
     lock: at("lock"),
   } as const;
 }
@@ -115,10 +131,16 @@ return { size or '0', indexed or '' }
 // commitment, so a full queue answers busy whatever is sent, and again here
 // rather than only at step 5, since step 7's round trip lets concurrent
 // requests pass step 5 together. A commitment already live, in flight or
-// queued (for any group) is accepted and changes nothing.
+// queued (for any group) is accepted and changes nothing. So is one shown at
+// a re-issuance whose mark is kept: it is abandoned and never queued
+// (docs/spec/tier0-token.md, Keys, item 4), and checking it in this script
+// serialises queueing with the mark's own check (tier0-shown.ts), so neither
+// can slip between the other's check and write.
 const ENQUEUE = `
 local size = tonumber(redis.call('HGET', KEYS[2], ARGV[2]) or '0')
 if size >= tonumber(ARGV[3]) then return 0 end
+local lapse = redis.call('ZSCORE', KEYS[5], ARGV[1])
+if lapse and tonumber(lapse) + tonumber(ARGV[5]) > tonumber(ARGV[4]) then return 1 end
 if redis.call('SISMEMBER', KEYS[3], ARGV[1]) == 1 then return 1 end
 if redis.call('SISMEMBER', KEYS[4], ARGV[1]) == 1 then return 1 end
 if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then
@@ -286,14 +308,17 @@ export class Tier0Registrations {
     if (verdict === "unavailable") throw new Tier0RegistrationError("challenge-unavailable");
     const queued = await this.#eval(
       ENQUEUE,
-      4,
+      5,
       keys.queue,
       keys.sizes,
       keys.live,
       keys.inflight,
+      keys.shown,
       request.commitment,
       group,
       String(REGISTRATION_QUEUE_MAX),
+      String(Math.floor(this.#now())),
+      String(TIER0_SHOWN_MARGIN),
     );
     if (queued !== 1) throw new Tier0RegistrationError("busy");
   }

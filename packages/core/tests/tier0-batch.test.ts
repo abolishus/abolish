@@ -586,6 +586,23 @@ describe("one batch per position", () => {
     );
   });
 
+  test("a final batch's commitments move from in flight to the index in one step", async () => {
+    const chain = new FakeChain();
+    const job = batches(chain);
+    const values = commitments(MIN_REGISTRATION_BATCH);
+    await enqueue(values);
+    await job.runBoundary();
+    // Sent after the boundary's refresh, so the index doesn't hold them yet.
+    expect(await redis.exists(keys().live)).toBe(0);
+    chain.finalize();
+    // The refresh after the finish fails: the index still holds them, so a
+    // re-issuance's mark never sees one of ours in neither set.
+    chain.tier0Commitments = () => Promise.reject(new Error("node down"));
+    expect((await job.runBoundary())[0]?.outcome).toBe("index-unavailable");
+    expect(await redis.exists(keys().inflight)).toBe(0);
+    expect((await redis.smembers(keys().live)).sort()).toEqual(values.map(commitmentKey).sort());
+  });
+
   test("a batch that didn't land is sent again unchanged, by a restarted job too", async () => {
     const chain = new FakeChain();
     await enqueue(commitments(MIN_REGISTRATION_BATCH));

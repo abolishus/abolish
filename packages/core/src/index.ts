@@ -309,6 +309,7 @@ export {
   TIER0_INDEX_MAX_LAG,
   TIER0_INDEX_MAX_SKEW,
   TIER0_MAX_CONCURRENT,
+  TIER0_SHOWN_MARGIN,
   type Tier0Keys,
   tier0Keys,
   type Tier0MalformedCode,
@@ -321,6 +322,7 @@ export {
   type Tier0RequestInput,
   TURNSTILE_ACTION_TIER0,
 } from "./tier0-registration.ts";
+export { type Tier0ShowOutcome, Tier0ShownList, type Tier0ShownOptions } from "./tier0-shown.ts";
 export {
   checkTier0IssuerDeployment,
   generateTier0IssuerKey,

@@ -195,12 +195,19 @@ return 1
 const READ_BATCH = `return redis.call('HGET', KEYS[1], ARGV[1]) or ''`;
 
 // Step 1, a final batch: its commitments are live now, so they leave the
-// in-flight set with the record, and the group's next position can never
-// again be below the record's end (KEYS[4]), whatever a lagging node says.
+// in-flight set for the index (KEYS[5]) with the record, and the group's next
+// position can never again be below the record's end (KEYS[4]), whatever a
+// lagging node says. Moving them in one step means no index read older than
+// the record's finality can leave a commitment of ours in neither set, where
+// a re-issuance's mark would take it for one never added (tier0-shown.ts).
+// The next refresh reads it from finalized history anyway.
 const FINISH = `${FENCE}
 redis.call('HDEL', KEYS[3], ARGV[2])
 redis.call('HSET', KEYS[4], ARGV[2], ARGV[3])
-if #ARGV > 3 then redis.call('SREM', KEYS[2], unpack(ARGV, 4)) end
+if #ARGV > 3 then
+  redis.call('SREM', KEYS[2], unpack(ARGV, 4))
+  redis.call('SADD', KEYS[5], unpack(ARGV, 4))
+end
 return 1
 `;
 
@@ -478,7 +485,7 @@ export class Tier0Batches {
         if (!logged.final) return report("waiting");
         await this.#fenced(
           FINISH,
-          [k.inflight, k.batches, k.positions],
+          [k.inflight, k.batches, k.positions, k.live],
           token,
           g,
           String(end),

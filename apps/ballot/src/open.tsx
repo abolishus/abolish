@@ -403,6 +403,8 @@ interface Sending {
   readonly trackingCode: string;
   /** Its qualified seats with no receipt kept yet, each with its `ct_i`: delivered before the ballot is sent. */
   readonly undelivered: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+  /** Found recorded on opening the poll, not cast on this page: the voter may leave it and answer anew. */
+  readonly resumed?: true;
 }
 
 /** Deliveries in flight at once: the relay takes a few at a time from everyone (T-52). */
@@ -538,7 +540,7 @@ export function Ballot({
       return {
         kind: "unsent",
         reason: "earlier",
-        sending: { ballot, tier, trackingCode: toHex(trackingCode), undelivered },
+        sending: { ballot, tier, trackingCode: toHex(trackingCode), undelivered, resumed: true },
       };
     }
     return { kind: "answering" };
@@ -940,9 +942,10 @@ export function Ballot({
           trackingCode={step.sending.trackingCode}
           reason={step.reason}
           onSend={() => sendAgain(step.sending)}
-          // A recorded cast found on opening the poll: the voter may leave
-          // it and answer anew, which casts a ballot that replaces it.
-          onAgain={step.reason === "earlier" ? again : undefined}
+          // A recorded cast found on opening the poll, however its sending
+          // went since: the voter may leave it and answer anew, which casts
+          // a ballot that replaces it.
+          onAgain={step.sending.resumed === true ? again : undefined}
         />
       );
     case "sent":

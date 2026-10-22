@@ -1488,8 +1488,10 @@ export const ResumedUndelivered: Story = {
         name: "Your ballot hasn't reached every trustee yet",
       }),
     ).toHaveFocus();
-    // The undelivered screen offers sending again, not leaving the cast.
-    await expect(canvas.queryByRole("button", { name: "Answer again" })).toBeNull();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    // A cast found on opening can still be left for a new answer.
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
   },
 };

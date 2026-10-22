@@ -30,6 +30,7 @@ import {
   recordRegistration,
   REMOVAL_REASONS as CORE_REMOVAL_REASONS,
   RESTORE_REASONS as CORE_RESTORE_REASONS,
+  SearchQueryError,
   searchTerms,
   shortCode,
   storeDefinition,
@@ -631,7 +632,7 @@ describe("elections.list (T-68)", () => {
         expect((await get("/elections", { q, limit: "1" })).status, q).toBe(200);
     });
 
-    test("the contract admits exactly the queries core reads", () => {
+    test("the contract admits exactly the queries core reads, and those blank once normalised", () => {
       const input = contract.elections.list["~orpc"].inputSchema!;
       const admits = (q: string) => {
         const result = input["~standard"].validate({ limit: "1", q });
@@ -641,20 +642,31 @@ describe("elections.list (T-68)", () => {
       const piece = fc.oneof(
         fc.string({ unit: "binary", maxLength: 6 }),
         fc.constantFrom(" ", "\t", "\n", "\u3000", "\u00a0", "\u2028", "\ufeff", "\u180e"),
+        fc.constantFrom("\u0085", "\u0001", "\u009f"),
       );
       fc.assert(
         fc.property(fc.array(piece, { maxLength: 60 }), (pieces) => {
           const q = pieces.join("");
-          let read = true;
+          let read: "terms" | "blank" | "refused" = "terms";
           try {
             searchTerms(q);
-          } catch {
-            read = false;
+          } catch (e) {
+            read = e instanceof SearchQueryError ? "blank" : "refused";
           }
-          expect(admits(q), JSON.stringify(q)).toBe(read);
+          expect(admits(q), JSON.stringify(q)).toBe(read !== "refused");
         }),
         { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) },
       );
+    });
+
+    test("a query blank once normalised is refused, quoting nothing", async () => {
+      for (const q of ["\u0085", "\u0001 \u009f"]) {
+        const r = await get("/elections", { q, limit: "1" });
+        expect(r.status, JSON.stringify(q)).toBe(400);
+        expect(JSON.stringify(await json(r))).not.toContain(q);
+      }
+      // A blank term beside a real one is dropped.
+      expect(searchTerms("park \u0085")).toEqual(["park"]);
     });
 
     test("the query is never logged", async () => {

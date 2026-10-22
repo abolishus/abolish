@@ -1,6 +1,6 @@
 // Search over question text (P2-23 part 4). Each stored display text gets one
 // row of normalised text, its titles and questions in every translation, in
-// display_text_search (migrations/0027_display_text_search.sql), which a
+// display_text_search (migrations/0028_display_text_search.sql), which a
 // foreign key deletes with the display text: a takedown that deletes the text
 // leaves nothing of it to be found by search (T-17, T-68). The row is written
 // from the record @abolishus/crypto checked and decoded when it was stored, so
@@ -39,12 +39,27 @@ export function normalizeSearchText(text: string): string {
 }
 
 /**
+ * A query no term of which is left once normalised: each was control
+ * characters alone (U+0085, which `\s` doesn't match), which normalise to
+ * spaces and would match nearly every poll.
+ */
+export class SearchQueryError extends Error {
+  override readonly name = "SearchQueryError";
+  readonly code = "blank";
+  constructor() {
+    super("search refused: blank");
+  }
+}
+
+/**
  * A query's terms: split on whitespace, each normalised and cut to its first
- * `MAX_SEARCH_QUERY` code points, duplicates dropped. Refuses a query longer
- * than `MAX_SEARCH_QUERY`, one with no term, and one with more than
- * `MAX_SEARCH_TERMS`, counted before normalising, as the contract's pattern
- * counts them. The cut bounds what each `strpos` searches for, which NFKC can
- * otherwise grow eighteenfold (U+FDFA), and only widens a match (T-52).
+ * `MAX_SEARCH_QUERY` code points, blank ones and duplicates dropped. Refuses
+ * a query longer than `MAX_SEARCH_QUERY`, one with no term, and one with more
+ * than `MAX_SEARCH_TERMS`, counted before normalising, as the contract's
+ * pattern counts them (a `TypeError`); and one whose terms are all blank once
+ * normalised, which the pattern can't see (a `SearchQueryError`). The cut
+ * bounds what each `strpos` searches for, which NFKC can otherwise grow
+ * eighteenfold (U+FDFA), and only widens a match (T-52).
  */
 export function searchTerms(query: string): string[] {
   if (typeof query !== "string" || query.length > MAX_SEARCH_QUERY)
@@ -52,11 +67,13 @@ export function searchTerms(query: string): string[] {
   const raw = query.split(/\s+/u).filter((t) => t !== "");
   if (raw.length < 1 || raw.length > MAX_SEARCH_TERMS)
     throw new TypeError(`query must have 1 to ${MAX_SEARCH_TERMS} terms`);
-  return [
-    ...new Set(
-      raw.map((t) => Array.from(normalizeSearchText(t)).slice(0, MAX_SEARCH_QUERY).join("")),
-    ),
-  ];
+  const terms = new Set(
+    raw
+      .map((t) => Array.from(normalizeSearchText(t)).slice(0, MAX_SEARCH_QUERY).join(""))
+      .filter((t) => !/^\s*$/u.test(t)),
+  );
+  if (terms.size === 0) throw new SearchQueryError();
+  return [...terms];
 }
 
 /**
@@ -105,7 +122,7 @@ const FILL_BATCH = 100;
 
 /**
  * Writes the search row of every stored display text that has none: those
- * stored before migration 0027 added the table, or by a `storeDisplayText`
+ * stored before migration 0028 added the table, or by a `storeDisplayText`
  * call interrupted between its two writes. Returns how many it wrote. Every
  * stored text passed the show check against its stored definition when it was
  * stored, so one that doesn't now is an error.

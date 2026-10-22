@@ -23,13 +23,14 @@ import {
   MAX_SEARCH_TERMS,
   moderate,
   normalizeSearchText,
+  SearchQueryError,
   searchTerms,
   storeDefinition,
   storeDisplayText,
 } from "../src/index.ts";
 import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 
-// Search over question text (src/search.ts, migrations/0027; P2-23 part 4;
+// Search over question text (src/search.ts, migrations/0028; P2-23 part 4;
 // T-17, T-68): each stored display text's titles and questions, normalised,
 // filter the listing's orders; the row goes with its display text, and
 // delisted or hidden polls stay out of every search.
@@ -151,6 +152,10 @@ describe("terms", () => {
     expect(searchTerms("a".repeat(MAX_SEARCH_QUERY))).toHaveLength(1);
     expect(() => searchTerms("a".repeat(MAX_SEARCH_QUERY + 1))).toThrow(TypeError);
     expect(() => searchTerms(7 as unknown as string)).toThrow(TypeError);
+    // Control characters alone pass the pattern but normalise to spaces.
+    for (const q of ["\u0085", "\u0001\u0002 \u009f"])
+      expect(() => searchTerms(q)).toThrow(SearchQueryError);
+    expect(searchTerms("park \u0085 park")).toEqual(["park"]);
   });
 
   test("every term is normalised, distinct and non-empty, and as many as the query's words at most", () => {
@@ -161,11 +166,15 @@ describe("terms", () => {
           expect(() => searchTerms(q)).toThrow(TypeError);
           return;
         }
+        if (words.every((w) => /^\s*$/u.test(normalizeSearchText(w)))) {
+          expect(() => searchTerms(q)).toThrow(SearchQueryError);
+          return;
+        }
         const terms = searchTerms(q);
         expect(terms.length).toBeLessThanOrEqual(words.length);
         expect(new Set(terms).size).toBe(terms.length);
         for (const t of terms) {
-          expect(t).not.toBe("");
+          expect(t).not.toMatch(/^\s*$/u);
           expect(t).not.toMatch(/\p{Cc}/u);
           expect(Array.from(t).length).toBeLessThanOrEqual(MAX_SEARCH_QUERY);
         }

@@ -119,6 +119,7 @@ export {
   MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS,
   normalizeSearchText,
+  SearchQueryError,
   searchTerms,
   searchTextOf,
 } from "./search.ts";

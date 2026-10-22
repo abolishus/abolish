@@ -224,7 +224,8 @@ describe("the public check", () => {
       ),
       { numRuns },
     );
-  });
+    // Each run checks a posting's proof: CI's 1000 runs take about 30 s.
+  }, 120_000);
 });
 
 test("an election of a definition version whose postings aren't relayed yet refuses every one", () => {

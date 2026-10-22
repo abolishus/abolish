@@ -1,4 +1,8 @@
 import {
+  decodeDeploymentRecord,
+  type DeploymentGroup,
+  type DeploymentRecordV2,
+  encodeDeploymentRecord,
   generateTier0TokenKeyPair,
   GROUP_ORDER,
   Tier0TokenError,
@@ -11,6 +15,7 @@ import {
   TOKEN_KEY_PERIOD,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { inspect } from "node:util";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
@@ -18,6 +23,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { accountTokens, tier0TokenIssuances } from "../src/db/schema/index.ts";
 import {
+  checkTier0IssuerDeployment,
   issueTier0Token,
   markDeadTier0Tokens,
   newAccountId,
@@ -277,6 +283,140 @@ describe("tier0Issuer", () => {
     );
     // Keys held ahead are kept.
     expect(() => tier0Issuer({ ...base, now: at(Q - 1) })).not.toThrow();
+  });
+});
+
+describe("checkTier0IssuerDeployment", () => {
+  // The spec's typical version-2 record, made this issuer's: its L2, its
+  // registry, region 0's signed group and its self-paid one, and the keys of
+  // Q - 1 to Q + 6, of which the issuer holds Q - 1 to Q + 1.
+  const vector = (file: string) =>
+    (
+      JSON.parse(
+        readFileSync(new URL(`../../../docs/spec/vectors/${file}`, import.meta.url), "utf8"),
+      ) as { vectors: { id: string; encoding: string }[] }
+    ).vectors.find((v) => v.id === "typical")!.encoding;
+  const typical = decodeDeploymentRecord(Buffer.from(vector("deployment-record-v2.json"), "hex"));
+  if (typical.version !== 2) throw new Error("the typical vector isn't version 2");
+  const ahead = [Q + 2, Q + 3, Q + 4, Q + 5, Q + 6].map(
+    (q) => [q, generateTier0TokenKeyPair()] as const,
+  );
+  const listed = [...pairs, ...ahead].map(([period, p]) => ({
+    period,
+    key: p.publicKey,
+    retired: false,
+  }));
+  const record = (change: Partial<DeploymentRecordV2> = {}) =>
+    encodeDeploymentRecord({
+      version: 2,
+      value: {
+        ...typical.value,
+        l2_chain_id: CHAIN_ID,
+        group_registry: REGISTRY,
+        groups: [
+          { group_id: GROUP_ID, tier: 0, self_paid: false, region: 0 },
+          { group_id: GROUP_ID + 1n, tier: 0, self_paid: true, region: 0 },
+        ],
+        tier0_token_keys: listed,
+        ...change,
+      },
+    });
+  const refusal = (encoding: Uint8Array) => {
+    try {
+      checkTier0IssuerDeployment(ISSUER, encoding);
+    } catch (e) {
+      // No error ever quotes a key, secret or public.
+      for (const [, p] of [...pairs, ...ahead])
+        for (const k of [p.secretKey, p.publicKey])
+          expect((e as Error).message).not.toContain(hex(k).slice(0, 8));
+      expect(e).toBeInstanceOf(RangeError);
+      return (e as Error).message;
+    }
+    return undefined;
+  };
+
+  test("passes the record listing every held key, and keys it doesn't hold", () => {
+    expect(refusal(record())).toBeUndefined();
+  });
+
+  test("refuses a record that doesn't decode, is version 1 or is ill formed", () => {
+    expect(refusal(record().subarray(0, 100))).toBe(
+      "the deployment record doesn't decode: truncated",
+    );
+    expect(refusal(Buffer.from(vector("deployment-record.json"), "hex"))).toBe(
+      "the deployment record is version 1, which lists no token key",
+    );
+    expect(refusal(record({ tier0_token_keys: [listed[0]!, ...listed.slice(2)] }))).toBe(
+      "the deployment record is ill formed: token-key-order",
+    );
+  });
+
+  test("refuses another deployment's record", () => {
+    expect(refusal(record({ l2_chain_id: CHAIN_ID + 1n }))).toBe(
+      "the deployment record names another L2 chain ID",
+    );
+    expect(refusal(record({ group_registry: Uint8Array.from(randomBytes(20)) }))).toBe(
+      "the deployment record names another group registry",
+    );
+    const group = "region 0's group isn't the deployment record's signed Tier 0 group there";
+    // Region 0's group listed only as self-paid, only as Tier 1, or in another region.
+    const others: DeploymentGroup[][] = [
+      [
+        { group_id: GROUP_ID - 1n, tier: 0, self_paid: false, region: 0 },
+        { group_id: GROUP_ID, tier: 0, self_paid: true, region: 0 },
+      ],
+      [
+        { group_id: GROUP_ID - 1n, tier: 0, self_paid: false, region: 0 },
+        { group_id: GROUP_ID, tier: 1, self_paid: false, region: 0 },
+        { group_id: GROUP_ID + 1n, tier: 0, self_paid: true, region: 0 },
+      ],
+      [
+        { group_id: GROUP_ID - 2n, tier: 0, self_paid: false, region: 0 },
+        { group_id: GROUP_ID - 1n, tier: 0, self_paid: true, region: 0 },
+        { group_id: GROUP_ID, tier: 0, self_paid: false, region: 1 },
+        { group_id: GROUP_ID + 1n, tier: 0, self_paid: true, region: 1 },
+      ],
+    ];
+    for (const groups of others) expect(refusal(record({ groups }))).toBe(group);
+  });
+
+  test("refuses a held key the record doesn't list for its period, lists otherwise or retired (T-74)", () => {
+    expect(refusal(record({ tier0_token_keys: listed.slice(1) }))).toBe(
+      `the deployment record lists no key for period ${Q - 1}`,
+    );
+    const other = generateTier0TokenKeyPair().publicKey;
+    expect(
+      refusal(
+        record({
+          tier0_token_keys: listed.map((k) => (k.period === Q ? { ...k, key: other } : k)),
+        }),
+      ),
+    ).toBe(`the issuer key of period ${Q} isn't the deployment record's`);
+    // Another held period's key, listed for Q.
+    expect(
+      refusal(
+        record({
+          tier0_token_keys: listed.map((k) =>
+            k.period === Q
+              ? { ...k, key: pairs.get(Q + 1)!.publicKey }
+              : k.period === Q + 1
+                ? { ...k, key: other }
+                : k,
+          ),
+        }),
+      ),
+    ).toBe(`the issuer key of period ${Q} isn't the deployment record's`);
+    expect(
+      refusal(
+        record({ tier0_token_keys: listed.map((k) => ({ ...k, retired: k.period === Q + 1 })) }),
+      ),
+    ).toBe(`the deployment record lists the key of period ${Q + 1} retired`);
+    // A key the issuer doesn't hold may be retired.
+    expect(
+      refusal(
+        record({ tier0_token_keys: listed.map((k) => ({ ...k, retired: k.period === Q + 2 })) }),
+      ),
+    ).toBeUndefined();
   });
 });
 

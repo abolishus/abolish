@@ -301,6 +301,7 @@ export {
   TURNSTILE_ACTION_TIER0,
 } from "./tier0-registration.ts";
 export {
+  checkTier0IssuerDeployment,
   issueTier0Token,
   markDeadTier0Tokens,
   parseTier0IssuerKeys,

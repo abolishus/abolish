@@ -557,11 +557,11 @@ export class Tier0ReissueUnavailable extends Error {
  *   or past `q + 1` before the timer marked the record dead.
  * - A record marked dead names no key; item 3's binding to its `B` then shows
  *   which key it was. One the deployment record still lists must not redeem.
- *   One it no longer lists is from a period that ended before the release's
- *   (releases drop ended periods), so the record's period is at most
- *   `current - 2`, the bound a dead mark itself has: the mark lasts until
- *   that period's lapse, at or after the real one, which only keeps an
- *   abandoned `C` on the list longer.
+ *   One it no longer lists is taken as period `current - 1`, so the mark
+ *   lasts to the end of `current`: a dead mark bounds the period by
+ *   `current - 2` only on the clock of the instance that made it, and only a
+ *   release-signing convention, not well-formedness, keeps `current - 1`
+ *   listed; a later lapse only keeps an abandoned `C` on the list longer.
  */
 function deadKeyPeriod(
   held: { readonly keyId: Uint8Array | null; readonly keyPeriod: number | null },
@@ -578,7 +578,7 @@ function deadKeyPeriod(
   }
   if (entry !== undefined)
     return entry.retired || entry.period < current - 1 ? entry.period : undefined;
-  return current >= 2 ? current - 2 : undefined;
+  return current >= 1 ? current - 1 : undefined;
 }
 
 /**
@@ -609,6 +609,10 @@ function deadKeyPeriod(
  * this request, which the transport keeps no record of. T-01: one record per
  * account and deployment, replaced only against its own dead token. T-74: a
  * re-issued token is counted under its new key.
+ *
+ * The shown list's Redis is called with the record's row locked, so its
+ * client needs a command timeout (which `show` answers as `unavailable`), or
+ * a stalled Redis holds the row and the connection.
  */
 export async function reissueTier0Token(
   client: Sql,

@@ -71,6 +71,8 @@ const ERRORS: Record<Tier0IssuanceErrorCode, [number, string]> = {
   "token-taken": [409, "TOKEN_TAKEN"],
   // The client keeps its values and retries ([[tier0-token]], Issuance, step 4).
   inverse: [503, "INVERSE"],
+  // Re-issuance's (P2-30 part 3d-2b-2 serves it): the client keeps its dead token and may repeat later.
+  "reissue-refused": [409, "REISSUE_REFUSED"],
 };
 
 const bytes = (hex: string) => Uint8Array.from(Buffer.from(hex, "hex"));

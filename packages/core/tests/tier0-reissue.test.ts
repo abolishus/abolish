@@ -258,9 +258,12 @@ describe("reissueTier0Token", () => {
       expect(Number(held["key_period"])).toBe(Q);
       expect(hex(held["blinded_element"])).toBe(hex(next.blindedElement));
       expect(Number(held["region"])).toBe(0);
-      // Marked until the dead key's own lapse: P is unlisted today, and a
-      // dead record's period is at most Q - 2, which is P.
-      expect(await marks()).toMatchObject({ [commitmentKey(valueOf(token.c))]: lapseOf(P) });
+      // Marked past the dead key's own lapse once the record is marked dead:
+      // P is unlisted today, so taken as Q - 1, whose lapse is the latest any
+      // key that stopped redeeming by Q's start on some clock can have.
+      expect(await marks()).toMatchObject({
+        [commitmentKey(valueOf(token.c))]: dead ? lapseOf(Q - 1) : lapseOf(P),
+      });
       // A lost answer is retried as an ordinary issuance of B'.
       await expect(
         issueTier0Token(app, account, next.request, { issuer: NEW, now: NOW }),
@@ -433,6 +436,17 @@ describe("reissueTier0Token", () => {
     const elsewhere = { ...blind(Q), request: { ...blind(Q).request, region: 1 } };
     expect(await refusal(reissue(account, showing(token, elsewhere), { shown }))).toBe(
       "region-unknown",
+    );
+    // A region with a group of its own, but not the record's: moving region stays refused.
+    const two: Tier0Issuer = {
+      ...NEW,
+      infos: new Map([
+        ...NEW.infos,
+        [1, tier0TokenInfo({ chainId: CHAIN_ID, groupRegistry: REGISTRY, groupId: GROUP_ID + 2n })],
+      ]),
+    };
+    expect(await refusal(reissue(account, showing(token, elsewhere), { issuer: two, shown }))).toBe(
+      "reissue-refused",
     );
     const badB = {
       ...blind(Q),

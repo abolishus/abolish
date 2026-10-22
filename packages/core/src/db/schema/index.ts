@@ -40,6 +40,7 @@ import {
   ceremonyStubs,
   pollCreationTxs,
 } from "./polls.ts";
+import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
 
 export {
   accountAppeals,
@@ -58,6 +59,7 @@ export {
   accountPollSubmissions,
   accountPasskeys,
   accountSessions,
+  accountTokens,
   accountUsers,
   accountVerifications,
   boardBallotHashes,
@@ -79,13 +81,15 @@ export {
   moderationActions,
   moderationReports,
   pollCreationTxs,
+  tier0TokenIssuances,
 };
 
 /**
  * Every table in the schema, by class. Board tables hold public bulletin-board
  * data and are rebuilt from chain + IPFS. Account tables hold accounts
- * (better-auth) and the polls each account wrote (ADR 0032): who someone is
- * to the app, never how they voted. Operational tables (moderation, caches)
+ * (better-auth), the polls each account wrote (ADR 0032) and the Tier 0 token
+ * each account took ([[tier0-token]]): who someone is to the app, never how
+ * they voted. Operational tables (moderation, caches)
  * hold nothing a result depends on.
  * Identity tables hold voting-identity backups (ADR 0017): operational, since
  * a wipe changes no result, but on the ballot side of the no-join rules. A
@@ -124,6 +128,7 @@ export const TABLE_CLASSES = {
     "account_poll_submissions",
     "account_polls",
     "account_sessions",
+    "account_tokens",
     "account_users",
     "account_verifications",
   ],
@@ -139,5 +144,6 @@ export const TABLE_CLASSES = {
     "moderation_reports",
     "poll_creation_txs",
     "schema_migrations",
+    "tier0_token_issuances",
   ],
 } as const;

@@ -633,6 +633,20 @@ describe("poll page", () => {
     expect(html).toContain(">Share this poll<");
   });
 
+  test("names Tier 0 by the deployment's phone setting, off unless set to on", async () => {
+    // What the token issuer checks (P2-31 part 6b-2a; T-01).
+    const text = async () => (await (await get(`/polls/${ID}`)).text()).replace(/<[^>]+>/g, "");
+    expect(await text()).toContain("Tier 0 (verified e-mail)");
+    process.env["PHONE_VERIFICATION"] = "on";
+    try {
+      const on = await text();
+      expect(on).toContain("Tier 0 (verified e-mail and phone)");
+      expect(on).not.toContain("Tier 0 (verified e-mail)");
+    } finally {
+      delete process.env["PHONE_VERIFICATION"];
+    }
+  });
+
   test("offers reactions to everyone alike, their counts read once the page's script runs", async () => {
     // The page's server never gets the account cookie (src/node/serve.ts), so
     // the counts and the account's own come from /reactions in the browser.

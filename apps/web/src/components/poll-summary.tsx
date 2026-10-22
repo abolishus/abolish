@@ -3,7 +3,7 @@ import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { ReactionsClient } from "../account/reactions.ts";
-import { catalogs, type Messages } from "../messages.ts";
+import { catalogs, type Messages, tierMessage } from "../messages.ts";
 import {
   type Instant,
   instructionOf,
@@ -11,7 +11,6 @@ import {
   type PollStatus,
   type PollTags,
   type PollView,
-  type Tier,
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
 import { ListedUnder } from "./listed-under.tsx";
@@ -34,9 +33,9 @@ export interface PollSummaryProps {
   share?: PollShareProps | undefined;
   /** Where the poll's reactions are read and set; without one, none are shown. */
   reactions?: ReactionsClient | undefined;
+  /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
+  phoneVerification: boolean;
 }
-
-const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
 
 const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
 
@@ -107,6 +106,7 @@ export function PollSummary({
   tags,
   share,
   reactions,
+  phoneVerification,
 }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
@@ -114,11 +114,12 @@ export function PollSummary({
   const counting = t(COUNTING_LABEL[poll.counting]);
   const options = poll.questions.reduce((sum, q) => sum + q.optionCount, 0);
   const illFormed = poll.illFormed;
+
   const tiers = (
     <ul className="m-0 grid list-none gap-1 p-0">
       {/* By position: an ill-formed definition can repeat a tier. */}
       {poll.electorate.map((group, i) => (
-        <li key={i}>{t(TIER_LABEL[group.tier])}</li>
+        <li key={i}>{t(tierMessage(group.tier, phoneVerification))}</li>
       ))}
     </ul>
   );
@@ -299,7 +300,7 @@ export function PollSummary({
                 <ul className="m-0 grid list-none gap-1 p-0">
                   {poll.electorate.map((group, i) => (
                     <li key={i}>
-                      {t(TIER_LABEL[group.tier])}:{" "}
+                      {t(tierMessage(group.tier, phoneVerification))}:{" "}
                       <span className="tabular-nums">
                         {t("groupMembers", { count: BigInt(group.groupSize) })}
                       </span>

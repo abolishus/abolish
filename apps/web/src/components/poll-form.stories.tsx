@@ -152,7 +152,7 @@ const solves = (challenge: unknown) => (challenge as ReturnType<typeof fakeChall
 
 const meta = {
   component: PollFormPage,
-  args: { now: () => NOW, timeZone: "America/New_York" },
+  args: { now: () => NOW, timeZone: "America/New_York", phoneVerification: false },
 } satisfies Meta<typeof PollFormPage>;
 
 export default meta;
@@ -292,6 +292,8 @@ export const TopicAndPlace: Story = {
     ]);
     await expect(review.getByText("November 4, 2026 at 3:00 PM UTC")).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
+    // With phone verification off, Tier 0 is named by the e-mail alone.
+    await expect(review.getByText("Tier 0 (verified e-mail)")).toBeVisible();
     await userEvent.click(review.getByRole("link", { name: "Change Topic" }));
     await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveFocus();
 
@@ -313,6 +315,19 @@ export const TopicAndPlace: Story = {
     const second = writes(args.client)[1]![2];
     await expect(second).not.toHaveProperty("topic");
     await expect(second).not.toHaveProperty("place");
+  },
+};
+
+/** With phone verification on, Tier 0 is named by both checks, in the form and its review. */
+export const PhoneVerification: Story = {
+  args: { client: fakeDrafts(), phoneVerification: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
+    await expect(who.getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
+    const review = within(canvas.getByRole("region", { name: "Check it through" }));
+    await expect(review.getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
+    await expect(canvas.queryByText("Tier 0 (verified e-mail)")).toBeNull();
   },
 };
 

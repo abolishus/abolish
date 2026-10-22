@@ -5,6 +5,8 @@ import type { PollTopic } from "@abolishus/core/poll-topics";
 import type { PollFailure } from "@abolishus/core/poll-failures";
 import type { Message } from "@abolishus/ui";
 
+import type { Tier } from "./poll.ts";
+
 const enUS = {
   siteName: "Abolish",
   homeTitle: "Ask anything. Anyone can answer. Anyone can check the count.",
@@ -538,6 +540,8 @@ const enUS = {
   factShortLink: "Short link",
   factElectorate: "Who can vote",
   tier0: "Tier 0 (passkey)",
+  tier0_email: "Tier 0 (verified e-mail)",
+  tier0_phone: "Tier 0 (verified e-mail and phone)",
   tier1: "Tier 1 (vouched)",
   tier2: "Tier 2 (document-verified)",
   groupMembers: { one: "{count} member", other: "{count} members" },
@@ -1205,6 +1209,20 @@ export const POLL_TOPIC_MESSAGES: Readonly<Record<PollTopic, keyof Messages>> = 
   technology: "pollTopic_technology",
   transport: "pollTopic_transport",
 };
+
+/**
+ * A tier's name on a poll's page and in its editor, or none for a tier that
+ * has no name. Tier 0 is named by what this deployment checks before an
+ * account takes a token (`PHONE_VERIFICATION`; [[0038-verified-accounts]],
+ * Owner decision (2026-10-22)), so a poll never claims a phone check the
+ * issuer doesn't make (T-01).
+ */
+export function tierMessage(tier: Tier, phoneVerification: boolean): keyof Messages;
+export function tierMessage(tier: number, phoneVerification: boolean): keyof Messages | undefined;
+export function tierMessage(tier: number, phoneVerification: boolean): keyof Messages | undefined {
+  if (tier === 0) return phoneVerification ? "tier0_phone" : "tier0_email";
+  return tier === 1 ? "tier1" : tier === 2 ? "tier2" : undefined;
+}
 
 export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };
 

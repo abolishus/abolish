@@ -48,6 +48,7 @@ const meta = {
     code: "mhanrsz",
     share: { url: "https://abolish.us/p/mhanrsz", title: "Poll mhanrsz" },
     reactions,
+    phoneVerification: false,
   },
 } satisfies Meta<typeof PollSummary>;
 
@@ -75,6 +76,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // The surface: where the poll stands, who can vote, when, and how answering works.
   await expect(canvas.getByText("Open for answers")).toBeVisible();
   await expect(canvas.getByText("3 options")).toBeVisible();
+  // With phone verification off, Tier 0 is named by the e-mail alone.
+  await expect(canvas.getByText("Tier 0 (verified e-mail)")).toBeVisible();
   await expect(canvas.getByRole("heading", { name: "Answering" })).toBeVisible();
   await expect(canvas.getByText(/only in the ballot app, never on this website/)).toBeVisible();
   await expect(canvas.getByRole("button", { name: "Share this poll" })).toBeVisible();
@@ -103,6 +106,18 @@ const play: Story["play"] = async ({ canvasElement }) => {
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/** With phone verification on, Tier 0 is named by both checks, on the surface and in the evidence. */
+export const PhoneVerification: Story = {
+  args: { phoneVerification: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
+    await openEvidence(canvasElement);
+    await expect(canvas.getByText(/^Tier 0 \(verified e-mail and phone\):/)).toBeVisible();
+    await expect(canvas.queryByText(/^Tier 0 \(verified e-mail\)/)).toBeNull();
+  },
+};
 
 /** Before `opens_at`: not open yet, with its opening time on the surface. */
 export const Scheduled: Story = {

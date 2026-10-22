@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { turnstileChallenge } from "../account/challenge.ts";
 import { draftsClient } from "../account/drafts.ts";
 import { PollFormPage } from "../components/poll-form.tsx";
-import { fetchChallengeKey } from "../data.ts";
+import { fetchChallengeKey, fetchPhoneVerification } from "../data.ts";
 
 // An author's draft, `/account/polls/<id>`, and a new one, `/account/polls/new`
 // (a poll ID is 32 lower-case letters and digits, so never `new`). One route,
@@ -15,11 +15,14 @@ import { fetchChallengeKey } from "../data.ts";
 // a submitted poll goes on to "Setting up your poll" as a new document, so
 // the widget's script never runs under any other page's.
 export const Route = createFileRoute("/account_/polls/$id")({
-  loader: async () => ({ siteKey: await fetchChallengeKey() }),
+  loader: async () => ({
+    siteKey: await fetchChallengeKey(),
+    phoneVerification: await fetchPhoneVerification(),
+  }),
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
   component: function AccountPoll() {
     const { id } = Route.useParams();
-    const { siteKey } = Route.useLoaderData();
+    const { siteKey, phoneVerification } = Route.useLoaderData();
     const navigate = useNavigate();
     const challenge = useMemo(
       () => (siteKey === null ? undefined : turnstileChallenge(siteKey)),
@@ -30,6 +33,7 @@ export const Route = createFileRoute("/account_/polls/$id")({
         client={draftsClient}
         id={id === "new" ? undefined : id}
         challenge={challenge}
+        phoneVerification={phoneVerification}
         onCreated={(created) =>
           void navigate({ to: "/account/polls/$id", params: { id: created }, replace: true })
         }

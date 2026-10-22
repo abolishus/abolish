@@ -48,7 +48,7 @@ async function deliverAgainst(answer: () => Response, delivery = DELIVERY, seat 
   return { read, calls };
 }
 
-const octets = (body: Uint8Array | string, status = 200) =>
+const octets = (body: Uint8Array<ArrayBuffer> | string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/octet-stream" } });
 const text = (body: string, status = 422) =>
   new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });

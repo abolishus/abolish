@@ -26,6 +26,7 @@ import type { Sql } from "postgres";
 import { type BallotAdmissions, SubmitError } from "./admission.ts";
 import {
   parsePostingPair,
+  POSTING_MAX_DATA,
   POSTING_SEND_MARGIN,
   POSTING_WAIT,
   POSTING_WORKER_REFUSALS,
@@ -121,9 +122,11 @@ export interface PostingToSend {
 /**
  * The relay's durable record and the posting key (docs/spec/posting-relay.md,
  * Sending, steps 2, 5 and 6; Caps). A call that fails without an answer
- * rejects, and the pair stays queued for the next tick; `send` must have
- * kept its record of anything it broadcast before it resolves, so a repeat
- * is answered by `sent` and never paid twice.
+ * rejects, and the pair stays queued for the next tick. So that a posting
+ * is never paid for twice (ADR 0042, rule 4), `send` checks `sent(key)`
+ * again under the same lock or transaction it records in, writes its
+ * record of the transaction before broadcasting it, and never rejects once
+ * it has broadcast: a broadcast that fails is the record's to rebroadcast.
  */
 export interface PostingLedger {
   /** Step 2: the last transaction that carried this posting, if the relay sent it. */
@@ -220,6 +223,9 @@ export class PostingWorker {
   // For each queued posting that went unanswered: the first such tick's time
   // and how many there were. Dropped once it leaves the queue.
   readonly #unanswered = new Map<string, { readonly since: number; readonly ticks: number }>();
+  // One tick at a time: an overlapping tick would judge the same pairs
+  // and could hand the ledger the same posting twice.
+  #running = false;
 
   constructor(options: PostingWorkerOptions) {
     const { forcedInclusion = PINNED_FORCED_INCLUSION } = options;
@@ -236,12 +242,24 @@ export class PostingWorker {
   }
 
   /**
-   * One tick, every `POSTING_TICK_MS`: the index, then every queued pair in
-   * Redis's hash order, never one the route sets. A Redis or database
-   * failure throws, leaving every pair not yet answered queued for the next
-   * tick; the index, unwritten, ages out and the route answers unavailable.
+   * One tick, every `POSTING_TICK_MS`: every queued pair in Redis's hash
+   * order, never one the route sets, then the index. Resolves null while
+   * another tick of this worker runs. A Redis failure throws, leaving every
+   * pair not yet answered queued for the next tick, and the index,
+   * unwritten, ages out, so the route answers unavailable rather than queue
+   * pairs nothing judges.
    */
-  async tick(): Promise<PostingTickReport> {
+  async tick(): Promise<PostingTickReport | null> {
+    if (this.#running) return null;
+    this.#running = true;
+    try {
+      return await this.#tick();
+    } finally {
+      this.#running = false;
+    }
+  }
+
+  async #tick(): Promise<PostingTickReport> {
     const answered = Object.fromEntries(
       ["sent", ...POSTING_WORKER_REFUSALS].map((c) => [c, 0]),
     ) as Record<"sent" | PostingWorkerRefusal, number>;
@@ -257,18 +275,12 @@ export class PostingWorker {
     if (typeof head.timestamp !== "bigint" || head.timestamp < 0n || head.timestamp > U64_MAX)
       return { chain: false, answered, kept };
     const now = this.#now();
-    await this.#redis.eval(
-      WRITE_INDEX,
-      1,
-      this.#keys.index,
-      postingIndexValue({ at: now, l2Time: head.timestamp }),
-    );
-    const queued = fields(await this.#redis.eval(READ_ALL, 1, this.#keys.queue));
+    const queued = fields(await this.#eval(READ_ALL, 1, this.#keys.queue));
     const present = new Set(queued.map(([key]) => key));
     for (const key of this.#unanswered.keys()) if (!present.has(key)) this.#unanswered.delete(key);
 
     const answer = async (key: string, outcome: PostingOutcome) => {
-      await this.#redis.eval(
+      await this.#eval(
         ANSWER,
         2,
         this.#keys.queue,
@@ -301,13 +313,19 @@ export class PostingWorker {
     >();
     for (const [key, value] of queued) {
       if (!KEY.test(key)) {
-        await this.#redis.eval(DROP, 1, this.#keys.queue, key);
+        await this.#eval(DROP, 1, this.#keys.queue, key);
         continue;
       }
       // Step 1: the worker doesn't take the route's word for the bytes, or
       // for anything it counts by.
       const pair = parsePostingPair(value);
-      if (pair === undefined || postingKey(pair.posting) !== key) {
+      // The calldata's bound too: a pair past it couldn't be forced through
+      // L1, whoever wrote it to the queue.
+      if (
+        pair === undefined ||
+        postingKey(pair.posting) !== key ||
+        postingCalldataLength(pair.posting.length, pair.ballot.length) > POSTING_MAX_DATA
+      ) {
         await refuse(key, "malformed");
         continue;
       }
@@ -332,13 +350,18 @@ export class PostingWorker {
       // An election the route judged but this worker can't, under its own
       // pins and our index, is a configuration apart from the route's: the
       // relay can't establish what it would pay for.
-      const electionId = await registeredElection(this.#sql, form.definitionHash);
+      // A database failure leaves this pair unanswered, not the pairs
+      // after it in the hash's order.
+      let electionId: Uint8Array | undefined;
       let election: Election | undefined;
-      if (electionId !== undefined) {
-        try {
+      try {
+        electionId = await registeredElection(this.#sql, form.definitionHash);
+        if (electionId !== undefined)
           election = await this.#admissions.postings(this.#sql, electionId);
-        } catch (e) {
-          if (!(e instanceof SubmitError)) throw e;
+      } catch (e) {
+        if (!(e instanceof SubmitError)) {
+          await unanswered(key);
+          continue;
         }
       }
       if (electionId === undefined || election === undefined) {
@@ -437,6 +460,25 @@ export class PostingWorker {
         await answer(p.key, outcome);
       }
     }
+    // Last, so a worker that can't judge stops vouching for the queue.
+    await this.#eval(
+      WRITE_INDEX,
+      1,
+      this.#keys.index,
+      postingIndexValue({ at: now, l2Time: head.timestamp }),
+    );
     return { chain: true, answered, kept };
+  }
+
+  /**
+   * One script. Its error is dropped, since the client's message can quote
+   * the script's arguments, a posting's key or a transaction (T-11, T-18).
+   */
+  async #eval(script: string, numkeys: number, ...keysThenArgs: string[]): Promise<unknown> {
+    try {
+      return await this.#redis.eval(script, numkeys, ...keysThenArgs);
+    } catch {
+      throw new Error("the posting relay's store failed");
+    }
   }
 }

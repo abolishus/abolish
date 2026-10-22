@@ -21,6 +21,7 @@ import {
   parsePostingIndex,
   parsePostingOutcome,
   POSTING_GAS_LIMIT_MAX,
+  POSTING_MAX_DATA,
   POSTING_SEND_MARGIN,
   POSTING_UNANSWERED_SPAN,
   POSTING_UNANSWERED_TICKS,
@@ -127,7 +128,7 @@ async function queue(pair: { posting: Uint8Array; ballot: Uint8Array }): Promise
 const outcomeOf = async (key: string) => parsePostingOutcome(await redis.get(keys().outcome(key)));
 
 /** `admitAll` admitting the fixture's posted ballots, as the verifier would admit a member's. */
-function admitting(tier = TIER): BallotAdmissions {
+function admitting(tier = TIER, nullifierOffset = 0n): BallotAdmissions {
   const real = new BallotAdmissions({ panels: [panel], clock });
   const known = [first, second];
   return Object.assign(Object.create(real) as BallotAdmissions, {
@@ -145,7 +146,7 @@ function admitting(tier = TIER): BallotAdmissions {
               ok: true,
               ballotHash: b.hash,
               tier,
-              nullifier: b.nullifier,
+              nullifier: b.nullifier + nullifierOffset,
               message: new Uint8Array(32),
               l1RefNumber: 0n,
               l1RefHash: new Uint8Array(32),
@@ -211,10 +212,17 @@ function workerWith(o: WorkerOptions = {}) {
   return { worker, calls };
 }
 
+/** A tick that ran: none overlaps in these tests. */
+async function ticked(worker: PostingWorker) {
+  const report = await worker.tick();
+  if (report === null) throw new Error("a tick overlapped");
+  return report;
+}
+
 describe("the index", { timeout: 60_000 }, () => {
   test("each tick writes when it read the L2's latest block, and that block's time", async () => {
     const { worker } = workerWith({ head: async () => ({ number: 7n, timestamp: 1234n }) });
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.chain).toBe(true);
     expect(parsePostingIndex(await redis.get(keys().index))).toEqual({ at: NOW, l2Time: 1234n });
   });
@@ -226,7 +234,7 @@ describe("the index", { timeout: 60_000 }, () => {
         throw new Error("https://node.example/key-in-url unreachable");
       },
     });
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.chain).toBe(false);
     expect(report.kept).toBe(0);
     expect(await redis.get(keys().index)).toBeNull();
@@ -240,7 +248,7 @@ describe("an honest pair", { timeout: 60_000 }, () => {
     const pair = pairOf(2);
     const key = await queue(pair);
     const { worker, calls } = workerWith();
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.answered.sent).toBe(1);
     expect(report.kept).toBe(0);
     expect(calls.sends).toHaveLength(1);
@@ -273,7 +281,7 @@ describe("an honest pair", { timeout: 60_000 }, () => {
     for (const code of ["ballot-cap", "budget", "too-late"] as const) {
       const key = await queue(pairOf(3));
       const { worker } = workerWith({ send: async () => ({ sent: false, code }) });
-      const report = await worker.tick();
+      const report = await ticked(worker);
       expect(report.answered[code]).toBe(1);
       expect(await outcomeOf(key)).toEqual({ sent: false, code });
       expect(await redis.hlen(keys().queue)).toBe(0);
@@ -287,7 +295,7 @@ describe("an honest pair", { timeout: 60_000 }, () => {
       await queue(pairOf(1, second)),
     ];
     const { worker, calls } = workerWith();
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(batches).toEqual([3]);
     expect(report.answered.sent).toBe(3);
     expect(calls.sends.map((s) => s.key).sort()).toEqual(queued.sort());
@@ -302,7 +310,7 @@ describe("step 1: the bytes again", { timeout: 60_000 }, () => {
     const garbled = postingKey(new Uint8Array([1, 2, 3]));
     await redis.hset(keys().queue, garbled, "not a pair");
     const { worker, calls } = workerWith();
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.answered.malformed).toBe(2);
     for (const key of [other, garbled])
       expect(await outcomeOf(key)).toEqual({ sent: false, code: "malformed" });
@@ -321,7 +329,7 @@ describe("step 1: the bytes again", { timeout: 60_000 }, () => {
           posting[at] = (posting[at] as number) ^ flip;
           const key = await queue({ posting, ballot: honest.ballot });
           const { worker, calls } = workerWith();
-          const report = await worker.tick();
+          const report = await ticked(worker);
           // A change in `m` or the ciphertext keeps the posting well formed:
           // the public check is the route's, so the worker passes it on to
           // admission and the simulation, which a real board refuses.
@@ -342,7 +350,7 @@ describe("step 1: the bytes again", { timeout: 60_000 }, () => {
   test("a field that can't be a posting's key is dropped, with no outcome", async () => {
     await redis.hset(keys().queue, "nonsense", "x");
     const { worker } = workerWith();
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.kept).toBe(0);
     expect(Object.values(report.answered).every((n) => n === 0)).toBe(true);
     expect((await keysUnder()).sort()).toEqual([keys().index]);
@@ -357,7 +365,7 @@ describe("step 2: a repeat", { timeout: 60_000 }, () => {
       sent: async (k) => (k === key ? { transaction: L1, layer: "l1" } : undefined),
       head: async () => ({ number: 10n, timestamp: LAST + 1n }),
     });
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.answered.sent).toBe(1);
     // Even past the send cutoff: it was sent before it.
     expect(await outcomeOf(key)).toEqual({ sent: true, transaction: L1, layer: "l1" });
@@ -374,7 +382,7 @@ describe("step 3: the send cutoff", { timeout: 60_000 }, () => {
     ] as const) {
       const key = await queue(pairOf());
       const { worker } = workerWith({ head: async () => ({ number: 10n, timestamp }) });
-      await worker.tick();
+      await ticked(worker);
       expect(await outcomeOf(key)).toEqual(expected);
       await redis.del(keys().outcome(key));
     }
@@ -383,7 +391,7 @@ describe("step 3: the send cutoff", { timeout: 60_000 }, () => {
   test("an election this worker can't judge is unavailable", async () => {
     const key = await queue(pairOf());
     const { worker, calls } = workerWith({ admissions: { postings: async () => undefined } });
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.answered.unavailable).toBe(1);
     expect(await outcomeOf(key)).toEqual({ sent: false, code: "unavailable" });
     expect(calls.simulated + calls.sends.length).toBe(0);
@@ -398,7 +406,7 @@ describe("step 4: admission, then the simulation", { timeout: 120_000 }, () => {
     const { worker, calls } = workerWith({
       admissions: new BallotAdmissions({ panels: [panel], clock }),
     });
-    const report = await worker.tick();
+    const report = await ticked(worker);
     expect(report.answered.simulation).toBe(2);
     for (const key of queued)
       expect(await outcomeOf(key)).toEqual({ sent: false, code: "simulation" });
@@ -409,7 +417,7 @@ describe("step 4: admission, then the simulation", { timeout: 120_000 }, () => {
   test("a simulation that reverts is refused", async () => {
     const key = await queue(pairOf());
     const { worker, calls } = workerWith({ simulate: async () => ({ reverted: true }) });
-    await worker.tick();
+    await ticked(worker);
     expect(await outcomeOf(key)).toEqual({ sent: false, code: "simulation" });
     expect(calls.sends).toHaveLength(0);
   });
@@ -424,7 +432,7 @@ describe("step 4: admission, then the simulation", { timeout: 120_000 }, () => {
       const { worker, calls } = workerWith({
         simulate: async () => ({ reverted: false, gasUsed }),
       });
-      await worker.tick();
+      await ticked(worker);
       expect(await outcomeOf(key)).toEqual(expected);
       if (expected.sent) expect(calls.sends[0]?.gasLimit).toBe(POSTING_GAS_LIMIT_MAX);
       await redis.del(keys().outcome(key));
@@ -446,12 +454,12 @@ describe("a pair with no verdict", { timeout: 60_000 }, () => {
       const { worker } = workerWith({ ...options, now: () => now });
       const step = POSTING_UNANSWERED_SPAN / (POSTING_UNANSWERED_TICKS - 1);
       for (let i = 0; i < POSTING_UNANSWERED_TICKS - 1; i++) {
-        const report = await worker.tick();
+        const report = await ticked(worker);
         expect(report.kept).toBe(1);
         expect(await redis.hlen(keys().queue)).toBe(1);
         now += step;
       }
-      const report = await worker.tick();
+      const report = await ticked(worker);
       expect(report.answered.unavailable).toBe(1);
       expect(await outcomeOf(key)).toEqual({ sent: false, code: "unavailable" });
     });
@@ -461,7 +469,7 @@ describe("a pair with no verdict", { timeout: 60_000 }, () => {
     let now = NOW;
     const { worker } = workerWith({ ...failing.simulation, now: () => now });
     for (let i = 0; i < 3 * POSTING_UNANSWERED_TICKS; i++) {
-      const report = await worker.tick();
+      const report = await ticked(worker);
       expect(report.kept).toBe(1);
       now += 2;
     }
@@ -476,9 +484,9 @@ describe("a pair with no verdict", { timeout: 60_000 }, () => {
         return { reverted: false, gasUsed: GAS_USED };
       },
     });
-    expect((await worker.tick()).kept).toBe(1);
+    expect((await ticked(worker)).kept).toBe(1);
     down = false;
-    expect((await worker.tick()).answered.sent).toBe(1);
+    expect((await ticked(worker)).answered.sent).toBe(1);
     expect(await outcomeOf(key)).toEqual({ sent: true, transaction: TX, layer: "l2" });
   });
 });
@@ -509,3 +517,143 @@ describe("postingGasLimit", () => {
     expect(() => postingGasLimit(0n, 1.5)).toThrow(RangeError);
   });
 });
+
+describe("the review's edges", { timeout: 60_000 }, () => {
+  test("a tick while another runs does nothing", async () => {
+    await queue(pairOf());
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { worker, calls } = workerWith({
+      simulate: async () => {
+        await held;
+        return { reverted: false, gasUsed: GAS_USED };
+      },
+    });
+    const firstTick = worker.tick();
+    // Let the first tick reach its simulation.
+    while (calls.simulated === 0) await new Promise((r) => setTimeout(r, 5));
+    expect(await worker.tick()).toBeNull();
+    release();
+    expect((await firstTick)?.answered.sent).toBe(1);
+    expect(calls.sends).toHaveLength(1);
+  });
+
+  test("the index is written only once the queue is judged", async () => {
+    const key = await queue(pairOf());
+    const { worker } = workerWith({
+      sent: async () => {
+        expect(await redis.get(keys().index)).toBeNull();
+        return undefined;
+      },
+    });
+    await ticked(worker);
+    expect(await outcomeOf(key)).toEqual({ sent: true, transaction: TX, layer: "l2" });
+    expect(await redis.get(keys().index)).not.toBeNull();
+  });
+
+  test("a Redis failure throws an error that quotes nothing of the pair", async () => {
+    const key = await queue(pairOf());
+    const { worker } = workerWith();
+    const failing = new PostingWorker({
+      sql: app,
+      redis: {
+        eval: async (script: string, numkeys: number, ...args: string[]) => {
+          throw new Error(`ERR in ${script.length} with ${numkeys} ${args.join(" ")}`);
+        },
+      },
+      chain: {
+        latest: async () => ({ number: 1n, timestamp: LAST }),
+        simulate: async () => ({ reverted: true }),
+      },
+      ledger: { sent: async () => undefined, send: async () => ({ sent: false, code: "budget" }) },
+      admissions: admitting(),
+      now: () => NOW,
+      prefix,
+    });
+    const error = await failing.tick().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(key);
+    expect((error as Error).message).not.toContain(prefix);
+    // The healthy worker still judges the pair afterwards.
+    expect((await ticked(worker)).answered.sent).toBe(1);
+  });
+
+  test("calldata over POSTING_MAX_DATA is malformed, whoever queued it", async () => {
+    const pair = pairOf();
+    const ballot = new Uint8Array(POSTING_MAX_DATA);
+    ballot.set(pair.ballot);
+    const key = await queue({ posting: pair.posting, ballot });
+    const { worker, calls } = workerWith();
+    await ticked(worker);
+    expect(await outcomeOf(key)).toEqual({ sent: false, code: "malformed" });
+    expect(calls.sentLookups).toBe(0);
+  });
+
+  test("admission disagreeing with postingForm is malformed, never sent", async () => {
+    const key = await queue(pairOf());
+    const { worker, calls } = workerWith({ admissions: admitting(TIER, 1n) });
+    await ticked(worker);
+    expect(await outcomeOf(key)).toEqual({ sent: false, code: "malformed" });
+    expect(calls.simulated + calls.sends.length).toBe(0);
+  });
+
+  test("a head whose time isn't a u64 judges nothing", async () => {
+    await queue(pairOf());
+    for (const timestamp of [-1n, 1n << 64n, 5 as unknown as bigint]) {
+      const { worker, calls } = workerWith({ head: async () => ({ number: 1n, timestamp }) });
+      const report = await ticked(worker);
+      expect(report.chain).toBe(false);
+      expect(calls.sentLookups).toBe(0);
+      expect(await redis.get(keys().index)).toBeNull();
+    }
+  });
+
+  test("a simulation answering no gas amount leaves the pair unanswered", async () => {
+    for (const gasUsed of [-1n, 7 as unknown as bigint]) {
+      await queue(pairOf());
+      const { worker, calls } = workerWith({
+        simulate: async () => ({ reverted: false, gasUsed }),
+      });
+      expect((await ticked(worker)).kept).toBe(1);
+      expect(calls.sends).toHaveLength(0);
+    }
+  });
+
+  test("fewer than POSTING_UNANSWERED_TICKS failing ticks keep it, however far apart", async () => {
+    await queue(pairOf());
+    let now = NOW;
+    const { worker } = workerWith({ ...failingSimulation, now: () => now });
+    for (let i = 0; i < POSTING_UNANSWERED_TICKS - 1; i++) {
+      expect((await ticked(worker)).kept).toBe(1);
+      now += 10 * POSTING_UNANSWERED_SPAN;
+    }
+  });
+
+  test("a database failure on one election leaves that pair unanswered, not the others", async () => {
+    const stuck = await queue(pairOf(1));
+    const fine = await queue(pairOf(2));
+    const real = admitting();
+    const { worker } = workerWith({
+      admissions: {
+        postings: async (sql, id) => {
+          if (current === stuck) throw new Error("connection lost");
+          return real.postings(sql, id);
+        },
+      },
+      sent: async (k) => {
+        current = k;
+        return undefined;
+      },
+    });
+    let current = "";
+    const report = await ticked(worker);
+    expect(report.kept).toBe(1);
+    expect(report.answered.sent).toBe(1);
+    expect(await outcomeOf(fine)).toEqual({ sent: true, transaction: TX, layer: "l2" });
+    expect(await redis.hkeys(keys().queue)).toEqual([stuck]);
+  });
+});
+
+const failingSimulation: WorkerOptions = {
+  simulate: () => Promise.reject(new Error("node down")),
+};

@@ -818,15 +818,18 @@ export function PollFormPage({
   // A check still showing when the page goes is taken down with it.
   useEffect(() => () => solving.current?.abort(), []);
 
+  // Counts the profile's reads, so only the newest one's answer is kept.
+  const profileReads = useRef(0);
   const readProfile = useCallback(async () => {
     if (profiles === undefined) return;
-    // Unreadable is shown as no choice: the account page says why.
-    setProfile(
-      await profiles.own().then(
-        (p) => p ?? null,
-        () => undefined,
-      ),
+    const read = ++profileReads.current;
+    // A failed read keeps the profile as last read, or no choice before a
+    // first read: the account page says why.
+    const p = await profiles.own().then(
+      (p) => p ?? null,
+      () => undefined,
     );
+    if (p !== undefined && read === profileReads.current) setProfile(p);
   }, [profiles]);
 
   useEffect(() => void readProfile(), [readProfile]);

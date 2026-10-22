@@ -106,14 +106,15 @@ export function AccountPolls({
       .finally(() => setBusy(false));
   }, [refresh, failed]);
 
-  // The profile's own section says when it can't be read; here there is just no choice.
+  // The profile's own section says when it can't be read; here a failed
+  // read keeps the boxes as last read, and none before a first read.
   useEffect(() => {
     if (profiles === undefined) return;
     let live = true;
     profiles
       .own()
       .then((p) => live && setProfile(p))
-      .catch(() => live && setProfile(undefined));
+      .catch(() => {});
     return () => {
       live = false;
     };

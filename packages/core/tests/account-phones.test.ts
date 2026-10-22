@@ -974,10 +974,12 @@ describe("rotatePhoneHashes", () => {
       const b = await newAccount();
       await ask(b, n, { keys: ONE_STAGED, p });
       const q = provider();
+      // Made before the race, so every promise below is handled from the start.
+      const d = await newAccount();
       const [rotation, answer, last] = await Promise.allSettled([
         rotatePhoneHashes(app2, TWO),
         enter(b, n, CODE, { keys: ONE_STAGED, p, client: app }),
-        ask(await newAccount(), c, { keys: ONE_STAGED, p: q }),
+        ask(d, c, { keys: ONE_STAGED, p: q }),
       ]);
       expect(rotation.status).toBe("fulfilled");
       expect(answer.status === "rejected" && answer.reason.code).toBe("number-held");

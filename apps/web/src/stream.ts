@@ -44,7 +44,8 @@ export type StreamQuery =
 export function streamQuery(q: string | undefined): StreamQuery {
   const trimmed = q?.trim() ?? "";
   if (trimmed === "") return { kind: "none" };
-  if (trimmed.length > MAX_STREAM_QUERY || !QUERY.test(trimmed)) return { kind: "refused" };
+  // Code points, as the API contract's `maxLength` counts them.
+  if ([...trimmed].length > MAX_STREAM_QUERY || !QUERY.test(trimmed)) return { kind: "refused" };
   return { kind: "search", q: trimmed };
 }
 

@@ -263,6 +263,9 @@ describe("streamQuery", () => {
     expect(streamQuery("a".repeat(MAX_SEARCH_QUERY)).kind).toBe("search");
     expect(streamQuery(` ${"a".repeat(MAX_SEARCH_QUERY)} `).kind).toBe("search");
     expect(streamQuery("a".repeat(MAX_SEARCH_QUERY + 1))).toEqual({ kind: "refused" });
+    // Code points, as the contract counts them, not UTF-16 units.
+    expect(streamQuery("\u{10000}".repeat(MAX_SEARCH_QUERY)).kind).toBe("search");
+    expect(streamQuery("\u{10000}".repeat(MAX_SEARCH_QUERY + 1))).toEqual({ kind: "refused" });
   });
 
   test("searches for exactly the queries the API's contract takes, trimmed", () => {

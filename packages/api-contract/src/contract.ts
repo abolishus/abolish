@@ -92,7 +92,7 @@ const getDisplayText = oc
 export const MAX_SEARCH_QUERY = 200;
 export const MAX_SEARCH_TERMS = 8;
 
-/** One to `MAX_SEARCH_TERMS` whitespace-separated terms, at most `MAX_SEARCH_QUERY` characters. */
+/** One to `MAX_SEARCH_TERMS` whitespace-separated terms, at most `MAX_SEARCH_QUERY` code points. */
 const SearchQuery = z
   .string()
   .check(

@@ -79,7 +79,11 @@ function afterAnswer(sender: EmailSender, log: EmailOptions["log"]): EmailSender
   const failed = () => log({ error: "EmailSendUnavailable" });
   return {
     send: async (message) => {
-      sender.send(message).then((outcome) => outcome === "sent" || failed(), failed);
+      sender
+        .send(message)
+        .then((outcome) => outcome === "sent" || failed(), failed)
+        // Nothing may reject unobserved here: an unhandled rejection stops Node.
+        .catch(() => {});
       return "sent";
     },
   };

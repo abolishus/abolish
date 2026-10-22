@@ -29,7 +29,7 @@ import {
 } from "../src/index.ts";
 import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 
-// Search over question text (src/search.ts, migrations/0026; P2-23 part 4;
+// Search over question text (src/search.ts, migrations/0027; P2-23 part 4;
 // T-17, T-68): each stored display text's titles and questions, normalised,
 // filter the listing's orders; the row goes with its display text, and
 // delisted or hidden polls stay out of every search.

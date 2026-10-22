@@ -1,6 +1,6 @@
 // Search over question text (P2-23 part 4). Each stored display text gets one
 // row of normalised text, its titles and questions in every translation, in
-// display_text_search (migrations/0026_display_text_search.sql), which a
+// display_text_search (migrations/0027_display_text_search.sql), which a
 // foreign key deletes with the display text: a takedown that deletes the text
 // leaves nothing of it to be found by search (T-17, T-68). The row is written
 // from the record @abolishus/crypto checked and decoded when it was stored, so
@@ -100,7 +100,7 @@ const FILL_BATCH = 100;
 
 /**
  * Writes the search row of every stored display text that has none: those
- * stored before migration 0026 added the table, or by a `storeDisplayText`
+ * stored before migration 0027 added the table, or by a `storeDisplayText`
  * call interrupted between its two writes. Returns how many it wrote. Every
  * stored text passed the show check against its stored definition when it was
  * stored, so one that doesn't now is an error.

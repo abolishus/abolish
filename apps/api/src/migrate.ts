@@ -32,7 +32,7 @@ try {
   const applied = await migrate(sql, env.DATABASE_SCHEMA);
   // Data a migration's SQL can't derive: the times of definitions stored
   // before 0023 added their table, and the search text of display texts
-  // stored before 0026 added theirs, decoded by @abolishus/crypto.
+  // stored before 0027 added theirs, decoded by @abolishus/crypto.
   // Idempotent, so every run checks and a run that finds none writes nothing.
   const schedules = await fillElectionSchedules(sql);
   const search = await fillDisplayTextSearch(sql);

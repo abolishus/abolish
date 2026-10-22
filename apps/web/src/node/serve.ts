@@ -1,7 +1,8 @@
 // apps/web's HTTP front on node:http: the built Start handler for pages and
 // server functions, the account handler from @abolishus/core under /auth, an
 // author's poll drafts under /drafts (src/node/drafts.ts), an account's
-// e-mail address under /email (src/node/email.ts), and the client's hashed
+// e-mail address under /email (src/node/email.ts), its phone number under
+// /phone (src/node/phone.ts), and the client's hashed
 // assets from disk.
 //
 // The account system lives here, on apps/web's origin, so its host-only
@@ -39,6 +40,9 @@ export type DraftsHandler = (request: Request) => Promise<Response>;
 /** The e-mail handler (`createEmailHandler(...)` from src/node/email.ts). */
 export type EmailHandler = (request: Request) => Promise<Response>;
 
+/** The phone handler (`createPhoneHandler(...)` from src/node/phone.ts). */
+export type PhoneHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -46,6 +50,7 @@ export type RouteClass =
   | "auth"
   | "drafts"
   | "email"
+  | "phone"
   | "asset"
   | "ingest"
   | "refused";
@@ -91,6 +96,7 @@ export interface WebServerOptions {
   readonly accounts: AccountHandler;
   readonly drafts: DraftsHandler;
   readonly email: EmailHandler;
+  readonly phone: PhoneHandler;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -144,12 +150,13 @@ async function readBody(req: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> 
 }
 
 /** The route classes whose handlers get the account cookie. */
-const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set(["auth", "drafts", "email"]);
+const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set(["auth", "drafts", "email", "phone"]);
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
   if (path === "/drafts" || path.startsWith("/drafts/")) return "drafts";
   if (path === "/email" || path.startsWith("/email/")) return "email";
+  if (path === "/phone" || path.startsWith("/phone/")) return "phone";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
@@ -216,6 +223,7 @@ export function createWebServer({
   accounts,
   drafts,
   email,
+  phone,
   clientDir,
   origin,
   log,
@@ -301,12 +309,12 @@ export function createWebServer({
       ...(body === undefined ? {} : { body }),
     });
     if (!ACCOUNT_ROUTES.has(route)) return send(res, await start.fetch(request), method === "HEAD");
-    // The account, drafts and e-mail handlers answer JSON and set few
-    // headers of their own (src/security.ts covers pages). A copy: a
+    // The account, drafts, e-mail and phone handlers answer JSON and set
+    // few headers of their own (src/security.ts covers pages). A copy: a
     // response's own headers can be immutable.
-    const answer = await (route === "auth" ? accounts : route === "drafts" ? drafts : email)(
-      request,
-    );
+    const handler =
+      route === "auth" ? accounts : route === "drafts" ? drafts : route === "email" ? email : phone;
+    const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");
     response.headers.set("referrer-policy", "no-referrer");

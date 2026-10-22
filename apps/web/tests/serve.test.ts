@@ -9,6 +9,8 @@ import {
   emailKeys,
   type EmailMessage,
   parseKeyring,
+  type PhoneChannel,
+  type PhoneVerifier,
   TURNSTILE_HEADER,
   type TurnstileVerdict,
   moderate,
@@ -37,6 +39,7 @@ import type { ClientError, Page } from "../src/analytics.ts";
 import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
+import { createPhoneHandler } from "../src/node/phone.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 
 const ORIGIN = "https://abolish.test";
@@ -78,6 +81,41 @@ const provider: { send: "sent" | "unavailable" | "hang"; verdict: TurnstileVerdi
 const emailChecks: [string | null, TurnstileAction][] = [];
 const ring = (id: string) => parseKeyring(`${id}:${randomBytes(32).toString("hex")}`);
 const EMAIL_KEYS = emailKeys(ring("h1"), ring("b1"));
+
+/** The one code the phone handler's stand-in provider sends and approves. */
+const PHONE_CODE = "246810";
+/** What the stand-in provider was asked, and how it answers. */
+const phones = {
+  started: [] as [string, PhoneChannel][],
+  checked: [] as [string, string][],
+  pending: new Map<string, number>(),
+  lines: new Map<string, { country: string; lineType: string } | "invalid" | "unavailable">(),
+  start: "sent" as "sent" | "unavailable" | "throw" | "hang",
+  check: undefined as "unavailable" | undefined,
+  verdict: "passed" as TurnstileVerdict,
+};
+/** Every token a request for a phone code's Turnstile check saw. */
+const phoneChecks: [string | null, TurnstileAction][] = [];
+const phoneVerifier: PhoneVerifier = {
+  lookup: async (number) => {
+    const line = phones.lines.get(number) ?? { country: "US", lineType: "mobile" };
+    return typeof line === "string" ? line : { number, ...line };
+  },
+  start: async (number, channel) => {
+    phones.started.push([number, channel]);
+    if (phones.start === "hang") return new Promise<never>(() => {});
+    if (phones.start === "throw") throw new Error(`send to ${number} failed`);
+    if (phones.start === "sent") phones.pending.set(number, 1);
+    return phones.start;
+  },
+  check: async (number, code) => {
+    phones.checked.push([number, code]);
+    if (phones.check !== undefined) return phones.check;
+    if (code !== PHONE_CODE || phones.pending.get(number) !== 1) return "wrong";
+    phones.pending.delete(number);
+    return "approved";
+  },
+};
 
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
@@ -170,6 +208,20 @@ beforeAll(async () => {
         verify: async (token, action) => {
           emailChecks.push([token, action]);
           return provider.verdict;
+        },
+      },
+      origin: ORIGIN,
+      log: (line) => logged.push(line),
+      now: () => NOW,
+    }),
+    phone: createPhoneHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      service: { keys: ring("p1"), verifier: phoneVerifier, dailyCeiling: 10_000 },
+      turnstile: {
+        verify: async (token, action) => {
+          phoneChecks.push([token, action]);
+          return phones.verdict;
         },
       },
       origin: ORIGIN,
@@ -1220,6 +1272,234 @@ describe("an account's e-mail address under /email", () => {
   });
 });
 
+describe("an account's phone number under /phone", () => {
+  let numbers = 0;
+  /** A North American number no other test uses. */
+  const fresh = () => `+1415${4_000_000 + ++numbers}`;
+
+  /** A signed-in browser. */
+  async function signedIn() {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    return browser;
+  }
+
+  const ask = (browser: Browser, number: string) =>
+    browser.call("POST", "/phone/request", { number }, { [TURNSTILE_HEADER]: "solved" });
+
+  test("an account asks for a code, enters it with the number, and reads the day it verified", async () => {
+    const browser = await signedIn();
+    const number = fresh();
+    expect(await (await browser.call("GET", "/phone")).json()).toEqual({});
+    const before = phoneChecks.length;
+    // As typed: separators, no country code.
+    const typed = `(${number.slice(2, 5)}) ${number.slice(5, 8)}-${number.slice(8)}`;
+    const res = await ask(browser, typed);
+    expect(res.status).toBe(202);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({});
+    expect(phoneChecks.slice(before)).toEqual([["solved", "phone-code"]]);
+    expect(phones.started.at(-1)).toEqual([number, "sms"]);
+
+    const refused = await browser.call("POST", "/phone/verify", { number: typed, code: "135791" });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ code: "WRONG_CODE", status: 422, triesLeft: 4 });
+    const verified = await browser.call("POST", "/phone/verify", {
+      number: typed,
+      code: `${PHONE_CODE.slice(0, 3)} ${PHONE_CODE.slice(3)}`,
+    });
+    expect(verified.status).toBe(200);
+    expect(phones.checked.at(-1)).toEqual([number, PHONE_CODE]);
+    // The day only: the number is gone.
+    expect(await (await browser.call("GET", "/phone")).json()).toEqual({
+      verifiedOn: NOW.toISOString().slice(0, 10),
+    });
+    const spent = await browser.call("POST", "/phone/verify", { number, code: PHONE_CODE });
+    expect(await spent.json()).toEqual({ code: "NO_CODE", status: 409 });
+
+    // T-11, T-67, T-73: the log has the route class, never the number or the code.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "phone", status: 409 });
+    const log = JSON.stringify(logged);
+    expect(log).not.toContain(number.slice(2));
+    expect(log).not.toContain(PHONE_CODE);
+  });
+
+  test("a landline or fixed VoIP line is called, not texted", async () => {
+    const browser = await signedIn();
+    for (const lineType of ["landline", "fixedVoip"]) {
+      const number = fresh();
+      phones.lines.set(number, { country: "US", lineType });
+      expect((await ask(browser, number)).status).toBe(202);
+      expect(phones.started.at(-1)).toEqual([number, "call"]);
+    }
+  });
+
+  test("a number another account holds is asked for as any other, and refused only with its code (T-11)", async () => {
+    const number = fresh();
+    const first = await signedIn();
+    expect((await ask(first, number)).status).toBe(202);
+    expect((await first.call("POST", "/phone/verify", { number, code: PHONE_CODE })).status).toBe(
+      200,
+    );
+
+    const second = await signedIn();
+    const res = await ask(second, number);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({});
+    const held = await second.call("POST", "/phone/verify", { number, code: PHONE_CODE });
+    expect(held.status).toBe(409);
+    expect(await held.json()).toEqual({ code: "NUMBER_HELD", status: 409 });
+    expect(await (await second.call("GET", "/phone")).json()).toEqual({});
+  });
+
+  test.each(["unavailable", "throw"] as const)(
+    "a send the provider didn't take (%s) is answered as a sent one, and logged by kind",
+    async (outcome) => {
+      const errors = logged.filter((l) => "error" in l).length;
+      phones.start = outcome;
+      const number = fresh();
+      try {
+        const res = await ask(await signedIn(), number);
+        expect(res.status).toBe(202);
+        expect(await res.json()).toEqual({});
+      } finally {
+        phones.start = "sent";
+      }
+      await new Promise((r) => setTimeout(r, 20));
+      expect(logged.filter((l) => "error" in l).slice(errors)).toEqual([
+        { error: "PhoneSendUnavailable" },
+      ]);
+      expect(JSON.stringify(logged)).not.toContain(number.slice(2));
+    },
+  );
+
+  test("answers before the provider's send does, so a capped number can't be told apart by time (T-11)", async () => {
+    phones.start = "hang";
+    try {
+      const res = await ask(await signedIn(), fresh());
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({});
+    } finally {
+      phones.start = "sent";
+    }
+  });
+
+  test("a capped number is answered as any other, and sent nothing (T-11, T-52)", async () => {
+    const number = fresh();
+    // Five accounts, one request each, so no account's own limit is reached.
+    for (let i = 0; i < 5; i++) expect((await ask(await signedIn(), number)).status).toBe(202);
+    const before = phones.started.length;
+    const res = await ask(await signedIn(), number);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({});
+    expect(phones.started.length).toBe(before);
+  });
+
+  test("refuses what core refuses, with its code", async () => {
+    const browser = await signedIn();
+    const refusal = async (number: string) => (await ask(browser, number)).json();
+    expect(await refusal("12345")).toEqual({ code: "INVALID_NUMBER", status: 422 });
+    const lines = [
+      [{ country: "GB", lineType: "mobile" }, "UNSUPPORTED_COUNTRY", 422],
+      [{ country: "US", lineType: "nonFixedVoip" }, "VIRTUAL_NUMBER", 422],
+      ["invalid", "INVALID_NUMBER", 422],
+      ["unavailable", "LOOKUP_UNAVAILABLE", 503],
+    ] as const;
+    for (const [line, code, status] of lines) {
+      const number = fresh();
+      phones.lines.set(number, line);
+      expect(await refusal(number)).toEqual({ code, status });
+    }
+    // Those four and one more spend the account's five an hour; the malformed one cost none.
+    expect((await ask(browser, fresh())).status).toBe(202);
+    expect(await refusal(fresh())).toEqual({ code: "TOO_MANY_THIS_HOUR", status: 429 });
+
+    phones.verdict = "refused";
+    try {
+      expect(await (await ask(await signedIn(), fresh())).json()).toEqual({
+        code: "TURNSTILE_REFUSED",
+        status: 403,
+      });
+    } finally {
+      phones.verdict = "passed";
+    }
+  });
+
+  test("a check the provider doesn't answer spends no try, and says so", async () => {
+    const browser = await signedIn();
+    const number = fresh();
+    await ask(browser, number);
+    phones.check = "unavailable";
+    try {
+      const res = await browser.call("POST", "/phone/verify", { number, code: PHONE_CODE });
+      expect(await res.json()).toEqual({ code: "CHECK_UNAVAILABLE", status: 503 });
+    } finally {
+      phones.check = undefined;
+    }
+    const wrong = await browser.call("POST", "/phone/verify", { number, code: "135791" });
+    expect(await wrong.json()).toEqual({ code: "WRONG_CODE", status: 422, triesLeft: 4 });
+  });
+
+  test("needs a session, our origin and JSON, and serves only its routes", async () => {
+    const pages = started.length;
+    const signedOut = new Browser();
+    expect((await signedOut.call("GET", "/phone")).status).toBe(401);
+    expect((await signedOut.call("POST", "/phone/request", { number: fresh() })).status).toBe(401);
+
+    const browser = await signedIn();
+    const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const post = (headers: Record<string, string>) =>
+      fetch(`${base}/phone/verify`, {
+        method: "POST",
+        headers: { cookie, ...headers },
+        body: JSON.stringify({ number: fresh(), code: PHONE_CODE }),
+      });
+    expect(
+      (await post({ origin: "https://elsewhere.test", "content-type": "application/json" })).status,
+    ).toBe(403);
+    expect((await post({ "content-type": "application/json" })).status).toBe(403);
+    expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+    expect((await browser.call("GET", "/phone?x=1")).status).toBe(404);
+    expect((await browser.call("POST", "/phone", {})).status).toBe(404);
+    expect((await browser.call("GET", "/phone/request")).status).toBe(404);
+    expect((await browser.call("POST", "/phone/verify", { code: PHONE_CODE })).status).toBe(400);
+    expect(
+      (await browser.call("POST", "/phone/verify", { number: fresh(), code: "1", extra: 1 }))
+        .status,
+    ).toBe(400);
+    expect((await browser.call("POST", "/phone/request", { number: "1".repeat(257) })).status).toBe(
+      400,
+    );
+    expect(started).toHaveLength(pages);
+  });
+
+  test("answers 503 on every route where the deployment has no phone service", async () => {
+    const handler = createPhoneHandler({
+      sql,
+      accountOf: async () => newAccountId(),
+      service: undefined,
+      turnstile: { verify: async () => "passed" },
+      origin: ORIGIN,
+      log: () => {},
+    });
+    const headers = { origin: ORIGIN, "content-type": "application/json" };
+    for (const [method, path, body] of [
+      ["GET", "/phone", undefined],
+      ["POST", "/phone/request", '{"number":"+14155552671"}'],
+      ["POST", "/phone/verify", '{"number":"+14155552671","code":"123456"}'],
+    ] as const) {
+      const res = await handler(
+        new Request(`${ORIGIN}${path}`, {
+          method,
+          headers,
+          ...(body === undefined ? {} : { body }),
+        }),
+      );
+      expect(await res.json()).toEqual({ code: "PHONE_UNAVAILABLE", status: 503 });
+    }
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -1236,6 +1516,7 @@ describe("limits", () => {
       accounts: async () => new Response(null, { status: 404 }),
       drafts: async () => new Response(null, { status: 404 }),
       email: async () => new Response(null, { status: 404 }),
+      phone: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1260,6 +1541,7 @@ describe("limits", () => {
       accounts: async () => new Response(),
       drafts: async () => new Response(),
       email: async () => new Response(),
+      phone: async () => new Response(),
       clientDir,
       log: () => {},
     };

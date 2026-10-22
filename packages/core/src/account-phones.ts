@@ -90,7 +90,8 @@ const HASH_LABEL = new TextEncoder().encode("abolish/phone/v1");
 
 /**
  * The verification provider. `lookup`: the number in the provider's own
- * E.164 form, its country and its line type. `start`: send a code by
+ * E.164 form, its country and its line type, or `invalid` if it is no
+ * number the provider knows of. `start`: send a code by
  * `channel`. `check`: whether `code` is the one sent and still good; a code
  * the provider no longer has (expired, spent, never sent because the number
  * was capped, or past the provider's own limit on checks) is `wrong`.
@@ -107,6 +108,7 @@ export interface PhoneVerifier {
         readonly country: string;
         readonly lineType: string;
       }
+    | "invalid"
     | "unavailable"
   >;
   start(number: string, channel: PhoneChannel): Promise<"sent" | "unavailable">;
@@ -312,6 +314,7 @@ export async function requestPhoneCode(
   });
   const line = await verifier.lookup(number);
   if (line === "unavailable") throw new PhoneVerificationError("lookup-unavailable");
+  if (line === "invalid") throw new PhoneVerificationError("invalid-number");
   // One line, one chain: a number written in a form the provider reads
   // differently (a trunk prefix, say) would hash apart from its own E.164 one.
   if (line.number !== number) throw new PhoneVerificationError("invalid-number");

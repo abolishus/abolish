@@ -56,6 +56,7 @@ import {
   profileHandles,
 } from "./profiles.ts";
 import { pollTagActions, pollTags } from "./poll-tags.ts";
+import { postingBallots, postingInFlight, postingSent, postingSpend } from "./postings.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
 
@@ -109,6 +110,10 @@ export {
   pollCreationTxs,
   pollTagActions,
   pollTags,
+  postingBallots,
+  postingInFlight,
+  postingSent,
+  postingSpend,
   profileHandles,
   profileModerationActions,
   profileReports,
@@ -124,8 +129,10 @@ export {
  * ([[0040-creator-profiles]]): who someone is to the app, never how they
  * voted. Operational tables (moderation, caches)
  * hold nothing a result depends on.
- * Identity tables hold voting-identity backups (ADR 0017): operational, since
- * a wipe changes no result, but on the ballot side of the no-join rules. A
+ * Identity tables hold voting-identity backups (ADR 0017) and the posting
+ * relay's record of what it sent ([[posting-relay]], Caps and In flight):
+ * operational, since a wipe changes no result, but on the ballot side of the
+ * no-join rules. A
  * test fails on any table not listed here, on any foreign key that touches a
  * board or identity table or leaves the account tables, on a column of the
  * board or identity class that could name an account and an account column
@@ -175,7 +182,13 @@ export const TABLE_CLASSES = {
     "account_verifications",
     "profile_handles",
   ],
-  identity: ["identity_backups"],
+  identity: [
+    "identity_backups",
+    "posting_ballots",
+    "posting_in_flight",
+    "posting_sent",
+    "posting_spend",
+  ],
   operational: [
     "ceremony_approvals",
     "ceremony_messages",

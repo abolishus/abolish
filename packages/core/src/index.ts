@@ -178,6 +178,10 @@ export {
   pollCreationTxs,
   pollTagActions,
   pollTags,
+  postingBallots,
+  postingInFlight,
+  postingSent,
+  postingSpend,
   profileHandles,
   profileModerationActions,
   profileReports,
@@ -598,6 +602,20 @@ export {
   type PostingSent,
   type PostingWorkerRefusal,
 } from "./posting-relay.ts";
+export {
+  POSTING_BALLOT_CAP,
+  POSTING_CLIENT_MARGIN,
+  POSTING_FINALITY,
+  POSTING_FORCE_AFTER,
+  type PostgresPostingLedgerOptions,
+  PostgresPostingLedger,
+  type PostingCosts,
+  type PostingKeyChain,
+  postingMostCost,
+  type PostingSigned,
+  type PostingWindows,
+  postingWindows,
+} from "./posting-ledger.ts";
 export {
   POSTING_GAS_HEADROOM,
   POSTING_GAS_LIMIT_MAX,

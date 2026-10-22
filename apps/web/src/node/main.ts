@@ -3,7 +3,13 @@
 // user granted abolish_app (never the owner; packages/core, Database) and
 // listens.
 
-import { createAccounts, createTurnstile } from "@abolishus/core";
+import {
+  createAccounts,
+  createPostmarkSender,
+  createTurnstile,
+  emailKeys,
+  parseKeyring,
+} from "@abolishus/core";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
@@ -11,6 +17,8 @@ import * as z from "zod";
 import { ballotBase, isSiteKey } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
+import { createEmailHandler, type EmailService } from "./email.ts";
+import { startAccountPrune } from "./prune.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
 
 const Env = z
@@ -45,6 +53,16 @@ const Env = z
         "not an https URL without a query or fragment",
       )
       .optional(),
+    // An account's e-mail address (src/node/email.ts; ADR 0038, Email): the
+    // keyrings its hash and its ciphertext are made under (`id:hex,…`,
+    // packages/core's src/keyring.ts; each key in one ring only), and the
+    // Postmark server token and sender address. All four or none: without
+    // them every /email route answers 503. Staging uses Postmark's test
+    // token, which takes messages and sends none.
+    EMAIL_HASH_KEYS: z.string().min(1).optional(),
+    EMAIL_BOX_KEYS: z.string().min(1).optional(),
+    POSTMARK_SERVER_TOKEN: z.string().min(1).optional(),
+    EMAIL_FROM: z.string().min(1).optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -58,7 +76,18 @@ const Env = z
   })
   .refine((env) => (env.POSTHOG_HOST === undefined) === (env.POSTHOG_KEY === undefined), {
     message: "POSTHOG_HOST and POSTHOG_KEY go together",
-  });
+  })
+  .refine(
+    (env) =>
+      new Set(
+        [env.EMAIL_HASH_KEYS, env.EMAIL_BOX_KEYS, env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM].map(
+          (v) => v === undefined,
+        ),
+      ).size === 1,
+    {
+      message: "EMAIL_HASH_KEYS, EMAIL_BOX_KEYS, POSTMARK_SERVER_TOKEN and EMAIL_FROM go together",
+    },
+  );
 
 const env = Env.parse({
   DATABASE_URL: process.env["DATABASE_URL"],
@@ -73,7 +102,42 @@ const env = Env.parse({
   WEB_PORT: process.env["WEB_PORT"],
   POSTHOG_HOST: process.env["POSTHOG_HOST"] || undefined,
   POSTHOG_KEY: process.env["POSTHOG_KEY"] || undefined,
+  EMAIL_HASH_KEYS: process.env["EMAIL_HASH_KEYS"] || undefined,
+  EMAIL_BOX_KEYS: process.env["EMAIL_BOX_KEYS"] || undefined,
+  POSTMARK_SERVER_TOKEN: process.env["POSTMARK_SERVER_TOKEN"] || undefined,
+  EMAIL_FROM: process.env["EMAIL_FROM"] || undefined,
 });
+
+/**
+ * The e-mail service, if configured. Each failure names the variable,
+ * never its value, which is a key or a token (T-65).
+ */
+function emailService(): EmailService | undefined {
+  const { EMAIL_HASH_KEYS, EMAIL_BOX_KEYS, POSTMARK_SERVER_TOKEN, EMAIL_FROM } = env;
+  if (
+    EMAIL_HASH_KEYS === undefined ||
+    EMAIL_BOX_KEYS === undefined ||
+    POSTMARK_SERVER_TOKEN === undefined ||
+    EMAIL_FROM === undefined
+  )
+    return undefined;
+  const attempt = <T>(name: string, make: () => T): T => {
+    try {
+      return make();
+    } catch (e) {
+      throw new Error(`${name}: ${e instanceof Error ? e.message : "invalid"}`);
+    }
+  };
+  const hash = attempt("EMAIL_HASH_KEYS", () => parseKeyring(EMAIL_HASH_KEYS));
+  const box = attempt("EMAIL_BOX_KEYS", () => parseKeyring(EMAIL_BOX_KEYS));
+  return {
+    keys: attempt("EMAIL_HASH_KEYS and EMAIL_BOX_KEYS", () => emailKeys(hash, box)),
+    // Its errors name the option (`serverToken`, `from`), never the value.
+    sender: attempt("POSTMARK_SERVER_TOKEN or EMAIL_FROM", () =>
+      createPostmarkSender({ serverToken: POSTMARK_SERVER_TOKEN, from: EMAIL_FROM }),
+    ),
+  };
+}
 
 const write = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
@@ -106,6 +170,15 @@ const drafts = createDraftsHandler({
   turnstile,
   origin,
 });
+const email = createEmailHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  service: emailService(),
+  turnstile,
+  origin,
+  log: write,
+});
+const prune = startAccountPrune({ sql, log: write });
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
     ? noAnalytics
@@ -119,6 +192,7 @@ const server = createWebServer({
   start,
   accounts: (request) => accounts.handler(request),
   drafts,
+  email,
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,
   log: write,
@@ -128,5 +202,5 @@ server.listen(env.WEB_PORT, env.WEB_HOST);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, () => {
-    server.close(() => void Promise.all([sql.end(), analytics.close()]));
+    server.close(() => void prune.stop().then(() => Promise.all([sql.end(), analytics.close()])));
   });

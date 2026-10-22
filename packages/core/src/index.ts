@@ -198,6 +198,7 @@ export {
   type KeyringKey,
   parseKeyring,
 } from "./keyring.ts";
+export { createPostmarkSender, POSTMARK_EMAIL, type PostmarkOptions } from "./postmark.ts";
 export {
   createTurnstile,
   MAX_TURNSTILE_TOKEN,

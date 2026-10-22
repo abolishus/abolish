@@ -196,6 +196,19 @@ export const NoL1: Story = {
   },
 };
 
+export const Delivering: Story = {
+  name: "Delivering a cast ballot's parts to the trustees",
+  render: () => <Working poll={POLL} kind="delivering" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Handing your ballot to the poll's trustees",
+    );
+    await expect(canvas.getByRole("status")).toHaveTextContent(/recorded your sealed ballot/);
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
 export const Sending: Story = {
   name: "Sending a cast ballot",
   render: () => <Working poll={POLL} kind="sending" />,
@@ -223,6 +236,24 @@ export const UnsentBusy: Story = {
     ).toHaveTextContent(CODE);
     // The same ballot, never a new one (T-25).
     await expect(canvas.getByText(/never a new one/)).toBeVisible();
+    onSend.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(onSend).toHaveBeenCalledOnce();
+  },
+};
+
+export const UnsentUndelivered: Story = {
+  name: "A trustee didn't take its part: nothing sent, deliver the same ballot again",
+  render: () => <Unsent poll={POLL} trackingCode={CODE} reason="undelivered" onSend={onSend} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your ballot hasn't reached every trustee yet",
+    );
+    // Never boarded from here undelivered, and never a promise that the
+    // earlier ballot stands: the relay holds this one (T-25).
+    await expect(canvas.getByText(/This device sent nothing to the board/)).toBeVisible();
+    await expect(canvas.getByText(/answer again while the poll is open/)).toBeVisible();
     onSend.mockClear();
     await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
     await expect(onSend).toHaveBeenCalledOnce();

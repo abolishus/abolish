@@ -239,10 +239,19 @@ export function electionAuthorStubV6Hash(d: ElectionDefinitionV6): Uint8Array {
   return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV6(stub)));
 }
 
+/**
+ * The version-5 stub's bytes: the definition with `ceremony_transcript_hash`
+ * replaced by 32 zero bytes, header included, as a seat's intake takes it
+ * beside the transcript (docs/spec/election-definition.md, Stub hash and the
+ * ceremony).
+ */
+export function encodeElectionStubV5(d: ElectionDefinitionV5): Uint8Array {
+  return encodeElectionDefinitionV5({ ...d, ceremony_transcript_hash: new Uint8Array(32) });
+}
+
 /** `electionStubHash` for version 5: the questions are in the stub, fixed before the ceremony (T-34). */
 export function electionStubV5Hash(d: ElectionDefinitionV5): Uint8Array {
-  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
-  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV5(stub)));
+  return H(ds("abolish/v1/election-stub", encodeElectionStubV5(d)));
 }
 
 /** `electionStubHash` for version 4: the receipt keys are in the stub, fixed before the ceremony (T-26). */

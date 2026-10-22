@@ -23,7 +23,7 @@ import type {
 
 import type { ElectionCheck } from "../election.ts";
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * How long the prover may take. Generous: a proof took 24 s in Chromium at
@@ -134,6 +134,20 @@ export interface ReceiptRequest {
   readonly kind: "receipt";
   readonly ballot: Uint8Array;
   readonly receipt: Uint8Array;
+}
+
+/**
+ * What a seat's intake takes beside a ballot of the poll the worker last
+ * checked, if it is the one `definitionHash` names: the poll's stub and the
+ * ceremony transcript its seal keys came from ([[delivery]], Client rule 4).
+ * Both are public; the worker hands over the bytes it checked, so the page
+ * never picks the transcript out of the board itself (T-37).
+ */
+export interface IntakeRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "intake";
+  readonly definitionHash: Uint8Array;
 }
 
 /**
@@ -270,6 +284,7 @@ export type WorkerRequest =
   | ChallengeRequest
   | CastRequest
   | ReceiptRequest
+  | IntakeRequest
   | PostingRequest;
 
 /**
@@ -398,6 +413,14 @@ export type ReceiptResult =
   | { readonly ok: false; readonly problem: "unknown" | "refused" };
 
 /**
+ * The held poll's stub (`encodeElectionStubV5`) and ceremony transcript, or
+ * `no-election` for no poll held or another than the one asked for.
+ */
+export type IntakeResult =
+  | { readonly ok: true; readonly stub: Uint8Array; readonly transcript: Uint8Array }
+  | { readonly ok: false; readonly problem: "no-election" };
+
+/**
  * Whether a kept share would deliver its seat if posted, or why not: no
  * poll held, or a ballot that isn't a cast of it or a seat outside its panel
  * (`unknown`), or a posting that fails the public check (`refused`, with
@@ -479,6 +502,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "receipt";
       readonly result: ReceiptResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "intake";
+      readonly result: IntakeResult;
     }
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -579,6 +608,7 @@ const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];
 const RECEIPT_KEYS = ["ballot", "id", "kind", "receipt", "v"];
+const INTAKE_KEYS = ["definitionHash", "id", "kind", "v"];
 const POSTING_KEYS = ["ballot", "ciphertext", "id", "kind", "m", "seat", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
@@ -774,6 +804,10 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
     if (!isBytes(ballot) || !isBytes(receipt)) return undefined;
     return { v, id, kind: "receipt", ballot, receipt };
   }
+  if (data["kind"] === "intake") {
+    if (!hasKeys(data, INTAKE_KEYS) || !isBytes(data["definitionHash"], 32)) return undefined;
+    return { v, id, kind: "intake", definitionHash: data["definitionHash"] };
+  }
   if (data["kind"] === "posting") {
     if (!hasKeys(data, POSTING_KEYS)) return undefined;
     const { ballot, seat, ciphertext, m } = data;
@@ -801,6 +835,7 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "challenge",
   "cast",
   "receipt",
+  "intake",
   "posting",
   "error",
 ]);

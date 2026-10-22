@@ -112,7 +112,12 @@ export type SealingElectionCode =
   | "ceremony-participation";
 
 export type SealingElection =
-  | { readonly ok: true; readonly election: QuestionBallotElection }
+  | {
+      readonly ok: true;
+      readonly election: QuestionBallotElection;
+      /** The ceremony transcript's bytes that passed, as a seat's intake takes them beside the stub. */
+      readonly transcript: Uint8Array;
+    }
   | {
       readonly ok: false;
       readonly code: SealingElectionCode;
@@ -193,7 +198,11 @@ export function sealingElectionV5(
   // and the tally's failure margin with it (T-54, T-40).
   if (checked.registered.length < Math.max(panel.threshold, panel.keys.length - 1))
     return refuse("ceremony-participation");
-  return { ok: true, election: questionBallotElection(definition, checked.registered) };
+  return {
+    ok: true,
+    election: questionBallotElection(definition, checked.registered),
+    transcript,
+  };
 }
 
 const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([

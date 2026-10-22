@@ -14,6 +14,7 @@ import {
   type CastRequest,
   type CastResult,
   type ChallengeResult,
+  type IntakeResult,
   type PostingResult,
   type ReceiptResult,
   type CommitmentResult,
@@ -278,6 +279,17 @@ export class BallotWorker {
     // The one place a `CheckedReceipt` is made: the worker passed these bytes.
     const checked = { seat: result.seat, receipt: receipt.slice() } as unknown as CheckedReceipt;
     return { ok: true, checked };
+  }
+
+  /** The stub and ceremony transcript each seat's intake takes beside a ballot of the poll `definitionHash` names. */
+  async intake(definitionHash: Uint8Array): Promise<IntakeResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "intake", definitionHash }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "intake") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
   }
 
   /**

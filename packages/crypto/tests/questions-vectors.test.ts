@@ -1,3 +1,4 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, test } from "vite-plus/test";
 import {
   DecodeError,
@@ -16,6 +17,7 @@ import {
   electionStubV5Hash,
   encodeDisplayTextV2,
   encodeElectionDefinitionV5,
+  encodeElectionStubV5,
   RECORD_TYPES,
   UNPINNED,
   UnsupportedVersionError,
@@ -76,6 +78,15 @@ describe("election definition version 5 (docs/spec/election-definition.md, Layou
     expect(toHex(encodeElectionDefinitionV5(decoded))).toBe(v.encoding);
     expect(toHex(electionDefinitionV5Hash(decoded))).toBe(v.hash);
     expect(toHex(electionStubV5Hash(decoded))).toBe(v.stubHash);
+    // The stub a seat's intake takes is the bytes the vector's stub hash
+    // covers, by the spec's formula rather than the code under test.
+    const stub = encodeElectionStubV5(decoded);
+    const tag = new TextEncoder().encode("abolish/v1/election-stub");
+    expect(toHex(sha256(Uint8Array.of(tag.length, ...tag, ...stub)))).toBe(v.stubHash);
+    expect(decodeElectionDefinitionV5(stub)).toEqual({
+      ...decoded,
+      ceremony_transcript_hash: new Uint8Array(32),
+    });
     const failure = electionDefinitionV5Rule(decoded);
     expect(failure?.rule).toBe(v.illFormed);
     expect(

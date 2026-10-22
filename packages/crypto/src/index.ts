@@ -497,6 +497,7 @@ export {
   encodeElectionDefinitionV4,
   encodeElectionDefinitionV5,
   encodeElectionDefinitionV6,
+  encodeElectionStubV5,
   newDisplayTextSalt,
   pinnedVersion,
   profileCombinationRule,

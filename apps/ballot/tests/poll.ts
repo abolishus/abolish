@@ -157,7 +157,8 @@ const answers = seats.map((s) => answersMessage(run, s, keys, round2));
 const reveals = seats.map((s, i) =>
   revealsMessage(run, s, { keys, challenges: round2, answers }, challenges[i]?.secrets ?? []),
 );
-const transcript = encodeCeremonyTranscript({
+/** The ceremony's transcript, as the board's first entry carries it. */
+export const transcript = encodeCeremonyTranscript({
   run_id: run.runId,
   keys,
   challenges: round2,

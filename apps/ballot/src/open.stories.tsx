@@ -4,9 +4,16 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { App } from "./app.tsx";
 import type { Backer } from "./backup-offer.tsx";
-import type { CastsRead, RecordBoardedOutcome, RecordCastOutcome } from "./casts.ts";
+import type {
+  CastsRead,
+  CheckedReceipt,
+  RecordBoardedOutcome,
+  RecordCastOutcome,
+  RecordReceiptOutcome,
+} from "./casts.ts";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
+import type { IntakeAnswer } from "./intake.ts";
 import { parseLink } from "./link.ts";
 import type { Loaded, LoadedBoard, LoadedRegistry } from "./load.ts";
 import type { ProverArtifacts } from "./prover-artifacts.ts";
@@ -27,6 +34,8 @@ import type { SendAnswer } from "./send.ts";
 import type {
   CastResult,
   ChallengeResult,
+  IntakeResult,
+  ReceiptResult,
   SealResult,
   Tier0OutcomeResult,
 } from "./worker/protocol.ts";
@@ -141,6 +150,22 @@ const boarded = (payload: Uint8Array, index = 41n): SendAnswer => ({
   link: LINK,
 });
 const BOARDED = boarded(CAST.ballot);
+const STUB = Uint8Array.of(0x00, 0x01, 0x05, 0x57);
+const TRANSCRIPT = Uint8Array.of(0x00, 0x09, 0x01, 0x7c);
+const INTAKE: IntakeResult = { ok: true, stub: STUB, transcript: TRANSCRIPT };
+/** A seat's intake answer: a receipt the stories' worker reads the seat from. */
+const receiptOf = (seat: number): IntakeAnswer => ({
+  kind: "receipt",
+  receipt: Uint8Array.of(0xec, seat),
+});
+type CheckedAnswer =
+  | { readonly ok: true; readonly checked: CheckedReceipt }
+  | Extract<ReceiptResult, { readonly ok: false }>;
+/** The stories' worker passes a receipt `receiptOf` made for its seat. */
+const passes = (receipt: Uint8Array): CheckedAnswer => ({
+  ok: true,
+  checked: { seat: receipt[1] ?? 0, receipt } as unknown as CheckedReceipt,
+});
 
 /** The voter's side of a story's source: what the device holds and what the board and the cast answer. */
 interface Voter {
@@ -155,7 +180,15 @@ interface Voter {
   readonly identityAtCast?: IdentityRead;
   /** Tier 0 registration (`registrar`), whose store then answers every identity read. */
   readonly registrar?: Registrar;
-  /** Whether the build delivers shares to intake (`delivers`). */
+  /** The worker's stub and transcript for each seat's intake. */
+  readonly intake: IntakeResult | "fail";
+  /** What seat `seat`'s intake answers to its `call`th delivery (from 0). */
+  readonly delivered: (seat: number, call: number) => IntakeAnswer | "fail";
+  /** The worker's check of an intake's answer. */
+  readonly receipts: (receipt: Uint8Array) => CheckedAnswer | "fail";
+  /** What keeping a checked receipt answers. */
+  readonly keptReceipt: RecordReceiptOutcome;
+  /** Whether the build has every delivery route (`delivers`). */
   readonly delivers: boolean;
   /** This device's casts before the cast. */
   readonly held: CastsRead;
@@ -174,6 +207,10 @@ const VOTER: Voter = {
   l1: L1,
   artifacts: ARTIFACTS,
   cast: CAST,
+  intake: INTAKE,
+  delivered: receiptOf,
+  receipts: passes,
+  keptReceipt: "recorded",
   delivers: true,
   held: { kind: "read", casts: [] },
   recorded: "recorded",
@@ -195,6 +232,10 @@ const MOCKS = new WeakMap<
     readonly cast: Mock<ElectionSource["cast"]>;
     readonly casts: Mock<ElectionSource["casts"]>;
     readonly record: Mock<ElectionSource["record"]>;
+    readonly intake: Mock<ElectionSource["intake"]>;
+    readonly deliver: Mock<ElectionSource["deliver"]>;
+    readonly receipt: Mock<ElectionSource["receipt"]>;
+    readonly keepReceipt: Mock<ElectionSource["keepReceipt"]>;
     readonly send: Mock<ElectionSource["send"]>;
     readonly keepBoarded: Mock<ElectionSource["keepBoarded"]>;
     /** Each secret the page handed on, as given, and a copy taken when it was. */
@@ -232,6 +273,10 @@ function source(
     cast: castResult,
     identityAtCast,
     registrar,
+    intake: intakeResult,
+    delivered,
+    receipts,
+    keptReceipt,
     delivers,
     held,
     recorded,
@@ -267,6 +312,15 @@ function source(
   let sent = 0;
   const casts = fn<ElectionSource["casts"]>(() => Promise.resolve(held));
   const record = fn<ElectionSource["record"]>(() => Promise.resolve(recorded));
+  const intake = fn<ElectionSource["intake"]>(() => answer(intakeResult));
+  const deliveries = new Map<number, number>();
+  const deliver = fn<ElectionSource["deliver"]>((seat) => {
+    const call = deliveries.get(seat) ?? 0;
+    deliveries.set(seat, call + 1);
+    return answer(delivered(seat, call));
+  });
+  const receipt = fn<ElectionSource["receipt"]>((_, bytes) => answer(receipts(bytes)));
+  const keepReceipt = fn<ElectionSource["keepReceipt"]>(() => Promise.resolve(keptReceipt));
   const send = fn<ElectionSource["send"]>(() =>
     answer(answers[Math.min(sent++, answers.length - 1)] as SendAnswer | "fail"),
   );
@@ -292,6 +346,10 @@ function source(
     cast,
     casts,
     record,
+    intake,
+    deliver,
+    receipt,
+    keepReceipt,
     send,
     keepBoarded,
     registrar,
@@ -306,6 +364,10 @@ function source(
     cast,
     casts,
     record,
+    intake,
+    deliver,
+    receipt,
+    keepReceipt,
     send,
     keepBoarded,
     secrets,
@@ -506,6 +568,30 @@ export const SealedThenCast: Story = {
       CAST.ballot,
       CAST.ciphertexts,
       { definitionHash: fromHex(REGISTERED), cell: 2, l1Number: L1.number, l1Hash: L1.hash },
+    );
+    // Each seat's ct_i delivered with the poll's stub and transcript and the
+    // whole record, never its m_i, and each receipt checked and kept before
+    // the ballot left ([[delivery]], Client rules 1 to 4).
+    await expect(mocks(args.source).intake).toHaveBeenCalledWith(fromHex(REGISTERED));
+    await expect(mocks(args.source).deliver.mock.calls).toEqual(
+      CAST.ciphertexts.map(({ seat, ciphertext }) => [
+        seat,
+        { stub: STUB, transcript: TRANSCRIPT, record: CAST.ballot, ciphertext },
+      ]),
+    );
+    await expect(mocks(args.source).receipt.mock.calls).toEqual(
+      [1, 3].map((seat) => [CAST.ballot, Uint8Array.of(0xec, seat)]),
+    );
+    await expect(mocks(args.source).keepReceipt.mock.calls).toEqual(
+      [1, 3].map((seat) => [
+        fromHex(ELECTION_ID),
+        0,
+        CAST.ballot,
+        { seat, receipt: Uint8Array.of(0xec, seat) },
+      ]),
+    );
+    await expect(mocks(args.source).keepReceipt.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mocks(args.source).send.mock.invocationCallOrder[0] ?? 0,
     );
     await expect(mocks(args.source).send).toHaveBeenCalledOnce();
     await expect(mocks(args.source).send).toHaveBeenCalledWith(fromHex(ELECTION_ID), CAST.ballot);
@@ -1136,16 +1222,139 @@ export const RefusedByTheBoard: Story = {
 };
 
 export const NoDelivery: Story = {
-  name: "Cast by a build that can't deliver shares to the trustees",
+  name: "Cast by a build without every route to the trustees",
   args: { source: castsSource({ delivers: false }) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await castInto(canvas, "This ballot can't send your ballot yet");
-    // Never boarded without delivery, which would void an earlier ballot.
+    // No ballot is made, so no relay ever holds one (T-25).
     await expect(mocks(args.source).casts).not.toHaveBeenCalled();
     await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
     await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const DeliveredAgainAfterARefusal: Story = {
+  name: "A trustee's intake refuses, then the same ballot is delivered again and sent",
+  args: {
+    source: castsSource({
+      delivered: (seat, call) =>
+        seat === 3 && call === 0 ? { kind: "refused", code: "intake-busy" } : receiptOf(seat),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    // Never boarded with a seat undelivered, which would void an earlier ballot.
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(mocks(args.source).keepReceipt).toHaveBeenCalledOnce();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toHaveFocus();
+    // Only the seat left undelivered, with the same bytes; proved and recorded once.
+    await expect(mocks(args.source).deliver.mock.calls.map(([seat]) => seat)).toEqual([1, 3, 3]);
+    await expect(mocks(args.source).deliver.mock.calls[2]?.[1]).toEqual(
+      mocks(args.source).deliver.mock.calls[1]?.[1],
+    );
+    await expect(mocks(args.source).cast).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).record).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).keepReceipt).toHaveBeenCalledTimes(2);
+    await expect(mocks(args.source).send).toHaveBeenCalledOnce();
+  },
+};
+
+export const UndeliveredEveryWay: Story = {
+  name: "No intake answers with a receipt: the relay is busy, fails or is unreachable",
+  args: {
+    source: castsSource({
+      delivered: (seat, call) =>
+        call > 0 ? "fail" : seat === 1 ? { kind: "busy" } : { kind: "unavailable" },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "Your ballot hasn't reached every trustee yet",
+      }),
+    ).toHaveFocus();
+    await expect(mocks(args.source).deliver).toHaveBeenCalledTimes(4);
+    await expect(mocks(args.source).receipt).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const ReceiptRefusedByTheWorker: Story = {
+  name: "An intake's answer fails the worker's receipt check",
+  args: {
+    source: castsSource({
+      receipts: (receipt) =>
+        receipt[1] === 3 ? { ok: false, problem: "refused" } : passes(receipt),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    // Only the passing receipt is kept: the other seat keeps its m_i (Client rule 1; T-25).
+    await expect(mocks(args.source).keepReceipt).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).keepReceipt.mock.calls[0]?.[3]).toEqual({
+      seat: 1,
+      receipt: Uint8Array.of(0xec, 1),
+    });
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const ReceiptForAnotherSeat: Story = {
+  name: "A seat's intake answers with another seat's receipt",
+  args: {
+    // Seat 3's relay answers with seat 1's receipt, which is seat 1's all the same.
+    source: castsSource({ delivered: () => receiptOf(1) }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const ReceiptUnwritable: Story = {
+  name: "The browser refuses to keep a trustee's receipt",
+  args: { source: castsSource({ keptReceipt: "unwritable" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device couldn't record your ballot");
+    await expect(mocks(args.source).keepReceipt).toHaveBeenCalledOnce();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Answer again" })).toBeVisible();
+  },
+};
+
+export const IntakeWithoutThePoll: Story = {
+  name: "The worker no longer holds the poll when the ballot is delivered",
+  args: { source: castsSource({ intake: { ok: false, problem: "no-election" } }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device couldn't make your ballot");
+    await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const ReceiptWorkerFailed: Story = {
+  name: "The worker fails while checking a receipt",
+  args: { source: castsSource({ receipts: () => "fail" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device couldn't make your ballot");
+    await expect(mocks(args.source).keepReceipt).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
   },
 };
 

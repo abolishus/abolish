@@ -50,21 +50,38 @@ export function placeKey(place: string): string | undefined {
 }
 
 /**
+ * The tags of a stored draft that a draft can hold: its topic if one of
+ * `POLL_TOPICS`, its place if `placeIsWellFormed`. Every draft write checks
+ * them, so a stored draft holding others is malformed; a malformed tag is
+ * left out rather than refused, since a listing tag must never stop a
+ * registered poll opening ([[0041-poll-topics-and-places]], rule 4).
+ */
+export function storedPollTags(draft: unknown): PollTags {
+  if (typeof draft !== "object" || draft === null) return {};
+  const { topic, place } = draft as { topic?: unknown; place?: unknown };
+  return {
+    ...((POLL_TOPICS as readonly unknown[]).includes(topic) ? { topic: topic as PollTopic } : {}),
+    ...(typeof place === "string" && placeIsWellFormed(place) && placeKey(place) !== undefined
+      ? { place }
+      : {}),
+  };
+}
+
+/**
  * Writes `electionId`'s tags, unless it has a row already: the first tags
- * written for a poll are the ones it was filed under. A draft with neither
- * tag writes nothing. Refuses tags `pollDraftProblem` would (a `TypeError`):
- * every draft write checks them, so a stored draft holding others is
- * malformed.
+ * written for a poll are the ones it was filed under. Tags with neither
+ * write nothing. Refuses tags `pollDraftProblem` would (a `TypeError`).
+ * Returns whether a row was written.
  */
 export async function insertPollTags(
   client: Sql,
   electionId: Uint8Array,
   tags: PollTags,
-): Promise<void> {
+): Promise<boolean> {
   if (!isBytes(electionId) || electionId.length !== 32)
     throw new TypeError("electionId must be 32 bytes");
   const { topic, place } = tags;
-  if (topic === undefined && place === undefined) return;
+  if (topic === undefined && place === undefined) return false;
   if (topic !== undefined && !(POLL_TOPICS as readonly unknown[]).includes(topic))
     throw new TypeError("topic is not one of POLL_TOPICS");
   let key: string | undefined;
@@ -73,7 +90,7 @@ export async function insertPollTags(
     key = placeKey(place);
     if (key === undefined) throw new TypeError("place has no key");
   }
-  await drizzle({ client })
+  const written = await drizzle({ client })
     .insert(pollTags)
     .values({
       electionId: new Uint8Array(electionId),
@@ -81,7 +98,9 @@ export async function insertPollTags(
       place: place ?? null,
       placeKey: key ?? null,
     })
-    .onConflictDoNothing({ target: pollTags.electionId });
+    .onConflictDoNothing({ target: pollTags.electionId })
+    .returning({ electionId: pollTags.electionId });
+  return written.length > 0;
 }
 
 /** How many polls `fillPollTags` reads at a time. */
@@ -90,7 +109,8 @@ const FILL_BATCH = 100;
 /**
  * Writes the tags of every open poll whose draft has a tag and which has no
  * row: those opened before migration 0035 added the table, or by an opening
- * step interrupted between its writes. Returns how many it wrote.
+ * step interrupted between its writes. Returns how many it wrote; a draft
+ * whose tags are all malformed (`storedPollTags`) writes none.
  */
 export async function fillPollTags(client: Sql): Promise<number> {
   const db = drizzle({ client });
@@ -118,12 +138,14 @@ export async function fillPollTags(client: Sql): Promise<number> {
     for (const row of rows) {
       // An open poll has its identifier: the table requires one outside
       // `drafted`, `submitted` and `failed`.
-      const draft = row.draft as PollTags;
-      await insertPollTags(client, Uint8Array.from(row.electionId as Uint8Array), {
-        ...(draft.topic === undefined ? {} : { topic: draft.topic }),
-        ...(draft.place === undefined ? {} : { place: draft.place }),
-      });
-      written++;
+      if (
+        await insertPollTags(
+          client,
+          Uint8Array.from(row.electionId as Uint8Array),
+          storedPollTags(row.draft),
+        )
+      )
+        written++;
       after = row.id;
     }
     if (rows.length < FILL_BATCH) return written;

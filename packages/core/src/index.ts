@@ -116,7 +116,13 @@ export {
   listPolls,
   MAX_LISTING_PAGE,
 } from "./listing.ts";
-export { fillPollTags, insertPollTags, placeKey, type PollTags } from "./poll-tags.ts";
+export {
+  fillPollTags,
+  insertPollTags,
+  placeKey,
+  type PollTags,
+  storedPollTags,
+} from "./poll-tags.ts";
 export {
   fillDisplayTextSearch,
   MAX_SEARCH_QUERY,

@@ -325,6 +325,22 @@ describe("a registered poll", { timeout: 60_000 }, () => {
     await clear();
   });
 
+  test("a stored draft's malformed tag is left out, never holding up its opening or the fill", async () => {
+    const r = await registered(true, { ...DRAFT, topic: "food", place: "Mill Lane" });
+    // As if a stored draft held tags no draft write would take.
+    await db.admin`
+      UPDATE account_polls SET draft = draft || '{"place": " Mill  Lane", "topic": "food"}'::jsonb
+      WHERE id = ${r.id}`;
+    expect(await run()).toEqual({ ...quiet, opened: 1 });
+    expect(await tags(r.electionId)).toEqual([{ topic: "food", place: null, place_key: null }]);
+    await db.admin`DELETE FROM poll_tags WHERE election_id = ${r.electionId}`;
+    await db.admin`
+      UPDATE account_polls SET draft = draft || '{"topic": "weather"}'::jsonb WHERE id = ${r.id}`;
+    // Neither tag is one a draft can hold: nothing to write, and nothing refused.
+    expect(await fillPollTags(app)).toBe(0);
+    expect(await tags(r.electionId)).toEqual([]);
+  });
+
   test("two runs racing on separate connections board the transcript once", async () => {
     const r = await registered();
     const other = await db.as("abolish_app");

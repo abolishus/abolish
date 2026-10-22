@@ -21,6 +21,7 @@ import {
   POLL_TOPICS,
   type PollTags,
   pollTags,
+  storedPollTags,
   searchTerms,
   storeDefinition,
   storeDisplayText,
@@ -193,7 +194,7 @@ describe("schema", () => {
     expect(await failsWith(app`DELETE FROM poll_tags`)).toBe("42501");
     expect(await failsWith(app`TRUNCATE poll_tags`)).toBe("42501");
     // A second write is a no-op.
-    await insertPollTags(app, id, { topic: "food", place: "Riverside" });
+    expect(await insertPollTags(app, id, { topic: "food", place: "Riverside" })).toBe(false);
     expect(await row(id)).toEqual([{ topic: "sport", place: null, place_key: null }]);
   });
 
@@ -235,6 +236,27 @@ describe("writing", () => {
       TypeError,
     );
     expect(await row(id)).toEqual([]);
+  });
+});
+
+describe("a stored draft's tags", () => {
+  test("keep only what a draft can hold", () => {
+    expect(storedPollTags({ topic: "food", place: "Mill Lane", title: "x" })).toEqual({
+      topic: "food",
+      place: "Mill Lane",
+    });
+    for (const draft of [
+      {},
+      null,
+      "food",
+      { topic: "weather", place: " Mill Lane" },
+      { topic: 7, place: ["Mill Lane"] },
+      { place: "a".repeat(MAX_PLACE_LENGTH + 1) },
+    ])
+      expect(storedPollTags(draft)).toEqual({});
+    expect(storedPollTags({ topic: "weather", place: "Mill Lane" })).toEqual({
+      place: "Mill Lane",
+    });
   });
 });
 

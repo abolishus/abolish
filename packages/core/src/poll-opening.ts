@@ -50,7 +50,7 @@ import { accountPolls, ceremonyStubs, electionRegistrations } from "./db/schema/
 import { readDefinition } from "./definitions.ts";
 import { DisplayTextError, storeDisplayText } from "./display-texts.ts";
 import { draftDisplayText, draftQuestions, type PollDraft } from "./poll-drafts.ts";
-import { insertPollTags } from "./poll-tags.ts";
+import { insertPollTags, storedPollTags } from "./poll-tags.ts";
 import type { StoredTierElectorate } from "./poll-roots.ts";
 import { tierElectorate } from "./poll-stubs.ts";
 
@@ -348,7 +348,7 @@ export async function openPolls(
     }
     // Before `open`, so a run that dies here writes them on the next; the
     // fill writes those of polls opened before the table.
-    await insertPollTags(client, electionId, draft);
+    await insertPollTags(client, electionId, storedPollTags(draft));
     return (await move(p.id, electionId, { state: "open" })) ? "opened" : undefined;
   };
 

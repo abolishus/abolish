@@ -1635,6 +1635,41 @@ export const OpensWithAPick: Story = {
   },
 };
 
+/**
+ * The pick is for the first ballot shown only: after a cast, "Answer again"
+ * starts from nothing chosen, as the cast story's last step checks.
+ */
+export const SealedThenCastFromAPick: Story = {
+  ...SealedThenCast,
+  name: "Opened from a card's answer, cast, then answered again from nothing",
+  args: {
+    link: parseLink(`#election=${ELECTION_ID}&pick=1`),
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      cast: "hold",
+    }),
+  },
+};
+
+/** A restart checks the poll anew, and starts from nothing chosen. */
+export const RestartedFromAPick: Story = {
+  name: "Opened from a card's answer, then checked again from nothing",
+  args: {
+    link: parseLink(`#election=${ELECTION_ID}&pick=1`),
+    source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, {
+      board: { ok: false, problem: "unreachable" },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("radio", { name: "No" })).toBeChecked();
+    await answerAndSeal(canvas);
+    await userEvent.click(await canvas.findByRole("button", { name: "Answer again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(mocks(args.source).load).toHaveBeenCalledTimes(2);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+  },
+};
+
 export const WorkerFailed: Story = {
   name: "The worker failed",
   args: { source: source([LOADED], "fail") },

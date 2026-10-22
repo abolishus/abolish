@@ -120,7 +120,9 @@ async function call(
 ): Promise<unknown> {
   const response = await fetch(path, {
     method: "POST",
-    credentials: "same-origin",
+    // Counts are anyone's, so they go without the session: a signed-in
+    // visitor's cookie and the poll they opened never travel together (T-11).
+    credentials: path === "/reactions/counts" ? "omit" : "same-origin",
     cache: "no-store",
     redirect: "error",
     // Exactly this type, with no charset: the handler refuses anything else.

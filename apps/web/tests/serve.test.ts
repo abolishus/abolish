@@ -998,6 +998,46 @@ describe("failures", () => {
     for (const request of started) expect(request.headers.get("cookie")).toBeNull();
   });
 
+  test("the reaction counts never get the account cookie; own and set do", async () => {
+    const seen: [string, string | null][] = [];
+    const front = createWebServer({
+      start: { fetch: async () => new Response() },
+      accounts: async () => new Response(),
+      drafts: async () => new Response(),
+      email: async () => new Response(),
+      phone: async () => new Response(),
+      token: async () => new Response(),
+      reactions: async (request) => {
+        seen.push([new URL(request.url).pathname, request.headers.get("cookie")]);
+        return Response.json({});
+      },
+      clientDir,
+      origin: ORIGIN,
+      log: () => {},
+    });
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = front.address() as AddressInfo;
+      for (const path of ["/reactions/counts", "/reactions/own", "/reactions/set"])
+        await fetch(`http://127.0.0.1:${port}${path}`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "content-type": "application/json",
+            cookie: `${SESSION}=tok`,
+          },
+          body: "{}",
+        });
+      expect(seen).toEqual([
+        ["/reactions/counts", null],
+        ["/reactions/own", `${SESSION}=tok`],
+        ["/reactions/set", `${SESSION}=tok`],
+      ]);
+    } finally {
+      await new Promise((resolve) => front.close(resolve));
+    }
+  });
+
   test("a client that leaves mid-page stops the render", async () => {
     const { port } = server.address() as AddressInfo;
     await new Promise<void>((resolve, reject) => {

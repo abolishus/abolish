@@ -60,9 +60,10 @@ describe("reactions client", () => {
       "/reactions/own",
       "/reactions/set",
     ]);
+    // Counts go without the session (T-11); own and set need it.
+    expect(calls.map((c) => c.init.credentials)).toEqual(["omit", "same-origin", "same-origin"]);
     for (const { init } of calls) {
       expect(init.method).toBe("POST");
-      expect(init.credentials).toBe("same-origin");
       expect(init.redirect).toBe("error");
       expect(init.headers).toEqual({ "content-type": "application/json" });
     }

@@ -170,6 +170,13 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "reactions",
 ]);
 
+/**
+ * Paths under an account route class that answer anyone alike and never get
+ * the cookie: the poll page asks a poll's reaction counts for every visitor,
+ * so the session and the poll it names never arrive together (T-11).
+ */
+const SESSION_FREE_PATHS: ReadonlySet<string> = new Set(["/reactions/counts"]);
+
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
   if (path === "/drafts" || path.startsWith("/drafts/")) return "drafts";
@@ -321,7 +328,8 @@ export function createWebServer({
       if (value === undefined || name === "host") continue;
       // Pages and server functions never get the account cookie: nothing
       // they render can join a session to the poll it shows (T-10, T-67).
-      if (name === "cookie" && !ACCOUNT_ROUTES.has(route)) continue;
+      if (name === "cookie" && (!ACCOUNT_ROUTES.has(route) || SESSION_FREE_PATHS.has(url.pathname)))
+        continue;
       for (const v of Array.isArray(value) ? value : [value]) headers.append(name, v);
     }
     headers.set("host", base.host);

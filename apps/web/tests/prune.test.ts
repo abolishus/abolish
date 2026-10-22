@@ -1,6 +1,8 @@
 // The account tables' timer (src/node/prune.ts) against Postgres as the app
 // role: an expired e-mail or phone code is gone after a run, a live one
-// stays, and a failed run is logged by kind and retried on the next tick.
+// stays, phone-hash chains are extended to the current key where the phone
+// service is configured, and a failed run is logged by kind and retried on
+// the next tick.
 
 import {
   emailKeys,
@@ -8,6 +10,7 @@ import {
   parseKeyring,
   requestEmailCode,
   requestPhoneCode,
+  verifyPhoneCode,
 } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
@@ -108,4 +111,49 @@ test("logs a failed run by kind only, and tries again on the next tick", async (
   await prune.stop();
   expect(calls).toBeGreaterThan(1);
   expect(lines[0]).toEqual({ error: "AccountPruneFailed" });
+});
+
+test("extends verified numbers' chains to the current phone-hash key, only where configured", async () => {
+  const k1 = randomBytes(32).toString("hex");
+  const k2 = randomBytes(32).toString("hex");
+  const one = parseKeyring(`q1:${k1}`);
+  const two = parseKeyring(`q1:${k1},q2:${k2}`);
+  const account = await newAccount();
+  const number = `+1415${3_000_000 + ++numbers}`;
+  const verifier = {
+    lookup: async (n: string) => ({ number: n, country: "US", lineType: "mobile" }),
+    start: async () => "sent" as const,
+    check: async () => "approved" as const,
+  };
+  const now = new Date("2026-10-22T12:00:00Z");
+  await requestPhoneCode(sql, account, number, {
+    keys: one,
+    verifier,
+    turnstile: { verify: async () => "passed" },
+    token: "t",
+    dailyCeiling: 1000,
+    now,
+  });
+  await verifyPhoneCode(sql, account, number, "123456", { keys: one, verifier, now });
+  const keyOf = async () =>
+    (await sql`SELECT hash_key FROM account_phones WHERE user_id = ${account}`)[0]?.["hash_key"];
+  const run = async (phoneKeys?: typeof two) => {
+    const lines: { error: string }[] = [];
+    const prune = startAccountPrune({
+      sql,
+      log: (l) => lines.push(l),
+      ...(phoneKeys === undefined ? {} : { phoneKeys }),
+      now: () => now,
+    });
+    await prune.stop();
+    return lines;
+  };
+  expect(await run()).toEqual([]);
+  expect(await keyOf()).toBe("q1");
+  // A row under a key this keyring lacks, which it can't rotate.
+  await sql`
+    INSERT INTO account_phone_holds (phone_hash, hash_key, freed_on)
+    VALUES (${randomBytes(32)}, 'gone', '2026-10-22T00:00:00Z')`;
+  expect(await run(two)).toEqual([{ error: "PhoneHashKeyMissing" }]);
+  expect(await keyOf()).toBe("q2");
 });

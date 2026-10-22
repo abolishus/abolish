@@ -42,12 +42,25 @@
 // provider is told a number and a code, never an account, a poll or a ballot.
 
 import { createHmac } from "node:crypto";
-import { and, eq, gt, inArray, lt, lte, ne, sql as q } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  sql as q,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import {
   accountPhoneCodes,
   accountPhoneHolds,
+  accountPhoneKeyChecks,
   accountPhoneRecipients,
   accountPhones,
   accountPhoneSends,
@@ -179,16 +192,19 @@ export function parsePhoneNumber(input: string): string | undefined {
   return number;
 }
 
+/** One more link of a chain: `HMAC(key, hash)`, needing no number. */
+const extend = (key: Uint8Array, hash: Uint8Array): Buffer =>
+  createHmac("sha256", key).update(hash).digest();
+
 /** A number's chain under each key of `keys` in turn, oldest first: one value per prefix. */
 function chainOf(keys: Keyring, number: string): { readonly id: string; readonly hash: Buffer }[] {
   const chain: { id: string; hash: Buffer }[] = [];
   let hash: Buffer | undefined;
   for (const { id, key } of keys.keys) {
-    const mac = createHmac("sha256", key);
     hash =
       hash === undefined
-        ? mac.update(HASH_LABEL).update(number, "utf8").digest()
-        : mac.update(hash).digest();
+        ? createHmac("sha256", key).update(HASH_LABEL).update(number, "utf8").digest()
+        : extend(key, hash);
     chain.push({ id, hash });
   }
   return chain;
@@ -347,7 +363,7 @@ export async function requestPhoneCode(
     if (sent >= MAX_SENDS_PER_NUMBER) return true;
     await tx
       .insert(accountPhoneRecipients)
-      .values({ phoneHash: hashes.current.hash, sentAt: hourOf(now) });
+      .values({ phoneHash: hashes.current.hash, hashKey: hashes.current.id, sentAt: hourOf(now) });
     return false;
   });
   if (!capped && (await verifier.start(number, channel)) !== "sent")
@@ -532,4 +548,278 @@ export async function pruneAccountPhones(
     recipients: recipients.length,
     holds: holds.length,
   };
+}
+
+/** Rows a rotation reads at a time. */
+const ROTATION_BATCH = 500;
+
+/** One stored chain, by its table's key. */
+interface StoredChain<K> {
+  readonly at: K;
+  readonly phoneHash: Uint8Array;
+  readonly hashKey: string;
+}
+
+/** What `rotatePhoneHashes` did. */
+export interface PhoneHashRotation {
+  /** Chains extended to the current key. */
+  readonly rotated: number;
+  /**
+   * Rows under a key the keyring doesn't hold, left as they are: the keyring
+   * dropped a key, or another instance's holds one this one lacks. Either
+   * way the runbook's to settle, since this instance can't match them.
+   */
+  readonly unknownKeys: number;
+  /**
+   * Verified numbers left unrotated because another account's row already
+   * holds the value theirs would become: two accounts holding one number.
+   */
+  readonly conflicts: number;
+  /**
+   * Keys whose bytes don't reproduce the check value stored for their ID:
+   * nothing was rotated, since rows rotated under a wrong key would match no
+   * number again.
+   */
+  readonly mismatchedKeys: number;
+}
+
+const KEY_CHECK_LABEL = new TextEncoder().encode("abolish/phone/keycheck/v1");
+
+/**
+ * Extends every stored chain made under a key older than `keys`' current one
+ * to the current key, one HMAC per later key, without the number
+ * ([[0038-verified-accounts]], The number's keyed hash): the verified
+ * numbers, the holds, the codes waiting and the per-number counts. Once it
+ * has run, a dump of these tables is useless without the current key, so a
+ * leaked older key stops mattering (T-73). Chains already under the current
+ * key, or under a key listed after it (staged), are left alone.
+ *
+ * Idempotent and safe beside requests, answers and other instances running
+ * it: each row is rewritten only if it still holds the chain read, and a
+ * verified number's row only under its number's locks, which an answer holds
+ * over every value of the chain while it reads and moves a row by its hash.
+ * The other tables are read by hash only as members of a number's chain, so
+ * one value of a chain or the next counts the same.
+ *
+ * Rotates nothing while any key fails its stored check (`mismatchedKeys`).
+ */
+export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<PhoneHashRotation> {
+  const db = drizzle({ client });
+  const ids = keys.keys.map((k) => k.id);
+  const current = ids.indexOf(keys.current.id);
+  const older = ids.slice(0, current);
+  /** The chain's later values, each under the next key, the last under the current one. */
+  const links = ({ phoneHash, hashKey }: StoredChain<unknown>): Uint8Array[] => {
+    const later: Uint8Array[] = [];
+    let hash = phoneHash;
+    for (const { key } of keys.keys.slice(ids.indexOf(hashKey) + 1, current + 1))
+      later.push((hash = extend(key, hash)));
+    return later;
+  };
+  const to = (later: readonly Uint8Array[]) => ({
+    // An older key's chain has at least the current key's link to add.
+    phoneHash: later[later.length - 1]!,
+    hashKey: keys.current.id,
+  });
+
+  // Each key's check value, stored by the first instance that holds it; a
+  // key whose bytes differ from the ones its ID was first seen with stops
+  // the rotation before it rewrites anything.
+  const checks = keys.keys.map(({ id, key }) => ({
+    keyId: id,
+    keyCheck: createHmac("sha256", key).update(KEY_CHECK_LABEL).digest(),
+  }));
+  await db.insert(accountPhoneKeyChecks).values(checks).onConflictDoNothing();
+  const stored = new Map(
+    (
+      await db.select().from(accountPhoneKeyChecks).where(inArray(accountPhoneKeyChecks.keyId, ids))
+    ).map((row) => [row.keyId, Buffer.from(row.keyCheck)]),
+  );
+  const mismatchedKeys = checks.filter((c) => !stored.get(c.keyId)?.equals(c.keyCheck)).length;
+
+  let rotated = 0;
+  let conflicts = 0;
+  /** Each row `read` gives, in its key's order, a batch at a time, through `write`. */
+  async function each<K>(
+    read: (after: K | undefined) => Promise<StoredChain<K>[]>,
+    write: (row: StoredChain<K>, later: Uint8Array[]) => Promise<number>,
+  ): Promise<void> {
+    let after: K | undefined;
+    for (;;) {
+      const rows = await read(after);
+      for (const row of rows) rotated += await write(row, links(row));
+      if (rows.length < ROTATION_BATCH) return;
+      after = rows[rows.length - 1]!.at;
+    }
+  }
+
+  if (older.length > 0 && mismatchedKeys === 0) {
+    // The verified numbers last: a row skipped there for a conflict never
+    // keeps the others from rotating.
+    await each<bigint>(
+      (after) =>
+        db
+          .select({
+            at: accountPhoneHolds.id,
+            phoneHash: accountPhoneHolds.phoneHash,
+            hashKey: accountPhoneHolds.hashKey,
+          })
+          .from(accountPhoneHolds)
+          .where(
+            and(
+              inArray(accountPhoneHolds.hashKey, older),
+              after === undefined ? undefined : gt(accountPhoneHolds.id, after),
+            ),
+          )
+          .orderBy(asc(accountPhoneHolds.id))
+          .limit(ROTATION_BATCH),
+      async (row, later) =>
+        (
+          await db
+            .update(accountPhoneHolds)
+            .set(to(later))
+            .where(
+              and(
+                eq(accountPhoneHolds.id, row.at),
+                eq(accountPhoneHolds.phoneHash, row.phoneHash),
+                eq(accountPhoneHolds.hashKey, row.hashKey),
+              ),
+            )
+            .returning({ at: accountPhoneHolds.id })
+        ).length,
+    );
+    await each<string>(
+      (after) =>
+        db
+          .select({
+            at: accountPhoneCodes.userId,
+            phoneHash: accountPhoneCodes.phoneHash,
+            hashKey: accountPhoneCodes.hashKey,
+          })
+          .from(accountPhoneCodes)
+          .where(
+            and(
+              inArray(accountPhoneCodes.hashKey, older),
+              after === undefined ? undefined : gt(accountPhoneCodes.userId, after),
+            ),
+          )
+          .orderBy(asc(accountPhoneCodes.userId))
+          .limit(ROTATION_BATCH),
+      // An answer reads the code under its row lock and changes only its
+      // tries or deletes it, so a rewrite here waits for it and then finds
+      // the chain it read, or nothing.
+      async (row, later) =>
+        (
+          await db
+            .update(accountPhoneCodes)
+            .set(to(later))
+            .where(
+              and(
+                eq(accountPhoneCodes.userId, row.at),
+                eq(accountPhoneCodes.phoneHash, row.phoneHash),
+                eq(accountPhoneCodes.hashKey, row.hashKey),
+              ),
+            )
+            .returning({ at: accountPhoneCodes.userId })
+        ).length,
+    );
+    await each<bigint>(
+      async (after) =>
+        (
+          await db
+            .select({
+              at: accountPhoneRecipients.id,
+              phoneHash: accountPhoneRecipients.phoneHash,
+              hashKey: accountPhoneRecipients.hashKey,
+            })
+            .from(accountPhoneRecipients)
+            .where(
+              and(
+                inArray(accountPhoneRecipients.hashKey, older),
+                after === undefined ? undefined : gt(accountPhoneRecipients.id, after),
+              ),
+            )
+            .orderBy(asc(accountPhoneRecipients.id))
+            .limit(ROTATION_BATCH)
+        )
+          // `inArray` has kept out the rows with no key.
+          .flatMap((row) => (row.hashKey === null ? [] : [{ ...row, hashKey: row.hashKey }])),
+      async (row, later) =>
+        (
+          await db
+            .update(accountPhoneRecipients)
+            .set(to(later))
+            .where(
+              and(
+                eq(accountPhoneRecipients.id, row.at),
+                eq(accountPhoneRecipients.phoneHash, row.phoneHash),
+                eq(accountPhoneRecipients.hashKey, row.hashKey),
+              ),
+            )
+            .returning({ at: accountPhoneRecipients.id })
+        ).length,
+    );
+    await each<string>(
+      (after) =>
+        db
+          .select({
+            at: accountPhones.userId,
+            phoneHash: accountPhones.phoneHash,
+            hashKey: accountPhones.hashKey,
+          })
+          .from(accountPhones)
+          .where(
+            and(
+              inArray(accountPhones.hashKey, older),
+              after === undefined ? undefined : gt(accountPhones.userId, after),
+            ),
+          )
+          .orderBy(asc(accountPhones.userId))
+          .limit(ROTATION_BATCH),
+      (row, later) =>
+        db.transaction(async (tx) => {
+          // Every value this rotation touches is one of the chain's, so an
+          // answer for the number holds at least one of the same locks.
+          await lockNumber(tx, [row.phoneHash, ...later]);
+          // Another row already holds the extended value only if two
+          // accounts hold one number, which an instance on a keyring missing
+          // a key could have let happen (the runbook's two deploys). Left for
+          // the operator rather than failing the run, and never sent to the
+          // database to refuse, whose log would carry the hash.
+          const [taken] = await tx
+            .select({ at: accountPhones.userId })
+            .from(accountPhones)
+            .where(eq(accountPhones.phoneHash, to(later).phoneHash));
+          if (taken !== undefined) {
+            conflicts++;
+            return 0;
+          }
+          const done = await tx
+            .update(accountPhones)
+            .set(to(later))
+            .where(
+              and(
+                eq(accountPhones.userId, row.at),
+                eq(accountPhones.phoneHash, row.phoneHash),
+                eq(accountPhones.hashKey, row.hashKey),
+              ),
+            )
+            .returning({ at: accountPhones.userId });
+          return done.length;
+        }),
+    );
+  }
+
+  const unknownKeys =
+    (await db.$count(accountPhones, notInArray(accountPhones.hashKey, ids))) +
+    (await db.$count(accountPhoneHolds, notInArray(accountPhoneHolds.hashKey, ids))) +
+    (await db.$count(accountPhoneCodes, notInArray(accountPhoneCodes.hashKey, ids))) +
+    (await db.$count(
+      accountPhoneRecipients,
+      and(
+        isNotNull(accountPhoneRecipients.hashKey),
+        notInArray(accountPhoneRecipients.hashKey, ids),
+      ),
+    ));
+  return { rotated, unknownKeys, conflicts, mismatchedKeys };
 }

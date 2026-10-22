@@ -263,15 +263,20 @@ const email = createEmailHandler({
   origin,
   log: write,
 });
+const phoneVerification = phoneService();
 const phone = createPhoneHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
-  service: phoneService(),
+  service: phoneVerification,
   turnstile,
   origin,
   log: write,
 });
-const prune = startAccountPrune({ sql, log: write });
+const prune = startAccountPrune({
+  sql,
+  log: write,
+  ...(phoneVerification === undefined ? {} : { phoneKeys: phoneVerification.keys }),
+});
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
     ? noAnalytics

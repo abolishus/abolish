@@ -27,6 +27,7 @@ import {
   pruneAccountPhones,
   readAccountPhone,
   requestPhoneCode,
+  rotatePhoneHashes,
   type Turnstile,
   type TurnstileAction,
   type TurnstileVerdict,
@@ -740,5 +741,214 @@ describe("pruneAccountPhones", () => {
       await db.admin`SELECT 1 FROM account_phone_holds
         WHERE freed_on <= ${days(-1 - PHONE_HOLD_DAYS)}`,
     ).toHaveLength(0);
+  });
+});
+
+describe("rotatePhoneHashes", () => {
+  // Keys of their own, so the rows other tests made under p1 and p2 are
+  // only ever rows under a key these keyrings don't hold.
+  const [R1, R2, R3] = [hexKey(), hexKey(), hexKey()];
+  const ONE = parseKeyring(`r1:${R1}`);
+  const ONE_STAGED = parseKeyring(`r1:${R1}*,r2:${R2}`);
+  const TWO = parseKeyring(`r1:${R1},r2:${R2}`);
+  const THREE = parseKeyring(`r1:${R1},r2:${R2},r3:${R3}`);
+  const mac = (key: string, hash: Uint8Array) =>
+    createHmac("sha256", Buffer.from(key, "hex")).update(hash).digest();
+  const first = (number: string) =>
+    createHmac("sha256", Buffer.from(R1, "hex")).update("abolish/phone/v1").update(number).digest();
+  /** Every stored chain of the four tables, as `table:hex` → key ID. */
+  const stored = async () =>
+    new Map(
+      (
+        await db.admin`
+          SELECT 'account_phones' AS t, phone_hash, hash_key FROM account_phones
+          UNION ALL SELECT 'account_phone_holds', phone_hash, hash_key FROM account_phone_holds
+          UNION ALL SELECT 'account_phone_codes', phone_hash, hash_key FROM account_phone_codes
+          UNION ALL SELECT 'account_phone_recipients', phone_hash, hash_key
+            FROM account_phone_recipients`
+      ).map((r) => [
+        `${r["t"] as string}:${(r["phone_hash"] as Buffer).toString("hex")}`,
+        r["hash_key"] as string | null,
+      ]),
+    );
+  const unknownTo = async (ids: readonly string[]) =>
+    Number(
+      (
+        await db.admin`
+          SELECT count(*) AS n FROM (
+            SELECT hash_key FROM account_phones UNION ALL SELECT hash_key FROM account_phone_holds
+            UNION ALL SELECT hash_key FROM account_phone_codes
+            UNION ALL SELECT hash_key FROM account_phone_recipients) t
+          WHERE hash_key IS NOT NULL AND NOT hash_key = ANY(${ids as string[]})`
+      )[0]!["n"],
+    );
+
+  test("extends every table's chains to the current key, as the number's own chain would be", async () => {
+    // A verified number, a hold from a change of number, a code waiting and
+    // the per-number counts, all under r1.
+    const [n, m, w] = [fresh(), fresh(), fresh()];
+    const a = await newAccount();
+    await verified(a, n, { keys: ONE, now: days(-1) });
+    await verified(a, m, { keys: ONE });
+    const b = await newAccount();
+    const p = provider();
+    await ask(b, w, { keys: ONE, p });
+    const before = await stored();
+
+    const result = await rotatePhoneHashes(app, TWO);
+    const after = await stored();
+    for (const [number, tables] of [
+      [n, ["account_phone_holds", "account_phone_recipients"]],
+      [m, ["account_phones", "account_phone_recipients"]],
+      [w, ["account_phone_codes", "account_phone_recipients"]],
+    ] as const) {
+      const h1 = first(number);
+      const h2 = mac(R2, h1);
+      for (const table of tables) {
+        expect(before.get(`${table}:${h1.toString("hex")}`)).toBe("r1");
+        expect(after.has(`${table}:${h1.toString("hex")}`)).toBe(false);
+        expect(after.get(`${table}:${h2.toString("hex")}`)).toBe("r2");
+      }
+    }
+    expect(result.rotated).toBe([...before.values()].filter((k) => k === "r1").length);
+    expect([...after.values()]).not.toContain("r1");
+    expect(result.unknownKeys).toBe(await unknownTo(["r1", "r2"]));
+
+    // And every row still does its work under the rotated chain.
+    expect(await readAccountPhone(app, a)).toEqual({ verifiedOn: DAY_OF_NOW });
+    expect(await code(verified(await newAccount(), m, { keys: TWO }))).toBe("number-held");
+    expect(await code(verified(await newAccount(), n, { keys: TWO }))).toBe("number-held");
+    await enter(b, w, CODE, { keys: TWO, p });
+    expect(await readAccountPhone(app, b)).toEqual({ verifiedOn: DAY_OF_NOW });
+  });
+
+  test("a waiting code's tries and a number's daily cap carry over", async () => {
+    const [n, c] = [fresh(), fresh()];
+    const a = await newAccount();
+    const p = provider();
+    await ask(a, n, { keys: ONE, p });
+    expect(await code(enter(a, n, "000000", { keys: ONE, p }))).toBe("wrong-code");
+    for (let i = 1; i < MAX_SENDS_PER_NUMBER; i++) await ask(await newAccount(), c, { keys: ONE });
+    await rotatePhoneHashes(app, TWO);
+    expect(await failure(enter(a, n, "000000", { keys: TWO, p }))).toMatchObject({
+      code: "wrong-code",
+      triesLeft: PHONE_CODE_TRIES - 2,
+    });
+    const q = provider();
+    await ask(await newAccount(), c, { keys: TWO, p: q });
+    await ask(await newAccount(), c, { keys: TWO, p: q });
+    // The cap's last code went, and then no more.
+    expect(q.started).toHaveLength(1);
+  });
+
+  test("goes through every later key at once, from wherever a chain stands", async () => {
+    const [n, m] = [fresh(), fresh()];
+    const [a, b] = [await newAccount(), await newAccount()];
+    await verified(a, n, { keys: ONE });
+    await verified(b, m, { keys: TWO });
+    await rotatePhoneHashes(app, THREE);
+    const h1 = first(n);
+    expect(await phoneOf(a)).toEqual({ phone_hash: mac(R3, mac(R2, h1)), hash_key: "r3" });
+    expect(await phoneOf(b)).toEqual({ phone_hash: mac(R3, mac(R2, first(m))), hash_key: "r3" });
+  });
+
+  test("leaves chains under the current key or a staged one, and a second run does nothing", async () => {
+    const n = fresh();
+    const a = await newAccount();
+    await verified(a, n, { keys: ONE });
+    expect((await rotatePhoneHashes(app, ONE_STAGED)).rotated).toBe(0);
+    expect((await rotatePhoneHashes(app, ONE)).rotated).toBe(0);
+    expect(await phoneOf(a)).toEqual({ phone_hash: first(n), hash_key: "r1" });
+    expect((await rotatePhoneHashes(app, TWO)).rotated).toBeGreaterThanOrEqual(1);
+    expect((await rotatePhoneHashes(app, TWO)).rotated).toBe(0);
+    // Under r2 now, a keyring with r2 staged after a current r1 leaves it be.
+    expect((await rotatePhoneHashes(app, ONE_STAGED)).rotated).toBe(0);
+    expect(await phoneOf(a)).toEqual({ phone_hash: mac(R2, first(n)), hash_key: "r2" });
+  });
+
+  test("leaves rows under a key the keyring doesn't hold, and counts them", async () => {
+    const a = await newAccount();
+    await verified(a, fresh(), { keys: KEYS });
+    const { phone_hash } = (await phoneOf(a))!;
+    const result = await rotatePhoneHashes(app, TWO);
+    expect(await phoneOf(a)).toEqual({ phone_hash, hash_key: "p1" });
+    expect(result.unknownKeys).toBeGreaterThanOrEqual(1);
+    expect(result.unknownKeys).toBe(await unknownTo(["r1", "r2"]));
+  });
+
+  test("a count from before the per-number key was kept is left alone, and still counts", async () => {
+    const n = fresh();
+    const h1 = first(n);
+    for (let i = 0; i < MAX_SENDS_PER_NUMBER; i++)
+      await db.admin`
+        INSERT INTO account_phone_recipients (phone_hash, sent_at)
+        VALUES (${h1}, ${new Date("2026-10-22T11:00:00Z")})`;
+    await rotatePhoneHashes(app, TWO);
+    expect(
+      await db.admin`SELECT hash_key FROM account_phone_recipients WHERE phone_hash = ${h1}`,
+    ).toHaveLength(MAX_SENDS_PER_NUMBER);
+    const p = provider();
+    await ask(await newAccount(), n, { keys: TWO, p });
+    expect(p.started).toHaveLength(0);
+  });
+
+  test("racing answers never fails a move, frees a number unheld or lets one verify twice", async () => {
+    for (let i = 0; i < 20; i++) {
+      const [n, m] = [fresh(), fresh()];
+      const a = await newAccount();
+      await verified(a, n, { keys: ONE, now: days(-PHONE_HOLD_DAYS) });
+      const b = await newAccount();
+      const c = await newAccount();
+      const p = provider();
+      await ask(b, n, { keys: TWO, p });
+      await ask(a, m, { keys: TWO, p });
+      const [rotation, move, change] = await Promise.allSettled([
+        rotatePhoneHashes(app2, TWO),
+        enter(b, n, CODE, { keys: TWO, p, client: app }),
+        enter(a, m, CODE, { keys: TWO, p, client: app }),
+      ]);
+      expect(rotation.status).toBe("fulfilled");
+      expect(move.status).toBe("fulfilled");
+      expect(change.status).toBe("fulfilled");
+      expect(await readAccountPhone(app, b)).toBeDefined();
+      expect(await code(verified(c, n, { keys: TWO }))).toBe("number-held");
+      expect(await code(verified(c, m, { keys: TWO }))).toBe("number-held");
+    }
+  });
+
+  test("rotates nothing while a key's bytes differ from those its ID was first seen with", async () => {
+    const [M1, M2] = [hexKey(), hexKey()];
+    const n = fresh();
+    const a = await newAccount();
+    await verified(a, n, { keys: parseKeyring(`m1:${M1}`) });
+    // The first instance holding m2 stores its check; one with m2 retyped is refused.
+    expect((await rotatePhoneHashes(app, parseKeyring(`m1:${M1}*,m2:${M2}`))).mismatchedKeys).toBe(
+      0,
+    );
+    const wrong = await rotatePhoneHashes(app, parseKeyring(`m1:${M1},m2:${hexKey()}`));
+    expect(wrong).toMatchObject({ rotated: 0, mismatchedKeys: 1 });
+    expect((await phoneOf(a))!["hash_key"]).toBe("m1");
+    const right = await rotatePhoneHashes(app, parseKeyring(`m1:${M1},m2:${M2}`));
+    expect(right.mismatchedKeys).toBe(0);
+    expect((await phoneOf(a))!["hash_key"]).toBe("m2");
+    const owner = await db.as("abolish_migrator");
+    await expect(
+      owner`INSERT INTO account_phone_key_checks VALUES ('m3', ${randomBytes(31)})`,
+    ).rejects.toThrow(/check constraint/);
+  });
+
+  test("leaves a number two accounts hold unrotated, counted, and rotates the rest", async () => {
+    const [n, m] = [fresh(), fresh()];
+    const [a, b, c] = [await newAccount(), await newAccount(), await newAccount()];
+    await verified(a, n, { keys: ONE });
+    await verified(c, m, { keys: ONE });
+    // As an instance missing r1 could have let happen: b holds n under r2.
+    await db.admin`
+      INSERT INTO account_phones VALUES (${b}, ${mac(R2, first(n))}, 'r2', ${DAY_OF_NOW})`;
+    const result = await rotatePhoneHashes(app, TWO);
+    expect(result.conflicts).toBe(1);
+    expect(await phoneOf(a)).toEqual({ phone_hash: first(n), hash_key: "r1" });
+    expect(await phoneOf(c)).toEqual({ phone_hash: mac(R2, first(m)), hash_key: "r2" });
+    await db.admin`DELETE FROM account_users WHERE id IN (${a}, ${b})`;
   });
 });

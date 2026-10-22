@@ -135,3 +135,14 @@ Building the phone half in `packages/core` settled these details; none changes a
 - **One line, one chain.** A request is refused unless the lookup gives back the number in the same E.164 form it was hashed in, so a trunk prefix or another written form can't make a second chain for one line.
 - **A number's daily cap can be spent by others.** As with e-mail's per-address cap, accounts made in bulk can spend a number's 5 daily codes and keep its owner from verifying it that day: the cost of not letting them flood a phone or the spend (T-52).
 - **A deleted account's number is held by a trigger** on `account_phones`, so every deletion path, better-auth's included, holds it; a move sets a transaction-local flag the trigger skips, since a moved number is held by its new account.
+
+## Amendment (P2-31 part 3c, 2026-10-22)
+
+The phone-hash rotation, as built; none changes a decision.
+
+- **No separate job.** Each website instance's account timer, every 10 minutes and at start, extends every stored chain under a key older than its keyring's current one, so a rotation finishes within one tick of the deploy that makes a new key current, and an instance still on the staged configuration leaves rows under the new key alone. It is idempotent: a row is rewritten only if it still holds the chain read, and a verified number's row only under the number's locks, which an answer holds over every value of the chain.
+- **Every table with a chain is rotated**: the verified numbers, the holds, the codes waiting, and the per-number send counts, which now record their key (migration 0030). Without that, a dump in the day after a rotation would still hold the numbers sent codes that day under the old keys. Counts from before the migration stay unkeyed and are pruned within a day.
+- **What rotation can't reach**: dumps and backups taken before it, dead row versions until the tables are rewritten (`VACUUM FULL`), and the provider's recovery log and replicas. The [[account-keys]] runbook makes deleting those backups part of answering an exposure.
+- **A row under a key the keyring lacks** is left alone and logged by kind (`PhoneHashKeyMissing`), since it means a dropped or mistyped key, which only putting the key back fixes.
+- **A check value per key.** A rotation is one way, so a key's bytes changed under its ID would leave every rotated chain matching no number. The first instance to hold a key stores `HMAC(key, "abolish/phone/keycheck/v1")` for its ID, and an instance whose keys don't all reproduce their checks rotates nothing (`PhoneHashKeyMismatch`). The check reveals nothing about a 256-bit key.
+- **Two accounts on one number** (only possible after an instance ran without a key) leave that number's older row unrotated and logged (`PhoneHashConflict`), rather than failing the run.

@@ -8,9 +8,10 @@ import { catalogs, type Messages } from "../messages.ts";
 
 type Key = keyof Messages;
 
-// Only routes this server has. The mockups' Discover, Verify, Board and
-// Trustees join as their pages land (docs/status/P2-19.md).
+// Only routes this server has. The mockups' Verify, Board and Trustees join
+// as their pages land (docs/status/P2-19.md).
 const NAV = [
+  { href: "/discover", label: "navDiscover" },
   { href: "/polls", label: "navPolls" },
   { href: "/how-it-works", label: "navHowItWorks" },
   { href: "/moderation", label: "navModeration" },

@@ -207,6 +207,26 @@ describe("dist/node/main.mjs", () => {
     30_000,
   );
 
+  test.each(["http://ballot.test", "https://ballot.test/?from=web", "https://ballot.test/#x"])(
+    "refuses to start with %j as the ballot client's address",
+    async (ballotUrl) => {
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        TURNSTILE_SITE_KEY: SITE_KEY,
+        BALLOT_URL: ballotUrl,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain("BALLOT_URL");
+      expect(web.err()).not.toContain("ballot.test");
+    },
+    30_000,
+  );
+
   test("refuses half a PostHog configuration, quoting none of it", async () => {
     const web = run({
       DATABASE_URL: database(),

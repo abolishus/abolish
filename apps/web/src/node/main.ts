@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
 
-import { isSiteKey } from "../values.ts";
+import { ballotBase, isSiteKey } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
@@ -34,6 +34,17 @@ const Env = z
     // (src/data.ts, fetchChallengeKey). Without one the editor says polls
     // can't be submitted here; a malformed one is refused at start.
     TURNSTILE_SITE_KEY: z.string().refine(isSiteKey, "not a Turnstile site key").optional(),
+    // The ballot client's address, which the stream's cards link to with the
+    // poll in the fragment (src/values.ts, ballotLink). Read by the Start
+    // server's own code (src/data.ts, fetchStream); without one the cards
+    // link only to each poll's page, and a malformed one is refused at start.
+    BALLOT_URL: z
+      .string()
+      .refine(
+        (url) => ballotBase(url) !== undefined,
+        "not an https URL without a query or fragment",
+      )
+      .optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -57,6 +68,7 @@ const env = Env.parse({
   ACCOUNT_SECRET: process.env["ACCOUNT_SECRET"],
   TURNSTILE_SECRET_KEY: process.env["TURNSTILE_SECRET_KEY"],
   TURNSTILE_SITE_KEY: process.env["TURNSTILE_SITE_KEY"] || undefined,
+  BALLOT_URL: process.env["BALLOT_URL"] || undefined,
   WEB_HOST: process.env["WEB_HOST"],
   WEB_PORT: process.env["WEB_PORT"],
   POSTHOG_HOST: process.env["POSTHOG_HOST"] || undefined,

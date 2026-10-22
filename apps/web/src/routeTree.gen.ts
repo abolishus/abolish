@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from "./routes/__root.tsx";
 import { Route as IndexRouteImport } from "./routes/index.tsx";
 import { Route as AccountRouteImport } from "./routes/account.tsx";
+import { Route as DiscoverRouteImport } from "./routes/discover.tsx";
 import { Route as HowItWorksRouteImport } from "./routes/how-it-works.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
 const AccountRoute = AccountRouteImport.update({
   id: "/account",
   path: "/account",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const DiscoverRoute = DiscoverRouteImport.update({
+  id: "/discover",
+  path: "/discover",
   getParentRoute: () => rootRouteImport,
 } as any);
 const HowItWorksRoute = HowItWorksRouteImport.update({
@@ -80,6 +86,7 @@ const AccountPollsIdSetupRoute = AccountPollsIdSetupRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
@@ -93,6 +100,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/discover": typeof DiscoverRoute;
   "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/account"
+    | "/discover"
     | "/how-it-works"
     | "/moderation"
     | "/p/$code"
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/account"
+    | "/discover"
     | "/how-it-works"
     | "/moderation"
     | "/p/$code"
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/account"
+    | "/discover"
     | "/how-it-works"
     | "/moderation"
     | "/p/$code"
@@ -162,6 +174,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AccountRoute: typeof AccountRoute;
+  DiscoverRoute: typeof DiscoverRoute;
   HowItWorksRoute: typeof HowItWorksRoute;
   ModerationRoute: typeof ModerationRoute;
   PCodeRoute: typeof PCodeRoute;
@@ -186,6 +199,13 @@ declare module "@tanstack/react-router" {
       path: "/account";
       fullPath: "/account";
       preLoaderRoute: typeof AccountRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/discover": {
+      id: "/discover";
+      path: "/discover";
+      fullPath: "/discover";
+      preLoaderRoute: typeof DiscoverRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/how-it-works": {
@@ -269,6 +289,7 @@ const PollsElectionIdRouteWithChildren = PollsElectionIdRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  DiscoverRoute: DiscoverRoute,
   HowItWorksRoute: HowItWorksRoute,
   ModerationRoute: ModerationRoute,
   PCodeRoute: PCodeRoute,

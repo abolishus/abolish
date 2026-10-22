@@ -136,6 +136,72 @@ for (const id of FILLER)
     ),
   );
 
+/**
+ * The stream's polls (`/discover`), each committed to a published display
+ * text: a version-5 poll of two questions, a version-1 poll, one whose
+ * served text isn't the one its definition commits to, and one with no text
+ * at all. The fillers follow them, without text, so the stream has a second
+ * page.
+ */
+interface TextVector {
+  id: string;
+  encoding: string;
+  commitment: string;
+}
+const textVector = (name: string, id: string) => {
+  const v = (
+    JSON.parse(
+      readFileSync(new URL(`../../../docs/spec/vectors/${name}`, import.meta.url), "utf8"),
+    ) as { vectors: TextVector[] }
+  ).vectors.find((x) => x.id === id);
+  if (v === undefined) throw new Error("vectors missing");
+  return v;
+};
+const TEXT_V1 = textVector("display-text.json", "display-text-two-languages");
+const TEXT_V2 = textVector("display-text-v2.json", "display-text-v2-two-questions");
+const STREAM_V5 = "c1".repeat(32);
+const STREAM_V1 = "c2".repeat(32);
+const STREAM_BAD_TEXT = "c3".repeat(32);
+const STREAM_NO_TEXT = "c4".repeat(32);
+const streamV1 = (electionId: string) =>
+  toHex(
+    encodeElectionDefinition({
+      ...decodeElectionDefinition(fromHex(typical.encoding)),
+      election_id: fromHex(electionId),
+      option_count: 3,
+      max_selections: 1,
+      display_text_commitment: fromHex(TEXT_V1.commitment),
+    }),
+  );
+{
+  const v5 = decodeElectionDefinitionV5(fromHex(typicalV5.encoding));
+  definitions.set(
+    STREAM_V5,
+    toHex(
+      encodeElectionDefinitionV5({
+        ...v5,
+        election_id: fromHex(STREAM_V5),
+        questions: [3, 2].map((option_count) => ({
+          ...v5.questions[0]!,
+          option_count,
+          min_selections: 0,
+          max_selections: 1,
+        })),
+        display_text_commitment: fromHex(TEXT_V2.commitment),
+      }),
+    ),
+  );
+}
+for (const id of [STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT]) definitions.set(id, streamV1(id));
+const displayTexts = new Map([
+  [STREAM_V5, TEXT_V2.encoding],
+  [STREAM_V1, TEXT_V1.encoding],
+  [STREAM_BAD_TEXT, TEXT_V2.encoding],
+]);
+/** The stream under `new`; `closing` is the same polls the other way round. */
+const streamed = [STREAM_V5, STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT, ...FILLER];
+const BALLOT = "https://ballot.test/";
+
 /** A poll's short code at `length`, from the definition the stub serves for it. */
 const codeOf = (id: string, length = 7) =>
   shortCode(
@@ -211,6 +277,26 @@ function stubApi(): Server {
     if (url.pathname === "/elections") {
       const after = url.searchParams.get("after") ?? "";
       const limit = Number(url.searchParams.get("limit"));
+      const sort = url.searchParams.get("sort");
+      if (sort === "answered")
+        return json(503, {
+          defined: true,
+          code: "SORT_UNAVAILABLE",
+          status: 503,
+          message: "This order is unavailable here for now.",
+        });
+      if (sort === "new" || sort === "closing") {
+        const order = sort === "new" ? streamed : streamed.toReversed();
+        const from = after === "" ? 0 : order.indexOf(after) + 1;
+        if (from === 0 && after !== "")
+          return json(400, {
+            defined: true,
+            code: "CURSOR_NOT_FOUND",
+            status: 400,
+            message: "`after` names no poll this order can place.",
+          });
+        return json(200, { elections: order.slice(from, from + limit) });
+      }
       return json(200, { elections: listed.filter((id) => id > after).slice(0, limit) });
     }
     if (definition === undefined)
@@ -223,6 +309,17 @@ function stubApi(): Server {
     switch (url.pathname) {
       case "/elections/definition":
         return json(200, { definition });
+      case "/elections/display-text": {
+        const displayText = displayTexts.get(electionId);
+        return displayText === undefined
+          ? json(404, {
+              defined: true,
+              code: "DISPLAY_TEXT_NOT_FOUND",
+              status: 404,
+              message: "This server holds no display text for this election.",
+            })
+          : json(200, { displayText });
+      }
       case "/board/head":
         return json(200, HEAD);
       case "/board/entries": {
@@ -271,6 +368,7 @@ beforeAll(async () => {
   process.env["API_URL"] = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
   // Cloudflare's published test key, which always passes.
   process.env["TURNSTILE_SITE_KEY"] = SITE_KEY;
+  process.env["BALLOT_URL"] = BALLOT;
   const builder = await createBuilder({ root, logLevel: "warn" });
   await builder.buildApp();
   const server = (await import(pathToFileURL(`${root}dist/server/server.js`).href)) as {
@@ -320,6 +418,7 @@ describe("every page", () => {
     "/account/polls/new",
     `/account/polls/${"a".repeat(32)}/setup`,
     "/how-it-works",
+    "/discover",
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
   ])(
@@ -349,7 +448,10 @@ describe("every page", () => {
       expect(html).not.toMatch(/\son[a-z]+="/);
       // The CSP's style-src 'self' would block an inline style (P2-19).
       expect(html).not.toMatch(/\sstyle="/);
-      expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
+      // The one way off the site: the ballot client, with a poll in the fragment.
+      expect(
+        html.replaceAll(new RegExp(`href="${BALLOT}#election=[0-9a-f]{64}"`, "g"), ""),
+      ).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
     },
   );
 
@@ -763,6 +865,86 @@ describe("poll list", () => {
   });
 });
 
+describe("stream", () => {
+  /** The polls a page of the stream shows, in order, by the links of their cards' headings. */
+  const cards = (html: string) =>
+    [...html.matchAll(/<h3\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map((m) => m[1]);
+
+  test("shows each open poll's checked words, answerable in the ballot client", async () => {
+    const response = await get("/discover");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("What people are asking");
+    expect(cards(html)).toEqual(streamed.slice(0, 10));
+    // A version-5 poll's title, a version-1 poll's question, each in its own language.
+    expect(html).toMatch(
+      /<h3[^>]*lang="en"[^>]*><a href="\/polls\/c1c1[0-9a-f]{60}"[^>]*>Park and library</,
+    );
+    expect(html).toContain(">Should the park stay open late?<");
+    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V5}"`);
+    expect(html).toContain("Answer 2 questions");
+    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V1}"`);
+    // Text the definition doesn't commit to, or none, gets no words and no way to answer (T-41).
+    expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
+    expect(html).not.toContain(`#election=${STREAM_NO_TEXT}`);
+    expect(html.match(/can&#x27;t be shown here/g)).toHaveLength(8);
+    // The order is marked, and the next page keeps it.
+    expect(html).toMatch(/<a href="\/discover" aria-current="page"[^>]*>New</);
+    expect(html).toContain(`href="/discover?after=${streamed[9]}"`);
+  });
+
+  test("pages and orders as the API does, never with an endless scroll", async () => {
+    const second = await (await get(`/discover?after=${streamed[9]}`)).text();
+    expect(cards(second)).toEqual(streamed.slice(10, 20));
+    const third = await (await get(`/discover?after=${streamed[19]}`)).text();
+    expect(cards(third)).toEqual(streamed.slice(20));
+    expect(third).not.toContain("More questions");
+    const closing = await (await get("/discover?sort=closing")).text();
+    expect(cards(closing)).toEqual(streamed.toReversed().slice(0, 10));
+    expect(closing).toMatch(/<a href="\/discover\?sort=closing" aria-current="page"/);
+    expect(closing).toContain(
+      `href="/discover?sort=closing&amp;after=${streamed.toReversed()[9]}"`,
+    );
+  });
+
+  test("says when an order is unavailable, or a page can't be placed, quoting nothing", async () => {
+    let response = await get("/discover?sort=answered");
+    expect(response.status).toBe(200);
+    let html = await response.text();
+    expect(html).toContain("This order isn&#x27;t available just now");
+    expect(cards(html)).toEqual([]);
+    response = await get(`/discover?sort=closing&after=${UNKNOWN_ID}`);
+    expect(response.status).toBe(200);
+    html = await response.text();
+    expect(html).toContain("That page has moved on");
+    expect(html).toContain('href="/discover?sort=closing">Start from the top');
+    expect(html).not.toContain("CURSOR_NOT_FOUND");
+  });
+
+  test.each(["?sort=bogus", "?sort=id", "?after=abc", "?sort=new&sort=closing"])(
+    "%s is the first page of the newest, quoting nothing",
+    async (search) => {
+      const response = await follow(`/discover${search}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(cards(html)).toEqual(streamed.slice(0, 10));
+      expect(html).not.toContain("bogus");
+    },
+  );
+
+  test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {
+    seen.length = 0;
+    await get("/discover", { cookie: "session=secret", "x-forwarded-for": "203.0.113.9" });
+    expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
+    expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(10);
+    expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(10);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+    }
+  });
+});
+
 describe("moderation log", () => {
   test("lists decisions with their reasons, linking each poll", async () => {
     const html = await (await get("/moderation")).text();
@@ -861,7 +1043,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(7);
+    expect(ids.length).toBe(8);
     return ids;
   }
 
@@ -886,7 +1068,7 @@ describe("server functions", () => {
       expect(await own.text()).toMatch(
         // The site key's takes no input, and answers the key.
         new RegExp(
-          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|${SITE_KEY}`,
+          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|expected a stream order|${SITE_KEY}`,
         ),
       );
     }

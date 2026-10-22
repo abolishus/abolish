@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ArrowRight } from "lucide-react";
 import { expect, fn, userEvent, within } from "storybook/test";
 
-import { Button } from "./button.tsx";
+import { Button, buttonVariants } from "./button.tsx";
 
 const meta = {
   component: Button,
@@ -39,6 +39,19 @@ export const Disabled: Story = {
     // The button ignores pointer events while disabled; dispatch the click anyway.
     await userEvent.setup({ pointerEventsCheck: 0 }).click(button);
     await expect(args.onClick).not.toHaveBeenCalled();
+  },
+};
+
+/** A link drawn as a button takes the size's text, not the base's 12px. */
+export const AsLink: Story = {
+  render: () => (
+    <a href="#next" className={buttonVariants({ size: "lg" })}>
+      Continue
+    </a>
+  ),
+  play: async ({ canvasElement }) => {
+    const link = within(canvasElement).getByRole("link", { name: "Continue" });
+    await expect(getComputedStyle(link).fontSize).toBe("16px");
   },
 };
 

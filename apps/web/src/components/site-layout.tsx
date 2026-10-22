@@ -119,20 +119,28 @@ export function Notice({ title, children }: { title: string; children: ReactNode
   );
 }
 
+// Four, so the two-column grid closes with no empty cell. Discover first:
+// it's where an everyday visitor finds a poll again by searching.
 const WAYS = [
+  { href: "/discover", label: "navDiscover", note: "navDiscoverNote" },
   { href: "/polls", label: "navPolls", note: "navPollsNote" },
   { href: "/moderation", label: "navModeration", note: "navModerationNote" },
   { href: "/", label: "navHome", note: "navHomeNote" },
 ] as const satisfies readonly { href: string; label: Key; note: Key }[];
 
-/** A system page: what happened, in words, then other places to go. */
+/**
+ * A system page: what happened, in words, then other places to go, unless
+ * there are none (`ways={false}`, offline, where every other page fails too).
+ */
 function SystemPage({
   code,
   title,
+  ways = true,
   children,
 }: {
   code: string;
   title: string;
+  ways?: boolean;
   children: ReactNode;
 }) {
   const t = useTranslate(catalogs);
@@ -147,26 +155,28 @@ function SystemPage({
         </h1>
         <div className="grid max-w-prose gap-4 text-lg text-pretty lg:col-span-7">{children}</div>
       </div>
-      <nav aria-label={t("otherPlaces")}>
-        <ul className="m-0 grid list-none border-t border-border p-0 sm:grid-cols-2">
-          {WAYS.map((w) => (
-            <li key={w.href} className="border-b border-border sm:odd:border-e">
-              <a
-                href={w.href}
-                className="group grid min-h-12 grid-cols-[1fr_auto] items-center gap-x-4 px-1 py-5 hover:bg-muted sm:px-5"
-              >
-                <span className="grid gap-0.5">
-                  <span className="text-lg font-semibold">{t(w.label)}</span>
-                  <span className="text-sm text-muted-foreground group-hover:text-foreground">
-                    {t(w.note)}
+      {ways && (
+        <nav aria-label={t("otherPlaces")}>
+          <ul className="m-0 grid list-none border-t border-border p-0 sm:grid-cols-2">
+            {WAYS.map((w) => (
+              <li key={w.href} className="border-b border-border sm:odd:border-e">
+                <a
+                  href={w.href}
+                  className="group grid min-h-12 grid-cols-[1fr_auto] items-center gap-x-4 px-1 py-5 hover:bg-muted sm:px-5"
+                >
+                  <span className="grid gap-0.5">
+                    <span className="text-lg font-semibold">{t(w.label)}</span>
+                    <span className="text-sm text-muted-foreground group-hover:text-foreground">
+                      {t(w.note)}
+                    </span>
                   </span>
-                </span>
-                <ArrowRight aria-hidden="true" className="size-5" />
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+                  <ArrowRight aria-hidden="true" className="size-5" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
     </div>
   );
 }
@@ -192,7 +202,7 @@ export function NotFound() {
 export function Offline({ retry = "" }: { retry?: string }) {
   const t = useTranslate(catalogs);
   return (
-    <SystemPage code={t("offlineCode")} title={t("offlineTitle")}>
+    <SystemPage code={t("offlineCode")} title={t("offlineTitle")} ways={false}>
       <p className="m-0">{t("offline")}</p>
       <p className="m-0 text-base">{t("offlineKept")}</p>
       <div>

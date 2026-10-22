@@ -28,6 +28,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     "/polls",
   );
+  // Where an everyday visitor finds a shared poll again, by its question.
+  await expect(within(ways).getByRole("link", { name: /^Discover/ })).toHaveAttribute(
+    "href",
+    "/discover",
+  );
+  await expect(within(ways).getAllByRole("link")).toHaveLength(4);
+  await expect(canvas.getByRole("main")).not.toHaveTextContent(/64-character|board entries/);
   await userEvent.tab();
   await expect(canvas.getByRole("link", { name: "Skip to content" })).toHaveFocus();
 };
@@ -76,6 +83,11 @@ const offline: Story["play"] = async ({ canvasElement }) => {
     "/polls?after=3",
   );
   await expect(canvas.queryByRole("button")).toBeNull();
+  // Offline, every other page fails as this one did, so it offers none.
+  await expect(canvas.queryByRole("navigation", { name: "Other places to go" })).toBeNull();
+  await expect(getComputedStyle(canvas.getByRole("link", { name: "Try again" })).fontSize).toBe(
+    "16px",
+  );
 };
 
 /** What the offline shell shows when a page can't be fetched (src/app/offline.ts). */

@@ -20,6 +20,7 @@ import {
   type CheckResult,
   parseBundle,
   readArchive,
+  readBlockStore,
   readBoardByCid,
   type Report,
   splitEntries,
@@ -179,12 +180,19 @@ const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as Chec
 const without43 = (r: Report) => r.checks.filter((c) => c.id !== "4.3");
 
 describe("readArchive", () => {
-  test("a whole archive passes 4.3, reads every listed object and changes no other row", async () => {
+  test("a whole archive reads every listed object and changes no other row, but 4.3 waits on the earlier locators", async () => {
     const plain = bundle({ locator: locatorOf(m1) });
     const { source, asked } = arweave(WHOLE);
     const read = await readArchive(plain, source);
     const r = verifyBundle(read.bundle);
-    expect(row(r, "4.3")).toEqual({ id: "4.3", kind: "election", status: "pass" });
+    // No bundle carries the anchor's ArchiveLocated logs yet, and only they
+    // show an overwritten locator (T-69): never a pass without them.
+    expect(row(r, "4.3")).toEqual({
+      id: "4.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "not-implemented",
+    });
     expect(row(verifyBundle(plain), "4.3").code).toBe("not-implemented");
     expect(without43(r)).toEqual(without43(verifyBundle(plain)));
     expect(row(r, "4.1").status).toBe("pass");
@@ -211,8 +219,40 @@ describe("readArchive", () => {
     const r = verifyBundle(withCopy);
     expect(row(r, "4.1").status).toBe("pass");
     expect(row(r, "4.2").status).toBe("pass");
-    expect(row(r, "4.3").status).toBe("pass");
+    expect(row(r, "4.3").code).toBe("not-implemented");
     expect(r.board.byCid).toEqual({});
+  });
+
+  test("a copy asks blocks.car first, then the objects read, and a gateway only for neither's blocks (T-11)", async () => {
+    const empty = bundle({ locator: locatorOf(m1), board: [], withCheckpoints: true });
+    const segment = objects[0] as Archived;
+    const run = async (inStore: boolean, inArchive: boolean) => {
+      const read = await readArchive(
+        empty,
+        arweave(WHOLE.filter((o) => inArchive || o !== segment)).source,
+      );
+      const asked = { archive: 0, gateway: 0 };
+      const archived: typeof read.blocks = async (cid, limit) => {
+        asked.archive++;
+        return read.blocks(cid, limit);
+      };
+      const gateways = {
+        source: async (cid: Uint8Array) => {
+          asked.gateway++;
+          return bytesToHex(cid) === bytesToHex(segment.cid) ? [segment.bytes] : [];
+        },
+        stats: () => ({ requests: asked.gateway, blocks: asked.gateway }),
+      };
+      const store = inStore ? readBlockStore(objectCar(segment.bytes)) : undefined;
+      const withCopy = await readBoardByCid(read.bundle, store, 2 ** 20, gateways, archived);
+      expect(withCopy.entries).toEqual(copy);
+      return asked;
+    };
+    expect(runs).toHaveLength(1);
+    // The store's block asks neither; the archive's asks no gateway.
+    expect(await run(true, true)).toEqual({ archive: 0, gateway: 0 });
+    expect(await run(false, true)).toEqual({ archive: 1, gateway: 0 });
+    expect(await run(false, false)).toEqual({ archive: 1, gateway: 1 });
   });
 
   test("a copy short of what the archive holds stays short, and 4.3 still reports the archive", async () => {
@@ -232,6 +272,24 @@ describe("readArchive", () => {
     expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "locator-none", at: {} });
     expect(r.archive).toEqual({ stopped: "locator-none", count: "0" });
     expect(asked).toEqual([]);
+  });
+
+  test("with the anchors unread, the walk's report still comes first", async () => {
+    const r = verifyBundle(
+      (
+        await readArchive(
+          bundle({ locator: locatorOf(m1), board: [] }),
+          arweave([m1, ...objects]).source,
+        )
+      ).bundle,
+    );
+    expect(row(r, "4.3")).toEqual({
+      id: "4.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "unavailable",
+      at: {},
+    });
   });
 
   test("a lost manifest is unavailable, and the objects only it listed are not archived", async () => {
@@ -308,9 +366,14 @@ describe("readArchive", () => {
     );
     expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "locator-version" });
     expect(asked).toEqual([]);
-    expect(r.archive).toMatchObject({
-      walk: { manifests: 0, reads: 0 },
-      objects: { read: 0, reads: 0 },
+    // No chain was read, so no object is called missing.
+    expect(r.archive).toEqual({
+      count: "2",
+      walk: {
+        manifests: 0,
+        reads: 0,
+        findings: [{ code: "locator-version", locator: "latest", version: 9 }],
+      },
     });
     expect(r.archive && "walk" in r.archive && "latest" in r.archive.walk).toBe(false);
   });
@@ -357,6 +420,17 @@ describe("readArchive", () => {
     );
     expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "over-budget" });
     expect(r.archive).toMatchObject({ walk: { findings: [{ code: "over-budget", budget: 1 }] } });
+    // Manifests left unread may list any object: none is called not archived.
+    expect(r.archive !== undefined && "objects" in r.archive).toBe(false);
+  });
+
+  test("the objects' read budget stops the reads, objects-over-budget", async () => {
+    const { source, asked } = arweave(WHOLE);
+    const r = verifyBundle(
+      (await readArchive(bundle({ locator: locatorOf(m1) }), source, { maxReads: 1 })).bundle,
+    );
+    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "objects-over-budget" });
+    expect(asked).toHaveLength(3);
   });
 
   test("a proof without the locator's nodes leaves 4.3 unverifiable with the L1 code", async () => {
@@ -380,7 +454,13 @@ describe("readArchive", () => {
       (await readArchive(bundle({ locator: locatorOf(m1), board: [] }), source)).bundle,
     );
     expect(row(r, "4.2").code).toBe("l1-checkpoint-unknown");
-    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+    expect(row(r, "4.3")).toEqual({
+      id: "4.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "not-reached",
+      at: {},
+    });
     expect(r.archive).toEqual({
       count: "2",
       walk: { latest: "1", manifests: 2, reads: 2, findings: [] },
@@ -393,7 +473,13 @@ describe("readArchive", () => {
     const r = verifyBundle(
       (await readArchive(bundle({ locator: locatorOf(m1), definition: "0001" }), source)).bundle,
     );
-    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+    expect(row(r, "4.3")).toEqual({
+      id: "4.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "not-reached",
+      at: {},
+    });
     expect(r.archive).toEqual({ stopped: "not-reached" });
     expect(asked).toEqual([]);
   });
@@ -414,8 +500,12 @@ describe("readArchive", () => {
     await expect(readArchive(format1, source)).rejects.toThrow(TypeError);
     const once = await readArchive(bundle({ locator: locatorOf(m1) }), source);
     await expect(readArchive(once.bundle, source)).rejects.toThrow(TypeError);
-    for (const maxBytes of [0, 1.5, -1, Number.MAX_SAFE_INTEGER + 1])
-      await expect(readArchive(bundle(), source, { maxBytes })).rejects.toThrow(RangeError);
+    // Every budget is checked before anything is read, whatever the bundle holds.
+    for (const bad of [0, 1.5, -1, Number.MAX_SAFE_INTEGER + 1])
+      for (const name of ["maxManifests", "maxBytes", "maxReads"])
+        await expect(readArchive(bundle(), source, { [name]: bad })).rejects.toThrow(
+          new RangeError(`${name} must be a positive integer`),
+        );
     await expect(
       readBoardByCid(bundle({ board: [] }), undefined, 1, undefined, undefined),
     ).rejects.toThrow(TypeError);

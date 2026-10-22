@@ -613,7 +613,9 @@ const DEFAULT_ARCHIVE_BYTES = 2 ** 30;
  * the chain of manifests from it (`walkArchive`, under the definition's
  * `l1_chain_id` and anchor); and, where the board checks' steps 1 and 2 fix
  * the counted checkpoints, the objects they name (`readListedObjects`).
- * Returns the bundle with how the read came out, which `verifyBundle`
+ * The objects are read only after a walk that reached the latest
+ * locator's manifest within its budget, since an unread manifest may list
+ * any object. Returns the bundle with how the read came out, which `verifyBundle`
  * reports as 4.3's row and the report's `archive`, and the objects' blocks,
  * which `readBoardByCid` asks beside its other sources.
  *
@@ -638,8 +640,14 @@ export async function readArchive(
   const maxManifests = options.maxManifests ?? DEFAULT_MANIFEST_BUDGET;
   const maxBytes = options.maxBytes ?? DEFAULT_ARCHIVE_BYTES;
   const maxReads = options.maxReads ?? DEFAULT_OBJECT_READS;
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
-    throw new RangeError("maxBytes must be a positive integer");
+  // Checked before anything is read, whatever the bundle holds.
+  for (const [name, value] of [
+    ["maxManifests", maxManifests],
+    ["maxBytes", maxBytes],
+    ["maxReads", maxReads],
+  ] as const)
+    if (!Number.isSafeInteger(value) || value < 1)
+      throw new RangeError(`${name} must be a positive integer`);
   const none: AsyncBlockSource = async () => [];
   const done = (archive: ArchiveRead, blocks = none) => ({
     bundle: { ...bundle, archive },
@@ -687,8 +695,12 @@ export async function readArchive(
           findings: [{ code: "locator-framing", locator: "latest" } as const],
           reads: 0,
         };
+  // The listings are known only from a chain read from the latest's manifest
+  // within the budget: a manifest the walk didn't read may list any object,
+  // so none is called `not-archived` from a partial walk (T-52).
+  const whole = walk.latest !== undefined && !walk.findings.some((f) => f.code === "over-budget");
   const objects =
-    targets === undefined
+    targets === undefined || !whole
       ? undefined
       : await readListedObjects(targets, walk.listings, source, maxBytes, maxReads);
   return done(
@@ -724,15 +736,16 @@ export async function readArchive(
  * the bytes wherever they came from (docs/spec/archive.md; T-53).
  */
 function archiveRow(read: ArchiveRead): Outcome {
-  if ("stopped" in read)
-    return read.stopped === "not-reached"
-      ? NOT_REACHED
-      : { status: "unverifiable", code: read.stopped, at: {} };
+  if ("stopped" in read) return { status: "unverifiable", code: read.stopped, at: {} };
   const first = read.walk.findings[0] ?? read.objects?.findings[0];
   if (first !== undefined) return { status: "unverifiable", code: first.code, at: {} };
   // Without counted checkpoints there is no object to look for, and so no pass.
-  if (read.objects === undefined) return NOT_REACHED;
-  return PASS;
+  if (read.objects === undefined) return { status: "unverifiable", code: "not-reached", at: {} };
+  // 4.3 also judges the earlier locators from the anchor's `ArchiveLocated`
+  // logs, the only check that sees a seized authority's overwritten locator
+  // (T-69), and a bundle carries none yet: a whole chain from the latest is
+  // no pass until they are read (P4-3 part 3b-2b-2).
+  return NOT_IMPLEMENTED;
 }
 
 /**

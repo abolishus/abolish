@@ -144,16 +144,17 @@ export function toggle(
  */
 export function openingAnswers(questions: readonly BallotQuestion[], pick?: number): Answers {
   const first = questions[0];
-  return questions.map((_, i) =>
-    i === 0 &&
+  const picked =
     first !== undefined &&
     pick !== undefined &&
     Number.isInteger(pick) &&
     pick >= 0 &&
     pick < first.options.length
-      ? [pick]
-      : [],
-  );
+      ? toggle(first, [], pick)
+      : undefined;
+  // The same rule as a tap on the screen.
+  const opening = picked === undefined || picked.refused ? [] : picked.selection;
+  return questions.map((_, i) => (i === 0 ? opening : []));
 }
 
 /** Whether `selection` is an answer the question's validity proof accepts. */

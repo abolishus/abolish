@@ -1,5 +1,6 @@
 import { encodeBoardEntry, RECORD_TYPES } from "@abolishus/crypto";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { type ComponentProps, useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import RECORDS from "../../../docs/spec/vectors/ballot-v3-records.json" with { type: "json" };
@@ -1667,8 +1668,26 @@ export const RestartedFromAPick: Story = {
     await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(mocks(args.source).load).toHaveBeenCalledTimes(2);
     for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+    // A later link in the same tab brings its own pick, even to the same poll.
+    await userEvent.click(canvas.getByRole("button", { name: "Open a later link" }));
+    await expect(await canvas.findByRole("radio", { name: "Yes" })).toBeChecked();
+    await expect(mocks(args.source).load).toHaveBeenCalledTimes(3);
   },
+  render: (args) => <Relinked {...args} />,
 };
+
+/** The client with a way to open another link in the same tab, as a new fragment does. */
+function Relinked(props: ComponentProps<typeof App>) {
+  const [link, setLink] = useState(props.link);
+  return (
+    <>
+      <App {...props} link={link} />
+      <button type="button" onClick={() => setLink(parseLink(`#election=${ELECTION_ID}&pick=0`))}>
+        Open a later link
+      </button>
+    </>
+  );
+}
 
 export const WorkerFailed: Story = {
   name: "The worker failed",

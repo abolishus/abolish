@@ -228,8 +228,9 @@ export function OpenElection({
   const [state, setState] = useState<State>({ kind: "checking" });
   const [attempt, setAttempt] = useState(0);
   // The link's pick holds until a ballot restarts; a load that failed and
-  // was tried again showed no ballot, so it keeps it.
-  const [restarted, setRestarted] = useState(false);
+  // was tried again showed no ballot, so it keeps it. A later link (a new
+  // fragment, so new bytes) brings its own pick.
+  const [restartedFor, setRestartedFor] = useState<Uint8Array | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -264,13 +265,13 @@ export function OpenElection({
           key={attempt}
           election={state.election}
           hiddenAsThreat={state.hiddenAsThreat}
-          pick={restarted ? undefined : pick}
+          pick={restartedFor === electionId ? undefined : pick}
           source={source}
           languages={languages}
           // A failed seal or opening checks the poll anew, in a fresh worker
           // if the last one stopped: the worker holds the poll it seals for.
           onRestart={() => {
-            setRestarted(true);
+            setRestartedFor(electionId);
             setAttempt(attempt + 1);
           }}
         />

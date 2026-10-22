@@ -173,6 +173,12 @@ describe("schema", () => {
       // Plus UPDATE of some columns (appeals.test.ts).
       ["account_appeals", "INSERT,SELECT"],
       ["account_credentials", "DELETE,SELECT"],
+      ["account_email_codes", "DELETE,INSERT,SELECT,UPDATE"],
+      // Never updated; pruned past the daily window (account-emails.test.ts).
+      ["account_email_recipients", "DELETE,INSERT,SELECT"],
+      // Never updated; pruned past the daily window (account-emails.test.ts).
+      ["account_email_sends", "DELETE,INSERT,SELECT"],
+      ["account_emails", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_moderators", "INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
       // Append-only: a submission counts for its 24 hours (poll-failures.test.ts).

@@ -169,6 +169,36 @@ export {
   pruneAccountVerifications,
 } from "./accounts.ts";
 export {
+  EMAIL_CODE_DIGITS,
+  EMAIL_CODE_SECONDS,
+  EMAIL_CODE_TRIES,
+  type EmailKeys,
+  emailKeys,
+  type EmailMessage,
+  type EmailSender,
+  EmailVerificationError,
+  type EmailVerificationErrorCode,
+  foldEmailAddress,
+  MAX_EMAIL_BYTES,
+  MAX_SENDS_PER_ADDRESS,
+  MAX_SENDS_PER_DAY,
+  MAX_SENDS_PER_HOUR,
+  parseEmailAddress,
+  pruneAccountEmails,
+  readAccountEmail,
+  renderEmail,
+  requestEmailCode,
+  type RequestEmailCodeOptions,
+  verifyEmailCode,
+} from "./account-emails.ts";
+export {
+  assertDistinctKeyrings,
+  KEY_ID,
+  type Keyring,
+  type KeyringKey,
+  parseKeyring,
+} from "./keyring.ts";
+export {
   createTurnstile,
   MAX_TURNSTILE_TOKEN,
   type Turnstile,

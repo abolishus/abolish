@@ -9,6 +9,12 @@ import { accountAppeals, accountModerators } from "./appeals.ts";
 import { boardBallotKeys, boardCheckpoints, boardEntries, boardSubtrees } from "./board.ts";
 import { electionDefinitions, electionRegistrations, electionSchedules } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
+import {
+  accountEmailCodes,
+  accountEmailRecipients,
+  accountEmails,
+  accountEmailSends,
+} from "./emails.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 import {
@@ -24,6 +30,10 @@ import {
 export {
   accountAppeals,
   accountCredentials,
+  accountEmailCodes,
+  accountEmailRecipients,
+  accountEmails,
+  accountEmailSends,
   accountModerators,
   accountPolls,
   accountPollSubmissions,
@@ -76,6 +86,10 @@ export const TABLE_CLASSES = {
   account: [
     "account_appeals",
     "account_credentials",
+    "account_email_codes",
+    "account_email_recipients",
+    "account_email_sends",
+    "account_emails",
     "account_moderators",
     "account_passkeys",
     "account_poll_submissions",

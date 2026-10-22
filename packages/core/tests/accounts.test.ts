@@ -181,6 +181,13 @@ describe("schema", () => {
       ["account_emails", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_moderators", "INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
+      ["account_phone_codes", "DELETE,INSERT,SELECT,UPDATE"],
+      ["account_phone_holds", "DELETE,INSERT,SELECT,UPDATE"],
+      // Never updated; pruned past the daily window (account-phones.test.ts).
+      ["account_phone_recipients", "DELETE,INSERT,SELECT"],
+      // Never updated; pruned past the daily window (account-phones.test.ts).
+      ["account_phone_sends", "DELETE,INSERT,SELECT"],
+      ["account_phones", "DELETE,INSERT,SELECT,UPDATE"],
       // Append-only: a submission counts for its 24 hours (poll-failures.test.ts).
       ["account_poll_submissions", "INSERT,SELECT"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],

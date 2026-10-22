@@ -121,6 +121,12 @@ export {
   insertPollTags,
   placeKey,
   type PollTags,
+  type PollTagsView,
+  readPollTags,
+  type RefileDecision,
+  REFILE_REASONS,
+  refilePoll,
+  type RefileReason,
   storedPollTags,
 } from "./poll-tags.ts";
 export {
@@ -168,6 +174,7 @@ export {
   moderationActions,
   moderationReports,
   pollCreationTxs,
+  pollTagActions,
   pollTags,
   profileHandles,
   profileModerationActions,

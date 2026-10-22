@@ -17,10 +17,21 @@ import {
   MAX_PLACE_LENGTH,
   moderate,
   placeIsWellFormed,
+  ModerationError,
+  type ModerationErrorCode,
+  moderationStatus,
+  newAccountId,
   placeKey,
   POLL_TOPICS,
   type PollTags,
+  pollTagActions,
   pollTags,
+  readModerationLog,
+  readPollTags,
+  readProfileModerationLog,
+  type RefileDecision,
+  REFILE_REASONS,
+  refilePoll,
   storedPollTags,
   searchTerms,
   storeDefinition,
@@ -32,17 +43,19 @@ import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 // [[0041-poll-topics-and-places]]; P2-26 part 1c; T-10, T-67, T-68): the
 // topic and place its author chose, kept beside the definition, filter the
 // listing's orders without ranking anything, and delisted or hidden polls
-// stay out of every filter. The opening step's write and the fill are tested
-// with the step (poll-opening.test.ts).
+// stay out of every filter. Only moderation refiles a poll once it is filed,
+// in the moderation log (migrations/0036). The opening step's write and the
+// fill are tested with the step (poll-opening.test.ts).
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 let db: TestDb;
 let app: Sql;
+let moderators: Map<string, string>;
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
-  await addModerators(app, "mod-1");
+  moderators = await addModerators(app, "mod-1", "mod-2");
 });
 afterAll(() => db?.close());
 
@@ -168,40 +181,50 @@ describe("a place's key", () => {
 
 describe("schema", () => {
   test("matches its Drizzle view", async () => {
-    const cols = await db.admin`
-      SELECT column_name, data_type, is_nullable FROM information_schema.columns
-      WHERE table_schema = ${db.schema} AND table_name = 'poll_tags'
-      ORDER BY ordinal_position`;
-    const config = getTableConfig(pollTags);
-    expect(cols.map((c) => [c["column_name"], c["data_type"], c["is_nullable"]])).toEqual(
-      config.columns.map((c) => [c.name, c.getSQLType(), c.notNull ? "NO" : "YES"]),
-    );
-    // No key reaches a board table, or any other.
-    expect(
-      await db.admin`
-        SELECT conname FROM pg_constraint WHERE contype = 'f' AND conrelid = 'poll_tags'::regclass`,
-    ).toEqual([]);
+    for (const table of [pollTags, pollTagActions]) {
+      const config = getTableConfig(table);
+      const cols = await db.admin`
+        SELECT column_name, data_type, is_nullable FROM information_schema.columns
+        WHERE table_schema = ${db.schema} AND table_name = ${config.name}
+        ORDER BY ordinal_position`;
+      expect(cols.map((c) => [c["column_name"], c["data_type"], c["is_nullable"]])).toEqual(
+        config.columns.map((c) => [c.name, c.getSQLType(), c.notNull ? "NO" : "YES"]),
+      );
+      // No key reaches a board table, or any other.
+      expect(
+        await db.admin`
+          SELECT conname FROM pg_constraint
+          WHERE contype = 'f' AND conrelid = ${config.name}::regclass`,
+      ).toEqual([]);
+    }
   });
 
-  test("the app role may only read and add rows: a poll keeps the tags it was filed under", async () => {
+  test("the app role may add rows and change their tags, never remove one", async () => {
     const privs = await db.admin`
       SELECT privilege_type FROM information_schema.role_table_grants
       WHERE table_schema = ${db.schema} AND table_name = 'poll_tags' AND grantee = 'abolish_app'
       ORDER BY privilege_type`;
     expect(privs.map((p) => p["privilege_type"])).toEqual(["INSERT", "SELECT"]);
+    const columns = await db.admin`
+      SELECT column_name FROM information_schema.column_privileges
+      WHERE table_schema = ${db.schema} AND table_name = 'poll_tags' AND grantee = 'abolish_app'
+        AND privilege_type = 'UPDATE'
+      ORDER BY column_name`;
+    expect(columns.map((c) => c["column_name"])).toEqual(["place", "place_key", "topic"]);
     const id = await poll({ topic: "sport" });
-    expect(await failsWith(app`UPDATE poll_tags SET topic = 'food'`)).toBe("42501");
+    expect(await failsWith(app`UPDATE poll_tags SET election_id = ${randomBytes(32)}`)).toBe(
+      "42501",
+    );
     expect(await failsWith(app`DELETE FROM poll_tags`)).toBe("42501");
     expect(await failsWith(app`TRUNCATE poll_tags`)).toBe("42501");
-    // A second write is a no-op.
+    // A second write is a no-op: only a refiling changes a poll's tags.
     expect(await insertPollTags(app, id, { topic: "food", place: "Riverside" })).toBe(false);
     expect(await row(id)).toEqual([{ topic: "sport", place: null, place_key: null }]);
   });
 
-  test("refuses a row with no tag, a malformed tag, or a place without its key", async () => {
+  test("refuses a malformed tag, or a place without its key, and keeps an empty row", async () => {
     const insert = (topic: string | null, place: string | null, key: string | null) =>
       failsWith(app`INSERT INTO poll_tags VALUES (${randomBytes(32)}, ${topic}, ${place}, ${key})`);
-    expect(await insert(null, null, null)).toBe("23514");
     expect(await insert("Sport", null, null)).toBe("23514");
     expect(await insert(null, "Riverside", null)).toBe("23514");
     expect(await insert(null, null, "riverside")).toBe("23514");
@@ -210,6 +233,55 @@ describe("schema", () => {
     expect(
       await failsWith(app`INSERT INTO poll_tags VALUES (${randomBytes(31)}, 'sport', NULL, NULL)`),
     ).toBe("23514");
+    // A poll refiled under neither tag.
+    const empty = new Uint8Array(randomBytes(32));
+    await app`INSERT INTO poll_tags VALUES (${empty}, NULL, NULL, NULL)`;
+    expect(await row(empty)).toEqual([{ topic: null, place: null, place_key: null }]);
+  });
+
+  test("the refiling log is append-only, numbered from the poll log's sequence", async () => {
+    const privs = await db.admin`
+      SELECT privilege_type FROM information_schema.role_table_grants
+      WHERE table_schema = ${db.schema} AND table_name = 'poll_tag_actions'
+        AND grantee = 'abolish_app'
+      ORDER BY privilege_type`;
+    expect(privs.map((p) => p["privilege_type"])).toEqual(["INSERT", "SELECT"]);
+    const id = await poll({ topic: "sport" });
+    await refilePoll(app, id, { tags: { topic: "food" }, reason: "misfiled", moderator: "mod-1" });
+    for (const sql of [app, db.admin]) {
+      expect(await failsWith(sql`UPDATE poll_tag_actions SET reason = 'spam'`)).toBe("42501");
+      expect(await failsWith(sql`DELETE FROM poll_tag_actions`)).toBe("42501");
+      expect(await failsWith(sql`TRUNCATE poll_tag_actions`)).toBe("42501");
+    }
+    // Whatever number an insert names, the trigger draws the next one.
+    const [written] = await app`
+      INSERT INTO poll_tag_actions
+        (seq, election_id, topic_set, topic, place_set, place, reason, moderator, decided_at)
+      VALUES (1, ${id}, true, 'food', false, NULL, 'misfiled', 'mod-1', now()) RETURNING seq`;
+    const [last] = await app`SELECT max(seq) AS seq FROM moderation_actions`;
+    expect(BigInt(written!["seq"])).toBeGreaterThan(1n);
+    expect(BigInt(written!["seq"])).toBeGreaterThan(BigInt(last!["seq"] ?? 0));
+    const insert = (
+      topicSet: boolean,
+      topic: string | null,
+      placeSet: boolean,
+      place: string | null,
+      reason = "misfiled",
+      moderator = "mod-1",
+    ) =>
+      failsWith(app`
+        INSERT INTO poll_tag_actions
+          (seq, election_id, topic_set, topic, place_set, place, reason, moderator, decided_at)
+        VALUES (0, ${id}, ${topicSet}, ${topic}, ${placeSet}, ${place}, ${reason}, ${moderator},
+          now())`);
+    expect(await insert(true, "food", false, null, "error")).toBe("23514");
+    expect(await insert(true, "food", false, null, "misfiled", "Mod-1")).toBe("23514");
+    expect(await insert(true, "Food", false, null)).toBe("23514");
+    expect(await insert(false, null, true, "")).toBe("23514");
+    // A row sets at least one tag, and holds a value only for a tag it set.
+    expect(await insert(false, null, false, null)).toBe("23514");
+    expect(await insert(false, "food", true, null)).toBe("23514");
+    expect(await insert(true, null, false, "Mill Lane")).toBe("23514");
   });
 });
 
@@ -336,5 +408,284 @@ describe("the listing's filters", () => {
       await expect(
         listPolls(app, undefined, 1, { sort: "id" }, [], tags as unknown as ListingTags),
       ).rejects.toThrow(TypeError);
+  });
+});
+
+const refused = async (
+  id: Uint8Array,
+  decision: RefileDecision,
+  code: ModerationErrorCode,
+): Promise<void> => {
+  const before = await row(id);
+  const [count] = await app`SELECT count(*)::int AS n FROM poll_tag_actions`;
+  const error = await refilePoll(app, id, decision).then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(ModerationError);
+  expect((error as ModerationError).code).toBe(code);
+  expect(await row(id)).toEqual(before);
+  expect(await app`SELECT count(*)::int AS n FROM poll_tag_actions`).toEqual([count]);
+};
+
+const logged = async (id: Uint8Array) =>
+  (
+    await app`
+      SELECT topic_set, topic, place_set, place, reason, moderator
+      FROM poll_tag_actions WHERE election_id = ${id} ORDER BY seq`
+  ).map((r) => ({ ...r }));
+
+describe("refiling", () => {
+  test("changes a poll's tags, and the listing's filters follow", async () => {
+    const t = hex(randomBytes(4));
+    const id = await poll({ topic: "housing", place: `Elm Street ${t}` });
+    const { seq } = await refilePoll(app, id, {
+      tags: { topic: "transport", place: `Ward ${t}` },
+      reason: "personal-data",
+      moderator: "mod-1",
+    });
+    expect(await row(id)).toEqual([
+      { topic: "transport", place: `Ward ${t}`, place_key: `ward ${t}` },
+    ]);
+    expect(await listed({ placeKey: placeKey(`Elm Street ${t}`)! })).toEqual([]);
+    expect(await listed({ placeKey: placeKey(`Ward ${t}`)! })).toEqual([hex(id)]);
+    expect(await listed({ topic: "housing" })).not.toContain(hex(id));
+    expect(await listed({ topic: "transport" })).toContain(hex(id));
+    // The log keeps the new tags, never the place it replaced.
+    expect(
+      await app`SELECT election_id FROM poll_tag_actions WHERE seq = ${seq.toString()}`,
+    ).toEqual([{ election_id: Buffer.from(id) }]);
+    expect(await logged(id)).toEqual([
+      {
+        topic_set: true,
+        topic: "transport",
+        place_set: true,
+        place: `Ward ${t}`,
+        reason: "personal-data",
+        moderator: "mod-1",
+      },
+    ]);
+  });
+
+  test("logs only what it changed, so a place it kept and then cleared survives in no row", async () => {
+    const place = `14 Elm Street ${hex(randomBytes(4))}`;
+    const id = await poll({ topic: "food", place });
+    // A topic-only refiling passes the place back, and doesn't log it.
+    await refilePoll(app, id, {
+      tags: { topic: "housing", place },
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    await refilePoll(app, id, {
+      tags: { topic: "housing" },
+      reason: "personal-data",
+      moderator: "mod-2",
+    });
+    expect(await logged(id)).toEqual([
+      {
+        topic_set: true,
+        topic: "housing",
+        place_set: false,
+        place: null,
+        reason: "misfiled",
+        moderator: "mod-1",
+      },
+      {
+        topic_set: false,
+        topic: null,
+        place_set: true,
+        place: null,
+        reason: "personal-data",
+        moderator: "mod-2",
+      },
+    ]);
+    expect(await app`SELECT 1 FROM poll_tag_actions WHERE place = ${place}`).toEqual([]);
+    expect(await row(id)).toEqual([{ topic: "housing", place: null, place_key: null }]);
+  });
+
+  test("files an untagged poll, clears both tags, and keeps only the two tags of the decision", async () => {
+    const id = await poll({});
+    await refilePoll(app, id, {
+      tags: { place: "Mill Lane", title: "x" } as PollTags,
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    expect(await row(id)).toEqual([{ topic: null, place: "Mill Lane", place_key: "mill lane" }]);
+    await refilePoll(app, id, { tags: {}, reason: "spam", moderator: "mod-1" });
+    expect(await row(id)).toEqual([{ topic: null, place: null, place_key: null }]);
+    // An opening after the refiling leaves it alone.
+    expect(await insertPollTags(app, id, { topic: "food" })).toBe(false);
+    expect(await row(id)).toEqual([{ topic: null, place: null, place_key: null }]);
+    expect(await listed({ placeKey: "mill lane" })).not.toContain(hex(id));
+    // A poll with no row is filed under nothing yet: even no tags file it.
+    const unfiled = await poll({});
+    await refilePoll(app, unfiled, { tags: {}, reason: "personal-data", moderator: "mod-1" });
+    expect(await row(unfiled)).toEqual([{ topic: null, place: null, place_key: null }]);
+    expect(await insertPollTags(app, unfiled, { place: "Mill Lane" })).toBe(false);
+    expect(await logged(unfiled)).toEqual([
+      {
+        topic_set: true,
+        topic: null,
+        place_set: true,
+        place: null,
+        reason: "personal-data",
+        moderator: "mod-1",
+      },
+    ]);
+  });
+
+  test("against an opening step writing the author's tags at once, either one files the poll and nothing is logged twice", async () => {
+    for (let i = 0; i < 5; i++) {
+      const id = await poll({});
+      const other = await db.as("abolish_app");
+      const [refiled, inserted] = await Promise.all([
+        refilePoll(app, id, {
+          tags: { topic: "sport" },
+          reason: "misfiled",
+          moderator: "mod-1",
+        }).then(
+          () => "ok",
+          (e: unknown) => (e as ModerationError).code,
+        ),
+        insertPollTags(other, id, { topic: "sport" }),
+      ]);
+      await other.end();
+      expect(await row(id)).toEqual([{ topic: "sport", place: null, place_key: null }]);
+      // The refiling waited for the step's row and found nothing to change,
+      // or the step found the refiling's row and wrote nothing.
+      expect(inserted).toBe(refiled !== "ok");
+      expect((await logged(id)).length).toBe(refiled === "ok" ? 1 : 0);
+    }
+  });
+
+  test("takes its number from the poll log's sequence, between decisions about polls and profiles", async () => {
+    const id = await poll({ topic: "food" });
+    const a = await moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    const b = await refilePoll(app, id, {
+      tags: { topic: "sport" },
+      reason: "misfiled",
+      moderator: "mod-1",
+    });
+    const c = await moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" });
+    expect(a.seq < b.seq && b.seq < c.seq).toBe(true);
+    // Neither the poll log nor the profile log has the refiling's number.
+    const polls = await readModerationLog(app, a.seq - 1n, 10);
+    expect(polls.map((e) => e.seq)).toEqual([a.seq, c.seq]);
+    expect((await readProfileModerationLog(app, a.seq - 1n, 10)).map((e) => e.seq)).toEqual([]);
+    // Refiling is not a change of state.
+    expect((await moderationStatus(app, id)).state).toBe("visible");
+  });
+
+  test("is refused, writing nothing: malformed, unknown poll or moderator, own poll, or no change", async () => {
+    const id = await poll({ topic: "food", place: "Mill Lane" });
+    const ok = { tags: { topic: "sport" }, reason: "misfiled", moderator: "mod-1" } as const;
+    for (const decision of [
+      { ...ok, reason: "error" },
+      { ...ok, reason: "appeal-upheld" },
+      { ...ok, moderator: "Mod 1" },
+      { ...ok, moderator: 7 },
+      { ...ok, tags: { topic: "weather" } },
+      { ...ok, tags: { place: " Mill Lane" } },
+      { ...ok, tags: { place: "Mill\u202eLane" } },
+      { ...ok, tags: { place: "a".repeat(MAX_PLACE_LENGTH + 1) } },
+      { ...ok, tags: null },
+      { ...ok, tags: "sport" },
+    ])
+      await refused(id, decision as unknown as RefileDecision, "invalid");
+    await refused(id, null as unknown as RefileDecision, "invalid");
+    await refused(new Uint8Array(randomBytes(32)), ok, "unknown-election");
+    await refused(id, { ...ok, moderator: "mod-9" }, "unknown-moderator");
+    await refused(id, { ...ok, tags: { topic: "food", place: "Mill Lane" } }, "no-change");
+    await expect(refilePoll(app, id.subarray(1), ok)).rejects.toThrow(TypeError);
+
+    // A moderator's own poll: mod-2's account created it.
+    await app`
+      INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at, submitted_at,
+        creator_address, create_tx_hash, election_id, created_block, l1_origin_timestamp,
+        anchors_checked_block, electorate, stub_hash, ceremony_tx_hash, register_tx_hash,
+        registered_block)
+      VALUES (${newAccountId()}, ${moderators.get("mod-2")!}, 'open', '{}', now(), now(), now(),
+        ${randomBytes(20)}, ${randomBytes(32)}, ${id}, 1, 1, 1, '[]', ${randomBytes(32)},
+        ${randomBytes(32)}, ${randomBytes(32)}, 2)`;
+    await refused(id, { ...ok, moderator: "mod-2" }, "own-poll");
+    await refilePoll(app, id, ok);
+  });
+
+  test("ends with the poll filed under its last refiling, refusing only refilings that change nothing", async () => {
+    const tagsArb: fc.Arbitrary<PollTags> = fc.record(
+      {
+        topic: fc.constantFrom(...POLL_TOPICS.slice(0, 3)),
+        place: fc.constantFrom("Mill Lane", "Old Town", "東京"),
+      },
+      { requiredKeys: [] },
+    );
+    await fc.assert(
+      fc.asyncProperty(
+        tagsArb,
+        fc.array(fc.tuple(tagsArb, fc.constantFrom(...REFILE_REASONS)), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        async (author, refilings) => {
+          const id = await poll(author);
+          // A poll filed under nothing has no row, so its first refiling
+          // sets both tags whatever they are.
+          let model: PollTags | undefined =
+            author.topic === undefined && author.place === undefined ? undefined : author;
+          const want: Record<string, unknown>[] = [];
+          for (const [tags, reason] of refilings) {
+            const topicSet = model === undefined || tags.topic !== model.topic;
+            const placeSet = model === undefined || tags.place !== model.place;
+            const result = await refilePoll(app, id, { tags, reason, moderator: "mod-1" }).then(
+              () => "ok",
+              (e: unknown) => (e as ModerationError).code,
+            );
+            expect(result).toBe(topicSet || placeSet ? "ok" : "no-change");
+            if (!topicSet && !placeSet) continue;
+            model = tags;
+            want.push({
+              topic_set: topicSet,
+              topic: topicSet ? (tags.topic ?? null) : null,
+              place_set: placeSet,
+              place: placeSet ? (tags.place ?? null) : null,
+              reason,
+              moderator: "mod-1",
+            });
+          }
+          expect(await logged(id)).toEqual(want);
+          const view = await readPollTags(app, id);
+          expect(view).toEqual({ state: "visible", tags: model ?? {} });
+        },
+      ),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+});
+
+describe("a poll's tags, as its page reads them", () => {
+  test("are the tags it is filed under, none for an untagged poll, and nothing for an unknown one", async () => {
+    const tagged = await poll({ topic: "food", place: "Mill Lane" });
+    expect(await readPollTags(app, tagged)).toEqual({
+      state: "visible",
+      tags: { topic: "food", place: "Mill Lane" },
+    });
+    expect(await readPollTags(app, await poll({}))).toEqual({ state: "visible", tags: {} });
+    expect(await readPollTags(app, new Uint8Array(randomBytes(32)))).toBeUndefined();
+    await expect(readPollTags(app, tagged.subarray(1))).rejects.toThrow(TypeError);
+  });
+
+  test("are shown while it is delisted and withheld while it is hidden", async () => {
+    const id = await poll({ place: "Mill Lane" });
+    await moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    expect(await readPollTags(app, id)).toEqual({
+      state: "delisted",
+      tags: { place: "Mill Lane" },
+    });
+    await moderate(app, id, { action: "hide", reason: "threat", moderator: "mod-1" });
+    expect(await readPollTags(app, id)).toEqual({ state: "hidden" });
+    // A hidden poll can still be refiled, as its place may be why.
+    await refilePoll(app, id, { tags: {}, reason: "threat", moderator: "mod-1" });
+    await moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" });
+    expect(await readPollTags(app, id)).toEqual({ state: "visible", tags: {} });
   });
 });

@@ -6,6 +6,11 @@
 import {
   createAccounts,
   decideAppeal,
+  emailKeys,
+  type EmailMessage,
+  parseKeyring,
+  TURNSTILE_HEADER,
+  type TurnstileVerdict,
   moderate,
   newAccountId,
   type TurnstileAction,
@@ -31,6 +36,7 @@ import {
 import type { ClientError, Page } from "../src/analytics.ts";
 import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
+import { createEmailHandler } from "../src/node/email.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 
 const ORIGIN = "https://abolish.test";
@@ -60,6 +66,18 @@ const analytics: Analytics = {
 const submitted: [string | null, TurnstileAction][] = [];
 /** The drafts handler's clock. */
 const NOW = new Date("2026-10-17T12:00:00Z");
+
+/** Every message the e-mail handler's sender was asked to send. */
+const mailed: EmailMessage[] = [];
+/** What the e-mail handler's sender answers, and its Turnstile check. */
+const provider: { send: "sent" | "unavailable" | "hang"; verdict: TurnstileVerdict } = {
+  send: "sent",
+  verdict: "passed",
+};
+/** Every token a request for an e-mail code's Turnstile check saw. */
+const emailChecks: [string | null, TurnstileAction][] = [];
+const ring = (id: string) => parseKeyring(`${id}:${randomBytes(32).toString("hex")}`);
+const EMAIL_KEYS = emailKeys(ring("h1"), ring("b1"));
 
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
@@ -133,6 +151,29 @@ beforeAll(async () => {
         },
       },
       origin: ORIGIN,
+      now: () => NOW,
+    }),
+    email: createEmailHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      service: {
+        keys: EMAIL_KEYS,
+        sender: {
+          send: async (message) => {
+            mailed.push(message);
+            if (provider.send === "hang") return new Promise<never>(() => {});
+            return provider.send;
+          },
+        },
+      },
+      turnstile: {
+        verify: async (token, action) => {
+          emailChecks.push([token, action]);
+          return provider.verdict;
+        },
+      },
+      origin: ORIGIN,
+      log: (line) => logged.push(line),
       now: () => NOW,
     }),
     clientDir,
@@ -964,6 +1005,218 @@ describe("analytics", () => {
   });
 });
 
+describe("an account's e-mail address under /email", () => {
+  /** A signed-in browser that has just asked for a code to `address`. */
+  async function asked(address: string) {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const res = await browser.call(
+      "POST",
+      "/email/request",
+      { address },
+      { [TURNSTILE_HEADER]: "solved" },
+    );
+    return { browser, res };
+  }
+
+  test("an account asks for a code, enters it, and reads its verified address", async () => {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    expect(await (await browser.call("GET", "/email")).json()).toEqual({});
+    const before = emailChecks.length;
+    const res = await browser.call(
+      "POST",
+      "/email/request",
+      { address: " Ana@Example.org " },
+      { [TURNSTILE_HEADER]: "solved" },
+    );
+    expect(res.status).toBe(202);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({});
+    expect(emailChecks.slice(before)).toEqual([["solved", "email-code"]]);
+    const message = mailed.at(-1);
+    expect(message).toMatchObject({ kind: "email-code", to: "Ana@Example.org" });
+    const code = (message as { code: string }).code;
+
+    const wrong = code === "00000000" ? "11111111" : "00000000";
+    const refused = await browser.call("POST", "/email/verify", { code: wrong });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ code: "WRONG_CODE", status: 422, triesLeft: 4 });
+    expect(
+      (
+        await browser.call("POST", "/email/verify", {
+          code: `${code.slice(0, 4)} ${code.slice(4)}`,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await browser.call("GET", "/email")).json()).toEqual({
+      address: "Ana@Example.org",
+      verifiedAt: NOW.toISOString(),
+    });
+    const spent = await browser.call("POST", "/email/verify", { code });
+    expect(await spent.json()).toEqual({ code: "NO_CODE", status: 409 });
+
+    // T-11, T-67: the log has the route class, never the address or the code.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "email", status: 409 });
+    const log = JSON.stringify(logged).toLowerCase();
+    expect(log).not.toContain("example.org");
+    expect(log).not.toContain(code);
+  });
+
+  test("a request for another account's address is answered as any other (T-11)", async () => {
+    const first = await asked("held@example.org");
+    const code = (mailed.at(-1) as { code: string }).code;
+    expect((await first.browser.call("POST", "/email/verify", { code })).status).toBe(200);
+
+    const second = await asked("HELD@example.org");
+    expect(second.res.status).toBe(first.res.status);
+    expect(await second.res.json()).toEqual({});
+    expect(mailed.at(-1)).toEqual({ kind: "email-held", to: "HELD@example.org" });
+    // No code was sent, and any answer is just a wrong one.
+    expect(await (await second.browser.call("POST", "/email/verify", { code })).json()).toEqual({
+      code: "WRONG_CODE",
+      status: 422,
+      triesLeft: 4,
+    });
+  });
+
+  test("a send the provider didn't take is answered as a sent one, and logged by kind", async () => {
+    provider.send = "unavailable";
+    try {
+      const { res } = await asked("outage@example.org");
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({});
+    } finally {
+      provider.send = "sent";
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    expect(logged.filter((l) => "error" in l)).toContainEqual({ error: "EmailSendUnavailable" });
+  });
+
+  test("answers before the provider does, so a capped address can't be told apart by time (T-11)", async () => {
+    provider.send = "hang";
+    try {
+      // A provider that never answers: the request is answered anyway.
+      const { res } = await asked("slow@example.org");
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({});
+    } finally {
+      provider.send = "sent";
+    }
+  });
+
+  test("a capped address is answered as any other, and sent nothing (T-11, T-52)", async () => {
+    const asker = new Browser();
+    await register(asker, new SoftAuthenticator(RP_ID), true);
+    for (let i = 0; i < 5; i++)
+      expect(
+        (
+          await asker.call(
+            "POST",
+            "/email/request",
+            { address: "capped@example.org" },
+            { [TURNSTILE_HEADER]: "solved" },
+          )
+        ).status,
+      ).toBe(202);
+    const before = mailed.length;
+    const { res } = await asked("capped@example.org");
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({});
+    expect(mailed.length).toBe(before);
+  });
+
+  test("refuses what core refuses, with its code", async () => {
+    const invalid = await asked("not an address");
+    expect(await invalid.res.json()).toEqual({ code: "INVALID_ADDRESS", status: 422 });
+    provider.verdict = "refused";
+    try {
+      const refused = await asked("refused@example.org");
+      expect(await refused.res.json()).toEqual({ code: "TURNSTILE_REFUSED", status: 403 });
+    } finally {
+      provider.verdict = "passed";
+    }
+    const { browser } = await asked("limits@example.org");
+    expect(await (await browser.call("POST", "/email/verify", { code: "1" })).json()).toMatchObject(
+      {
+        code: "WRONG_CODE",
+      },
+    );
+    for (let i = 0; i < 4; i++)
+      await browser.call(
+        "POST",
+        "/email/request",
+        { address: `limits${i}@example.net` },
+        { [TURNSTILE_HEADER]: "solved" },
+      );
+    const limited = await browser.call(
+      "POST",
+      "/email/request",
+      { address: "limits@example.org" },
+      { [TURNSTILE_HEADER]: "solved" },
+    );
+    expect(await limited.json()).toEqual({ code: "TOO_MANY_THIS_HOUR", status: 429 });
+  });
+
+  test("needs a session, our origin and JSON, and serves only its routes", async () => {
+    const pages = started.length;
+    const signedOut = new Browser();
+    expect((await signedOut.call("GET", "/email")).status).toBe(401);
+    expect(
+      (await signedOut.call("POST", "/email/request", { address: "a@example.org" })).status,
+    ).toBe(401);
+
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const post = (headers: Record<string, string>) =>
+      fetch(`${base}/email/verify`, {
+        method: "POST",
+        headers: { cookie, ...headers },
+        body: JSON.stringify({ code: "12345678" }),
+      });
+    expect(
+      (await post({ origin: "https://elsewhere.test", "content-type": "application/json" })).status,
+    ).toBe(403);
+    expect((await post({ "content-type": "application/json" })).status).toBe(403);
+    expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+    expect((await browser.call("GET", "/email?x=1")).status).toBe(404);
+    expect((await browser.call("POST", "/email", {})).status).toBe(404);
+    expect((await browser.call("GET", "/email/request")).status).toBe(404);
+    expect((await browser.call("POST", "/email/verify", { code: "1", extra: 1 })).status).toBe(400);
+    expect(
+      (await browser.call("POST", "/email/request", { address: "a".repeat(1025) })).status,
+    ).toBe(400);
+    expect(started).toHaveLength(pages);
+  });
+
+  test("answers 503 on every route where the deployment has no e-mail service", async () => {
+    const handler = createEmailHandler({
+      sql,
+      accountOf: async () => newAccountId(),
+      service: undefined,
+      turnstile: { verify: async () => "passed" },
+      origin: ORIGIN,
+      log: () => {},
+    });
+    const headers = { origin: ORIGIN, "content-type": "application/json" };
+    for (const [method, path, body] of [
+      ["GET", "/email", undefined],
+      ["POST", "/email/request", '{"address":"a@example.org"}'],
+      ["POST", "/email/verify", '{"code":"12345678"}'],
+    ] as const) {
+      const res = await handler(
+        new Request(`${ORIGIN}${path}`, {
+          method,
+          headers,
+          ...(body === undefined ? {} : { body }),
+        }),
+      );
+      expect(await res.json()).toEqual({ code: "EMAIL_UNAVAILABLE", status: 503 });
+    }
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -979,6 +1232,7 @@ describe("limits", () => {
       },
       accounts: async () => new Response(null, { status: 404 }),
       drafts: async () => new Response(null, { status: 404 }),
+      email: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1002,6 +1256,7 @@ describe("limits", () => {
       start: { fetch: async () => new Response() },
       accounts: async () => new Response(),
       drafts: async () => new Response(),
+      email: async () => new Response(),
       clientDir,
       log: () => {},
     };

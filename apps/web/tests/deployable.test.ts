@@ -84,6 +84,14 @@ function database(): string {
 // Cloudflare's published test key, which always passes.
 const SITE_KEY = "1x00000000000000000000AA";
 
+/** A whole e-mail configuration, with Postmark's test token. */
+const EMAIL = {
+  EMAIL_HASH_KEYS: `h1:${randomBytes(32).toString("hex")}`,
+  EMAIL_BOX_KEYS: `b1:${randomBytes(32).toString("hex")}`,
+  POSTMARK_SERVER_TOKEN: "POSTMARK_API_TEST",
+  EMAIL_FROM: "codes@abolish.test",
+};
+
 describe("dist/node/main.mjs", () => {
   test("serves pages, their assets and the account handler, from the bundle alone", async () => {
     const port = await freePort();
@@ -96,6 +104,7 @@ describe("dist/node/main.mjs", () => {
       ACCOUNT_SECRET: SECRET,
       TURNSTILE_SECRET_KEY: "turnstile-secret",
       TURNSTILE_SITE_KEY: SITE_KEY,
+      ...EMAIL,
       WEB_PORT: String(port),
     });
     try {
@@ -140,6 +149,9 @@ describe("dist/node/main.mjs", () => {
       });
       expect(session.status).toBe(200);
       expect(await session.json()).toBeNull();
+      // The e-mail routes are served, and need a session.
+      const email = await fetch(`${at}/email`);
+      expect(await email.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
       // Its log: one line per request, by route class, written once each
       // answer is sent.
       await new Promise((r) => setTimeout(r, 100));
@@ -149,6 +161,9 @@ describe("dist/node/main.mjs", () => {
         .split("\n")
         .map((l) => JSON.parse(l) as { route?: string });
       expect(lines.map((l) => l.route)).toContain("auth");
+      expect(lines.map((l) => l.route)).toContain("email");
+      // No start-up prune of the account tables failed as abolish_app.
+      expect(web.out()).not.toContain("AccountPruneFailed");
       expect(web.out()).not.toContain("abolish.test");
     } finally {
       if (web.child.exitCode === null) {
@@ -242,6 +257,51 @@ describe("dist/node/main.mjs", () => {
     expect(web.err()).toContain("POSTHOG_HOST and POSTHOG_KEY go together");
     expect(web.err()).not.toContain("phc_unpaired");
   }, 30_000);
+
+  test("refuses part of an e-mail configuration, quoting none of it", async () => {
+    const { EMAIL_FROM: _, ...partial } = EMAIL;
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
+      ...partial,
+    });
+    const [code] = (await once(web.child, "exit")) as [number];
+    expect(code).not.toBe(0);
+    expect(web.err()).toContain("EMAIL_FROM go together");
+    for (const value of Object.values(partial)) expect(web.err()).not.toContain(value);
+  }, 30_000);
+
+  test.each([
+    ["a malformed keyring", { EMAIL_HASH_KEYS: "h1:0123" }, "EMAIL_HASH_KEYS"],
+    [
+      "one key in both keyrings",
+      { EMAIL_BOX_KEYS: `b1:${EMAIL.EMAIL_HASH_KEYS.slice(3)}` },
+      "EMAIL_BOX_KEYS",
+    ],
+    ["a sender with a display name", { EMAIL_FROM: "Abolish <codes@abolish.test>" }, "EMAIL_FROM"],
+  ])(
+    "refuses %s, naming the variable and quoting none of it",
+    async (_, change, name) => {
+      const configured = { ...EMAIL, ...change };
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...configured,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain(name);
+      for (const value of Object.values(configured))
+        if (value !== EMAIL.EMAIL_FROM) expect(web.err()).not.toContain(value.slice(3));
+    },
+    30_000,
+  );
 });
 
 describe("link previews from the bundle", () => {

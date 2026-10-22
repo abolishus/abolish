@@ -132,6 +132,8 @@ export {
   accountModerators,
   accountPolls,
   accountPollSubmissions,
+  accountReactionHours,
+  accountReactions,
   accountSessions,
   accountUsers,
   accountVerifications,
@@ -468,6 +470,18 @@ export {
   report,
   reviewReports,
 } from "./reports.ts";
+export {
+  MAX_REACTION_CHANGES_PER_HOUR,
+  pruneReactionHours,
+  type Reaction,
+  type ReactionCounts,
+  ReactionError,
+  type ReactionErrorCode,
+  REACTIONS,
+  readOwnReactions,
+  readReactionCounts,
+  setReaction,
+} from "./reactions.ts";
 export {
   countRegistrations,
   latestRegistration,

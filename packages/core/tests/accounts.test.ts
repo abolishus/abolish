@@ -196,6 +196,9 @@ describe("schema", () => {
       // Append-only: a submission counts for its 24 hours (poll-failures.test.ts).
       ["account_poll_submissions", "INSERT,SELECT"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
+      ["account_reaction_hours", "DELETE,INSERT,SELECT,UPDATE"],
+      // Set or taken back, never changed in place (reactions.test.ts).
+      ["account_reactions", "DELETE,INSERT,SELECT"],
       ["account_sessions", "DELETE,INSERT,SELECT,UPDATE"],
       // Plus UPDATE of the key and B (tier0-tokens.test.ts).
       ["account_tokens", "INSERT,SELECT"],

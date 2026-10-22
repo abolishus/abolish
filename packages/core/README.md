@@ -119,6 +119,17 @@ Reports of polls to the moderators: one row per election and removal ground, `el
 
 Reports never change a poll's state or the public log (a test checks this): report volume is never a ground.
 
+### `account_reactions` and `account_reaction_hours` (T-10, T-11, T-52, T-68)
+
+Reactions on a poll ([[P2-25]] part 5): `account_reactions` holds one row per account, `election_id` and reaction, one of the fixed `REACTIONS` (no agree or disagree, so no count reads as a tally), with no time; `account_reaction_hours` counts each account's changes per UTC hour, with no poll. Both are account-side; `abolish_app` may set and take back a reaction, never change one in place. Operational: a wipe loses reactions and changes no result.
+
+`src/reactions.ts`:
+
+- `setReaction(sql, accountId, electionId, reaction, on, { now })` sets or takes back one reaction and says whether anything changed. `ReactionError` refuses, in order, a reaction outside the set (`invalid`), and when setting, an account not verified by e-mail (`account`), an unknown election (`unknown-election`) or a hidden poll (`hidden`); then a change past `MAX_REACTION_CHANGES_PER_HOUR` (`too-many-this-hour`).
+- `readReactionCounts(sql, electionId)`: the public count of each reaction, refused for a hidden poll.
+- `readOwnReactions(sql, accountId, electionId)`: the account's own, for its own page only.
+- `pruneReactionHours(sql, now)` drops hours before the last one; the website's account prune runs it.
+
 ### `identity_backups` (T-20, T-10, T-11, T-52, T-66)
 
 Voting-identity recovery backups (ADR 0017, option A, step 5; `docs/spec/identity-backup.md`): `id` (`H(DS(id-tag, locator))`, 32 bytes), `envelope` (a version-1 envelope, 63 bytes, header checked by the table) and `written_month` (the UTC month of the last write, by the database clock). The locator is never stored, so a copy of the table can't read, replace or delete a row. No account column, address or request time; reads change nothing. `abolish_app` holds `SELECT`, `INSERT`, `UPDATE` and `DELETE`, never `TRUNCATE`. Operational: a wipe loses every backup and changes no result (T-66).

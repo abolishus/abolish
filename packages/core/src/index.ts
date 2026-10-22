@@ -599,6 +599,22 @@ export {
   type PostingWorkerRefusal,
 } from "./posting-relay.ts";
 export {
+  POSTING_GAS_HEADROOM,
+  POSTING_GAS_LIMIT_MAX,
+  POSTING_TICK_MS,
+  POSTING_UNANSWERED_SPAN,
+  POSTING_UNANSWERED_TICKS,
+  type PostingChain,
+  postingGasLimit,
+  type PostingHead,
+  type PostingLedger,
+  type PostingSimulation,
+  type PostingTickReport,
+  type PostingToSend,
+  PostingWorker,
+  type PostingWorkerOptions,
+} from "./posting-worker.ts";
+export {
   countRegistrations,
   latestRegistration,
   lookupShortCode,

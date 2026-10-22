@@ -43,7 +43,7 @@ import {
   profileHandles,
   profileModerationActions,
 } from "./db/schema/index.ts";
-import { type RemovalReason, statusOf } from "./moderation.ts";
+import { lockModeration, type RemovalReason, statusOf } from "./moderation.ts";
 
 /** The longest name, in code points; the table's check holds it too. */
 export const MAX_PROFILE_NAME = 60;
@@ -63,6 +63,8 @@ export type ProfileErrorCode =
   | "no-profile"
   /** The account set a name already this UTC day. */
   | "too-soon"
+  /** Moderation hides the profile: its name stays the one a moderator judged. */
+  | "hidden"
   /** No poll with this ID belongs to the account. */
   | "not-found";
 
@@ -186,8 +188,9 @@ export async function makeProfile(
  * Renames `accountId`'s profile to `name`, returning whether the name
  * changed: the name it has already changes nothing and isn't counted against
  * the day. Refused, with nothing written, in this order: a name `profileName`
- * refuses (`invalid-name`), an account with no profile (`no-profile`) and one
- * that set a name already this UTC day (`too-soon`). The handle never
+ * refuses (`invalid-name`), an account with no profile (`no-profile`), a
+ * profile moderation hides (`hidden`) and one that set a name already this
+ * UTC day (`too-soon`). The handle never
  * changes, and every poll the profile shows takes the new name.
  */
 export async function renameProfile(
@@ -202,12 +205,16 @@ export async function renameProfile(
   if (n === undefined) throw new ProfileError("invalid-name");
   return drizzle({ client }).transaction(async (tx) => {
     await lock(tx, accountId);
+    // T-75: under the moderation lock, so no hide commits between the check
+    // and the rename, and an upheld appeal restores the name a moderator saw.
+    await lockModeration(tx);
     const [row] = await tx
-      .select({ name: accountProfiles.name })
+      .select({ handle: accountProfiles.handle, name: accountProfiles.name })
       .from(accountProfiles)
       .where(eq(accountProfiles.userId, accountId));
     if (row === undefined) throw new ProfileError("no-profile");
     if (row.name === n) return false;
+    if ((await hiddenFor(tx, row.handle)) !== undefined) throw new ProfileError("hidden");
     if (await namedSince(tx, accountId, day)) throw new ProfileError("too-soon");
     await tx.update(accountProfiles).set({ name: n }).where(eq(accountProfiles.userId, accountId));
     await recordNaming(tx, accountId, day);
@@ -426,7 +433,8 @@ export interface AskedBy {
  * The profile `electionId`'s author chose to show the poll on, or
  * `undefined`: none chosen, no profile, no creator record (a poll not made
  * on the website, or one a wipe or account deletion took), a hidden poll,
- * whose page shows none of it, or a profile moderation hid. "Asked by" is our database's word, never part
+ * whose page shows none of it, or a profile moderation hid. "Asked by" is
+ * our database's word, never part
  * of the poll anyone can verify (T-75).
  */
 export async function askedBy(client: Sql, electionId: Uint8Array): Promise<AskedBy | undefined> {

@@ -245,10 +245,15 @@ describe("decisions", () => {
     expect(await askedBy(app, poll.electionId)).toBeUndefined();
     // A hide leaves the author's polls as they were: they're moderated as polls.
     expect((await moderationStatus(app, poll.electionId)).state).toBe("visible");
-    // A rename doesn't lift it.
-    await renameProfile(app, user, "Someone else", { now: new Date("2026-10-23T12:00:00Z") });
+    // No rename while it stands, so an upheld appeal or a restore shows the
+    // name a moderator judged.
+    const tomorrow = { now: new Date("2026-10-23T12:00:00Z") };
+    await expect(renameProfile(app, user, "Someone else", tomorrow)).rejects.toMatchObject({
+      code: "hidden",
+    });
     expect((await readProfile(app, handle))?.state).toBe("hidden");
     const restored = await moderateProfile(app, handle, restore());
+    await renameProfile(app, user, "Someone else", tomorrow);
     expect(restored).toEqual({ seq: restored.seq, state: "visible" });
     expect(restored.seq).toBeGreaterThan(hidden.seq);
     expect(await readProfile(app, handle)).toEqual({

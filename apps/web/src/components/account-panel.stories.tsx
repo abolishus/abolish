@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import { AccountError, type AccountClient, type PasskeyView } from "../account/client.ts";
 import { type DraftsClient, DraftsError } from "../account/drafts.ts";
+import { type ProfilesClient, ProfilesError } from "../account/profiles.ts";
 import {
   type EmailView,
   type PhoneView,
@@ -99,6 +100,26 @@ const noPolls: DraftsClient = {
   submit: async () => {},
 };
 
+/** An account with no profile: the profile's own stories are in account-profile.stories.tsx. */
+const noProfile: ProfilesClient = {
+  own: async () => undefined,
+  make: async () => {
+    throw new ProfilesError("failed");
+  },
+  rename: async () => {
+    throw new ProfilesError("changed");
+  },
+  remove: async () => {
+    throw new ProfilesError("changed");
+  },
+  moderation: async () => {
+    throw new ProfilesError("changed");
+  },
+  appeal: async () => {
+    throw new ProfilesError("changed");
+  },
+};
+
 /** An account's e-mail and phone as the handlers hold them; the verification page's stories are in account-verify.stories.tsx. */
 function fakeVerify({ email, phone }: { email?: EmailView; phone?: PhoneView } = {}): VerifyClient {
   const refused = async () => {
@@ -120,7 +141,7 @@ const notice = async (canvas: ReturnType<typeof within>) =>
 
 const meta = {
   component: AccountPanel,
-  args: { drafts: noPolls, verify: fakeVerify(), phone: true },
+  args: { drafts: noPolls, profiles: noProfile, verify: fakeVerify(), phone: true },
 } satisfies Meta<typeof AccountPanel>;
 
 export default meta;

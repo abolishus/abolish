@@ -9,9 +9,11 @@ import {
   type PasskeyView,
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
+import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import { AccountPolls } from "./account-polls.tsx";
+import { AccountProfile } from "./account-profile.tsx";
 import { AccountVerification } from "./account-verify.tsx";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
@@ -103,6 +105,8 @@ export interface AccountPanelProps {
   readonly client: AccountClient;
   /** The signed-in account's polls. */
   readonly drafts: DraftsClient;
+  /** The signed-in account's public profile. */
+  readonly profiles: ProfilesClient;
   /** The signed-in account's e-mail and phone. */
   readonly verify: VerifyClient;
   /** Whether this deployment verifies a phone before an account votes. */
@@ -115,7 +119,7 @@ export interface AccountPanelProps {
  * here can name a ballot (T-10). Votes are cast only in the ballot client,
  * with a voting identity kept on the device under its own passkey (ADR 0017).
  */
-export function AccountPanel({ client, drafts, verify, phone }: AccountPanelProps) {
+export function AccountPanel({ client, drafts, profiles, verify, phone }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -251,8 +255,9 @@ export function AccountPanel({ client, drafts, verify, phone }: AccountPanelProp
           {/* First, so an account that hasn't verified sees it at sign-in (P2-31 part 4). */}
           <AccountVerification client={verify} index="01" phone={phone} />
           <AccountPolls client={drafts} index="02" onSignedOut={signedOut} />
+          <AccountProfile client={profiles} index="03" phone={phone} onSignedOut={signedOut} />
           <Section
-            index="03"
+            index="04"
             mark={t("passkeysTitle")}
             title={t("passkeysHeading")}
             id="passkeys-title"
@@ -316,7 +321,7 @@ export function AccountPanel({ client, drafts, verify, phone }: AccountPanelProp
           </Section>
 
           <Section
-            index="04"
+            index="05"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

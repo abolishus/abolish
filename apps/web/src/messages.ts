@@ -785,7 +785,8 @@ const enUS = {
   passkeyAdded: "Passkey added.",
   accountDeleteMark: "Delete",
   accountDeleteTitle: "Delete your account",
-  accountDeleteLede: "This removes the account, its passkeys and its sign-ins from our servers.",
+  accountDeleteLede:
+    "This removes the account, its passkeys, its sign-ins and its profile from our servers.",
   accountDeleteStays:
     "Polls already published stay on the public board, and moderation decisions about them stay in the public log. Your voting identity and receipts are on your device and aren't affected.",
   accountDelete: "Delete account…",
@@ -794,6 +795,61 @@ const enUS = {
   accountDeleteCancel: "Keep account",
   accountFailure_cancelled: "The passkey prompt was dismissed. Nothing changed.",
   accountFailure_unsupported: "This browser doesn't support passkeys.",
+  profileMark: "Profile",
+  profileTitle: "Your public profile",
+  profileLede:
+    "Optional. A profile puts a name of your choosing beside the polls you choose, as “Asked by”. It shows that name and those polls, nothing else: not your account, your e-mail or phone, and nothing about answering polls.",
+  profileNone:
+    "You don't have a profile, so your polls don't say who asked them. You can make one at any time, and delete it at any time.",
+  profileNeedsPhoneHere:
+    "A profile needs a verified phone number, and this site doesn't verify phone numbers yet.",
+  profileNameLabel: "The name your profile shows",
+  profileNameHelp:
+    "A person, a group or a pseudonym, up to 60 characters. Names aren't checked and needn't be unique, and the name can change once a day. Moderators can hide a profile under the same rules as a poll.",
+  profileMake: "Make profile",
+  profileName: "Name",
+  profileAddress: "Address",
+  profileAddressHelp:
+    "Chosen at random, and never given to anyone else. Profile pages aren't open yet; this is where yours will be.",
+  profilePolls: "Polls it shows",
+  profilePollsNone: "None yet. You choose, poll by poll, which of your polls it shows.",
+  profilePollsSome: "{count}. You choose, poll by poll, which of your polls it shows.",
+  profileRename: "Change name",
+  profileRenameSave: "Save name",
+  profileRenameCancel: "Keep the name",
+  profileRenameOn: "The name was set today. It can change again on {day} (UTC).",
+  profileRenameHidden: "The name can't change while the profile is hidden.",
+  profileDelete: "Delete profile…",
+  profileDeleteQuestion: "Delete your profile?",
+  profileDeleteMeans:
+    "Its name and your choice of polls are deleted, and its address is retired for good. Your polls stay, without “Asked by”. Copies others made while it was shown, such as saved pages, may remain.",
+  profileDeleteConfirm: "Delete profile",
+  profileDeleteCancel: "Keep profile",
+  profileMade: "Your profile is made. It shows no polls until you choose them.",
+  profileRenamed: "The name is changed on your profile and every poll it shows.",
+  profileSameName: "That's the name it has already. Nothing changed.",
+  profileDeleted: "Your profile is deleted.",
+  profileAppealed: "Your appeal is filed. A different moderator will review it.",
+  profileMeans_visible: "Our pages show this profile again.",
+  profileMeans_hidden:
+    "Our pages show only this decision in place of the profile's name and polls, and your polls don't say who asked them. The polls themselves aren't affected.",
+  profileAppeal_upheld: "upheld on {when} UTC, and the profile restored",
+  profileAppeal_rejected: "rejected on {when} UTC",
+  profileAppeal_superseded:
+    "closed on {when} UTC, because a later decision changed the profile first",
+  profileVerifyPhone: "Verify your phone",
+  profileFailure_signedOut: "You've been signed out. Sign in again to see your profile.",
+  profileFailure_phoneUnverified: "A profile needs your phone number verified first.",
+  profileFailure_invalidName:
+    "A profile can't have that name. Use 1 to 60 letters, digits, spaces or punctuation, with no invisible characters.",
+  profileFailure_oneNameADay: "The name was set already today. Nothing changed.",
+  profileFailure_hidden: "The profile is hidden, so its name can't change. Nothing changed.",
+  profileFailure_changed:
+    "Your profile changed since this page read it. This shows how it stands now.",
+  profileFailure_failed: "That didn't work. Nothing changed; try again shortly.",
+  profileFailure_unloaded: "Your profile couldn't be loaded. Try again shortly.",
+  profileFailure_moderationUnloaded:
+    "This profile's moderation couldn't be loaded. Try again shortly.",
   pollsMark: "Your polls",
   pollsTitle: "Polls you created",
   pollsLede:

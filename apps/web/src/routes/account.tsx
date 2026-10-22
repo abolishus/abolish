@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { accountClient } from "../account/client.ts";
 import { draftsClient } from "../account/drafts.ts";
+import { profilesClient } from "../account/profiles.ts";
 import { verifyClient } from "../account/verify.ts";
 import { AccountPanel } from "../components/account-panel.tsx";
 import { fetchPhoneVerification } from "../data.ts";
@@ -17,6 +18,7 @@ export const Route = createFileRoute("/account")({
       <AccountPanel
         client={accountClient}
         drafts={draftsClient}
+        profiles={profilesClient}
         verify={verifyClient}
         phone={phone}
       />

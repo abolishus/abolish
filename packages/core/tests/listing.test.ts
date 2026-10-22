@@ -292,6 +292,21 @@ describe("listPolls, new and closing", () => {
     }
   });
 
+  test("closing pages past a closes_at of 2^63 and over, up to a u64", async () => {
+    // Any u64 a definition's `timing` rule allows, whose times are past
+    // int8's range, so the cursor must keep them exact.
+    const now = T + 5_000n;
+    const top = (1n << 64n) - 1n - BigInt(typical.l1_inclusion_bound);
+    const mine = [
+      await timed(now, 1n << 63n, false),
+      await timed(now, (1n << 63n) + 1n, false),
+      await timed(now, top, false),
+    ].map(hex);
+    expect((await listAll(1, { sort: "closing", now })).filter((id) => mine.includes(id))).toEqual(
+      mine,
+    );
+  });
+
   test("refuse a cursor the order can't place, and a now that isn't a u64", async () => {
     const stray = new Uint8Array(randomBytes(32));
     const unregistered = await timed(T, T + 1n, false);

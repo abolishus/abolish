@@ -153,7 +153,9 @@ export async function listPolls(
       .from(electionSchedules)
       .where(eq(electionSchedules.electionId, cursor));
     if (at === undefined) throw new ListingError();
-    from = q`(${electionSchedules.closesAt}, ${electionSchedules.electionId}) > (${at.closesAt}::numeric, ${cursor})`;
+    // As text: postgres.js would send a bigint as int8, which can't hold a
+    // u64 from 2^63 up, before the cast.
+    from = q`(${electionSchedules.closesAt}, ${electionSchedules.electionId}) > (${at.closesAt.toString()}::numeric, ${cursor})`;
   }
   const rows = await db
     .select({ electionId: electionDefinitions.electionId })

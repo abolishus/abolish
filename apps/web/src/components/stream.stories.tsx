@@ -73,6 +73,8 @@ const meta = {
   args: {
     stream: { kind: "stream", cards, next: NEXT },
     sort: "new",
+    typed: "",
+    q: undefined,
     ballot: BALLOT,
   },
 } satisfies Meta<typeof StreamPage>;
@@ -147,6 +149,17 @@ const play: Story["play"] = async ({ canvasElement }) => {
   );
   // No engagement counts.
   await expect(canvas.queryByText(/viewing now|streak/i)).toBeNull();
+
+  // The search box is a plain GET to the stream, keeping no order but the default.
+  const search = canvas.getByRole("search");
+  await expect(search).toHaveAttribute("method", "get");
+  await expect(search).toHaveAttribute("action", "/discover");
+  const box = within(search).getByRole("searchbox", { name: "Search the questions" });
+  await expect(box).toHaveAttribute("name", "q");
+  await expect(box).toHaveAccessibleDescription(/up to 8 words/);
+  await expect(box).toHaveValue("");
+  await expect(search.querySelector('input[name="sort"]')).toBeNull();
+  await expect(canvas.queryByRole("link", { name: "Clear the search" })).toBeNull();
 };
 
 export const Default: Story = { play };
@@ -208,5 +221,66 @@ export const Empty: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: "No open questions just now" })).toBeVisible();
     await expect(canvas.queryByRole("list", { name: "Questions" })).toBeNull();
+  },
+};
+
+/** A search: the order and every next page keep it, and the box shows what was typed. */
+export const Searching: Story = {
+  args: { sort: "closing", typed: " library  hours", q: "library  hours" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const search = canvas.getByRole("search");
+    await expect(within(search).getByRole("searchbox")).toHaveValue(" library  hours");
+    await expect(search.querySelector('input[name="sort"]')).toHaveValue("closing");
+    const order = canvas.getByRole("navigation", { name: "Order" });
+    await expect(within(order).getByRole("link", { name: "New" })).toHaveAttribute(
+      "href",
+      "/discover?q=library%20%20hours",
+    );
+    await expect(within(order).getByRole("link", { name: "Closing soon" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(canvas.getByRole("link", { name: "More questions" })).toHaveAttribute(
+      "href",
+      `/discover?sort=closing&q=library%20%20hours&after=${NEXT}`,
+    );
+    await expect(canvas.getByText(/hold every word you searched for/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/discover?sort=closing",
+    );
+    // The query is never quoted in the page's own words.
+    await expect(canvas.queryByText(/library {2}hours/)).toBeNull();
+  },
+};
+
+export const SearchFoundNothing: Story = {
+  args: { typed: "ferries", q: "ferries", stream: { kind: "stream", cards: [], next: undefined } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "No open question matches" })).toBeVisible();
+    await expect(canvas.queryByText("No open questions just now")).toBeNull();
+    await expect(canvas.getAllByRole("link", { name: "Clear the search" })[1]).toHaveAttribute(
+      "href",
+      "/discover",
+    );
+    await expect(canvas.queryByText(/ferries/)).toBeNull();
+  },
+};
+
+export const SearchRefused: Story = {
+  args: { typed: "a b c d e f g h i", q: undefined, stream: { kind: "search-refused" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "That search can't be run" })).toBeVisible();
+    await expect(canvas.getByText(/one to 8 words, in at most 200 characters/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/discover",
+    );
+    await expect(within(canvas.getByRole("search")).getByRole("searchbox")).toHaveValue(
+      "a b c d e f g h i",
+    );
   },
 };

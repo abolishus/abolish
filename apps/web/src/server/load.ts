@@ -313,10 +313,22 @@ export type Stream =
   /** The API can't sort this way just now (`answered` without the anchoring clock). */
   | { readonly kind: "sort-unavailable" }
   /** `after` names no poll this order can place. */
-  | { readonly kind: "cursor-not-found" };
+  | { readonly kind: "cursor-not-found" }
+  /**
+   * The search is one the API doesn't take: too long or of too many words
+   * (src/stream.ts, `streamQuery`), or of no word left once the API
+   * normalises it (control characters alone).
+   */
+  | { readonly kind: "search-refused" };
 
 const listingError = (error: unknown, code: "SORT_UNAVAILABLE" | "CURSOR_NOT_FOUND") =>
   error instanceof ORPCError && error.defined && error.code === code;
+
+// The API's answer to a query whose every term is blank once normalised,
+// which no pattern the contract can state catches first (packages/core,
+// `searchTerms`).
+const searchRefused = (error: unknown) =>
+  error instanceof ORPCError && !error.defined && error.code === "BAD_REQUEST";
 
 /**
  * The display text the API serves for `electionId`, or `undefined` if it
@@ -340,7 +352,9 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
 
 /**
  * A page of the stream in the order `sort`, from just after `after` (an
- * election ID, or `""` from the start), each poll's text in `locale`. The API
+ * election ID, or `""` from the start), only of the polls whose question
+ * text holds every term of `q` when it is given (a query `streamQuery`
+ * admits), each poll's text in `locale`. The API
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/stream.ts). A poll the database lost between the
@@ -350,6 +364,7 @@ export async function loadStream(
   api: Api,
   sort: StreamSort,
   after: string,
+  q: string | undefined,
   locale: string,
 ): Promise<Stream> {
   let elections;
@@ -357,11 +372,13 @@ export async function loadStream(
     ({ elections } = await api.elections.list({
       sort,
       ...(after === "" ? {} : { after }),
+      ...(q === undefined ? {} : { q }),
       limit: String(STREAM_PAGE),
     }));
   } catch (error) {
     if (listingError(error, "SORT_UNAVAILABLE")) return { kind: "sort-unavailable" };
     if (listingError(error, "CURSOR_NOT_FOUND")) return { kind: "cursor-not-found" };
+    if (q !== undefined && searchRefused(error)) return { kind: "search-refused" };
     throw error;
   }
   const cards = await Promise.all(

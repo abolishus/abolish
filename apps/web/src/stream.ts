@@ -20,6 +20,40 @@ export const STREAM_SORTS = ["new", "closing", "answered"] as const;
 
 export type StreamSort = (typeof STREAM_SORTS)[number];
 
+/**
+ * The longest search query and its most terms, as `GET /elections` bounds
+ * them; a test ties these copies to @abolishus/api-contract's. Copies, so the
+ * page's bundle doesn't carry the whole contract.
+ */
+export const MAX_STREAM_QUERY = 200;
+export const MAX_STREAM_TERMS = 8;
+
+const QUERY = new RegExp(`^\\s*\\S+(?:\\s+\\S+){0,${MAX_STREAM_TERMS - 1}}\\s*$`, "u");
+
+/**
+ * What a stream's `q` asks for: no search when it is absent or only
+ * whitespace, a search for it trimmed when the API's contract admits that,
+ * and a refusal otherwise (too long, or too many words), which the page says
+ * without asking the API.
+ */
+export type StreamQuery =
+  | { readonly kind: "none" }
+  | { readonly kind: "search"; readonly q: string }
+  | { readonly kind: "refused" };
+
+export function streamQuery(q: string | undefined): StreamQuery {
+  const trimmed = q?.trim() ?? "";
+  if (trimmed === "") return { kind: "none" };
+  if (trimmed.length > MAX_STREAM_QUERY || !QUERY.test(trimmed)) return { kind: "refused" };
+  return { kind: "search", q: trimmed };
+}
+
+/** A query exactly as `streamQuery` hands one on: what a server function takes as a search. */
+export function isStreamSearch(q: string): boolean {
+  const query = streamQuery(q);
+  return query.kind === "search" && query.q === q;
+}
+
 /** One language's words for a card. */
 export interface CardText {
   /** The translation's tag, lowercase BCP 47, as the record holds it. */

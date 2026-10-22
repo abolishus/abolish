@@ -1,6 +1,7 @@
 // Moderation commands (docs/moderation-policy.md; T-68): the moderators' queue
 // of reports, reviewing them, recording decisions and reading the log, the
-// moderators' handles, and the creators' appeals. Until
+// moderators' handles, and the creators' appeals, for polls and, under
+// `profile-`, for creator profiles (Profiles; T-75). Until
 // the owner names moderators, the operator of the deployment is the only one
 // (docs/moderation-policy.md, Moderators), so this tooling is a command line
 // on the operator's own connection rather than a page anyone can reach.
@@ -11,15 +12,24 @@ import {
   type AppealDecision,
   AppealError,
   decideAppeal,
+  decideProfileAppeal,
   MAX_APPEAL_QUEUE,
   MAX_MODERATION_PAGE,
+  MAX_PROFILE_APPEAL_QUEUE,
   MAX_REPORT_QUEUE,
   moderate,
+  moderateProfile,
   type ModerationDecision,
   ModerationError,
   moderationStatus,
-  readModerationLog,
+  PROFILE_HANDLE,
+  profileModerationStatus,
+  type ProfileModerationDecision,
+  type ProfileReportQueueCursor,
   readAppealQueue,
+  readProfileAppealQueue,
+  readProfileReportQueue,
+  readPublicModerationLog,
   readReportQueue,
   REMOVAL_REASONS,
   type RemovalReason,
@@ -27,6 +37,7 @@ import {
   RESTORE_REASONS,
   type RestoreReason,
   retireModerator,
+  reviewProfileReports,
   reviewReports,
 } from "@abolishus/core";
 import type { Command } from "./cli.ts";
@@ -48,6 +59,13 @@ function bigintArg(s: string, min: bigint, what: string): bigint {
   if (!/^(?:0|[1-9][0-9]{0,18})$/.test(s) || BigInt(s) < min || BigInt(s) > INT8_MAX)
     throw new UsageError(`${what} is a decimal from ${min} to 2^63 − 1`);
   return BigInt(s);
+}
+
+/** A profile handle in its one spelling, 16 base32 letters and digits (T-75). */
+function profileHandle(s: string): string {
+  if (!PROFILE_HANDLE.test(s))
+    throw new UsageError("a profile handle is 16 characters from a to z and 2 to 7");
+  return s;
 }
 
 function limitArg(s: unknown, max: number): number {
@@ -88,14 +106,13 @@ async function refusable<T>(p: Promise<T>): Promise<T> {
 }
 
 /**
- * A queue cursor: the last row's hour, election ID and ground, as `queue`
- * prints it in `next`. Opaque to the operator; parsed strictly so a typo is a
- * usage error rather than a page that silently starts elsewhere.
+ * A queue cursor's parts: the last row's hour, what was reported (an election
+ * ID or a profile handle, which the caller checks) and the ground, as
+ * `command` prints them in `next`. Opaque to the operator; parsed strictly so
+ * a typo is a usage error rather than a page that silently starts elsewhere.
  */
-export function parseQueueCursor(s: string): ReportQueueCursor {
-  const m = /^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00\.000Z)\/([0-9a-f]{64})\/([a-z-]+)$/.exec(
-    s,
-  );
+function cursorParts(s: string, command: string) {
+  const m = /^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00\.000Z)\/([^/]+)\/([a-z-]+)$/.exec(s);
   const pendingSince = m?.[1] === undefined ? undefined : new Date(m[1]);
   // An out-of-range field (hour 30) makes an invalid Date, whose toISOString throws.
   if (
@@ -104,16 +121,41 @@ export function parseQueueCursor(s: string): ReportQueueCursor {
     Number.isNaN(pendingSince.getTime()) ||
     pendingSince.toISOString() !== m[1]
   )
-    throw new UsageError("--after is a cursor as `queue` printed it in `next`");
+    throw new UsageError(`--after is a cursor as \`${command}\` printed it in \`next\``);
   // Groups 2 and 3 aren't optional, so a match has both.
-  return { pendingSince, electionId: electionId(m[2]!), reason: removalReason(m[3]!) };
+  return { pendingSince, key: m[2]!, reason: removalReason(m[3]!) };
+}
+
+/** The polls' queue cursor, as `queue` prints it in `next`. */
+export function parseQueueCursor(s: string): ReportQueueCursor {
+  const { pendingSince, key, reason } = cursorParts(s, "queue");
+  return { pendingSince, electionId: electionId(key), reason };
+}
+
+export function formatQueueCursor(c: ReportQueueCursor): string {
+  return `${c.pendingSince.toISOString()}/${hex(c.electionId)}/${c.reason}`;
+}
+
+/** The profiles' queue cursor, as `profile-queue` prints it in `next`. */
+export function parseProfileQueueCursor(s: string): ProfileReportQueueCursor {
+  const { pendingSince, key, reason } = cursorParts(s, "profile-queue");
+  return { pendingSince, handle: profileHandle(key), reason };
+}
+
+export function formatProfileQueueCursor(c: ProfileReportQueueCursor): string {
+  return `${c.pendingSince.toISOString()}/${c.handle}/${c.reason}`;
+}
+
+/** The moderator a decision names, required by every command that records one. */
+function moderatorArg(s: unknown): string {
+  // Every decision names who made it, for the operator's own records;
+  // the public log omits it (docs/moderation-policy.md, Transparency).
+  if (typeof s !== "string") throw new UsageError("--moderator is required");
+  return s;
 }
 
 // `run` (cli.ts) calls a command only with exactly its `positionals`, so the
 // `!` on each positional below holds.
-export function formatQueueCursor(c: ReportQueueCursor): string {
-  return `${c.pendingSince.toISOString()}/${hex(c.electionId)}/${c.reason}`;
-}
 
 export const moderationCommands: Readonly<Record<string, Command>> = {
   queue: {
@@ -166,10 +208,7 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
     positionals: 3,
     async run(sql, [id, action, reason], values, io) {
       const election = electionId(id!);
-      const moderator = values["moderator"];
-      // Every decision names who made it, for the operator's own records;
-      // the public log omits it (docs/moderation-policy.md, Transparency).
-      if (typeof moderator !== "string") throw new UsageError("--moderator is required");
+      const moderator = moderatorArg(values["moderator"]);
       let decision: ModerationDecision;
       if (action === "delist" || action === "hide")
         decision = { action, reason: removalReason(reason!), moderator };
@@ -209,16 +248,18 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
     async run(sql, _, values, io) {
       const limit = limitArg(values["limit"], MAX_MODERATION_PAGE);
       const after = values["after"];
-      const entries = await readModerationLog(
+      const entries = await readPublicModerationLog(
         sql,
         typeof after === "string" ? bigintArg(after, 0n, "--after") : 0n,
         limit,
       );
-      // The public log, as GET /moderation/log serves it: no moderator.
+      // The whole public log, polls' and profiles' decisions in one
+      // numbering, as GET /moderation/log serves it: no moderator, and a
+      // profile by its handle, never its name or account.
       for (const e of entries)
         io.out({
           seq: String(e.seq),
-          electionId: hex(e.electionId),
+          ...(e.target === "poll" ? { electionId: hex(e.electionId) } : { handle: e.handle }),
           action: e.action,
           reason: e.reason,
           decidedAt: e.decidedAt.toISOString(),
@@ -284,9 +325,134 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
     async run(sql, [seq, decision], values, io) {
       const decisionSeq = bigintArg(seq!, 1n, "decision-seq");
       const outcome = appealDecision(decision!);
-      const moderator = values["moderator"];
-      if (typeof moderator !== "string") throw new UsageError("--moderator is required");
+      const moderator = moderatorArg(values["moderator"]);
       const review = await refusable(decideAppeal(sql, decisionSeq, outcome, moderator));
+      io.out({
+        decisionSeq: seq,
+        outcome: review.outcome,
+        state: review.state,
+        ...(review.restoreSeq !== undefined && { restoreSeq: String(review.restoreSeq) }),
+      });
+    },
+  },
+
+  "profile-queue": {
+    usage: `[--limit 1..${MAX_REPORT_QUEUE}] [--after <next>]`,
+    options: { limit: { type: "string" }, after: { type: "string" } },
+    positionals: 0,
+    async run(sql, _, values, io) {
+      const limit = limitArg(values["limit"], MAX_REPORT_QUEUE);
+      const after = values["after"];
+      const rows = await readProfileReportQueue(
+        sql,
+        limit,
+        typeof after === "string" ? parseProfileQueueCursor(after) : undefined,
+      );
+      for (const r of rows)
+        io.out({
+          handle: r.handle,
+          reason: r.reason,
+          pending: String(r.pending),
+          total: String(r.total),
+          pendingSince: r.pendingSince.toISOString(),
+        });
+      const last = rows.at(-1);
+      if (rows.length === limit && last !== undefined)
+        io.out({ next: formatProfileQueueCursor(last) });
+    },
+  },
+
+  "profile-review": {
+    usage: "<handle> <reason> <seen-total>",
+    options: {},
+    positionals: 3,
+    async run(sql, [h, reason, seen], _, io) {
+      const handle = profileHandle(h!);
+      const ground = removalReason(reason!);
+      // The `total` the queue showed, so a report counted since stays pending.
+      const pending = await refusable(
+        reviewProfileReports(sql, handle, ground, bigintArg(seen!, 1n, "seen-total")),
+      );
+      io.out({ handle, reason: ground, pending: String(pending) });
+    },
+  },
+
+  "profile-decide": {
+    usage: "<handle> <hide|restore> <reason> --moderator <handle>",
+    options: { moderator: { type: "string" } },
+    positionals: 3,
+    async run(sql, [h, action, reason], values, io) {
+      const handle = profileHandle(h!);
+      const moderator = moderatorArg(values["moderator"]);
+      // No delist: a profile is reached only through its polls (Profiles).
+      let decision: ProfileModerationDecision;
+      if (action === "hide") decision = { action, reason: removalReason(reason!), moderator };
+      else if (action === "restore")
+        decision = { action, reason: restoreReason(reason!), moderator };
+      else throw new UsageError("a profile's action is hide or restore");
+      const { seq, state } = await refusable(moderateProfile(sql, handle, decision));
+      io.out({ seq: String(seq), handle, state });
+    },
+  },
+
+  "profile-status": {
+    usage: "<handle>",
+    options: {},
+    positionals: 1,
+    async run(sql, [h], _, io) {
+      const handle = profileHandle(h!);
+      const { state, latest } = await profileModerationStatus(sql, handle);
+      io.out({
+        handle,
+        state,
+        ...(latest && {
+          latest: {
+            seq: String(latest.seq),
+            action: latest.action,
+            reason: latest.reason,
+            decidedAt: latest.decidedAt.toISOString(),
+          },
+        }),
+      });
+    },
+  },
+
+  "profile-appeals": {
+    usage: `[--limit 1..${MAX_PROFILE_APPEAL_QUEUE}] [--after <seq>]`,
+    options: { limit: { type: "string" }, after: { type: "string" } },
+    positionals: 0,
+    async run(sql, _, values, io) {
+      const limit = limitArg(values["limit"], MAX_PROFILE_APPEAL_QUEUE);
+      const after = values["after"];
+      const rows = await readProfileAppealQueue(
+        sql,
+        limit,
+        typeof after === "string" ? bigintArg(after, 0n, "--after") : 0n,
+      );
+      // The profile and the decision appealed, never whose profile it is.
+      for (const a of rows)
+        io.out({
+          decisionSeq: String(a.decisionSeq),
+          handle: a.handle,
+          action: "hide",
+          reason: a.reason,
+          decidedAt: a.decidedAt.toISOString(),
+          filedAt: a.filedAt.toISOString(),
+        });
+      const last = rows.at(-1);
+      if (rows.length === limit && last !== undefined) io.out({ next: String(last.decisionSeq) });
+    },
+  },
+
+  "profile-appeal-decide": {
+    usage: "<decision-seq> <upheld|rejected> --moderator <handle>",
+    options: { moderator: { type: "string" } },
+    positionals: 2,
+    async run(sql, [seq, decision], values, io) {
+      const decisionSeq = bigintArg(seq!, 1n, "decision-seq");
+      const outcome = appealDecision(decision!);
+      const moderator = moderatorArg(values["moderator"]);
+      const review = await refusable(decideProfileAppeal(sql, decisionSeq, outcome, moderator));
       io.out({
         decisionSeq: seq,
         outcome: review.outcome,

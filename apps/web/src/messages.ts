@@ -275,6 +275,17 @@ const enUS = {
   streamCursorLostTitle: "That page has moved on",
   streamCursorLost: "The question this page started after can't be placed in this order any more.",
   streamStart: "Start from the top",
+  streamSearchLabel: "Search the questions",
+  streamSearchHint:
+    "Every word you type must appear in a question or its title, up to {words} words. Results keep the order above.",
+  streamSearchSubmit: "Search",
+  streamSearching: "Only the questions that hold every word you searched for.",
+  streamSearchClear: "Clear the search",
+  streamSearchEmpty: "No open question matches",
+  streamSearchEmptyLede:
+    "Try fewer words, or shorter ones: a question matches only when it holds every one.",
+  streamSearchRefusedTitle: "That search can't be run",
+  streamSearchRefused: "A search is one to {words} words, in at most {characters} characters.",
   listTitle: "Listed polls",
   listLede:
     "Polls this server lists, in order of their IDs. Polls that moderation has delisted or hidden aren't listed but stay open by ID, and the election registry on chain names every poll, whatever this list shows.",

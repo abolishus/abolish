@@ -14,7 +14,7 @@ import {
   loadStream,
   resolveShortLink,
 } from "./server/load.ts";
-import { STREAM_SORTS, type StreamSort } from "./stream.ts";
+import { isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { LOCALE } from "./messages.ts";
 import { ballotBase, isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
 
@@ -83,16 +83,25 @@ export const fetchFirstPolls = createServerFn({ method: "GET" })
  */
 export const fetchStream = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { sort, after } = (input ?? {}) as { sort?: unknown; after?: unknown };
+    const { sort, after, q } = (input ?? {}) as { sort?: unknown; after?: unknown; q?: unknown };
     if (!STREAM_SORTS.some((s) => s === sort)) throw new TypeError("expected a stream order");
     // `""` starts the stream, as for the register.
     if (after !== "" && !isElectionId(after))
       throw new TypeError("expected an election ID or an empty string");
-    return { sort: sort as StreamSort, after };
+    // `""` is no search; anything else is a query as `streamQuery` gives it.
+    if (q !== "" && (typeof q !== "string" || !isStreamSearch(q)))
+      throw new TypeError("expected a search query or an empty string");
+    return { sort: sort as StreamSort, after, q };
   })
   .handler(({ data }) =>
     opaque(async () => ({
-      stream: await loadStream(api(), data.sort, data.after, LOCALE),
+      stream: await loadStream(
+        api(),
+        data.sort,
+        data.after,
+        data.q === "" ? undefined : data.q,
+        LOCALE,
+      ),
       ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
     })),
   );

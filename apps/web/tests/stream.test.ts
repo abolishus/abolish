@@ -10,10 +10,19 @@ import {
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
+import { contract, MAX_SEARCH_QUERY, MAX_SEARCH_TERMS } from "@abolishus/api-contract";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { pickTranslation, streamCard } from "../src/stream.ts";
+import { streamHref } from "../src/components/stream.tsx";
+import {
+  isStreamSearch,
+  MAX_STREAM_QUERY,
+  MAX_STREAM_TERMS,
+  pickTranslation,
+  streamCard,
+  streamQuery,
+} from "../src/stream.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -225,5 +234,73 @@ describe("ballot links", () => {
     "javascript:alert(1)",
   ])("refuse %j", (value) => {
     expect(ballotBase(value)).toBeUndefined();
+  });
+});
+
+describe("streamQuery", () => {
+  const input = contract.elections.list["~orpc"].inputSchema!;
+  /** Whether the API's contract takes `q` as a listing's search. */
+  const admits = (q: string) => {
+    const result = input["~standard"].validate({ limit: "1", q });
+    if (result instanceof Promise) throw new Error("the contract validates synchronously");
+    return result.issues === undefined;
+  };
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+
+  test("its bounds are the API contract's", () => {
+    expect([MAX_STREAM_QUERY, MAX_STREAM_TERMS]).toEqual([MAX_SEARCH_QUERY, MAX_SEARCH_TERMS]);
+  });
+
+  test("reads nothing, or only whitespace, as no search", () => {
+    for (const q of [undefined, "", " ", "\t\n", "\u3000"])
+      expect(streamQuery(q)).toEqual({ kind: "none" });
+  });
+
+  test("trims a query, and refuses one too long or of too many words", () => {
+    expect(streamQuery("  park  library ")).toEqual({ kind: "search", q: "park  library" });
+    expect(streamQuery(words(MAX_SEARCH_TERMS)).kind).toBe("search");
+    expect(streamQuery(words(MAX_SEARCH_TERMS + 1))).toEqual({ kind: "refused" });
+    expect(streamQuery("a".repeat(MAX_SEARCH_QUERY)).kind).toBe("search");
+    expect(streamQuery(` ${"a".repeat(MAX_SEARCH_QUERY)} `).kind).toBe("search");
+    expect(streamQuery("a".repeat(MAX_SEARCH_QUERY + 1))).toEqual({ kind: "refused" });
+  });
+
+  test("searches for exactly the queries the API's contract takes, trimmed", () => {
+    const piece = fc.oneof(
+      fc.string({ unit: "binary", maxLength: 6 }),
+      fc.constantFrom(" ", "\t", "\n", "\u3000", "\u00a0", "\u2028", "\ufeff", "\u180e"),
+      fc.constantFrom("\u0085", "\u0001", "a".repeat(40)),
+    );
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 60 }), (pieces) => {
+        const q = pieces.join("");
+        const query = streamQuery(q);
+        if (q.trim() === "") {
+          expect(query.kind).toBe("none");
+          return;
+        }
+        expect(query.kind === "search", JSON.stringify(q)).toBe(admits(q.trim()));
+        if (query.kind === "search") {
+          expect(query.q).toBe(q.trim());
+          expect(isStreamSearch(query.q)).toBe(true);
+          expect(isStreamSearch(q)).toBe(q === q.trim());
+        }
+      }),
+      runs,
+    );
+  });
+
+  test("a search's links carry it whole, read back as the same text", () => {
+    fc.assert(
+      fc.property(fc.string({ unit: "grapheme", minLength: 1, maxLength: 40 }), (q) => {
+        const href = streamHref("closing", "ab".repeat(32), q);
+        const params = new URL(href, "https://web.test").searchParams;
+        expect(params.get("q")).toBe(q);
+        expect(params.get("sort")).toBe("closing");
+        expect(params.get("after")).toBe("ab".repeat(32));
+        expect(params.getAll("q")).toHaveLength(1);
+      }),
+      runs,
+    );
   });
 });

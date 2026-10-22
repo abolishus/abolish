@@ -279,12 +279,23 @@ const forgiving = (code: string) => code.toUpperCase().replaceAll("0", "O").repl
 let down = false;
 
 /** Every request the stub API received, with its headers. */
-const seen: { path: string; headers: IncomingHttpHeaders }[] = [];
+const seen: { path: string; query: URLSearchParams; headers: IncomingHttpHeaders }[] = [];
+
+/**
+ * The polls the stub finds for a search, as the API would from their
+ * question text: "park" is in both streamed texts' questions, "library" only
+ * in the version-5 poll's title. Any other query finds nothing, and a query
+ * of control characters alone is refused as the API refuses one.
+ */
+const SEARCHES = new Map([
+  ["park", [STREAM_V5, STREAM_V1]],
+  ["library", [STREAM_V5]],
+]);
 
 function stubApi(): Server {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
-    seen.push({ path: url.pathname, headers: req.headers });
+    seen.push({ path: url.pathname, query: url.searchParams, headers: req.headers });
     if (down) return void req.socket.destroy();
     const json = (status: number, body: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -321,8 +332,17 @@ function stubApi(): Server {
           status: 503,
           message: "This order is unavailable here for now.",
         });
+      const q = url.searchParams.get("q");
+      if (q !== null && /^[\p{Cc}\s]*$/u.test(q))
+        return json(400, {
+          defined: false,
+          code: "BAD_REQUEST",
+          status: 400,
+          message: "No search term is left once normalised.",
+        });
       if (sort === "new" || sort === "closing") {
-        const order = sort === "new" ? streamed : streamed.toReversed();
+        const matches = q === null ? streamed : (SEARCHES.get(q.toLowerCase()) ?? []);
+        const order = sort === "new" ? matches : matches.toReversed();
         const from = after === "" ? 0 : order.indexOf(after) + 1;
         if (from === 0 && after !== "")
           return json(400, {
@@ -1221,6 +1241,51 @@ describe("stream", () => {
       expect(html).not.toContain("bogus");
     },
   );
+
+  test("searches within the order, keeping the search on every link", async () => {
+    let html = await (await get("/discover?q=%20PaRK%20")).text();
+    expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
+    expect(html).toContain("hold every word you searched for");
+    // The box holds what was typed; the page's own words never quote it.
+    expect(html).toMatch(/<input[^>]*type="search"[^>]*name="q"[^>]*value=" PaRK "/);
+    expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*PaRK/);
+    expect(html).toContain('href="/discover?sort=closing&amp;q=PaRK"');
+    expect(html).toContain('href="/discover">Clear the search');
+    html = await (await get("/discover?sort=closing&q=park")).text();
+    expect(cards(html)).toEqual([STREAM_V1, STREAM_V5]);
+    expect(html).toMatch(/<input type="hidden" name="sort" value="closing"/);
+    html = await (await get("/discover?q=library")).text();
+    expect(cards(html)).toEqual([STREAM_V5]);
+    // Spaces in either spelling, and a blank search is no search.
+    for (const search of ["?q=park+library", "?q=park%20library"]) {
+      seen.length = 0;
+      await get(`/discover${search}`);
+      expect(seen.find((r) => r.path === "/elections")?.query.get("q")).toBe("park library");
+    }
+    html = await (await get("/discover?q=%20%20")).text();
+    expect(cards(html)).toEqual(streamed.slice(0, 10));
+    expect(html).not.toContain("Clear the search");
+  });
+
+  test("says when a search finds nothing, or can't be run, asking nothing of one the contract refuses", async () => {
+    let html = await (await get("/discover?q=ferries")).text();
+    expect(cards(html)).toEqual([]);
+    expect(html).toContain("No open question matches");
+    expect(html).not.toContain("No open questions just now");
+    for (const q of [Array.from({ length: 9 }, (_, i) => `w${i}`).join("+"), "a".repeat(201)]) {
+      seen.length = 0;
+      const response = await get(`/discover?q=${q}`);
+      expect(response.status).toBe(200);
+      html = await response.text();
+      expect(html).toContain("That search can&#x27;t be run");
+      expect(cards(html)).toEqual([]);
+      expect(seen).toEqual([]);
+    }
+    // Control characters alone pass the contract's pattern, and the API refuses them.
+    html = await (await get("/discover?q=%C2%85")).text();
+    expect(html).toContain("That search can&#x27;t be run");
+    expect(html).not.toContain("BAD_REQUEST");
+  });
 
   test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {
     seen.length = 0;

@@ -15,7 +15,7 @@ import {
   boardSubtrees,
 } from "./board.ts";
 import { electionDefinitions, electionRegistrations, electionSchedules } from "./definitions.ts";
-import { displayTexts } from "./display-texts.ts";
+import { displayTexts, displayTextSearch } from "./display-texts.ts";
 import {
   accountEmailCodes,
   accountEmailRecipients,
@@ -71,6 +71,7 @@ export {
   ceremonyRuns,
   ceremonyStubs,
   displayTexts,
+  displayTextSearch,
   electionDefinitions,
   electionRegistrations,
   electionSchedules,
@@ -132,6 +133,7 @@ export const TABLE_CLASSES = {
     "ceremony_messages",
     "ceremony_runs",
     "ceremony_stubs",
+    "display_text_search",
     "display_texts",
     "moderation_actions",
     "moderation_reports",

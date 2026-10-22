@@ -114,6 +114,14 @@ export {
   listPolls,
   MAX_LISTING_PAGE,
 } from "./listing.ts";
+export {
+  fillDisplayTextSearch,
+  MAX_SEARCH_QUERY,
+  MAX_SEARCH_TERMS,
+  normalizeSearchText,
+  searchTerms,
+  searchTextOf,
+} from "./search.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
   accountCredentials,
@@ -136,6 +144,7 @@ export {
   ceremonyRuns,
   ceremonyStubs,
   displayTexts,
+  displayTextSearch,
   electionDefinitions,
   electionRegistrations,
   electionSchedules,

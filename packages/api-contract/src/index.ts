@@ -1,6 +1,8 @@
 export {
   contract,
   type Contract,
+  MAX_SEARCH_QUERY,
+  MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH,
   REMOVAL_REASONS,
   RESTORE_REASONS,

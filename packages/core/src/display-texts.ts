@@ -19,6 +19,7 @@ import { isBytes } from "./bytes.ts";
 import { displayTexts, moderationActions } from "./db/schema/index.ts";
 import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
 import { REMOVAL_REASONS } from "./moderation.ts";
+import { insertSearchText } from "./search.ts";
 
 export type DisplayTextErrorCode =
   /** No definition is stored for the election, so nothing to check the text against. */
@@ -59,7 +60,7 @@ function checkElectionId(electionId: unknown): asserts electionId is Uint8Array 
  * version-5 definition's questions). Storing the same bytes again is a no-op;
  * other bytes for an election that has text are a `conflict` (the
  * commitment binds one record, so they can't pass the check unless the hash
- * collides).
+ * collides). Each stored text gets its search row (src/search.ts).
  */
 export async function storeDisplayText(
   client: Sql,
@@ -92,6 +93,10 @@ export async function storeDisplayText(
     if (stored === undefined || !equal(new Uint8Array(stored.displayText), bytes))
       throw new DisplayTextError("conflict");
   }
+  // After the text, which the row's foreign key needs. Not in one
+  // transaction with it: storing again, or fillDisplayTextSearch, writes a
+  // row an interrupted call left out.
+  await insertSearchText(client, id, checked);
 }
 
 /**

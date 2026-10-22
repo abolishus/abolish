@@ -7,6 +7,7 @@ import {
   ListingError,
   type ListingOrder,
   listPolls,
+  searchTerms,
   lookupShortCode,
   ModerationError,
   moderationStatus,
@@ -95,7 +96,10 @@ export const router = os.router({
       else if (context.boardClock === undefined) throw errors.SORT_UNAVAILABLE();
       else order = { sort, now: context.now(), clock: context.boardClock };
       try {
-        const elections = await listPolls(context.sql, after, Number(input.limit), order);
+        // The query is matched and dropped: like every query string, it is
+        // never logged (T-11, T-67).
+        const terms = input.q === undefined ? [] : searchTerms(input.q);
+        const elections = await listPolls(context.sql, after, Number(input.limit), order, terms);
         return { elections: elections.map(toHex) };
       } catch (e) {
         if (e instanceof ListingError) throw errors.CURSOR_NOT_FOUND();

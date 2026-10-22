@@ -26,6 +26,14 @@ vp node packages/verifier/src/bin.ts path/to/bundle   # from a checkout
 
 It prints the JSON report on stdout and a summary on stderr, and exits on `verdict` alone: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected, 64 usage. Any other code is the verifier's own error, not a verdict. `runCli(args, { stdout, stderr })` runs the same from code. The package doesn't install an `abolish-verify` binary yet: a published gated package may not declare `bin` until CI's policy allows it.
 
+### Keys run
+
+```sh
+vp node packages/verifier/src/bin.ts keys path/to/evidence   # keys.json inside
+```
+
+`runKeys(parseKeysEvidence(json), pin, runAt)` judges the Tier 0 token keys of every release in the L1 release registry (`docs/spec/verifier.md`, Token keys across releases): every release, revoked or not, read from the registry's state under one L1 header, its release record and deployment record found by hash among those given, every pair of version-2 deployments by the rules across releases, and each period's key first listed before its period began (T-74, T-10). It contacts nothing and writes `abolish-keys-report/1`. No registry is deployed yet, so this release pins none (`PINNED_RELEASE_REGISTRY`), and every run from the command line is unverifiable with `release-registry-unpinned`.
+
 The checks themselves live in `@abolishus/crypto`; this package reads inputs, maps outcomes onto the spec's checks and reports them (T-36).
 
 ## Test

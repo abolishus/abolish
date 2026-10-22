@@ -318,17 +318,23 @@ export function storageWord(value: Uint8Array | undefined): Uint8Array {
   return w;
 }
 
+/** A contract's account as the state trie holds it: its storage root and code hash. */
+export interface ContractAccount {
+  readonly storageRoot: Uint8Array;
+  readonly codeHash: Uint8Array;
+}
+
 /**
- * The storage root of the account at `address` in the state trie under
- * `stateRoot`, or undefined if the nodes prove there is no account there or
- * it has no code. An account without code (an EOA, say) can't be one of our
- * contracts, so a wrong address reads as absent, never as empty storage.
+ * The account at `address` in the state trie under `stateRoot`, or
+ * undefined if the nodes prove there is no account there or it has no code.
+ * An account without code (an EOA, say) can't be one of our contracts, so a
+ * wrong address reads as absent, never as empty storage.
  */
-export function contractStorageRoot(
+export function contractAccount(
   nodes: NodePool,
   stateRoot: Uint8Array,
   address: Uint8Array,
-): Uint8Array | undefined {
+): ContractAccount | undefined {
   const account = nodes.get(stateRoot, keccak_256(address));
   if (account === undefined) return undefined;
   try {
@@ -336,12 +342,22 @@ export function contractStorageRoot(
     if (!a.list || a.items.length !== 4) throw new RlpError("an account is 4 fields");
     rlpUint(a.items[0], 8);
     rlpUint(a.items[1], 32);
-    const root = rlpBytes32(a.items[2]);
-    return equal(rlpBytes32(a.items[3]), NO_CODE) ? undefined : root;
+    const storageRoot = rlpBytes32(a.items[2]);
+    const codeHash = rlpBytes32(a.items[3]);
+    return equal(codeHash, NO_CODE) ? undefined : { storageRoot, codeHash };
   } catch (e) {
     if (e instanceof RlpError) throw new L1Error("l1-proof-malformed");
     throw e;
   }
+}
+
+/** The storage root of `contractAccount`'s account, or undefined as it is. */
+export function contractStorageRoot(
+  nodes: NodePool,
+  stateRoot: Uint8Array,
+  address: Uint8Array,
+): Uint8Array | undefined {
+  return contractAccount(nodes, stateRoot, address)?.storageRoot;
 }
 
 /** The anchor account's storage root, from the state trie. */

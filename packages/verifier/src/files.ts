@@ -42,14 +42,14 @@ function read(dir: string, name: string): Uint8Array {
   }
 }
 
-function json(dir: string): string {
-  const raw = read(dir, "bundle.json");
+export function json(dir: string, name = "bundle.json"): string {
+  const raw = read(dir, name);
   try {
     // fatal: invalid UTF-8 rejects the bundle instead of being replaced with
     // U+FFFD; ignoreBOM: a byte-order mark is kept, so JSON.parse rejects it.
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
   } catch {
-    throw new BundleError("bundle.json: not UTF-8");
+    throw new BundleError(`${name}: not UTF-8`);
   }
 }
 

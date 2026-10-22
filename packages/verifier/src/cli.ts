@@ -7,14 +7,28 @@
 
 import { parseArgs } from "node:util";
 import { BundleError } from "./bundle.ts";
-import { DEFAULT_MAX_BOARD_BYTES, loadBundle } from "./files.ts";
+import { DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "./files.ts";
 import { type Gateways, gatewaySource, MAX_GATEWAYS, parseGateway } from "./gateways.ts";
+import { type KeysReport, keysSummary, parseKeysEvidence, runKeys } from "./keys.ts";
+import { PINNED_RELEASE_REGISTRY, type ReleaseRegistryPin } from "./registry.ts";
 import { authenticated, type Report, type Verdict, verifyBundle } from "./verify.ts";
 
 export interface CliOutput {
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
 }
+
+/** What a run takes from its surroundings: the run's clock, and the registry the release pins. */
+export interface CliContext {
+  /** Seconds since the epoch, read once as a run starts. */
+  readonly clock: () => bigint;
+  readonly registry: ReleaseRegistryPin | undefined;
+}
+
+const DEFAULT_CONTEXT: CliContext = {
+  clock: () => BigInt(Math.floor(Date.now() / 1000)),
+  registry: PINNED_RELEASE_REGISTRY,
+};
 
 /**
  * Exit codes. 0 means verified and nothing else: help exits as a usage error.
@@ -32,6 +46,7 @@ export const EXIT_CODES = Object.freeze({
 } as const);
 
 const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]... [--] <bundle-directory>
+       abolish-verify keys [--] <evidence-directory>
 
 Verifies one election from a bundle (bundle.json, and board.bin, blocks.car,
 or neither with --gateway; see docs/spec/verifier.md, Inputs, procedure and
@@ -46,9 +61,13 @@ up to ${MAX_GATEWAYS} times, asked in order. Every block is checked against its 
 but each gateway sees which blocks, and so which election, you read (and,
 over http:, so does the network); prefer https:.
 
-Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected,
-64 usage (and --help). Any other code is an error of the verifier, not a
-verdict.
+keys judges the Tier 0 token keys of every release in the release registry
+from keys.json (docs/spec/verifier.md, Token keys across releases), and
+contacts nothing.
+
+Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle or evidence
+rejected, 64 usage (and --help). Any other code is an error of the
+verifier, not a verdict.
 `;
 
 /** The exit code for a report's `verdict`. */
@@ -154,8 +173,57 @@ export function summary(report: Report): string {
   return lines.join("\n") + "\n";
 }
 
-/** Runs the command line over `args` (without the node and script paths) and returns the exit code. */
-export async function runCli(args: readonly string[], out: CliOutput): Promise<number> {
+/** `abolish-verify keys`: the bundle options are usage errors here. */
+function runKeysCli(args: readonly string[], out: CliOutput, context: CliContext): number {
+  let positionals: string[];
+  let help: boolean | undefined;
+  try {
+    ({
+      positionals,
+      values: { help },
+    } = parseArgs({
+      args: [...args],
+      options: { help: { type: "boolean", short: "h" } },
+      allowPositionals: true,
+      strict: true,
+    }));
+  } catch (e) {
+    out.stderr(`${printable(e instanceof Error ? e.message : String(e))}\n${USAGE}`);
+    return EXIT_CODES.usage;
+  }
+  if (help === true) {
+    out.stdout(USAGE);
+    return EXIT_CODES.usage;
+  }
+  const [dir] = positionals;
+  if (dir === undefined || dir === "" || positionals.length !== 1) {
+    out.stderr(USAGE);
+    return EXIT_CODES.usage;
+  }
+  let report: KeysReport;
+  try {
+    report = runKeys(parseKeysEvidence(json(dir, "keys.json")), context.registry, context.clock());
+  } catch (e) {
+    if (!(e instanceof BundleError)) throw e;
+    out.stderr(`evidence rejected: ${printable(e.message)}\n`);
+    return EXIT_CODES.bundleRejected;
+  }
+  out.stdout(JSON.stringify(report, null, 2) + "\n");
+  out.stderr(keysSummary(report));
+  return exitCode(report.verdict);
+}
+
+/**
+ * Runs the command line over `args` (without the node and script paths) and
+ * returns the exit code. A first argument `keys` is always the subcommand; a
+ * bundle directory of that name is given after `--`.
+ */
+export async function runCli(
+  args: readonly string[],
+  out: CliOutput,
+  context: CliContext = DEFAULT_CONTEXT,
+): Promise<number> {
+  if (args[0] === "keys") return runKeysCli(args.slice(1), out, context);
   let positionals: string[];
   let help: boolean | undefined;
   let budget: string | undefined;

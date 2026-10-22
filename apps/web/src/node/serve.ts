@@ -5,7 +5,8 @@
 // /phone (src/node/phone.ts), its Tier 0 token under /token
 // (src/node/token.ts), reactions on a poll under /reactions
 // (src/node/reactions.ts), and the client's hashed assets from disk, with
-// the web app manifest and its icons (src/app/install.ts).
+// the web app manifest and its icons (src/app/install.ts), and the offline
+// shell's page and worker, which Start renders (src/app/offline.ts).
 //
 // The account system lives here, on apps/web's origin, so its host-only
 // session cookie never reaches the API or the ballot client's host (T-10,
@@ -27,6 +28,7 @@ import { join } from "node:path";
 
 import { type ClientError, ERROR_NAME, pageOf, parseClientError } from "../analytics.ts";
 import { APP_FILES } from "../app/install.ts";
+import { OFFLINE_PATH, WORKER_PATH } from "../app/offline.ts";
 import { appFileHeaders } from "../security.ts";
 import { type Analytics, noAnalytics } from "./analytics.ts";
 
@@ -64,6 +66,7 @@ export type RouteClass =
   | "token"
   | "reactions"
   | "asset"
+  | "offline"
   | "ingest"
   | "refused";
 
@@ -194,6 +197,10 @@ function classify(method: string, path: string): RouteClass {
     (method === "GET" || method === "HEAD")
   )
     return "asset";
+  // Fetched by the offline shell's worker as it installs and updates, not by
+  // a visitor opening a page, so never a page view (T-67).
+  if ((path === OFFLINE_PATH || path === WORKER_PATH) && (method === "GET" || method === "HEAD"))
+    return "offline";
   return "page";
 }
 

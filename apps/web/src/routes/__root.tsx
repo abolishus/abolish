@@ -9,6 +9,7 @@ import {
 import { type ReactNode, useEffect } from "react";
 
 import { ICON_SVG_PATH, MANIFEST_PATH } from "../app/install.ts";
+import { registerOfflineShell } from "../app/offline.ts";
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
 import { reportErrors } from "../error-reports.ts";
 import { catalogs, LOCALE } from "../messages.ts";
@@ -20,6 +21,8 @@ const siteName = catalogs[LOCALE]!.siteName;
 function Document({ children }: { children: ReactNode }) {
   // Error tracking, in the browser only (src/error-reports.ts).
   useEffect(() => reportErrors(window), []);
+  // The offline shell (P2-28 part 1b): a page that can't load shows /offline.
+  useEffect(() => registerOfflineShell(navigator), []);
   const path = useRouterState({ select: (s) => s.location.pathname });
   return (
     <html lang={LOCALE}>

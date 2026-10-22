@@ -5,9 +5,13 @@ import {
   imageHeaders,
   isChallengePage,
   isEmbedPage,
+  isOfflineShell,
   newNonce,
+  offlineHeaders,
   securityHeaders,
+  workerHeaders,
 } from "./security.ts";
+import { WORKER_PATH } from "./app/offline.ts";
 
 // Server functions are reachable only from our own pages: a request from
 // another origin is refused before any handler runs. Page loads are plain
@@ -18,7 +22,8 @@ const csrf = createCsrfMiddleware({ filter: ({ handlerType }) => handlerType ===
 // router stamps on the inline scripts it renders (src/router.tsx). A link
 // preview's PNG gets the image's set instead, keeping its route's caching.
 // Only the poll editor's pages may run Turnstile, and only a poll's embed
-// may be framed, with no script at all (src/security.ts).
+// may be framed, with no script at all; the offline shell's page and worker
+// get theirs (src/security.ts).
 const headers = createMiddleware().server(async ({ next, request }) => {
   const nonce = newNonce();
   const result = await next({ context: { nonce } });
@@ -32,13 +37,22 @@ const headers = createMiddleware().server(async ({ next, request }) => {
     response.status >= 300 && response.status < 400 ? response.headers.get("cache-control") : null;
   const { pathname } = new URL(request.url);
   const embed = !image && isEmbedPage(pathname);
+  const offline = !image && isOfflineShell(pathname);
   const challenge = isChallengePage(pathname);
   for (const [name, value] of Object.entries(
-    image ? imageHeaders() : embed ? embedHeaders() : securityHeaders(nonce, { challenge }),
+    image
+      ? imageHeaders()
+      : embed
+        ? embedHeaders()
+        : offline
+          ? pathname === WORKER_PATH
+            ? workerHeaders()
+            : offlineHeaders()
+          : securityHeaders(nonce, { challenge }),
   ))
     response.headers.set(name, value);
   if (redirectCaching !== null) response.headers.set("cache-control", redirectCaching);
-  if (image || embed) response.headers.delete("set-cookie");
+  if (image || embed || offline) response.headers.delete("set-cookie");
   // Only an embed that drew its poll may be cached: a failure is retried.
   if (embed && response.status !== 200) response.headers.set("cache-control", "no-store");
   return { ...result, response };

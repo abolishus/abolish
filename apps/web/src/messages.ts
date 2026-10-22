@@ -622,6 +622,13 @@ const enUS = {
   error:
     "This page couldn't be shown. Try again in a moment, or go somewhere else below. This website never handles ballots: if you were voting, your ballot and receipt are safe in the ballot app on your device.",
   errorRetry: "Try again",
+  offlineCode: "Offline",
+  offlineTitle: "You're offline",
+  offline:
+    "This device can't reach Abolish right now, so the page you opened couldn't load. It will open as usual once you're connected again.",
+  offlineKept:
+    "For times like this, your device keeps only this page and its fonts. No poll or account page you've opened is stored on it.",
+  offlineRetry: "Try again",
   moderationEyebrow: "Moderation · Public and append-only",
   moderationTitle: "Moderation acts on poll text, never on results",
   moderationLede:

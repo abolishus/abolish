@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { shortCode } from "@abolishus/core/short-codes";
 import {
@@ -22,6 +23,7 @@ import {
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
+import { offlineWorkerConfig } from "../src/app/offline.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -1571,6 +1573,59 @@ describe("failures", () => {
     } finally {
       down = false;
     }
+  });
+});
+
+describe("offline shell", () => {
+  test("the offline page is the same script-free document for everyone, with no cookie (P2-28 part 1b)", async () => {
+    const response = await get("/offline", { cookie: "better-auth.session_token=tok" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const csp = response.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("script-src");
+    expect(csp).not.toContain("nonce-");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const html = await response.text();
+    expect(html).not.toMatch(/<script\b/);
+    expect(html).not.toMatch(/<(?:form|input|button|select|textarea|iframe)\b/);
+    expect(html).not.toMatch(/\s(?:on[a-z]+|style)="/);
+    expect(html).toContain("You&#x27;re offline");
+    // "Try again" is this document's own address, which is the page asked for.
+    expect(html).toMatch(/<a href="" class="[^"]*">.*Try again<\/a>/);
+    expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/[\w-]+\.css"\/>/);
+    // Every link stays on the site.
+    expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
+    expect(await (await get("/offline")).text()).toBe(html);
+  });
+
+  test("the worker is a script naming the offline page's hash and stylesheet, and runs as served", async () => {
+    const response = await get("/sw.js");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; connect-src 'self'",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-cache");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const source = await response.text();
+    const html = await (await get("/offline")).text();
+    const stylesheet = /<link rel="stylesheet" href="([^"]+)"/.exec(html)?.[1] ?? "";
+    expect(source).toContain(JSON.stringify(await offlineWorkerConfig(html, stylesheet)));
+    // The built server's copy of the worker uses nothing outside itself.
+    const listened: string[] = [];
+    runInNewContext(source, {
+      self: { addEventListener: (type: string) => listened.push(type) },
+    });
+    expect(listened).toEqual(["install", "activate", "fetch"]);
+  });
+
+  test("every page lets the worker start, from our own origin only", async () => {
+    for (const path of ["/", "/discover", `/polls/${ID}`])
+      expect((await get(path)).headers.get("content-security-policy")).toContain(
+        "worker-src 'self'",
+      );
   });
 });
 

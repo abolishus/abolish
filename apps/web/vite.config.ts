@@ -120,6 +120,10 @@ export default defineConfig({
   ],
   build: {
     sourcemap: false,
+    // Fonts are always files: inlined as `data:` URLs (Vite inlines anything
+    // under 4 KiB, which a few of the fonts' subsets are) the policy's
+    // `font-src 'self'` refuses them (src/security.ts).
+    assetsInlineLimit: (file) => (file.endsWith(".woff2") ? false : undefined),
     rollupOptions: {
       // Base UI marks its modules "use client", a React Server Components
       // directive that Start's SSR doesn't use, and the bundler warns about
@@ -160,6 +164,17 @@ export default defineConfig({
           // into dist/ first, so the files run one at a time.
           hookTimeout: 180_000,
           fileParallelism: false,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // The built site in Chromium (tests/*.e2e.ts): what only a browser shows.
+          name: "e2e",
+          include: ["tests/**/*.e2e.ts"],
+          environment: "node",
+          testTimeout: 60_000,
+          hookTimeout: 180_000,
         },
       },
       storybook("storybook"),

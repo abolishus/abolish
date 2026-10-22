@@ -8,6 +8,7 @@
 // anyway. T-73: the provider is told an address, a subject and a body, never
 // an account, a poll or a ballot; no tag or metadata goes with it.
 
+import { domainToASCII } from "node:url";
 import {
   type EmailMessage,
   type EmailSender,
@@ -34,6 +35,12 @@ export interface PostmarkOptions {
 // What a header value or token may hold: printable ASCII without spaces.
 const TOKEN = /^[\x21-\x7e]+$/;
 const STREAM = /^[a-z0-9-]{1,64}$/;
+
+/** `address` with its domain in ASCII form (UTS 46), as SMTP without SMTPUTF8 takes it. */
+function asciiDomain(address: string): string {
+  const at = address.lastIndexOf("@");
+  return `${address.slice(0, at)}@${domainToASCII(address.slice(at + 1))}`;
+}
 
 /**
  * Sends each message through Postmark. `sent` only on Postmark's own clear
@@ -68,7 +75,7 @@ export function createPostmarkSender({
           },
           body: JSON.stringify({
             From: from,
-            To: message.to,
+            To: asciiDomain(message.to),
             Subject: subject,
             TextBody: text,
             MessageStream: messageStream,

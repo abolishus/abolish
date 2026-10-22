@@ -70,7 +70,7 @@ const NOW = new Date("2026-10-17T12:00:00Z");
 /** Every message the e-mail handler's sender was asked to send. */
 const mailed: EmailMessage[] = [];
 /** What the e-mail handler's sender answers, and its Turnstile check. */
-const provider: { send: "sent" | "unavailable"; verdict: TurnstileVerdict } = {
+const provider: { send: "sent" | "unavailable" | "hang"; verdict: TurnstileVerdict } = {
   send: "sent",
   verdict: "passed",
 };
@@ -161,6 +161,7 @@ beforeAll(async () => {
         sender: {
           send: async (message) => {
             mailed.push(message);
+            if (provider.send === "hang") return new Promise<never>(() => {});
             return provider.send;
           },
         },
@@ -1088,10 +1089,41 @@ describe("an account's e-mail address under /email", () => {
     } finally {
       provider.send = "sent";
     }
-    expect(logged.slice(-2)).toEqual([
-      { error: "EmailSendUnavailable" },
-      expect.objectContaining({ route: "email", status: 202 }),
-    ]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(logged.filter((l) => "error" in l)).toContainEqual({ error: "EmailSendUnavailable" });
+  });
+
+  test("answers before the provider does, so a capped address can't be told apart by time (T-11)", async () => {
+    provider.send = "hang";
+    try {
+      // A provider that never answers: the request is answered anyway.
+      const { res } = await asked("slow@example.org");
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({});
+    } finally {
+      provider.send = "sent";
+    }
+  });
+
+  test("a capped address is answered as any other, and sent nothing (T-11, T-52)", async () => {
+    const asker = new Browser();
+    await register(asker, new SoftAuthenticator(RP_ID), true);
+    for (let i = 0; i < 5; i++)
+      expect(
+        (
+          await asker.call(
+            "POST",
+            "/email/request",
+            { address: "capped@example.org" },
+            { [TURNSTILE_HEADER]: "solved" },
+          )
+        ).status,
+      ).toBe(202);
+    const before = mailed.length;
+    const { res } = await asked("capped@example.org");
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({});
+    expect(mailed.length).toBe(before);
   });
 
   test("refuses what core refuses, with its code", async () => {

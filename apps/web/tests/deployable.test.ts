@@ -162,7 +162,7 @@ describe("dist/node/main.mjs", () => {
         .map((l) => JSON.parse(l) as { route?: string });
       expect(lines.map((l) => l.route)).toContain("auth");
       expect(lines.map((l) => l.route)).toContain("email");
-      // The start-up prune of the account tables ran as abolish_app.
+      // No start-up prune of the account tables failed as abolish_app.
       expect(web.out()).not.toContain("AccountPruneFailed");
       expect(web.out()).not.toContain("abolish.test");
     } finally {

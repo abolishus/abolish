@@ -36,8 +36,11 @@ export function startAccountPrune({
     running = (async () => {
       try {
         const at = now();
-        await pruneAccountVerifications(sql, at);
-        await pruneAccountEmails(sql, at);
+        // Apart, so one failing never keeps the other's rows past their time.
+        await pruneAccountVerifications(sql, at).catch(() =>
+          log({ error: "AccountVerificationPruneFailed" }),
+        );
+        await pruneAccountEmails(sql, at).catch(() => log({ error: "AccountEmailPruneFailed" }));
       } catch {
         log({ error: "AccountPruneFailed" });
       } finally {

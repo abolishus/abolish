@@ -58,7 +58,8 @@ describe("createPostmarkSender", () => {
     ]);
     expect(body).toMatchObject({
       From: FROM,
-      To: "Ana@Example.org",
+      // The domain in its ASCII form, which UTS 46 lowercases; the local part as typed.
+      To: "Ana@example.org",
       MessageStream: "outbound",
       TrackOpens: false,
       TrackLinks: "None",
@@ -74,6 +75,15 @@ describe("createPostmarkSender", () => {
     const body = JSON.parse(sent[0]?.init?.body as string) as Record<string, unknown>;
     expect(body["To"]).toBe("ana@example.org");
     expect(body["TextBody"]).not.toMatch(/[0-9]{8}/);
+  });
+
+  test("sends a domain written in Unicode in its ASCII form", async () => {
+    const { sent, fetch } = postmark(OK);
+    const sender = createPostmarkSender({ serverToken: TOKEN, from: FROM, fetch });
+    expect(await sender.send({ ...CODE, to: "ana@bücher.de" })).toBe("sent");
+    expect(JSON.parse(sent[0]?.init?.body as string)).toMatchObject({
+      To: "ana@xn--bcher-kva.de",
+    });
   });
 
   test("uses the stream it is given", async () => {

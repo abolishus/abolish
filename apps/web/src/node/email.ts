@@ -7,11 +7,13 @@
 //
 // T-11, T-73: a request for a code answers the same whether a code went, a
 // notice went (another account holds the address), nothing went (the
-// address's daily cap) or the provider didn't take the message. Core reports
-// the last as `send-unavailable`, which only a request it would have sent to
-// can reach, so answering it differently would tell a capped address apart
-// during an outage; the operator learns of it from the log instead, by kind
-// only. The page tells the person to ask again if no code arrives.
+// address's daily cap) or the provider didn't take the message. Core sends
+// nothing to a capped address, so a request that waited for the provider
+// would answer a capped address faster; and core reports a failed send as
+// `send-unavailable`, which only an uncapped address can reach. So the
+// provider is called after the answer, never before it (`afterAnswer`), and
+// a failed send reaches only the operator's log, by kind. The page tells
+// the person to ask again if no code arrives.
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -69,13 +71,27 @@ const Inputs = {
   "POST /email/verify": z.strictObject({ code: z.string().max(64) }),
 } as const;
 
+/**
+ * `sender`, called without waiting: every send is taken as `sent` at once,
+ * and one the provider didn't take is logged by kind only.
+ */
+function afterAnswer(sender: EmailSender, log: EmailOptions["log"]): EmailSender {
+  const failed = () => log({ error: "EmailSendUnavailable" });
+  return {
+    send: async (message) => {
+      sender.send(message).then((outcome) => outcome === "sent" || failed(), failed);
+      return "sent";
+    },
+  };
+}
+
 const answer = (status: number, body: object) =>
   Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
 const refuse = (status: number, code: string, extra: object = {}) =>
   answer(status, { code, status, ...extra });
 
-// `send-unavailable` is answered as a sent code (above), so it isn't here.
+// `afterAnswer`'s sender always answers `sent`, so core never throws `send-unavailable`.
 const ERRORS: Record<Exclude<EmailVerificationErrorCode, "send-unavailable">, [number, string]> = {
   "invalid-address": [422, "INVALID_ADDRESS"],
   "too-many-this-hour": [429, "TOO_MANY_THIS_HOUR"],
@@ -99,6 +115,10 @@ export function createEmailHandler({
   log,
   now = () => new Date(),
 }: EmailOptions): (request: Request) => Promise<Response> {
+  const emailing: EmailService | undefined =
+    service === undefined
+      ? undefined
+      : { keys: service.keys, sender: afterAnswer(service.sender, log) };
   return async (request) => {
     const url = new URL(request.url);
     const route = `${request.method} ${url.pathname}`;
@@ -111,9 +131,9 @@ export function createEmailHandler({
     }
     const account = await accountOf(request.headers);
     if (account === undefined) return refuse(401, "SIGNED_OUT");
-    if (service === undefined) return refuse(503, "EMAIL_UNAVAILABLE");
+    if (emailing === undefined) return refuse(503, "EMAIL_UNAVAILABLE");
     if (route === "GET /email") {
-      const email = await readAccountEmail(sql, account, service.keys);
+      const email = await readAccountEmail(sql, account, emailing.keys);
       return answer(
         200,
         email === undefined
@@ -133,23 +153,18 @@ export function createEmailHandler({
         case "POST /email/request": {
           const input = Inputs[route].safeParse(body);
           if (!input.success) return refuse(400, "BAD_REQUEST");
-          try {
-            await requestEmailCode(sql, account, input.data.address, {
-              ...service,
-              turnstile,
-              token: request.headers.get(TURNSTILE_HEADER),
-              now: now(),
-            });
-          } catch (e) {
-            if (!(e instanceof EmailVerificationError) || e.code !== "send-unavailable") throw e;
-            log({ error: "EmailSendUnavailable" });
-          }
+          await requestEmailCode(sql, account, input.data.address, {
+            ...emailing,
+            turnstile,
+            token: request.headers.get(TURNSTILE_HEADER),
+            now: now(),
+          });
           return answer(202, {});
         }
         case "POST /email/verify": {
           const input = Inputs[route].safeParse(body);
           if (!input.success) return refuse(400, "BAD_REQUEST");
-          await verifyEmailCode(sql, account, input.data.code, { keys: service.keys, now: now() });
+          await verifyEmailCode(sql, account, input.data.code, { keys: emailing.keys, now: now() });
           return answer(200, {});
         }
       }

@@ -216,6 +216,7 @@ export {
   checkEmailKeys,
   EMAIL_CODE_DIGITS,
   EMAIL_CODE_SECONDS,
+  EMAIL_HOLD_DAYS,
   EMAIL_CODE_TRIES,
   type EmailKeyRotation,
   type EmailKeys,

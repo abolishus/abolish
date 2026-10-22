@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   accountEmailCodes,
+  accountEmailHolds,
   accountEmailKeyChecks,
   accountEmailRecipients,
   accountEmails,
@@ -12,6 +13,7 @@ import {
 } from "../src/db/schema/index.ts";
 import {
   EMAIL_CODE_SECONDS,
+  EMAIL_HOLD_DAYS,
   type EmailKeys,
   emailKeys,
   type EmailMessage,
@@ -147,6 +149,7 @@ describe("schema", () => {
       accountEmailSends,
       accountEmailRecipients,
       accountEmailKeyChecks,
+      accountEmailHolds,
     ]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
@@ -267,6 +270,7 @@ describe("renderEmail", () => {
     for (const m of [
       { kind: "email-code", to: "a@example.org", code: "01234567" },
       { kind: "email-held", to: "a@example.org" },
+      { kind: "email-on-hold", to: "a@example.org" },
     ] as const) {
       const { subject, text } = renderEmail(m);
       for (const part of [subject, text]) {
@@ -469,14 +473,12 @@ describe("verifying a code", () => {
     await expect(readAccountEmail(app, b, KEYS)).rejects.toThrow(/failed to open/);
   });
 
-  test("changing the address replaces it and frees the old one", async () => {
+  test("changing the address replaces it", async () => {
     const a = await newAccount();
-    const b = await newAccount();
-    await verified(a, "old@example.org");
-    await verified(a, "new@example.org");
-    expect((await readAccountEmail(app, a, KEYS))?.address).toBe("new@example.org");
-    await verified(b, "OLD@example.org");
-    expect((await readAccountEmail(app, b, KEYS))?.address).toBe("OLD@example.org");
+    const [old, next] = [fresh(), fresh()];
+    await verified(a, old);
+    await verified(a, next);
+    expect((await readAccountEmail(app, a, KEYS))?.address).toBe(next);
   });
 
   test("deleting the account deletes its address, code and sends", async () => {
@@ -698,6 +700,134 @@ describe("failing closed", () => {
   });
 });
 
+describe("an address an account lets go", () => {
+  const DAY = 24 * 3600;
+  /** Verifies `address` for `account` at `now`, through a code asked for then. */
+  const verifiedAt = async (account: string, address: string, now: Date) =>
+    verifyEmailCode(app, account, codeOf(await ask(account, address, { now })), {
+      keys: KEYS,
+      now,
+    });
+  /** The hash as the module makes it, recomputed here from its spec. */
+  const hashOf = (key: Uint8Array, address: string) =>
+    createHmac("sha256", key)
+      .update("abolish/email/v1")
+      .update(foldEmailAddress(address), "utf8")
+      .digest();
+  const holdsOf = async (address: string) =>
+    await db.admin`
+      SELECT row_to_json(t)::text AS j FROM account_email_holds t
+      WHERE address_hash = ${hashOf(KEYS.hash.current.key, address)}`;
+
+  test(`a changed-away address is held ${EMAIL_HOLD_DAYS} days: another account gets a notice and can't verify it`, async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const old = fresh();
+    await verified(a, old);
+    await verified(a, fresh());
+    const m = await ask(b, old.toUpperCase());
+    expect(m).toEqual({ kind: "email-on-hold", to: old.toUpperCase() });
+    expect(await code(verifyEmailCode(app, b, "12345678", { keys: KEYS, now: NOW }))).toBe(
+      "wrong-code",
+    );
+  });
+
+  test("the hold keeps the address's hash, its key and the day, and no account or box", async () => {
+    const a = await newAccount();
+    const old = fresh();
+    await verified(a, old);
+    await verified(a, fresh());
+    const rows = (await holdsOf(old)).map((r) => JSON.parse(r["j"] as string));
+    expect(rows).toHaveLength(1);
+    expect(Object.keys(rows[0]).sort()).toEqual(["address_hash", "freed_on", "hash_key", "id"]);
+    expect(rows[0]).toMatchObject({ hash_key: "h1" });
+    expect(new Date(rows[0].freed_on as string).toISOString()).toBe("2026-10-22T00:00:00.000Z");
+  });
+
+  test("re-verifying the account's own address holds nothing", async () => {
+    const a = await newAccount();
+    const address = fresh();
+    await verified(a, address);
+    await verified(a, address.toUpperCase());
+    expect(await holdsOf(address)).toHaveLength(0);
+  });
+
+  test("the account that let it go can't take it back while it is held", async () => {
+    const a = await newAccount();
+    const old = fresh();
+    await verified(a, old);
+    await verified(a, fresh());
+    expect((await ask(a, old)).kind).toBe("email-on-hold");
+  });
+
+  test("a deleted account's address is held, by whatever path it was deleted", async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const address = fresh();
+    await verified(a, address);
+    await db.admin`DELETE FROM account_users WHERE id = ${a}`;
+    expect(await holdsOf(address)).toHaveLength(1);
+    expect((await ask(b, address)).kind).toBe("email-on-hold");
+  });
+
+  test("an operator's deletion under abolish.email_unheld holds nothing", async () => {
+    const a = await newAccount();
+    const address = fresh();
+    await verified(a, address);
+    await db.admin.begin(async (tx) => {
+      await tx`SET LOCAL abolish.email_unheld = 'on'`;
+      await tx`DELETE FROM account_emails WHERE user_id = ${a}`;
+    });
+    expect(await holdsOf(address)).toHaveLength(0);
+    await verified(a, address);
+  });
+
+  test("an address let go after another account was sent a code refuses that code", async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const address = fresh();
+    const forA = codeOf(await ask(a, address));
+    const forB = codeOf(await ask(b, address));
+    await verifyEmailCode(app, a, forA, { keys: KEYS, now: NOW });
+    await app`DELETE FROM account_users WHERE id = ${a}`;
+    expect(await code(verifyEmailCode(app, b, forB, { keys: KEYS, now: NOW }))).toBe(
+      "address-taken",
+    );
+  });
+
+  test(`the hold ends ${EMAIL_HOLD_DAYS} days after the day it was freed, not before`, async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const address = fresh();
+    await verified(a, address);
+    await verified(a, fresh());
+    // Freed on NOW's day: still held at its last second of the 89th day after.
+    const lastHeld = new Date(Date.UTC(2026, 9, 22) + EMAIL_HOLD_DAYS * DAY * 1000 - 1000);
+    expect((await ask(b, address, { now: lastHeld })).kind).toBe("email-on-hold");
+    const freed = new Date(lastHeld.getTime() + 1000);
+    await verifiedAt(b, address, freed);
+    expect((await readAccountEmail(app, b, KEYS))?.address).toBe(address);
+  });
+
+  test("a hold under an older hash key still holds, and the rotation leaves it", async () => {
+    const hex = () => randomBytes(32).toString("hex");
+    const [H1, H2, B1] = [hex(), hex(), hex()];
+    const before = emailKeys(parseKeyring(`q1:${H1}`), parseKeyring(`p1:${B1}`));
+    const after = emailKeys(parseKeyring(`q1:${H1},q2:${H2}`), parseKeyring(`p1:${B1}`));
+    const [a, b] = [await newAccount(), await newAccount()];
+    const address = fresh();
+    await verified(a, address, before);
+    await verified(a, fresh(), before);
+    await rotateEmailKeys(app, after);
+    const [hold] = await db.admin`
+      SELECT a.hash_key FROM account_email_holds a
+      WHERE a.hash_key = 'q1' AND a.address_hash = ${hashOf(Buffer.from(H1, "hex"), address)}`;
+    expect(hold).toEqual({ hash_key: "q1" });
+    expect((await ask(b, address, { keys: after })).kind).toBe("email-on-hold");
+    // With the key it was made under retired, the hold is lost: so a hash key
+    // stays until its holds end (the account-keys runbook), and the rotation
+    // counts the hold among the rows under a key it lacks.
+    const retired = emailKeys(parseKeyring(`q2:${H2}`), parseKeyring(`p1:${B1}`));
+    expect((await rotateEmailKeys(app, retired)).unknownKeys).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe("pruneAccountEmails", () => {
   test("deletes expired codes, and sends and recipients past the day, and nothing newer", async () => {
     const account = await newAccount();
@@ -723,6 +853,30 @@ describe("pruneAccountEmails", () => {
       await left("account_email_codes", recent),
       await left("account_email_sends", recent),
     ]).toEqual([1, 1]);
+  });
+
+  test(`deletes holds ${EMAIL_HOLD_DAYS} days after they were freed, and none sooner`, async () => {
+    const a = await newAccount();
+    const [ended, held] = [fresh(), fresh()];
+    const daysAgo = (n: number) => later(-n * 24 * 3600);
+    // Each verification frees the one before: `ended` 91 days ago, `held` 89.
+    for (const [address, n] of [
+      [ended, 92],
+      [held, 91],
+      [fresh(), 89],
+    ] as const)
+      await verifyEmailCode(app, a, codeOf(await ask(a, address, { now: daysAgo(n) })), {
+        keys: KEYS,
+        now: daysAgo(n),
+      });
+    const pruned = await pruneAccountEmails(app, NOW);
+    expect(pruned.holds).toBeGreaterThanOrEqual(1);
+    const days = await db.admin`
+      SELECT freed_on FROM account_email_holds WHERE freed_on <= ${later(-90 * 24 * 3600)}`;
+    expect(days).toHaveLength(0);
+    const b = await newAccount();
+    expect((await ask(b, held)).kind).toBe("email-on-hold");
+    await verified(b, ended);
   });
 });
 

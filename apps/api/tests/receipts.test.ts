@@ -67,6 +67,9 @@ const dbs: TestDb[] = [];
 const servers: Server[] = [];
 const workers: RunningWorker[] = [];
 const queues: ReceiptQueue[] = [];
+// Each run's own, so cleaning up never takes another process's keys from
+// under its running queues.
+const prefixes: string[] = [];
 // The worker's clock, in UNIX seconds.
 let now = during;
 
@@ -84,7 +87,11 @@ async function election(): Promise<Sql> {
   return app;
 }
 
-const prefixed = () => `abolish-test-api-receipts-${hex(randomBytes(6))}`;
+const prefixed = () => {
+  const prefix = `abolish-test-api-receipts-${hex(randomBytes(6))}`;
+  prefixes.push(prefix);
+  return prefix;
+};
 
 /** A worker judging receipts for `sql`, and the API's queue to it, under a prefix of their own. */
 async function judging(sql: Sql): Promise<ReceiptQueue> {
@@ -132,7 +139,8 @@ afterAll(async () => {
   for (const s of servers) await new Promise((r) => s.close(r));
   for (const q of queues) await q.close();
   for (const w of workers) await w.close();
-  for (const key of await connection.keys("abolish-test-api-receipts-*")) await connection.del(key);
+  for (const prefix of prefixes)
+    for (const key of await connection.keys(`${prefix}:*`)) await connection.del(key);
   connection?.disconnect();
   await Promise.all(dbs.map((d) => d.close()));
 });

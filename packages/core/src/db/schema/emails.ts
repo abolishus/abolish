@@ -2,7 +2,7 @@ import { bigint, pgTable, smallint, text, timestamp } from "drizzle-orm/pg-core"
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0024_account_emails.sql; a test checks the two
+// Drizzle view of migrations/0025_account_emails.sql; a test checks the two
 // agree. All four are in the account class: an account's address, kept only
 // as ciphertext and a keyed hash, the code waiting to verify one, when each
 // account was sent codes, and when each address hash was sent messages

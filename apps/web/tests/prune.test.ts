@@ -11,6 +11,7 @@ import {
   parseKeyring,
   requestEmailCode,
   requestPhoneCode,
+  verifyEmailCode,
   verifyPhoneCode,
 } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
@@ -183,4 +184,44 @@ test("marks dead the Tier 0 token records whose key stopped redeeming", async ()
   expect(await period(dead)).toBeNull();
   expect(await period(redeeming)).toBe(String(current - 1));
   expect(lines).toEqual([]);
+});
+
+test("re-hashes and re-seals verified addresses under the current e-mail keys, only where configured", async () => {
+  const [h1, h2, b1, b2] = [0, 0, 0, 0].map(() => randomBytes(32).toString("hex"));
+  const one = emailKeys(parseKeyring(`e1:${h1}`), parseKeyring(`f1:${b1}`));
+  const two = emailKeys(parseKeyring(`e1:${h1},e2:${h2}`), parseKeyring(`f1:${b1},f2:${b2}`));
+  const account = await newAccount();
+  const sent: string[] = [];
+  const now = new Date("2026-10-22T12:00:00Z");
+  await requestEmailCode(sql, account, `${account}@example.org`, {
+    keys: one,
+    sender: {
+      send: async (m) => {
+        if (m.kind === "email-code") sent.push(m.code);
+        return "sent";
+      },
+    },
+    turnstile: { verify: async () => "passed" },
+    token: "t",
+    now,
+  });
+  await verifyEmailCode(sql, account, sent[0]!, { keys: one, now });
+  const keysOf = async () =>
+    (await sql`SELECT hash_key, box_key FROM account_emails WHERE user_id = ${account}`)[0];
+  const run = async (emailKeys?: typeof two) => {
+    const lines: { error: string }[] = [];
+    const prune = startAccountPrune({
+      sql,
+      log: (l) => lines.push(l),
+      ...(emailKeys === undefined ? {} : { emailKeys }),
+      now: () => now,
+    });
+    await prune.stop();
+    return lines;
+  };
+  expect(await run()).toEqual([]);
+  expect(await keysOf()).toEqual({ hash_key: "e1", box_key: "f1" });
+  // Rows other tests made under other keys are only ever reported missing.
+  expect((await run(two)).filter((l) => l.error !== "EmailKeyMissing")).toEqual([]);
+  expect(await keysOf()).toEqual({ hash_key: "e2", box_key: "f2" });
 });

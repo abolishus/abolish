@@ -586,6 +586,37 @@ export interface PhoneHashRotation {
 const KEY_CHECK_LABEL = new TextEncoder().encode("abolish/phone/keycheck/v1");
 
 /**
+ * How many of `keys` don't reproduce the check value stored for their ID,
+ * storing the check of any ID not seen before (the first instance to hold a
+ * key writes it). A key retyped under its ID matches no chain made or
+ * rotated under the right bytes, so a number another account holds would
+ * verify again through it (T-01): the website refuses to start with one,
+ * and a rotation rewrites nothing while one is held.
+ */
+export async function checkPhoneKeys(client: Sql, keys: Keyring): Promise<number> {
+  const db = drizzle({ client });
+  const checks = keys.keys.map(({ id, key }) => ({
+    keyId: id,
+    keyCheck: createHmac("sha256", key).update(KEY_CHECK_LABEL).digest(),
+  }));
+  await db.insert(accountPhoneKeyChecks).values(checks).onConflictDoNothing();
+  const stored = new Map(
+    (
+      await db
+        .select()
+        .from(accountPhoneKeyChecks)
+        .where(
+          inArray(
+            accountPhoneKeyChecks.keyId,
+            checks.map((c) => c.keyId),
+          ),
+        )
+    ).map((row) => [row.keyId, Buffer.from(row.keyCheck)]),
+  );
+  return checks.filter((c) => !stored.get(c.keyId)?.equals(c.keyCheck)).length;
+}
+
+/**
  * Extends every stored chain made under a key older than `keys`' current one
  * to the current key, one HMAC per later key, without the number
  * ([[0038-verified-accounts]], The number's keyed hash): the verified
@@ -622,20 +653,7 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
     hashKey: keys.current.id,
   });
 
-  // Each key's check value, stored by the first instance that holds it; a
-  // key whose bytes differ from the ones its ID was first seen with stops
-  // the rotation before it rewrites anything.
-  const checks = keys.keys.map(({ id, key }) => ({
-    keyId: id,
-    keyCheck: createHmac("sha256", key).update(KEY_CHECK_LABEL).digest(),
-  }));
-  await db.insert(accountPhoneKeyChecks).values(checks).onConflictDoNothing();
-  const stored = new Map(
-    (
-      await db.select().from(accountPhoneKeyChecks).where(inArray(accountPhoneKeyChecks.keyId, ids))
-    ).map((row) => [row.keyId, Buffer.from(row.keyCheck)]),
-  );
-  const mismatchedKeys = checks.filter((c) => !stored.get(c.keyId)?.equals(c.keyCheck)).length;
+  const mismatchedKeys = await checkPhoneKeys(client, keys);
 
   let rotated = 0;
   let conflicts = 0;
@@ -778,8 +796,12 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
           .limit(ROTATION_BATCH),
       (row, later) =>
         db.transaction(async (tx) => {
-          // Every value this rotation touches is one of the chain's, so an
-          // answer for the number holds at least one of the same locks.
+          // The account's lock first, as an answer takes it, so a rotation
+          // never waits on a row an answer's account holds while that answer
+          // waits on the number. Every value this rotation touches is one of
+          // the chain's, so an answer for the number holds at least one of
+          // the same number locks.
+          await lockAccount(tx, row.at);
           await lockNumber(tx, [row.phoneHash, ...later]);
           // Another row already holds the extended value only if two
           // accounts hold one number, which an instance on a keyring missing

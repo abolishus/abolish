@@ -357,6 +357,28 @@ describe("dist/node/main.mjs", () => {
     for (const value of Object.values(partial)) expect(web.err()).not.toContain(value.slice(3));
   }, 30_000);
 
+  test("refuses a key whose bytes differ from those its ID was first seen with, quoting none of it", async () => {
+    const start = (keys: string) =>
+      run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...EMAIL,
+        ...PHONE,
+        PHONE_HASH_KEYS: keys,
+      });
+    // As if the first instance to hold `pz` had other bytes for it.
+    await db.admin`INSERT INTO account_phone_key_checks VALUES ('pz', ${randomBytes(32)})`;
+    const wrong = `pz:${randomBytes(32).toString("hex")}`;
+    const web = start(wrong);
+    const [code] = (await once(web.child, "exit")) as [number];
+    expect(code).not.toBe(0);
+    expect(web.err()).toContain("PHONE_HASH_KEYS: a key differs");
+    expect(web.err()).not.toContain(wrong.slice(3));
+  }, 60_000);
+
   test.each([
     ["a malformed keyring", { PHONE_HASH_KEYS: "p1:0123" }, "PHONE_HASH_KEYS"],
     [

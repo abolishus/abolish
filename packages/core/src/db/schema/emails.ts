@@ -1,12 +1,12 @@
-import { bigint, pgTable, smallint, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, pgTable, primaryKey, smallint, text, timestamp } from "drizzle-orm/pg-core";
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0025_account_emails.sql; a test checks the two
-// agree. All four are in the account class: an account's address, kept only
-// as ciphertext and a keyed hash, the code waiting to verify one, when each
-// account was sent codes, and when each address hash was sent messages
-// (ADR 0038; T-10).
+// Drizzle view of migrations/0025_account_emails.sql and 0031; a test checks
+// they agree. All five are in the account class: an account's address, kept
+// only as ciphertext and a keyed hash, the code waiting to verify one, when
+// each account was sent codes, when each address hash was sent messages, and
+// each e-mail key's check value (ADR 0038; T-10).
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -46,3 +46,13 @@ export const accountEmailRecipients = pgTable("account_email_recipients", {
   addressHash: bytea("address_hash").notNull(),
   sentAt: at("sent_at").notNull(),
 });
+
+export const accountEmailKeyChecks = pgTable(
+  "account_email_key_checks",
+  {
+    keyring: text("keyring").notNull(),
+    keyId: text("key_id").notNull(),
+    keyCheck: bytea("key_check").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.keyring, t.keyId] })],
+);

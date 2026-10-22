@@ -1,6 +1,6 @@
 # Deployment record
 
-What a ballot-client release is built for, byte for byte: the deployment record (record type `0x0020`), its strict decoding, its well-formedness rules, the deployment hash a release record carries, and the rules a release and its deployment must meet together. [[0036-release-record]] (Recommendation, item 5) has the release bind "the deployment the client is built for", so that the client and its record can't disagree; [[release]] binds it by hash, and this page fixes what that hash commits to. Notation is from [[notation]], `H` from [[group]], origins and hosts from [[release]] (Well-formedness). Threats: T-41, T-34, T-37, T-71, T-43, T-20, T-16, T-64, T-31, T-52.
+What a ballot-client release is built for, byte for byte: the deployment record (record type `0x0020`), its strict decoding, its well-formedness rules, the Tier 0 token issuer's keys it lists from version 2 and the rules they meet across releases, the deployment hash a release record carries, and the rules a release and its deployment must meet together. [[0036-release-record]] (Recommendation, item 5) has the release bind "the deployment the client is built for", so that the client and its record can't disagree; [[release]] binds it by hash, and this page fixes what that hash commits to. Notation is from [[notation]], `H` from [[group]], origins and hosts from [[release]] (Well-formedness). Threats: T-41, T-34, T-37, T-71, T-43, T-20, T-16, T-64, T-31, T-52, T-74, T-10.
 
 A release's client trusts nothing a server or an RPC tells it about where the deployment is: it reads the election registry at the address its build pins, never at the one a served definition names (T-34), checks ceremonies only under the panels its build pins (T-37), rebuilds a voter's cell under the registrars its build pins (T-71), and makes requests only to the origins its build lists (T-43). The deployment record is that build's pins as one record, so whoever reads a release (the verifier's 1.1, `apps/node`, the release Safe's signers, a third party) reads the same pins the client runs with, and a release that pinned another registry, panel or registrar set would have another release hash.
 
@@ -77,7 +77,7 @@ Record type `0x0020` ([[versioning]]), version 1.
 
 The encoding is the record header, then the fields in table order, each `panel`, `seat` and `group` as its fields in order with no header of its own ([[notation]], Records). A seat's key is `bytes[33]` rather than `p256-key` so that a record with a bad key still decodes and fails `panel-key`, as a panel with one fails [[trustee-identity]]'s `key`.
 
-**Decoding.** A strict decoder reads a deployment record where only `0x0020` is expected, so `0x0020` is the only type its decoder knows: any other type is `unknown-record-type`, as for a release record ([[release]], Decoding). Version 1 is the only version; any other is `unknown-version`. A deployment belongs to no election, so no profile pins its version and `profile-mismatch` never applies. Each length and count is checked against its maximum before anything it describes is read (T-52). At its maximums a version-1 record is 9,779 bytes.
+**Decoding.** A strict decoder reads a deployment record where only `0x0020` is expected, so `0x0020` is the only type its decoder knows: any other type is `unknown-record-type`, as for a release record ([[release]], Decoding). Versions 1 and 2 are its versions (Record (version 2)); any other is `unknown-version`. A deployment belongs to no election, so no profile pins its version and `profile-mismatch` never applies. Each length and count is checked against its maximum before anything it describes is read (T-52). At its maximums a version-1 record is 9,779 bytes.
 
 ## Well-formedness
 
@@ -125,6 +125,59 @@ deployment_hash = H(DS("abolish/v1/deployment", encode(record)))
 
 over the record's whole encoding, header included ([[domain-separation]]). A release record carries it as `deployment_hash` ([[release]], Record).
 
+## Record (version 2)
+
+Version 2 is version 1 with the Tier 0 token issuer's public keys appended ([[tier0-token]], Keys; [[P2-30]] part 3c), so a client takes each period's `pkS` from the release it runs and from nowhere else. Every version-1 field keeps its type, meaning and place, and one field follows `membership_wasm_sha256`:
+
+| Field              | Type                  | Meaning                                                                                           |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------------- |
+| `tier0_token_keys` | `list<token_key, 16>` | The issuer's key for each period the release lists (Token keys in a release), in ascending period |
+
+`token_key`:
+
+| Field     | Type        | Meaning                                                                                                                                                    |
+| --------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `period`  | `u32`       | Its key period `q` ([[tier0-token]], Values): the key issues during `q` and redeems during `q` and `q + 1`                                                 |
+| `key`     | `bytes[32]` | Its `pkS`, as [[group]] encodes an element                                                                                                                 |
+| `retired` | `bool`      | Whether the key was retired early (T-74): it issues and redeems nothing, and an account holding a token under it re-issues at once ([[tier0-token]], Keys) |
+
+`period` is a `u32` because `key_id` hashes it as one ([[tier0-token]], Keys). `key` is `bytes[32]` rather than `element` so that a record with a bad key still decodes and fails `token-key`, as a seat's bad key fails `panel-key`.
+
+**Decoding.** As for version 1. A reader of both versions reads the header's version and then that version's layout, so a version-2 record labelled 1 has `trailing-bytes` and a version-1 record labelled 2 is `truncated`. At its maximums a version-2 record is 10,375 bytes. The deployment hash is the same formula over the whole encoding, header included (Deployment hash), so the version byte keeps a version-1 and a version-2 record of one deployment apart.
+
+A release whose client takes Tier 0 tokens names a version-2 record. A version-1 record lists no key, so its client takes no token: a client never accepts a key the API offers alone ([[tier0-token]], Keys).
+
+## Well-formedness (version 2)
+
+A version-2 record is well formed if it breaks no rule of Well-formedness and none below. A reader rejects an ill-formed one with the first rule it breaks: version 1's rules first, in their order, then `token-keys-empty`, then key by key in list order `token-key` and `token-key-repeated` (a key, then whether an earlier entry has it, as for a panel's seats), then `token-key-order`.
+
+| Code                 | The record breaks the rule if                                                                                                                                                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token-keys-empty`   | `tier0_token_keys` is empty: every well-formed record has a signed Tier 0 group (`groups-empty`, `group-region`), and a version-2 client registers a voter there only with a token. A release whose client takes none names a version-1 record                                |
+| `token-key`          | A key isn't the canonical encoding of an element other than the identity ([[group]], Encodings): RFC 9497's `GenerateKeyPair` never makes one, and the client's `Blind` refuses it ([[tier0-token]], Issuance, step 1)                                                        |
+| `token-key-repeated` | A key is an earlier entry's: each period has a key pair of its own, whose `skS` is destroyed when `q + 1` ends ([[tier0-token]], Keys), so a key listed for two periods would outlive its window                                                                              |
+| `token-key-order`    | The periods aren't consecutive and ascending, each the previous one's plus 1: one key per period (T-74), and no period inside the list without one, since a key retired early stays listed with `retired` set, so a client on a release signed after a retirement knows of it |
+
+As for version 1, these rules check only what the record says about itself. That the issuer holds `skS` for each listed key and answers under no other is the operator's to keep ([[P2-30]] part 3c checks `apps/web`'s keys against its release's record at start), and the client's proof check refuses any answer under another key ([[tier0-token]], Issuance, step 5).
+
+## Across releases
+
+A period's key is fixed once a release lists it, and a key belongs to one period ([[tier0-token]], Keys), so any two well-formed version-2 records named by published releases are judged together: the **earlier**, named by the release published first on L1 (the release registry's recorded time; in one registry, the lower `sequence`), and the **later**. Every published release counts, revoked or not, and in every release registry a verifier release reads, whatever deployment each names: a revoked release may still run in the clients that loaded it, a deployment's releases may sit in more than one registry ([[0036-release-record]]), and one issuer serves every deployment, `info` keeping their groups apart ([[tier0-token]], Group info). [[verifier]]'s report is to judge every such pair ([[P2-30]] part 3c). A rule below is broken at a period of the later record, and a reader reports the first rule broken, in this order, at the lowest such period:
+
+| Code                  | The pair breaks the rule if                                                                                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token-key-changed`   | The later lists another `key` for the period: two keys for one period split its clients into two sets the issuer chose, and a release served to one account would mark its token (T-74, T-10)              |
+| `token-key-reused`    | The later lists, for the period, a key the earlier lists for another period: a key pair serves one period and its `skS` is destroyed when `q + 1` ends, as `token-key-repeated` requires within one record |
+| `token-key-unretired` | The earlier lists the period's key `retired` and the later doesn't: a retirement stands, since accounts holding tokens under the key were told to re-issue ([[tier0-token]], Keys)                         |
+
+Short of `token-key-reused`, a period only one record lists breaks nothing: a later release drops the periods that have ended and adds new ones (Token keys in a release). A version-1 record lists no key, so a pair with one has nothing to compare.
+
+## Token keys in a release
+
+A record has no clock, so how far its keys reach is the release Safe's signers' check at signing, not a rule, and so is the key being listed before its period starts ([[tier0-token]], Keys), which a verifier can also check from L1: the first release that lists a period's key must be published before that period begins. A release lists the key of the period it is signed in, the period before it, and at least the six periods after it, so about half a year. The period before is still redeeming, so listing it carries an early retirement of its key to clients. The bound of 16 leaves room for a release signed late in a period, and for one that lists further ahead. The issuer generates its keys that far ahead and keeps each `skS` apart from every other secret ([[0039-tier0-token-issuance]]). A client running past its release's last listed period takes no token: it tells the voter that a newer client is needed, rather than taking a key from anywhere else ([[P2-30]] part 4).
+
+Why six: a release has to keep working between client releases, which ship on review rather than on a schedule, while each period listed ahead is an `skS` held for longer before its period starts, and a stolen future key mints identities from the start of its period until it is retired (T-74). Half a year keeps a client that hasn't been updated working through a slow release cycle, and keeps fewer than a year's keys waiting.
+
 ## Against its release
 
 A release record and the deployment record it names are judged together after each is found well formed (the release first). The pair is **consistent** if it breaks none of the rules below, and a reader rejects an inconsistent pair with the first it breaks, in this order:
@@ -146,6 +199,8 @@ Nothing relates the release record's `l1_chain_id` to the deployment's: the firs
 ## Test vectors
 
 `docs/spec/vectors/deployment-record.json` (Deployment-record vectors, [[vectors/README|vectors]]), from an independent Python implementation (`packages/crypto/scripts/deployment-record-vectors.py`, standard library only, reusing `trustee-vectors.py`'s P-256 decoding and panel identifier and `release-record-vectors.py`'s release record and sites): valid records (a typical deployment, one of transitional and independent panels, a record at every bound and at its largest, 9,779 bytes), each with its deployment hash; an ill-formed record for every rule above, several per grammar, each with its code; decode rejections at every bound; and pairs of a release record and a deployment record, consistent or breaking each rule of Against its release.
+
+`docs/spec/vectors/deployment-record-v2.json` (the same section of [[vectors/README|vectors]]) covers version 2, from a second generator (`packages/crypto/scripts/deployment-record-v2-vectors.py`, standard library only) that reuses the first's version 1, `group-vectors.py`'s ristretto255 decoding and `tier0-token-vectors.py`'s key identifier: a typical record and one at every bound and at its largest (10,375 bytes), each with its deployment hash and each key's `key_id`; version 1's typical record, which a reader of both versions decodes as version 1; every version-1 rule's ill-formed record with the token keys appended, and an ill-formed record for every version-2 rule; decode rejections, version 2's bounds and labels included; and pairs of an earlier and a later record, consistent or breaking each rule of Across releases. `deployment-record.json` stays as it is: it freezes version 1, and its `unknown-version` vector is read by a decoder of version 1 only ([[vectors/README|vectors]], Rules).
 
 ## Security notes
 

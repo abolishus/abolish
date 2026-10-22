@@ -18,6 +18,7 @@ import {
   MAX_SHARE_RECEIPT,
   MAX_SHARE_RECEIPT_ENTRY,
   PageSize,
+  POSTING_MAX_DATA,
   RegionCode,
   TurnstileResponse,
   U64,
@@ -611,6 +612,39 @@ const relayTier1 = oc
   .input(z.strictObject({ record: hexFixed(TIER1_ADDITION_RECORD), turnstile: TurnstileResponse }))
   .output(z.strictObject({}));
 
+// The posting relay (docs/spec/posting-relay.md; ADR 0042). The ballot client
+// sends a seat's share posting and the ballot it delivers, both in the body
+// and neither naming the election, whose definition hash the posting carries
+// (T-10). No answer depends on whether the ballot was cast, receipted or
+// posted before, except a repeat of the same bytes (T-13); every answer is a
+// hint, and the client stands down only on the board's `SharePosted` event.
+const submitPosting = oc
+  .route({
+    method: "POST",
+    path: "/postings",
+    summary: "Ask the relay to post a seat's share",
+    description:
+      "Sends `posting` (a share posting record, 0x000d) with `ballot` (the ballot record it delivers, 0x0002) to the board's `submitPosting` from the operator's posting key, which pays its gas (docs/spec/posting-relay.md, Answers). Checked in order: the forms, with `submitPosting`'s calldata for the pair at most 120,000 bytes; the records alone (both decode strictly, the posting's version is the one the ballot's fixes, and it names the ballot's definition and hash), answered as `POSTING_REFUSED` with code `malformed` and the failing check as `check`; the election, registered by this server's index of the registry, and the relay's latest L2 block no later than `c_D − 6,600` seconds (`unknown-election`, `too-late`, or `RELAY_UNAVAILABLE` while the index lags); the posting's public check against the election's registered key set (its code); then the queue. The route waits up to 20 seconds for the relay's worker: `sent` answers with the hash of the last transaction that carried the posting, an L2 call or, once forced, the L1 deposit; a refusal is `POSTING_REFUSED` with the worker's code; `RELAY_BUSY` means only not sent yet, and the client sends the same bytes again later, which the relay never pays for twice. The client judges a posting recorded only by the board's `SharePosted` event at the L2's finalized head, and past the relay's patience posts it from the voter's own wallet (T-25).",
+    tags: ["postings"],
+  })
+  .errors({
+    POSTING_REFUSED: {
+      status: 422,
+      message: "The relay won't send this posting.",
+      data: z.strictObject({ code: ErrorCode, check: z.optional(ErrorCode) }),
+    },
+    RATE_LIMITED: { status: 429, message: "Too many requests; retry later." },
+    RELAY_UNAVAILABLE: { status: 503, message: "The relay is unavailable here for now." },
+    RELAY_BUSY: {
+      status: 503,
+      message: "The posting isn't sent yet; send the same bytes again later.",
+    },
+  })
+  .input(
+    z.strictObject({ posting: hexBytes(POSTING_MAX_DATA), ballot: hexBytes(POSTING_MAX_DATA) }),
+  )
+  .output(z.strictObject({ transaction: Hash32, layer: z.enum(["l2", "l1"]) }));
+
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
   elections: {
@@ -624,6 +658,7 @@ export const contract = {
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   receipts: { submit: submitReceipt },
+  postings: { submit: submitPosting },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
   registrations: { tier0: registerTier0, tier1: relayTier1 },

@@ -28,6 +28,7 @@ export {
   MAX_SHARE_RECEIPT,
   MAX_SHARE_RECEIPT_ENTRY,
   PageSize,
+  POSTING_MAX_DATA,
   RegionCode,
   TurnstileResponse,
   U64,

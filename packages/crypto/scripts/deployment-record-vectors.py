@@ -73,10 +73,13 @@ def enc_group(g):
 
 
 def encode(d, record_type=RECORD_TYPE, version=VERSION):
+    return rr.u16(record_type) + u8(version) + encode_fields(d)
+
+
+def encode_fields(d):
+    """Version 1's fields, after the header; version 2 appends to them."""
     return b"".join(
         [
-            rr.u16(record_type),
-            u8(version),
             u64(d["l1_chain_id"]),
             u64(d["l2_chain_id"]),
             d["election_registry"],
@@ -115,6 +118,14 @@ def decode(b):
         raise DecodeError("unknown-record-type")
     if r.int(1) != VERSION:
         raise DecodeError("unknown-version")
+    d = decode_fields(r)
+    if r.at != len(b):
+        raise DecodeError("trailing-bytes")
+    return d
+
+
+def decode_fields(r):
+    """Version 1's fields, after the header; version 2 reads on from where they end."""
     d = {
         "l1_chain_id": r.int(8),
         "l2_chain_id": r.int(8),
@@ -156,8 +167,6 @@ def decode(b):
     d["account_rp_id"] = r.var(MAX_RP_ID)
     d["membership_zkey_sha256"] = r.take(32)
     d["membership_wasm_sha256"] = r.take(32)
-    if r.at != len(b):
-        raise DecodeError("trailing-bytes")
     return d
 
 

@@ -105,6 +105,7 @@ export function tier0Keys(prefix = "abolish") {
     batches: at("batches"),
     positions: at("positions"),
     finished: at("finished"),
+    added: at("added"),
     boundary: at("boundary"),
     next: at("next"),
     shown: at("shown"),

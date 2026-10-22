@@ -766,6 +766,16 @@ describe("nodes at different blocks", () => {
     // A read at the batch's own block holds it, and is swapped in.
     chain.staleIndex = { block: 1n, commitments: values };
     expect(await newJob(chain).refreshIndex()).toBe(true);
+    // One that claims the block but misses the batch's logs (a load
+    // balancer's lagging node answering a range) is swapped in with the
+    // batch joined, so the mark still finds every one of them.
+    const other = commitments(1, 6n)[0] as bigint;
+    chain.staleIndex = { block: 5n, commitments: [other] };
+    expect(await newJob(chain).refreshIndex()).toBe(true);
+    expect((await redis.smembers(keys().live)).sort()).toEqual(
+      [...values, other].map(commitmentKey).sort(),
+    );
+    for (const v of values) expect(await shown.show(v, 0)).toBe("registered");
     chain.staleIndex = undefined;
     chain.selfPaid.add(commitments(1, 5n)[0] as bigint);
     expect(await newJob(chain).refreshIndex()).toBe(true);
@@ -943,6 +953,7 @@ describe("the queue's state", () => {
             k.batches,
             k.positions,
             k.finished,
+            k.added,
             k.boundary,
           ]);
           for (const key of await allKeys()) expect(allowed.has(key)).toBe(true);

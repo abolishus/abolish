@@ -192,18 +192,23 @@ redis.call('SADD', KEYS[2], unpack(ARGV, 2))
 return 1
 `;
 
-// A read at a block below the highest batch the job has finished (KEYS[5],
-// set by FINISH) is refused: it misses that batch, whose commitments left the
-// in-flight set at the finish, so it would hold one of ours in neither set
-// and a re-issuance's mark would take it for one never added
-// (tier0-shown.ts). Only a read from a lagging node, or a load balancer's
-// other node, after a restart can be below it: one job's adapter refuses a
-// node behind blocks it has already read.
+// A finished batch's commitments left the in-flight set at the finish, so an
+// index without them would hold one of ours in neither set, and a
+// re-issuance's mark would take it for one never added (tier0-shown.ts). So
+// a read at a block below the highest batch finished (`finished`, KEYS[5]) is
+// refused: a lagging node read after a restart, or by another instance, since
+// one adapter refuses a node behind blocks it has already read. And every
+// finished batch's commitments (`added`, KEYS[6]: final, so never undone) are
+// joined into whatever read is swapped in, since a read claiming a block may
+// still be missing logs a load balancer's lagging node answered.
 const INDEX_SWAP = `${FENCE}
 local finished = redis.call('GET', KEYS[5])
 if finished and tonumber(ARGV[3]) < tonumber(finished) then
   redis.call('DEL', KEYS[2])
   return 0
+end
+if redis.call('EXISTS', KEYS[6]) == 1 then
+  redis.call('SUNIONSTORE', KEYS[2], KEYS[2], KEYS[6])
 end
 if redis.call('EXISTS', KEYS[2]) == 1 then
   redis.call('RENAME', KEYS[2], KEYS[3])
@@ -222,8 +227,9 @@ const READ_BATCH = `return redis.call('HGET', KEYS[1], ARGV[1]) or ''`;
 // lagging node says. Moving them in one step means no index read older than
 // the record's finality can leave a commitment of ours in neither set, where
 // a re-issuance's mark would take it for one never added (tier0-shown.ts).
-// The next refresh reads it from finalized history anyway, and none below
-// the record's block (KEYS[6], the highest kept) replaces the index.
+// The next refresh reads it from finalized history anyway; the record's block
+// raises `finished` (KEYS[6]) and its commitments join `added` (KEYS[7]), so
+// no read that misses them replaces the index (INDEX_SWAP).
 const FINISH = `${FENCE}
 redis.call('HDEL', KEYS[3], ARGV[2])
 redis.call('HSET', KEYS[4], ARGV[2], ARGV[3])
@@ -234,6 +240,7 @@ end
 if #ARGV > 4 then
   redis.call('SREM', KEYS[2], unpack(ARGV, 5))
   redis.call('SADD', KEYS[5], unpack(ARGV, 5))
+  redis.call('SADD', KEYS[7], unpack(ARGV, 5))
 end
 return 1
 `;
@@ -478,7 +485,7 @@ export class Tier0Batches {
       await this.#fenced(INDEX_ADD, [k.next], token, ...commitments.slice(i, i + INDEX_CHUNK));
     const swapped = await this.#fenced(
       INDEX_SWAP,
-      [k.next, k.live, k.indexed, k.finished],
+      [k.next, k.live, k.indexed, k.finished, k.added],
       token,
       String(at),
       block,
@@ -538,7 +545,7 @@ export class Tier0Batches {
         }
         await this.#fenced(
           FINISH,
-          [k.inflight, k.batches, k.positions, k.live, k.finished],
+          [k.inflight, k.batches, k.positions, k.live, k.finished, k.added],
           token,
           g,
           String(end),

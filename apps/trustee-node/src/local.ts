@@ -13,7 +13,6 @@ import {
   type CeremonyTranscript,
   checkCeremonyTranscript,
   DecodeError,
-  decodeElectionDefinitionRecord,
   displayTextCommitment,
   ELECTION_TYPES,
   type ElectionDefinition,
@@ -43,6 +42,7 @@ import {
   requestTranscript,
   stubHashOf,
 } from "./wire.ts";
+import { decodeStub } from "./stub.ts";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
@@ -162,10 +162,10 @@ export class LocalCoordinator implements Coordinator {
 
   constructor(options: LocalCoordinatorOptions) {
     const hash = stubHashOf(options.stub);
-    if (hash === undefined) throw new RangeError("local coordinator: not a version-1 stub");
+    if (hash === undefined) throw new RangeError("local coordinator: not a stub this node reads");
     this.#o = options;
     this.#stubHash = hash;
-    this.#electionId = decodeElectionDefinitionRecord(options.stub).value.election_id;
+    this.#electionId = decodeStub(options.stub).value.election_id;
     this.#opened = options.now();
   }
 

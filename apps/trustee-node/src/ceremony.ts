@@ -34,10 +34,6 @@ import {
   decode,
   decodeCeremonyTranscript,
   DecodeError,
-  decodeElectionDefinitionRecord,
-  type ElectionDefinition,
-  electionDefinitionHash,
-  electionStubHash,
   encode,
   EncodeError,
   encodeCeremonyTranscript,
@@ -65,9 +61,13 @@ import {
 import type { SeatStore } from "./store.ts";
 import {
   checkStub,
+  decodeStub,
   type ElectorateCheck,
   type Pins,
+  type Stub,
+  stubDefinitionHash,
   stubDemand,
+  stubHash,
   type StubRefusal,
 } from "./stub.ts";
 
@@ -241,7 +241,7 @@ export class CeremonySeat {
     const prefix = `runs/${stubHash}/${hex(runId)}`;
     const begun = await config.store.putOnce(
       `${prefix}/begun`,
-      encode(BEGUN, { election_id: checked.stub.election_id }),
+      encode(BEGUN, { election_id: checked.stub.value.election_id }),
     );
     if (!begun.created) {
       // A retry after a lost response gets the message it already sent; a
@@ -254,7 +254,7 @@ export class CeremonySeat {
       return own === undefined ? refuse("run-seen") : { ok: true, value: own };
     }
     const seat = ceremonyKeygen(config.index, config.identitySecret);
-    const params = this.#params(checked.stub.election_id, checked.stubHash, runId);
+    const params = this.#params(checked.stub.value.election_id, checked.stubHash, runId);
     const message = keysMessage(params, seat);
     await config.store.putOnce(
       `${prefix}/secrets`,
@@ -411,11 +411,8 @@ export class CeremonySeat {
     };
     // Recorded before signing, so every later stub check 4 counts it, even
     // after a crash between this record and the approval.
-    const demand = stubDemand(checked.stub);
-    const definitionHash = electionDefinitionHash({
-      ...checked.stub,
-      ceremony_transcript_hash: result.hash,
-    });
+    const demand = stubDemand(checked.stub.value);
+    const definitionHash = stubDefinitionHash(checked.stub, result.hash);
     const recorded = await config.store.putOnce(
       `served/${hex(checked.stubHash)}`,
       encode(SERVED, {
@@ -425,7 +422,7 @@ export class CeremonySeat {
         l1_inclusion_bound: Number(demand.l1InclusionBound),
         // The definition this approval registers: the stub with this transcript.
         definition_hash: definitionHash,
-        opens_at: checked.stub.opens_at,
+        opens_at: checked.stub.value.opens_at,
       }),
     );
     // A record a crash left for another transcript of this stub names another
@@ -528,17 +525,15 @@ export class CeremonySeat {
 
   /** Whether the seat holds an approval for the stub these bytes decode to. */
   async #approvedBefore(stubBytes: Uint8Array): Promise<boolean> {
-    let stub: ElectionDefinition;
+    let stub: Stub;
     try {
-      const record = decodeElectionDefinitionRecord(stubBytes);
-      if (record.version !== 1) return false;
-      stub = record.value;
+      stub = decodeStub(stubBytes);
     } catch (e) {
       // checkStub refuses it with its own code.
       if (e instanceof DecodeError) return false;
       throw e;
     }
-    return (await this.#durable(`approvals/${hex(electionStubHash(stub))}`)) !== undefined;
+    return (await this.#durable(`approvals/${hex(stubHash(stub))}`)) !== undefined;
   }
 
   /**

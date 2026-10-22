@@ -90,9 +90,12 @@ export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./s
 export { type ServedBlocks, servedBlocks } from "./served.ts";
 export {
   checkStub,
+  decodeStub,
   type ElectorateCheck,
   type Pins,
+  type Stub,
   type StubCheck,
+  stubHash,
   type StubRefusal,
 } from "./stub.ts";
 export {

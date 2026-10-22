@@ -202,11 +202,12 @@ function bundle(
     readonly definition?: string;
     /** The logs the bundle carries, and the ones the anchor's state counts, if others. */
     readonly logs?: readonly ContractLog[];
-    readonly stateLogs?: readonly ContractLog[];
+    readonly stateLogs?: readonly ContractLog[] | null;
     readonly extra?: readonly (readonly [Uint8Array, Uint8Array])[];
   } = {},
 ): Bundle {
-  const stateLogs = options.stateLogs ?? options.logs;
+  // `null`: no accumulator in the anchor's storage but what `extra` holds.
+  const stateLogs = options.stateLogs === null ? undefined : (options.stateLogs ?? options.logs);
   const l1 = anchoredL1(
     definition.election_id,
     definition.l1_anchor,
@@ -704,6 +705,28 @@ describe("the earlier locators, from the anchor's logs", () => {
     await stops(bundle({ locator, logs: backwards }), "order");
   });
 
+  test("the anchor's logs on another chain or at another address are no earlier locators", async () => {
+    // The anchor's genesis binds L1's chain and its own address (T-71).
+    for (const [chainId, anchor] of [
+      [definition.l1_chain_id + 1n, definition.l1_anchor],
+      [definition.l1_chain_id, new Uint8Array(20).fill(0x11)],
+    ] as const) {
+      const { accumulator } = replayEventAccumulator(chainId, anchor, honestLogs);
+      await stops(
+        bundle({
+          locator: locatorOf(m1),
+          logs: honestLogs,
+          stateLogs: null,
+          extra: [
+            [word(ACCUMULATOR), stored(accumulator)],
+            [word(ACCUMULATOR + 1n), stored(word(BigInt(honestLogs.length)))],
+          ],
+        }),
+        "accumulator",
+      );
+    }
+  });
+
   test("a count word no accumulator writes is no earlier locators", async () => {
     await stops(
       bundle({
@@ -724,6 +747,11 @@ describe("the earlier locators, from the anchor's logs", () => {
       // The version topic isn't the locator's.
       { ...good, topics: [ARCHIVE_LOCATED, word(2n)] },
       { ...good, topics: [ARCHIVE_LOCATED] },
+      { ...good, topics: [...good.topics, word(0n)] },
+      { ...good, topics: [...good.topics, word(0n), word(0n)] },
+      // Data too short for a head, or not whole words.
+      { ...good, data: data.subarray(0, 64) },
+      { ...good, data: data.subarray(0, data.length - 1) },
       // Another offset, a length past the bytes, padding not zero, a word after.
       { ...good, data: concat([word(64n), data.subarray(32)]) },
       { ...good, data: concat([word(32n), word(BigInt(locator.length + 32)), data.subarray(64)]) },

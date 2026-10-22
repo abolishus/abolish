@@ -4,7 +4,9 @@
 // records' own checks (the verifier's `postingForm`), the election by our
 // index of the registry and the relay's clock, then the public check of the
 // posting against the election's registered key set (the verifier's posting
-// judge), so the relay pays only for postings that deliver (T-52). Then one
+// judge), so with the worker's simulation, which checks the ballot's
+// membership proof, the relay pays only for postings that deliver (T-52).
+// Then one
 // Redis script queues the pair, and the route waits for the posting
 // worker's outcome, which holds the posting key and sends.
 //
@@ -231,9 +233,8 @@ const READ = `return redis.call('GET', KEYS[1]) or ''`;
 const ENQUEUE = `
 local outcome = redis.call('GET', KEYS[2])
 if outcome then return outcome end
-if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 1 end
 if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
-redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
 return 1
 `;
 
@@ -385,8 +386,10 @@ export class PostingRelay {
       deliveryDeadlines(election.closesAt, election.l1InclusionBound).delivery -
       this.#forcedInclusion;
     if (index.l2Time > cD - POSTING_SEND_MARGIN) throw new PostingRelayError("too-late");
-    // Step 5: only the voter, who knows `m_i`, can make a pair that passes,
-    // so nothing else takes a queue place or reaches the key's process.
+    // Step 5: a pair that fails takes no queue place. One that passes needs
+    // only a ballot record whose share hashes its maker chose, not a
+    // member's: the membership proof is checked by the worker's simulation
+    // alone, before any gas is spent.
     const checked = election.posting(posting, ballot);
     if (!checked.ok) {
       // `postingForm` passed and the election is the posting's definition's,

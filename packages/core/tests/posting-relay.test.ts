@@ -379,7 +379,7 @@ describe("step 5: the public check", { timeout: 60_000 }, () => {
 });
 
 describe("step 6: the queue's bound", { timeout: 60_000 }, () => {
-  test("a full queue answers busy, and a pair already queued is still answered", async () => {
+  test("a full queue answers busy, whatever the pair, until it has an outcome", async () => {
     await setIndex();
     const relay = relayWith();
     expect(await answer(relay, honest(1))).toBe("busy");
@@ -388,12 +388,12 @@ describe("step 6: the queue's bound", { timeout: 60_000 }, () => {
       fill[toHex(keccak_256(Uint8Array.of(i)))] = postingPairValue(Uint8Array.of(i), first.payload);
     await redis.hset(keys().queue, fill);
     expect(await redis.hlen(keys().queue)).toBe(POSTING_QUEUE_MAX);
-    // A new pair finds no place; the one queued finds its own.
+    // A new pair finds no place, nor does the one queued (step 6's order).
     expect(await answer(relay, honest(2))).toBe("busy");
+    expect(await answer(relay, honest(1))).toBe("busy");
     expect(await redis.hlen(keys().queue)).toBe(POSTING_QUEUE_MAX);
-    const outcome = { sent: true, transaction: TX, layer: "l2" } as const;
-    const waiting = relayWith({ meanwhile: () => writeOutcome(honest(1).posting, outcome) });
-    expect(await answer(waiting, honest(1))).toBe(`sent:l2:${toHex(TX)}`);
+    await writeOutcome(honest(1).posting, { sent: true, transaction: TX, layer: "l2" });
+    expect(await answer(relay, honest(1))).toBe(`sent:l2:${toHex(TX)}`);
   });
 
   test("past POSTING_MAX_CONCURRENT requests at once, the next is busy before it is read further", async () => {

@@ -3,7 +3,8 @@
 // author's poll drafts under /drafts (src/node/drafts.ts), an account's
 // e-mail address under /email (src/node/email.ts), its phone number under
 // /phone (src/node/phone.ts), its Tier 0 token under /token
-// (src/node/token.ts), and the client's hashed assets from disk.
+// (src/node/token.ts), reactions on a poll under /reactions
+// (src/node/reactions.ts), and the client's hashed assets from disk.
 //
 // The account system lives here, on apps/web's origin, so its host-only
 // session cookie never reaches the API or the ballot client's host (T-10,
@@ -46,6 +47,9 @@ export type PhoneHandler = (request: Request) => Promise<Response>;
 /** The token handler (`createTokenHandler(...)` from src/node/token.ts). */
 export type TokenHandler = (request: Request) => Promise<Response>;
 
+/** The reactions handler (`createReactionsHandler(...)` from src/node/reactions.ts). */
+export type ReactionsHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -55,6 +59,7 @@ export type RouteClass =
   | "email"
   | "phone"
   | "token"
+  | "reactions"
   | "asset"
   | "ingest"
   | "refused";
@@ -102,6 +107,7 @@ export interface WebServerOptions {
   readonly email: EmailHandler;
   readonly phone: PhoneHandler;
   readonly token: TokenHandler;
+  readonly reactions: ReactionsHandler;
   /** The built client (`dist/client`); only its `assets/` are served. */
   readonly clientDir: string;
   /**
@@ -161,7 +167,15 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "email",
   "phone",
   "token",
+  "reactions",
 ]);
+
+/**
+ * Paths under an account route class that answer anyone alike and never get
+ * the cookie: the poll page asks a poll's reaction counts for every visitor,
+ * so the session and the poll it names never arrive together (T-11).
+ */
+const SESSION_FREE_PATHS: ReadonlySet<string> = new Set(["/reactions/counts"]);
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
@@ -169,6 +183,7 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/email" || path.startsWith("/email/")) return "email";
   if (path === "/phone" || path.startsWith("/phone/")) return "phone";
   if (path === "/token" || path.startsWith("/token/")) return "token";
+  if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
@@ -237,6 +252,7 @@ export function createWebServer({
   email,
   phone,
   token,
+  reactions,
   clientDir,
   origin,
   log,
@@ -312,7 +328,8 @@ export function createWebServer({
       if (value === undefined || name === "host") continue;
       // Pages and server functions never get the account cookie: nothing
       // they render can join a session to the poll it shows (T-10, T-67).
-      if (name === "cookie" && !ACCOUNT_ROUTES.has(route)) continue;
+      if (name === "cookie" && (!ACCOUNT_ROUTES.has(route) || SESSION_FREE_PATHS.has(url.pathname)))
+        continue;
       for (const v of Array.isArray(value) ? value : [value]) headers.append(name, v);
     }
     headers.set("host", base.host);
@@ -322,9 +339,9 @@ export function createWebServer({
       ...(body === undefined ? {} : { body }),
     });
     if (!ACCOUNT_ROUTES.has(route)) return send(res, await start.fetch(request), method === "HEAD");
-    // The account, drafts, e-mail, phone and token handlers answer JSON and set
-    // few headers of their own (src/security.ts covers pages). A copy: a
-    // response's own headers can be immutable.
+    // The account, drafts, e-mail, phone, token and reactions handlers answer
+    // JSON and set few headers of their own (src/security.ts covers pages). A
+    // copy: a response's own headers can be immutable.
     const handler =
       route === "auth"
         ? accounts
@@ -334,7 +351,9 @@ export function createWebServer({
             ? email
             : route === "phone"
               ? phone
-              : token;
+              : route === "token"
+                ? token
+                : reactions;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");

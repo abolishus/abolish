@@ -2,6 +2,7 @@ import { cn, Count, Fingerprint, Hash, useI18n, useTranslate } from "@abolishus/
 import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import type { ReactionsClient } from "../account/reactions.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import {
   type Instant,
@@ -13,6 +14,7 @@ import {
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
+import { PollReactions } from "./poll-reactions.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
 
@@ -26,6 +28,8 @@ export interface PollSummaryProps {
   code: string | undefined;
   /** The share sheet's link and title, for a poll with a short link that isn't hidden. */
   share?: PollShareProps | undefined;
+  /** Where the poll's reactions are read and set; without one, none are shown. */
+  reactions?: ReactionsClient | undefined;
 }
 
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
@@ -102,7 +106,15 @@ const STATUS_TEXT = {
  * T-34). A native disclosure keeps the evidence in the server's HTML, so it
  * opens without the page's script.
  */
-export function PollSummary({ poll, board, moderation, asOf, code, share }: PollSummaryProps) {
+export function PollSummary({
+  poll,
+  board,
+  moderation,
+  asOf,
+  code,
+  share,
+  reactions,
+}: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
   const status = pollStatus(poll, asOf);
@@ -197,6 +209,11 @@ export function PollSummary({ poll, board, moderation, asOf, code, share }: Poll
           </div>
         )}
       </section>
+
+      {/* Not for a hidden poll, which takes none and shows no counts (T-68). */}
+      {reactions === undefined || moderation.state === "hidden" ? null : (
+        <PollReactions electionId={poll.electionId} client={reactions} />
+      )}
 
       <details className="group border-t border-border pt-8">
         <summary className="flex min-h-12 cursor-pointer list-none items-center gap-4 underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">

@@ -1,6 +1,7 @@
 import { useTranslate } from "@abolishus/ui";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
+import { reactionsClient } from "../account/reactions.ts";
 import { embedHeight } from "../components/poll-embed.tsx";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
@@ -71,7 +72,8 @@ export const Route = createFileRoute("/polls/$electionId")({
   component: function Poll() {
     const t = useTranslate(catalogs);
     const { page, share } = Route.useLoaderData();
-    if (page.kind === "poll") return <PollSummary {...page} share={share} />;
+    if (page.kind === "poll")
+      return <PollSummary {...page} share={share} reactions={reactionsClient} />;
     return (
       <Notice title={t("unavailableTitle")}>
         {t(page.problem === "undecodable" ? "definitionUndecodable" : "definitionMismatch")}

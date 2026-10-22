@@ -20,6 +20,7 @@ import {
   readInclusionProof,
   readBoardedEntry,
   readEntryAt,
+  readPollTags,
   readPublicModerationLog,
   report,
   SearchQueryError,
@@ -143,6 +144,14 @@ export const router = os.router({
       if (text.served === "withheld") throw errors.DISPLAY_TEXT_WITHHELD();
       if (text.served === "none") throw errors.DISPLAY_TEXT_NOT_FOUND();
       return { displayText: toHex(text.displayText) };
+    }),
+    // Moderation decides what is served, as for the text: a hidden poll's
+    // place is its author's words (docs/moderation-policy.md, Refiling; T-68).
+    getTags: os.elections.getTags.handler(async ({ input, context, errors }) => {
+      const view = await readPollTags(context.sql, fromHex(input.electionId));
+      if (view === undefined) throw errors.ELECTION_NOT_FOUND();
+      if (view.tags === undefined) throw errors.TAGS_WITHHELD();
+      return view.tags;
     }),
     // Short links (docs/design/sharing.md). A refusal never quotes the input,
     // and the request log records only the route (T-11, T-67).
@@ -287,14 +296,28 @@ export const router = os.router({
       );
       return {
         entries: entries.map((e) => {
-          const common = {
-            seq: e.seq.toString(),
-            reason: e.reason,
-            decidedAt: e.decidedAt.toISOString(),
-          };
-          return e.target === "poll"
-            ? { ...common, electionId: toHex(e.electionId), action: e.action }
-            : { ...common, handle: e.handle, action: e.action };
+          const common = { seq: e.seq.toString(), decidedAt: e.decidedAt.toISOString() };
+          switch (e.target) {
+            case "poll":
+              return {
+                ...common,
+                electionId: toHex(e.electionId),
+                action: e.action,
+                reason: e.reason,
+              };
+            // What a refiling changed, never a place's words (T-17).
+            case "refiling":
+              return {
+                ...common,
+                electionId: toHex(e.electionId),
+                action: "refile" as const,
+                reason: e.reason,
+                ...(e.topic === undefined ? {} : { topic: e.topic }),
+                ...(e.place === undefined ? {} : { place: e.place }),
+              };
+            case "profile":
+              return { ...common, handle: e.handle, action: e.action, reason: e.reason };
+          }
         }),
       };
     }),

@@ -122,6 +122,7 @@ export {
   placeKey,
   type PollTags,
   type PollTagsView,
+  type PublicRefilingEntry,
   readPollTags,
   type RefileDecision,
   REFILE_REASONS,

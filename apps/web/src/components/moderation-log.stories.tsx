@@ -36,6 +36,24 @@ const meta = {
           reason: "impersonation",
           decidedAt: "2026-10-04T09:30:00.000Z",
         },
+        {
+          seq: "14",
+          electionId: "ef".repeat(32),
+          action: "refile",
+          reason: "misfiled",
+          decidedAt: "2026-10-05T10:00:00.000Z",
+          topic: "housing",
+          place: "changed",
+        },
+        {
+          seq: "15",
+          electionId: "ef".repeat(32),
+          action: "refile",
+          reason: "personal-data",
+          decidedAt: "2026-10-05T11:00:00.000Z",
+          topic: null,
+          place: "cleared",
+        },
       ],
     },
     next: undefined,
@@ -52,7 +70,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(reach).getByText("The count and the result")).toBeVisible();
   const log = canvas.getByRole("list", { name: "Decisions, oldest first" });
   const rows = within(log).getAllByRole("listitem");
-  await expect(rows).toHaveLength(4);
+  await expect(rows).toHaveLength(6);
   // Each row names its cells for assistive technology, whatever the width shows.
   await expect(within(rows[2]!).getByText("Ground")).toBeInTheDocument();
   await expect(within(log).getByText("Appeal upheld")).toBeVisible();
@@ -65,6 +83,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(rows[3]!).getByText("k7qa2mzr5xw3bn4d")).toBeVisible();
   await expect(within(rows[3]!).getByText("Profile hidden")).toBeVisible();
   await expect(within(rows[3]!).queryByRole("link")).toBeNull();
+  // A refiling links its poll and says what it changed, never the place itself.
+  await expect(within(rows[4]!).getByRole("link", { name: /^efefefef/ })).toBeVisible();
+  await expect(within(rows[4]!).getByText("Refiled")).toBeVisible();
+  await expect(within(rows[4]!).getByText("Topic now Housing · Place changed")).toBeVisible();
+  await expect(within(rows[4]!).getByText("Misfiled")).toBeVisible();
+  await expect(within(rows[5]!).getByText("Topic cleared · Place cleared")).toBeVisible();
   // The fingerprint is a seal beside the link, not a second name for the poll.
   await expect(within(log).queryByRole("img")).toBeNull();
   await expect(canvas.getByText("October 1, 2026 at 12:00 PM UTC")).toBeVisible();

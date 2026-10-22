@@ -123,6 +123,9 @@ export const POLL_TOPICS = [
 ] as const;
 export const MAX_PLACE_LENGTH = 80;
 
+/** One to `MAX_PLACE_LENGTH` code points, which take at most twice as many UTF-16 units. */
+const Place = z.string().check(z.minLength(1), z.maxLength(2 * MAX_PLACE_LENGTH));
+
 const listElections = oc
   .route({
     method: "GET",
@@ -150,6 +153,26 @@ const listElections = oc
     }),
   )
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));
+
+const getTags = oc
+  .route({
+    method: "GET",
+    path: "/elections/tags",
+    summary: "Where a poll is listed",
+    description:
+      "The topic and place the poll is filed under for discovery: its author's, or moderation's once it refiled the poll (docs/moderation-policy.md, Refiling), either, both or neither. They are listing tags this server keeps beside the definition, which doesn't commit to them, so they are a claim no verifier checks and no result depends on (docs/adr/0041-poll-topics-and-places.md; T-68). Shown for a delisted poll, as its text is to anyone with its ID; `TAGS_WITHHELD` while the poll is hidden, since a place is its author's words, as its text is withheld.",
+    tags: ["elections"],
+  })
+  .errors({
+    ...electionNotFound,
+    TAGS_WITHHELD: {
+      status: 451,
+      message:
+        "This poll's tags are withheld under the moderation policy; see GET /moderation/status.",
+    },
+  })
+  .input(ElectionQuery)
+  .output(z.strictObject({ topic: z.optional(z.enum(POLL_TOPICS)), place: z.optional(Place) }));
 
 /** The longest short code (docs/design/sharing.md); a test ties this copy to `@abolishus/core`. */
 export const MAX_SHORT_CODE_LENGTH = 52;
@@ -338,6 +361,8 @@ export const REMOVAL_REASONS = [
 ] as const;
 /** The policy's grounds for restoring; a test ties this copy to `@abolishus/core`. */
 export const RESTORE_REASONS = ["appeal-upheld", "error", "notice-withdrawn"] as const;
+/** The policy's grounds for refiling a poll; a test ties this copy to `@abolishus/core`. */
+export const REFILE_REASONS = ["misfiled", ...REMOVAL_REASONS] as const;
 
 /**
  * A creator profile's public handle ([[0040-creator-profiles]]): 16 lower-case
@@ -356,7 +381,7 @@ const getModerationLog = oc
     path: "/moderation/log",
     summary: "A page of the public moderation log",
     description:
-      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. Each cites one of the policy's reason codes, and the two kinds share one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
+      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. A refiling (`refile`) names a poll by `electionId` and changes where it is listed, not its state: `topic` is the topic it filed the poll under, `null` if it cleared the topic, and absent if it kept it; `place` says only whether it `changed` or `cleared` the place, never the place's words, which may be personal data a later refiling clears (T-17); `GET /elections/tags` serves the place the poll is filed under now. Each cites one of the policy's reason codes, and every kind shares one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
     tags: ["moderation"],
   })
   .input(z.strictObject({ after: U64, limit: PageSize }))
@@ -371,6 +396,15 @@ const getModerationLog = oc
               action: ModerationAction,
               reason: ModerationReason,
               decidedAt: Timestamp,
+            }),
+            z.strictObject({
+              seq: U64,
+              electionId: Hash32,
+              action: z.literal("refile"),
+              reason: z.enum(REFILE_REASONS),
+              decidedAt: Timestamp,
+              topic: z.optional(z.nullable(z.enum(POLL_TOPICS))),
+              place: z.optional(z.enum(["changed", "cleared"])),
             }),
             z.strictObject({
               seq: U64,
@@ -579,7 +613,14 @@ const relayTier1 = oc
 
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
-  elections: { list: listElections, getDefinition, getDisplayText, resolveCode, getCode },
+  elections: {
+    list: listElections,
+    getDefinition,
+    getDisplayText,
+    getTags,
+    resolveCode,
+    getCode,
+  },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   receipts: { submit: submitReceipt },

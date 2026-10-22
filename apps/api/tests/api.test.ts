@@ -34,6 +34,8 @@ import {
   readBoard,
   readReportQueue,
   recordRegistration,
+  REFILE_REASONS as CORE_REFILE_REASONS,
+  refilePoll,
   REMOVAL_REASONS as CORE_REMOVAL_REASONS,
   RESTORE_REASONS as CORE_RESTORE_REASONS,
   SearchQueryError,
@@ -52,6 +54,7 @@ import {
   MAX_SHORT_CODE_LENGTH,
   POLL_TOPICS,
   PROFILE_HANDLE,
+  REFILE_REASONS,
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
@@ -757,6 +760,39 @@ describe("elections.list (T-68)", () => {
         expect((await get("/elections", { ...filter, limit: "1" })).status).toBe(200);
     });
 
+    test("a poll's tags are served as it is filed, withheld while it is hidden", async () => {
+      const tags = (e: { idHex: string }) => get("/elections/tags", { electionId: e.idHex });
+      const tagged = await election();
+      await insertPollTags(app, tagged.id, { topic: "housing", place: "東京 Ward 2" });
+      let r = await tags(tagged);
+      expect(r.status).toBe(200);
+      expect(await json(r)).toEqual({ topic: "housing", place: "東京 Ward 2" });
+      expect(await json(await tags(await election()))).toEqual({});
+      await refilePoll(app, tagged.id, {
+        tags: { topic: "transport" },
+        reason: "personal-data",
+        moderator: "mod-1",
+      });
+      expect(await json(await tags(tagged))).toEqual({ topic: "transport" });
+      await moderate(app, tagged.id, { action: "delist", reason: "spam", moderator: "mod-1" });
+      expect(await json(await tags(tagged))).toEqual({ topic: "transport" });
+      await moderate(app, tagged.id, { action: "hide", reason: "threat", moderator: "mod-1" });
+      r = await tags(tagged);
+      expect(r.status).toBe(451);
+      expect(await json(r)).toEqual(expect.objectContaining({ code: "TAGS_WITHHELD" }));
+      r = await get("/elections/tags", { electionId: hex(b32()) });
+      expect(r.status).toBe(404);
+      expect((await json(r))["code"]).toBe("ELECTION_NOT_FOUND");
+      expect((await get("/elections/tags", { electionId: "00" })).status).toBe(400);
+    });
+
+    test("a place as long as a draft may hold is served", async () => {
+      const e = await election();
+      const place = "𝔄".repeat(MAX_PLACE_LENGTH);
+      await insertPollTags(app, e.id, { place });
+      expect(await json(await get("/elections/tags", { electionId: e.idHex }))).toEqual({ place });
+    });
+
     test("the place is never logged", async () => {
       const secret = `Unusualplace ${hex(b32()).slice(0, 12)}`;
       logs.length = 0;
@@ -1101,6 +1137,7 @@ describe("moderation (T-68)", () => {
   test("the contract's reason codes are core's", () => {
     expect([...REMOVAL_REASONS]).toEqual([...CORE_REMOVAL_REASONS]);
     expect([...RESTORE_REASONS]).toEqual([...CORE_RESTORE_REASONS]);
+    expect([...REFILE_REASONS]).toEqual([...CORE_REFILE_REASONS]);
   });
 
   test("a poll never moderated is visible, with no decision", async () => {
@@ -1206,6 +1243,41 @@ describe("moderation (T-68)", () => {
     // Neither the moderator nor the profile's account or name is served (T-10).
     const served = JSON.stringify(body);
     for (const secret of ["mod-", user, "Riverside"]) expect(served).not.toContain(secret);
+  });
+
+  test("the log carries refilings in the poll's numbering, saying what changed but never a place or the moderator", async () => {
+    const e = await election();
+    const place = `Unusualstreet ${hex(b32()).slice(0, 8)}`;
+    await insertPollTags(app, e.id, { topic: "food", place });
+    const before = await json(await get("/moderation/log", { after: "0", limit: "256" }));
+    const start = (before["entries"] as { seq: string }[]).at(-1)?.seq ?? "0";
+    const by = { moderator: "mod-secret" } as const;
+    await refilePoll(app, e.id, { tags: { topic: "housing", place }, reason: "misfiled", ...by });
+    await moderate(app, e.id, { action: "delist", reason: "spam", ...by });
+    await refilePoll(app, e.id, { tags: { topic: "housing" }, reason: "personal-data", ...by });
+    await refilePoll(app, e.id, { tags: { place: "Ward 3" }, reason: "misfiled", ...by });
+    const body = await json(await get("/moderation/log", { after: start, limit: "256" }));
+    const entries = (body["entries"] as Record<string, string>[]).map(
+      ({ seq, decidedAt, ...rest }) => {
+        expect(seq).toMatch(/^\d+$/);
+        expect(decidedAt).toMatch(/Z$/);
+        return rest;
+      },
+    );
+    expect(entries).toEqual([
+      { electionId: e.idHex, action: "refile", reason: "misfiled", topic: "housing" },
+      { electionId: e.idHex, action: "delist", reason: "spam" },
+      { electionId: e.idHex, action: "refile", reason: "personal-data", place: "cleared" },
+      {
+        electionId: e.idHex,
+        action: "refile",
+        reason: "misfiled",
+        topic: null,
+        place: "changed",
+      },
+    ]);
+    const served = JSON.stringify(body);
+    for (const secret of ["mod-", "Unusualstreet", "Ward"]) expect(served).not.toContain(secret);
   });
 
   test("the log refuses positions and page sizes outside its bounds", async () => {

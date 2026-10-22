@@ -1,4 +1,4 @@
-import { REMOVAL_REASONS, RESTORE_REASONS } from "@abolishus/api-contract";
+import { REFILE_REASONS, REMOVAL_REASONS, RESTORE_REASONS } from "@abolishus/api-contract";
 import { describe, expect, test } from "vite-plus/test";
 
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../src/components/moderation-log.tsx";
@@ -19,5 +19,10 @@ describe("the moderation page's grounds", () => {
         expect(messages[`reason_${ground}`]).toBeTruthy();
         expect(messages[`ground_${ground}`]).toBeTruthy();
       }
+  });
+
+  test("a refiling's every ground has a name in every catalog", () => {
+    for (const messages of Object.values(catalogs))
+      for (const ground of REFILE_REASONS) expect(messages[`reason_${ground}`]).toBeTruthy();
   });
 });

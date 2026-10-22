@@ -207,6 +207,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/code",
       "GET /elections/definition",
       "GET /elections/display-text",
+      "GET /elections/tags",
       "GET /moderation/log",
       "GET /moderation/status",
       "POST /backups",

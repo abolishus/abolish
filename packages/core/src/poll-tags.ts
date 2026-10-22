@@ -250,6 +250,69 @@ export async function refilePoll(
   );
 }
 
+/** The largest Postgres `bigint`. */
+const INT8_MAX = (1n << 63n) - 1n;
+
+/**
+ * One refiling as the public log shows it: everything but the moderator and
+ * the place's words. The topic is one of `POLL_TOPICS`, so it can say nothing
+ * of anyone; the place is free text, and a place a moderator set may be one a
+ * later refiling clears for personal data, so the log says only that it
+ * changed or was cleared, and the poll's page shows the place it is filed
+ * under now (`readPollTags`; T-17, T-68).
+ */
+export interface PublicRefilingEntry {
+  readonly seq: bigint;
+  readonly electionId: Uint8Array;
+  readonly reason: RefileReason;
+  readonly decidedAt: Date;
+  /** The topic it filed the poll under, `null` if it cleared it; absent if it kept it. */
+  readonly topic?: PollTopic | null;
+  /** Absent if it kept the place. */
+  readonly place?: "changed" | "cleared";
+}
+
+/**
+ * Up to `limit` refilings with a sequence number above `after`, oldest first,
+ * in a transaction the caller holds, with arguments it has checked: the
+ * refilings' half of the public log (`readPublicModerationLog`).
+ */
+export async function refilingLogOf(
+  db: Pick<ModerationTx, "select">,
+  after: bigint,
+  limit: number,
+): Promise<PublicRefilingEntry[]> {
+  // Past the largest Postgres `bigint` there is nothing, and Postgres would
+  // refuse the comparison rather than say so.
+  if (after >= INT8_MAX) return [];
+  const t = pollTagActions;
+  const rows = await db
+    .select({
+      seq: t.seq,
+      electionId: t.electionId,
+      topicSet: t.topicSet,
+      topic: t.topic,
+      placeSet: t.placeSet,
+      placeCleared: q<boolean>`${t.place} IS NULL`,
+      reason: t.reason,
+      decidedAt: t.decidedAt,
+    })
+    .from(t)
+    .where(gt(t.seq, after))
+    .orderBy(asc(t.seq))
+    .limit(limit);
+  return rows.map((r) => ({
+    seq: r.seq,
+    electionId: new Uint8Array(r.electionId),
+    // The table's check admits only `REFILE_REASONS`, and only `refilePoll`
+    // writes rows, with tags `tagsProblem` passed.
+    reason: r.reason as RefileReason,
+    decidedAt: r.decidedAt,
+    ...(r.topicSet ? { topic: (r.topic ?? null) as PollTopic | null } : {}),
+    ...(r.placeSet ? { place: r.placeCleared ? ("cleared" as const) : ("changed" as const) } : {}),
+  }));
+}
+
 /** The tags `electionId`'s poll is filed under: none if it has no row. */
 async function tagsOf(db: Pick<ModerationTx, "select">, electionId: Uint8Array): Promise<PollTags> {
   const [row] = await db

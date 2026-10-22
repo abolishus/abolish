@@ -322,6 +322,15 @@ function stubApi(): Server {
           ? [
               { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
               { ...LATEST, electionId: HIDDEN_ID },
+              {
+                seq: "8",
+                electionId: HIDDEN_ID,
+                action: "refile",
+                reason: "misfiled",
+                decidedAt: LATEST.decidedAt,
+                topic: "transport",
+                place: "cleared",
+              },
             ]
           : [];
       return json(200, { entries });
@@ -1160,6 +1169,13 @@ describe("poll list", () => {
     const html = await (await get(`/polls?after=${LOST_ID}`)).text();
     expect(html).toContain(`href="/polls/${SWAPPED_ID}"`);
     expect(html).toContain("sent another poll&#x27;s definition");
+  });
+
+  test("lists a refiling with its topic and what it did to the place", async () => {
+    const html = await (await get("/moderation")).text();
+    expect(html).toContain("Refiled");
+    expect(html).toContain("Misfiled");
+    expect(html).toContain("Topic now Transport · Place cleared");
   });
 
   test.each(["?after=abc", `?after=${ID.toUpperCase()}`, `?after=${ID}&after=${ID}`])(

@@ -1,8 +1,8 @@
 import { Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
-import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, UserRound } from "lucide-react";
+import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, Tags, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { catalogs, type Messages } from "../messages.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import type { ModerationLog as Log } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
@@ -41,7 +41,30 @@ const ACTION_ICON: Record<Entry["action"], ReactNode> = {
   delist: <ListX className="size-4" />,
   hide: <EyeOff className="size-4" />,
   restore: <RotateCcw className="size-4" />,
+  refile: <Tags className="size-4" />,
 };
+
+type Refiling = Extract<Entry, { action: "refile" }>;
+
+/** What a refiling changed: the topic's words, and only whether the place changed (T-17). */
+function Refiled({ entry }: { entry: Refiling }) {
+  const t = useTranslate(catalogs);
+  const changes: string[] = [];
+  if (entry.topic === null) changes.push(t("refiledTopicCleared"));
+  else if (entry.topic !== undefined)
+    changes.push(t("refiledTopic", { topic: t(POLL_TOPIC_MESSAGES[entry.topic]) }));
+  if (entry.place !== undefined)
+    changes.push(t(entry.place === "changed" ? "refiledPlaceChanged" : "refiledPlaceCleared"));
+  return (
+    <span className="grid gap-0.5">
+      <span className="flex items-center gap-2">
+        <span aria-hidden="true">{ACTION_ICON.refile}</span>
+        {t("action_refile")}
+      </span>
+      <span className="text-xs text-muted-foreground">{changes.join(" · ")}</span>
+    </span>
+  );
+}
 
 const RULED = "m-0 grid list-none border-t border-foreground p-0";
 const TERM = "text-sm text-muted-foreground lg:sr-only";
@@ -127,10 +150,16 @@ function Row({ entry }: { entry: Entry }) {
               </a>
             </dd>
             <dt className={TERM}>{t("moderationAction")}</dt>
-            <dd className="m-0 flex items-center gap-2 text-sm">
-              <span aria-hidden="true">{ACTION_ICON[entry.action]}</span>
-              {t(`action_${entry.action}`)}
-            </dd>
+            {entry.action === "refile" ? (
+              <dd className="m-0 text-sm">
+                <Refiled entry={entry} />
+              </dd>
+            ) : (
+              <dd className="m-0 flex items-center gap-2 text-sm">
+                <span aria-hidden="true">{ACTION_ICON[entry.action]}</span>
+                {t(`action_${entry.action}`)}
+              </dd>
+            )}
           </>
         ) : (
           <>
@@ -164,8 +193,8 @@ export interface ModerationLogProps {
 }
 
 /**
- * The public moderation log (T-68): what was done to which poll or profile
- * and why, never who did it or who reported it, with the policy's limits and grounds
+ * The public moderation log (T-68): what was done to which poll or profile,
+ * including where a poll is listed, and why, never who did it or who reported it, with the policy's limits and grounds
  * beside it. The log carries no free text, so a row can't carry personal
  * data (T-17); the page shows the API's rows as they come, oldest first.
  */

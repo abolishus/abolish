@@ -4,6 +4,8 @@ import {
   makeProfile,
   newAccountId,
   newProfileHandle,
+  insertPollTags,
+  refilePoll,
   report,
   reportProfile,
   storeDefinition,
@@ -163,6 +165,27 @@ describe("moderation decisions", () => {
       [id, "restore", "error"],
     ]);
     expect(JSON.stringify([status, log])).not.toContain("mod-7");
+  });
+
+  test("the log prints refilings with what they changed, never the place or the moderator", async () => {
+    const id = await election();
+    await insertPollTags(app, bytes(id), { topic: "food", place: "14 Elm Street" });
+    const { seq } = await refilePoll(app, bytes(id), {
+      tags: { topic: "housing" },
+      reason: "personal-data",
+      moderator: "mod-7",
+    });
+    const log = await cli("moderation", "log", "--after", String(seq - 1n), "--limit", "1");
+    expect(log.out[0]).toEqual({
+      seq: String(seq),
+      electionId: id,
+      action: "refile",
+      reason: "personal-data",
+      decidedAt: expect.any(String),
+      topic: "housing",
+      place: "cleared",
+    });
+    expect(JSON.stringify(log)).not.toMatch(/Elm Street|mod-7/);
   });
 
   test("core's refusals come back as their codes, with nothing recorded", async () => {

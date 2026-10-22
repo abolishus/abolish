@@ -567,5 +567,7 @@ describe("a poll's life from the author's side", () => {
       }),
       { numRuns: Math.min(numRuns, 50), verbose: true },
     );
-  });
+    // Fifty runs of up to sixteen database writes each can outlast the default
+    // timeout on a CI runner shared with the other test files.
+  }, 60_000);
 });

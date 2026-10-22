@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 8
+// The contract-event record, record type 0x0008 versions 1 to 9
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -11,7 +11,10 @@
 // T-52, P1-12f), version 6 the group registry's Tier 1 addition event
 // (T-53, P3-3), version 7 its two self-paid events (T-25, T-53, P3-2), and
 // version 8 the board's availability attestation and complaint events (T-24,
-// T-53, P4-3).
+// T-53, P4-3), and version 9 the election registry's author panel
+// registration with the board's framing of ballot version 4 and the
+// version-2 delivery records, which name their seat's panel (T-37, T-53,
+// P2-16).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -53,9 +56,15 @@ import {
   decodeObligationRoot,
   decodeShareReceiptBatch,
   OBLIGATION_ROOT_LENGTH,
+  OBLIGATION_ROOT_LENGTH_V2,
   RECEIPT_BATCH_MAX,
 } from "./delivery.ts";
-import { frameBallot, frameComplaintBatch, frameDelivery } from "./direct-submit.ts";
+import {
+  type BoardFraming,
+  frameBallot,
+  frameComplaintBatch,
+  frameDelivery,
+} from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
   decodeElectionDefinitionRecord,
@@ -68,9 +77,10 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
 /**
  * `MAX_EVENT_DATA`: the framing bound on a record's `data`, checked before
  * anything is allocated (T-52). Every event of either version's tables is
- * far smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes, and
- * version 2's a framed `BallotSubmitted`, about 175 KB. An event that needs
- * more is a new record version.
+ * far smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes,
+ * version 2's a framed `BallotSubmitted`, about 175 KB, and version 9's a
+ * framed `BallotSubmitted` carrying ballot version 4, about 209 KB. An event
+ * that needs more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 
@@ -87,7 +97,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 8 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 9 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -99,6 +109,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   6: contractEventV1,
   7: contractEventV1,
   8: contractEventV1,
+  9: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -106,7 +117,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -194,6 +205,14 @@ export type ContractEvent =
       readonly stubHash: Uint8Array;
       readonly panelId: Uint8Array;
       readonly transcriptHash: Uint8Array;
+      readonly registration: Uint8Array;
+    }
+  | {
+      readonly event: "AuthorPanelRegistered";
+      readonly definitionHash: Uint8Array;
+      /** The `authorPanelId` topic, which is the registration's own `panel_id`. */
+      readonly authorPanelId: Uint8Array;
+      /** The registration, in the trustee registry's key-set layout; 3.1 judges it. */
       readonly registration: Uint8Array;
     }
   | {
@@ -520,16 +539,47 @@ const CEREMONY_REGISTERED = ceremonyRegistered(
 
 // Version 2's: the key-set layout the registry takes (Trustee registry,
 // Registration, check 2), exactly `98 + 97 · seats + 65 · count` bytes.
-const CEREMONY_REGISTERED_V2 = ceremonyRegistered(
-  (r) => {
-    const seats = r[REGISTRATION_HEADER - 1];
-    if (seats === undefined) return false;
-    const countAt = REGISTRATION_HEADER + REGISTRATION_SEAT * seats;
-    const count = r[countAt];
-    return count !== undefined && r.length === countAt + 1 + REGISTRATION_APPROVAL * count;
+function keySetLayout(r: Uint8Array): boolean {
+  const seats = r[REGISTRATION_HEADER - 1];
+  if (seats === undefined) return false;
+  const countAt = REGISTRATION_HEADER + REGISTRATION_SEAT * seats;
+  const count = r[countAt];
+  return count !== undefined && r.length === countAt + 1 + REGISTRATION_APPROVAL * count;
+}
+
+const KEY_SET_MAX = REGISTRATION_HEADER + 1 + 255 * (REGISTRATION_SEAT + REGISTRATION_APPROVAL);
+
+const CEREMONY_REGISTERED_V2 = ceremonyRegistered(keySetLayout, KEY_SET_MAX);
+
+// The author panel's key set, which the election registry records with the
+// definition (Election registry, Author panel registration and Events): the
+// trustee registry's key-set layout, as version 2's `CeremonyRegistered`,
+// and the `authorPanelId` topic must be the record's `panel_id`, so the
+// event's two readings of the panel agree (T-31, T-37). The registry's check
+// 2 makes that the definition's author panel identifier, so every record it
+// logs passes (T-53); the `definitionHash` topic, the stub, the transcript,
+// the seats and the approvals are 3.1's, which reads the definition.
+const AUTHOR_PANEL_REGISTERED: EventSpec = {
+  signature: "AuthorPanelRegistered(bytes32,bytes32,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, authorPanelId] = topics;
+    if (topics.length !== 3 || definitionHash === undefined || authorPanelId === undefined)
+      return "event-topics";
+    const registration = readAbi(data, 1, [{ at: 0, words: false, max: KEY_SET_MAX }])?.tails[0];
+    if (
+      registration === undefined ||
+      !keySetLayout(registration) ||
+      !equalBytes(registration.subarray(0, 32), authorPanelId)
+    )
+      return "event-data";
+    return {
+      event: "AuthorPanelRegistered",
+      definitionHash: definitionHash.slice(),
+      authorPanelId: authorPanelId.slice(),
+      registration,
+    };
   },
-  REGISTRATION_HEADER + 1 + 255 * (REGISTRATION_SEAT + REGISTRATION_APPROVAL),
-);
+};
 
 const REGISTRARS_PINNED: EventSpec = {
   signature: "RegistrarsPinned(uint8,address[])",
@@ -631,42 +681,46 @@ function boardEvent(
 // A ballot forced through the L1 relay (Board, Relayed ballots): the relay
 // call's four fields, which verifier 4.5 matches against the call hash the
 // relay stored, then the record, framed as an ordinary submission's is.
-const RELAYED_BALLOT_SUBMITTED: EventSpec = {
-  signature: "RelayedBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes)",
-  decode(topics, data) {
-    const [, definitionHash, ballotHash] = topics;
-    if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
-      return "event-topics";
-    const abi = readAbi(data, 5, [{ at: 4, words: false, max: MAX_EVENT_DATA }]);
-    if (abi === undefined) return "event-data";
-    const [index, l1Block, stamp, gasLimit] = [0, 1, 2, 3].map((i) =>
-      uintWord(word(abi.words, i), 64),
-    );
-    const record = abi.tails[0];
-    const framed = record && frameBallot(record);
-    if (
-      index === undefined ||
-      l1Block === undefined ||
-      stamp === undefined ||
-      gasLimit === undefined ||
-      record === undefined ||
-      framed === undefined ||
-      !equalBytes(framed.definitionHash, definitionHash) ||
-      !equalBytes(framed.ballotHash, ballotHash)
-    )
-      return "event-data";
-    return {
-      event: "RelayedBallotSubmitted",
-      definitionHash: definitionHash.slice(),
-      ballotHash: ballotHash.slice(),
-      index,
-      l1Block,
-      stamp,
-      gasLimit,
-      record,
-    };
-  },
-};
+function relayedBallotSubmitted(framing: BoardFraming): EventSpec {
+  return {
+    signature: "RelayedBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes)",
+    decode(topics, data) {
+      const [, definitionHash, ballotHash] = topics;
+      if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+        return "event-topics";
+      const abi = readAbi(data, 5, [{ at: 4, words: false, max: MAX_EVENT_DATA }]);
+      if (abi === undefined) return "event-data";
+      const [index, l1Block, stamp, gasLimit] = [0, 1, 2, 3].map((i) =>
+        uintWord(word(abi.words, i), 64),
+      );
+      const record = abi.tails[0];
+      const framed = record && frameBallot(record, framing);
+      if (
+        index === undefined ||
+        l1Block === undefined ||
+        stamp === undefined ||
+        gasLimit === undefined ||
+        record === undefined ||
+        framed === undefined ||
+        !equalBytes(framed.definitionHash, definitionHash) ||
+        !equalBytes(framed.ballotHash, ballotHash)
+      )
+        return "event-data";
+      return {
+        event: "RelayedBallotSubmitted",
+        definitionHash: definitionHash.slice(),
+        ballotHash: ballotHash.slice(),
+        index,
+        l1Block,
+        stamp,
+        gasLimit,
+        record,
+      };
+    },
+  };
+}
+
+const RELAYED_BALLOT_SUBMITTED = relayedBallotSubmitted(8);
 
 // A close statement through the contract path (Board, Close statements): the
 // record whole, which decodes strictly as version 1, the version contract-event
@@ -803,6 +857,83 @@ const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
   },
 };
 
+// Version 9's batches and roots (What the board frames (version 9)): a record
+// of version 1, read as versions 4 and 5 read it, or of version 2, which puts
+// its `panel` at 35 and its `seat` at 36, so the seat topic is recomputed
+// from the bytes under the record's own version, and a version-2 record
+// whose topic is its panel byte, or a version-1 record relabelled, fails
+// `event-data` (T-31). A version-2 record carries its panel, which the
+// topics don't repeat: a reader finding a seat's records by topic finds both
+// panels' and tells them apart by the record (T-37). Any other version fails
+// `event-data`; whether a record's version is the one its election's ballot
+// version fixes is the delivery check's (verifier 5.9).
+function batchOrRootV9(
+  event: "ShareReceiptBatchSubmitted" | "ShareComplaintBatchSubmitted" | "ObligationRootSubmitted",
+  max: number,
+  read: (
+    record: Uint8Array,
+  ) => { readonly definitionHash: Uint8Array; readonly seat: number } | undefined,
+): EventSpec {
+  return {
+    signature: `${event}(bytes32,uint8,bytes)`,
+    decode(topics, data) {
+      const [, definitionHash, seatWord] = topics;
+      const seat = seatWord && uintWord(seatWord, 8);
+      if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
+        return "event-topics";
+      const record = readAbi(data, 1, [{ at: 0, words: false, max }])?.tails[0];
+      if (record === undefined) return "event-data";
+      let named;
+      try {
+        named = read(record);
+      } catch (e) {
+        if (e instanceof DecodeError) return "event-data";
+        throw e;
+      }
+      if (
+        named === undefined ||
+        !equalBytes(named.definitionHash, definitionHash) ||
+        BigInt(named.seat) !== seat
+      )
+        return "event-data";
+      return { event, definitionHash: definitionHash.slice(), seat: named.seat, record };
+    },
+  };
+}
+
+// Each decoded strictly under its own version byte; a version-2 record's
+// `seat` is the one after its `panel`.
+const SHARE_RECEIPT_BATCH_SUBMITTED_V9 = batchOrRootV9(
+  "ShareReceiptBatchSubmitted",
+  BATCH_LENGTH_MAX + 1,
+  (r) => {
+    const batch =
+      r[2] === 1
+        ? decodeShareReceiptBatch(r, 1)
+        : r[2] === 2
+          ? decodeShareReceiptBatch(r, 2)
+          : undefined;
+    return batch && { definitionHash: batch.definition_hash, seat: batch.seat };
+  },
+);
+
+// Framed, each `D` never decoded, as the board frames it under version 9.
+const SHARE_COMPLAINT_BATCH_SUBMITTED_V9 = batchOrRootV9(
+  "ShareComplaintBatchSubmitted",
+  COMPLAINT_BATCH_LENGTH_MAX + 1,
+  (r) => frameComplaintBatch(r, 9),
+);
+
+const OBLIGATION_ROOT_SUBMITTED_V9 = batchOrRootV9(
+  "ObligationRootSubmitted",
+  OBLIGATION_ROOT_LENGTH_V2,
+  (r) => {
+    const root =
+      r[2] === 1 ? decodeObligationRoot(r, 1) : r[2] === 2 ? decodeObligationRoot(r, 2) : undefined;
+    return root && { definitionHash: root.definition_hash, seat: root.seat };
+  },
+);
+
 // An availability attestation or complaint through the contract path (Board,
 // Availability records): the record whole, which decodes strictly as version
 // 1, the version contract-event version 8 fixes, with its `definition_hash`
@@ -909,12 +1040,20 @@ const SELF_PAID_MEMBER_ADDED: EventSpec = {
   },
 };
 
-const BOARD_EVENTS: readonly EventSpec[] = [
-  boardEvent("BallotSubmitted", frameBallot),
-  boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
-  boardEvent("SharePosted", (r) => frameDelivery(RECORD_TYPES.sharePosting, r)),
-  boardEvent("ShareComplaintSubmitted", (r) => frameDelivery(RECORD_TYPES.shareComplaint, r)),
-];
+function boardEvents(framing: BoardFraming): readonly EventSpec[] {
+  return [
+    boardEvent("BallotSubmitted", (r) => frameBallot(r, framing)),
+    boardEvent("ShareReceiptSubmitted", (r) =>
+      frameDelivery(RECORD_TYPES.shareReceipt, r, framing),
+    ),
+    boardEvent("SharePosted", (r) => frameDelivery(RECORD_TYPES.sharePosting, r, framing)),
+    boardEvent("ShareComplaintSubmitted", (r) =>
+      frameDelivery(RECORD_TYPES.shareComplaint, r, framing),
+    ),
+  ];
+}
+
+const BOARD_EVENTS = boardEvents(8);
 
 const GROUP_EVENTS: readonly EventSpec[] = [
   REGISTRARS_PINNED,
@@ -1029,10 +1168,33 @@ const TABLES: Readonly<
       AVAILABILITY_COMPLAINT_SUBMITTED,
     ],
   },
+  // Version 8's rows, in the same order, with the election registry's author
+  // panel registration added and the board's eight rows that carry a ballot
+  // or a delivery record reading them under version 9's framing.
+  9: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2, AUTHOR_PANEL_REGISTERED],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [
+      ...boardEvents(9),
+      relayedBallotSubmitted(9),
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED_V9,
+      SHARE_COMPLAINT_BATCH_SUBMITTED_V9,
+      OBLIGATION_ROOT_SUBMITTED_V9,
+      AVAILABILITY_ATTESTATION_SUBMITTED,
+      AVAILABILITY_COMPLAINT_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -1067,6 +1229,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   6: signaturesOf(6),
   7: signaturesOf(7),
   8: signaturesOf(8),
+  9: signaturesOf(9),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

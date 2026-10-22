@@ -226,6 +226,7 @@ export {
   TAG_REGISTRY,
 } from "./domain-separation.ts";
 export {
+  type BoardFraming,
   frameBallot,
   frameComplaintBatch,
   frameDelivery,

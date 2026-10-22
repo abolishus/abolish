@@ -25,11 +25,12 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json (version 1) to contract-event-v8.json
+// docs/spec/vectors/contract-event.json (version 1) to contract-event-v9.json
 // (version 6, with its own strict Tier 1 addition decoder, version 7, with
-// its own checks of the self-paid record, and version 8, with
-// scripts/availability-vectors.py's decoding of the availability records)
-// come from independent
+// its own checks of the self-paid record, version 8, with
+// scripts/availability-vectors.py's decoding of the availability records,
+// and version 9, with its own framing of ballot version 4 and the version-2
+// delivery records and its own key-set layout check) come from independent
 // Python implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
 // SEC 1 decompression and accumulator, scripts/contract-event-v2-vectors.py,
@@ -99,6 +100,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   6: load("contract-event-v6.json"),
   7: load("contract-event-v7.json"),
   8: load("contract-event-v8.json"),
+  9: load("contract-event-v9.json"),
 };
 const vectors = FILES[1];
 
@@ -160,6 +162,13 @@ function project(e: ContractEvent): unknown {
         stubHash: bytesToHex(e.stubHash),
         panelId: bytesToHex(e.panelId),
         transcriptHash: bytesToHex(e.transcriptHash),
+        registration: bytesToHex(e.registration),
+      };
+    case "AuthorPanelRegistered":
+      return {
+        event: e.event,
+        definitionHash: bytesToHex(e.definitionHash),
+        authorPanelId: bytesToHex(e.authorPanelId),
         registration: bytesToHex(e.registration),
       };
     case "RegistrarsPinned":
@@ -306,6 +315,11 @@ function reencode(
         topics: [sig(e.event), e.stubHash, e.panelId, e.transcriptHash],
         data: dyn([], tail(e.registration)),
       };
+    case "AuthorPanelRegistered":
+      return {
+        topics: [sig(e.event), e.definitionHash, e.authorPanelId],
+        data: dyn([], tail(e.registration)),
+      };
     case "RegistrarsPinned":
       return {
         topics: [sig(e.event)],
@@ -371,6 +385,7 @@ function reencode(
 const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ElectionCreated: "election-registry",
   DefinitionRegistered: "election-registry",
+  AuthorPanelRegistered: "election-registry",
   PanelPinned: "trustee-registry",
   CeremonyRegistered: "trustee-registry",
   RegistrarsPinned: "group-registry",
@@ -402,6 +417,7 @@ describe.each([
   [6, "contract-event-v6.json"],
   [7, "contract-event-v7.json"],
   [8, "contract-event-v8.json"],
+  [9, "contract-event-v9.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -558,7 +574,7 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test.each([1, 2, 3, 4, 5, 7, 8] as const)(
+  test.each([1, 2, 3, 4, 5, 7, 8, 9] as const)(
     "version %i: every passing record's topics and data are those rebuilt from its decoded event",
     (version) => {
       const contracts = contractsOf(FILES[version]);
@@ -894,6 +910,115 @@ describe("contract-event version 8 against version 7", () => {
           ? "AvailabilityAttestationSubmitted"
           : "AvailabilityComplaintSubmitted",
       );
+    }
+  });
+});
+
+describe("contract-event version 9 against version 8", () => {
+  const v9 = contractsOf(FILES[9]);
+  const v8 = contractsOf(FILES[8]);
+  const sameVerdict = (all: readonly VectorRecord[], from: ContractEventVersion) => {
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, from, 9) };
+      const result = checkContractEvent(record, v9, 9);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  };
+
+  // Version 9 reads every record version 8 passes exactly as version 8 does,
+  // and fails every other with the same code: its board rows only widen the
+  // framing to the versions it adds (Event tables (version 9)).
+  test("every version-8 vector has the same verdict under version 9", () => {
+    const all = [...FILES[8].records, ...FILES[8].eventFailures];
+    expect(all.length).toBeGreaterThan(40);
+    sameVerdict(all, 8);
+  });
+
+  // The earlier files' board failures, among them every ballot and delivery
+  // decode rejection that needs no election, still fail under the wider
+  // framing: none of them is a version version 9 adds.
+  test.each([2, 3, 4, 5] as const)(
+    "every board failure of version %i keeps its verdict under version 9",
+    (from) => {
+      const board = FILES[from].contracts.board;
+      const failures = FILES[from].eventFailures.filter((v) => v.fields.contract === board);
+      expect(failures.length).toBeGreaterThan(10);
+      sameVerdict(failures, from);
+    },
+  );
+
+  // Under version 8 the author registration is no event of the election
+  // registry's, and a version-4 ballot or a version-2 delivery record
+  // doesn't frame, so a profile pinning version 8 can't be given either by
+  // a board that accepts them: version 8 must be retired first (T-53).
+  test("underVersion8 gives each version-9 record's verdict under version 8", () => {
+    const under = (FILES[9] as Vectors & { underVersion8: Record<string, string> }).underVersion8;
+    const records = new Map(FILES[9].records.map((r) => [r.id, r]));
+    expect(Object.keys(under).length).toBeGreaterThan(40);
+    for (const [id, error] of Object.entries(under)) {
+      const v = records.get(id);
+      if (v === undefined) throw new Error(`no record ${id}`);
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 9, 8) };
+      expect(checkContractEvent(record, v8, 8)).toEqual({ ok: false, error });
+    }
+    // Every other version-9 record passes version 8 with the same fields.
+    for (const v of FILES[9].records.filter((r) => under[r.id] === undefined)) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 9, 8) };
+      const result = checkContractEvent(record, v8, 8);
+      if (!result.ok) throw new Error(`${v.id}: ${result.error} under version 8`);
+      expect(project(result.event)).toEqual(v.event);
+    }
+  });
+
+  // A record with AuthorPanelRegistered's topic 0 that version 9 fails is no
+  // event of version 8's tables at all.
+  test("version 9's failing author registrations are unknown-event under version 8", () => {
+    const topic0 = bytesToHex(sigTopic("AuthorPanelRegistered(bytes32,bytes32,bytes)"));
+    const failing = FILES[9].eventFailures.filter(
+      (v) =>
+        v.fields.topics[0] === topic0 &&
+        v.fields.contract === FILES[9].contracts["election-registry"],
+    );
+    expect(failing.length).toBeGreaterThan(10);
+    for (const v of failing) {
+      const record = { ...recordOf(v.fields), contract: v8.electionRegistry };
+      expect(checkContractEvent(record, v8, 8)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+
+  // The board frames an author element, a version-2 complaint's `D` and a
+  // posting's `ct_dh`, never decodes them (T-53): these vectors' elements
+  // aren't ristretto255 points, and their events still pass.
+  test("the framed elements of the version-9 not-a-point vectors aren't points", () => {
+    const cases: readonly [string, (record: Uint8Array) => number][] = [
+      // The first author element: past the fixed fields, both of the default
+      // half's lists, and the author list's two counts.
+      [
+        "ballot-v4-author-element-not-point",
+        (r) => {
+          const view = new DataView(r.buffer, r.byteOffset);
+          let at = 364;
+          const options = view.getUint32(at);
+          at += 4;
+          for (let j = 0; j < options; j++) at += 4 + 32 * view.getUint32(at);
+          at += 4 + 32 * view.getUint32(at);
+          return at + 4 + 4;
+        },
+      ],
+      ["complaint-v2-d-not-point", () => 3 + 32 + 32 + 1 + 1],
+      ["posting-v2-ct_dh-not-point", () => 3 + 32 + 32 + 1 + 1 + 32 + 1088],
+      ["complaint-batch-v2-d-not-point", () => 3 + 32 + 1 + 1 + 4 + 32],
+    ];
+    for (const [id, at] of cases) {
+      const v = FILES[9].records.find((r) => r.id === id);
+      if (v === undefined) throw new Error(`no record ${id}`);
+      const result = checkContractEvent(recordOf(v.fields), v9, 9);
+      if (!result.ok || !("record" in result.event)) throw new Error(`${id} doesn't pass`);
+      const record = result.event.record;
+      const i = at(record);
+      expect(() => decode(element, record.subarray(i, i + 32))).toThrow(DecodeError);
     }
   });
 });

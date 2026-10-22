@@ -8,6 +8,7 @@ import {
   decideAppeal,
   emailKeys,
   type EmailMessage,
+  MAX_REACTION_CHANGES_PER_HOUR,
   parseKeyring,
   type PhoneChannel,
   type PhoneVerifier,
@@ -53,8 +54,10 @@ import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
+import { createReactionsHandler } from "../src/node/reactions.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 import { createTokenHandler } from "../src/node/token.ts";
+import { fromHex } from "../src/values.ts";
 
 const ORIGIN = "https://abolish.test";
 const RP_ID = "abolish.test";
@@ -262,6 +265,12 @@ beforeAll(async () => {
       sql,
       accountOf: (headers) => accounts.accountOf(headers),
       issuer: ISSUER,
+      origin: ORIGIN,
+      now: () => NOW,
+    }),
+    reactions: createReactionsHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
       origin: ORIGIN,
       now: () => NOW,
     }),
@@ -1733,6 +1742,7 @@ describe("an account's Tier 0 token under /token", () => {
         origin: ORIGIN,
         now: () => NOW,
       }),
+      reactions: async () => new Response(),
       clientDir,
       origin: ORIGIN,
       log: (line) => lines.push(line),
@@ -1760,6 +1770,252 @@ describe("an account's Tier 0 token under /token", () => {
   });
 });
 
+describe("reactions on a poll under /reactions", () => {
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  const ZERO = { heart: 0, laugh: 0, wow: 0, thinking: 0, sad: 0, clap: 0 };
+
+  /** A signed-in browser, its account verified by e-mail unless told otherwise. */
+  async function signedIn({ verified = true } = {}) {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const account = (await accounts.accountOf(new Headers({ cookie })))!;
+    if (verified)
+      await sql`
+        INSERT INTO account_emails VALUES (${account}, ${randomBytes(32)}, 'h1', ${randomBytes(40)}, 'b1', now())`;
+    return browser;
+  }
+
+  let moderator: string;
+  beforeAll(async () => {
+    moderator = `${newAccountId().slice(0, 8)}-r`;
+    await addModerators(sql, moderator);
+  });
+
+  test("anyone reads the counts; an account sets, sees and takes back its own", async () => {
+    const electionId = hex(await newElection(sql));
+    const anyone = new Browser();
+    const read = await anyone.call("POST", "/reactions/counts", { electionId });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    expect(await read.json()).toEqual({ counts: ZERO });
+    expect(await (await anyone.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      code: "SIGNED_OUT",
+      status: 401,
+    });
+
+    const a = await signedIn();
+    const b = await signedIn();
+    // The counts are the same signed in: no `own`.
+    expect(await (await a.call("POST", "/reactions/counts", { electionId })).json()).toEqual({
+      counts: ZERO,
+    });
+    expect(await (await a.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      counts: ZERO,
+      own: [],
+    });
+    const set = await a.call("POST", "/reactions/set", { electionId, reaction: "clap", on: true });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({ counts: { ...ZERO, clap: 1 }, own: ["clap"] });
+    await a.call("POST", "/reactions/set", { electionId, reaction: "heart", on: true });
+    // Setting one already set changes nothing.
+    expect(
+      await (
+        await b.call("POST", "/reactions/set", { electionId, reaction: "clap", on: true })
+      ).json(),
+    ).toEqual({ counts: { ...ZERO, heart: 1, clap: 2 }, own: ["clap"] });
+    expect(
+      await (
+        await b.call("POST", "/reactions/set", { electionId, reaction: "clap", on: true })
+      ).json(),
+    ).toEqual({ counts: { ...ZERO, heart: 1, clap: 2 }, own: ["clap"] });
+    // Each account sees only its own, in the set's order.
+    expect(await (await a.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      counts: { ...ZERO, heart: 1, clap: 2 },
+      own: ["heart", "clap"],
+    });
+    expect(await (await anyone.call("POST", "/reactions/counts", { electionId })).json()).toEqual({
+      counts: { ...ZERO, heart: 1, clap: 2 },
+    });
+    const back = await a.call("POST", "/reactions/set", {
+      electionId,
+      reaction: "clap",
+      on: false,
+    });
+    expect(await back.json()).toEqual({ counts: { ...ZERO, heart: 1, clap: 1 }, own: ["heart"] });
+
+    // T-10, T-11, T-67: the log has the route class, never the poll, the
+    // reaction or the account.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "reactions", status: 200 });
+    const log = JSON.stringify(logged);
+    expect(log).not.toContain(electionId);
+    expect(log).not.toContain("clap");
+  });
+
+  test("refuses what core refuses, with its code", async () => {
+    const electionId = hex(await newElection(sql));
+    const set = async (browser: Browser, body: object) =>
+      (
+        await browser.call("POST", "/reactions/set", {
+          electionId,
+          reaction: "wow",
+          on: true,
+          ...body,
+        })
+      ).json();
+    const unverified = await signedIn({ verified: false });
+    expect(await set(unverified, {})).toEqual({ code: "ACCOUNT_UNVERIFIED", status: 403 });
+    // Taking one back is always allowed, and changes nothing here.
+    expect(await set(unverified, { on: false })).toEqual({ counts: ZERO, own: [] });
+    const browser = await signedIn();
+    expect(await set(browser, { electionId: "00".repeat(32) })).toEqual({
+      code: "UNKNOWN_ELECTION",
+      status: 404,
+    });
+    // A poll with no stored definition counts zero throughout.
+    expect(
+      await (await browser.call("POST", "/reactions/own", { electionId: "00".repeat(32) })).json(),
+    ).toEqual({ counts: ZERO, own: [] });
+
+    await set(browser, {});
+    await moderate(sql, fromHex(electionId), {
+      action: "hide",
+      reason: "illegal",
+      moderator,
+    });
+    // A hidden poll takes no reaction and shows no counts (T-68)…
+    expect(await set(browser, { reaction: "sad" })).toEqual({ code: "HIDDEN", status: 409 });
+    expect(
+      await (await new Browser().call("POST", "/reactions/counts", { electionId })).json(),
+    ).toEqual({ code: "HIDDEN", status: 409 });
+    expect(await (await browser.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      code: "HIDDEN",
+      status: 409,
+    });
+    // …but its reactions can still be taken back, though the answer names no counts.
+    expect(await set(browser, { on: false })).toEqual({ code: "HIDDEN", status: 409 });
+    expect(
+      (
+        await sql`SELECT count(*)::int AS n FROM account_reactions
+        WHERE election_id = ${fromHex(electionId)}`
+      )[0]!["n"],
+    ).toBe(0);
+  });
+
+  test("refuses changes past the hour's limit", async () => {
+    const electionId = hex(await newElection(sql));
+    const browser = await signedIn();
+    for (let i = 0; i < MAX_REACTION_CHANGES_PER_HOUR; i++)
+      expect(
+        (
+          await browser.call("POST", "/reactions/set", {
+            electionId,
+            reaction: "laugh",
+            on: i % 2 === 0,
+          })
+        ).status,
+      ).toBe(200);
+    expect(
+      await (
+        await browser.call("POST", "/reactions/set", { electionId, reaction: "laugh", on: true })
+      ).json(),
+    ).toEqual({ code: "TOO_MANY_THIS_HOUR", status: 429 });
+  });
+
+  test("refuses a malformed request before core sees it", async () => {
+    const browser = await signedIn();
+    const electionId = hex(await newElection(sql));
+    const body = { electionId, reaction: "heart", on: true };
+    for (const bad of [
+      { ...body, electionId: electionId.toUpperCase() },
+      { ...body, electionId: electionId.slice(2) },
+      { ...body, reaction: "thumbs-up" },
+      { ...body, reaction: "Heart" },
+      { ...body, on: "true" },
+      { ...body, extra: 1 },
+      { electionId, reaction: "heart" },
+    ])
+      expect(await (await browser.call("POST", "/reactions/set", bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    for (const path of ["/reactions/counts", "/reactions/own"])
+      for (const bad of [{}, { electionId, reaction: "heart" }, { electionId: 1 }])
+        expect(await (await browser.call("POST", path, bad)).json()).toEqual({
+          code: "BAD_REQUEST",
+          status: 400,
+        });
+    const text = await fetch(`${base}/reactions/counts`, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(await text.json()).toEqual({ code: "BAD_REQUEST", status: 400 });
+    // Nothing was recorded.
+    expect(await (await browser.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      counts: ZERO,
+      own: [],
+    });
+  });
+
+  test("refuses a change signed out, and any request from another origin, of another type or path", async () => {
+    const electionId = hex(await newElection(sql));
+    const body = { electionId, reaction: "heart", on: true };
+    const signedOut = await new Browser().call("POST", "/reactions/set", body);
+    expect(await signedOut.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+    const browser = await signedIn();
+    for (const path of ["/reactions/counts", "/reactions/own", "/reactions/set"]) {
+      const elsewhere = await browser.call("POST", path, body, { origin: "https://evil.test" });
+      expect(await elsewhere.json()).toEqual({ code: "FORBIDDEN_ORIGIN", status: 403 });
+      const text = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "text/plain" },
+        body: JSON.stringify(body),
+      });
+      expect(await text.json()).toEqual({ code: "UNSUPPORTED_MEDIA_TYPE", status: 415 });
+      expect((await browser.call("POST", `${path}?x=1`, body)).status).toBe(404);
+    }
+    expect((await browser.call("GET", "/reactions/counts")).status).toBe(404);
+    expect((await browser.call("POST", "/reactions", body)).status).toBe(404);
+    expect((await browser.call("POST", `/reactions/${electionId}`, body)).status).toBe(404);
+    // None of it was recorded.
+    expect(await (await browser.call("POST", "/reactions/own", { electionId })).json()).toEqual({
+      counts: ZERO,
+      own: [],
+    });
+  });
+
+  test("never reads the session for the counts (T-11)", async () => {
+    const electionId = hex(await newElection(sql));
+    const asked: string[] = [];
+    const handler = createReactionsHandler({
+      sql,
+      accountOf: async () => {
+        asked.push("accountOf");
+        return newAccountId();
+      },
+      origin: ORIGIN,
+      now: () => NOW,
+    });
+    const post = (path: string) =>
+      handler(
+        new Request(`${ORIGIN}${path}`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "content-type": "application/json",
+            cookie: `${SESSION}=x.y`,
+          },
+          body: JSON.stringify({ electionId }),
+        }),
+      );
+    expect(await (await post("/reactions/counts")).json()).toEqual({ counts: ZERO });
+    expect(asked).toEqual([]);
+    expect((await post("/reactions/own")).status).toBe(200);
+    expect(asked).toEqual(["accountOf"]);
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -1778,6 +2034,7 @@ describe("limits", () => {
       email: async () => new Response(null, { status: 404 }),
       phone: async () => new Response(null, { status: 404 }),
       token: async () => new Response(null, { status: 404 }),
+      reactions: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1804,6 +2061,7 @@ describe("limits", () => {
       email: async () => new Response(),
       phone: async () => new Response(),
       token: async () => new Response(),
+      reactions: async () => new Response(),
       clientDir,
       log: () => {},
     };

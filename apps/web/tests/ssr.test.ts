@@ -555,6 +555,17 @@ describe("poll page", () => {
     expect(html).toContain(">Share this poll<");
   });
 
+  test("offers reactions to everyone alike, their counts read once the page's script runs", async () => {
+    // The page's server never gets the account cookie (src/node/serve.ts), so
+    // the counts and the account's own come from /reactions in the browser.
+    const html = await (
+      await get(`/polls/${ID}`, { cookie: "__Secure-abolish-account.session_token=secret" })
+    ).text();
+    expect(html).toContain('<h2 id="reactions-title"');
+    expect(html).toContain("A reaction isn&#x27;t an answer");
+    expect(html).toContain("Loading reactions…");
+  });
+
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
     const response = await get(`/polls/${QUESTIONS_ID}`);
     expect(response.status).toBe(200);
@@ -623,6 +634,8 @@ describe("poll page", () => {
     expect(html).toContain("Approve any number");
     // Moderation withheld its text: we don't offer to spread it.
     expect(html).not.toContain("Share this poll");
+    // And it takes no reactions and shows no counts (T-68).
+    expect(html).not.toContain("reactions-title");
   });
 
   test("refuses a definition that names another election (T-34)", async () => {

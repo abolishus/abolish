@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 
+import type { ReactionsClient } from "../account/reactions.ts";
 import type { PollView } from "../poll.ts";
 import { PollSummary } from "./poll-summary.tsx";
 
@@ -26,6 +27,17 @@ const OPEN_AT = { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" };
 
 const board = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
 
+/** A signed-out visitor's reactions: the counts only. */
+const reactions: ReactionsClient = {
+  counts: async () => ({ heart: 4, laugh: 0, wow: 1, thinking: 2, sad: 0, clap: 0 }),
+  own: async () => {
+    throw new Error("signed out");
+  },
+  set: async () => {
+    throw new Error("signed out");
+  },
+};
+
 const meta = {
   component: PollSummary,
   args: {
@@ -35,6 +47,7 @@ const meta = {
     asOf: OPEN_AT,
     code: "mhanrsz",
     share: { url: "https://abolish.us/p/mhanrsz", title: "Poll mhanrsz" },
+    reactions,
   },
 } satisfies Meta<typeof PollSummary>;
 
@@ -65,6 +78,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByRole("heading", { name: "Answering" })).toBeVisible();
   await expect(canvas.getByText(/only in the ballot app, never on this website/)).toBeVisible();
   await expect(canvas.getByRole("button", { name: "Share this poll" })).toBeVisible();
+  // Reactions, offered alike whether or not this visitor answered (T-10, T-11).
+  await expect(await canvas.findByText("Heart: 4 people")).toBeInTheDocument();
   await openEvidence(canvasElement);
   await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();
@@ -155,6 +170,8 @@ export const Hidden: Story = {
     const note = within(canvasElement).getByRole("note");
     await expect(within(canvasElement).getByText("Text hidden")).toBeVisible();
     await expect(note).toHaveTextContent("withheld (Personal data)");
+    // No reactions on a hidden poll, and no counts (T-68).
+    await expect(within(canvasElement).queryByRole("heading", { name: "Reactions" })).toBeNull();
     await expect(
       within(note).getByRole("link", { name: "See the moderation log" }),
     ).toHaveAttribute("href", "/moderation");

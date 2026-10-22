@@ -45,6 +45,7 @@ describe("tier0-keys period", () => {
       [iso(TOKEN_KEY_PERIOD - 1), 0],
       [iso(TOKEN_KEY_PERIOD), 1],
       ["2026-10-22T16:00:00Z", 691],
+      ["2026-10-22T18:00:00+02:00", 691],
     ] as const) {
       const r = await cli("tier0-keys", "period", "--at", at);
       expect(r.out[0]?.["period"], at).toBe(q);
@@ -52,7 +53,7 @@ describe("tier0-keys period", () => {
   });
 
   test("refuses an --at that isn't a time from 1970 on", async () => {
-    for (const at of ["soon", "1969-12-31T23:59:59Z"]) {
+    for (const at of ["soon", "March 3", "2026-10-22T16:00:00", "1969-12-31T23:59:59Z"]) {
       const r = await cli("tier0-keys", "period", "--at", at);
       expect(r.code).toBe(2);
       expect(r.err[0]?.["error"]).toBe("usage");
@@ -97,9 +98,31 @@ describe("tier0-keys generate", () => {
     for (const e of entries) expect(printed).not.toContain(e.split(":")[1]);
   });
 
-  test("makes the current period's key, for the first release", async () => {
+  test("makes the current period's key only with --first, for the first release", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tier0-keys-"));
-    const r = await cli("tier0-keys", "generate", "--from", `${Q}`, "--count", "1", "--dir", dir);
+    const late = await cli(
+      "tier0-keys",
+      "generate",
+      "--from",
+      `${Q}`,
+      "--count",
+      "1",
+      "--dir",
+      dir,
+    );
+    expect(late).toMatchObject({ code: 1, err: [{ error: "period-started" }] });
+    expect(readdirSync(dir)).toEqual([]);
+    const r = await cli(
+      "tier0-keys",
+      "generate",
+      "--first",
+      "--from",
+      `${Q}`,
+      "--count",
+      "1",
+      "--dir",
+      dir,
+    );
     expect(r.code).toBe(0);
     expect(r.out[0]?.["period"]).toBe(Q);
   });
@@ -142,7 +165,16 @@ describe("tier0-keys generate", () => {
 
   test("refuses a directory that doesn't exist", async () => {
     const dir = join(mkdtempSync(join(tmpdir(), "tier0-keys-")), "absent");
-    const r = await cli("tier0-keys", "generate", "--from", `${Q}`, "--count", "1", "--dir", dir);
+    const r = await cli(
+      "tier0-keys",
+      "generate",
+      "--from",
+      `${Q + 1}`,
+      "--count",
+      "1",
+      "--dir",
+      dir,
+    );
     expect(r).toMatchObject({ code: 1, err: [{ error: "no-directory" }] });
   });
 

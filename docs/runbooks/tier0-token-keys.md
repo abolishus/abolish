@@ -6,18 +6,18 @@ How the operator makes, loads, rotates, retires and destroys the Tier 0 token is
 
 One key per 30-day period `q` ([[tier0-token]], Values). A key issues during its own period and redeems during it and the next, so it lives from the release that first lists it until the end of `q + 1`, after which every copy is destroyed.
 
-| Where                            | Holds                                                                                           |
-| -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| The key directory, offline       | One file per period, `tier0-key-<q>.txt`, from the moment it is made until the end of `q + 1`   |
-| `apps/web`'s `TIER0_ISSUER_KEYS` | The current period's key and the next one's (and the previous one's, until the period's deploy) |
-| Each release's deployment record | Every key's public half, `pkS`, with its period and whether it was retired early (never `skS`)  |
+| Where                            | Holds                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| The key directory, offline       | One file per period, `tier0-key-<q>.txt`, from the moment it is made until the end of `q + 1`              |
+| `apps/web`'s `TIER0_ISSUER_KEYS` | Two periods' keys: the previous and current until the period's last-week deploy, then the current and next |
+| Each release's deployment record | Every key's public half, `pkS`, with its period and whether it was retired early (never `skS`)             |
 
 `TIER0_ISSUER_KEYS` is the files' contents joined by commas, `q:hex,q:hex` (`packages/core`, `parseTier0IssuerKeys`). It goes with `TIER0_CHAIN_ID`, `TIER0_GROUP_REGISTRY`, `TIER0_GROUP` and `TIER0_DEPLOYMENT_RECORD`, the version-2 deployment record the release names, as lowercase hex: all five or none (`apps/web`, `src/node/main.ts`). Keep the key directory on a machine you trust, encrypted and offline, apart from every other secret (the account keys of [[account-keys]] included), never in the repository, the database, a log, a ticket or a chat. Keys for later periods stay there until they are near: an `apps/web` environment that leaks hands over only the keys it holds.
 
 Make keys only with the command line, on that machine. A random 32 bytes is not a key: about fifteen in sixteen are not a scalar below `l`, which `apps/web` refuses. From `apps/admin-cli`:
 
 - `vp node src/main.ts tier0-keys period [--at <ISO time>]` prints the period now (or at that time), when it starts and ends, and when its key stops redeeming.
-- `vp node src/main.ts tier0-keys generate --from <q> --count <n> --dir <dir>` makes keys for `n` consecutive periods from `q` (at most 16), each in its own new owner-only file, and prints each period's times, `publicKey` (`pkS`) and `keyId`, which go into the next release's deployment record. It refuses a period that has begun (`period-started`), since a release could then list its key only late, and any period whose file already exists (`key-exists`), writing nothing.
+- `vp node src/main.ts tier0-keys generate --from <q> --count <n> --dir <dir>` makes keys for `n` consecutive periods from `q` (at most 16), each in its own new owner-only file, and prints each period's times, `publicKey` (`pkS`) and `keyId`, which go into the next release's deployment record. It refuses a period that has begun (`period-started`), since a release could then list its key only late; `--first` allows the current one, for the first release only (First keys), and any period whose file already exists (`key-exists`), writing nothing.
 
 ## Rules
 
@@ -30,7 +30,7 @@ Make keys only with the command line, on that machine. A random 32 bytes is not 
 ## First keys
 
 1. Run `tier0-keys period`; call its `period` `q`.
-2. Run `tier0-keys generate --from <q> --count 7 --dir <dir>`. The first release may list its own period ([[deployment]], Token keys in a release), and no earlier period has a key.
+2. Run `tier0-keys generate --first --from <q> --count 7 --dir <dir>`. The first release may list its own period ([[deployment]], Token keys in a release), and no earlier period has a key.
 3. The release's signers put the printed `period`, `publicKey` and `retired: false` of each into the deployment record's `tier0_token_keys`, in ascending period, and check each `keyId`. No tool assembles a deployment record yet ([[P4-4]]).
 4. Once the release is published, set `apps/web`'s variables: `TIER0_ISSUER_KEYS` to the files of `q` and `q + 1` joined by a comma, `TIER0_DEPLOYMENT_RECORD` to the release's deployment record, and the other three from the same record. Deploy. `apps/web` doesn't start unless every held key is listed in that record for its own period, under its own `pkS`, and not retired.
 
@@ -38,17 +38,17 @@ Make keys only with the command line, on that machine. A random 32 bytes is not 
 
 In the last week of period `q` (see `tier0-keys period`'s `ends`):
 
-1. **Load the next key and drop the old one.** Set `TIER0_ISSUER_KEYS` to the files of `q` and `q + 1` only, and deploy. From `q + 1`'s start that is the previous key, which answers retries, and the current one, which issues: a restart stays valid until `q + 2` begins. The deploy also drops `q − 1`'s `skS` from memory, where it would otherwise stay until the next restart.
+1. **Load the next key and drop the old one.** Set `TIER0_ISSUER_KEYS` to the files of `q` and `q + 1` only, and deploy. From `q + 1`'s start that is the previous key, which answers retries, and the current one, which issues: a restart stays valid until `q + 2` begins. The deploy also drops `q − 1`'s `skS` from memory, where it would otherwise stay until the next restart. Dropping `q − 1` about a week before it stops redeeming means a client retrying a lost answer under it in that week is refused (`KEY_NOT_ISSUING`) and takes a token under `q + 1` instead: the price of never holding three keys.
 2. **Destroy the old key.** Once `q + 1` has begun, `q − 1`'s key no longer redeems: destroy every copy of `tier0-key-<q − 1>.txt`.
 3. **Keep six ahead.** If the next release is near, make the missing keys with `generate --from <first period with no file> --count <n>`, and give their public keys to the signers.
 
 **When a release is published**, set `TIER0_DEPLOYMENT_RECORD` (and the other three, if they changed) to its record and deploy. Since every release lists the next six periods, the running record lists `q + 1` as long as a release was published in the last six periods; otherwise `apps/web` refuses to start with `q + 1`'s key, and a release is overdue.
 
-**If the period's deploy was missed**, `apps/web` keeps running and issuing under `q + 1` as long as it held that key, but any restart after `q + 1` begins fails while `TIER0_ISSUER_KEYS` still holds `q − 1` (see Start-up errors): this is fail-closed by choice ([[P2-30]], Known-weak), so do step 1 at once. If it didn't hold `q + 1`, nobody can take a token until it does (`KEY_NOT_ISSUING`).
+**If the period's deploy was missed**, `apps/web` doesn't hold `q + 1`'s key, so nobody can take a token from `q + 1`'s start (`KEY_NOT_ISSUING`), and any restart after `q + 1` begins fails while `TIER0_ISSUER_KEYS` still holds `q − 1` (see Start-up errors): fail-closed by choice ([[P2-30]], Known-weak). Do step 1 at once.
 
 ## Retiring a key early
 
-Retire a key on any suspected exposure: of its file, the key directory or its machine, `apps/web`'s environment, a host that ran it, or a backup of any of these. Retire every key the exposure could have reached: the environment holds the current and next periods', the directory holds every key ahead.
+Retire a key on any suspected exposure: of its file, the key directory or its machine, `apps/web`'s environment, a host that ran it, or a backup of any of these. Retire every key the exposure could have reached: every key the environment held when exposed (the previous or the next period's as well as the current one), and after a leak of the key directory, every key in it. Each retired period that a release has listed issues nothing for its whole length, so a directory leak can stop Tier 0 issuance for up to seven months; only keys no release has listed yet may be thrown away and made again.
 
 1. **Stop issuing.** Remove the retired keys from `TIER0_ISSUER_KEYS` and deploy at once. If the current period's key is among them, nobody takes a token until the next period begins (`KEY_NOT_ISSUING`): a period's key is never replaced.
 2. **Publish the retirement.** The next release lists each retired key with its own period and `pkS` and `retired: true`. Never list a new key for its period, and never lift the mark later. Clients take a retirement from the release and re-issue their tokens under the next key ([[tier0-token]], Keys; [[P2-30]] parts 3 and 4, not built yet).

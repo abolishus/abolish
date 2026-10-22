@@ -25,11 +25,26 @@ function Frame({ children, className }: { children: ReactNode; className?: strin
 /**
  * Every page's frame, in the everyday register ([[language]]): wordmark,
  * the site's links and the footer's claim. `current` is the page's path, for
- * `aria-current`.
+ * `aria-current`. `links={false}` leaves out every link to another page, for
+ * the offline page, where each of them would fail the same way.
  */
-export function SiteLayout({ current, children }: { current?: string; children: ReactNode }) {
+export function SiteLayout({
+  current,
+  links = true,
+  children,
+}: {
+  current?: string;
+  links?: boolean;
+  children: ReactNode;
+}) {
   const t = useTranslate(catalogs);
   const here = (href: string) => (current === href ? "page" : undefined);
+  const wordmark = (
+    <>
+      <span className="font-heading text-2xl font-semibold tracking-tight">{t("siteName")}</span>
+      <span className="hidden text-sm text-muted-foreground md:inline">{t("siteTagline")}</span>
+    </>
+  );
   return (
     <div className="min-h-screen overflow-x-clip bg-background font-sans text-foreground">
       <a
@@ -40,39 +55,45 @@ export function SiteLayout({ current, children }: { current?: string; children: 
       </a>
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-1 px-4 py-3">
-          <a href="/" className="flex items-baseline gap-3" aria-current={here("/")}>
-            <span className="font-heading text-2xl font-semibold tracking-tight">
-              {t("siteName")}
-            </span>
-            <span className="hidden text-sm text-muted-foreground md:inline">
-              {t("siteTagline")}
-            </span>
-          </a>
-          <nav
-            aria-label={t("navSite")}
-            className="order-last w-full md:order-none md:ms-auto md:w-auto"
-          >
-            <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-1 p-0 text-base">
-              {NAV.map((item) => (
-                <li key={item.href}>
-                  <a
-                    href={item.href}
-                    aria-current={here(item.href)}
-                    className="inline-flex min-h-12 items-center underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
-                  >
-                    {t(item.label)}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <a
-            href="/account"
-            aria-current={here("/account")}
-            className="ms-auto inline-flex h-12 items-center px-2 text-base underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2 md:ms-0"
-          >
-            {t("navAccount")}
-          </a>
+          {links ? (
+            <a href="/" className="flex items-baseline gap-3" aria-current={here("/")}>
+              {wordmark}
+            </a>
+          ) : (
+            // The same height as the site's links would give the header.
+            <div className="flex min-h-12 items-center">
+              <p className="m-0 flex items-baseline gap-3">{wordmark}</p>
+            </div>
+          )}
+          {links && (
+            <>
+              <nav
+                aria-label={t("navSite")}
+                className="order-last w-full md:order-none md:ms-auto md:w-auto"
+              >
+                <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-1 p-0 text-base">
+                  {NAV.map((item) => (
+                    <li key={item.href}>
+                      <a
+                        href={item.href}
+                        aria-current={here(item.href)}
+                        className="inline-flex min-h-12 items-center underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
+                      >
+                        {t(item.label)}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+              <a
+                href="/account"
+                aria-current={here("/account")}
+                className="ms-auto inline-flex h-12 items-center px-2 text-base underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2 md:ms-0"
+              >
+                {t("navAccount")}
+              </a>
+            </>
+          )}
         </div>
       </header>
       <main id="main">
@@ -87,20 +108,22 @@ export function SiteLayout({ current, children }: { current?: string; children: 
           {/* The entry points and the ballot app's release fingerprint join
               here once the server has them to show (P4-4); until then the
               footer leaves them out rather than showing samples. */}
-          <nav aria-label={t("footerNav")} className="md:col-span-5">
-            <ul className="m-0 grid list-none gap-1 p-0 text-sm">
-              {NAV.map((item) => (
-                <li key={item.href}>
-                  <a
-                    className="inline-flex min-h-8 items-center underline underline-offset-4"
-                    href={item.href}
-                  >
-                    {t(item.label)}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          {links && (
+            <nav aria-label={t("footerNav")} className="md:col-span-5">
+              <ul className="m-0 grid list-none gap-1 p-0 text-sm">
+                {NAV.map((item) => (
+                  <li key={item.href}>
+                    <a
+                      className="inline-flex min-h-8 items-center underline underline-offset-4"
+                      href={item.href}
+                    >
+                      {t(item.label)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
         </Frame>
       </footer>
     </div>
@@ -131,6 +154,8 @@ const WAYS = [
 /**
  * A system page: what happened, in words, then other places to go, unless
  * there are none (`ways={false}`, offline, where every other page fails too).
+ * `code` is only for not found's familiar 404: elsewhere a label above the
+ * title would only repeat it.
  */
 function SystemPage({
   code,
@@ -138,7 +163,7 @@ function SystemPage({
   ways = true,
   children,
 }: {
-  code: string;
+  code?: string;
   title: string;
   ways?: boolean;
   children: ReactNode;
@@ -147,9 +172,11 @@ function SystemPage({
   return (
     <div className="grid gap-12">
       <div className="grid gap-8 pt-6 md:pt-18 lg:grid-cols-12">
-        <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase lg:col-span-12">
-          {code}
-        </p>
+        {code && (
+          <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase lg:col-span-12">
+            {code}
+          </p>
+        )}
         <h1 className="m-0 font-heading text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-7xl lg:col-span-9">
           {title}
         </h1>
@@ -202,7 +229,7 @@ export function NotFound() {
 export function Offline({ retry = "" }: { retry?: string }) {
   const t = useTranslate(catalogs);
   return (
-    <SystemPage code={t("offlineCode")} title={t("offlineTitle")} ways={false}>
+    <SystemPage title={t("offlineTitle")} ways={false}>
       <p className="m-0">{t("offline")}</p>
       <p className="m-0 text-base">{t("offlineKept")}</p>
       <div>
@@ -222,8 +249,9 @@ export function Failed({ error }: { error?: unknown }) {
   const t = useTranslate(catalogs);
   useEffect(() => reportCaught(error), [error]);
   return (
-    <SystemPage code={t("errorCode")} title={t("errorTitle")}>
+    <SystemPage title={t("errorTitle")}>
       <p className="m-0">{t("error")}</p>
+      <p className="m-0 text-base">{t("errorBallot")}</p>
       <div>
         <Button size="lg" onClick={() => window.location.reload()}>
           <RotateCw aria-hidden="true" data-icon="inline-start" />

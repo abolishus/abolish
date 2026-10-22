@@ -164,6 +164,24 @@ describe("exportAccount", () => {
       3, ${blinded})`;
     await addModerator(app, "moderator-one", user);
 
+    // Another account with every kind of row, none of which may show.
+    const other = await newAccount();
+    await app`INSERT INTO account_phones VALUES (${other}, ${randomBytes(32)}, 'p1', '2026-10-10T00:00:00Z')`;
+    const otherPoll = await openPoll(other);
+    const otherHandle = await makeProfile(app, other, "Someone Else", { now: NOW });
+    await showOnProfile(app, other, otherPoll.id, true);
+    await app`INSERT INTO moderation_actions (election_id, action, reason, moderator, decided_at)
+      VALUES (${otherPoll.electionId}, 'hide', 'illegal', 'mod', now())`;
+    const [otherHid] = await app`SELECT max(seq) AS seq FROM moderation_actions`;
+    await db.admin`INSERT INTO account_appeals VALUES (${otherHid!["seq"]}, ${otherPoll.id},
+      '2026-10-22T10:00:00Z', NULL, NULL, NULL)`;
+    await db.admin`INSERT INTO account_profile_appeals VALUES (${(seq + 1000n).toString()},
+      ${otherHandle}, '2026-10-22T10:30:00Z', NULL, NULL, NULL)`;
+    const otherRegistry = randomBytes(20);
+    await app`INSERT INTO account_tokens VALUES (${other}, 84532, ${otherRegistry}, 8, NULL, NULL,
+      ${randomBytes(32)})`;
+    await addModerator(app, "moderator-two", other);
+
     const out = await exportAccount(app, user, at);
     expect(out).toEqual({
       version: ACCOUNT_EXPORT_VERSION,
@@ -174,7 +192,7 @@ describe("exportAccount", () => {
       ],
       sessions: [{ createdAt: "2026-10-22T09:00:00.000Z", expiresAt: "2026-10-29T09:00:00.000Z" }],
       signInMethods: [],
-      email: { address: "Someone@Example.org", verifiedAt: NOW.toISOString() },
+      email: { address: "Someone@Example.org", verifiedOn: "2026-10-22T00:00:00.000Z" },
       phone: { verifiedOn: "2026-10-10T00:00:00.000Z" },
       polls: [
         {
@@ -243,6 +261,17 @@ describe("exportAccount", () => {
       "reviewer-one",
     ])
       expect(text).not.toContain(secret.toLowerCase());
+    for (const theirs of [
+      other,
+      otherPoll.id,
+      hex(otherPoll.electionId),
+      otherHandle,
+      "someone else",
+      (seq + 1000n).toString(),
+      hex(otherRegistry),
+      "moderator-two",
+    ])
+      expect(text).not.toContain(theirs.toLowerCase());
   });
 
   test("a deleted profile's naming day stays, as the table keeps it", async () => {
@@ -287,10 +316,10 @@ describe("exportAccount", () => {
             });
           made.push({ user, drafts, reactions: s.reactions });
         }
-        // The stand-in boxes above don't open: export without the address.
-        await app`DELETE FROM account_emails WHERE user_id = ANY(${made.map((m) => m.user)})`;
         for (const [i, m] of made.entries()) {
           const out = await exportAccount(app, m.user, at);
+          // The stand-in box doesn't open under KEYS: the rest still exports.
+          expect(out?.email).toEqual({ address: null, verifiedOn: expect.any(String) });
           expect(out?.polls.map((p) => p.id).sort()).toEqual([...m.drafts].sort());
           expect(out?.reactions.map((r) => `${r.electionId} ${r.reaction}`).sort()).toEqual(
             m.reactions.map((r) => `${hex(polls[r.poll]!.electionId)} ${r.reaction}`).sort(),

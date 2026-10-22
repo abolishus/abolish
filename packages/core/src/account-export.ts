@@ -5,9 +5,13 @@
 // out what would harm the account in another's hands and adds nothing for it
 // to read: secrets (session tokens, passkeys' public keys and credential IDs,
 // better-auth's provider tokens), the keyed hashes and ciphertexts we keep in
-// place of an address or a number, and rate-limit counts. `ACCOUNT_EXPORT`
-// names, for every account table, what the export takes from it or why it
-// takes nothing, and a test holds that list equal to the account class.
+// place of an address or a number, and rate-limit counts. Of a poll it
+// gives what the author wrote and what became of it (state, times, election
+// ID, failure), not the chain's bookkeeping (creator address, transaction
+// hashes, blocks, the electorate's cells), which is public on chain or
+// derived from the draft. `ACCOUNT_EXPORT` names, for every account table,
+// what the export takes from it or why it takes nothing, and a test holds
+// that list equal to the account class.
 //
 // T-10: account tables only, read in one snapshot. None of them names a
 // ballot, a nullifier, a receipt or the fact of having answered (the no-join
@@ -15,6 +19,9 @@
 // and key period, never the blinded element: on its own that element names
 // nothing, but with the blinding the voter's device keeps it is one step
 // toward the voting identity, and an exported file may be copied anywhere.
+// For the same reason the address's verification is given to the day, as
+// the number's is: the token is taken once the account is verified, and a
+// time to the second would narrow which of the next day's joins is its.
 // T-73: the address is opened only here and to send to it, and the export
 // gives the number's verification day only, as the number itself is gone.
 // T-68: an appeal's outcome without its reviewer, as the author's own view.
@@ -77,7 +84,7 @@ export const ACCOUNT_EXPORT = {
   account_sessions: "exported",
   account_tokens: "exported",
   account_users: "exported",
-  account_verifications: "names no account: passkey ceremonies' challenges",
+  account_verifications: "a passkey ceremony's challenge, gone in minutes",
   profile_handles: "names no account: every handle ever issued",
 } as const;
 
@@ -101,7 +108,8 @@ export interface AccountExport {
   }[];
   readonly sessions: readonly { readonly createdAt: string; readonly expiresAt: string }[];
   readonly signInMethods: readonly { readonly providerId: string; readonly createdAt: string }[];
-  readonly email: { readonly address: string; readonly verifiedAt: string } | null;
+  /** The address is `null` if its box no longer opens (its key left the keyring). */
+  readonly email: { readonly address: string | null; readonly verifiedOn: string } | null;
   /** The number itself is never kept. */
   readonly phone: { readonly verifiedOn: string } | null;
   readonly polls: readonly {
@@ -139,6 +147,18 @@ const ACCOUNT_ID = /^[a-z0-9]{32}$/;
 const iso = (d: Date) => d.toISOString();
 const isoOr = (d: Date | null) => (d === null ? null : d.toISOString());
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+
+const dayOf = (d: Date) => new Date(Math.floor(d.getTime() / 86_400_000) * 86_400_000);
+
+// A box the rotation couldn't move keeps an account's export from failing: the
+// rest is still the account's to take.
+function opened(keys: EmailKeys, accountId: string, box: Uint8Array, keyId: string) {
+  try {
+    return unsealEmailAddress(keys, accountId, box, keyId);
+  } catch {
+    return null;
+  }
+}
 
 const appealOf = (r: {
   decisionSeq: bigint;
@@ -292,8 +312,8 @@ export async function exportAccount(
           email === undefined
             ? null
             : {
-                address: unsealEmailAddress(keys, accountId, email.addressBox, email.boxKey),
-                verifiedAt: iso(email.verifiedAt),
+                address: opened(keys, accountId, email.addressBox, email.boxKey),
+                verifiedOn: iso(dayOf(email.verifiedAt)),
               },
         phone: phone === undefined ? null : { verifiedOn: iso(phone.verifiedOn) },
         polls: polls.map((p) => ({

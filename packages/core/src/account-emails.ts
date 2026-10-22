@@ -275,7 +275,7 @@ function unseal(keys: EmailKeys, accountId: string, box: Uint8Array, keyId: stri
   }
 }
 
-/** `unseal`, for the account's own export (src/account-export.ts). */
+/** `unseal`, for the account's own export (src/account-export.ts) only. */
 export const unsealEmailAddress = unseal;
 
 /**

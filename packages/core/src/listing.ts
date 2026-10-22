@@ -10,14 +10,15 @@
 // registry's order, the definition's own times and, for `answered`, a count
 // of the public board. None reads anything an account did, so none is
 // personalised, and the one count is of distinct voters, never of views,
-// reactions or shares. Search (src/search.ts) only filters an order: it
-// ranks nothing.
+// reactions or shares. Search (src/search.ts) and the listing tags
+// (src/poll-tags.ts) only filter an order: they rank nothing.
 
 import type { PeriodClock } from "@abolishus/crypto";
 import { and, asc, desc, eq, exists, gt, lte, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
+import { POLL_TOPICS, type PollTopic } from "./poll-draft-rules.ts";
 import { MAX_SEARCH_TERMS } from "./search.ts";
 import {
   boardBallotKeys,
@@ -27,6 +28,7 @@ import {
   electionRegistrations,
   electionSchedules,
   moderationActions,
+  pollTags,
 } from "./db/schema/index.ts";
 
 /** The most polls one page of the listing returns. */
@@ -49,6 +51,15 @@ export type ListingOrder =
   | { readonly sort: "new" | "closing"; readonly now: bigint }
   /** `clock`: the anchoring clock by which our boards label each entry's segment. */
   | { readonly sort: "answered"; readonly now: bigint; readonly clock: PeriodClock };
+
+/**
+ * The listing's tag filters ([[0041-poll-topics-and-places]]): a topic, and a
+ * place by its key (`placeKey`).
+ */
+export interface ListingTags {
+  readonly topic?: PollTopic;
+  readonly placeKey?: string;
+}
 
 export class ListingError extends Error {
   override readonly name = "ListingError";
@@ -134,6 +145,10 @@ export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint;
  * contains every term are listed, in the same order; the cursor is placed as
  * without them, so it need not match. A poll whose display text was never
  * stored, or has been deleted, matches no search.
+ *
+ * With `tags`, only the polls filed under that topic, or at the place with
+ * that key, or both, are listed, in the same order and with the cursor
+ * placed as without them. An untagged poll matches no tag filter.
  */
 export async function listPolls(
   client: Sql,
@@ -141,6 +156,7 @@ export async function listPolls(
   limit: number,
   order: ListingOrder = { sort: "id" },
   terms: readonly string[] = [],
+  tags: ListingTags = {},
 ): Promise<Uint8Array[]> {
   if (after !== undefined && (!isBytes(after) || after.length !== 32))
     throw new TypeError("after must be 32 bytes");
@@ -159,6 +175,13 @@ export async function listPolls(
     !terms.every((t) => typeof t === "string" && t !== "")
   )
     throw new TypeError(`terms must be up to ${MAX_SEARCH_TERMS} non-empty strings`);
+  if (
+    typeof tags !== "object" ||
+    tags === null ||
+    (tags.topic !== undefined && !(POLL_TOPICS as readonly unknown[]).includes(tags.topic)) ||
+    (tags.placeKey !== undefined && (typeof tags.placeKey !== "string" || tags.placeKey === ""))
+  )
+    throw new TypeError("tags must be a topic of POLL_TOPICS and a non-empty place key");
   const window = order.sort === "answered" ? answeredWindow(order.now, order.clock) : undefined;
   const cursor = after === undefined ? undefined : new Uint8Array(after);
   const db = drizzle({ client });
@@ -185,7 +208,23 @@ export async function listPolls(
               ),
             ),
         );
-  const listed = and(restored, matched);
+  // The poll's row, through its primary key.
+  const tagged =
+    tags.topic === undefined && tags.placeKey === undefined
+      ? undefined
+      : exists(
+          db
+            .select({ one: q`1` })
+            .from(pollTags)
+            .where(
+              and(
+                eq(pollTags.electionId, electionDefinitions.electionId),
+                tags.topic === undefined ? undefined : eq(pollTags.topic, tags.topic),
+                tags.placeKey === undefined ? undefined : eq(pollTags.placeKey, tags.placeKey),
+              ),
+            ),
+        );
+  const listed = and(restored, matched, tagged);
 
   if (order.sort === "id") {
     const rows = await db

@@ -3,8 +3,8 @@
 // registry sync has recorded its `DefinitionRegistered` event and stored the
 // definition the registry holds, the worker reads that definition back and
 // compares it, field by field, with the author's draft (rule 13), boards the
-// ceremony transcript as the board's first entry, stores the display text,
-// and the poll moves to `open`.
+// ceremony transcript as the board's first entry, stores the display text
+// and the draft's listing tags, and the poll moves to `open`.
 //
 // The read-back is independent of the creation key's own read of its
 // registration: the registry sync takes the event and the definition from
@@ -24,7 +24,8 @@
 //
 // T-10: the step reads the author's record and writes public records only:
 // the transcript and the display text are published with the registration
-// and name no voter.
+// and name no voter, and the tags name only the election
+// ([[0041-poll-topics-and-places]]).
 
 import {
   ceremonyTranscriptHash,
@@ -49,6 +50,7 @@ import { accountPolls, ceremonyStubs, electionRegistrations } from "./db/schema/
 import { readDefinition } from "./definitions.ts";
 import { DisplayTextError, storeDisplayText } from "./display-texts.ts";
 import { draftDisplayText, draftQuestions, type PollDraft } from "./poll-drafts.ts";
+import { insertPollTags } from "./poll-tags.ts";
 import type { StoredTierElectorate } from "./poll-roots.ts";
 import { tierElectorate } from "./poll-stubs.ts";
 
@@ -344,6 +346,9 @@ export async function openPolls(
       // moderation's; the definition commits to this one record either way.
       if (e.code !== "conflict") throw e;
     }
+    // Before `open`, so a run that dies here writes them on the next; the
+    // fill writes those of polls opened before the table.
+    await insertPollTags(client, electionId, draft);
     return (await move(p.id, electionId, { state: "open" })) ? "opened" : undefined;
   };
 

@@ -26,6 +26,7 @@ import {
   searchTerms,
   shortCodeOf,
   parseTier0Request,
+  placeKey,
   parseTier1Request,
   Tier0RegistrationError,
   type Tier0Registrations,
@@ -106,7 +107,14 @@ export const router = os.router({
         // The query is matched and dropped: like every query string, it is
         // never logged (T-11, T-67).
         const terms = input.q === undefined ? [] : searchTerms(input.q);
-        const elections = await listPolls(context.sql, after, Number(input.limit), order, terms);
+        const placeKeyOf = input.place === undefined ? undefined : placeKey(input.place);
+        // Quoting nothing of the place, as of the query (T-11).
+        if (input.place !== undefined && placeKeyOf === undefined)
+          throw new ORPCError("BAD_REQUEST", { message: "No place is left once normalised." });
+        const elections = await listPolls(context.sql, after, Number(input.limit), order, terms, {
+          ...(input.topic === undefined ? {} : { topic: input.topic }),
+          ...(placeKeyOf === undefined ? {} : { placeKey: placeKeyOf }),
+        });
         return { elections: elections.map(toHex) };
       } catch (e) {
         if (e instanceof ListingError) throw errors.CURSOR_NOT_FOUND();

@@ -22,6 +22,7 @@ import {
   approvedCeremony,
   type BoardClock,
   createPollDraft,
+  fillPollTags,
   draftDisplayText,
   newAccountId,
   openCeremonyRuns,
@@ -142,13 +143,13 @@ interface Registered {
  * as part 5b leaves it; with `synced`, its registration recorded and its
  * definition stored as the registry sync does.
  */
-async function registered(synced = true): Promise<Registered> {
+async function registered(synced = true, draft = DRAFT): Promise<Registered> {
   const author = newAccountId();
   await app`
     INSERT INTO account_users VALUES (${author}, ${`${newAccountId()}@account.invalid`},
       false, '', NULL, now(), now())`;
   const submittedAt = new Date(NOW.getTime() - 3600_000);
-  const id = await createPollDraft(app, author, DRAFT, submittedAt);
+  const id = await createPollDraft(app, author, draft, submittedAt);
   await submitPollDraft(app, author, id, {
     turnstile: { verify: async () => "passed" as const },
     token: "t",
@@ -191,7 +192,7 @@ async function registered(synced = true): Promise<Registered> {
     electionId,
     poll: {
       electionId,
-      draft: DRAFT,
+      draft,
       electorate: ELECTORATE,
       stubHash,
       stub: Uint8Array.from(stub!["stub"]),
@@ -232,6 +233,10 @@ const poll = async (id: string) => {
   return r!;
 };
 const clear = () => db.admin`DELETE FROM account_polls WHERE state = 'registered'`;
+const tags = async (electionId: Uint8Array) =>
+  (
+    await db.admin`SELECT topic, place, place_key FROM poll_tags WHERE election_id = ${electionId}`
+  ).map((r) => ({ ...r }));
 
 /** One registered poll's records, shared by the read-back's pure tests. */
 let base: Registered;
@@ -292,6 +297,32 @@ describe("a registered poll", { timeout: 60_000 }, () => {
     expect(board.length).toBe(1);
     // The entry kept its first segment.
     expect(decodeBoardEntry(board[0]!, 5).segment).toBe(segmentAt(NOW_S));
+  });
+
+  test("carries the draft's listing tags, and none for an untagged draft", async () => {
+    const tagged = await registered(true, { ...DRAFT, topic: "food", place: "Riverside Park" });
+    const untagged = await registered();
+    expect(await run()).toEqual({ ...quiet, opened: 2 });
+    expect(await tags(tagged.electionId)).toEqual([
+      { topic: "food", place: "Riverside Park", place_key: "riverside park" },
+    ]);
+    expect(await tags(untagged.electionId)).toEqual([]);
+  });
+
+  test("the fill writes the tags of an open poll that has none, once, and of no other", async () => {
+    const opened = await registered(true, { ...DRAFT, place: "Old Town" });
+    expect(await run()).toEqual({ ...quiet, opened: 1 });
+    // As if it opened before migration 0035, or its run died after `open`.
+    await db.admin`DELETE FROM poll_tags WHERE election_id = ${opened.electionId}`;
+    const waiting = await registered(false, { ...DRAFT, topic: "sport" });
+    expect(await fillPollTags(app)).toBe(1);
+    expect(await tags(opened.electionId)).toEqual([
+      { topic: null, place: "Old Town", place_key: "old town" },
+    ]);
+    // Not open yet: the step writes its tags when it opens it.
+    expect(await tags(waiting.electionId)).toEqual([]);
+    expect(await fillPollTags(app)).toBe(0);
+    await clear();
   });
 
   test("two runs racing on separate connections board the transcript once", async () => {

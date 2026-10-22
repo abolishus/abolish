@@ -21,10 +21,13 @@ import {
   IDENTITY_BACKUP_ENVELOPE_LENGTH,
   IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
+  insertPollTags,
+  MAX_PLACE_LENGTH as CORE_MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY as CORE_MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS as CORE_MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH as CORE_MAX_SHORT_CODE_LENGTH,
   moderate,
+  POLL_TOPICS as CORE_POLL_TOPICS,
   readBoard,
   readReportQueue,
   recordRegistration,
@@ -40,9 +43,11 @@ import {
   contract,
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS,
   MAX_SHORT_CODE_LENGTH,
+  POLL_TOPICS,
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
@@ -677,6 +682,84 @@ describe("elections.list (T-68)", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(logs).toHaveLength(2);
       expect(JSON.stringify(logs)).not.toContain(secret);
+    });
+  });
+
+  describe("topic and place (P2-26 part 1c; ADR 0041)", () => {
+    /** Every poll listed with `filter`, a page of `limit` at a time. */
+    async function filed(filter: Record<string, string>, limit = "256") {
+      const all: string[] = [];
+      let after: string | undefined;
+      for (;;) {
+        const r = await get("/elections", {
+          ...filter,
+          limit,
+          ...(after !== undefined && { after }),
+        });
+        expect(r.status).toBe(200);
+        const page = (await json(r))["elections"] as string[];
+        all.push(...page);
+        if (page.length < Number(limit)) return all;
+        after = page.at(-1);
+      }
+    }
+
+    test("the contract's topics and place bound are core's", () => {
+      expect([[...POLL_TOPICS], MAX_PLACE_LENGTH]).toEqual([
+        [...CORE_POLL_TOPICS],
+        CORE_MAX_PLACE_LENGTH,
+      ]);
+    });
+
+    test("lists the polls under a topic or at a place, matched whole after normalising, a page at a time", async () => {
+      const town = `Brook ${hex(b32()).slice(0, 8)}`;
+      const at = await election();
+      const atAndSport = await election();
+      const elsewhere = await election();
+      await insertPollTags(app, at.id, { place: town });
+      await insertPollTags(app, atAndSport.id, { topic: "sport", place: town });
+      await insertPollTags(app, elsewhere.id, { topic: "sport", place: `${town} East` });
+      const ids = (...xs: { id: Uint8Array }[]) => xs.map((x) => hex(x.id)).sort();
+      for (const limit of ["1", "256"]) {
+        expect(await filed({ place: ` ${town.toUpperCase()}  ` }, limit)).toEqual(
+          ids(at, atAndSport),
+        );
+        expect(await filed({ place: town, topic: "sport" }, limit)).toEqual(ids(atAndSport));
+        expect(await filed({ place: `${town} east` }, limit)).toEqual(ids(elsewhere));
+      }
+      const sport = await filed({ topic: "sport" });
+      for (const x of [atAndSport, elsewhere]) expect(sport).toContain(hex(x.id));
+      expect(sport).not.toContain(hex(at.id));
+      await moderate(app, atAndSport.id, { action: "delist", reason: "spam", moderator: "mod-1" });
+      expect(await filed({ place: town })).toEqual(ids(at));
+    });
+
+    test("refuses an unknown topic, an empty or overlong place, and one blank once normalised, quoting nothing", async () => {
+      for (const filter of [
+        { topic: "weather" },
+        { topic: "Sport" },
+        { place: "" },
+        { place: "a".repeat(MAX_PLACE_LENGTH + 1) },
+        { place: "  " },
+        { place: "\u0085" },
+      ]) {
+        const r = await get("/elections", { ...filter, limit: "1" });
+        expect(r.status, JSON.stringify(filter)).toBe(400);
+      }
+      const r = await get("/elections", { place: "\u0001\u009f", limit: "1" });
+      expect(r.status).toBe(400);
+      expect(JSON.stringify(await json(r))).not.toContain("\u0001");
+      for (const filter of [{ topic: "transport" }, { place: "a".repeat(MAX_PLACE_LENGTH) }])
+        expect((await get("/elections", { ...filter, limit: "1" })).status).toBe(200);
+    });
+
+    test("the place is never logged", async () => {
+      const secret = `Unusualplace ${hex(b32()).slice(0, 12)}`;
+      logs.length = 0;
+      await get("/elections", { place: secret, limit: "1" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(logs).toHaveLength(1);
+      expect(JSON.stringify(logs)).not.toContain(secret.split(" ")[1]);
     });
   });
 });

@@ -232,11 +232,16 @@ describe("drafts client", () => {
       { ...STORED, questions: [{ ...question, maxSelections: -1 }] },
       { ...STORED, questions: [{ ...question, options: [{ label: "Yes" }] }] },
       { ...STORED, questions: {} },
+      { ...STORED, topic: 1 },
+      { ...STORED, place: null },
     ];
     for (const draft of bad) {
       serve(Response.json({ ...DRAFT, draft }));
       expect(await failure(draftsClient.read(ID))).toBe("failed");
     }
+    const filed = { ...STORED, topic: "transport", place: "Harbor" };
+    serve(Response.json({ ...DRAFT, draft: filed }));
+    expect((await draftsClient.read(ID)).draft).toEqual({ ...filed, closesAt: 1793750400n });
     // Another poll's answer isn't this page's.
     serve(Response.json({ ...DRAFT, id: "b".repeat(32), draft: STORED }));
     expect(await failure(draftsClient.read(ID))).toBe("failed");

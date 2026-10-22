@@ -479,6 +479,13 @@ describe("poll drafts under /drafts", () => {
       id,
       draft: edited,
     });
+    const filed = { ...edited, topic: "food", place: "Riverside" };
+    expect((await author.call("POST", "/drafts/update", { id, draft: filed })).status).toBe(200);
+    expect(await (await author.call("POST", "/drafts/read", { id })).json()).toMatchObject({
+      id,
+      draft: filed,
+    });
+    expect((await author.call("POST", "/drafts/update", { id, draft: edited })).status).toBe(200);
 
     const other = new Browser();
     await register(other, new SoftAuthenticator(RP_ID), true);
@@ -518,11 +525,28 @@ describe("poll drafts under /drafts", () => {
       status: 422,
       problem: { rule: "selections", question: 1 },
     });
+    for (const [filed, rule] of [
+      [{ topic: "sports" }, "topic"],
+      [{ place: "Alder  County" }, "place"],
+    ] as const) {
+      const refused = await author.call("POST", "/drafts/create", {
+        draft: { ...draft, ...filed },
+      });
+      expect(refused.status).toBe(422);
+      expect(await refused.json()).toEqual({
+        code: "DRAFT_REFUSED",
+        status: 422,
+        problem: { rule },
+      });
+    }
     // Outside the transport bounds, or not the contract's shape: 400.
     for (const bad of [
       { draft: { ...draft, extra: 1 } },
       { draft: { ...draft, closesAt: "01" } },
       { draft: { ...draft, title: "x".repeat(1025) } },
+      { draft: { ...draft, topic: "x".repeat(17) } },
+      { draft: { ...draft, place: "x".repeat(161) } },
+      { draft: { ...draft, place: 1 } },
       {},
     ])
       expect((await author.call("POST", "/drafts/create", bad)).status).toBe(400);

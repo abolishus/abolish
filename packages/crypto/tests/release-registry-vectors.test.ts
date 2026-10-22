@@ -145,10 +145,8 @@ describe("release registry (docs/spec/contracts.md, Release registry)", () => {
     // with a status); a code the generator gives that the table lacks, or one
     // the table has with no vector, fails here.
     const page = readFileSync(new URL("../verifier.md", SPEC_VECTORS), "utf8");
-    const section = page.slice(
-      page.indexOf("\n### Served client\n"),
-      page.indexOf("\n### Procedure\n"),
-    );
+    const start = page.indexOf("\n### Served client\n") + 1;
+    const section = page.slice(start, page.indexOf("\n### ", start));
     const codes = [...section.matchAll(/^\| `([a-z0-9-]+)` +\| (?:fail|unverifiable) /gm)].map(
       (m) => m[1],
     );

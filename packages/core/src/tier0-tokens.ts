@@ -31,6 +31,7 @@ import type { Sql } from "postgres";
 import {
   accountEmails,
   accountPhones,
+  accountUsers,
   accountTokens,
   tier0TokenIssuances,
 } from "./db/schema/index.ts";
@@ -193,9 +194,18 @@ type Tx = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0
  * Whether `accountId` may take a token (step 2.1): verified by e-mail and by
  * phone ([[0038-verified-accounts]]). Both rows are locked for the rest of
  * the transaction, so a number moved to another account, or an address
- * changed, can't leave between this check and the record (T-01).
+ * changed, can't leave between this check and the record (T-01). The
+ * account's own row is locked first, in the order its deletion's cascade
+ * takes them, so an account deleted mid-request is refused here rather than
+ * deadlocking with the record's reference to it.
  */
 async function mayTakeToken(tx: Tx, accountId: string): Promise<boolean> {
+  const user = await tx
+    .select({ id: accountUsers.id })
+    .from(accountUsers)
+    .where(eq(accountUsers.id, accountId))
+    .for("key share");
+  if (user.length !== 1) return false;
   const email = await tx
     .select({ userId: accountEmails.userId })
     .from(accountEmails)

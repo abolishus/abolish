@@ -351,6 +351,18 @@ describe("issuance", () => {
     expect(await record(account)).toBeUndefined();
   });
 
+  test("refuses an account deleted mid-request, without deadlocking with its cascade", async () => {
+    const account = await newAccount();
+    let issuing: Promise<Tier0IssuanceErrorCode> | undefined;
+    await app2.begin(async (tx) => {
+      await tx`DELETE FROM account_users WHERE id = ${account}`;
+      issuing = refusal(issue(account, blind().request));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+    expect(await issuing).toBe("account");
+    expect(await record(account)).toBeUndefined();
+  });
+
   test("refuses a key that isn't the one issuing now", async () => {
     const account = await newAccount();
     // Unknown, next period's (held ahead) and last period's (still redeeming, but no record).

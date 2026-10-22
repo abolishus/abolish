@@ -88,7 +88,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(rows[4]!).getByText("Refiled")).toBeVisible();
   await expect(within(rows[4]!).getByText("Topic now Housing · Place changed")).toBeVisible();
   await expect(within(rows[4]!).getByText("Misfiled")).toBeVisible();
-  await expect(within(rows[5]!).getByText("Topic cleared · Place cleared")).toBeVisible();
+  await expect(within(rows[5]!).getByText("No topic · No place")).toBeVisible();
   // The fingerprint is a seal beside the link, not a second name for the poll.
   await expect(within(log).queryByRole("img")).toBeNull();
   await expect(canvas.getByText("October 1, 2026 at 12:00 PM UTC")).toBeVisible();

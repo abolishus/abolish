@@ -1175,7 +1175,7 @@ describe("poll list", () => {
     const html = await (await get("/moderation")).text();
     expect(html).toContain("Refiled");
     expect(html).toContain("Misfiled");
-    expect(html).toContain("Topic now Transport · Place cleared");
+    expect(html).toContain("Topic now Transport · No place");
   });
 
   test.each(["?after=abc", `?after=${ID.toUpperCase()}`, `?after=${ID}&after=${ID}`])(

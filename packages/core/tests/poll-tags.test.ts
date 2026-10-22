@@ -747,6 +747,60 @@ describe("the public log", () => {
     ]);
     expect((await readPublicModerationLog(app, c.seq, 1)).map((x) => x.seq)).toEqual([d.seq]);
   });
+
+  test("leaves out a topic written past refilePoll, rather than failing every page that holds it", async () => {
+    const id = await poll({ topic: "food" });
+    const [row] = await app<{ seq: string }[]>`
+      INSERT INTO poll_tag_actions (seq, election_id, topic_set, topic, place_set, reason, moderator, decided_at)
+      VALUES (0, ${id}, true, 'weather', false, 'misfiled', 'mod-1', now()) RETURNING seq`;
+    await app`UPDATE poll_tags SET topic = 'weather' WHERE election_id = ${id}`;
+    const seq = BigInt(row!.seq);
+    const [entry] = await readPublicModerationLog(app, seq - 1n, 1);
+    expect(entry).toEqual({
+      target: "refiling",
+      seq,
+      electionId: id,
+      reason: "misfiled",
+      decidedAt: entry!.decidedAt,
+    });
+    expect(await readPollTags(app, id)).toEqual({ state: "visible", tags: {} });
+  });
+
+  test("paging the whole log at any page size returns every decision and refiling once, in order (fast-check)", async () => {
+    const id = await poll({ topic: "food" });
+    const steps = [
+      () => moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" }),
+      () =>
+        refilePoll(app, id, { tags: { topic: "sport" }, reason: "misfiled", moderator: "mod-1" }),
+      () => moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" }),
+      () =>
+        refilePoll(app, id, {
+          tags: { place: "Mill Lane" },
+          reason: "misfiled",
+          moderator: "mod-2",
+        }),
+      () => refilePoll(app, id, { tags: {}, reason: "personal-data", moderator: "mod-2" }),
+      () => moderate(app, id, { action: "hide", reason: "threat", moderator: "mod-2" }),
+    ];
+    const written: bigint[] = [];
+    for (const step of steps) written.push((await step()).seq);
+    const start = written[0]! - 1n;
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 7 }), async (limit) => {
+        const seen: bigint[] = [];
+        let after = start;
+        for (;;) {
+          const page = await readPublicModerationLog(app, after, limit);
+          expect(page.length).toBeLessThanOrEqual(limit);
+          seen.push(...page.map((e) => e.seq));
+          if (page.length < limit) break;
+          after = page.at(-1)!.seq;
+        }
+        expect(seen.filter((s) => s <= written.at(-1)!)).toEqual(written);
+      }),
+      { numRuns: Math.min(numRuns, 30) },
+    );
+  });
 });
 
 describe("a poll's tags, as its page reads them", () => {

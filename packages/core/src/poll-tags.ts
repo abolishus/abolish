@@ -258,8 +258,10 @@ const INT8_MAX = (1n << 63n) - 1n;
  * the place's words. The topic is one of `POLL_TOPICS`, so it can say nothing
  * of anyone; the place is free text, and a place a moderator set may be one a
  * later refiling clears for personal data, so the log says only that it
- * changed or was cleared, and the poll's page shows the place it is filed
- * under now (`readPollTags`; T-17, T-68).
+ * changed or was cleared, and the API serves the place it is filed under now
+ * (`readPollTags`; T-17, T-68). A poll's first filing by moderation sets
+ * both tags, so a tag it didn't give reads as cleared even if the poll never
+ * had one.
  */
 export interface PublicRefilingEntry {
   readonly seq: bigint;
@@ -308,10 +310,18 @@ export async function refilingLogOf(
     // writes rows, with tags `tagsProblem` passed.
     reason: r.reason as RefileReason,
     decidedAt: r.decidedAt,
-    ...(r.topicSet ? { topic: (r.topic ?? null) as PollTopic | null } : {}),
+    // A topic outside `POLL_TOPICS` (only a row written past `refilePoll`
+    // can hold one) is left out rather than failing every page of the log
+    // that holds it, which no one could then read past (T-68).
+    ...(r.topicSet && (r.topic === null || isTopic(r.topic))
+      ? { topic: r.topic as PollTopic | null }
+      : {}),
     ...(r.placeSet ? { place: r.placeCleared ? ("cleared" as const) : ("changed" as const) } : {}),
   }));
 }
+
+const isTopic = (topic: string): topic is PollTopic =>
+  (POLL_TOPICS as readonly string[]).includes(topic);
 
 /** The tags `electionId`'s poll is filed under: none if it has no row. */
 async function tagsOf(db: Pick<ModerationTx, "select">, electionId: Uint8Array): Promise<PollTags> {
@@ -321,8 +331,9 @@ async function tagsOf(db: Pick<ModerationTx, "select">, electionId: Uint8Array):
     .where(eq(pollTags.electionId, electionId));
   return {
     // Only `insertPollTags` and `refilePoll` write rows, each with tags
-    // `tagsProblem` passed.
-    ...(row?.topic == null ? {} : { topic: row.topic as PollTopic }),
+    // `tagsProblem` passed; a topic written past them is left out, as in the
+    // log (T-68).
+    ...(row?.topic == null || !isTopic(row.topic) ? {} : { topic: row.topic }),
     ...(row?.place == null ? {} : { place: row.place }),
   };
 }

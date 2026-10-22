@@ -1,7 +1,8 @@
-// Moderation of a creator's profile, under /profiles on apps/web's origin
-// ([[0040-creator-profiles]]; P2-27 part 1c-2c): anyone reports a profile by
-// its handle, and a signed-in author sees their own profile's moderation and
-// appeals its newest hide. Both read `account_profiles`, an account table,
+// A creator's profile, under /profiles on apps/web's origin
+// ([[0040-creator-profiles]]; P2-27 parts 1c-2c and 1d-1): anyone reports a
+// profile by its handle; a signed-in author makes, renames and deletes their
+// own profile, chooses which of their polls it shows, sees its moderation
+// and appeals its newest hide. All read `account_profiles`, an account table,
 // so they are here, never on the API, which reads none (T-10, ADR 0017).
 // This transport parses, asks core and serialises; the rules are
 // packages/core's (src/profile-moderation.ts).
@@ -11,7 +12,8 @@
 // reported, and core counts the report with nothing about the reporter, as
 // a poll's report on the API. The author's routes take no handle: the
 // session names the account, and the account names its one profile, so no
-// one sees another's appeals. Answers carry the public decisions, never a
+// one sees another's profile or appeals; a poll is shown only by the account
+// that wrote it (core's `showOnProfile`). Answers carry the public decisions, never a
 // moderator or a reviewer (T-68). T-10, T-11, T-67: the handle travels in
 // the body, never the path, and answers are no-store, so the request log
 // keeps only the route class. CSRF: the session cookie is SameSite=Strict,
@@ -20,13 +22,21 @@
 import {
   AppealError,
   type AppealErrorCode,
+  deleteProfile,
   fileProfileAppeal,
+  makeProfile,
   ModerationError,
+  type OwnProfile,
   PROFILE_HANDLE,
+  ProfileError,
+  type ProfileErrorCode,
   type ProfileModeration,
+  readOwnProfile,
   readProfileModeration,
   REMOVAL_REASONS,
+  renameProfile,
   reportProfile,
+  showOnProfile,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
 import * as z from "zod";
@@ -36,6 +46,11 @@ export const PROFILE_ROUTES = [
   "POST /profiles/report",
   "POST /profiles/moderation",
   "POST /profiles/appeal",
+  "POST /profiles/own",
+  "POST /profiles/make",
+  "POST /profiles/rename",
+  "POST /profiles/delete",
+  "POST /profiles/show",
 ] as const;
 
 const ROUTES: ReadonlySet<string> = new Set(PROFILE_ROUTES);
@@ -46,7 +61,13 @@ export interface ProfilesOptions {
   readonly accountOf: (headers: Headers) => Promise<string | undefined>;
   /** apps/web's origin: every POST must come from it. */
   readonly origin: string;
+  /** The clock a name's one change a UTC day is counted by. */
+  readonly now?: () => Date;
 }
+
+const PollId = z.string().regex(/^[a-z0-9]{32}$/);
+// `profileName` judges the name; the schema only takes a string.
+const Name = z.string();
 
 const Inputs = {
   "POST /profiles/report": z.strictObject({
@@ -55,7 +76,20 @@ const Inputs = {
   }),
   "POST /profiles/moderation": z.strictObject({}),
   "POST /profiles/appeal": z.strictObject({}),
+  "POST /profiles/own": z.strictObject({}),
+  "POST /profiles/make": z.strictObject({ name: Name }),
+  "POST /profiles/rename": z.strictObject({ name: Name }),
+  "POST /profiles/delete": z.strictObject({}),
+  "POST /profiles/show": z.strictObject({ pollId: PollId, on: z.boolean() }),
 } as const;
+
+const own = (p: OwnProfile) => ({
+  handle: p.handle,
+  name: p.name,
+  // A UTC day, as `YYYY-MM-DD`.
+  ...(p.renamableOn === undefined ? {} : { renamableOn: p.renamableOn.toISOString().slice(0, 10) }),
+  pollIds: p.pollIds,
+});
 
 // Sequence numbers are Postgres `bigint`s, so decimal strings, as the API's log.
 const moderation = (m: ProfileModeration) => ({
@@ -92,15 +126,26 @@ const APPEAL_ERRORS: Partial<Record<AppealErrorCode, [number, string]>> = {
   "already-appealed": [409, "ALREADY_APPEALED"],
 };
 
+const PROFILE_ERRORS: Readonly<Record<ProfileErrorCode, [number, string]>> = {
+  account: [403, "PHONE_UNVERIFIED"],
+  exists: [409, "PROFILE_EXISTS"],
+  "invalid-name": [422, "INVALID_NAME"],
+  "no-profile": [404, "NO_PROFILE"],
+  "too-soon": [429, "ONE_NAME_A_DAY"],
+  hidden: [409, "HIDDEN"],
+  "not-found": [404, "NOT_FOUND"],
+};
+
 /**
  * The profiles handler: answers every route in `PROFILE_ROUTES`. `report`
- * answers anyone alike, never reading the session; `moderation` and
- * `appeal` act on the signed-in account's own profile.
+ * answers anyone alike, never reading the session; the rest act on the
+ * signed-in account's own profile.
  */
 export function createProfilesHandler({
   sql,
   accountOf,
   origin,
+  now = () => new Date(),
 }: ProfilesOptions): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -118,13 +163,14 @@ export function createProfilesHandler({
       return refuse(400, "BAD_REQUEST");
     }
     try {
+      if (route === "POST /profiles/report") {
+        const input = Inputs[route].safeParse(body);
+        if (!input.success) return refuse(400, "BAD_REQUEST");
+        await reportProfile(sql, input.data.handle, input.data.reason);
+        return answer(200, {});
+      }
+      // Every other route acts on the signed-in author's own profile.
       switch (route) {
-        case "POST /profiles/report": {
-          const input = Inputs[route].safeParse(body);
-          if (!input.success) return refuse(400, "BAD_REQUEST");
-          await reportProfile(sql, input.data.handle, input.data.reason);
-          return answer(200, {});
-        }
         case "POST /profiles/moderation": {
           if (!Inputs[route].safeParse(body).success) return refuse(400, "BAD_REQUEST");
           const account = await accountOf(request.headers);
@@ -140,6 +186,44 @@ export function createProfilesHandler({
           const seq = await fileProfileAppeal(sql, account);
           return answer(201, { decisionSeq: seq.toString() });
         }
+        case "POST /profiles/own": {
+          if (!Inputs[route].safeParse(body).success) return refuse(400, "BAD_REQUEST");
+          const account = await accountOf(request.headers);
+          if (account === undefined) return refuse(401, "SIGNED_OUT");
+          const p = await readOwnProfile(sql, account, { now: now() });
+          if (p === undefined) return refuse(404, "NO_PROFILE");
+          return answer(200, own(p));
+        }
+        case "POST /profiles/make": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const account = await accountOf(request.headers);
+          if (account === undefined) return refuse(401, "SIGNED_OUT");
+          const handle = await makeProfile(sql, account, input.data.name, { now: now() });
+          return answer(201, { handle });
+        }
+        case "POST /profiles/rename": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const account = await accountOf(request.headers);
+          if (account === undefined) return refuse(401, "SIGNED_OUT");
+          const changed = await renameProfile(sql, account, input.data.name, { now: now() });
+          return answer(200, { changed });
+        }
+        case "POST /profiles/delete": {
+          if (!Inputs[route].safeParse(body).success) return refuse(400, "BAD_REQUEST");
+          const account = await accountOf(request.headers);
+          if (account === undefined) return refuse(401, "SIGNED_OUT");
+          return answer(200, { deleted: await deleteProfile(sql, account) });
+        }
+        case "POST /profiles/show": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const account = await accountOf(request.headers);
+          if (account === undefined) return refuse(401, "SIGNED_OUT");
+          const { pollId, on } = input.data;
+          return answer(200, { changed: await showOnProfile(sql, account, pollId, on) });
+        }
       }
       return refuse(404, "NOT_FOUND");
     } catch (e) {
@@ -151,6 +235,10 @@ export function createProfilesHandler({
         const known = APPEAL_ERRORS[e.code];
         if (known === undefined) throw e;
         return refuse(known[0], known[1]);
+      }
+      if (e instanceof ProfileError) {
+        const [status, code] = PROFILE_ERRORS[e.code];
+        return refuse(status, code);
       }
       throw e;
     }

@@ -34,6 +34,9 @@ export const POSTING_FINALITY = 1_800n;
 /** Seconds a sent transaction may stay out of every L2 block before its posting is forced through L1 (Values). */
 export const POSTING_FORCE_AFTER = 600n;
 
+/** Milliseconds the ledger waits on any one call to the posting key's node before it gives up. */
+export const POSTING_CHAIN_TIMEOUT_MS = 10_000;
+
 const U64_MAX = (1n << 64n) - 1n;
 const I64_MAX = (1n << 63n) - 1n;
 
@@ -91,6 +94,8 @@ export interface PostgresPostingLedgerOptions {
   /** The release's `F` and `R`; the verifier's pinned values by default. */
   readonly forcedInclusion?: bigint;
   readonly margin?: bigint;
+  /** Milliseconds to wait on any one call to the node; `POSTING_CHAIN_TIMEOUT_MS` by default. */
+  readonly chainTimeoutMs?: number;
 }
 
 /** An election's windows, from its `closes_at` and `l1_inclusion_bound`, under the release's `F` and `R`. */
@@ -152,6 +157,40 @@ const keyBytes = (key: string) => {
   return Uint8Array.from(Buffer.from(key, "hex"));
 };
 
+/**
+ * A send that failed without an answer. Its message never quotes the pair,
+ * a nullifier, a transaction or the node: a database error's message can
+ * carry its query's parameters, the posting's `m_i` among them, and a
+ * node's its URL (T-11, T-18, T-69), so neither is passed on.
+ */
+export class PostingLedgerError extends Error {
+  override readonly name = "PostingLedgerError";
+}
+
+/** A call to the posting key's node, bounded in time, its error replaced. */
+async function call<T>(f: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      f(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), timeoutMs);
+      }),
+    ]);
+  } catch {
+    throw new PostingLedgerError("the posting key's node failed");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The ledger's own errors as they are; any other, the store's, replaced. */
+function scrubbed(e: unknown): PostingLedgerError {
+  return e instanceof PostingLedgerError
+    ? e
+    : new PostingLedgerError("the posting ledger's store failed");
+}
+
 // One lock for every send, so the nonce, the caps and the spend are read
 // and written by one send at a time, whichever worker runs it.
 const LOCK = q`SELECT pg_advisory_xact_lock(hashtextextended('posting_ledger', 0))`;
@@ -164,9 +203,16 @@ export class PostgresPostingLedger implements PostingLedger {
   readonly #feeCap: bigint;
   readonly #now: () => number;
   readonly #constants: { readonly forcedInclusion: bigint; readonly margin: bigint };
+  readonly #chainTimeoutMs: number;
 
   constructor(options: PostgresPostingLedgerOptions) {
-    const { forcedInclusion = PINNED_FORCED_INCLUSION, margin = PINNED_MARGIN } = options;
+    const {
+      forcedInclusion = PINNED_FORCED_INCLUSION,
+      margin = PINNED_MARGIN,
+      chainTimeoutMs = POSTING_CHAIN_TIMEOUT_MS,
+    } = options;
+    if (!Number.isSafeInteger(chainTimeoutMs) || chainTimeoutMs <= 0)
+      throw new RangeError("chainTimeoutMs must be an integer > 0");
     if (!isWei(options.budget)) throw new RangeError("budget must be a bigint ≥ 0");
     if (!isWei(options.feeCap) || options.feeCap === 0n)
       throw new RangeError("feeCap must be a bigint > 0");
@@ -178,11 +224,21 @@ export class PostgresPostingLedger implements PostingLedger {
     this.#feeCap = options.feeCap;
     this.#now = options.now;
     this.#constants = { forcedInclusion, margin };
+    this.#chainTimeoutMs = chainTimeoutMs;
+  }
+
+  #call<T>(f: () => Promise<T>): Promise<T> {
+    return call(f, this.#chainTimeoutMs);
   }
 
   /** Step 2: the last transaction that carried the posting `key` names, if the relay sent it. */
   async sent(key: string): Promise<PostingSent | undefined> {
-    return sentIn(drizzle({ client: this.#sql }), keyBytes(key));
+    const k = keyBytes(key);
+    try {
+      return await sentIn(drizzle({ client: this.#sql }), k);
+    } catch (e) {
+      throw scrubbed(e);
+    }
   }
 
   /** Steps 5 and 6, under the ledger's lock. */
@@ -198,13 +254,57 @@ export class PostgresPostingLedger implements PostingLedger {
     const windows = postingWindows(p.closesAt, p.l1InclusionBound, this.#constants);
     if (windows.intake < 0n || windows.delivery > I64_MAX)
       throw new RangeError("the election's windows must fit the record");
-    const now = this.#now();
-    if (!Number.isSafeInteger(now) || now < 0) throw new RangeError("now must be a UNIX time");
+    // Before the lock, so a slow fee oracle holds no other send. The costs
+    // depend only on the call, never on what another send records.
+    const costs = await this.#call(() => this.#chain.costs(p.posting, p.ballot, p.gasLimit));
+    if (!isWei(costs.l1DataFee) || !isWei(costs.deposit))
+      throw new PostingLedgerError("the chain answered a cost out of form");
 
     let signed: PostingSigned | undefined;
-    const outcome = await drizzle({ client: this.#sql }).transaction(
+    let outcome: PostingOutcome;
+    try {
+      outcome = await this.#record(p, { key, nullifier, windows, costs }, (s) => {
+        signed = s;
+      });
+    } catch (e) {
+      throw scrubbed(e);
+    }
+    if (signed !== undefined) {
+      // Recorded and committed: from here nothing rejects, and a broadcast
+      // the node refused or never got is rebroadcast from the record.
+      const tx = signed.tx;
+      try {
+        await this.#call(() => this.#chain.broadcast(tx));
+      } catch {
+        // Dropped: the record answers for it.
+      }
+    }
+    return outcome;
+  }
+
+  /** The caps, the nonce, the signature and the record, in one transaction under the ledger's lock. */
+  async #record(
+    p: PostingToSend,
+    c: {
+      readonly key: Uint8Array;
+      readonly nullifier: Uint8Array;
+      readonly windows: PostingWindows;
+      readonly costs: PostingCosts;
+    },
+    signedWith: (s: PostingSigned) => void,
+  ): Promise<PostingOutcome> {
+    const { key, nullifier, windows, costs } = c;
+    return drizzle({ client: this.#sql }).transaction(
       async (tx): Promise<PostingOutcome> => {
         await tx.execute(LOCK);
+        // A node that never answers can't hold the lock for good: the
+        // database ends a transaction left idle this long, and its commit
+        // then fails (T-52).
+        await tx.execute(q`SET LOCAL idle_in_transaction_session_timeout = '30s'`);
+        // After the lock, which may have waited on another send: the deposit
+        // condition and the first send's time are this send's.
+        const now = this.#now();
+        if (!Number.isSafeInteger(now) || now < 0) throw new RangeError("now must be a UNIX time");
         // Again under the lock: a second worker may have sent it since the
         // first worker's step 2.
         const already = await sentIn(tx, key);
@@ -225,9 +325,6 @@ export class PostgresPostingLedger implements PostingLedger {
 
         // Caps, Spend: the call's most cost against what is left of the
         // election's budget.
-        const costs = await this.#chain.costs(p.posting, p.ballot, p.gasLimit);
-        if (!isWei(costs.l1DataFee) || !isWei(costs.deposit))
-          throw new Error("the chain answered a cost out of form");
         const forceable = BigInt(now) + POSTING_FORCE_AFTER <= windows.deposit;
         const cost = postingMostCost(p.gasLimit, this.#feeCap, costs, forceable);
         const [spend] = await tx
@@ -240,21 +337,23 @@ export class PostgresPostingLedger implements PostingLedger {
 
         // The next nonce: past what the chain has taken and past every
         // transaction still in flight, which may not be in a block yet.
-        const count = await this.#chain.nonce();
+        const count = await this.#call(() => this.#chain.nonce());
         if (!isWei(count) || count > U64_MAX)
-          throw new Error("the chain answered a nonce out of form");
+          throw new PostingLedgerError("the chain answered a nonce out of form");
         const [highest] = await tx
           .select({ nonce: max(postingInFlight.nonce) })
           .from(postingInFlight);
         const next =
           highest?.nonce == null ? count : highest.nonce + 1n > count ? highest.nonce + 1n : count;
-        if (next > I64_MAX) throw new Error("the posting key's nonce is out of range");
+        if (next > I64_MAX) throw new PostingLedgerError("the posting key's nonce is out of range");
 
-        const s = await this.#chain.sign(p.posting, p.ballot, {
-          nonce: next,
-          gasLimit: p.gasLimit,
-          feeCap: this.#feeCap,
-        });
+        const s = await this.#call(() =>
+          this.#chain.sign(p.posting, p.ballot, {
+            nonce: next,
+            gasLimit: p.gasLimit,
+            feeCap: this.#feeCap,
+          }),
+        );
         if (
           !(s.tx instanceof Uint8Array) ||
           s.tx.length === 0 ||
@@ -264,7 +363,7 @@ export class PostgresPostingLedger implements PostingLedger {
           s.maxFee > this.#feeCap ||
           s.priorityFee > s.maxFee
         )
-          throw new Error("the posting key signed out of form");
+          throw new PostingLedgerError("the posting key signed out of form");
 
         // Step 6's record, before anything is broadcast.
         await tx.insert(postingSent).values({
@@ -312,21 +411,16 @@ export class PostgresPostingLedger implements PostingLedger {
           signed: s.tx,
           transactions: s.hash,
         });
-        signed = s;
+        // Seen by `send` only once this transaction has committed: a commit
+        // that fails rejects before anything is broadcast.
+        signedWith(s);
         return { sent: true, transaction: s.hash, layer: "l2" };
       },
+      // Each statement after the lock sees what the send before it
+      // committed; a deployment's default of repeatable read would let two
+      // sends both pass the ballot cap.
+      { isolationLevel: "read committed" },
     );
-    if (signed !== undefined) {
-      // Recorded and committed: from here nothing rejects, and a broadcast
-      // the node refused or never got is rebroadcast from the record.
-      try {
-        await this.#chain.broadcast(signed.tx);
-      } catch {
-        // The node's error is dropped: it can quote the transaction or the
-        // node's URL (T-11, T-69).
-      }
-    }
-    return outcome;
   }
 }
 

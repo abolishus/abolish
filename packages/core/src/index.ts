@@ -604,6 +604,7 @@ export {
 } from "./posting-relay.ts";
 export {
   POSTING_BALLOT_CAP,
+  POSTING_CHAIN_TIMEOUT_MS,
   POSTING_CLIENT_MARGIN,
   POSTING_FINALITY,
   POSTING_FORCE_AFTER,
@@ -614,6 +615,7 @@ export {
   postingMostCost,
   type PostingSigned,
   type PostingWindows,
+  PostingLedgerError,
   postingWindows,
 } from "./posting-ledger.ts";
 export {

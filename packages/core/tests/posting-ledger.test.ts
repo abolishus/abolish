@@ -15,6 +15,7 @@ import {
   type PostingCosts,
   postingInFlight,
   type PostingKeyChain,
+  PostingLedgerError,
   postingMostCost,
   postingSent,
   type PostingSigned,
@@ -107,13 +108,17 @@ class FakeKey implements PostingKeyChain {
   }
 }
 
-function ledger(chain: PostingKeyChain, o: { budget?: bigint; now?: number; sql?: Sql } = {}) {
+function ledger(
+  chain: PostingKeyChain,
+  o: { budget?: bigint; now?: number; sql?: Sql; chainTimeoutMs?: number } = {},
+) {
   return new PostgresPostingLedger({
     sql: o.sql ?? app,
     chain,
     budget: o.budget ?? 10n ** 18n,
     feeCap: FEE_CAP,
     now: () => o.now ?? NOW,
+    ...(o.chainTimeoutMs === undefined ? {} : { chainTimeoutMs: o.chainTimeoutMs }),
   });
 }
 
@@ -331,11 +336,71 @@ describe("send", () => {
   test("a failure before the record leaves nothing behind and rejects", async () => {
     for (const step of ["nonce", "costs", "sign"] as const) {
       const chain = new FakeKey();
-      chain.fail[step] = new Error(step);
-      await expect(ledger(chain).send(toSend())).rejects.toThrow(step);
+      // The node's error is replaced: it can quote the node's URL (T-69).
+      chain.fail[step] = new Error(`${step} at https://secret@node.example`);
+      const error = await ledger(chain)
+        .send(toSend())
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(PostingLedgerError);
+      expect(String((error as Error).message)).not.toContain("secret");
       expect(chain.broadcasts).toEqual([]);
       expect(await counts()).toEqual({ sent: 0, ballots: 0, spend: 0, in_flight: 0 });
     }
+  });
+
+  test("a node that never answers is given up on, leaving nothing behind", async () => {
+    for (const step of ["nonce", "costs", "sign"] as const) {
+      const chain = new FakeKey();
+      chain[step] = () => new Promise<never>(() => {});
+      await expect(ledger(chain, { chainTimeoutMs: 50 }).send(toSend())).rejects.toThrow(
+        PostingLedgerError,
+      );
+      expect(await counts()).toEqual({ sent: 0, ballots: 0, spend: 0, in_flight: 0 });
+    }
+    // A broadcast that never answers still answers sent, from the record.
+    const chain = new FakeKey();
+    chain.broadcast = () => new Promise<never>(() => {});
+    expect((await ledger(chain, { chainTimeoutMs: 50 }).send(toSend())).sent).toBe(true);
+    expect(await counts()).toEqual({ sent: 1, ballots: 1, spend: 1, in_flight: 1 });
+  });
+
+  test("a store failure after signing broadcasts nothing, keeps nothing and quotes nothing", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    await l.send(toSend());
+    const p = toSend();
+    const sign = chain.sign.bind(chain);
+    chain.sign = async (posting, ballot, o) => {
+      // A row that takes the chosen nonce, as only a write outside the
+      // ledger could leave it, so this send's in-flight insert fails.
+      await db.admin`INSERT INTO posting_in_flight
+        SELECT ${bytes32()}, posting, ballot, election_id, intake_cutoff, contract_cutoff,
+          delivery_ends, first_sent, ${o.nonce.toString()}, gas_limit, max_fee, priority_fee,
+          cost, signed, transactions
+        FROM posting_in_flight LIMIT 1`;
+      return sign(posting, ballot, o);
+    };
+    const error = await l.send(p).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PostingLedgerError);
+    expect((error as Error).cause).toBeUndefined();
+    const { message } = error as Error;
+    for (const secret of [hex(p.posting), p.key, hex(p.ballotHash)])
+      expect(message).not.toContain(secret);
+    expect(chain.broadcasts).toHaveLength(1);
+    expect(await l.sent(p.key)).toBeUndefined();
+    expect(await counts()).toEqual({ sent: 1, ballots: 1, spend: 1, in_flight: 2 });
+  });
+
+  test("a posting forced through L1 is answered with its deposit", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    await l.send(p);
+    const deposit = bytes32();
+    await db.admin`UPDATE posting_sent SET layer = 'l1', transaction = ${deposit}`;
+    expect(await l.sent(p.key)).toEqual({ transaction: deposit, layer: "l1" });
+    expect(await l.send(p)).toEqual({ sent: true, transaction: deposit, layer: "l1" });
+    expect(chain.signed).toHaveLength(1);
   });
 
   test("a signature over the fee cap, or out of form, is never recorded or broadcast", async () => {
@@ -398,6 +463,7 @@ describe("send", () => {
     expect(() => new PostgresPostingLedger({ ...base, feeCap: 0n })).toThrow(RangeError);
     expect(() => new PostgresPostingLedger({ ...base, forcedInclusion: -1n })).toThrow(RangeError);
     expect(() => new PostgresPostingLedger({ ...base, margin: -1n })).toThrow(RangeError);
+    expect(() => new PostgresPostingLedger({ ...base, chainTimeoutMs: 0 })).toThrow(RangeError);
   });
 });
 
@@ -477,5 +543,27 @@ describe("caps", () => {
     expect(await l.send(toSend())).toEqual({ sent: false, code: "budget" });
     expect(await counts()).toEqual({ sent: 0, ballots: 0, spend: 0, in_flight: 0 });
     expect(chain.signed).toEqual([]);
+
+    const capped = ledger(chain);
+    const nullifier = 7n;
+    await capped.send(toSend({ nullifier }));
+    await capped.send(toSend({ nullifier }));
+    const before = await counts();
+    const spent = await spentOf(ELECTION);
+    expect(await capped.send(toSend({ nullifier }))).toEqual({ sent: false, code: "ballot-cap" });
+    expect(await counts()).toEqual(before);
+    expect(await spentOf(ELECTION)).toBe(spent);
+    expect(chain.signed).toHaveLength(2);
+  });
+
+  test("ledgers sending different ballots of one (tier, ν) at once still pay for two", async () => {
+    const others = await Promise.all([db.as("abolish_app"), db.as("abolish_app")]);
+    const chains = [new FakeKey(), new FakeKey(), new FakeKey()];
+    const nullifier = 99n;
+    const outcomes = await Promise.all(
+      chains.map((c, i) => ledger(c, { sql: [app, ...others][i]! }).send(toSend({ nullifier }))),
+    );
+    expect(outcomes.filter((o) => o.sent)).toHaveLength(POSTING_BALLOT_CAP);
+    expect(outcomes.filter((o) => !o.sent)).toEqual([{ sent: false, code: "ballot-cap" }]);
   });
 });

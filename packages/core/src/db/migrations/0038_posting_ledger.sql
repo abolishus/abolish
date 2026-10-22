@@ -13,8 +13,9 @@
 -- or can never be in time.
 --
 -- Operational: no verifier reads any of it, and a wipe changes no result. A
--- wipe forgets what was sent, so the relay could pay for a posting a second
--- time, at most once per posting it already paid for (Caps, Bytes).
+-- wipe forgets what was sent, so it reopens each election's budget and ballot
+-- cap and lets the relay pay for a posting again, and it forgets the nonces
+-- in flight, so the next send reads its nonce from the latest block alone.
 -- Every row carries `delivery_ends` (`t_D`), after which the spec deletes it
 -- once the L2's finalized head passes it.
 

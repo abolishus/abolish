@@ -36,6 +36,7 @@ export {
   type CellStatus,
   type CountedSet,
   type SummedSharePeers,
+  type TallyDefinition,
   TallyDuty,
   type TallyDutyOptions,
   type TallyDutyStatus,

@@ -961,5 +961,7 @@ describe("tend", () => {
       ),
       { numRuns: Math.min(numRuns, 30) },
     );
-  });
+    // Each run sends three postings and tends up to twelve times against
+    // the database: past the default 5 s on a busy runner.
+  }, 120_000);
 });

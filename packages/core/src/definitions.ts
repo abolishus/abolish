@@ -24,10 +24,10 @@ import {
   type ProfileCombinationRule,
   RECORD_TYPES,
 } from "@abolishus/crypto";
-import { eq, sql as q } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
-import { electionDefinitions } from "./db/schema/index.ts";
+import { electionDefinitions, electionSchedules } from "./db/schema/index.ts";
 import { isBytes } from "./bytes.ts";
 
 export type DefinitionErrorCode =
@@ -108,8 +108,10 @@ export function storedDefinitionHash(record: StoredDefinitionRecord): Uint8Array
  * and the client refuses it, so the server never serves it as an election
  * (T-34, T-42). So is one 2.3 finds only unsupported here
  * (`unsupported-version`): the board store and admission can't read its
- * records either (T-36). Storing the same bytes again
- * is a no-op; different bytes for a stored election are a `conflict`. The
+ * records either (T-36). Its `opens_at` and `closes_at` go beside it, for
+ * discovery's sorts (src/listing.ts). Storing the same bytes again
+ * is a no-op, but for writing those times if they are missing; different
+ * bytes for a stored election are a `conflict`. The
  * caller is responsible for having read the definition from the registry in
  * a finalized L2 block (P3-5 indexes it): the row is permanent, and this
  * checks the bytes, not their registration.
@@ -146,7 +148,60 @@ export async function storeDefinition(
     const stored = await readDefinition(client, electionId);
     if (stored === undefined || !equal(stored, bytes)) throw new DefinitionError("conflict");
   }
+  // After the definition, so a schedule never names one that isn't stored.
+  // Not in one transaction with it: storing again, or fillElectionSchedules,
+  // writes a schedule an interrupted call left out.
+  await insertSchedule(client, electionId, record);
   return { electionId, definitionHash };
+}
+
+async function insertSchedule(
+  client: Sql,
+  electionId: Uint8Array,
+  record: StoredDefinitionRecord,
+): Promise<void> {
+  await drizzle({ client })
+    .insert(electionSchedules)
+    .values({ electionId, opensAt: record.value.opens_at, closesAt: record.value.closes_at })
+    .onConflictDoNothing({ target: electionSchedules.electionId });
+}
+
+/** How many definitions `fillElectionSchedules` reads at a time. */
+const FILL_BATCH = 500;
+
+/**
+ * Writes the schedule of every stored definition that has none: those stored
+ * before migration 0023 added the table, or by a `storeDefinition` call
+ * interrupted between its two writes. Returns how many it wrote. Every stored
+ * definition decoded when it was stored, so one that doesn't now is an error.
+ */
+export async function fillElectionSchedules(client: Sql): Promise<number> {
+  const db = drizzle({ client });
+  let written = 0;
+  let after = new Uint8Array(0);
+  for (;;) {
+    const rows = await db
+      .select({
+        electionId: electionDefinitions.electionId,
+        definition: electionDefinitions.definition,
+      })
+      .from(electionDefinitions)
+      .leftJoin(electionSchedules, eq(electionSchedules.electionId, electionDefinitions.electionId))
+      .where(and(isNull(electionSchedules.electionId), gt(electionDefinitions.electionId, after)))
+      .orderBy(asc(electionDefinitions.electionId))
+      .limit(FILL_BATCH);
+    for (const row of rows) {
+      const electionId = new Uint8Array(row.electionId);
+      await insertSchedule(
+        client,
+        electionId,
+        decodeStoredDefinition(new Uint8Array(row.definition)),
+      );
+      written++;
+      after = electionId;
+    }
+    if (rows.length < FILL_BATCH) return written;
+  }
 }
 
 /** Whether a definition is stored for `electionId`, without reading it. */

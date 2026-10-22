@@ -1,4 +1,4 @@
-import { migrate } from "@abolishus/core";
+import { fillElectionSchedules, migrate } from "@abolishus/core";
 import postgres from "postgres";
 import * as z from "zod";
 
@@ -21,15 +21,20 @@ const env = Env.parse({
 
 // The role is a startup parameter, so every connection, a reconnect included,
 // acts as abolish_migrator: objects then belong to the group role rather than
-// the login, and a rotated login can still migrate.
+// the login, and a rotated login can still migrate. So is the search path,
+// which fillElectionSchedules's unqualified table names resolve through.
 const sql = postgres(env.DATABASE_URL, {
   max: 1,
   onnotice: () => {},
-  connection: { role: "abolish_migrator" },
+  connection: { role: "abolish_migrator", search_path: env.DATABASE_SCHEMA },
 });
 try {
   const applied = await migrate(sql, env.DATABASE_SCHEMA);
-  process.stdout.write(`${JSON.stringify({ migrations: applied })}\n`);
+  // Data a migration's SQL can't derive: the times of definitions stored
+  // before 0023 added their table, decoded by @abolishus/crypto. Idempotent,
+  // so every run checks and a run that finds none writes nothing.
+  const schedules = await fillElectionSchedules(sql);
+  process.stdout.write(`${JSON.stringify({ migrations: applied, schedules })}\n`);
 } finally {
   await sql.end();
 }

@@ -50,7 +50,7 @@ MAX_ENCODING = v1.MAX_ENCODING + 4 + MAX_TOKEN_KEYS * (4 + 32 + 1)
 
 TOKEN_RULES = ["token-keys-empty", "token-key", "token-key-repeated", "token-key-order"]
 RULES = v1.RULES + TOKEN_RULES
-ACROSS_RULES = ["token-key-changed", "token-key-unretired"]
+ACROSS_RULES = ["token-key-changed", "token-key-reused", "token-key-unretired"]
 
 
 # --- Encoding ----------------------------------------------------------------
@@ -120,6 +120,10 @@ def across(earlier, later):
         e = before.get(k["period"])
         if e is not None and e["key"] != k["key"]:
             return "token-key-changed", {"period": k["period"]}
+    periods = {k["key"]: k["period"] for k in earlier["tier0_token_keys"]}
+    for k in later["tier0_token_keys"]:
+        if periods.get(k["key"], k["period"]) != k["period"]:
+            return "token-key-reused", {"period": k["period"]}
     for k in later["tier0_token_keys"]:
         e = before.get(k["period"])
         if e is not None and e["retired"] and not k["retired"]:
@@ -199,9 +203,12 @@ def ill_formed_cases(base):
         return lambda d: d["tier0_token_keys"][i].__setitem__("key", value)
 
     first = base["tier0_token_keys"][0]["key"]
-    # A 32-byte string that isn't an element: the first odd s, then s = p (not canonical), then a negative s.
+    # 32-byte strings that aren't elements: the first even s on no point;
+    # s = p + 4, a non-canonical encoding of the element s = 4 encodes; and
+    # s = 1, which is negative.
     no_point = next(b for b in (i.to_bytes(32, "little") for i in range(2, 200, 2)) if grp.decode(b) is None)
-    at_p = grp.P.to_bytes(32, "little")
+    assert grp.decode((4).to_bytes(32, "little")) is not None
+    above_p = (grp.P + 4).to_bytes(32, "little")
     negative = (1).to_bytes(32, "little")
     K = lambda i: {"key": i}  # noqa: E731
     keys = lambda f: lambda d: d.__setitem__("tier0_token_keys", f(d["tier0_token_keys"]))  # noqa: E731
@@ -209,7 +216,7 @@ def ill_formed_cases(base):
         ("token-keys-empty", "No token key", keys(lambda ks: []), "token-keys-empty", {}),
         ("token-key-identity", "The identity as a token key", key_at(0, bytes(32)), "token-key", K(0)),
         ("token-key-no-point", "A token key that decodes to no element", key_at(3, no_point), "token-key", K(3)),
-        ("token-key-non-canonical", "A token key with s at the field prime", key_at(1, at_p), "token-key", K(1)),
+        ("token-key-non-canonical", "A token key encoding s = 4 as s = p + 4", key_at(1, above_p), "token-key", K(1)),
         ("token-key-negative", "A token key with a negative s", key_at(7, negative), "token-key", K(7)),
         ("token-key-repeated", "One key for two periods", key_at(2, first), "token-key-repeated", K(2)),
         (
@@ -284,6 +291,8 @@ def across_cases(base):
         ("retired-kept", "A key retired in both", with_keys(base, retired), later(retired), None),
         ("changed", "Another key for a period both list", base, later(ks[:3] + [token_key(ks[3]["period"], "replacement")] + ks[4:]), "token-key-changed"),
         ("changed-retired", "A retired key replaced within its period", with_keys(base, retired), later(ks[:2] + [token_key(Q + 1, "replacement", True)] + ks[3:]), "token-key-changed"),
+        ("reused", "The earlier release's key for one period listed for the next", base, later([token_key(Q + 10, "fresh")] + [dict(ks[-1], period=Q + 11)]), "token-key-reused"),
+        ("reused-retired", "A retired key moved to a period the earlier release doesn't list", with_keys(base, retired), later([dict(ks[2], period=Q + 20)]), "token-key-reused"),
         ("unretired", "A key retired in the earlier release listed as live in the later", with_keys(base, retired), later(ks), "token-key-unretired"),
         (
             "across-rule-order",
@@ -291,6 +300,13 @@ def across_cases(base):
             with_keys(base, retired),
             later(ks[:5] + [token_key(ks[5]["period"], "replacement")] + ks[6:]),
             "token-key-changed",
+        ),
+        (
+            "across-rule-order-reused",
+            "One period's key unretired and the oldest period's key moved after the last: token-key-reused comes first",
+            with_keys(base, retired),
+            later(ks[1:] + [dict(ks[0], period=Q + 7)]),
+            "token-key-reused",
         ),
     ]
 

@@ -198,6 +198,44 @@ describe("deployment record version 2 (docs/spec/deployment.md)", () => {
     },
   );
 
+  // Version 2's own rules, restated over the decoded keys with this
+  // package's Blind as the element check, for every vector that breaks none
+  // of version 1's: each gets its code and the key it names.
+  const v2Rules = new Set(codes("Well-formedness (version 2)"));
+  test.each(decoded.filter(([, v]) => v.type.kind === "ref" && v.type.name === "deployment_v2"))(
+    "%s breaks the first version-2 rule it names, at its key",
+    (_id, v) => {
+      if (v.illFormed !== undefined && !v2Rules.has(v.illFormed)) return;
+      const keys = decode(v.encoding).value.tier0_token_keys;
+      const info = tier0TokenInfo({ chainId: 1n, groupRegistry: new Uint8Array(20), groupId: 0n });
+      const valid = (k: TokenKey) => {
+        try {
+          tier0TokenBlind(tier0TokenInput(tier0TokenKeyId(k.period, k.key), C), k.key, info);
+          return true;
+        } catch (e) {
+          if (e instanceof RangeError) return false;
+          throw e;
+        }
+      };
+      let got: { code: string; key?: number } | undefined;
+      if (keys.length === 0) got = { code: "token-keys-empty" };
+      const seen = new Set<string>();
+      for (const [i, k] of keys.entries()) {
+        if (got !== undefined) break;
+        if (!valid(k)) got = { code: "token-key", key: i };
+        else if (seen.has(toHex(k.key))) got = { code: "token-key-repeated", key: i };
+        seen.add(toHex(k.key));
+      }
+      if (
+        got === undefined &&
+        keys.some((k, i) => i > 0 && k.period !== (keys[i - 1]?.period ?? 0) + 1)
+      )
+        got = { code: "token-key-order" };
+      expect(got?.code).toBe(v.illFormed);
+      expect(got?.key === undefined ? undefined : String(got.key)).toBe(v.illFormedAt?.["key"]);
+    },
+  );
+
   // The rules across releases compare what two records list for each
   // period: this restates them over the decoded records, so each succession
   // is checked against its code, and its period is the first that breaks it.
@@ -211,13 +249,17 @@ describe("deployment record version 2 (docs/spec/deployment.md)", () => {
         const e = before.get(k.period);
         return e !== undefined && toHex(e.key) !== toHex(k.key);
       });
+      const periodOf = new Map(earlier.map((k) => [toHex(k.key), k.period]));
+      const reused = later.find((k) => (periodOf.get(toHex(k.key)) ?? k.period) !== k.period);
       const unretired = later.find((k) => before.get(k.period)?.retired === true && !k.retired);
       const got =
         changed !== undefined
           ? { across: "token-key-changed", period: changed.period }
-          : unretired !== undefined
-            ? { across: "token-key-unretired", period: unretired.period }
-            : undefined;
+          : reused !== undefined
+            ? { across: "token-key-reused", period: reused.period }
+            : unretired !== undefined
+              ? { across: "token-key-unretired", period: unretired.period }
+              : undefined;
       expect(got?.across).toBe(s.across);
       expect(got === undefined ? undefined : String(got.period)).toBe(s.acrossAt?.period);
     },

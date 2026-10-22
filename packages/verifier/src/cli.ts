@@ -202,7 +202,9 @@ function runKeysCli(args: readonly string[], out: CliOutput, context: CliContext
   }
   let report: KeysReport;
   try {
-    report = runKeys(parseKeysEvidence(json(dir, "keys.json")), context.registry, context.clock());
+    // `t` is the clock as the run starts, before the evidence is read.
+    const runAt = context.clock();
+    report = runKeys(parseKeysEvidence(json(dir, "keys.json")), context.registry, runAt);
   } catch (e) {
     if (!(e instanceof BundleError)) throw e;
     out.stderr(`evidence rejected: ${printable(e.message)}\n`);

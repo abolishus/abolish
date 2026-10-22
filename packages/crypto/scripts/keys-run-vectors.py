@@ -392,6 +392,15 @@ def main():
         "fail",
         "token-key-late",
     )
+    expect(
+        scenario(
+            "late-behind-ill-formed",
+            "A late listing above a release whose deployment is ill formed: that release fails the run, and the late listing is no finding",
+            [honest[0], honest[1], ("ill-formed-v2", T2, 0, None), ("late", T3, 0, None)],
+        ),
+        "fail",
+        "deployment-record",
+    )
     expect(scenario("record-missing", "The first version-2 release's record isn't given", honest, omit_records=(1,)), "unverifiable", "release-record-missing")
     expect(scenario("deployment-missing", "The second version-2 release's deployment record isn't given", honest, omit_deployments=(2,)), "unverifiable", "deployment-record-missing")
     expect(scenario("release-unsupported", "A release record of version 2, which this release doesn't read", [honest[0], ("first", T1, 0, "raw-version-2")]), "unverifiable", "unsupported-version")

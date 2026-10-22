@@ -30,7 +30,8 @@ import {
   runCli,
   runKeys,
 } from "../src/index.ts";
-import { buildTrie, l2State, stored, word } from "./state.ts";
+import { rlp } from "./headers.ts";
+import { anchorState, buildTrie, l2State, stored, word } from "./state.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -204,6 +205,51 @@ describe("the registry's account", () => {
     });
   });
 
+  test("an account without code at the pinned address is absent, never empty storage", () => {
+    const { evidence: state } = l2State(
+      [
+        {
+          address: PIN.address,
+          storage: storageOf(honest),
+          codeHash: keccak_256(new Uint8Array()),
+        },
+      ],
+      21_000_000n,
+      BigInt(honest.now),
+    );
+    const json = JSON.stringify({
+      format: KEYS_EVIDENCE_FORMAT,
+      l1: { header: bytesToHex(state.header), nodes: state.nodes.map(bytesToHex) },
+      records: [],
+      deployments: [],
+    });
+    expect(run(json).result).toEqual({
+      status: "unverifiable",
+      code: "release-registry-absent",
+      at: {},
+    });
+  });
+
+  test("a stored value that isn't a word's canonical encoding is malformed, never a count", () => {
+    // `count` stored as 0x0003: a leading zero no trie holds.
+    const state = anchorState(
+      PIN.address,
+      [[word(RELEASE_REGISTRY_NAMESPACE), rlp(Uint8Array.of(0, 3))]],
+      { number: 21_000_000n, timestamp: BigInt(honest.now) },
+    );
+    const json = JSON.stringify({
+      format: KEYS_EVIDENCE_FORMAT,
+      l1: { header: bytesToHex(state.header), nodes: state.nodes.map(bytesToHex) },
+      records: [],
+      deployments: [],
+    });
+    expect(run(json).result).toEqual({
+      status: "unverifiable",
+      code: "l1-proof-malformed",
+      at: {},
+    });
+  });
+
   test("an account with other code fails, whatever its words say", () => {
     const r = run(vectorEvidence(honest), { ...PIN, codeHash: keccak_256(Uint8Array.of(0xff)) });
     expect(r.result).toEqual({ status: "fail", code: "release-registry-code", at: {} });
@@ -317,6 +363,22 @@ describe("findings", () => {
     expect(r.findings).toHaveLength(990);
     expect(r.findingsTruncated).toBeUndefined();
   });
+});
+
+test("a large pool of records the registry doesn't hold costs one hash each", () => {
+  const v = vector("honest");
+  const junk = Array.from({ length: 20_000 }, (_, i) => i.toString(16).padStart(8, "0"));
+  const json = evidence(
+    storageOf(v),
+    BigInt(v.now),
+    [...junk, ...v.records.map((r) => vectors.records[r] as string)],
+    [...junk, ...v.deployments.map((d) => vectors.deployments[d] as string)],
+  );
+  const started = performance.now();
+  expect(runKeys(parseKeysEvidence(json), PIN, BigInt(v.runAt)).result).toEqual({ status: "pass" });
+  // Linear: well under a second here, where a search per release would hash
+  // the pool once for each of them.
+  expect(performance.now() - started).toBeLessThan(10_000);
 });
 
 describe("properties", () => {

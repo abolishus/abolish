@@ -188,7 +188,7 @@ function findDeployment(
   r: PublishedRelease,
   previous: Uint8Array,
   pin: ReleaseRegistryPin,
-  evidence: KeysEvidence,
+  byHash: ByHash,
   row: { deploymentHash?: string; version?: string },
 ): Step4 {
   const S = { sequence: r.sequence.toString() };
@@ -198,7 +198,7 @@ function findDeployment(
     at,
     fails,
   });
-  const encoding = evidence.records.find((e) => equal(releaseHash(e), r.hash));
+  const encoding = byHash.records.get(bytesToHex(r.hash));
   if (encoding === undefined) return stop("release-record-missing", S, false);
   let record;
   try {
@@ -225,7 +225,7 @@ function findDeployment(
   )
     return stop("release-chain", S, true);
   row.deploymentHash = bytesToHex(v.deployment_hash);
-  const denc = evidence.deployments.find((e) => equal(deploymentHash(e), v.deployment_hash));
+  const denc = byHash.deployments.get(bytesToHex(v.deployment_hash));
   if (denc === undefined) return stop("deployment-record-missing", S, false);
   let deployment: DecodedDeploymentRecord;
   try {
@@ -240,6 +240,23 @@ function findDeployment(
   const rule = deploymentRecordRule(deployment);
   if (rule !== undefined) return stop("deployment-record", { ...S, ...deploymentAt(rule) }, true);
   return { resolved: true, deployment, hash: v.deployment_hash };
+}
+
+interface ByHash {
+  readonly records: ReadonlyMap<string, Uint8Array>;
+  readonly deployments: ReadonlyMap<string, Uint8Array>;
+}
+
+// Each encoding hashed once, the first with a hash kept, so finding every
+// release's records costs one lookup each, not a hash of every record
+// given (T-52). Two encodings with one hash are one record.
+function index(encodings: readonly Uint8Array[], hash: (e: Uint8Array) => Uint8Array) {
+  const out = new Map<string, Uint8Array>();
+  for (const e of encodings) {
+    const h = bytesToHex(hash(e));
+    if (!out.has(h)) out.set(h, e);
+  }
+  return out;
 }
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
@@ -307,12 +324,16 @@ export function runKeys(
   const registry = pin as ReleaseRegistryPin;
 
   // Step 4.
+  const byHash: ByHash = {
+    records: index(evidence.records, releaseHash),
+    deployments: index(evidence.deployments, deploymentHash),
+  };
   const rows: KeysReleaseRow[] = [];
   const step4: Step4[] = [];
   for (const [i, r] of published.entries()) {
     const found: { deploymentHash?: string; version?: string } = {};
     const previous = i === 0 ? new Uint8Array(32) : (published[i - 1] as PublishedRelease).hash;
-    const s4 = findDeployment(r, previous, registry, evidence, found);
+    const s4 = findDeployment(r, previous, registry, byHash, found);
     step4.push(s4);
     rows.push({
       sequence: r.sequence.toString(),

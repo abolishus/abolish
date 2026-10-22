@@ -137,6 +137,34 @@ describe("the served ballot client", () => {
     expect(consoleErrors).toEqual([]);
   });
 
+  test("takes a link's pick out of the address once read, keeping the election", async () => {
+    const election = "5d".repeat(32);
+    const before = await page.evaluate(() => history.length);
+    await page.evaluate((id) => {
+      location.hash = `#election=${id}&pick=1`;
+    }, election);
+    await page
+      .getByRole("heading", { level: 1, name: "This copy of the ballot can't check polls yet" })
+      .waitFor();
+    // The entry the link made holds only the election: the tapped answer isn't
+    // left in the tab's history (T-45), and no entry was added to hold it.
+    expect(await page.evaluate(() => location.hash)).toBe(`#election=${election}`);
+    expect(await page.evaluate(() => history.length)).toBe(before + 1);
+    await page.evaluate(() => {
+      location.hash = `#election=${"5d".repeat(32)}&pick=64`;
+    });
+    await page.getByRole("heading", { level: 1, name: "This link doesn't open a poll" }).waitFor();
+    // Opened from another page, as from a card on the website.
+    await page.goto(`${origin}/#election=${election}&pick=2`);
+    await page
+      .getByRole("heading", { level: 1, name: "This copy of the ballot can't check polls yet" })
+      .waitFor();
+    expect(await page.evaluate(() => location.hash)).toBe(`#election=${election}`);
+    expect(foreignRequests).toEqual([]);
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  });
+
   test("refuses to turn a string into script or markup (Trusted Types)", async () => {
     const outcomes = await page.evaluate(() => {
       const attempts: Record<string, () => void> = {

@@ -108,6 +108,35 @@ const pickOne: Story["play"] = async ({ canvasElement }) => {
 
 export const PickOne: Story = { name: "Pick one", play: pickOne };
 
+/** Opened from a card's answer link: the tapped option is chosen, in words, and can be changed. */
+export const FromALink: Story = {
+  name: "Opened with the answer tapped on a card",
+  args: { pick: 3 },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("radio", { name: "Two hundred new street trees" })).toBeChecked();
+    await expect(canvas.getByText("Selected")).toBeVisible();
+    await expect(canvas.getByText("You chose: Two hundred new street trees.")).toBeVisible();
+    await userEvent.click(canvas.getByText("Public toilets open all year"));
+    await expect(canvas.getByRole("radio", { name: "Public toilets open all year" })).toBeChecked();
+    // Nothing goes anywhere until the voter goes on and seals.
+    await expect(args.onSeal).not.toHaveBeenCalled();
+    await next(canvas);
+    for (const box of canvas.getAllByRole("checkbox")) await expect(box).not.toBeChecked();
+  },
+};
+
+/** A pick the first question doesn't have chooses nothing. */
+export const FromALinkUnknownPick: Story = {
+  name: "Opened with an answer the question doesn't have",
+  args: { pick: 9 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const radio of canvas.getAllByRole("radio")) await expect(radio).not.toBeChecked();
+    await expect(canvas.getByText("Nothing chosen yet.")).toBeVisible();
+  },
+};
+
 const upToTwo: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(canvas.getByText("Public toilets open all year"));

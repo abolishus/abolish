@@ -6,6 +6,7 @@ import {
   firstUnfit,
   fits,
   instructionOf,
+  openingAnswers,
   pickLanguage,
   questionsOf,
   skippable,
@@ -144,6 +145,44 @@ describe("tapping an option", () => {
     const q = question(3, 0, 3);
     for (const option of [-1, 3, 1.5, Number.NaN])
       expect(() => toggle(q, [], option), String(option)).toThrow(RangeError);
+  });
+});
+
+describe("the answers a ballot opens with", () => {
+  const polls = fc.array(wellFormed, { minLength: 1, maxLength: 4 });
+
+  test("are the link's pick on the first question, and nothing anywhere else", () => {
+    fc.assert(
+      fc.property(polls, fc.nat(), (questions, n) => {
+        const first = questions[0] as BallotQuestion;
+        const pick = n % first.options.length;
+        const answers = openingAnswers(questions, pick);
+        expect(answers).toEqual(questions.map((_, i) => (i === 0 ? [pick] : [])));
+        // A tap on the card is the same answer as a tap on the screen.
+        expect(answers[0]).toEqual(toggle(first, [], pick).selection);
+        // And never more than the question allows.
+        expect(answers[0]?.length).toBeLessThanOrEqual(first.maxSelections);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("choose nothing for a pick the first question doesn't have, or no pick", () => {
+    fc.assert(
+      fc.property(
+        polls,
+        fc.oneof(fc.integer({ min: 12, max: 63 }), fc.constant(undefined)),
+        (questions, pick) => {
+          const first = questions[0] as BallotQuestion;
+          fc.pre(pick === undefined || pick >= first.options.length);
+          expect(openingAnswers(questions, pick)).toEqual(questions.map(() => []));
+        },
+      ),
+      { numRuns },
+    );
+    const q = question(3, 1, 1);
+    for (const pick of [-1, 3, 1.5, Number.NaN, Infinity])
+      expect(openingAnswers([q], pick), String(pick)).toEqual([[]]);
   });
 });
 

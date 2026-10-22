@@ -58,13 +58,15 @@ function Sorts({ sort }: { sort: StreamSort }) {
 }
 
 /**
- * One question in the stream: its words, when it closes, and the way into
- * the ballot client, which opens the poll from the link's fragment. Text an
+ * One question in the stream: its words, when it closes, and its first
+ * question's answers, each a way into the ballot client, which opens the
+ * poll with that answer chosen from the link's fragment. Text an
  * asker wrote carries its own language and direction.
  */
 export function StreamCard({ card, ballot }: { card: Card; ballot: string | null }) {
   const t = useTranslate(catalogs);
   const titleId = useId();
+  const answersId = useId();
   if (card.kind === "unavailable") {
     return (
       <article
@@ -125,14 +127,29 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
-        <a
-          href={ballotLink(ballot, poll.electionId)}
-          aria-describedby={titleId}
-          className={cn(buttonVariants({ size: "lg" }), "justify-between justify-self-start")}
-        >
-          {t("streamAnswer", { count: questions })}
-          <ArrowRight aria-hidden="true" />
-        </a>
+        <div className="grid gap-3">
+          <p id={answersId} className="m-0 text-sm text-pretty text-muted-foreground">
+            {t("streamPick", { count: questions })}
+          </p>
+          {/* Each answer is a plain link: the ballot client opens with it
+              chosen, and sends nothing until the voter does ([[first-answer]]). */}
+          <ul aria-labelledby={answersId} className="m-0 grid list-none gap-2 p-0">
+            {text.options.map((label, option) => (
+              <li key={option}>
+                <a
+                  href={ballotLink(ballot, poll.electionId, option)}
+                  aria-describedby={titleId}
+                  className="flex min-h-12 items-center justify-between gap-3 border border-input px-4 py-2 text-base font-medium hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <span lang={text.language} dir="auto" className="min-w-0 break-words">
+                    {label}
+                  </span>
+                  <ArrowRight aria-hidden="true" className="size-4 shrink-0" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </article>
   );

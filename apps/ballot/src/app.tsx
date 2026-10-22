@@ -32,6 +32,7 @@ export function App({
           // Another election starts from nothing: no state of this one carries over.
           key={link.hex}
           electionId={link.electionId}
+          pick={link.pick}
           source={source}
           origin={origin}
           languages={languages}

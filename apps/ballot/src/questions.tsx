@@ -8,6 +8,7 @@ import {
   firstUnfit,
   fits,
   instructionOf,
+  openingAnswers,
   singleChoice,
   skippable,
   stillNeeded,
@@ -21,12 +22,15 @@ import { catalogs, type Messages } from "./messages.ts";
 // per screen, then "Check your answers". They follow the Center for Civic
 // Design's Keep rules: the question, then its instruction, then the options;
 // every option a full-width target whose selected state shows as a check and
-// in words; nothing chosen for the voter; a plain message for an overvote
-// before it happens and for an undervote before going on; nothing moves.
+// in words; nothing chosen for the voter but the answer they tapped on the
+// card that linked here ([[first-answer]], step 1); a plain message for an
+// overvote before it happens and for an undervote before going on; nothing
+// moves.
 //
 // The answers live only in this component's state. Nothing is stored on the
-// device, so a re-vote starts from nothing chosen and a coercer who picks up
-// the phone finds no earlier answers ([[0026-multi-question-ballots]],
+// device, so a re-vote starts from nothing chosen (the link's pick is taken
+// out of the address once read, main.tsx) and a coercer who picks up the
+// phone finds no earlier answers ([[0026-multi-question-ballots]],
 // Re-voting; T-45, T-47).
 
 function instructionText(t: Translate<Messages>, q: BallotQuestion): string {
@@ -457,6 +461,8 @@ export interface AnswerQuestionsProps {
   questions: readonly BallotQuestion[];
   /** Shown above the first question: the arrival check. */
   arrival?: ReactNode;
+  /** The first question's option the ballot link was tapped on, chosen to start with if the question has it. */
+  pick?: number | undefined;
   /** The voter's answers, each fitting its question, to seal; casting or challenging the seal is the caller's. */
   onSeal: (answers: Answers) => void;
 }
@@ -466,7 +472,7 @@ type Screen = { readonly index: number; readonly short?: boolean } | "check";
 
 /**
  * The questions one at a time, then "Check your answers", starting from
- * nothing chosen. Hands the caller the voter's answers, every one checked
+ * nothing chosen but the link's `pick` (`openingAnswers`). Hands the caller the voter's answers, every one checked
  * against its question's limits, only when the voter seals them.
  *
  * Key it by the election's definition hash: the answers are kept by
@@ -478,12 +484,11 @@ export function AnswerQuestions({
   poll,
   questions,
   arrival,
+  pick,
   onSeal,
 }: AnswerQuestionsProps) {
   const [screen, setScreen] = useState<Screen>({ index: 0 });
-  const [answers, setAnswers] = useState<readonly (readonly number[])[]>(() =>
-    questions.map(() => []),
-  );
+  const [answers, setAnswers] = useState<Answers>(() => openingAnswers(questions, pick));
   const [returnToCheck, setReturnToCheck] = useState(false);
   // Focus follows the voter to each new screen, not on the first one.
   const [moved, setMoved] = useState(false);

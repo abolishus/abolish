@@ -7,6 +7,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
+import { gzipSync } from "node:zlib";
 
 import { shortCode } from "@abolishus/core/short-codes";
 import {
@@ -1626,6 +1627,81 @@ describe("offline shell", () => {
       expect((await get(path)).headers.get("content-security-policy")).toContain(
         "worker-src 'self'",
       );
+  });
+});
+
+/**
+ * What a first visit to `path` downloads before the page is whole, as a CDN
+ * gzips it: the document; every script it runs or preloads, with every module
+ * those import statically (not the ones loaded on demand); its stylesheets;
+ * and the fonts those name for Basic Latin, the subset an English page draws.
+ * Fonts are woff2, compressed already, so they count as built.
+ */
+async function firstLoad(path: string) {
+  const html = await (await get(path)).text();
+  const asset = (href: string) => readFileSync(`${root}dist/client${href}`);
+  const gzipped = (bytes: Uint8Array) => gzipSync(bytes).byteLength;
+  const scripts = new Set(
+    [
+      ...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),
+      ...html.matchAll(/<link rel="modulepreload" href="([^"]+)"/g),
+    ].map((m) => m[1]!),
+  );
+  for (const href of scripts) {
+    const code = asset(href).toString("utf8");
+    for (const m of code.matchAll(/\b(?:from|import)\s*"\.\/([\w.-]+\.js)"/g))
+      scripts.add(`/assets/${m[1]}`);
+  }
+  const stylesheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(
+    (m) => m[1]!,
+  );
+  const fonts = new Set<string>();
+  for (const href of stylesheets)
+    for (const [face] of asset(href)
+      .toString("utf8")
+      .matchAll(/@font-face\{[^}]*\}/g))
+      if (/unicode-range:U\+\?\?[,;}]/.test(face))
+        for (const m of face.matchAll(/url\(([^)]+\.woff2)\)/g)) fonts.add(m[1]!);
+  const sum = (hrefs: Iterable<string>, size: (bytes: Uint8Array) => number) =>
+    [...hrefs].reduce((total, href) => total + size(asset(href)), 0);
+  return {
+    html: gzipped(new TextEncoder().encode(html)),
+    js: sum(scripts, gzipped),
+    css: sum(stylesheets, gzipped),
+    fonts: sum(fonts, (bytes) => bytes.byteLength),
+  };
+}
+
+const KB = 1024;
+
+/**
+ * Each everyday page's first visit, in KiB as {@link firstLoad} counts it
+ * (P2-28 part 2a). Set a little above what the pages weigh today, so code that
+ * grows a page fails here and has to raise its number in the same diff; a
+ * dependency that starts shipping far more than it did shows up the same way
+ * (T-55). On a slow phone connection (1.6 Mbit/s, Lighthouse's mobile
+ * throttling) every 100 KiB is about half a second.
+ */
+const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
+  "/": { html: 10, js: 360, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 360, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 360, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 360, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 365, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 375, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 375, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 360, css: 40, fonts: 58 },
+  "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
+};
+
+describe("performance budgets", () => {
+  test.each(Object.entries(BUDGETS))("%s stays within its budget", async (path, budget) => {
+    const load = await firstLoad(path);
+    const kib = Object.fromEntries(
+      Object.entries(load).map(([k, bytes]) => [k, Math.ceil(bytes / KB)]),
+    );
+    for (const key of ["html", "js", "css", "fonts"] as const)
+      expect(load[key], `${key}: ${JSON.stringify(kib)}`).toBeLessThanOrEqual(budget[key] * KB);
   });
 });
 

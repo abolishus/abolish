@@ -96,16 +96,17 @@ Each threat's file holds its description, mitigation and full status; the tables
 
 Sybil resistance is the core problem: if one person can vote many times, results are meaningless.
 
-| ID       | Threat                                           | Adversary | Status         |
-| -------- | ------------------------------------------------ | --------- | -------------- |
-| [[T-01]] | Sybil accounts at Tier 0                         | A-1, A-9  | Not mitigated  |
-| [[T-02]] | Sybil rings at Tier 1                            | A-1, A-9  | Planned        |
-| [[T-03]] | Forged, stolen or duplicated documents at Tier 2 | A-1, A-9  | Partial        |
-| [[T-04]] | Double voting in one poll                        | A-9       | Planned        |
-| [[T-05]] | Unsound circuit or proof verification            | A-9, A-1  | Planned        |
-| [[T-06]] | Group stuffing by the operator                   | A-2       | Needs decision |
-| [[T-07]] | Setup compromise of a proving system             | A-1       | Accepted       |
-| [[T-08]] | Electorate definition manipulation               | A-2       | Planned        |
+| ID       | Threat                                           | Adversary     | Status         |
+| -------- | ------------------------------------------------ | ------------- | -------------- |
+| [[T-01]] | Sybil accounts at Tier 0                         | A-1, A-9      | Not mitigated  |
+| [[T-02]] | Sybil rings at Tier 1                            | A-1, A-9      | Planned        |
+| [[T-03]] | Forged, stolen or duplicated documents at Tier 2 | A-1, A-9      | Partial        |
+| [[T-04]] | Double voting in one poll                        | A-9           | Planned        |
+| [[T-05]] | Unsound circuit or proof verification            | A-9, A-1      | Planned        |
+| [[T-06]] | Group stuffing by the operator                   | A-2           | Needs decision |
+| [[T-07]] | Setup compromise of a proving system             | A-1           | Accepted       |
+| [[T-08]] | Electorate definition manipulation               | A-2           | Planned        |
+| [[T-74]] | Tier 0 token issuer misuse                       | A-2, A-1, A-6 | Planned        |
 
 ### Ballot secrecy, unlinkability and privacy (G-3, G-4, G-5, G-12)
 

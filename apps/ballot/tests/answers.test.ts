@@ -285,6 +285,7 @@ describe("the questions of a checked election", () => {
     boardEntryVersion: 5,
     opensAt: 0n,
     closesAt: 1n,
+    l1InclusionBound: 3_600n,
     translations: [
       {
         language: "en",

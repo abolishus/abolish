@@ -13,7 +13,10 @@
 // place and that seat's `m_i` erased from every cast it receipts, so a
 // receipted seat is never posted (Client rules 1 to 3); once the ballot is
 // boarded and the operator's board path answers for the receipt with an
-// entry that passes, that entry is kept beside it (Client rule 3).
+// entry that passes, that entry is kept beside it (Client rule 3). Once the
+// poll's posting cutoff passes, a seat still holding its `m_i` has its
+// `ct_i` and `m_i` erased from every cast: no posting of it can be in time
+// any more (Client rule 4).
 // Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
@@ -49,10 +52,12 @@ export interface Boarded {
  * `m_i`, while no receipt for the ballot has passed, or that receipt once
  * one has, `m_i` then erased ([[delivery]], Client rule 2), with the board
  * entry the operator answered for it once that answer passed (Client rule
- * 3).
+ * 3); or nothing but the seat, once the poll's posting cutoff passed with
+ * no receipt kept for it, its `ct_i` and `m_i` then erased (Client rule 4).
  */
 export type KeptShare =
   | { readonly seat: number; readonly ciphertext: Uint8Array; readonly m: Uint8Array }
+  | { readonly seat: number; readonly erased: true }
   | {
       readonly seat: number;
       readonly ciphertext: Uint8Array;
@@ -121,6 +126,9 @@ export interface UnboardedReceipt {
   readonly receipt: Uint8Array;
 }
 
+/** `eraseShares`'s outcome. */
+export type EraseSharesOutcome = "erased" | "none" | "unreadable" | "unwritable";
+
 /** `recordBoarded`'s outcome. */
 export type RecordBoardedOutcome =
   | "recorded"
@@ -135,11 +143,11 @@ const STORE = "casts";
 
 /**
  * The stored record's version: another is unreadable, never migrated by
- * guessing. Version 1 kept no shares, version 2 no receipts and version 3
- * no receipts' board entries; no build wrote any of them, since none
- * recorded a cast before it delivered.
+ * guessing. Version 1 kept no shares, version 2 no receipts, version 3 no
+ * receipts' board entries and version 4 no erased shares; no build wrote
+ * any of them, since none recorded a cast before it delivered.
  */
-const RECORD_VERSION = 4;
+const RECORD_VERSION = 5;
 
 /** The length of an ML-KEM-768 message `m` ([[share-encryption]], Ciphertext). */
 const M_LENGTH = 32;
@@ -233,7 +241,7 @@ function receiptFits(record: BallotRecordV3, seat: number, receipt: Uint8Array):
  * ciphertext hashing to that share hash with either a 32-byte `m`, no
  * receipt and no board entry, or a receipt fitting the ballot, no `m`, and
  * a board entry carrying a receipt that fits the ballot for that seat or
- * none; `undefined` otherwise. So a cast kept here carries a share for
+ * none; or, for an erased share, none of the four; `undefined` otherwise. So a cast kept here carries a share for
  * every seat its ballot must be delivered to and none it doesn't name, and
  * never both a seat's receipt and its `m_i` (T-25, T-38).
  */
@@ -251,8 +259,12 @@ function sharesFor(record: BallotRecordV3, shares: unknown): KeptShare[] | undef
     if (!isRecord(share) || !hasExactly(share, ["seat", "ciphertext", "m", "receipt", "boarded"]))
       return undefined;
     const { seat, ciphertext, m, receipt, boarded } = share;
+    if (seat !== expected.seat) return undefined;
+    if (ciphertext === null && m === null && receipt === null && boarded === null) {
+      copies.push({ seat, erased: true });
+      continue;
+    }
     if (
-      seat !== expected.seat ||
       !(ciphertext instanceof Uint8Array) ||
       ciphertext.length > MAX_BOARD_PAYLOAD ||
       !equalBytes(shareCiphertextHash(ciphertext), expected.hash)
@@ -281,7 +293,7 @@ function sharesFor(record: BallotRecordV3, shares: unknown): KeptShare[] | undef
 /** A kept share as `sharesFor` reads it back. */
 const storedShare = (share: KeptShare) => ({
   seat: share.seat,
-  ciphertext: share.ciphertext.slice(),
+  ciphertext: "erased" in share ? null : share.ciphertext.slice(),
   m: "m" in share ? share.m.slice() : null,
   receipt: "receipt" in share ? share.receipt.slice() : null,
   boarded:
@@ -464,7 +476,9 @@ export interface UnsentCast {
  * the newest: an older one is outranked by it wherever both are boarded, so
  * sending it could only matter if the newest never went, and then the
  * newest is the voter's last choice. `undefined` when the newest is
- * boarded or none is held; `other-election` for a newest cast that isn't
+ * boarded, holds a share erased at the poll's posting cutoff (its seat can
+ * then be neither delivered nor posted in time, and the poll closed days
+ * before), or none is held; `other-election` for a newest cast that isn't
  * a version-3 record naming `definitionHash`, which the poll's own casts
  * never are, so nothing is sent from them (T-25, T-45).
  */
@@ -474,6 +488,7 @@ export function unsentCast(
 ): UnsentCast | "other-election" | undefined {
   const newest = casts.at(-1);
   if (newest === undefined || newest.boarded !== undefined) return undefined;
+  if (newest.shares.some((share) => "erased" in share)) return undefined;
   const record = decodedOf(newest.ballot);
   if (record === undefined || !equalBytes(record.definition_hash, definitionHash))
     return "other-election";
@@ -605,7 +620,9 @@ export function withCast(
         })
       : shares;
   const shape = asStored(() => ({ m: new Uint8Array(M_LENGTH), receipt: null }));
-  if (sharesFor(decoded, shape) === undefined)
+  // A share is erased only in storage, at the posting cutoff: never one the worker hands over.
+  const judged = sharesFor(decoded, shape);
+  if (judged === undefined || judged.some((share) => "erased" in share))
     throw new TypeError("not the ballot's qualified seats' shares");
   const first = casts[0];
   if (first !== undefined && !equalBytes(definitionOf(first.ballot), definitionOf(ballot)))
@@ -621,7 +638,8 @@ export function withCast(
   if (kept === undefined) return "unreceipted";
   const receipted = kept.map((share): KeptShare => {
     const held = carriedShare(share.seat);
-    if (held === undefined) return share;
+    // `kept` holds no erased share once the shape passed: this only narrows.
+    if (held === undefined || "erased" in share) return share;
     const { ciphertext } = share;
     const receipt = held.receipt.slice();
     return held.boarded === undefined
@@ -663,7 +681,8 @@ export async function recordCast(
  * cast it receipts: that cast and any recast of the same seal, which
  * carries the same ballot hash and share (Client rule 2; T-18). A seat
  * already receipted keeps its first receipt, which passed as well.
- * `missing` if no cast has these bytes. Throws on a receipt that doesn't
+ * `missing` if no cast has these bytes, or if that cast's seat was erased
+ * at the posting cutoff. Throws on a receipt that doesn't
  * name `seat` and exactly this ballot, which the worker never passes.
  */
 export function withReceipt(
@@ -679,11 +698,16 @@ export function withReceipt(
     !receiptFits(decoded, seat, receipt)
   )
     throw new TypeError("not a receipt for this ballot");
-  if (!casts.some((cast) => equalBytes(cast.ballot, ballot))) return "missing";
+  const own = casts.find((cast) => equalBytes(cast.ballot, ballot));
+  // A seat erased at the posting cutoff has no share left to take the
+  // receipt's place: never answered as kept, so the caller stops rather
+  // than counting the seat receipted (found by the in-session review).
+  if (own === undefined || own.shares.some((share) => share.seat === seat && "erased" in share))
+    return "missing";
   return casts.map((cast) => {
     const at = cast.shares.findIndex((share) => share.seat === seat && "m" in share);
     const share = cast.shares[at];
-    if (share === undefined) return cast;
+    if (share === undefined || !("m" in share)) return cast;
     // Every cast held decoded when it was read.
     const record = decodedOf(cast.ballot) as BallotRecordV3;
     if (!receiptFits(record, seat, receipt)) return cast;
@@ -838,4 +862,46 @@ export async function recordReceiptBoarded(
   if (!equalBytes(entryElection(boarded.entry), electionId))
     throw new TypeError("not a board entry for this election");
   return updateCasts(key, factory, (casts) => withReceiptBoarded(casts, ballot, checked, boarded));
+}
+
+/** Whether any of `casts` still keeps a seat's `m_i`: what a posting would need, and what `withSharesErased` erases. */
+export const keepsShares = (casts: readonly CastRecord[]): boolean =>
+  casts.some((cast) => cast.shares.some((share) => "m" in share));
+
+/**
+ * `casts` with every seat still holding its `m_i` left with nothing but the
+ * seat, its `ct_i` and `m_i` erased, in every cast: what the client does once
+ * the poll's posting cutoff `c_D` passed, after which no posting delivers
+ * ([[delivery]], Client rule 4; T-18). Receipted seats keep their `ct_i`,
+ * receipt and board entry, which hold nothing a posting needs and are kept
+ * to be seen onto the board (Client rule 3). `none` if no seat holds an
+ * `m_i`.
+ */
+export function withSharesErased(casts: readonly CastRecord[]): CastRecord[] | "none" {
+  if (!keepsShares(casts)) return "none";
+  return casts.map((cast) => ({
+    ...cast,
+    shares: cast.shares.map((share) =>
+      "m" in share ? { seat: share.seat, erased: true as const } : share,
+    ),
+  }));
+}
+
+/**
+ * Erases every unreceipted seat's `ct_i` and `m_i` from the casts in
+ * `electionId` at `tier` (`withSharesErased`), in one transaction with the
+ * read; the caller has judged the poll's posting cutoff passed. As with a
+ * receipt, the browser may keep the replaced bytes on disk until it
+ * compacts them (T-18). `none` if no seat holds one, `unreadable` for casts
+ * this device can't read, which are never replaced, and `unwritable` for
+ * storage the browser refuses.
+ */
+export async function eraseShares(
+  electionId: Uint8Array,
+  tier: number,
+  factory: IDBFactory = indexedDB,
+): Promise<EraseSharesOutcome> {
+  const key = keyOf(electionId, tier);
+  const outcome = await updateCasts(key, factory, withSharesErased);
+  return outcome === "recorded" ? "erased" : outcome;
 }

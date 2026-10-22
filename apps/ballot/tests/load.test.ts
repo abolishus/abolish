@@ -21,6 +21,7 @@ import {
   DEFINITION_HASH_OF,
   type Fetch,
   loadBoard,
+  loadChainTime,
   loadElection,
   loadGroupRegistry,
 } from "../src/load.ts";
@@ -1065,5 +1066,56 @@ describe("the deployments", () => {
         STAGING.registrars.registrars.length,
       );
     }
+  });
+});
+
+describe("the chain's time", () => {
+  /** An L2 node answering `eth_chainId` with `chainId` and the finalized head with `head`. */
+  const node = (head: unknown, chainId: unknown = "0x14a34") =>
+    network((url, method) => {
+      expect(url).toBe(STAGING.rpc);
+      return {
+        status: 200,
+        body: method === "eth_chainId" ? rpcResult(1, chainId) : rpcResult(2, head),
+      };
+    });
+
+  test("is the L2's finalized head's timestamp, asked for with nothing else", async () => {
+    const { calls, fetchFn } = node({ number: "0x8c", timestamp: "0x6abcdef0" });
+    await expect(loadChainTime(STAGING, fetchFn)).resolves.toEqual({
+      ok: true,
+      timestamp: 0x6abcdef0n,
+    });
+    expect(calls.map(({ body }) => body)).toEqual([
+      { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] },
+      { jsonrpc: "2.0", id: 2, method: "eth_getBlockByNumber", params: ["finalized", false] },
+    ]);
+    for (const { init } of calls) {
+      expect(init.credentials).toBe("omit");
+      expect(init.referrerPolicy).toBe("no-referrer");
+    }
+  });
+
+  test("is refused from another chain, an answer that isn't a block, and a network that fails", async () => {
+    await expect(
+      loadChainTime(STAGING, node({ number: "0x8c", timestamp: "0x1" }, "0x1").fetchFn),
+    ).resolves.toEqual({ ok: false, problem: "wrong-chain" });
+    for (const head of [
+      null,
+      "0x1",
+      { number: "0x8c" },
+      { number: "0x8c", timestamp: 1 },
+      { number: "0x8c", timestamp: "0x01" },
+      { number: "0x8c", timestamp: "0x1".padEnd(20, "f") },
+      { timestamp: "0x1" },
+    ])
+      await expect(loadChainTime(STAGING, node(head).fetchFn)).resolves.toEqual({
+        ok: false,
+        problem: "bad-answer",
+      });
+    await expect(loadChainTime(STAGING, network(() => "network").fetchFn)).resolves.toEqual({
+      ok: false,
+      problem: "unreachable",
+    });
   });
 });

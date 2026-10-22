@@ -199,6 +199,7 @@ describe("the display text", () => {
         boardEntryVersion: undefined,
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
+        l1InclusionBound: BigInt(definition.l1_inclusion_bound),
       });
     },
   );
@@ -309,6 +310,8 @@ describe("a version-5 election, a poll of questions", () => {
         boardEntryVersion: pinnedVersion(definition, RECORD_TYPES.boardEntry),
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
+        // What the posting cutoff counts from, with `closes_at` ([[delivery]], Windows).
+        l1InclusionBound: BigInt(definition.l1_inclusion_bound),
         translations: v.value.translations.map((t) => ({
           language: text(t.language),
           title: text(t.title),

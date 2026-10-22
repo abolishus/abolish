@@ -6,7 +6,7 @@
 // First, as in main.tsx.
 import "../../src/worker-policy.ts";
 
-import { CASTS_DB, readCasts, recordBoarded, recordCast } from "../../src/casts.ts";
+import { CASTS_DB, eraseShares, readCasts, recordBoarded, recordCast } from "../../src/casts.ts";
 import { STAGING } from "../../src/deployment.ts";
 import {
   createIdentity,
@@ -347,6 +347,8 @@ const harness = {
     if (checked === undefined) return Promise.resolve("unchecked");
     return recordBoarded(fromHex(electionId), tier, bytes, checked);
   },
+  /** Erases every unreceipted seat's `ct_i` and `m_i` from the casts of `electionId` at `tier` (casts.ts). */
+  eraseShares: (electionId: string, tier: number) => eraseShares(fromHex(electionId), tier),
   /** The casts of `electionId` at `tier`, read as the page reads them, with hex and decimal strings. */
   async readCasts(electionId: string, tier: number): Promise<string> {
     return JSON.stringify(await readCasts(fromHex(electionId), tier), (_, v: unknown) =>

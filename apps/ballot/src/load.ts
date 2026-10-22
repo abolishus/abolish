@@ -499,6 +499,33 @@ export async function loadGroupRegistry(
   }
 }
 
+export type LoadedChainTime =
+  | { readonly ok: true; readonly timestamp: bigint }
+  | { readonly ok: false; readonly problem: LoadProblem };
+
+/**
+ * The timestamp of the L2's finalized head, the chain's time as far as a
+ * contract-path record's submission time is concerned ([[delivery]],
+ * Windows): what the client judges a poll's posting cutoff by, beside the
+ * device's own clock, before it erases what a posting would need (T-18).
+ * Finalized, so it lags the chain and never runs ahead of it.
+ */
+export async function loadChainTime(
+  deployment: Deployment,
+  fetchFn: Fetch,
+): Promise<LoadedChainTime> {
+  try {
+    const [, head] = await both(
+      checkChain(deployment, fetchFn),
+      finalizedHead(deployment, fetchFn),
+    );
+    return { ok: true, timestamp: head.timestamp };
+  } catch (error) {
+    if (error instanceof Stop) return { ok: false, problem: error.problem };
+    throw error;
+  }
+}
+
 /** Request 2: the L2's finalized block, by number and timestamp: logs past it could be reorganised away (T-34). */
 async function finalizedHead(
   deployment: Deployment,

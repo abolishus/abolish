@@ -96,6 +96,7 @@ describe("the frame under the client's CSP", () => {
       boardEntryVersion: undefined,
       opensAt: 1_790_000_000n,
       closesAt: 1_792_000_000n,
+      l1InclusionBound: 3_600n,
       translations: [
         {
           language: "en",
@@ -136,6 +137,10 @@ describe("the frame under the client's CSP", () => {
           keepBoarded: () => new Promise<never>(() => {}),
           submitReceipt: () => new Promise<never>(() => {}),
           keepReceiptBoarded: () => new Promise<never>(() => {}),
+          eraseShares: () => new Promise<never>(() => {}),
+          chainTime: () => new Promise<never>(() => {}),
+          now: () => 0,
+          forcedInclusion: 0n,
           registrar: undefined,
           delivers: false,
         },

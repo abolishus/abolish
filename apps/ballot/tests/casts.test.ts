@@ -18,6 +18,7 @@ import {
   type CastRecord,
   type CheckedReceipt,
   type KeptShare,
+  keepsShares,
   newestBlock,
   parseStoredCasts,
   storedCasts,
@@ -26,6 +27,7 @@ import {
   withCast,
   withReceipt,
   withReceiptBoarded,
+  withSharesErased,
 } from "../src/casts.ts";
 
 // The record of this device's casts in one election and tier (src/casts.ts;
@@ -140,6 +142,10 @@ const receiptedBoarded = (): KeptShare[] =>
     "receipt" in share ? { ...share, boarded: receiptBoardedFor(share.receipt) } : share,
   );
 
+/** `receipted()` once the posting cutoff passed: every other seat's `ct_i` and `m_i` erased. */
+const erased = (): KeptShare[] =>
+  receipted().map((share) => ("m" in share ? { seat: share.seat, erased: true } : share));
+
 // Distinct blocks in ascending order, each cast boarded or not.
 const casts = fc
   .uniqueArray(fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }), { maxLength: 6 })
@@ -148,19 +154,21 @@ const casts = fc
       ...blocks
         .toSorted((a, b) => (a < b ? -1 : 1))
         .map((n) =>
-          fc.tuple(fc.boolean(), fc.constantFrom(0, 1, 2)).map(([boarded, receipt]): CastRecord => {
-            const ballot = naming(n);
-            const list = [shares, receipted, receiptedBoarded][receipt]!();
-            return boarded
-              ? { ballot, l1Number: n, shares: list, boarded: boardedFor(ballot) }
-              : { ballot, l1Number: n, shares: list };
-          }),
+          fc
+            .tuple(fc.boolean(), fc.constantFrom(0, 1, 2, 3))
+            .map(([boarded, receipt]): CastRecord => {
+              const ballot = naming(n);
+              const list = [shares, receipted, receiptedBoarded, erased][receipt]!();
+              return boarded
+                ? { ballot, l1Number: n, shares: list, boarded: boardedFor(ballot) }
+                : { ballot, l1Number: n, shares: list };
+            }),
         ),
     ),
   );
 
 const record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  v: 4,
+  v: 5,
   casts: [{ ballot: naming(10n), shares: kept(), boarded: null }],
   ...over,
 });
@@ -218,6 +226,20 @@ function sharesRefused(): [string, unknown][] {
     ],
     ["a receipt's board entry cut short", entry({ ...ownEntry, entry: new Uint8Array(50) })],
     ["a share with neither its m nor a receipt", with_(0, { m: null })],
+    ["an m without its ciphertext", with_(0, { ciphertext: null })],
+    [
+      "an erased share with a receipt",
+      with_(0, { ciphertext: null, m: null, receipt: receiptFor(first.seat) }),
+    ],
+    [
+      "an erased share with a board entry",
+      with_(0, { ciphertext: null, m: null, boarded: ownEntry }),
+    ],
+    [
+      "an erased share for another seat",
+      with_(0, { seat: UNQUALIFIED, ciphertext: null, m: null }),
+    ],
+    ["an erased share of undefineds", with_(0, { ciphertext: undefined, m: undefined })],
     ["a share with both its m and a receipt", with_(0, { receipt: receiptFor(first.seat) })],
     [
       "a receipt for another seat",
@@ -274,7 +296,7 @@ describe("the stored casts", () => {
     const [cast] = parseStoredCasts(stored) as CastRecord[];
     cast!.ballot.fill(0);
     (cast!.shares[0] as { m: Uint8Array }).m.fill(0);
-    cast!.shares[0]!.ciphertext.fill(0);
+    (cast!.shares[0] as { ciphertext: Uint8Array }).ciphertext.fill(0);
     expect(parseStoredCasts(stored)).toEqual([
       { ballot: naming(10n), l1Number: 10n, shares: shares() },
     ]);
@@ -304,9 +326,10 @@ describe("the stored casts", () => {
     ["not an object", "casts"],
     ["a list", []],
     ["another version", record({ v: 2 })],
-    ["version as a string", record({ v: "4" })],
+    ["version as a string", record({ v: "5" })],
     ["version 3, which kept no receipts' entries", record({ v: 3 })],
-    ["a key missing", { v: 4 }],
+    ["version 4, which kept no erased shares", record({ v: 4 })],
+    ["a key missing", { v: 5 }],
     ["a key more", record({ tier: 0 })],
     ["casts not a list", record({ casts: {} })],
     ["a list with a hole", record({ casts: HOLED })],
@@ -790,12 +813,16 @@ describe("an unsent cast", () => {
     ).toBe("other-election");
   });
 
-  test("is exactly the newest cast without a board entry, with its seats holding an m (fast-check)", () => {
+  test("is exactly the newest cast without a board entry or an erased share, with its seats holding an m (fast-check)", () => {
     fc.assert(
       fc.property(casts, (held) => {
         const unsent = unsentCast(held, definition);
         const newest = held.at(-1);
-        if (newest === undefined || newest.boarded !== undefined) {
+        if (
+          newest === undefined ||
+          newest.boarded !== undefined ||
+          newest.shares.some((share) => "erased" in share)
+        ) {
           expect(unsent).toBeUndefined();
           return;
         }
@@ -963,5 +990,85 @@ describe("a cast's unboarded receipts", () => {
     const held: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: receipted() }];
     unboardedReceipts(held, naming(10n))[0]?.receipt.fill(0);
     expect(unboardedReceipts(held, naming(10n))).toEqual([{ seat: FIRST, receipt: own }]);
+  });
+});
+
+describe("the shares erased at the posting cutoff", () => {
+  test("are every seat still holding its m, in every cast, its ct and m gone and the rest untouched (fast-check)", () => {
+    fc.assert(
+      fc.property(casts, (list) => {
+        const changed = withSharesErased(list);
+        if (!keepsShares(list)) {
+          expect(changed).toBe("none");
+          return;
+        }
+        if (changed === "none") throw new Error("expected casts");
+        expect(keepsShares(changed)).toBe(false);
+        expect(changed).toHaveLength(list.length);
+        changed.forEach((cast, i) => {
+          const before = list[i] as CastRecord;
+          expect(cast.ballot).toEqual(before.ballot);
+          expect(cast.l1Number).toBe(before.l1Number);
+          expect(cast.boarded).toEqual(before.boarded);
+          expect(cast.shares).toEqual(
+            before.shares.map((share) =>
+              "m" in share ? { seat: share.seat, erased: true } : share,
+            ),
+          );
+        });
+        // Read back as written.
+        expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+      }),
+      { numRuns },
+    );
+  }, 600_000);
+
+  test("are none for casts that keep no m", () => {
+    expect(withSharesErased([])).toBe("none");
+    const cast: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: erased() };
+    expect(keepsShares([cast])).toBe(false);
+    expect(withSharesErased([cast])).toBe("none");
+  });
+
+  test("are stored with nothing but the seat", () => {
+    const [cast] = withSharesErased([
+      { ballot: naming(10n), l1Number: 10n, shares: receipted() },
+    ]) as CastRecord[];
+    const stored = storedCasts([cast!]) as { casts: { shares: unknown[] }[] };
+    expect(stored.casts[0]?.shares[1]).toEqual({
+      seat: (SHARES[1] as CastShare).seat,
+      ciphertext: null,
+      m: null,
+      receipt: null,
+      boarded: null,
+    });
+  });
+
+  test("leave a newest cast holding one never resumed", () => {
+    const older: CastRecord = { ballot: naming(9n), l1Number: 9n, shares: shares() };
+    const newest: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: erased() };
+    expect(unsentCast([older, newest], DECODED.definition_hash)).toBeUndefined();
+  });
+
+  test("take no receipt in their place: the receipt is missing, never answered as kept", () => {
+    const list: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: erased() }];
+    const second = (SHARES[1] as CastShare).seat;
+    expect(withReceipt(list, naming(10n), checkedOf(second, receiptFor(second)))).toBe("missing");
+    // The seat receipted before the erasure keeps its receipt, which passes again.
+    expect(withReceipt(list, naming(10n), checkedOf(FIRST, receiptFor(FIRST)))).toEqual(list);
+  });
+
+  test("are never taken from the worker's shares", () => {
+    const asErased = shares().map(({ seat }, i) =>
+      i === 0 ? { seat, ciphertext: null, m: null } : shares()[i],
+    );
+    expect(() => withCast([], naming(10n), asErased as unknown as CastShare[])).toThrow(TypeError);
+  });
+
+  test("leave a later recast's carried receipts as they were", () => {
+    const list: CastRecord[] = [{ ballot: naming(10n), l1Number: 10n, shares: erased() }];
+    const recast = withCast(list, naming(11n), shares()) as CastRecord[];
+    expect(recast[1]?.shares[0]).toEqual(erased()[0]);
+    expect(recast[1]?.shares.slice(1)).toEqual(shares().slice(1));
   });
 });

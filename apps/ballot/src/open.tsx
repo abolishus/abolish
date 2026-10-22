@@ -8,6 +8,8 @@ import {
   type CastAsked,
   type CastsRead,
   type CheckedReceipt,
+  type EraseSharesOutcome,
+  keepsShares,
   newestBlock,
   type RecordBoardedOutcome,
   type RecordCastOutcome,
@@ -20,7 +22,8 @@ import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
 import type { IdentityRead, Membership } from "./identity.ts";
 import type { Delivery, IntakeAnswer } from "./intake.ts";
-import type { Loaded, LoadedBoard, LoadProblem } from "./load.ts";
+import { passedOnDevice, postingCutoff, postingLapsed } from "./lapse.ts";
+import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
@@ -142,6 +145,17 @@ export interface ElectionSource {
     | { readonly ok: true; readonly checked: CheckedReceipt }
     | Extract<ReceiptResult, { readonly ok: false }>
   >;
+  /**
+   * Erases every unreceipted seat's `ct_i` and `m_i` from the recorded casts
+   * (`eraseShares`), once the poll's posting cutoff passed.
+   */
+  eraseShares(electionId: Uint8Array, tier: number): Promise<EraseSharesOutcome>;
+  /** The timestamp of the L2's finalized head (`loadChainTime`), read only when a cutoff may have passed. */
+  chainTime(): Promise<LoadedChainTime>;
+  /** This device's clock, in milliseconds since the epoch. */
+  now(): number;
+  /** The release's `F`, in seconds (`Deployment.forcedInclusion`): the posting cutoff is `t_D − F`. */
+  readonly forcedInclusion: bigint;
   /** Keeps a checked receipt in place of its seat's `m_i` in the recorded casts (`recordReceipt`). */
   keepReceipt(
     electionId: Uint8Array,
@@ -558,11 +572,33 @@ export function Ballot({
    * store refused after the worker erased its seal's copy is asked for once
    * more, and its node answers with the same receipt (T-18). Casts that
    * can't be read offer nothing here: the cast's own read stops on them.
+   * Once the poll's posting cutoff passed, every unreceipted seat's `ct_i`
+   * and `m_i` are erased first, and a cast holding an erased seat is never
+   * offered ([[delivery]], Client rule 4).
    */
   async function resume(): Promise<Step> {
+    const cutoff = postingCutoff(
+      election.closesAt,
+      election.l1InclusionBound,
+      source.forcedInclusion,
+    );
+    // The chain's time, read at most once, and only for a tier that keeps a
+    // share past the cutoff by this device's clock: most visits read nothing.
+    let chain: Promise<LoadedChainTime> | undefined;
     for (const tier of election.tiers) {
-      const held = await source.casts(electionId, tier);
+      let held = await source.casts(electionId, tier);
       if (held.kind === "unreadable") continue;
+      if (keepsShares(held.casts) && passedOnDevice(cutoff, source.now())) {
+        chain ??= source.chainTime();
+        const time = await chain;
+        // An RPC that fails or answers wrongly leaves the shares kept: erasing
+        // on its word alone could lose a posting still in time (T-25).
+        if (time.ok && postingLapsed(cutoff, time.timestamp, source.now())) {
+          await source.eraseShares(electionId, tier);
+          held = await source.casts(electionId, tier);
+          if (held.kind === "unreadable") continue;
+        }
+      }
       const unsent = unsentCast(held.casts, definitionHash);
       if (unsent === undefined) continue;
       if (unsent === "other-election") return stopped("cast-faulty");

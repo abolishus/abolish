@@ -281,6 +281,9 @@ describe("tier0Issuer", () => {
 });
 
 describe("issuance", () => {
+  // Each run makes an account in the database and evaluates and finalizes a
+  // token in bigint arithmetic: about 2 s in all locally, past the 5 s default
+  // on a loaded CI runner.
   test("answers an evaluation the client finalizes into the token redemption expects", async () => {
     await fc.assert(
       fc.asyncProperty(fc.constant(null), async () => {
@@ -299,7 +302,7 @@ describe("issuance", () => {
       }),
       { numRuns: Math.min(runs.numRuns, 50) },
     );
-  });
+  }, 60_000);
 
   test("records the region, key and B with no commitment, token or blind (T-10)", async () => {
     const account = await newAccount();

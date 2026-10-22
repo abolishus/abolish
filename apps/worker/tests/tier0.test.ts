@@ -209,7 +209,12 @@ async function deployRegistry(): Promise<{ registry: Address; fromBlock: bigint 
   return { registry: receipt.contractAddress, fromBlock: receipt.blockNumber };
 }
 
-async function send(registry: Address, functionName: "createGroup" | "addMembers", arg: unknown) {
+/** Resolves with the block that included the call. */
+async function send(
+  registry: Address,
+  functionName: "createGroup" | "addMembers",
+  arg: unknown,
+): Promise<bigint> {
   const hash = await wallet.writeContract({
     account: accounts[5] as Address,
     chain,
@@ -220,6 +225,7 @@ async function send(registry: Address, functionName: "createGroup" | "addMembers
   } as Parameters<typeof wallet.writeContract>[0]);
   const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
   if (receipt.status !== "success") throw new Error(`${functionName} reverted`);
+  return receipt.blockNumber;
 }
 
 /** Distinct allowed commitments, fresh for each call. */
@@ -344,7 +350,7 @@ describe("the adapter", () => {
     expect(await reader.group(0n)).toEqual({ tier: 0, finalizedSize: 0n, latestSize: 0n });
 
     const first = commitments(3);
-    await send(registry, "addMembers", signedRecord(registry, 0n, 0n, first));
+    const addedAt = await send(registry, "addMembers", signedRecord(registry, 0n, 0n, first));
     const unfinal = await reader.group(0n);
     expect(unfinal).toEqual({ tier: 0, finalizedSize: 0n, latestSize: 3n });
     expect(await reader.additionAt(0n, 0n)).toMatchObject({ final: false });
@@ -355,6 +361,8 @@ describe("the adapter", () => {
     expect(await reader.group(0n)).toEqual({ tier: 0, finalizedSize: 3n, latestSize: 3n });
     const logged = await reader.additionAt(0n, 0n);
     expect(logged?.final).toBe(true);
+    // The block that logged it, for the index's floor once it is finished.
+    expect(logged?.block).toBe(addedAt);
     expect(toHex(logged?.record as Uint8Array)).toBe(signedRecord(registry, 0n, 0n, first));
     expect(await reader.additionAt(0n, 3n)).toBeNull();
     // A group that was never created has no final creation.
@@ -374,7 +382,10 @@ describe("the adapter", () => {
     const expected = [...a, ...b, ...c].sort(cmp);
     for (const range of [undefined, 1n, 2n, 3n]) {
       const { chain: reader } = adapter(registry, fromBlock, range);
-      expect([...(await reader.tier0Commitments())].sort(cmp)).toEqual(expected);
+      const read = await reader.tier0Commitments();
+      expect([...read.commitments].sort(cmp)).toEqual(expected);
+      // At the node's latest block when the read began.
+      expect(read.block).toBe(await client.getBlockNumber({ cacheTime: 0 }));
     }
   });
 
@@ -448,7 +459,7 @@ describe("a node not to trust", () => {
     const r = reader(honest);
     expect(await r.group(0n)).toEqual({ tier: 0, finalizedSize: 3n, latestSize: 3n });
     expect(await r.additionAt(0n, 0n)).toMatchObject({ final: true });
-    expect([...(await r.tier0Commitments())]).toHaveLength(3);
+    expect([...(await r.tier0Commitments()).commitments]).toHaveLength(3);
   });
 
   test("a finalized block above the latest is refused", async () => {

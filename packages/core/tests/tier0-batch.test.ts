@@ -23,11 +23,13 @@ import {
   Tier0Batches,
   type Tier0Chain,
   type Tier0GroupState,
+  type Tier0IndexRead,
   tier0Keys,
   Tier0LockError,
   type Tier0LoggedAddition,
   type Tier0Redis,
   Tier0Registrations,
+  Tier0ShownList,
 } from "../src/index.ts";
 
 // Tier 0 registration's batch job against a live Redis and an in-memory group
@@ -101,6 +103,7 @@ interface Logged {
   readonly record: Uint8Array;
   readonly firstIndex: bigint;
   readonly commitments: readonly bigint[];
+  readonly block: bigint;
   final: boolean;
 }
 
@@ -123,6 +126,10 @@ class FakeChain implements Tier0Chain {
   staleGroup: Tier0GroupState | undefined;
   /** Answers `additionAt` from a node that hasn't seen any addition, while set. */
   staleAdditions = false;
+  /** Answers `tier0Commitments` from a node at this earlier read, while set. */
+  staleIndex: Tier0IndexRead | undefined;
+  /** The latest block: each landed record is in a block of its own. */
+  height = 0n;
 
   constructor(groups: readonly bigint[] = [GROUP]) {
     for (const g of groups) {
@@ -138,12 +145,13 @@ class FakeChain implements Tier0Chain {
     if (this.down) throw new Error("node down");
   }
 
-  async tier0Commitments(): Promise<Iterable<bigint>> {
+  async tier0Commitments(): Promise<Tier0IndexRead> {
     await this.#read();
+    if (this.staleIndex !== undefined) return this.staleIndex;
     const all = [...this.selfPaid];
     for (const [g, logs] of this.logs)
       if (this.tiers.get(g) === 0) for (const l of logs) all.push(...l.commitments);
-    return all;
+    return { block: this.height, commitments: all };
   }
 
   async group(groupId: bigint): Promise<Tier0GroupState> {
@@ -163,7 +171,7 @@ class FakeChain implements Tier0Chain {
     await this.#read();
     if (this.staleAdditions) return null;
     const l = (this.logs.get(groupId) ?? []).find((x) => x.firstIndex === firstIndex);
-    return l === undefined ? null : { record: l.record.slice(), final: l.final };
+    return l === undefined ? null : { record: l.record.slice(), block: l.block, final: l.final };
   }
 
   async submit(record: Uint8Array): Promise<void> {
@@ -192,6 +200,7 @@ class FakeChain implements Tier0Chain {
       record: record.slice(),
       firstIndex: d.value.firstIndex,
       commitments: d.value.commitments,
+      block: ++this.height,
       final,
     });
   }
@@ -728,6 +737,60 @@ describe("nodes at different blocks", () => {
     expect(chain.submitted).toEqual([]);
   });
 
+  test("an index read below a finished batch never replaces the index", async () => {
+    const chain = new FakeChain();
+    const values = commitments(MIN_REGISTRATION_BATCH);
+    await enqueue(values);
+    await batches(chain).runBoundary();
+    chain.finalize();
+    // A node below the batch's block answers the boundary's refresh after the
+    // finish: the index keeps the batch the finish moved into it.
+    chain.staleIndex = { block: 0n, commitments: [] };
+    expect((await batches(chain).runBoundary())[0]?.outcome).toBe("index-unavailable");
+    const live = values.map(commitmentKey).sort();
+    expect((await redis.smembers(keys().live)).sort()).toEqual(live);
+    expect(await redis.get(keys().finished)).toBe("1");
+    // So does a restarted job's refresh, from a fresh adapter that has read
+    // no block yet, and the index keeps its old time, so it ages out rather
+    // than pass as current.
+    await redis.set(keys().indexed, String(NOW - 100));
+    expect(await newJob(chain).refreshIndex()).toBe(false);
+    expect((await redis.smembers(keys().live)).sort()).toEqual(live);
+    expect(await redis.get(keys().indexed)).toBe(String(NOW - 100));
+    expect(await redis.exists(keys().next)).toBe(0);
+    // A re-issuance's mark still finds the batch's commitments added.
+    await redis.set(keys().indexed, String(clock));
+    const shown = new Tier0ShownList({ redis, now: () => clock, prefix });
+    for (const v of values) expect(await shown.show(v, 0)).toBe("registered");
+    expect(await redis.exists(keys().shown)).toBe(0);
+    // A read at the batch's own block holds it, and is swapped in.
+    chain.staleIndex = { block: 1n, commitments: values };
+    expect(await newJob(chain).refreshIndex()).toBe(true);
+    // One that claims the block but misses the batch's logs (a load
+    // balancer's lagging node answering a range) is swapped in with the
+    // batch joined, so the mark still finds every one of them.
+    const other = commitments(1, 6n)[0] as bigint;
+    chain.staleIndex = { block: 5n, commitments: [other] };
+    expect(await newJob(chain).refreshIndex()).toBe(true);
+    expect((await redis.smembers(keys().live)).sort()).toEqual(
+      [...values, other].map(commitmentKey).sort(),
+    );
+    for (const v of values) expect(await shown.show(v, 0)).toBe("registered");
+    chain.staleIndex = undefined;
+    chain.selfPaid.add(commitments(1, 5n)[0] as bigint);
+    expect(await newJob(chain).refreshIndex()).toBe(true);
+    expect(await redis.scard(keys().live)).toBe(values.length + 1);
+  });
+
+  test("a block number past what a script compares exactly is a node not to read", async () => {
+    const chain = new FakeChain();
+    chain.staleIndex = { block: 1n << 53n, commitments: [] };
+    expect(await batches(chain).refreshIndex()).toBe(false);
+    expect(await redis.exists(keys().indexed)).toBe(0);
+    chain.staleIndex = { block: (1n << 53n) - 1n, commitments: [] };
+    expect(await batches(chain).refreshIndex()).toBe(true);
+  });
+
   test("a landed batch that additionAt can't see yet is never abandoned", async () => {
     const chain = new FakeChain();
     await enqueue(commitments(MIN_REGISTRATION_BATCH));
@@ -889,6 +952,8 @@ describe("the queue's state", () => {
             k.held,
             k.batches,
             k.positions,
+            k.finished,
+            k.added,
             k.boundary,
           ]);
           for (const key of await allKeys()) expect(allowed.has(key)).toBe(true);

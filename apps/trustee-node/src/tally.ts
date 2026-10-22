@@ -23,6 +23,7 @@ import {
   aggregateCell,
   aggregateHash,
   ballotHash,
+  ballotHashV3,
   bytesFixed,
   type CellAggregate,
   ceremonyTranscriptHash,
@@ -31,8 +32,11 @@ import {
   type CommittedVote,
   decodeBallot,
   DecodeError,
+  EncodeError,
   type ElectionDefinition,
   electionDefinitionHash,
+  type ElectionDefinitionV5,
+  electionDefinitionV5Hash,
   encodeTallyOpening,
   identityKey,
   KEM_PUBLIC_KEY,
@@ -54,6 +58,17 @@ import { heldShares } from "./intake.ts";
 import type { SeatStore } from "./store.ts";
 import type { Pins } from "./stub.ts";
 
+/**
+ * A registered definition of a version the tally reads: version 1 (one cell
+ * per tier, one question) or version 5 (every tier's regional cells, several
+ * questions), the stubs the ceremony and intake take. A bare definition is
+ * version 1's, as crypto's summed-share calls read it.
+ */
+export type TallyDefinition =
+  | ElectionDefinition
+  | { readonly version: 1; readonly value: ElectionDefinition }
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+
 /** What the deployment reads of the counted set, from the anchored counted extent. */
 export type CountedSet =
   /** The counted extent isn't anchored yet, or the attestations aren't all read: nothing is fixed. */
@@ -66,7 +81,8 @@ export type CountedSet =
   | { readonly state: "unavailable" }
   /**
    * The counted set, fixed: for each cell of the registered partition, in
-   * order, the ballot records (version 1) of its counted ballots, as the
+   * order, the ballot records of its counted ballots (version 1 under
+   * definition version 1, version 3 under version 5), as the
    * anchored counted extent holds them. It must come from the seat's own
    * finalized L1 and L2 nodes through packages/verifier, never a served
    * value: sums over a set other than the anchored one, beside the
@@ -94,12 +110,12 @@ export interface TallyDutyOptions extends Pins {
   /** The transcript and key set the seat's approval signed for. */
   readonly secrets: Pick<IntakeSecrets, "transcriptHash" | "keySetHash">;
   /**
-   * The registered definition (version 1) and its ceremony transcript, as
+   * The registered definition (version 1 or 5) and its ceremony transcript, as
    * the deployment reads them. Checked against what the seat approved, never
    * trusted: the definition must hash to the approved definition hash, and
    * the transcript's check must return the approved key set (T-37).
    */
-  readonly definition: ElectionDefinition;
+  readonly definition: TallyDefinition;
   readonly transcript: Uint8Array;
   readonly store: SeatStore;
   readonly counted: (election: ApprovedElection) => Promise<CountedSet>;
@@ -145,8 +161,10 @@ interface Cell {
   readonly missing: number;
 }
 
+type Definition = Exclude<TallyDefinition, ElectionDefinition>;
+
 interface Fixed {
-  readonly definition: ElectionDefinition;
+  readonly definition: Definition;
   readonly registered: readonly RegisteredKeys[];
   readonly rules: TallyRules;
   readonly cells: readonly Cell[];
@@ -316,41 +334,36 @@ export class TallyDuty {
 
   async #cells(counted: readonly (readonly Uint8Array[])[]): Promise<Fixed> {
     const { election, store } = this.#o;
-    const { definition: d, registered } = this.#checked();
-    const rules = tallyRules({ version: 1, value: d });
-    // One cell per `electorate` entry under definition version 1, no more:
-    // a sum over any other set could disclose a difference of sums (T-14, T-16).
-    if (counted.length !== d.electorate.length)
+    const { definition, registered } = this.#checked();
+    const rules = tallyRules(definition);
+    // The partition's cells, each with its tier: under version 1 one per
+    // `electorate` entry, under version 5 every tier's cells numbered across
+    // the definition (verifier 2.8). No more and no fewer: a sum over any
+    // other set could disclose a difference of sums (T-14, T-16).
+    const tiers =
+      definition.version === 1
+        ? definition.value.electorate.map((t) => t.tier)
+        : definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
+    if (counted.length !== tiers.length)
       throw new Refused("another number of cells than the partition's");
     const voters = new Set<string>();
     const cells: Cell[] = [];
     for (const [c, records] of counted.entries()) {
-      const tier = (d.electorate[c] as ElectionDefinition["electorate"][number]).tier;
+      const tier = tiers[c] as number;
       const vss: CommittedVote["vss"][] = [];
       const shares: (readonly Share[])[] = [];
       let missing = 0;
       for (const bytes of records) {
-        let b;
-        try {
-          b = decodeBallot(bytes, 1);
-        } catch (e) {
-          if (e instanceof DecodeError) throw new Refused("a counted ballot doesn't decode");
-          throw e;
-        }
-        if (!equal(b.definition_hash, election.definitionHash) || b.tier !== tier)
-          throw new Refused("a counted ballot of another election or cell");
-        // Re-voting selects one ballot per voter (T-45): two would count twice.
-        const voter = `${b.tier}/${b.nullifier}`;
+        const b = countedBallot(definition.version, election.definitionHash, c, tier, bytes);
+        // Re-voting selects one ballot per voter (T-45): two would count
+        // twice. A nullifier is the tier's, so under version 5 a voter is
+        // one across the tier's cells, and a second in another cell is
+        // refused as one in the same cell is.
+        const voter = `${tier}/${b.nullifier}`;
         if (voters.has(voter)) throw new Refused("a voter counted twice");
         voters.add(voter);
-        vss.push(b.committed_vote.vss);
-        // T-38: looked up by the ballot hash recomputed from the record, so
-        // the source can't pair one ballot's vote with another's shares.
-        const hash = ballotHash(
-          { definitionHash: election.definitionHash, tier: b.tier, nullifier: b.nullifier },
-          b.committed_vote,
-        );
-        const held = await heldShares(store, election.stubHash, hash);
+        vss.push(b.vss);
+        const held = await heldShares(store, election.stubHash, b.hash);
         if (held === undefined) missing++;
         else shares.push(held);
       }
@@ -381,7 +394,7 @@ export class TallyDuty {
       if (!equal((await store.putOnce(name, encode(HASH, hash))).value, hash))
         throw new Refused("a counted set other than the one fixed before");
     }
-    return { definition: d, registered, rules, cells };
+    return { definition, registered, rules, cells };
   }
 
   /**
@@ -390,14 +403,32 @@ export class TallyDuty {
    * approved one, and that transcript's check under the pinned panel
    * returns the key set the approval signed, with this seat's own keys in it.
    */
-  #checked(): { definition: ElectionDefinition; registered: readonly RegisteredKeys[] } {
-    const { definition: d, transcript, election, secrets, panel } = this.#o;
+  #checked(): { definition: Definition; registered: readonly RegisteredKeys[] } {
+    const { transcript, election, secrets, panel } = this.#o;
+    const definition: Definition =
+      "version" in this.#o.definition && "value" in this.#o.definition
+        ? this.#o.definition
+        : { version: 1, value: this.#o.definition };
+    const d = definition.value;
     // Implied by the approved definition hash, which the seat computed from
     // a stub its pins passed; checked so the transcript is read against them.
+    // Each version is hashed under its own layout, so a definition read
+    // under another never matches, and one tagged with a version whose
+    // layout it doesn't have doesn't encode (T-34).
+    let hash: Uint8Array | undefined;
+    try {
+      hash =
+        definition.version === 1
+          ? electionDefinitionHash(definition.value)
+          : electionDefinitionV5Hash(definition.value);
+    } catch (e) {
+      if (!(e instanceof EncodeError)) throw e;
+    }
     if (
+      hash === undefined ||
       d.l2_chain_id !== this.#o.l2ChainId ||
       !equal(d.trustee_registry, this.#o.trusteeRegistry) ||
-      !equal(electionDefinitionHash(d), election.definitionHash)
+      !equal(hash, election.definitionHash)
     )
       throw new Refused("the definition isn't the one the seat approved");
     const transcriptHash = ceremonyTranscriptHash(transcript);
@@ -429,6 +460,44 @@ export class TallyDuty {
       )
     )
       throw new Refused("the transcript's key set isn't the one the seat approved");
-    return { definition: d, registered: result.registered };
+    return { definition, registered: result.registered };
+  }
+}
+
+/**
+ * A counted ballot of cell `c` read under the ballot version the definition
+ * pins (1 under definition version 1, 3 under version 5), with its ballot
+ * hash recomputed from the record. T-38: intake's shares are looked up by
+ * that hash, so the source can't pair one ballot's vote with another's
+ * shares; it binds the ballot version and the tier or cell, so a record
+ * relabelled to another layout or cell never finds the shares of the one it
+ * copies (T-34).
+ */
+function countedBallot(
+  version: Definition["version"],
+  definitionHash: Uint8Array,
+  c: number,
+  tier: number,
+  bytes: Uint8Array,
+): { readonly nullifier: bigint; readonly vss: CommittedVote["vss"]; readonly hash: Uint8Array } {
+  try {
+    if (version === 1) {
+      const b = decodeBallot(bytes, 1);
+      if (!equal(b.definition_hash, definitionHash) || b.tier !== tier)
+        throw new Refused("a counted ballot of another election or cell");
+      const hash = ballotHash({ definitionHash, tier, nullifier: b.nullifier }, b.committed_vote);
+      return { nullifier: b.nullifier, vss: b.committed_vote.vss, hash };
+    }
+    const b = decodeBallot(bytes, 3);
+    if (!equal(b.definition_hash, definitionHash) || b.cell !== c)
+      throw new Refused("a counted ballot of another election or cell");
+    const hash = ballotHashV3(
+      { definitionHash, cell: c, nullifier: b.nullifier },
+      b.committed_vote,
+    );
+    return { nullifier: b.nullifier, vss: b.committed_vote.vss, hash };
+  } catch (e) {
+    if (e instanceof DecodeError) throw new Refused("a counted ballot doesn't decode");
+    throw e;
   }
 }

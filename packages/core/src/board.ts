@@ -767,9 +767,28 @@ export async function readBoardedEntry(
   index: bigint,
   payload: Uint8Array,
 ): Promise<AppendedEntry | undefined> {
+  if (!isBytes(payload)) throw new TypeError("payload must be bytes");
+  const boarded = await readEntryAt(client, electionId, index);
+  if (boarded === undefined || !equalBytes(boarded.payload, payload)) return undefined;
+  const { payload: _, ...appended } = boarded;
+  return appended;
+}
+
+/**
+ * The entry at `index`, the chain link after it and the payload it carries,
+ * if the board has that entry. For a caller told by another process that an
+ * entry it can't name by its bytes stands in for what it sent (an earlier
+ * share receipt for the same seat, rule 5 of docs/spec/delivery.md,
+ * Boarding): the answer is the board's, and the sender checks the payload
+ * itself.
+ */
+export async function readEntryAt(
+  client: Sql,
+  electionId: Uint8Array,
+  index: bigint,
+): Promise<(AppendedEntry & { readonly payload: Uint8Array }) | undefined> {
   const id = checkId(electionId);
   if (!isU64(index)) throw new RangeError("index must be a u64");
-  if (!isBytes(payload)) throw new TypeError("payload must be bytes");
   const [row] = await drizzle({ client })
     .select({
       segment: boardEntries.segment,
@@ -779,12 +798,19 @@ export async function readBoardedEntry(
     })
     .from(boardEntries)
     .where(and(eq(boardEntries.electionId, id), eq(boardEntries.idx, index)));
-  if (row === undefined || !equalBytes(new Uint8Array(row.payload), payload)) return undefined;
+  if (row === undefined) return undefined;
+  const payload = new Uint8Array(row.payload);
   const entry = encodeBoardEntry(
     { election_id: id, index, segment: Number(row.segment), payload: new Uint8Array(payload) },
     await storedBoardVersion(client, id),
   );
-  return { entry, index, entryHash: new Uint8Array(row.entryHash), link: new Uint8Array(row.link) };
+  return {
+    entry,
+    index,
+    entryHash: new Uint8Array(row.entryHash),
+    link: new Uint8Array(row.link),
+    payload,
+  };
 }
 
 /**

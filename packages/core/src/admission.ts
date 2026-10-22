@@ -287,7 +287,7 @@ export class BallotAdmissions {
    * Boarding) and, if it passes, appends it to the board in the segment
    * current at `now`, never after `s_D`. Throws `ReceiptError` for a
    * refusal, with nothing written. The same bytes again return the entry
-   * that carries them; a passing receipt in other bytes for a seat whose
+   * that carries them, even after `s_D`; a passing receipt in other bytes for a seat whose
    * receipt the board path already carries returns that entry instead, as
    * `earlier`, writing nothing.
    */
@@ -322,9 +322,6 @@ export class BallotAdmissions {
       admission.l1InclusionBound,
     ).delivery;
     const segment = (now - epoch) / period;
-    // Rule 3: a board-path receipt boarded after `s_D` is outside its window
-    // and delivers nothing, so it isn't boarded at all.
-    if (segment > last || segment > 0xffffffffn) throw new ReceiptError("not-open");
     const verdict = admission.receipt(own);
     if (!verdict.ok) throw new ReceiptError("rejected", verdict.code);
     // Version-1 delivery records, the only ones judged yet, name no panel:
@@ -332,8 +329,14 @@ export class BallotAdmissions {
     const key = { ballotHash: verdict.ballotHash, panel: 1, seat: verdict.seat };
     // A receipt the board path already carries, replayed byte for byte from
     // the public board, gets its entry before any ballot is read (T-52).
+    // Before rule 3 too, since it writes nothing: a sender whose answer was
+    // lost just before `s_D` still learns, retrying after it, that its
+    // receipt is boarded, rather than taking the seat for undelivered.
     const boarded = await readBoardedReceipt(client, id, key, own);
     if (boarded !== undefined) return { boarded, earlier: false };
+    // Rule 3: a board-path receipt boarded after `s_D` is outside its window
+    // and delivers nothing, so it isn't boarded at all.
+    if (segment > last || segment > 0xffffffffn) throw new ReceiptError("not-open");
     const ballot = await readBallotByHash(client, id, verdict.ballotHash);
     if (ballot === undefined) throw new ReceiptError("rejected", "receipt-ballot");
     if (!verdict.check(ballot)) throw new ReceiptError("rejected", "share-receipt");

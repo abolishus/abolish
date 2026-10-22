@@ -58,6 +58,7 @@ export {
   readBallotByHash,
   readBoard,
   readBoardedEntry,
+  readEntryAt,
   readConsistencyProof,
   readEntries,
   readHead,

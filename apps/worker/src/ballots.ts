@@ -4,10 +4,14 @@
 // their membership proofs in one batch and boards the admitted ones in the
 // order the jobs arrived (docs/spec/ballot-validity.md, Batched admission;
 // T-52).
+//
+// Its `{receipt-submit}` side judges each share receipt on its own by core's
+// `BallotAdmissions.submitReceipt` (docs/spec/delivery.md, Boarding): one
+// signature check against one stored ballot, so there is nothing to batch.
 
-import type { BallotAdmissions, SubmitOutcome } from "@abolishus/core";
+import { type BallotAdmissions, ReceiptError, type SubmitOutcome } from "@abolishus/core";
 import type { Sql } from "postgres";
-import type { BallotOutcome } from "./ballot-queue.ts";
+import type { BallotOutcome, ReceiptOutcome } from "./ballot-queue.ts";
 import type { Log } from "./log.ts";
 
 /** Ballots judged in one batch at most, and the queue's concurrency: `finishBallotSteps`' own batch. */
@@ -151,6 +155,43 @@ export class BallotBatches {
       this.#running = false;
       // Whatever arrived meanwhile has waited a whole batch already.
       if (this.#waiting.length > 0) void this.#run();
+    }
+  }
+}
+
+/**
+ * Judges and boards share receipts with the ballots' admissions, by the
+ * same clock. A refusal is an outcome; a database error throws, and the
+ * sender's retry of the same bytes returns the entry if it was boarded.
+ */
+export class ReceiptSubmissions {
+  readonly #sql: Sql;
+  readonly #admissions: BallotAdmissions;
+  readonly #now: () => bigint;
+
+  constructor({ sql, admissions, now }: Pick<BallotBatchOptions, "sql" | "admissions" | "now">) {
+    this.#sql = sql;
+    this.#admissions = admissions;
+    this.#now = now;
+  }
+
+  /** The outcome for `record` (hex) in `electionId` (hex). */
+  async submit(electionId: string, record: string): Promise<ReceiptOutcome> {
+    try {
+      const { boarded, earlier } = await this.#admissions.submitReceipt(
+        this.#sql,
+        bytes(electionId),
+        bytes(record),
+        this.#now(),
+      );
+      return { ok: true, index: boarded.index.toString(), earlier };
+    } catch (e) {
+      if (!(e instanceof ReceiptError)) throw e;
+      return {
+        ok: false,
+        code: e.code,
+        ...(e.rejection === undefined ? {} : { rejection: e.rejection }),
+      };
     }
   }
 }

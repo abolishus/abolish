@@ -21,6 +21,8 @@ export {
   MAX_PAGE,
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
+  MAX_SHARE_RECEIPT,
+  MAX_SHARE_RECEIPT_ENTRY,
   PageSize,
   RegionCode,
   TurnstileResponse,

@@ -7,9 +7,9 @@ import { buildSchema, hex, SPEC_VECTORS, type Vector, type VectorFile } from "./
 // docs/spec/vectors/release-record.json, printed by
 // scripts/release-record-vectors.py (P4-4 part 2b-1), and site-directory.json,
 // printed by scripts/site-directory-vectors.mjs from Kubo and
-// ipfs-unixfs-importer. Until the release record's codec and rules are in
-// this package (part 2c), the file's own type descriptors decode each vector,
-// so this checks the file against itself and the spec's framing: every
+// ipfs-unixfs-importer. The file's own type descriptors decode each vector
+// here, so this checks the file against itself and the spec's framing (the
+// package's codec and rules are checked against it in release.test.ts): every
 // vector round-trips, its release hash is the tagged SHA-256 of its encoding,
 // and every well-formed record's sites are the directories Kubo built (T-31,
 // T-36, T-41).

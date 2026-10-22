@@ -288,9 +288,6 @@ export const router = os.router({
       }
     }),
   },
-  // The public moderation log, a poll's state, and reports
-  // (docs/moderation-policy.md; T-68). Nothing here names a moderator or a
-  // reporter, and a report reaches no one but the moderators' queue.
   postings: {
     // The posting relay (docs/spec/posting-relay.md, Answers): core checks
     // steps 2 to 7 in order. A server without the relay is unavailable once
@@ -327,6 +324,9 @@ export const router = os.router({
       }
     }),
   },
+  // The public moderation log, a poll's state, and reports
+  // (docs/moderation-policy.md; T-68). Nothing here names a moderator or a
+  // reporter, and a report reaches no one but the moderators' queue.
   moderation: {
     // Profiles' decisions name the public handle only, from the operational
     // log table; the API still reads no account table (T-10).

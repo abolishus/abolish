@@ -387,6 +387,15 @@ export function createApiServer({
             req,
             BODY_BOUNDS.get(route) ?? MAX_REQUEST_BODY,
           );
+          // The posting route waits up to POSTING_WAIT for the relay's worker
+          // with nothing crossing the socket, longer than the idle timeout
+          // allows; once its body is in, the deadline alone bounds it.
+          // Restored for whatever the connection carries next.
+          if (route === "POST /postings") {
+            const socket = req.socket;
+            socket.setTimeout(deadlineMs);
+            res.once("finish", () => socket.setTimeout(idleTimeoutMs));
+          }
         } else if (
           req.headers["content-length"] !== undefined ||
           req.headers["transfer-encoding"]

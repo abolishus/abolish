@@ -4,6 +4,8 @@ import {
   BallotAdmissions,
   POSTING_MAX_DATA as CORE_POSTING_MAX_DATA,
   type PostingOutcome,
+  POSTING_MAX_CONCURRENT,
+  type PostingRedis,
   postingIndexValue,
   postingKey,
   postingKeys,
@@ -99,36 +101,48 @@ afterAll(async () => {
  * it. `meanwhile` runs on each of the route's waits, as the worker would.
  */
 async function api(
-  o: { relay?: boolean; meanwhile?: () => Promise<unknown>; corsOrigins?: string[] } = {},
+  o: {
+    relay?: boolean;
+    meanwhile?: () => Promise<unknown>;
+    corsOrigins?: string[];
+    sql?: Sql;
+    redis?: PostingRedis;
+    /** The route's real wait, in milliseconds, with real sleeps; 0 and `meanwhile` by default. */
+    waitMs?: number;
+    idleTimeoutMs?: number;
+  } = {},
 ) {
   const log: unknown[] = [];
   const postings =
     o.relay === false
       ? undefined
       : new PostingRelay({
-          sql: app,
-          redis,
+          sql: o.sql ?? app,
+          redis: o.redis ?? redis,
           admissions: new BallotAdmissions({ panels: [panel], clock }),
           now: () => NOW,
-          waitMs: 0,
-          sleep: async () => {
-            await o.meanwhile?.();
-          },
+          waitMs: o.waitMs ?? 0,
+          ...(o.waitMs === undefined && {
+            sleep: async () => {
+              await o.meanwhile?.();
+            },
+          }),
           prefix,
         });
   const s = createApiServer({
-    sql: app,
+    sql: o.sql ?? app,
     log: (l) => log.push(l),
+    ...(o.idleTimeoutMs !== undefined && { idleTimeoutMs: o.idleTimeoutMs }),
     ...(postings !== undefined && { postings }),
     ...(o.corsOrigins !== undefined && { corsOrigins: o.corsOrigins }),
   });
   servers.push(s);
   await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
-  const post = async (body: unknown) => {
+  const post = async (body: unknown, headers: Record<string, string> = {}) => {
     const r = await fetch(`${base}/postings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...headers },
       body: typeof body === "string" ? body : JSON.stringify(body),
     });
     const answer = (await r.json()) as Record<string, unknown>;
@@ -223,14 +237,23 @@ describe("postings.submit", { timeout: 60_000 }, () => {
     expect((await post(body)).status).toBe(413);
   });
 
-  test("an unregistered election, a late index and a stale one answer by step 4", async () => {
+  test("an unregistered election, a late index and a missing one answer by step 4", async () => {
+    await setIndex();
+    // A schema where the definition is stored but no registration recorded.
+    const own = await testDb();
+    try {
+      const unregistered = await own.as("abolish_app");
+      await storeDefinition(unregistered, definitionBytes);
+      const { post } = await api({ sql: unregistered });
+      expect(await post(honest())).toMatchObject({
+        status: 422,
+        code: "POSTING_REFUSED",
+        data: { code: "unknown-election" },
+      });
+    } finally {
+      await own.close();
+    }
     const { post } = await api();
-    const other = {
-      ...honest(),
-      posting: hex(postingFor(first, 1, { definitionHash: new Uint8Array(32) })),
-    };
-    // Another definition is caught at step 3, as the ballot names its own.
-    expect((await post(other)).data).toEqual({ code: "malformed", check: "posting-definition" });
     await setIndex(LAST + 1n);
     expect(await post(honest())).toMatchObject({
       status: 422,
@@ -239,6 +262,57 @@ describe("postings.submit", { timeout: 60_000 }, () => {
     });
     await redis.del(keys.index);
     expect(await post(honest())).toMatchObject({ status: 503, code: "RELAY_UNAVAILABLE" });
+  });
+
+  test("Redis failing is RELAY_UNAVAILABLE", async () => {
+    const { post } = await api({ redis: { eval: () => Promise.reject(new Error("down")) } });
+    expect(await post(honest())).toMatchObject({ status: 503, code: "RELAY_UNAVAILABLE" });
+  });
+
+  test("the worker's malformed refusal names no check", async () => {
+    await setIndex();
+    const input = honest(4);
+    const { post } = await api({
+      meanwhile: () => writeOutcome(input.posting, { sent: false, code: "malformed" }),
+    });
+    const { status, data } = await post(input);
+    expect(status).toBe(422);
+    expect(data).toEqual({ code: "malformed" });
+  });
+
+  test("past POSTING_MAX_CONCURRENT waiting requests, the next is RELAY_BUSY at once", async () => {
+    await setIndex();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let waiting = 0;
+    const { post } = await api({
+      meanwhile: async () => {
+        waiting++;
+        await held;
+      },
+    });
+    const pending = Array.from({ length: POSTING_MAX_CONCURRENT }, (_, i) =>
+      post(honest(1 + (i % definition.panel_size))),
+    );
+    while (waiting < POSTING_MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 20));
+    expect(await post(honest())).toMatchObject({ status: 503, code: "RELAY_BUSY" });
+    release();
+    for (const r of await Promise.all(pending)) expect(r.code).toBe("RELAY_BUSY");
+  });
+
+  test("a wait longer than the idle timeout still gets its answer", async () => {
+    await setIndex();
+    const { post } = await api({ waitMs: 600, idleTimeoutMs: 200 });
+    expect(await post(honest())).toMatchObject({ status: 503, code: "RELAY_BUSY" });
+  });
+
+  test("an account credential is refused before the body is read", async () => {
+    const { post } = await api();
+    for (const headers of [
+      { authorization: "Bearer x" },
+      { cookie: "abolish-account.session_token=x" },
+    ])
+      expect((await post(honest(), headers)).status).toBe(400);
   });
 
   test("a posting failing the public check is POSTING_REFUSED with the check's code", async () => {

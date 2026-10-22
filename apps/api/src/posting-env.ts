@@ -52,7 +52,11 @@ export function postingFromEnv(env: PostingEnv): PostingConfig | undefined {
   const set = POSTING_ENV.filter((name) => env[name] !== undefined && env[name] !== "");
   if (set.length === 0) return undefined;
   if (set.length !== POSTING_ENV.length)
-    throw new Error(`the posting relay needs every one of ${POSTING_ENV.join(", ")}`);
+    // BALLOT_PINNED_PANELS is the worker's too, so a variable group shared
+    // with it must leave it out of the API's unless the relay runs here.
+    throw new Error(
+      `the posting relay needs every one of ${POSTING_ENV.join(", ")}; set both or neither on the API`,
+    );
   const parsed = Env.safeParse(Object.fromEntries(POSTING_ENV.map((n) => [n, env[n]])));
   if (!parsed.success)
     throw new Error(

@@ -47,6 +47,14 @@ export async function testDb(): Promise<TestDb> {
     as,
     async close() {
       await Promise.all(clients.map((c) => c.end()));
+      // One table per transaction, then the rest: a single DROP SCHEMA
+      // CASCADE locks every object at once, and with the other files'
+      // teardowns running beside it that can exhaust the server's lock table
+      // ("out of shared memory").
+      const tables = await admin`
+        SELECT tablename FROM pg_tables WHERE schemaname = ${schema}`;
+      for (const t of tables)
+        await admin.unsafe(`DROP TABLE IF EXISTS "${schema}"."${t["tablename"]}" CASCADE`);
       await admin.unsafe(`DROP SCHEMA "${schema}" CASCADE`);
       await admin.end();
     },

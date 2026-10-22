@@ -401,11 +401,18 @@ export async function reviewProfileReports(
 const isAccountId = (id: unknown): id is string =>
   typeof id === "string" && /^[a-z0-9]{32}$/.test(id);
 
+const foreignKeyViolation = (e: unknown): boolean => {
+  // Drizzle wraps the driver's error; the SQLSTATE is on it or its cause.
+  const code = (x: unknown) => (x as { code?: unknown } | null)?.code;
+  return code(e) === "23503" || code((e as { cause?: unknown } | null)?.cause) === "23503";
+};
+
 /**
  * Appeals the newest decision about `accountId`'s profile and returns that
  * decision's sequence number, which names the appeal, as `fileAppeal` does
  * for a poll. Refused, with nothing written: an account with no profile
- * (`not-found`), a profile whose newest decision isn't a hide
+ * (`not-found`, also when it is deleted while the appeal is filed), a
+ * profile whose newest decision isn't a hide
  * (`not-appealable`) and a decision appealed before (`already-appealed`).
  */
 export async function fileProfileAppeal(client: Sql, accountId: string): Promise<bigint> {
@@ -422,7 +429,12 @@ export async function fileProfileAppeal(client: Sql, accountId: string): Promise
       .insert(accountProfileAppeals)
       .values({ decisionSeq: latest.seq, handle: profile.handle, filedAt: await clock(tx) })
       .onConflictDoNothing()
-      .returning({ seq: accountProfileAppeals.decisionSeq });
+      .returning({ seq: accountProfileAppeals.decisionSeq })
+      .catch((e: unknown) => {
+        // The profile was deleted since it was read: its appeals go with it.
+        if (foreignKeyViolation(e)) throw new AppealError("not-found");
+        throw e;
+      });
     if (filed.length === 0) throw new AppealError("already-appealed");
     return latest.seq;
   });

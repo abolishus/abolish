@@ -54,11 +54,12 @@ CREATE INDEX account_email_sends_user_id ON account_email_sends (user_id, sent_a
 
 -- Every message an address was sent, for its daily cap (T-52): keyed by the
 -- address's hash alone (under the hash keyring's key current at the time),
--- never by an account.
+-- never by an account, and timed to the hour only, so it can't be joined to
+-- `account_email_sends` on the instant of the send (T-11, T-73).
 CREATE TABLE account_email_recipients (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   address_hash bytea NOT NULL CHECK (octet_length(address_hash) = 32),
-  sent_at timestamptz NOT NULL
+  sent_at timestamptz NOT NULL CHECK (sent_at = date_trunc('hour', sent_at, 'UTC'))
 );
 CREATE INDEX account_email_recipients_address_hash ON account_email_recipients (address_hash, sent_at);
 

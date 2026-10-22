@@ -7,8 +7,9 @@
 // The address is never stored in the clear (T-73): it is AES-256-GCM
 // ciphertext bound to its account, decrypted only to send to it or show the
 // account its own address, and an HMAC of its case-folded form, for one
-// account per address. Case is the only folding: the phone, not the address,
-// is the Sybil cost (T-01), and provider-specific folding guesses wrong.
+// account per address. Folding is case and the domain's ASCII form only
+// (`foldEmailAddress`): the phone, not the address, is the Sybil cost (T-01),
+// and provider-specific folding guesses wrong.
 //
 // A request for an address another account holds sends that address a notice
 // instead of a code, and answers the requester exactly as if a code had gone,
@@ -21,7 +22,9 @@
 // `MAX_SENDS_PER_ADDRESS` messages a day, whoever asks, so accounts made in
 // bulk can't flood a mailbox; past that the request is answered as usual and
 // nothing is sent, so the cap tells the requester nothing either. The two
-// counts are kept apart: one per account, one per address hash.
+// counts are kept apart: one per account, at the second, and one per address
+// hash, at the hour (`hourOf`), so the two tables share no time to join on
+// beyond the hour itself (T-73).
 //
 // T-10: account-side tables only, read by nothing on the ballot path; the
 // provider is told an address and a code, never an account, a poll or a
@@ -304,13 +307,21 @@ async function heldElsewhere(
   return held > 0;
 }
 
-/** Whether `address` was sent `MAX_SENDS_PER_ADDRESS` messages in the 24 hours before `now`. */
+/**
+ * The start of `now`'s hour: when an address was sent a message is kept to
+ * the hour only, so a dump can't pair a recipient row with the account whose
+ * send row has the same instant; at best with every account that asked for a
+ * code that hour (T-11, T-73).
+ */
+const hourOf = (now: Date) => new Date(Math.floor(now.getTime() / HOUR) * HOUR);
+
+/** Whether `address` was sent `MAX_SENDS_PER_ADDRESS` messages in the 24 hours up to `now`'s hour. */
 async function addressCapped(tx: Tx, keys: EmailKeys, address: string, now: Date) {
   const sent = await tx.$count(
     accountEmailRecipients,
     and(
       inArray(accountEmailRecipients.addressHash, hashesOf(keys, address)),
-      gt(accountEmailRecipients.sentAt, new Date(now.getTime() - DAY)),
+      gt(accountEmailRecipients.sentAt, new Date(hourOf(now).getTime() - DAY)),
     ),
   );
   return sent >= MAX_SENDS_PER_ADDRESS;
@@ -397,7 +408,7 @@ export async function requestEmailCode(
     if (capped) return undefined;
     await tx
       .insert(accountEmailRecipients)
-      .values({ addressHash: hashUnder(keys.hash.current.key, address), sentAt: now });
+      .values({ addressHash: hashUnder(keys.hash.current.key, address), sentAt: hourOf(now) });
     return held ? { kind: "email-held", to: address } : { kind: "email-code", to: address, code };
   });
   if (message !== undefined && (await sender.send(message)) !== "sent")
@@ -518,7 +529,7 @@ export async function pruneAccountEmails(
     .returning({ id: accountEmailSends.id });
   const recipients = await db
     .delete(accountEmailRecipients)
-    .where(lt(accountEmailRecipients.sentAt, new Date(now.getTime() - DAY)))
+    .where(lt(accountEmailRecipients.sentAt, new Date(hourOf(now).getTime() - DAY)))
     .returning({ id: accountEmailRecipients.id });
   return { codes: codes.length, sends: sends.length, recipients: recipients.length };
 }

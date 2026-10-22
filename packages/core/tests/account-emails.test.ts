@@ -570,6 +570,25 @@ describe("one account per address", () => {
 });
 
 describe("the per-address cap", () => {
+  test("an address's sends are timed to the hour, so they share no instant with an account's (T-73)", async () => {
+    const account = await newAccount();
+    const address = fresh();
+    const at = new Date("2027-03-04T13:27:41.123Z");
+    await ask(account, address, { now: at });
+    const recipients = await db.admin`SELECT sent_at FROM account_email_recipients
+      WHERE sent_at >= ${new Date("2027-03-04T13:00:00Z")} AND sent_at < ${new Date("2027-03-04T14:00:00Z")}`;
+    expect(recipients.map((r) => (r["sent_at"] as Date).toISOString())).toEqual([
+      "2027-03-04T13:00:00.000Z",
+    ]);
+    const [send] =
+      await db.admin`SELECT sent_at FROM account_email_sends WHERE user_id = ${account}`;
+    expect((send!["sent_at"] as Date).toISOString()).toBe(at.toISOString());
+    const owner = await db.as("abolish_migrator");
+    await expect(
+      owner`INSERT INTO account_email_recipients (address_hash, sent_at) VALUES (${randomBytes(32)}, ${at})`,
+    ).rejects.toThrow(/check constraint/);
+  });
+
   test(`an address is sent at most ${MAX_SENDS_PER_ADDRESS} messages a day, and past that the requester can't tell`, async () => {
     const address = fresh();
     const holder = await newAccount();

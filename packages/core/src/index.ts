@@ -299,6 +299,7 @@ export {
   type Tier0GroupOutcome,
   type Tier0GroupReport,
   type Tier0GroupState,
+  type Tier0IndexRead,
   Tier0LockError,
   type Tier0LoggedAddition,
   type Tier0Signer,

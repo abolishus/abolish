@@ -12,7 +12,12 @@
 
 import { groupRegistryAbi } from "@abolishus/contracts/abi";
 import { decodeGroupAddition } from "@abolishus/crypto";
-import type { Tier0Chain, Tier0GroupState, Tier0LoggedAddition } from "@abolishus/core";
+import type {
+  Tier0Chain,
+  Tier0GroupState,
+  Tier0IndexRead,
+  Tier0LoggedAddition,
+} from "@abolishus/core";
 import { type Address, getAddress, hexToBytes, type PublicClient } from "viem";
 import { privateKeyToAddress } from "viem/accounts";
 
@@ -65,7 +70,7 @@ export class ViemTier0Chain implements Tier0Chain {
     this.#range = range;
   }
 
-  async tier0Commitments(): Promise<Iterable<bigint>> {
+  async tier0Commitments(): Promise<Tier0IndexRead> {
     const latest = await this.#client.getBlockNumber({ cacheTime: 0 });
     this.#advance({ finalized: this.#seen.finalized, latest });
     const tier0 = new Set<bigint>();
@@ -76,7 +81,7 @@ export class ViemTier0Chain implements Tier0Chain {
       if (!tier0.has(log.args.groupId)) continue;
       all.push(...addition(log.args.record).commitments);
     }
-    return all;
+    return { block: latest, commitments: all };
   }
 
   /**
@@ -113,7 +118,7 @@ export class ViemTier0Chain implements Tier0Chain {
     const decoded = addition(log.args.record);
     if (decoded.groupId !== groupId || decoded.firstIndex !== firstIndex)
       throw new Error("an addition logged under another position");
-    return { record, final: log.blockNumber <= pin.finalized };
+    return { record, block: log.blockNumber, final: log.blockNumber <= pin.finalized };
   }
 
   submit(record: Uint8Array): Promise<void> {

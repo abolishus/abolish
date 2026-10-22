@@ -62,8 +62,17 @@ export interface Tier0GroupState {
 export interface Tier0LoggedAddition {
   /** The record as `addMembers` took it. */
   readonly record: Uint8Array;
+  /** The number of the block that logged it. */
+  readonly block: bigint;
   /** Whether its block is finalized. */
   readonly final: boolean;
+}
+
+/** Every Tier 0 commitment as of one block. */
+export interface Tier0IndexRead {
+  /** The block the read is at: the node's latest when it began. */
+  readonly block: bigint;
+  readonly commitments: Iterable<bigint>;
 }
 
 /**
@@ -74,9 +83,10 @@ export interface Tier0LoggedAddition {
 export interface Tier0Chain {
   /**
    * Every commitment in any Tier 0 group, signed or self-paid, up to the
-   * node's latest block, unfinalized included (Answers, step 6).
+   * node's latest block, unfinalized included (Answers, step 6), with that
+   * block's number.
    */
-  tier0Commitments(): Promise<Iterable<bigint>>;
+  tier0Commitments(): Promise<Tier0IndexRead>;
   /**
    * The group's tier, from its `GroupCreated` event in finalized history
    * (docs/spec/contracts.md, Groups: registrars sign for a group only once
@@ -182,7 +192,19 @@ redis.call('SADD', KEYS[2], unpack(ARGV, 2))
 return 1
 `;
 
+// A read at a block below the highest batch the job has finished (KEYS[5],
+// set by FINISH) is refused: it misses that batch, whose commitments left the
+// in-flight set at the finish, so it would hold one of ours in neither set
+// and a re-issuance's mark would take it for one never added
+// (tier0-shown.ts). Only a read from a lagging node, or a load balancer's
+// other node, after a restart can be below it: one job's adapter refuses a
+// node behind blocks it has already read.
 const INDEX_SWAP = `${FENCE}
+local finished = redis.call('GET', KEYS[5])
+if finished and tonumber(ARGV[3]) < tonumber(finished) then
+  redis.call('DEL', KEYS[2])
+  return 0
+end
 if redis.call('EXISTS', KEYS[2]) == 1 then
   redis.call('RENAME', KEYS[2], KEYS[3])
 else
@@ -200,13 +222,18 @@ const READ_BATCH = `return redis.call('HGET', KEYS[1], ARGV[1]) or ''`;
 // lagging node says. Moving them in one step means no index read older than
 // the record's finality can leave a commitment of ours in neither set, where
 // a re-issuance's mark would take it for one never added (tier0-shown.ts).
-// The next refresh reads it from finalized history anyway.
+// The next refresh reads it from finalized history anyway, and none below
+// the record's block (KEYS[6], the highest kept) replaces the index.
 const FINISH = `${FENCE}
 redis.call('HDEL', KEYS[3], ARGV[2])
 redis.call('HSET', KEYS[4], ARGV[2], ARGV[3])
-if #ARGV > 3 then
-  redis.call('SREM', KEYS[2], unpack(ARGV, 4))
-  redis.call('SADD', KEYS[5], unpack(ARGV, 4))
+local finished = redis.call('GET', KEYS[6])
+if not finished or tonumber(finished) < tonumber(ARGV[4]) then
+  redis.call('SET', KEYS[6], ARGV[4])
+end
+if #ARGV > 4 then
+  redis.call('SREM', KEYS[2], unpack(ARGV, 5))
+  redis.call('SADD', KEYS[5], unpack(ARGV, 5))
 end
 return 1
 `;
@@ -291,6 +318,16 @@ const FORBIDDEN = [0n, 1n, POSEIDON2_ZERO_ONE].map(commitmentKey);
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
+/**
+ * A block number as the scripts compare it: Lua's numbers are doubles, so
+ * one past 2⁵³ (never reached by a real chain) is a node not to trust.
+ */
+function blockNumber(block: bigint): string {
+  if (typeof block !== "bigint" || block < 0n || block > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new RangeError("a block number past 2^53");
+  return block.toString();
+}
+
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
@@ -361,8 +398,9 @@ export class Tier0Batches {
 
   /**
    * Brings the index up to the L2 node's latest block, for the route's
-   * step 6 between boundaries. Resolves false if the chain couldn't be read;
-   * the index is then left as it was. Throws `Tier0LockError` if a boundary
+   * step 6 between boundaries. Resolves false if the chain couldn't be read,
+   * or the node is below a batch the job has finished; the index is then
+   * left as it was. Throws `Tier0LockError` if a boundary
    * or another refresh is running.
    */
   async refreshIndex(): Promise<boolean> {
@@ -426,17 +464,26 @@ export class Tier0Batches {
     const k = this.#keys;
     // The time the read starts: the index is at least this current.
     const at = Math.floor(this.#now());
+    let block: string;
     let commitments: string[];
     try {
-      commitments = [...(await this.#chain.tier0Commitments())].map(commitmentKey);
+      const read = await this.#chain.tier0Commitments();
+      block = blockNumber(read.block);
+      commitments = [...read.commitments].map(commitmentKey);
     } catch {
       return false;
     }
     await this.#fenced(INDEX_CLEAR, [k.next], token);
     for (let i = 0; i < commitments.length; i += INDEX_CHUNK)
       await this.#fenced(INDEX_ADD, [k.next], token, ...commitments.slice(i, i + INDEX_CHUNK));
-    await this.#fenced(INDEX_SWAP, [k.next, k.live, k.indexed], token, String(at));
-    return true;
+    const swapped = await this.#fenced(
+      INDEX_SWAP,
+      [k.next, k.live, k.indexed, k.finished],
+      token,
+      String(at),
+      block,
+    );
+    return swapped === 1;
   }
 
   async #group(token: string, groupId: bigint): Promise<Tier0GroupReport> {
@@ -483,12 +530,19 @@ export class Tier0Batches {
       // the record's finish is caught before signing (below).
       if (logged !== null && equalBytes(logged.record, record)) {
         if (!logged.final) return report("waiting");
+        let block: string;
+        try {
+          block = blockNumber(logged.block);
+        } catch {
+          return report("chain-unavailable");
+        }
         await this.#fenced(
           FINISH,
-          [k.inflight, k.batches, k.positions, k.live],
+          [k.inflight, k.batches, k.positions, k.live, k.finished],
           token,
           g,
           String(end),
+          block,
           ...keys,
         );
       } else if (logged !== null && logged.final && state.finalizedSize > firstIndex) {

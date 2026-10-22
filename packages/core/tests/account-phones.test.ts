@@ -82,6 +82,7 @@ const passing = (verdict: TurnstileVerdict = "passed") => {
 };
 
 interface Line {
+  readonly number?: string;
   readonly country: string;
   readonly lineType: string;
 }
@@ -103,7 +104,8 @@ function provider({
   const verifier: PhoneVerifier = {
     lookup: async (n) => {
       lookups.push(n);
-      return lines.get(n) ?? { country: "US", lineType: "mobile" };
+      const line = lines.get(n) ?? { country: "US", lineType: "mobile" };
+      return line === "unavailable" ? line : { number: n, ...line };
     },
     start: async (n, channel) => {
       started.push([n, channel]);
@@ -383,6 +385,15 @@ describe("requestPhoneCode", () => {
     expect(p.started).toEqual([]);
   });
 
+  test("refuses a number the provider writes differently, so one line has one hash", async () => {
+    const n = "+442079460958";
+    const p = provider({
+      lines: new Map([[n, { number: "+4402079460958", country: "US", lineType: "mobile" }]]),
+    });
+    expect(await code(ask(await newAccount(), n, { p }))).toBe("invalid-number");
+    expect(p.started).toEqual([]);
+  });
+
   test("a failed lookup refuses for now, and the request still counts", async () => {
     const n = fresh();
     const a = await newAccount();
@@ -651,6 +662,46 @@ describe("verifyPhoneCode", () => {
           : String(r.reason),
     );
     expect(outcomes.toSorted()).toEqual(["number-held", "ok"]);
+  });
+
+  test("two accounts racing for one number through instances on different keyrings: one takes it", async () => {
+    const n = fresh();
+    const [a, b] = [await newAccount(), await newAccount()];
+    const p = provider();
+    await ask(a, n, { p, keys: STAGED });
+    await ask(b, n, { p, keys: ROTATED });
+    const results = await Promise.allSettled([
+      enter(a, n, CODE, { p, keys: STAGED, client: app }),
+      enter(b, n, CODE, { p, keys: ROTATED, client: app2 }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  });
+
+  test("a hold made under an older key still holds once a new key is current", async () => {
+    const n = fresh();
+    const a = await newAccount();
+    await verified(a, n, { keys: KEYS });
+    await verified(a, fresh(), { keys: KEYS });
+    expect(await code(verified(await newAccount(), n, { keys: ROTATED }))).toBe("number-held");
+  });
+
+  test("a move racing its old account's change of number never frees the new number unheld", async () => {
+    for (let i = 0; i < 30; i++) {
+      const [n, m] = [fresh(), fresh()];
+      const a = await newAccount();
+      await verified(a, n, { now: days(-PHONE_HOLD_DAYS) });
+      const b = await newAccount();
+      const p = provider();
+      await ask(a, m, { p });
+      await ask(b, n, { p });
+      await Promise.allSettled([
+        enter(a, m, CODE, { p, client: app }),
+        enter(b, n, CODE, { p, client: app2 }),
+      ]);
+      // Whichever went first, `a` keeps `m`, and `m` is no one's to take.
+      expect(await readAccountPhone(app, a)).toBeDefined();
+      expect(await code(verified(await newAccount(), m))).toBe("number-held");
+    }
   });
 
   test("refuses a malformed number", async () => {

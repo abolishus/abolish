@@ -65,7 +65,10 @@ export const MAX_PHONE_SENDS_PER_HOUR = 5;
 export const MAX_PHONE_SENDS_PER_DAY = 10;
 /** Codes one number may be sent in any 24 hours, whichever accounts asked. */
 export const MAX_SENDS_PER_NUMBER = 5;
-/** Days a number is held after its account lets it go, and kept from moving after it is verified or moved. */
+/**
+ * Days a number is held after its account lets it go, and kept from moving
+ * after it is verified or moved: whole UTC days, since only the day is kept.
+ */
 export const PHONE_HOLD_DAYS = 90;
 /** The countries whose numbers are taken at launch, as the lookup names them (ISO 3166-1 alpha-2). */
 export const PHONE_COUNTRIES: readonly string[] = ["US", "CA"];
@@ -86,16 +89,26 @@ const DAY = 24 * HOUR;
 const HASH_LABEL = new TextEncoder().encode("abolish/phone/v1");
 
 /**
- * The verification provider. `lookup`: the number's country and line type.
- * `start`: send a code by `channel`. `check`: whether `code` is the one sent
- * and still good; a code the provider no longer has (expired, spent, or never
- * sent because the number was capped) is `wrong`. `unavailable`: the provider
- * didn't answer.
+ * The verification provider. `lookup`: the number in the provider's own
+ * E.164 form, its country and its line type. `start`: send a code by
+ * `channel`. `check`: whether `code` is the one sent and still good; a code
+ * the provider no longer has (expired, spent, never sent because the number
+ * was capped, or past the provider's own limit on checks) is `wrong`.
+ * `unavailable`: the provider didn't answer.
+ *
+ * The provider keeps one code per number, whichever account asked, and must
+ * cap the checks against it (Verify: 5 per verification), since each account
+ * asking gets its own `PHONE_CODE_TRIES` here (T-01).
  */
 export interface PhoneVerifier {
-  lookup(
-    number: string,
-  ): Promise<{ readonly country: string; readonly lineType: string } | "unavailable">;
+  lookup(number: string): Promise<
+    | {
+        readonly number: string;
+        readonly country: string;
+        readonly lineType: string;
+      }
+    | "unavailable"
+  >;
   start(number: string, channel: PhoneChannel): Promise<"sent" | "unavailable">;
   check(number: string, code: string): Promise<"approved" | "wrong" | "unavailable">;
 }
@@ -210,11 +223,14 @@ const lockCeiling = (tx: Tx) =>
 /**
  * One number's locks, one per value of its chain, in a fixed order, so two
  * accounts can't both take it or both pass its cap; taken after the
- * account's lock, never before. Each is named by 64 bits of a hash, so not
- * even the hash reaches the database's logs.
+ * account's lock, never before. Each is named by 64 bits of a hash, so the
+ * hash itself never reaches the database's logs, though those 64 bits show
+ * in `pg_locks` while the lock is held.
  */
-async function lockNumber(tx: Tx, hashes: readonly Buffer[]): Promise<void> {
-  const ids = hashes.map((h) => h.readBigInt64BE(0)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+async function lockNumber(tx: Tx, hashes: readonly Uint8Array[]): Promise<void> {
+  const ids = hashes
+    .map((h) => Buffer.from(h.buffer, h.byteOffset, h.byteLength).readBigInt64BE(0))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   for (const id of ids) await tx.execute(q`SELECT pg_advisory_xact_lock(${id.toString()}::bigint)`);
 }
 
@@ -296,6 +312,9 @@ export async function requestPhoneCode(
   });
   const line = await verifier.lookup(number);
   if (line === "unavailable") throw new PhoneVerificationError("lookup-unavailable");
+  // One line, one chain: a number written in a form the provider reads
+  // differently (a trunk prefix, say) would hash apart from its own E.164 one.
+  if (line.number !== number) throw new PhoneVerificationError("invalid-number");
   if (!countries.includes(line.country)) throw new PhoneVerificationError("unsupported-country");
   const channel = Object.hasOwn(PHONE_LINE_TYPES, line.lineType)
     ? PHONE_LINE_TYPES[line.lineType]
@@ -398,7 +417,14 @@ export async function verifyPhoneCode(
       return { ok: false, code: "wrong-code", triesLeft: PHONE_CODE_TRIES - tries };
     }
     await spend();
-    await lockNumber(tx, hashes.all);
+    // The account's own number's locks too, taken in one sorted pass with the
+    // new one's, so a move of either can't land between reading it here and
+    // replacing it (a move deletes the row it read, by its hash).
+    const [before] = await tx
+      .select({ phoneHash: accountPhones.phoneHash })
+      .from(accountPhones)
+      .where(eq(accountPhones.userId, accountId));
+    await lockNumber(tx, before === undefined ? hashes.all : [...hashes.all, before.phoneHash]);
     const ended = holdEnded(now);
     const [other] = await tx
       .select()
@@ -416,7 +442,14 @@ export async function verifyPhoneCode(
       // A move, not a release: the trigger that holds a deleted account's
       // number skips this deletion, since the number stays held, here.
       await tx.execute(q`SELECT set_config('abolish.phone_moving', 'on', true)`);
-      await tx.delete(accountPhones).where(eq(accountPhones.userId, other.userId));
+      const moved = await tx
+        .delete(accountPhones)
+        .where(
+          and(eq(accountPhones.userId, other.userId), eq(accountPhones.phoneHash, other.phoneHash)),
+        )
+        .returning({ userId: accountPhones.userId });
+      // Under the number's locks the row can't have changed since it was read.
+      if (moved.length !== 1) throw new Error("a moved number's row changed under its lock");
       await tx.execute(q`SELECT set_config('abolish.phone_moving', '', true)`);
     }
     await tx

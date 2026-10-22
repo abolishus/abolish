@@ -11,7 +11,7 @@ export function PageHeader({
   children,
 }: {
   eyebrow: string;
-  title: string;
+  title: ReactNode;
   lede: ReactNode;
   titleId?: string;
   titleRef?: Ref<HTMLHeadingElement>;

@@ -11,12 +11,20 @@ import {
   loadModerationLog,
   loadPoll,
   loadPollList,
+  loadProfile,
   loadStream,
   resolveShortLink,
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { LOCALE } from "./messages.ts";
-import { ballotBase, isCanonicalU64, isElectionId, isShortCode, isSiteKey } from "./values.ts";
+import {
+  ballotBase,
+  isCanonicalU64,
+  isElectionId,
+  isShortCode,
+  isSiteKey,
+  PROFILE_HANDLE,
+} from "./values.ts";
 
 /**
  * Runs `load`, replacing any failure with one fixed error. A server
@@ -148,3 +156,30 @@ export const fetchChallengeKey = createServerFn({ method: "GET" }).handler((): s
 export const fetchPhoneVerification = createServerFn({ method: "GET" }).handler(
   (): boolean => process.env["PHONE_VERIFICATION"] === "on",
 );
+
+/**
+ * A page of the profile at `handle` (`/by/<handle>`), from just after
+ * `after` (one of its polls, or `""` from the top), with the ballot client's
+ * address its cards link to, as the stream's. The profile is read through
+ * the front's reader in the request's context (src/start.ts), never the
+ * API (T-10); without one this deployment serves no profiles.
+ */
+export const fetchProfile = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const { handle, after } = (input ?? {}) as Record<string, unknown>;
+    if (typeof handle !== "string" || !PROFILE_HANDLE.test(handle))
+      throw new TypeError("expected a profile handle");
+    if (after !== "" && !isElectionId(after))
+      throw new TypeError("expected an election ID or an empty string");
+    return { handle, after };
+  })
+  .handler(({ data, context }) =>
+    opaque(async () => {
+      const read = context.readProfile;
+      if (read === undefined) throw new Error("no profile reader");
+      return {
+        profile: await loadProfile(api(), read, data.handle, data.after, LOCALE),
+        ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
+      };
+    }),
+  );

@@ -267,6 +267,10 @@ describe("dist/node/main.mjs", () => {
         body: JSON.stringify({ handle: "a".repeat(16), reason: "spam" }),
       });
       expect(await report.json()).toEqual({ code: "UNKNOWN_PROFILE", status: 404 });
+      // And a profile's page, read through the front's reader in Start's
+      // request context as abolish_app: no reader, table or grant would be a 500.
+      const profile = await fetch(`${at}/by/${"a".repeat(16)}`);
+      expect(profile.status).toBe(404);
       // Its log: one line per request, by route class, written once each
       // answer is sent.
       await new Promise((r) => setTimeout(r, 100));

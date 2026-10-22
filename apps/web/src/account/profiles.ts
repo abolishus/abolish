@@ -11,11 +11,9 @@ import type { AppealOutcome, ProfileModerationState } from "@abolishus/core";
 
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
 
-/**
- * packages/core's `PROFILE_HANDLE`, spelled here so the page's bundle
- * carries none of core's database code; a test holds the two equal.
- */
-export const PROFILE_HANDLE = /^[a-z2-7]{16}$/;
+import { PROFILE_HANDLE } from "../values.ts";
+
+export { PROFILE_HANDLE };
 
 const POLL_ID = /^[a-z0-9]{32}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

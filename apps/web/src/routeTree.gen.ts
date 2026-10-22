@@ -17,6 +17,7 @@ import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as OfflineRouteImport } from "./routes/offline.tsx";
 import { Route as SwDotjsRouteImport } from "./routes/sw[.]js.ts";
 import { Route as AccountVerifyRouteImport } from "./routes/account_.verify.tsx";
+import { Route as ByHandleRouteImport } from "./routes/by.$handle.tsx";
 import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
 import { Route as PollsElectionIdRouteImport } from "./routes/polls.$electionId.tsx";
@@ -65,6 +66,11 @@ const SwDotjsRoute = SwDotjsRouteImport.update({
 const AccountVerifyRoute = AccountVerifyRouteImport.update({
   id: "/account_/verify",
   path: "/account/verify",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ByHandleRoute = ByHandleRouteImport.update({
+  id: "/by/$handle",
+  path: "/by/$handle",
   getParentRoute: () => rootRouteImport,
 } as any);
 const PCodeRoute = PCodeRouteImport.update({
@@ -122,6 +128,7 @@ export interface FileRoutesByFullPath {
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
   "/account/verify": typeof AccountVerifyRoute;
+  "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
@@ -141,6 +148,7 @@ export interface FileRoutesByTo {
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
   "/account/verify": typeof AccountVerifyRoute;
+  "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls": typeof PollsIndexRoute;
@@ -161,6 +169,7 @@ export interface FileRoutesById {
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
   "/account_/verify": typeof AccountVerifyRoute;
+  "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
@@ -182,6 +191,7 @@ export interface FileRouteTypes {
     | "/offline"
     | "/sw.js"
     | "/account/verify"
+    | "/by/$handle"
     | "/p/$code"
     | "/polls/$electionId"
     | "/polls/"
@@ -201,6 +211,7 @@ export interface FileRouteTypes {
     | "/offline"
     | "/sw.js"
     | "/account/verify"
+    | "/by/$handle"
     | "/p/$code"
     | "/polls/$electionId"
     | "/polls"
@@ -220,6 +231,7 @@ export interface FileRouteTypes {
     | "/offline"
     | "/sw.js"
     | "/account_/verify"
+    | "/by/$handle"
     | "/p/$code"
     | "/polls/$electionId"
     | "/polls/"
@@ -240,6 +252,7 @@ export interface RootRouteChildren {
   OfflineRoute: typeof OfflineRoute;
   SwDotjsRoute: typeof SwDotjsRoute;
   AccountVerifyRoute: typeof AccountVerifyRoute;
+  ByHandleRoute: typeof ByHandleRoute;
   PCodeRoute: typeof PCodeRoute;
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
   PollsIndexRoute: typeof PollsIndexRoute;
@@ -306,6 +319,13 @@ declare module "@tanstack/react-router" {
       path: "/account/verify";
       fullPath: "/account/verify";
       preLoaderRoute: typeof AccountVerifyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/by/$handle": {
+      id: "/by/$handle";
+      path: "/by/$handle";
+      fullPath: "/by/$handle";
+      preLoaderRoute: typeof ByHandleRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/p/$code": {
@@ -395,6 +415,7 @@ const rootRouteChildren: RootRouteChildren = {
   OfflineRoute: OfflineRoute,
   SwDotjsRoute: SwDotjsRoute,
   AccountVerifyRoute: AccountVerifyRoute,
+  ByHandleRoute: ByHandleRoute,
   PCodeRoute: PCodeRoute,
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,
   PollsIndexRoute: PollsIndexRoute,

@@ -78,11 +78,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     `/polls/${"cd".repeat(32)}`,
   );
-  // A profile's row names it by handle alone, with no link and no name.
+  // A profile's row names it by handle alone, never its name, linking its page.
   await expect(within(rows[3]!).getByText("Profile")).toBeInTheDocument();
-  await expect(within(rows[3]!).getByText("k7qa2mzr5xw3bn4d")).toBeVisible();
+  await expect(within(rows[3]!).getByRole("link", { name: "k7qa2mzr5xw3bn4d" })).toHaveAttribute(
+    "href",
+    "/by/k7qa2mzr5xw3bn4d",
+  );
   await expect(within(rows[3]!).getByText("Profile hidden")).toBeVisible();
-  await expect(within(rows[3]!).queryByRole("link")).toBeNull();
   // A refiling links its poll and says what it changed, never the place itself.
   await expect(within(rows[4]!).getByRole("link", { name: /^efefefef/ })).toBeVisible();
   await expect(within(rows[4]!).getByText("Refiled")).toBeVisible();

@@ -85,3 +85,9 @@ export function ballotLink(base: string, electionId: string, pick?: number): str
     ? `${base}#election=${electionId}`
     : `${base}#election=${electionId}&pick=${pick}`;
 }
+
+/**
+ * packages/core's `PROFILE_HANDLE`, spelled here so the pages' bundles
+ * carry none of core's database code; a test holds the two equal.
+ */
+export const PROFILE_HANDLE = /^[a-z2-7]{16}$/;

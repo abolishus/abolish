@@ -4,13 +4,18 @@
 // (display text version 2 and definition version 5) where they can point at
 // a field; `pollDraftProblem`, the rules the handler itself applies, has the
 // last word, so a draft the handler would refuse is never sent (T-34, T-72).
+// The topic and place (P2-26 part 1b) are listing tags beside the poll, not
+// words of it (ADR 0041), checked by the same rules.
 
 import { DEFINITION_V5_LIMITS } from "@abolishus/crypto";
 import {
   MAX_CLOSE_SECONDS,
+  MAX_PLACE_LENGTH,
   MIN_OPEN_SECONDS,
+  placeIsWellFormed,
   type PollDraft,
   pollDraftProblem,
+  type PollTopic,
   SETUP_SECONDS,
 } from "@abolishus/core/poll-draft-rules";
 
@@ -45,6 +50,10 @@ export interface PollForm {
   readonly language: string;
   readonly title: string;
   readonly description: string;
+  /** Where the poll is about, as typed; empty for none. Tidied by `tidyPlace` when sent. */
+  readonly place: string;
+  /** The topic it is filed under; empty for none. */
+  readonly topic: PollTopic | "";
   readonly questions: readonly FormQuestion[];
   /** The tiers that can answer, ascending. */
   readonly tiers: readonly number[];
@@ -96,6 +105,8 @@ export const newPollForm = (): PollForm => ({
   language: LANGUAGE,
   title: "",
   description: "",
+  place: "",
+  topic: "",
   questions: [newQuestion()],
   tiers: OFFERED_TIERS,
   closesDate: "",
@@ -146,12 +157,23 @@ function closesFields(closesAt: bigint): Pick<PollForm, "closesDate" | "closesTi
   };
 }
 
+/**
+ * The place as a draft holds it: every run of spaces, tabs or line breaks
+ * one space, none at either end, then NFC (which never makes or removes a
+ * space, so the result is its own tidy form), so what an author pastes
+ * from an address is one line. Whatever is still refused (a bidi mark, an
+ * invisible character, too many letters) is the field's problem to name.
+ */
+export const tidyPlace = (place: string) => place.replace(/\s+/gu, " ").trim().normalize("NFC");
+
 /** The form for a saved draft. A closing time is shown to the minute. */
 export function formOf(draft: PollDraft): PollForm {
   return {
     language: draft.language,
     title: draft.title,
     description: draft.description,
+    place: draft.place ?? "",
+    topic: draft.topic ?? "",
     questions: draft.questions.map((q) => {
       const { rule, optional } = ruleOf(q.minSelections, q.maxSelections, q.options.length);
       return {
@@ -201,10 +223,14 @@ export function closesAtOf(form: Pick<PollForm, "closesDate" | "closesTime">): b
 export function draftOf(form: PollForm): PollDraft | undefined {
   const closesAt = closesAtOf(form);
   if (closesAt === undefined) return undefined;
+  const place = tidyPlace(form.place);
   return {
     language: form.language,
     title: form.title,
     description: form.description,
+    // Left out when not given, as the handler stores them (ADR 0041).
+    ...(form.topic === "" ? {} : { topic: form.topic }),
+    ...(place === "" ? {} : { place }),
     questions: form.questions.map((q) => {
       const { min, max } = selectionRange(q);
       return {
@@ -224,6 +250,8 @@ export function draftOf(form: PollForm): PollDraft | undefined {
 export const fieldId = {
   title: "poll-title",
   description: "poll-description",
+  place: "poll-place",
+  topic: "poll-topic",
   question: (q: string) => `${q}-question`,
   questionDescription: (q: string) => `${q}-description`,
   min: (q: string) => `${q}-min`,
@@ -241,6 +269,8 @@ export type FormProblem =
   | "titleMissing"
   | "tooLong"
   | "unstorable"
+  | "placeTooLong"
+  | "placeRefused"
   | "questionMissing"
   | "questionRepeated"
   | "labelMissing"
@@ -277,6 +307,17 @@ function textProblem(value: string, limit: number, required: FormProblem | undef
   return undefined;
 }
 
+/** The place's problem, if any: none when it tidies to nothing, since a place is optional. */
+function placeProblem(value: string): FormProblem | undefined {
+  if (UNSTORABLE.test(value)) return "unstorable";
+  const place = tidyPlace(value);
+  if (place === "") return undefined;
+  if (Array.from(place).length > MAX_PLACE_LENGTH) return "placeTooLong";
+  // T-67: what tidying can't fix (a bidi mark, an invisible character) the author retypes.
+  if (!placeIsWellFormed(place)) return "placeRefused";
+  return undefined;
+}
+
 /**
  * Every problem with the form's text and questions, in page order, each on
  * its field. The closing time is `closesErrors`'s, since only submission
@@ -290,6 +331,7 @@ export function fieldErrors(form: PollForm): FieldError[] {
   };
   add(fieldId.title, textProblem(form.title, TEXT_BYTES.title, "titleMissing"));
   add(fieldId.description, textProblem(form.description, TEXT_BYTES.description, undefined));
+  add(fieldId.place, placeProblem(form.place));
   let options = 0;
   form.questions.forEach((q, i) => {
     const n = i + 1;

@@ -1,11 +1,20 @@
+import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-draft-rules";
 import { Button, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { Checkbox } from "@abolishus/ui/ui/checkbox";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
+import { NativeSelect, NativeSelectOption } from "@abolishus/ui/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@abolishus/ui/ui/radio-group";
 import { Textarea } from "@abolishus/ui/ui/textarea";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { type FormEvent, type SyntheticEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  type SyntheticEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { Challenge } from "../account/challenge.ts";
 import { DraftsError, type DraftsClient, type DraftsFailure } from "../account/drafts.ts";
@@ -26,8 +35,9 @@ import {
   newQuestion,
   type PollForm,
   selectionRange,
+  tidyPlace,
 } from "../account/poll-form.ts";
-import { catalogs, type Messages } from "../messages.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
@@ -41,6 +51,10 @@ function move<T>(list: readonly T[], from: number, to: number): T[] {
   if (item !== undefined) next.splice(to, 0, item);
   return next;
 }
+
+/** The select's value as a topic; anything else is none. */
+const topicOf = (value: string): PollTopic | "" =>
+  (POLL_TOPICS as readonly string[]).includes(value) ? (value as PollTopic) : "";
 
 /** What the page shows instead of the form, when it can't show one. */
 type Unavailable = "signedOut" | "gone" | "notDraft" | "unloaded";
@@ -472,6 +486,180 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
   );
 }
 
+/**
+ * Where the poll will be listed, apart from the poll itself: the topic and
+ * place are the listing's, not words people answer (ADR 0041, rule 4; T-34).
+ * The place keeps its own direction, so a right-to-left name can't reorder
+ * the words around it.
+ */
+function ListingPreview({ t, form }: { t: Translate; form: PollForm }) {
+  const place = tidyPlace(form.place);
+  if (form.topic === "" && place === "")
+    return <p className="m-0 text-sm text-muted-foreground">{t("pollFormPreviewNotListed")}</p>;
+  return (
+    <ul className="m-0 flex list-none flex-wrap gap-2 p-0 text-sm">
+      {form.topic === "" ? null : (
+        <li className="border border-border px-2 py-1">{t(POLL_TOPIC_MESSAGES[form.topic])}</li>
+      )}
+      {place === "" ? null : (
+        <li className="min-w-0 border border-border px-2 py-1 wrap-anywhere">
+          <bdi>{place}</bdi>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+/** One row of the review: what it is, what the form says, and the field that changes it. */
+interface ReviewRow {
+  readonly label: string;
+  readonly value: ReactNode;
+  /** The field to go back to; none when nothing on the page changes it. */
+  readonly field?: string;
+}
+
+function ReviewList({
+  t,
+  rows,
+  onJump,
+}: {
+  t: Translate;
+  rows: readonly ReviewRow[];
+  onJump: (event: SyntheticEvent, target: string) => void;
+}) {
+  return (
+    <dl className="m-0 grid">
+      {rows.map((r) => (
+        <div
+          key={r.label}
+          className="grid gap-x-6 gap-y-1 border-b border-border py-3 first:border-t sm:grid-cols-[9rem_1fr_auto]"
+        >
+          <dt className="font-semibold">{r.label}</dt>
+          <dd className="m-0 min-w-0 text-pretty wrap-anywhere">{r.value}</dd>
+          <dd className="m-0">
+            {r.field === undefined ? null : (
+              <a
+                href={`#${r.field}`}
+                onClick={(event) => onJump(event, r.field ?? "")}
+                className="inline-flex min-h-12 items-center underline underline-offset-4"
+              >
+                {t("pollFormReviewChange")}
+                <span className="sr-only"> {r.label}</span>
+              </a>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * The review before submitting (P2-26 part 1b): what goes on the public
+ * record for good, apart from where the poll is listed, which moderation can
+ * change (ADR 0041, rules 3 and 4; T-68). Drawn from the form, which
+ * submission requires to be the saved draft.
+ */
+function PollReview({
+  t,
+  form,
+  onJump,
+}: {
+  t: Translate;
+  form: PollForm;
+  onJump: (event: SyntheticEvent, target: string) => void;
+}) {
+  const { locale } = useI18n();
+  const closesAt = closesAtOf(form);
+  const place = tidyPlace(form.place);
+  const first = form.questions[0];
+  const none = <span className="text-muted-foreground">{t("pollFormReviewNone")}</span>;
+  const permanent: ReviewRow[] = [
+    {
+      label: t("pollFormReviewTitleRow"),
+      value:
+        form.title === "" ? (
+          <span className="text-muted-foreground">{t("pollFormReviewUntitled")}</span>
+        ) : (
+          form.title
+        ),
+      field: fieldId.title,
+    },
+    {
+      label: t("pollFormReviewQuestions"),
+      value: (
+        <>
+          {t("pollFormReviewQuestionCount", { count: form.questions.length })}
+          {form.questions.length === 0 ? null : (
+            <ol className="m-0 mt-1 grid gap-1 ps-5">
+              {form.questions.map((q) => (
+                <li key={q.key}>{q.question}</li>
+              ))}
+            </ol>
+          )}
+        </>
+      ),
+      field: first === undefined ? fieldId.addQuestion : fieldId.question(first.key),
+    },
+    {
+      label: t("pollFormReviewWho"),
+      value: form.tiers
+        .map((tier) => (TIER_NAMES[tier] === undefined ? String(tier) : t(TIER_NAMES[tier])))
+        .join(", "),
+    },
+    {
+      label: t("pollFormReviewCloses"),
+      value:
+        closesAt === undefined ? (
+          <span className="text-muted-foreground">{t("pollFormReviewNotSet")}</span>
+        ) : (
+          <span suppressHydrationWarning>
+            {t("pollFormReviewClosesAt", {
+              when: formatUtc(locale, new Date(Number(closesAt) * 1000)),
+            })}
+          </span>
+        ),
+      field: fieldId.closes,
+    },
+  ];
+  const listing: ReviewRow[] = [
+    {
+      label: t("pollFormReviewPlace"),
+      value: place === "" ? none : <bdi className="wrap-anywhere">{place}</bdi>,
+      field: fieldId.place,
+    },
+    {
+      label: t("pollFormReviewTopic"),
+      value: form.topic === "" ? none : t(POLL_TOPIC_MESSAGES[form.topic]),
+      field: fieldId.topic,
+    },
+  ];
+  return (
+    <section aria-labelledby="poll-form-review" className="grid gap-6">
+      <div className="grid gap-2">
+        <h3 id="poll-form-review" className="m-0 text-xl font-semibold">
+          {t("pollFormReviewTitle")}
+        </h3>
+        <p className="m-0 max-w-prose">{t("pollFormReviewLede")}</p>
+      </div>
+      <div className="grid gap-3">
+        <h4 className="m-0 text-base font-semibold">{t("pollFormReviewPermanent")}</h4>
+        <p className="m-0 max-w-prose text-sm text-muted-foreground">
+          {t("pollFormReviewPermanentLede")}
+        </p>
+        <ReviewList t={t} rows={permanent} onJump={onJump} />
+      </div>
+      <div className="grid gap-3">
+        <h4 className="m-0 text-base font-semibold">{t("pollFormReviewListing")}</h4>
+        <p className="m-0 max-w-prose text-sm text-muted-foreground">
+          {t("pollFormReviewListingLede")}
+        </p>
+        <ReviewList t={t} rows={listing} onJump={onJump} />
+      </div>
+    </section>
+  );
+}
+
 const ID = /^[a-z0-9]{32}$/;
 
 /** Why a submission didn't go: the handler's refusal, or the page's own reason. */
@@ -865,6 +1053,53 @@ export function PollFormPage({
                   onChange={(e) => change({ ...form, description: e.target.value })}
                 />
               </div>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="grid content-start gap-2">
+                  <Label htmlFor={fieldId.place} className="text-base font-semibold">
+                    {t("pollFormPlaceLabel")}
+                    <Optional t={t} />
+                  </Label>
+                  <p id={`${fieldId.place}-help`} className="m-0 text-sm text-muted-foreground">
+                    {t("pollFormPlaceHelp")}
+                  </p>
+                  <Errors t={t} errors={errors} id={fieldId.place} />
+                  <Input
+                    id={fieldId.place}
+                    dir="auto"
+                    autoComplete="off"
+                    className={FIELD}
+                    {...described(errors, fieldId.place, `${fieldId.place}-help`)}
+                    value={form.place}
+                    onChange={(e) => change({ ...form, place: e.target.value })}
+                  />
+                </div>
+                <div className="grid content-start gap-2">
+                  <Label htmlFor={fieldId.topic} className="text-base font-semibold">
+                    {t("pollFormTopicLabel")}
+                    <Optional t={t} />
+                  </Label>
+                  <p id={`${fieldId.topic}-help`} className="m-0 text-sm text-muted-foreground">
+                    {t("pollFormTopicHelp")}
+                  </p>
+                  <NativeSelect
+                    id={fieldId.topic}
+                    className="w-full"
+                    aria-describedby={`${fieldId.topic}-help`}
+                    value={form.topic}
+                    onChange={(e) => change({ ...form, topic: topicOf(e.target.value) })}
+                  >
+                    <NativeSelectOption value="">{t("pollFormTopicNone")}</NativeSelectOption>
+                    {POLL_TOPICS.map((topic) => (
+                      <NativeSelectOption key={topic} value={topic}>
+                        {t(POLL_TOPIC_MESSAGES[topic])}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </div>
+              </div>
+              <p className="m-0 max-w-prose text-sm text-muted-foreground">
+                {t("pollFormTagsNote")}
+              </p>
             </div>
           </Section>
 
@@ -1003,6 +1238,7 @@ export function PollFormPage({
             }
           >
             <div className="grid gap-4">
+              <PollReview t={t} form={form} onJump={jump} />
               <div>
                 <Button
                   type="button"
@@ -1050,6 +1286,10 @@ export function PollFormPage({
               {t("pollFormPreviewTitle")}
             </h2>
             <PollPreview t={t} form={form} />
+            <p className="m-0 font-mono text-xs tracking-widest uppercase">
+              {t("pollFormPreviewListed")}
+            </p>
+            <ListingPreview t={t} form={form} />
           </div>
         </aside>
       </form>

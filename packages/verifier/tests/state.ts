@@ -197,8 +197,9 @@ export function anchorState(
 
 /**
  * The `l1` member of a format-2 to 5 bundle whose anchor at `anchor` holds a
- * checkpoint after every segment of `entries` and after the seal, proven at
- * an L1 block numbered `number` at `timestamp`.
+ * checkpoint after every segment of `entries` and after the seal, and any
+ * `extra` storage (slot, RLP of the stored word), proven at an L1 block
+ * numbered `number` at `timestamp`.
  */
 export function anchoredL1(
   electionId: Uint8Array,
@@ -207,17 +208,19 @@ export function anchoredL1(
   version: BoardEntryVersion,
   clock: AnchorClock,
   block: { readonly number: bigint; readonly timestamp: bigint },
+  extra: readonly (readonly [Uint8Array, Uint8Array])[] = [],
 ) {
   const segments = [
     ...new Set([...entries.map((e) => decodeBoardEntry(e, version).segment), clock.lastSegment]),
   ].sort((a, b) => a - b);
   const checkpoints = copyCheckpoints(electionId, entries, segments);
-  const storage: [Uint8Array, Uint8Array][] = segments.map((s) => {
+  const storage: (readonly [Uint8Array, Uint8Array])[] = segments.map((s) => {
     const c = checkpoints.get(s);
     if (c === undefined) throw new Error(`anchoredL1: no checkpoint after segment ${s}`);
     return [checkpointSlot(electionId, s), stored(checkpointHash(c))];
   });
   storage.push([lowestSegmentSlot(electionId), stored(word(BigInt(segments[0] as number) + 1n))]);
+  storage.push(...extra);
   const storageTrie = buildTrie(storage);
   const account = rlp([uint(1n), uint(0n), storageTrie.root, keccak_256(Uint8Array.of(0xfe))]);
   const stateTrie = buildTrie([[anchor, account]]);
@@ -245,4 +248,37 @@ export function anchoredL1(
     nodes: [...stateTrie.nodes, ...storageTrie.nodes].map(toHex),
     checkpoints: [] as string[],
   };
+}
+
+// The board anchor's ERC-7201 namespace `A`, and `keccak256(abi.encode(A + 2))`,
+// where a locator longer than 31 bytes keeps its data, both by `cast keccak`
+// (Foundry 1.8.5), independently of the verifier's slots.
+export const ANCHOR_NAMESPACE = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00n;
+const LOCATOR_DATA = 0x98e4c54e8fbc2d40e1a48de253a98da3caaf11e620b9ccfdfa738212a2915a9an;
+
+/**
+ * The anchor's storage for its last locator, `bytes`, and the count posted,
+ * in Solidity's layout (docs/spec/contracts.md, Archive locator): a `bytes`
+ * at `A + 2`, short (at most 31 bytes, left-aligned with `2·len` in its low
+ * byte) or long (`2·len + 1`, the bytes from `LOCATOR_DATA`), and the count at
+ * `A + 3`; zero words are left out, as a trie holds no zero.
+ */
+export function locatorStorage(bytes: Uint8Array, count: bigint) {
+  const A = ANCHOR_NAMESPACE;
+  const entries: [Uint8Array, Uint8Array][] = [];
+  if (count > 0n) entries.push([word(A + 3n), stored(word(count))]);
+  if (bytes.length <= 31) {
+    const w = new Uint8Array(32);
+    w.set(bytes);
+    w[31] = 2 * bytes.length;
+    if (bytes.length > 0) entries.push([word(A + 2n), stored(w)]);
+    return entries;
+  }
+  entries.push([word(A + 2n), stored(word(2n * BigInt(bytes.length) + 1n))]);
+  for (let i = 0; i * 32 < bytes.length; i++) {
+    const w = new Uint8Array(32);
+    w.set(bytes.subarray(i * 32, i * 32 + 32));
+    if (w.some((x) => x !== 0)) entries.push([word(LOCATOR_DATA + BigInt(i)), stored(w)]);
+  }
+  return entries;
 }

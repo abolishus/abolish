@@ -15,7 +15,15 @@ import {
   PanelError,
   panelId,
 } from "@abolishus/crypto";
-import { decodeHeader, type L1Evidence, type L1Header, NodePool, RlpError } from "./l1.ts";
+import {
+  decodeHeader,
+  type L1ErrorCode,
+  type L1Evidence,
+  type L1Header,
+  NodePool,
+  RlpError,
+} from "./l1.ts";
+import type { ArchiveFinding, ListedFinding } from "./archive.ts";
 import type { L2BoardEvidence } from "./availability.ts";
 import type { GatewayStats } from "./gateways.ts";
 
@@ -62,6 +70,40 @@ export interface CidRead {
     | { readonly reason: "not-reached" };
 }
 
+/**
+ * How a run's read of the permanent archive came out (docs/spec/verifier.md,
+ * Archive; 4.3). `stopped`: the walk never ran, because the definition or
+ * the anchors stop the board checks (`not-reached`), the locator's proof
+ * doesn't hold (an L1 code), or the anchor holds no locator yet
+ * (`locator-none`). Otherwise `walk` is the chain from the latest locator
+ * and, where the board checks' steps 1 and 2 fix the counted checkpoints,
+ * `objects` the listed objects read. Nothing in it is a verdict.
+ */
+export type ArchiveRead =
+  | { readonly stopped: "not-reached" | L1ErrorCode }
+  | { readonly stopped: "locator-none"; readonly count: bigint }
+  | {
+      /** Locators posted, from the anchor's state. */
+      readonly count: bigint;
+      readonly walk: {
+        readonly latest: bigint | undefined;
+        /** Manifests reached. */
+        readonly manifests: number;
+        /** Manifest reads made. */
+        readonly reads: number;
+        readonly findings: readonly ArchiveFinding[];
+      };
+      readonly objects?: {
+        /** The objects the counted checkpoints name. */
+        readonly targets: number;
+        /** Of those, the ones read. */
+        readonly read: number;
+        readonly reads: number;
+        readonly spent: number;
+        readonly findings: readonly ListedFinding[];
+      };
+    };
+
 interface BundleCommon {
   readonly clock: AnchorClock;
   /** The board copy, split into encoded entries in index order. */
@@ -70,6 +112,8 @@ interface BundleCommon {
   readonly unreadableBytes: number;
   /** Set when the copy was read by CID from blocks.car instead of board.bin. */
   readonly byCid?: CidRead;
+  /** Set once the run read the permanent archive (`readArchive`). */
+  readonly archive?: ArchiveRead;
   readonly sources: InputSources;
 }
 

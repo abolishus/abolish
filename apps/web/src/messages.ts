@@ -729,7 +729,7 @@ const enUS = {
     "Your device will ask for your fingerprint, face or screen lock. There is no password.",
   accountNew: "I'm new here",
   accountNewLede:
-    "We create a passkey on this device and keep only its public key. No name is needed. Then you verify an e-mail address and a phone number: one account per number, and for now only numbers from the US and Canada.",
+    "We create a passkey on this device and keep only its public key. No name is needed. Then you verify an e-mail address, which voting needs: one account per address.",
   accountSignUp: "Create an account with a passkey",
   accountSignIn: "Sign in with a passkey",
   accountSignOut: "Sign out",
@@ -1051,9 +1051,12 @@ const enUS = {
   pollTopic_technology: "Technology",
   pollTopic_transport: "Transport",
   verifyEyebrow: "Account · Verification",
-  verifyTitle: "Verify your e-mail and phone",
-  verifyLede:
-    "Each account is verified by an e-mail address and a phone number, and a phone number verifies one account only. That keeps one person from making many accounts as cheaply as many passkeys. Neither ever reaches a poll, a ballot or the public record.",
+  verifyPageTitle_email: "Verify your e-mail",
+  verifyPageTitle_phone: "Verify your e-mail and phone",
+  verifyPageLede_email:
+    "Voting needs an account verified by an e-mail address, and an address verifies one account only. It never reaches a poll, a ballot or the public record.",
+  verifyPageLede_phone:
+    "Voting needs an account verified by an e-mail address and a phone number, and a phone number verifies one account only. That keeps one person from making many accounts as cheaply as many passkeys. We ask for the number when you first vote, or you can verify it now. Neither ever reaches a poll, a ballot or the public record.",
   verifyBack: "Back to your account",
   verifyNeedsScript: "Verifying needs this page's script.",
   verifyCloudflare:
@@ -1127,9 +1130,12 @@ const enUS = {
     "This number can't verify this account: another account holds it, or one let it go less than 90 days ago.",
   verifyFailure_failed: "That didn't work. Nothing changed; try again shortly.",
   verificationMark: "Verification",
-  verificationTitle: "E-mail and phone",
-  verificationLede:
-    "Every account verifies an e-mail address and a phone number. Soon an account will need both to take a voting token.",
+  verificationTitle_email: "E-mail",
+  verificationTitle_phone: "E-mail and phone",
+  verificationLede_email: "Voting needs a verified e-mail address: one account per address.",
+  verificationLede_phone:
+    "Voting needs a verified e-mail address and phone number: one account per number. We ask for the number when you first vote.",
+  verificationPhoneLater: "Asked for when you first vote",
   verificationEmail: "E-mail",
   verificationPhone: "Phone",
   verificationEmailDone: "Verified: {address}",
@@ -1137,8 +1143,9 @@ const enUS = {
   verificationNotYet: "Not verified yet",
   verificationUnavailable: "Not available on this site yet",
   verificationUnread: "Couldn't be loaded",
-  verificationGo: "Verify your e-mail and phone",
-  verificationManage: "Change your e-mail or phone",
+  verificationGo: "Verify your e-mail",
+  verificationManage_email: "Change your e-mail",
+  verificationManage_phone: "Manage your e-mail and phone",
   accountFailure_failedSignedOut: "That didn't work. Nothing changed; try again shortly.",
   accountFailure_failed:
     "That didn't work. Adding a passkey or deleting the account needs a sign-in from the last day: sign out, sign in again and retry.",

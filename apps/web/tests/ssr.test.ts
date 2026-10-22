@@ -1469,12 +1469,27 @@ describe("account page", () => {
 });
 
 describe("verification page", () => {
+  test("asks for no phone while phone verification is off, as it is unless set", async () => {
+    const html = await (await get("/account/verify")).text();
+    expect(html).toContain("Verify your e-mail");
+    expect(html).toContain("Your e-mail address");
+    expect(html).not.toContain("Verify your e-mail and phone");
+    expect(html).not.toContain("Your phone number");
+  });
+
   test("leaves the account's e-mail and phone to the page's script, with no request behind it", async () => {
     seen.length = 0;
-    const response = await get("/account/verify");
+    process.env["PHONE_VERIFICATION"] = "on";
+    let response: Response;
+    try {
+      response = await get("/account/verify");
+    } finally {
+      delete process.env["PHONE_VERIFICATION"];
+    }
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("Verify your e-mail and phone");
+    expect(html).toContain("Your phone number");
     expect(html).toContain("Verifying needs this page&#x27;s script.");
     expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
     // What the account holds is its own: none of it is server-rendered.
@@ -1535,7 +1550,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(8);
+    expect(ids.length).toBe(9);
     return ids;
   }
 
@@ -1558,9 +1573,10 @@ describe("server functions", () => {
       });
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
-        // The site key's takes no input, and answers the key.
+        // The site key's and the phone setting's take no input, and answer
+        // the key and the setting: off here, which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|expected a stream order|${SITE_KEY}`,
+          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }

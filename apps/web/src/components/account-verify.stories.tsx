@@ -123,7 +123,7 @@ const step = async (canvas: ReturnType<typeof within>, name: string) =>
 
 const meta = {
   component: VerifyPage,
-  args: { client: fakeVerify(), challenge: fakeChallenge() },
+  args: { client: fakeVerify(), challenge: fakeChallenge(), phone: true },
 } satisfies Meta<typeof VerifyPage>;
 
 export default meta;
@@ -144,6 +144,21 @@ export const NotVerified: Story = {
       "href",
       "/account",
     );
+  },
+};
+
+/** Phone verification off for this deployment: the e-mail step only, and no number asked for. */
+export const PhoneOff: Story = {
+  args: { client: fakeVerify(), challenge: fakeChallenge(), phone: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { level: 1, name: "Verify your e-mail" }),
+    ).toBeVisible();
+    const email = await step(canvas, "Your e-mail address");
+    await expect(await email.findByText("No address is verified yet.")).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: "Your phone number" })).toBeNull();
+    await expect(canvas.queryByLabelText("Phone number")).toBeNull();
   },
 };
 

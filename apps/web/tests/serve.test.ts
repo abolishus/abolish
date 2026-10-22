@@ -114,6 +114,7 @@ const ISSUER = tier0Issuer({
   groupRegistry: DEPLOYMENT.groupRegistry,
   groups: new Map([[0, DEPLOYMENT.groupId]]),
   now: NOW,
+  phoneVerification: true,
 });
 
 /** The one code the phone handler's stand-in provider sends and approves. */

@@ -81,6 +81,13 @@ const Env = z
     // Verify service, and how many codes every account together may ask for
     // in 24 hours (T-52). All five or none: without them every /phone route
     // answers 503.
+    // Whether voting needs a verified phone ([[0038-verified-accounts]],
+    // Owner decision (2026-10-22)): `on` or `off`, off unless set, and `on`
+    // only with the five above. Off, the token issuer asks for a verified
+    // e-mail alone, no page asks for a number and every /phone route answers
+    // 503, though phone-hash keys still rotate and holds still age, so turning
+    // it off and on again frees no number early (T-01, T-73).
+    PHONE_VERIFICATION: z.enum(["on", "off"]).default("off"),
     PHONE_HASH_KEYS: z.string().min(1).optional(),
     TWILIO_KEY_SID: z.string().min(1).optional(),
     TWILIO_KEY_SECRET: z.string().min(1).optional(),
@@ -152,6 +159,9 @@ const Env = z
         "PHONE_HASH_KEYS, TWILIO_KEY_SID, TWILIO_KEY_SECRET, TWILIO_VERIFY_SERVICE_SID and PHONE_DAILY_CEILING go together",
     },
   )
+  .refine((env) => env.PHONE_VERIFICATION === "off" || env.PHONE_HASH_KEYS !== undefined, {
+    message: "PHONE_VERIFICATION=on needs PHONE_HASH_KEYS and the phone provider's settings",
+  })
   .refine(
     (env) =>
       new Set(
@@ -191,6 +201,7 @@ const env = Env.parse({
   TWILIO_KEY_SECRET: process.env["TWILIO_KEY_SECRET"] || undefined,
   TWILIO_VERIFY_SERVICE_SID: process.env["TWILIO_VERIFY_SERVICE_SID"] || undefined,
   PHONE_DAILY_CEILING: process.env["PHONE_DAILY_CEILING"] || undefined,
+  PHONE_VERIFICATION: process.env["PHONE_VERIFICATION"] || undefined,
   TIER0_ISSUER_KEYS: process.env["TIER0_ISSUER_KEYS"] || undefined,
   TIER0_CHAIN_ID: process.env["TIER0_CHAIN_ID"] || undefined,
   TIER0_GROUP_REGISTRY: process.env["TIER0_GROUP_REGISTRY"] || undefined,
@@ -308,6 +319,7 @@ function tokenIssuer(): Tier0Issuer | undefined {
       groupRegistry: Uint8Array.from(Buffer.from(TIER0_GROUP_REGISTRY.slice(2), "hex")),
       groups: new Map([[0, BigInt(TIER0_GROUP)]]),
       now: new Date(),
+      phoneVerification: env.PHONE_VERIFICATION === "on",
     }),
   );
   // Its errors name a period or a rule, never a key.
@@ -360,11 +372,12 @@ const email = createEmailHandler({
   origin,
   log: write,
 });
-const phoneVerification = phoneService();
+const phoneProvider = phoneService();
 const phone = createPhoneHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
-  service: phoneVerification,
+  // Off, no number goes to the provider: the routes answer as unconfigured.
+  service: env.PHONE_VERIFICATION === "on" ? phoneProvider : undefined,
   turnstile,
   origin,
   log: write,
@@ -388,12 +401,12 @@ if (emailVerification !== undefined && (await checkEmailKeys(sql, emailVerificat
   throw new Error(
     "EMAIL_HASH_KEYS or EMAIL_BOX_KEYS: a key differs from the one its ID was first seen with",
   );
-if (phoneVerification !== undefined && (await checkPhoneKeys(sql, phoneVerification.keys)) > 0)
+if (phoneProvider !== undefined && (await checkPhoneKeys(sql, phoneProvider.keys)) > 0)
   throw new Error("PHONE_HASH_KEYS: a key differs from the one its ID was first seen with");
 const prune = startAccountPrune({
   sql,
   log: write,
-  ...(phoneVerification === undefined ? {} : { phoneKeys: phoneVerification.keys }),
+  ...(phoneProvider === undefined ? {} : { phoneKeys: phoneProvider.keys }),
   ...(emailVerification === undefined ? {} : { emailKeys: emailVerification.keys }),
 });
 const analytics =

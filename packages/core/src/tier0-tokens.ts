@@ -1,6 +1,6 @@
 // The Tier 0 token issuer ([[tier0-token]], Keys and Issuance;
 // [[0039-tier0-token-issuance]]; P2-30 part 3a): an account verified by
-// e-mail takes one token per deployment, for the group of one region, by
+// e-mail and phone takes one token per deployment, for the group of one region, by
 // sending a blinded element `B` under the current period's key; the issuer
 // records the account's token and answers RFC 9497's `BlindEvaluate`, which
 // the ballot client finalises against the key its release publishes. The
@@ -28,7 +28,12 @@ import {
 import { and, eq, lt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
-import { accountEmails, accountTokens, tier0TokenIssuances } from "./db/schema/index.ts";
+import {
+  accountEmails,
+  accountPhones,
+  accountTokens,
+  tier0TokenIssuances,
+} from "./db/schema/index.ts";
 
 const U32_MAX = 2 ** 32 - 1;
 const U64_MAX = (1n << 64n) - 1n;
@@ -104,15 +109,28 @@ export interface Tier0IssuerOptions {
   readonly groupRegistry: Uint8Array;
   /** Each region code served and its one Tier 0 group's `group_id`, as the deployment record lists them. */
   readonly groups: ReadonlyMap<number, bigint>;
+  /** When the issuer is loaded. */
+  readonly now: Date;
 }
 
-/** Checks the deployment's values and computes each region's `info`. */
+/**
+ * Checks the deployment's values and computes each region's `info`. Refuses
+ * a key whose redemption window (`q + 1`) has ended: its `skS` should have
+ * been destroyed then ([[tier0-token]], Keys), and an environment still
+ * carrying it is one nobody rotated (T-74). A key that ends while the issuer
+ * runs is refused by issuance itself.
+ */
 export function tier0Issuer({
   keys,
   chainId,
   groupRegistry,
   groups,
+  now,
 }: Tier0IssuerOptions): Tier0Issuer {
+  const current = tier0TokenKeyPeriod(Math.floor(now.getTime() / 1000));
+  for (const key of keys.keys)
+    if (key.period < current - 1)
+      throw new RangeError(`the issuer key of period ${key.period} no longer redeems`);
   if (typeof chainId !== "bigint" || chainId < 0n || chainId > U64_MAX)
     throw new RangeError("chainId must be a u64");
   if (!(groupRegistry instanceof Uint8Array) || groupRegistry.length !== 20)
@@ -169,21 +187,35 @@ const ACCOUNT_ID = /^[a-z0-9]{32}$/;
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
 
+type Tx = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0];
+
 /**
- * Whether `accountId` may take a token (step 2.1): verified by e-mail
- * ([[0038-verified-accounts]]). P2-31 part 3 adds the phone to this check,
- * and no route calls the issuer before it does (P2-30 part 3b).
+ * Whether `accountId` may take a token (step 2.1): verified by e-mail and by
+ * phone ([[0038-verified-accounts]]). Both rows are locked for the rest of
+ * the transaction, so a number moved to another account, or an address
+ * changed, can't leave between this check and the record (T-01).
  */
-async function mayTakeToken(db: ReturnType<typeof drizzle>, accountId: string): Promise<boolean> {
-  return (await db.$count(accountEmails, eq(accountEmails.userId, accountId))) > 0;
+async function mayTakeToken(tx: Tx, accountId: string): Promise<boolean> {
+  const email = await tx
+    .select({ userId: accountEmails.userId })
+    .from(accountEmails)
+    .where(eq(accountEmails.userId, accountId))
+    .for("share");
+  const phone = await tx
+    .select({ userId: accountPhones.userId })
+    .from(accountPhones)
+    .where(eq(accountPhones.userId, accountId))
+    .for("share");
+  return email.length === 1 && phone.length === 1;
 }
 
 /**
  * Issuance, steps 2 to 4, for the signed-in `accountId`: checks the request
  * in the spec's order, records the account's token (or recognises a retry of
  * it: the same region, key and `B`, while the key still redeems) and answers
- * `Z` and its proof under the key `keyId` names. The record and the count
- * are written in one transaction with the evaluation, so a refused or failed
+ * `Z` and its proof under the key `keyId` names. Every check, the record and
+ * the count run in one transaction with the evaluation, so the account's
+ * verification holds until the record is written, and a refused or failed
  * evaluation (`inverse`) leaves neither. Throws `Tier0IssuanceError` for the
  * first failed check.
  */
@@ -194,62 +226,64 @@ export async function issueTier0Token(
   { issuer, now }: { readonly issuer: Tier0Issuer; readonly now: Date },
 ): Promise<Tier0TokenEvaluation> {
   if (!ACCOUNT_ID.test(accountId)) throw new RangeError("not an account ID");
-  const db = drizzle({ client });
-  if (!(await mayTakeToken(db, accountId))) throw new Tier0IssuanceError("account");
-
   const seconds = Math.floor(now.getTime() / 1000);
-  const key =
-    request.keyId instanceof Uint8Array && request.keyId.length === 32
-      ? issuer.keys.byKeyId(request.keyId)
-      : undefined;
-  // A key that issues now, or one that still redeems, for a retry (step 2.2).
-  if (key === undefined || !tier0TokenKeyRedeems(key.period, seconds))
-    throw new Tier0IssuanceError("key-not-issuing");
-  const issues = tier0TokenKeyIssues(key.period, seconds);
   const deployment = and(
     eq(accountTokens.userId, accountId),
     eq(accountTokens.chainId, issuer.chainId),
     eq(accountTokens.groupRegistry, issuer.groupRegistry),
   );
-  // A key that only redeems now serves a retry of the token recorded under
-  // it, and nothing else, before the region and `B` are looked at (step
-  // 2.2); step 2.5 then checks the rest of the retry.
-  if (!issues) {
-    const [held] = await db
-      .select({ keyId: accountTokens.keyId })
-      .from(accountTokens)
-      .where(deployment);
-    if (held?.keyId == null || !sameBytes(held.keyId, key.keyId))
+
+  return drizzle({ client }).transaction(async (tx) => {
+    if (!(await mayTakeToken(tx, accountId))) throw new Tier0IssuanceError("account");
+
+    const key =
+      request.keyId instanceof Uint8Array && request.keyId.length === 32
+        ? issuer.keys.byKeyId(request.keyId)
+        : undefined;
+    // A key that issues now, or one that still redeems, for a retry (step 2.2).
+    if (key === undefined || !tier0TokenKeyRedeems(key.period, seconds))
       throw new Tier0IssuanceError("key-not-issuing");
-  }
+    const issues = tier0TokenKeyIssues(key.period, seconds);
+    // A key that only redeems now serves a retry of the token recorded under
+    // it, and nothing else, before the region and `B` are looked at (step
+    // 2.2); step 2.5 then checks the rest of the retry.
+    if (!issues) {
+      const [held] = await tx
+        .select({ keyId: accountTokens.keyId })
+        .from(accountTokens)
+        .where(deployment);
+      if (held?.keyId == null || !sameBytes(held.keyId, key.keyId))
+        throw new Tier0IssuanceError("key-not-issuing");
+    }
 
-  const info = Number.isSafeInteger(request.region) ? issuer.infos.get(request.region) : undefined;
-  if (info === undefined) throw new Tier0IssuanceError("region-unknown");
+    const info = Number.isSafeInteger(request.region)
+      ? issuer.infos.get(request.region)
+      : undefined;
+    if (info === undefined) throw new Tier0IssuanceError("region-unknown");
 
-  let blindedElement: Uint8Array;
-  try {
-    blindedElement = decodeTier0TokenBlindedElement(request.blindedElement);
-  } catch (e) {
-    if (e instanceof Tier0TokenError || e instanceof TypeError || e instanceof RangeError)
-      throw new Tier0IssuanceError("blinded-element");
-    throw e;
-  }
-
-  const evaluate = () => {
+    let blindedElement: Uint8Array;
     try {
-      return tier0TokenBlindEvaluate(key.secretKey, blindedElement, info);
+      blindedElement = decodeTier0TokenBlindedElement(request.blindedElement);
     } catch (e) {
-      // Thrown inside the transaction, so the record and count it wrote go
-      // with it: no token under this key for this group (step 4). Only a
-      // first issuance can reach this, since `inverse` depends on the key
-      // and `info` alone, so no retry of a recorded token can.
-      if (e instanceof Tier0TokenError && e.code === "inverse")
-        throw new Tier0IssuanceError("inverse");
+      if (e instanceof Tier0TokenError || e instanceof TypeError || e instanceof RangeError)
+        throw new Tier0IssuanceError("blinded-element");
       throw e;
     }
-  };
 
-  return db.transaction(async (tx) => {
+    const evaluate = () => {
+      try {
+        return tier0TokenBlindEvaluate(key.secretKey, blindedElement, info);
+      } catch (e) {
+        // Thrown inside the transaction, so the record and count it wrote go
+        // with it: no token under this key for this group (step 4). Only a
+        // first issuance can reach this, since `inverse` depends on the key
+        // and `info` alone, so no retry of a recorded token can.
+        if (e instanceof Tier0TokenError && e.code === "inverse")
+          throw new Tier0IssuanceError("inverse");
+        throw e;
+      }
+    };
+
     if (issues) {
       // Step 3: insert-if-absent on the account and deployment, so of two
       // concurrent first requests with different `B` only one is recorded
@@ -300,7 +334,7 @@ export async function issueTier0Token(
  * so the record keeps no period ([[tier0-token]], Issuance, step 3). Keyed on
  * the stored period and the clock alone, never on which keys this instance
  * holds, so an instance missing a key can't mark a live token dead. Returns
- * how many it marked. A scheduled job runs it (P2-30 part 3b).
+ * how many it marked. apps/web's account prune runs it on its timer (P2-30 part 3b).
  */
 export async function markDeadTier0Tokens(client: Sql, now: Date): Promise<number> {
   const current = tier0TokenKeyPeriod(Math.floor(now.getTime() / 1000));

@@ -78,17 +78,22 @@ const ISSUER: Tier0Issuer = tier0Issuer({
   chainId: CHAIN_ID,
   groupRegistry: REGISTRY,
   groups: new Map([[0, GROUP_ID]]),
+  now: NOW,
 });
 const INFO = tier0TokenInfo({ chainId: CHAIN_ID, groupRegistry: REGISTRY, groupId: GROUP_ID });
 
-async function newAccount({ verified = true } = {}): Promise<string> {
+async function newAccount({ email = true, phone = true } = {}): Promise<string> {
   const id = newAccountId();
   await app`
     INSERT INTO account_users VALUES (${id}, ${`${newAccountId()}@account.invalid`},
       false, '', NULL, now(), now())`;
-  if (verified)
+  if (email)
     await app`
       INSERT INTO account_emails VALUES (${id}, ${randomBytes(32)}, 'h1', ${randomBytes(40)}, 'b1', now())`;
+  if (phone)
+    await app`
+      INSERT INTO account_phones VALUES (${id}, ${randomBytes(32)}, 'p1',
+        date_trunc('day', now(), 'UTC'))`;
   return id;
 }
 
@@ -240,7 +245,7 @@ describe("parseTier0IssuerKeys", () => {
 describe("tier0Issuer", () => {
   test("refuses a deployment it can't compute info for", () => {
     const groups = new Map([[0, GROUP_ID]]);
-    const base = { keys: KEYS, chainId: CHAIN_ID, groupRegistry: REGISTRY, groups };
+    const base = { keys: KEYS, chainId: CHAIN_ID, groupRegistry: REGISTRY, groups, now: NOW };
     expect(() => tier0Issuer({ ...base, chainId: 1n << 64n })).toThrow(RangeError);
     expect(() => tier0Issuer({ ...base, chainId: -1n })).toThrow(RangeError);
     expect(() => tier0Issuer({ ...base, groupRegistry: new Uint8Array(19) })).toThrow(RangeError);
@@ -256,6 +261,22 @@ describe("tier0Issuer", () => {
         ]),
       }),
     ).toThrow(RangeError);
+  });
+
+  test("refuses at load a key whose redemption window has ended (T-74)", () => {
+    const base = {
+      keys: KEYS,
+      chainId: CHAIN_ID,
+      groupRegistry: REGISTRY,
+      groups: new Map([[0, GROUP_ID]]),
+    };
+    // Q - 1 still redeems during Q, to its last second, and not a second after.
+    expect(() => tier0Issuer({ ...base, now: at(Q, TOKEN_KEY_PERIOD - 1) })).not.toThrow();
+    expect(() => tier0Issuer({ ...base, now: at(Q + 1, 0) })).toThrow(
+      `the issuer key of period ${Q - 1} no longer redeems`,
+    );
+    // Keys held ahead are kept.
+    expect(() => tier0Issuer({ ...base, now: at(Q - 1) })).not.toThrow();
   });
 });
 
@@ -296,13 +317,37 @@ describe("issuance", () => {
     });
   });
 
-  test("refuses an account not verified, before any other check", async () => {
-    const account = await newAccount({ verified: false });
-    const c = blind();
-    expect(await refusal(issue(account, c.request))).toBe("account");
-    expect(
-      await refusal(issue(account, { ...c.request, keyId: new Uint8Array(32), region: 9 })),
-    ).toBe("account");
+  test("refuses an account not verified by both e-mail and phone, before any other check", async () => {
+    for (const verified of [
+      { email: false, phone: false },
+      { email: true, phone: false },
+      { email: false, phone: true },
+    ]) {
+      const account = await newAccount(verified);
+      const c = blind();
+      expect(await refusal(issue(account, c.request))).toBe("account");
+      expect(
+        await refusal(issue(account, { ...c.request, keyId: new Uint8Array(32), region: 9 })),
+      ).toBe("account");
+      expect(await record(account)).toBeUndefined();
+    }
+  });
+
+  test("checks the phone inside issuance's transaction, waiting on a move in flight (T-01)", async () => {
+    const account = await newAccount();
+    let issuing: Promise<Tier0IssuanceErrorCode> | undefined;
+    let settled = false;
+    // A number moved to another account deletes this account's row; until
+    // that commits, issuance waits for it rather than reading the old row.
+    await app2.begin(async (tx) => {
+      await tx`DELETE FROM account_phones WHERE user_id = ${account}`;
+      issuing = refusal(issue(account, blind().request)).finally(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(settled).toBe(false);
+    });
+    expect(await issuing).toBe("account");
     expect(await record(account)).toBeUndefined();
   });
 
@@ -451,6 +496,7 @@ describe("issuance", () => {
       chainId: CHAIN_ID,
       groupRegistry: registry,
       groups: new Map([[0, GROUP_ID]]),
+      now: NOW,
     });
     const info = tier0TokenInfo({ chainId: CHAIN_ID, groupRegistry: registry, groupId: GROUP_ID });
     const keyId = keyIdOf(Q);

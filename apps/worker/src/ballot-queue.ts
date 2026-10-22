@@ -167,14 +167,22 @@ class SubmitQueue<Outcome> {
       maxRetriesPerRequest: null,
       enableOfflineQueue: true,
     });
-    const events = new QueueEvents(name, { connection: eventsConnection, prefix });
     // Unheard, BullMQ prints the error, which can quote a command's arguments.
     queue.on("error", () => {});
-    events.on("error", () => {});
+    let events: QueueEvents | undefined;
     try {
+      // BullMQ's events loop starts reading from `$` only after a round trip
+      // of its own, so an outcome boarded before that first read would go
+      // unheard and its client wait out `timeoutMs`. Reading from the
+      // server's clock now, the stream IDs' clock, hears every outcome after
+      // opening.
+      const [seconds, micros] = await eventsConnection.time();
+      const lastEventId = `${Number(seconds) * 1000 + Math.floor(Number(micros) / 1000)}-0`;
+      events = new QueueEvents(name, { connection: eventsConnection, prefix, lastEventId });
+      events.on("error", () => {});
       await Promise.all([queue.waitUntilReady(), events.waitUntilReady()]);
     } catch (e) {
-      await Promise.allSettled([queue.close(), events.close()]);
+      await Promise.allSettled([queue.close(), events?.close()]);
       eventsConnection.disconnect();
       throw e;
     }

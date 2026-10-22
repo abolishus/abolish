@@ -8,11 +8,12 @@
 // another origin, and no other site can frame a page or learn which poll a
 // visitor came from (T-11, T-67).
 //
-// One exception: the poll editor's pages (P2-22 part 6c) may load Cloudflare
-// Turnstile's script and frame, whose token a poll's submission needs (T-72).
-// It is third-party code on our origin, so it is allowed only there, and the
-// page loads it only when the author submits (src/account/challenge.ts; T-43,
-// T-55).
+// One exception: the poll editor's pages (P2-22 part 6c) and the account's
+// verification page (P2-31 part 4) may load Cloudflare Turnstile's script and
+// frame, whose token a poll's submission and a request for a code need (T-72,
+// T-52). It is third-party code on our origin, so it is allowed only there,
+// and the page loads it only when the author submits or asks for a code
+// (src/account/challenge.ts; T-43, T-55).
 //
 // The other: a poll's embed, `/embed/p/<code>` (P2-24 part 3), which other
 // sites frame (docs/design/sharing.md, The embed decision). It is the only
@@ -30,11 +31,12 @@ export const CHALLENGE_ORIGIN = "https://challenges.cloudflare.com";
 
 /**
  * Whether the page at `pathname` may run Turnstile: the poll editor's,
- * `/account/polls/<new or id>`, and no other. Its links out are plain ones
- * that load a new document under that page's own policy.
+ * `/account/polls/<new or id>`, and the verification page's,
+ * `/account/verify`, and no other. Their links out are plain ones that load
+ * a new document under that page's own policy.
  */
 export function isChallengePage(pathname: string): boolean {
-  return /^\/account\/polls\/[a-z0-9]+$/.test(pathname);
+  return pathname === "/account/verify" || /^\/account\/polls\/[a-z0-9]+$/.test(pathname);
 }
 
 /** Whether `pathname` is a poll's embed, `/embed/p/<code>`, and so frameable. */

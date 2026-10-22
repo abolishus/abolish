@@ -10,3 +10,10 @@ export function formatUtc(locale: string, date: Date): string {
     timeZone: "UTC",
   }).format(date);
 }
+
+/** A UTC day, `YYYY-MM-DD`, for `locale`. */
+export function formatUtcDay(locale: string, day: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(
+    new Date(`${day}T00:00:00Z`),
+  );
+}

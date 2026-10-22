@@ -89,6 +89,10 @@ describe("the poll editor's policy (P2-22 part 6c)", () => {
     (path) => expect(isChallengePage(path)).toBe(true),
   );
 
+  // The verification page (P2-31 part 4): a request for a code takes a token.
+  test("/account/verify asks for codes", () =>
+    expect(isChallengePage("/account/verify")).toBe(true));
+
   test.each([
     "/",
     "/account",
@@ -101,6 +105,10 @@ describe("the poll editor's policy (P2-22 part 6c)", () => {
     `/account/polls/${"a1".repeat(16)}/setup`,
     "/account/polls/NEW",
     "/account/polls/%6Eew",
+    "/account/verify/",
+    "/account/verify/x",
+    "/account/Verify",
+    "/x/account/verify",
     "/account/polls/new.js",
     "/x/account/polls/new",
     "/polls/new",

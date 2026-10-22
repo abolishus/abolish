@@ -473,6 +473,7 @@ describe("every page", () => {
     "/account",
     "/account/polls/new",
     `/account/polls/${"a".repeat(32)}/setup`,
+    "/account/verify",
     "/how-it-works",
     "/discover",
     "/nowhere",
@@ -490,8 +491,9 @@ describe("every page", () => {
       expect(csp).toContain("default-src 'none'");
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("connect-src 'self'");
-      // Turnstile's origin only on the poll editor's pages (P2-22 part 6c; T-43, T-55).
-      const editor = /^\/account\/polls\/[a-z0-9]+$/.test(path);
+      // Turnstile's origin only on the poll editor's pages (P2-22 part 6c) and
+      // the verification page (P2-31 part 4; T-43, T-55).
+      const editor = path === "/account/verify" || /^\/account\/polls\/[a-z0-9]+$/.test(path);
       expect(csp.includes("https://challenges.cloudflare.com")).toBe(editor);
       expect(csp.includes("frame-src")).toBe(editor);
       const html = await response.text();
@@ -1346,6 +1348,25 @@ describe("account page", () => {
     expect(html).toContain("Your account is not your vote");
     expect(html).toContain("Accounts use passkeys, which need this page&#x27;s script.");
     expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("verification page", () => {
+  test("leaves the account's e-mail and phone to the page's script, with no request behind it", async () => {
+    seen.length = 0;
+    const response = await get("/account/verify");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Verify your e-mail and phone");
+    expect(html).toContain("Verifying needs this page&#x27;s script.");
+    expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+    // What the account holds is its own: none of it is server-rendered.
+    expect(html).not.toContain("Verified");
+    expect(html).not.toContain("Send a code");
+    // Turnstile isn't loaded with the page: only a request for a code loads it.
+    expect(html).not.toContain("api.js");
+    expect(html).toContain(SITE_KEY);
     expect(seen).toEqual([]);
   });
 });

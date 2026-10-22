@@ -676,7 +676,7 @@ const enUS = {
     "Your device will ask for your fingerprint, face or screen lock. There is no password.",
   accountNew: "I'm new here",
   accountNewLede:
-    "We create a passkey on this device and keep only its public key. No name or email is needed.",
+    "We create a passkey on this device and keep only its public key. No name is needed. Then you verify an e-mail address and a phone number: one account per number, and for now only numbers from the US and Canada.",
   accountSignUp: "Create an account with a passkey",
   accountSignIn: "Sign in with a passkey",
   accountSignOut: "Sign out",
@@ -694,6 +694,8 @@ const enUS = {
   separationAccount: "Your account",
   separationAccount_passkeys: "Each passkey's public key, and when it was added",
   separationAccount_sessions: "Your sign-ins to this website",
+  separationAccount_email: "Your e-mail address, encrypted",
+  separationAccount_phone: "A keyed fingerprint of your phone number, never the number",
   separationAccountNote:
     "Who you are to this website. It can create and manage polls. It can't vote.",
   separationNeverJoined: "Never joined",
@@ -947,6 +949,95 @@ const enUS = {
   pollForm_closesTooLate: "Choose a time no more than a year from now.",
   pollForm_draftTooLong: "Your poll is too long altogether. Shorten its text or remove a question.",
   pollForm_draftRefused: "Your poll breaks a rule the form couldn't point at. Check it through.",
+  verifyEyebrow: "Account · Verification",
+  verifyTitle: "Verify your e-mail and phone",
+  verifyLede:
+    "Each account is verified by an e-mail address and a phone number, and a phone number verifies one account only. That keeps one person from making many accounts as cheaply as many passkeys. Neither ever reaches a poll, a ballot or the public record.",
+  verifyBack: "Back to your account",
+  verifyNeedsScript: "Verifying needs this page's script.",
+  verifyCloudflare:
+    "Before a code is sent, a check by Cloudflare confirms you're a person. Cloudflare sees your browser's address while it runs.",
+  verifyMark_email: "E-mail",
+  verifyMark_phone: "Phone",
+  verifyHeading_email: "Your e-mail address",
+  verifyHeading_phone: "Your phone number",
+  verifyLede_email:
+    "We keep your address encrypted, to send you codes and, later, the notices you ask for. It's never shown to anyone else.",
+  verifyLede_phone:
+    "We never keep your number: only a keyed fingerprint of it, so it can't verify a second account. A mobile gets a text, a home phone a call. The provider that sends the code sees the number.",
+  verifyLoading: "Loading…",
+  verifyVerified_email: "Verified: {address}, on {date} UTC.",
+  verifyVerified_phone: "Verified on {date}. We don't keep the number, so we can't show it.",
+  verifyNone_email: "No address is verified yet.",
+  verifyNone_phone: "No phone number is verified yet.",
+  verifyChange_email: "Use another address",
+  verifyChange_phone: "Use another number",
+  verifyLabel_email: "E-mail address",
+  verifyLabel_phone: "Phone number",
+  verifyHelp_email: "We send an 8-digit code to it.",
+  verifyHelp_phone:
+    "A US or Canadian number, with or without +1. Internet and virtual numbers can't be used.",
+  verifySend: "Send a code",
+  verifyCheckLabel: "Check that you're a person",
+  verifyChecking: "Complete the check to send your code.",
+  verifySending: "Sending your code…",
+  verifySent_email:
+    "We sent a message to {address}. Enter the code from it; it works for 15 minutes. Nothing arrived? Check the address and send another.",
+  verifySent_phone:
+    "If {number} can take a code, one is on its way, by text to a mobile or by a call to a home phone. It works for 10 minutes. Nothing arrived? Check the number and send another.",
+  verifyCodeLabel: "Code",
+  verifyCodeSubmit: "Verify",
+  verifyStartOver: "Start over",
+  verifyCancel: "Cancel",
+  verifyChecked_email: "Your e-mail address is verified.",
+  verifyChecked_phone: "Your phone number is verified.",
+  verifyNoTarget_email: "Enter your e-mail address.",
+  verifyNoTarget_phone: "Enter your phone number.",
+  verifyNoCode: "Enter the code you were sent.",
+  verifyFailure_signedOut: "You've been signed out. Sign in on your account page, then come back.",
+  verifyFailure_unavailable: "This site can't verify this yet.",
+  verifyFailure_invalidAddress:
+    "That isn't an e-mail address we can send to. Check it and try again.",
+  verifyFailure_invalidNumber: "That isn't a phone number. Check it and try again.",
+  verifyFailure_unsupportedCountry:
+    "For now we can only verify numbers from the US and Canada. We're sorry: without one, you can't verify an account yet.",
+  verifyFailure_virtualNumber:
+    "This looks like an internet or virtual number. Please use a mobile or home phone.",
+  verifyFailure_tooManyThisHour:
+    "You've asked for as many codes as you can this hour. Try again in an hour.",
+  verifyFailure_tooManyToday:
+    "You've asked for as many codes as you can today. Try again tomorrow.",
+  verifyFailure_serviceBusy: "We've sent as many phone codes today as we can. Try again tomorrow.",
+  verifyFailure_challengeRefused:
+    "The check that you're a person didn't go through. Send the code again to take a new one.",
+  verifyFailure_challengeUnavailable:
+    "The check that you're a person couldn't load. Try again shortly.",
+  verifyFailure_lookupUnavailable: "We couldn't check that number just now. Try again shortly.",
+  verifyFailure_noCode: "No code is waiting for this. Send a new one.",
+  verifyFailure_expired: "That code has expired. Send a new one.",
+  verifyFailure_wrongCode: "That code isn't right. Check it and try again.",
+  verifyFailure_wrongCodeTries: "That code isn't right. Tries left for this code: {count}.",
+  verifyFailure_tooManyTries: "That code had too many wrong tries. Send a new one.",
+  verifyFailure_checkUnavailable:
+    "We couldn't check the code just now. No try was spent: try again shortly.",
+  verifyFailure_addressTaken:
+    "Another account has verified this address, so it can't verify this one.",
+  verifyFailure_numberHeld:
+    "This number can't verify this account: another account holds it, or one let it go less than 90 days ago.",
+  verifyFailure_failed: "That didn't work. Nothing changed; try again shortly.",
+  verificationMark: "Verification",
+  verificationTitle: "E-mail and phone",
+  verificationLede:
+    "Every account verifies an e-mail address and a phone number. Soon an account will need both to take a voting token.",
+  verificationEmail: "E-mail",
+  verificationPhone: "Phone",
+  verificationEmailDone: "Verified: {address}",
+  verificationPhoneDone: "Verified on {date}",
+  verificationNotYet: "Not verified yet",
+  verificationUnavailable: "Not available on this site yet",
+  verificationUnread: "Couldn't be loaded",
+  verificationGo: "Verify your e-mail and phone",
+  verificationManage: "Change your e-mail or phone",
   accountFailure_failedSignedOut: "That didn't work. Nothing changed; try again shortly.",
   accountFailure_failed:
     "That didn't work. Adding a passkey or deleting the account needs a sign-in from the last day: sign out, sign in again and retry.",

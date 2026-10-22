@@ -3,6 +3,12 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import { AccountError, type AccountClient, type PasskeyView } from "../account/client.ts";
 import { type DraftsClient, DraftsError } from "../account/drafts.ts";
+import {
+  type EmailView,
+  type PhoneView,
+  VerifyError,
+  type VerifyClient,
+} from "../account/verify.ts";
 import { AccountPanel } from "./account-panel.tsx";
 
 /** An account handler in memory: the panel's calls, with no network and no passkey prompt. */
@@ -93,13 +99,28 @@ const noPolls: DraftsClient = {
   submit: async () => {},
 };
 
+/** An account's e-mail and phone as the handlers hold them; the verification page's stories are in account-verify.stories.tsx. */
+function fakeVerify({ email, phone }: { email?: EmailView; phone?: PhoneView } = {}): VerifyClient {
+  const refused = async () => {
+    throw new VerifyError("failed");
+  };
+  return {
+    email: async () => email,
+    phone: async () => phone,
+    requestEmailCode: refused,
+    verifyEmailCode: refused,
+    requestPhoneCode: refused,
+    verifyPhoneCode: refused,
+  };
+}
+
 /** The panel's own notice; the polls list below it has its own. */
 const notice = async (canvas: ReturnType<typeof within>) =>
   (await canvas.findAllByRole("status"))[0];
 
 const meta = {
   component: AccountPanel,
-  args: { drafts: noPolls },
+  args: { drafts: noPolls, verify: fakeVerify() },
 } satisfies Meta<typeof AccountPanel>;
 
 export default meta;
@@ -156,7 +177,11 @@ export const SignedIn: Story = {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText("Device passkey")).toBeVisible();
     await expect(canvas.getByText("Added October 2, 2026 at 5:40 PM UTC")).toBeVisible();
-    // The account's polls come first; this one has none.
+    // Its verification comes first, then its polls; this one has none.
+    await expect(await canvas.findAllByText("Not verified yet")).toHaveLength(2);
+    await expect(
+      canvas.getByRole("link", { name: "Verify your e-mail and phone" }),
+    ).toHaveAttribute("href", "/account/verify");
     await expect(await canvas.findByText("You haven't created a poll yet.")).toBeVisible();
     const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);
@@ -247,5 +272,43 @@ export const SessionEndedUnderThePolls: Story = {
     await expect(
       await within(canvasElement).findByRole("button", { name: "Sign in with a passkey" }),
     ).toBeVisible();
+  },
+};
+
+export const Verified: Story = {
+  args: {
+    client: fakeClient({ signedIn: true, passkeys: ONE }),
+    verify: fakeVerify({
+      email: { address: "sam@example.org", verifiedAt: "2026-10-01T12:00:00.000Z" },
+      phone: { verifiedOn: "2026-10-02" },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const section = canvas.getByRole("region", { name: "E-mail and phone" });
+    await expect(await within(section).findByText("Verified: sam@example.org")).toBeVisible();
+    await expect(within(section).getByText("Verified on October 2, 2026")).toBeVisible();
+    await expect(
+      within(section).getByRole("link", { name: "Change your e-mail or phone" }),
+    ).toHaveAttribute("href", "/account/verify");
+  },
+};
+
+export const VerificationUnavailable: Story = {
+  args: {
+    client: fakeClient({ signedIn: true, passkeys: ONE }),
+    verify: {
+      ...fakeVerify(),
+      email: async () => {
+        throw new VerifyError("unavailable");
+      },
+      phone: async () => {
+        throw new VerifyError("unavailable");
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findAllByText("Not available on this site yet")).toHaveLength(2);
   },
 };

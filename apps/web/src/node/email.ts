@@ -96,7 +96,10 @@ const refuse = (status: number, code: string, extra: object = {}) =>
   answer(status, { code, status, ...extra });
 
 // `afterAnswer`'s sender always answers `sent`, so core never throws `send-unavailable`.
-const ERRORS: Record<Exclude<EmailVerificationErrorCode, "send-unavailable">, [number, string]> = {
+export const ERRORS: Record<
+  Exclude<EmailVerificationErrorCode, "send-unavailable">,
+  [number, string]
+> = {
   "invalid-address": [422, "INVALID_ADDRESS"],
   "too-many-this-hour": [429, "TOO_MANY_THIS_HOUR"],
   "too-many-today": [429, "TOO_MANY_TODAY"],

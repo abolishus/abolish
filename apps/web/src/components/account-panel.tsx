@@ -9,8 +9,10 @@ import {
   type PasskeyView,
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
+import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import { AccountPolls } from "./account-polls.tsx";
+import { AccountVerification } from "./account-verify.tsx";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
@@ -70,7 +72,12 @@ function Separation() {
         <Server className="size-4" />,
         "separationServer",
         "separationAccount",
-        ["separationAccount_passkeys", "separationAccount_sessions"],
+        [
+          "separationAccount_passkeys",
+          "separationAccount_sessions",
+          "separationAccount_email",
+          "separationAccount_phone",
+        ],
         "separationAccountNote",
       )}
       <div className="flex items-center gap-3 border-y border-border py-3 md:flex-col md:justify-center md:border-y-0 md:border-x md:px-3 md:py-0">
@@ -95,6 +102,8 @@ export interface AccountPanelProps {
   readonly client: AccountClient;
   /** The signed-in account's polls. */
   readonly drafts: DraftsClient;
+  /** The signed-in account's e-mail and phone. */
+  readonly verify: VerifyClient;
 }
 
 /**
@@ -103,7 +112,7 @@ export interface AccountPanelProps {
  * here can name a ballot (T-10). Votes are cast only in the ballot client,
  * with a voting identity kept on the device under its own passkey (ADR 0017).
  */
-export function AccountPanel({ client, drafts }: AccountPanelProps) {
+export function AccountPanel({ client, drafts, verify }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -236,9 +245,11 @@ export function AccountPanel({ client, drafts }: AccountPanelProps) {
 
       {view.kind === "signed-in" ? (
         <>
-          <AccountPolls client={drafts} index="01" onSignedOut={signedOut} />
+          {/* First, so an account that hasn't verified sees it at sign-in (P2-31 part 4). */}
+          <AccountVerification client={verify} index="01" />
+          <AccountPolls client={drafts} index="02" onSignedOut={signedOut} />
           <Section
-            index="02"
+            index="03"
             mark={t("passkeysTitle")}
             title={t("passkeysHeading")}
             id="passkeys-title"
@@ -302,7 +313,7 @@ export function AccountPanel({ client, drafts }: AccountPanelProps) {
           </Section>
 
           <Section
-            index="03"
+            index="04"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

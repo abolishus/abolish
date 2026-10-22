@@ -1,4 +1,4 @@
-import { foreignKey, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, foreignKey, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { accountUsers } from "./accounts.ts";
 import { accountPolls } from "./polls.ts";
 
@@ -44,3 +44,16 @@ export const accountProfilePolls = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+// Drizzle view of 0034_profile_moderation.sql's appeals: an author's appeal
+// of a decision about their profile, account class as the polls' appeals are.
+export const accountProfileAppeals = pgTable("account_profile_appeals", {
+  decisionSeq: bigint("decision_seq", { mode: "bigint" }).primaryKey(),
+  handle: text("handle")
+    .notNull()
+    .references(() => accountProfiles.handle, { onDelete: "cascade" }),
+  filedAt: timestamp("filed_at", { withTimezone: true }).notNull(),
+  outcome: text("outcome"),
+  reviewer: text("reviewer"),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+});

@@ -132,6 +132,7 @@ export {
   accountModerators,
   accountPolls,
   accountPollSubmissions,
+  accountProfileAppeals,
   accountProfileNamings,
   accountProfilePolls,
   accountProfiles,
@@ -160,6 +161,8 @@ export {
   moderationReports,
   pollCreationTxs,
   profileHandles,
+  profileModerationActions,
+  profileReports,
   TABLE_CLASSES,
 } from "./db/schema/index.ts";
 export {
@@ -498,6 +501,29 @@ export {
   renameProfile,
   showOnProfile,
 } from "./profiles.ts";
+export {
+  decideProfileAppeal,
+  fileProfileAppeal,
+  MAX_PROFILE_APPEAL_QUEUE,
+  moderateProfile,
+  type OpenProfileAppeal,
+  type PendingProfileReport,
+  profileModerationStatus,
+  type ProfileAppeal,
+  type ProfileAppealReview,
+  type ProfileModeration,
+  type ProfileModerationDecision,
+  type ProfileModerationState,
+  type ProfileModerationStatus,
+  type ProfileReportQueueCursor,
+  type PublicProfileModerationEntry,
+  readProfileAppealQueue,
+  readProfileModeration,
+  readProfileModerationLog,
+  readProfileReportQueue,
+  reportProfile,
+  reviewProfileReports,
+} from "./profile-moderation.ts";
 export {
   MAX_REACTION_CHANGES_PER_HOUR,
   pruneReactionHours,

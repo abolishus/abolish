@@ -1,8 +1,9 @@
 // Creator profiles ([[0040-creator-profiles]]; [[P2-27]] part 1b): an
 // account may make one profile, a name it chooses and a random handle, and
 // choose for each of its polls whether the profile shows it. A poll not
-// chosen names no author anywhere. Nothing here is shown until moderation of
-// profiles ([[P2-27]] part 1c) is built.
+// chosen names no author anywhere. A profile moderation hid
+// (src/profile-moderation.ts) shows only its handle and the reason, and names
+// no poll's author, until it is restored.
 //
 // T-10: account-side rows that name an account, its profile and its own
 // polls' creator records, never a ballot, a nullifier, a receipt or the fact
@@ -40,8 +41,9 @@ import {
   electionRegistrations,
   moderationActions,
   profileHandles,
+  profileModerationActions,
 } from "./db/schema/index.ts";
-import { statusOf } from "./moderation.ts";
+import { lockModeration, type RemovalReason, statusOf } from "./moderation.ts";
 
 /** The longest name, in code points; the table's check holds it too. */
 export const MAX_PROFILE_NAME = 60;
@@ -61,6 +63,8 @@ export type ProfileErrorCode =
   | "no-profile"
   /** The account set a name already this UTC day. */
   | "too-soon"
+  /** Moderation hides the profile: its name stays the one a moderator judged. */
+  | "hidden"
   /** No poll with this ID belongs to the account. */
   | "not-found";
 
@@ -184,8 +188,9 @@ export async function makeProfile(
  * Renames `accountId`'s profile to `name`, returning whether the name
  * changed: the name it has already changes nothing and isn't counted against
  * the day. Refused, with nothing written, in this order: a name `profileName`
- * refuses (`invalid-name`), an account with no profile (`no-profile`) and one
- * that set a name already this UTC day (`too-soon`). The handle never
+ * refuses (`invalid-name`), an account with no profile (`no-profile`), a
+ * profile moderation hides (`hidden`) and one that set a name already this
+ * UTC day (`too-soon`). The handle never
  * changes, and every poll the profile shows takes the new name.
  */
 export async function renameProfile(
@@ -200,12 +205,16 @@ export async function renameProfile(
   if (n === undefined) throw new ProfileError("invalid-name");
   return drizzle({ client }).transaction(async (tx) => {
     await lock(tx, accountId);
+    // T-75: under the moderation lock, so no hide commits between the check
+    // and the rename, and an upheld appeal restores the name a moderator saw.
+    await lockModeration(tx);
     const [row] = await tx
-      .select({ name: accountProfiles.name })
+      .select({ handle: accountProfiles.handle, name: accountProfiles.name })
       .from(accountProfiles)
       .where(eq(accountProfiles.userId, accountId));
     if (row === undefined) throw new ProfileError("no-profile");
     if (row.name === n) return false;
+    if ((await hiddenFor(tx, row.handle)) !== undefined) throw new ProfileError("hidden");
     if (await namedSince(tx, accountId, day)) throw new ProfileError("too-soon");
     await tx.update(accountProfiles).set({ name: n }).where(eq(accountProfiles.userId, accountId));
     await recordNaming(tx, accountId, day);
@@ -313,31 +322,71 @@ export async function readOwnProfile(
   };
 }
 
-/** A profile as anyone may see it: its name and the polls it shows that are listed. */
-export interface PublicProfile {
-  readonly handle: string;
-  readonly name: string;
-  /**
-   * The election IDs of the polls it shows whose definition the registry
-   * sync stored and that are neither delisted nor hidden, the latest
-   * registered first, at most `MAX_PROFILE_POLLS`.
-   */
-  readonly polls: readonly Uint8Array[];
+/**
+ * A profile as anyone may see it: its name and the polls it shows that are
+ * listed, or, while moderation hides it, only the ground it was hidden on.
+ */
+export type PublicProfile =
+  | {
+      readonly handle: string;
+      readonly state: "visible";
+      readonly name: string;
+      /**
+       * The election IDs of the polls it shows whose definition the registry
+       * sync stored and that are neither delisted nor hidden, the latest
+       * registered first, at most `MAX_PROFILE_POLLS`.
+       */
+      readonly polls: readonly Uint8Array[];
+    }
+  | {
+      readonly handle: string;
+      readonly state: "hidden";
+      /** The ground of the newest hide (src/profile-moderation.ts). */
+      readonly reason: RemovalReason;
+    };
+
+/**
+ * The newest decision about the profile at `handle` hides it: the reason, or
+ * `undefined` while it is shown.
+ */
+async function hiddenFor(
+  db: Pick<Db, "select">,
+  handle: string,
+): Promise<RemovalReason | undefined> {
+  const t = profileModerationActions;
+  const [row] = await db
+    .select({ action: t.action, reason: t.reason })
+    .from(t)
+    .where(eq(t.handle, handle))
+    .orderBy(desc(t.seq))
+    .limit(1);
+  // The table's check constraint gives a hide a removal reason.
+  return row?.action === "hide" ? (row.reason as RemovalReason) : undefined;
 }
 
 /**
  * The profile at `handle`, or `undefined` if none has it: never made,
  * deleted, or not a handle at all. Nothing about the account, the profile's
- * age or its other polls (drafts, failures, unlisted or unlinked ones).
+ * age or its other polls (drafts, failures, unlisted or unlinked ones), and
+ * neither name nor polls while moderation hides it (T-75). Read in one
+ * snapshot, so a hide and the name can't pass each other.
  */
 export async function readProfile(client: Sql, handle: string): Promise<PublicProfile | undefined> {
   if (typeof handle !== "string" || !PROFILE_HANDLE.test(handle)) return undefined;
-  const db = drizzle({ client });
+  return drizzle({ client }).transaction((tx) => profileOf(tx, handle), {
+    isolationLevel: "repeatable read",
+    accessMode: "read only",
+  });
+}
+
+async function profileOf(db: Tx, handle: string): Promise<PublicProfile | undefined> {
   const [profile] = await db
     .select({ userId: accountProfiles.userId, name: accountProfiles.name })
     .from(accountProfiles)
     .where(eq(accountProfiles.handle, handle));
   if (profile === undefined) return undefined;
+  const hidden = await hiddenFor(db, handle);
+  if (hidden !== undefined) return { handle, state: "hidden", reason: hidden };
   // The newest decision about each poll, as the listing reads it.
   const newest = db
     .select({ action: moderationActions.action })
@@ -366,7 +415,12 @@ export async function readProfile(client: Sql, handle: string): Promise<PublicPr
       asc(electionDefinitions.electionId),
     )
     .limit(MAX_PROFILE_POLLS);
-  return { handle, name: profile.name, polls: rows.map((r) => new Uint8Array(r.electionId)) };
+  return {
+    handle,
+    state: "visible",
+    name: profile.name,
+    polls: rows.map((r) => new Uint8Array(r.electionId)),
+  };
 }
 
 /** Who asked a poll, as its page and card say it. */
@@ -378,22 +432,28 @@ export interface AskedBy {
 /**
  * The profile `electionId`'s author chose to show the poll on, or
  * `undefined`: none chosen, no profile, no creator record (a poll not made
- * on the website, or one a wipe or account deletion took), or a hidden poll,
- * whose page shows none of it. "Asked by" is our database's word, never part
+ * on the website, or one a wipe or account deletion took), a hidden poll,
+ * whose page shows none of it, or a profile moderation hid. "Asked by" is
+ * our database's word, never part
  * of the poll anyone can verify (T-75).
  */
 export async function askedBy(client: Sql, electionId: Uint8Array): Promise<AskedBy | undefined> {
   if (!isBytes(electionId) || electionId.length !== 32)
     throw new TypeError("electionId must be 32 bytes");
   const id = new Uint8Array(electionId);
-  const db = drizzle({ client });
-  const [row] = await db
-    .select({ handle: accountProfiles.handle, name: accountProfiles.name })
-    .from(accountPolls)
-    .innerJoin(accountProfilePolls, eq(accountProfilePolls.pollId, accountPolls.id))
-    .innerJoin(accountProfiles, eq(accountProfiles.userId, accountProfilePolls.userId))
-    .where(eq(accountPolls.electionId, id));
-  if (row === undefined) return undefined;
-  if ((await statusOf(db, id)).state === "hidden") return undefined;
-  return row;
+  return drizzle({ client }).transaction(
+    async (tx) => {
+      const [row] = await tx
+        .select({ handle: accountProfiles.handle, name: accountProfiles.name })
+        .from(accountPolls)
+        .innerJoin(accountProfilePolls, eq(accountProfilePolls.pollId, accountPolls.id))
+        .innerJoin(accountProfiles, eq(accountProfiles.userId, accountProfilePolls.userId))
+        .where(eq(accountPolls.electionId, id));
+      if (row === undefined) return undefined;
+      if ((await statusOf(tx, id)).state === "hidden") return undefined;
+      if ((await hiddenFor(tx, row.handle)) !== undefined) return undefined;
+      return row;
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }

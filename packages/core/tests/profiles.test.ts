@@ -127,6 +127,13 @@ async function failsWith(query: PromiseLike<unknown>): Promise<string> {
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
+/** The polls the profile at `handle` shows, failing if it isn't shown at all. */
+async function shownPolls(handle: string): Promise<readonly Uint8Array[]> {
+  const p = await readProfile(app, handle);
+  if (p?.state !== "visible") throw new Error(`profile ${handle} isn't shown`);
+  return p.polls;
+}
+
 describe("schema", () => {
   test("the Drizzle tables match the migrated ones", async () => {
     for (const table of [
@@ -470,6 +477,7 @@ describe("what anyone sees", () => {
       await showOnProfile(app, user, p, true);
     expect(await readProfile(app, handle)).toEqual({
       handle,
+      state: "visible",
       name: "Riverside Neighbours",
       // The latest registered first.
       polls: [newer.electionId, shown.electionId],
@@ -487,7 +495,7 @@ describe("what anyone sees", () => {
     await showOnProfile(app, user, hidden.id, true);
     await decide(delisted.electionId, "delist");
     await decide(hidden.electionId, "hide");
-    expect((await readProfile(app, handle))?.polls).toEqual([]);
+    expect(await shownPolls(handle)).toEqual([]);
     // A delisted poll's own page still says who asked it; a hidden one's says nothing.
     expect(await askedBy(app, delisted.electionId)).toEqual({
       handle,
@@ -495,7 +503,7 @@ describe("what anyone sees", () => {
     });
     expect(await askedBy(app, hidden.electionId)).toBeUndefined();
     await decide(hidden.electionId, "restore");
-    expect((await readProfile(app, handle))?.polls.map(hex)).toEqual([hex(hidden.electionId)]);
+    expect((await shownPolls(handle)).map(hex)).toEqual([hex(hidden.electionId)]);
     expect(await askedBy(app, hidden.electionId)).toEqual({ handle, name: "Riverside Neighbours" });
   });
 
@@ -504,7 +512,7 @@ describe("what anyone sees", () => {
     const poll = await openPoll(user);
     await showOnProfile(app, user, poll.id, true);
     await showOnProfile(app, user, poll.id, false);
-    expect((await readProfile(app, handle))?.polls).toEqual([]);
+    expect(await shownPolls(handle)).toEqual([]);
     expect(await askedBy(app, poll.electionId)).toBeUndefined();
   });
 
@@ -514,7 +522,7 @@ describe("what anyone sees", () => {
     await showOnProfile(app, user, poll.id, true);
     await renameProfile(app, user, "After", later(1));
     expect(await askedBy(app, poll.electionId)).toEqual({ handle, name: "After" });
-    expect((await readProfile(app, handle))?.name).toBe("After");
+    expect(await readProfile(app, handle)).toMatchObject({ state: "visible", name: "After" });
   });
 
   test("no profile at a handle never made, or a string that isn't one", async () => {

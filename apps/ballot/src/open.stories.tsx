@@ -188,6 +188,8 @@ interface Voter {
   readonly receipts: (receipt: Uint8Array) => CheckedAnswer | "fail";
   /** What keeping a checked receipt answers. */
   readonly keptReceipt: RecordReceiptOutcome;
+  /** Whether the build has every delivery route (`delivers`). */
+  readonly delivers: boolean;
   /** This device's casts before the cast. */
   readonly held: CastsRead;
   /** What recording the cast answers. */
@@ -209,6 +211,7 @@ const VOTER: Voter = {
   delivered: receiptOf,
   receipts: passes,
   keptReceipt: "recorded",
+  delivers: true,
   held: { kind: "read", casts: [] },
   recorded: "recorded",
   answers: [BOARDED],
@@ -274,6 +277,7 @@ function source(
     delivered,
     receipts,
     keptReceipt,
+    delivers,
     held,
     recorded,
     answers,
@@ -349,6 +353,7 @@ function source(
     send,
     keepBoarded,
     registrar,
+    delivers,
   };
   MOCKS.set(made, {
     load,
@@ -1212,6 +1217,21 @@ export const RefusedByTheBoard: Story = {
     await castInto(canvas, "The board refused your ballot");
     await expect(canvas.getByText("ballot-l1-ref")).toBeVisible();
     // The operator chose this answer after the proof: no retry offers it another (T-55).
+    await expect(canvas.queryByRole("button")).toBeNull();
+  },
+};
+
+export const NoDelivery: Story = {
+  name: "Cast by a build without every route to the trustees",
+  args: { source: castsSource({ delivers: false }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This ballot can't send your ballot yet");
+    // No ballot is made, so no relay ever holds one (T-25).
+    await expect(mocks(args.source).casts).not.toHaveBeenCalled();
+    await expect(mocks(args.source).cast).not.toHaveBeenCalled();
+    await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
     await expect(canvas.queryByRole("button")).toBeNull();
   },
 };

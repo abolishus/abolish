@@ -265,6 +265,9 @@ const source: ElectionSource = {
   keepBoarded: (electionId, tier, ballot, boarded) =>
     recordBoarded(electionId, tier, ballot, boarded),
   registrar,
+  // Only the operator's relay so far: the route that bypasses it and the
+  // posting offer come first (P2-8 part 3c-1b-2b-2b-2c).
+  delivers: false,
 };
 
 async function withWorker<T>(ask: (used: BallotWorker) => Promise<T>): Promise<T> {

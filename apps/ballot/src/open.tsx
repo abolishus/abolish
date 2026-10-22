@@ -161,6 +161,16 @@ export interface ElectionSource {
    * register anyone (no published region, no challenge frame).
    */
   readonly registrar: Registrar | undefined;
+  /**
+   * Whether this build has every route to a seat's intake that
+   * [[delivery]], Client rule 4, asks for before delivery counts as failed:
+   * the operator's relay, a node's own endpoint through an anonymiser, and
+   * the posting the voter may choose. Until one does, no ballot is made:
+   * the relay holds the whole record, and an operator that refuses one seat
+   * could board it undelivered, outranking the voter's earlier ballot and
+   * voiding their vote ([[revoting]], Selection; T-25).
+   */
+  readonly delivers: boolean;
 }
 
 /** An L1 block, by number and hash, that a ballot's membership message names. */
@@ -611,6 +621,7 @@ export function Ballot({
     setStep({ kind: "proving", steps: undefined });
     run(
       async (current) => {
+        if (!source.delivers) return stopped("no-delivery");
         const l1 = await source.l1Block();
         if (l1 === undefined) return stopped("no-l1");
         // This device's casts before the artifacts and the secret: a ballot

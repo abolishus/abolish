@@ -255,6 +255,9 @@ const enUS = {
   castFaultyTitle: "Your ballot didn't pass this device's check",
   castFaulty:
     "This device checks every ballot before it is sent, and this one was wrong, so it wasn't sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
+  noDeliveryTitle: "This ballot can't send your ballot yet",
+  noDelivery:
+    "A cast ballot counts only once its parts reach the poll's trustees, and this version of the ballot can't deliver them every way it must yet. Your ballot wasn't made and nothing was sent.",
   castsUnreadableTitle: "This device's record of your ballots can't be read",
   castsUnreadable:
     "This device keeps a record of every ballot it sends, so a new one never cancels an earlier one, and that record can't be read now. Nothing was sent. Check that this browser keeps site data, then answer again.",

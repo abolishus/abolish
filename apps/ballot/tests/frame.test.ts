@@ -135,6 +135,7 @@ describe("the frame under the client's CSP", () => {
           send: () => new Promise<never>(() => {}),
           keepBoarded: () => new Promise<never>(() => {}),
           registrar: undefined,
+          delivers: false,
         },
         languages: ["en-US"],
         onRestart: () => {},
@@ -184,6 +185,7 @@ describe("the frame under the client's CSP", () => {
       ...(
         [
           "cant-seal-version",
+          "no-delivery",
           "no-identity",
           "identity-unreadable",
           "unregistered",

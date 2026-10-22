@@ -134,6 +134,15 @@ describe("terms", () => {
     expect(searchTerms("公園")).toEqual(["公園"]);
   });
 
+  test("cuts a term NFKC grows to its first MAX_SEARCH_QUERY code points", () => {
+    const [term] = searchTerms("\ufdfa".repeat(MAX_SEARCH_QUERY));
+    expect(Array.from(term!)).toHaveLength(MAX_SEARCH_QUERY);
+    expect(normalizeSearchText("\ufdfa".repeat(MAX_SEARCH_QUERY)).startsWith(term!)).toBe(true);
+    // Code points, not code units: no surrogate pair is split.
+    const [astral] = searchTerms("\u{1d400}".repeat(MAX_SEARCH_QUERY / 2));
+    expect(astral).toBe("a".repeat(MAX_SEARCH_QUERY / 2));
+  });
+
   test("refuses an empty query, too many terms and too many characters", () => {
     for (const q of ["", "   ", "\n\t"]) expect(() => searchTerms(q)).toThrow(TypeError);
     const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
@@ -157,7 +166,8 @@ describe("terms", () => {
         expect(new Set(terms).size).toBe(terms.length);
         for (const t of terms) {
           expect(t).not.toBe("");
-          expect(normalizeSearchText(t)).toBe(t);
+          expect(t).not.toMatch(/\p{Cc}/u);
+          expect(Array.from(t).length).toBeLessThanOrEqual(MAX_SEARCH_QUERY);
         }
       }),
       { numRuns },
@@ -215,7 +225,7 @@ describe("storing", () => {
       fr: "Le parc doit-il rester ouvert ?",
     });
     expect(await searchRow(id)).toEqual([
-      "should the park stay open? le parc doit-il rester ouvert ?",
+      "should the park stay open?\nle parc doit-il rester ouvert ?",
     ]);
   });
 
@@ -270,7 +280,7 @@ describe("storing", () => {
         "parque y biblioteca",
         "¿debe el parque abrir hasta tarde?",
         "¿debe la biblioteca abrir los domingos?",
-      ].join(" "),
+      ].join("\n"),
     ]);
     expect(await search("library")).toContain(hex(id));
     expect(await search("domingos")).toContain(hex(id));
@@ -313,8 +323,14 @@ describe("listing", () => {
     expect(await found("公園")).toEqual([hex(kanji)]);
     // Full-width letters match their plain ones.
     expect(await found("ｆｒｉｄａｙｓ")).toEqual([hex(park)]);
-    // A term never spans two translations.
+    // A term never spans two translations, even one NFKC gives a space.
     expect(await found("downtown?¿más")).toEqual([]);
+    // NFKC turns U+00A8 into a space and a combining diaeresis, which would
+    // match across a space between the two lines.
+    expect(searchTerms("sailboat\u00a8ok")).toEqual(["sailboat \u0308ok"]);
+    const spanned = await poll({ en: "A sailboat", fr: "\u0308ok?" });
+    expect(await search("sailboat\u00a8ok")).not.toContain(hex(spanned));
+    expect(await search("sailboat")).toContain(hex(spanned));
     // Without its display text a poll matches nothing; nor do descriptions.
     expect(await found("quiet")).toEqual([]);
     expect(await found("descriptions")).toEqual([]);

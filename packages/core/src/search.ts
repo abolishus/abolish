@@ -39,10 +39,12 @@ export function normalizeSearchText(text: string): string {
 }
 
 /**
- * A query's terms: split on whitespace, each normalised, duplicates dropped.
- * Refuses a query longer than `MAX_SEARCH_QUERY`, one with no term, and one
- * with more than `MAX_SEARCH_TERMS`, counted before normalising, as the
- * contract's pattern counts them.
+ * A query's terms: split on whitespace, each normalised and cut to its first
+ * `MAX_SEARCH_QUERY` code points, duplicates dropped. Refuses a query longer
+ * than `MAX_SEARCH_QUERY`, one with no term, and one with more than
+ * `MAX_SEARCH_TERMS`, counted before normalising, as the contract's pattern
+ * counts them. The cut bounds what each `strpos` searches for, which NFKC can
+ * otherwise grow eighteenfold (U+FDFA), and only widens a match (T-52).
  */
 export function searchTerms(query: string): string[] {
   if (typeof query !== "string" || query.length > MAX_SEARCH_QUERY)
@@ -50,14 +52,19 @@ export function searchTerms(query: string): string[] {
   const raw = query.split(/\s+/u).filter((t) => t !== "");
   if (raw.length < 1 || raw.length > MAX_SEARCH_TERMS)
     throw new TypeError(`query must have 1 to ${MAX_SEARCH_TERMS} terms`);
-  return [...new Set(raw.map(normalizeSearchText))];
+  return [
+    ...new Set(
+      raw.map((t) => Array.from(normalizeSearchText(t)).slice(0, MAX_SEARCH_QUERY).join("")),
+    ),
+  ];
 }
 
 /**
  * The searchable text of a checked record: each translation's title (version
- * 5) and every question, separated by spaces, so no term (which holds no
- * whitespace) matches across two of them. Descriptions and option labels are
- * left out: search is over the questions (P2-23, Scope).
+ * 5) and every question, each normalised, then joined by newlines. A
+ * normalised term holds no control character, so none matches across two of
+ * them, even one NFKC gave a space (U+00A8). Descriptions and option labels
+ * are left out: search is over the questions (P2-23, Scope).
  */
 export function searchTextOf(checked: ShowRecordCheck & { readonly ok: true }): string {
   const lines =
@@ -67,12 +74,10 @@ export function searchTextOf(checked: ShowRecordCheck & { readonly ok: true }): 
           t.title,
           ...t.questions.map((q) => q.question),
         ]);
-  return normalizeSearchText(
-    lines
-      .filter((l) => l.length > 0)
-      .map((l) => utf8.decode(l))
-      .join(" "),
-  );
+  return lines
+    .filter((l) => l.length > 0)
+    .map((l) => normalizeSearchText(utf8.decode(l)))
+    .join("\n");
 }
 
 // The codec admits only well-formed UTF-8, so `fatal` never fires on a

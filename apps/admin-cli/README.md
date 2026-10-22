@@ -31,6 +31,15 @@ Election IDs are 64 lowercase hex digits, their one spelling (T-31). Exit codes:
 
 A malformed scenario is a usage error naming the field (exit 2). A run whose cells differ from the plan prints the report, then `{ "error": "simulation-mismatch" }` (exit 1).
 
+## Tier 0 token keys
+
+`docs/runbooks/tier0-token-keys.md` (T-74). The issuer's keys are made on the operator's own machine; these commands need no database.
+
+| Command                                                           | What it does                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tier0-keys period [--at <ISO time>]`                             | The key period now, or at that time: its number, when it starts and ends, and when its key stops redeeming (`redeemsUntil`).                                                                                                                                                                                                                                                                             |
+| `tier0-keys generate --from <period> --count <1..16> --dir <dir>` | A fresh key for each of `count` periods from `period` (`generateTier0IssuerKey`), each written as its `TIER0_ISSUER_KEYS` entry to a new owner-only file `tier0-key-<period>.txt` in `dir`; prints each period's times, `publicKey` and `keyId`, never the key. Refused, with nothing written: `period-started` (a period that has begun), `key-exists` (a file for one of the periods), `no-directory`. |
+
 ## Running
 
 From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner). Only the moderation commands read it; a missing or malformed one is refused as `{ "error": "database-url" }` (exit 1).

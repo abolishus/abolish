@@ -8,6 +8,7 @@ import { parseArgs } from "node:util";
 import { CliError, UsageError } from "./errors.ts";
 import { moderationCommands } from "./moderation.ts";
 import { simulationCommands } from "./simulation.ts";
+import { tier0KeyCommands } from "./tier0-keys.ts";
 
 export interface CliIo {
   /** One JSON value per call; each becomes a line on stdout. */
@@ -38,6 +39,7 @@ export interface OfflineCommand extends CommandShape {
 const GROUPS: Readonly<Record<string, Readonly<Record<string, Command | OfflineCommand>>>> = {
   moderation: moderationCommands,
   simulation: simulationCommands,
+  "tier0-keys": tier0KeyCommands,
 };
 
 export function usage(): string {

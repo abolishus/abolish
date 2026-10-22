@@ -322,6 +322,7 @@ export {
 } from "./tier0-registration.ts";
 export {
   checkTier0IssuerDeployment,
+  generateTier0IssuerKey,
   issueTier0Token,
   markDeadTier0Tokens,
   parseTier0IssuerKeys,
@@ -333,6 +334,9 @@ export {
   type Tier0IssuerKey,
   type Tier0IssuerKeys,
   type Tier0IssuerOptions,
+  tier0KeyPeriodAt,
+  type Tier0KeyPeriodTimes,
+  tier0KeyPeriodTimes,
 } from "./tier0-tokens.ts";
 export {
   TIER1_BATCH_LOCK_MS,

@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { accountTokens, tier0TokenIssuances } from "../src/db/schema/index.ts";
 import {
   checkTier0IssuerDeployment,
+  generateTier0IssuerKey,
   issueTier0Token,
   markDeadTier0Tokens,
   newAccountId,
@@ -33,6 +34,8 @@ import {
   type Tier0Issuer,
   tier0Issuer,
   type Tier0IssuerKeys,
+  tier0KeyPeriodAt,
+  tier0KeyPeriodTimes,
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
@@ -248,6 +251,70 @@ describe("parseTier0IssuerKeys", () => {
     expect(() => parseTier0IssuerKeys(`${Q}:${a},${Q}:${b}`)).toThrow(
       "issuer key entry 2 repeats a period",
     );
+  });
+});
+
+describe("generateTier0IssuerKey", () => {
+  test("gives an entry the parser reads back as the key it returns, joinable with others", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 2 ** 32 - 2 }), (q) => {
+        const a = generateTier0IssuerKey(q);
+        const b = generateTier0IssuerKey(q + 1);
+        expect(a.entry).toMatch(new RegExp(`^${q}:[0-9a-f]{64}$`));
+        expect(a.key.period).toBe(q);
+        expect(hex(a.key.keyId)).toBe(hex(tier0TokenKeyId(q, a.key.publicKey)));
+        const keys = parseTier0IssuerKeys(`${b.entry},${a.entry}`);
+        expect(keys.keys.map((k) => [k.period, hex(k.publicKey)])).toEqual([
+          [q, hex(a.key.publicKey)],
+          [q + 1, hex(b.key.publicKey)],
+        ]);
+        expect(hex(a.key.secretKey)).toBe(a.entry.split(":")[1]);
+      }),
+      { numRuns: Math.min(runs.numRuns, 100) },
+    );
+  });
+
+  test("draws a fresh key each time", () => {
+    const seen = new Set(Array.from({ length: 20 }, () => generateTier0IssuerKey(Q).entry));
+    expect(seen.size).toBe(20);
+  });
+
+  test("never prints the secret key with the parsed one (T-74)", () => {
+    const { entry, key } = generateTier0IssuerKey(Q);
+    const sk = entry.split(":")[1]!;
+    expect(inspect(key, { depth: 5 })).not.toContain(sk);
+    expect(JSON.stringify(key)).not.toContain(sk);
+  });
+
+  test("refuses a period that isn't a u32", () => {
+    for (const q of [-1, 2 ** 32, 1.5, Number.NaN])
+      expect(() => generateTier0IssuerKey(q)).toThrow("period must be a u32");
+  });
+});
+
+describe("key periods", () => {
+  // The last period whose redemption window ends at or before 8.64e15 ms.
+  const LAST_DATE_PERIOD = Math.floor(8.64e12 / TOKEN_KEY_PERIOD) - 2;
+
+  test("a period runs 30 days and its key redeems through the next one", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: LAST_DATE_PERIOD }), (q) => {
+        const t = tier0KeyPeriodTimes(q);
+        expect(t.starts.getTime()).toBe(q * TOKEN_KEY_PERIOD * 1000);
+        expect(t.ends.getTime() - t.starts.getTime()).toBe(TOKEN_KEY_PERIOD * 1000);
+        expect(t.redeemsUntil.getTime() - t.ends.getTime()).toBe(TOKEN_KEY_PERIOD * 1000);
+        expect(tier0KeyPeriodAt(t.starts)).toBe(q);
+        expect(tier0KeyPeriodAt(new Date(t.ends.getTime() - 1000))).toBe(q);
+      }),
+      runs,
+    );
+  });
+
+  test("refuses a period that isn't a u32, or whose times a Date can't hold", () => {
+    for (const q of [-1, 2 ** 32, 1.5])
+      expect(() => tier0KeyPeriodTimes(q)).toThrow("period must be a u32");
+    for (const q of [LAST_DATE_PERIOD + 1, 2 ** 32 - 1])
+      expect(() => tier0KeyPeriodTimes(q)).toThrow("period is past what a Date holds");
   });
 });
 

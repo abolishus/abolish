@@ -20,6 +20,8 @@ import {
   decodeDeploymentRecord,
   decodeTier0TokenBlindedElement,
   deploymentRecordRule,
+  generateTier0TokenKeyPair,
+  TOKEN_KEY_PERIOD,
   Tier0TokenError,
   type Tier0TokenEvaluation,
   tier0TokenBlindEvaluate,
@@ -96,6 +98,55 @@ export function parseTier0IssuerKeys(text: string): Tier0IssuerKeys {
   keys.sort((a, b) => a.period - b.period);
   const byId = new Map(keys.map((k) => [Buffer.from(k.keyId).toString("hex"), k]));
   return { keys, byKeyId: (keyId) => byId.get(Buffer.from(keyId).toString("hex")) };
+}
+
+/** A key period's times ([[tier0-token]], Keys). */
+export interface Tier0KeyPeriodTimes {
+  readonly period: number;
+  /** When the period, and its key's issuing, begins. */
+  readonly starts: Date;
+  /** When it ends: its key issues nothing new from then. */
+  readonly ends: Date;
+  /** The end of `q + 1`: its key redeems nothing from then, and its `skS` is destroyed. */
+  readonly redeemsUntil: Date;
+}
+
+/** Key period `q`'s times, for the operator's rotation ([[tier0-token-keys]]). */
+export function tier0KeyPeriodTimes(period: number): Tier0KeyPeriodTimes {
+  if (!Number.isInteger(period) || period < 0 || period > U32_MAX)
+    throw new RangeError("period must be a u32");
+  const at = (q: number) => new Date(q * TOKEN_KEY_PERIOD * 1000);
+  const redeemsUntil = at(period + 2);
+  // A u32 period reaches far past the last time a Date holds (year 275760).
+  if (Number.isNaN(redeemsUntil.getTime()))
+    throw new RangeError("period is past what a Date holds");
+  return { period, starts: at(period), ends: at(period + 1), redeemsUntil };
+}
+
+/** The key period `now` falls in. */
+export function tier0KeyPeriodAt(now: Date): number {
+  return tier0TokenKeyPeriod(Math.floor(now.getTime() / 1000));
+}
+
+/**
+ * A fresh issuer key for `period` (RFC 9497 `GenerateKeyPair`, [[tier0-token]],
+ * Keys), as its entry in the issuer's keys' text form, `period:hex`, beside
+ * the parsed key whose `pkS` and `key_id` a deployment record lists. The entry
+ * is `skS` itself: it goes only where the operator keeps that period's key,
+ * apart from every other secret (T-74, [[tier0-token-keys]]).
+ */
+export function generateTier0IssuerKey(period: number): {
+  readonly entry: string;
+  readonly key: Tier0IssuerKey;
+} {
+  if (!Number.isInteger(period) || period < 0 || period > U32_MAX)
+    throw new RangeError("period must be a u32");
+  const { secretKey } = generateTier0TokenKeyPair();
+  // Hex by hand rather than through Buffer, whose pool would keep a copy.
+  const entry = `${period}:${Array.from(secretKey, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  secretKey.fill(0);
+  // Parsed back, so the entry is one `parseTier0IssuerKeys` accepts.
+  return { entry, key: parseTier0IssuerKeys(entry).keys[0]! };
 }
 
 /** The issuer's keys and the deployment's published Tier 0 groups. */

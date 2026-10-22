@@ -260,6 +260,9 @@ catalogs:
     '@wagmi/cli':
       specifier: 2.10.0
       version: 2.10.0
+    axe-core:
+      specifier: 4.13.0
+      version: 4.13.0
     better-auth:
       specifier: 1.7.7
       version: 1.7.7
@@ -806,6 +809,9 @@ importers:
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.1(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(playwright@1.63.0)(vitest@5.0.1)
+      axe-core:
+        specifier: 'catalog:'
+        version: 4.13.0
       fast-check:
         specifier: 'catalog:'
         version: 4.10.2

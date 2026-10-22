@@ -169,10 +169,17 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // The built site in Chromium (tests/*.e2e.ts): what only a browser shows.
+          // The built site in Chromium (tests/*.e2e.ts): what only a browser
+          // shows. Each file builds the app into dist/ first, so they run one
+          // at a time.
           name: "e2e",
           include: ["tests/**/*.e2e.ts"],
           environment: "node",
+          fileParallelism: false,
+          // The build each file imports, loaded by Node in that file's own
+          // process: through the test server, whose module cache the files
+          // share, a later file would get an earlier one's chunks.
+          server: { deps: { external: [/\/dist\/server\//] } },
           testTimeout: 60_000,
           hookTimeout: 180_000,
         },

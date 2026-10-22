@@ -3,23 +3,16 @@
 // what is shown) and what reaches the API (nothing of the visitor's).
 
 import { readdirSync, readFileSync } from "node:fs";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
 import { gzipSync } from "node:zlib";
 
-import { shortCode } from "@abolishus/core/short-codes";
 import {
   boardEntryHash,
-  decodeBoardEntry,
-  decodeElectionDefinition,
   decodeElectionDefinitionV5,
-  electionDefinitionHash,
   electionDefinitionV5Hash,
-  encodeBoardEntry,
-  encodeElectionDefinition,
-  encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -29,450 +22,49 @@ import type { AskedBy } from "../src/poll.ts";
 import type { ProfileRecord } from "../src/server/load.ts";
 import type { StartRequestContext } from "../src/start.ts";
 import { fromHex, toHex } from "../src/values.ts";
+import {
+  BALLOT,
+  BOARD,
+  CODE,
+  CODE_FAILS_ID,
+  codeOf,
+  FALSE_CODE,
+  FILLER,
+  HEAD,
+  HIDDEN_CODE,
+  HIDDEN_ID,
+  ID,
+  listed,
+  LOST_ID,
+  MISCODED_CODE,
+  MISCODED_ID,
+  OPEN_MANY,
+  OPEN_MANY_CODE,
+  OPEN_ONE,
+  OPEN_ONE_CODE,
+  OVERRIDE_ID,
+  PROFILE_HANDLE,
+  QUESTIONS_ID,
+  questionsDefinition,
+  seen,
+  streamed,
+  STREAM_BAD_TEXT,
+  STREAM_NO_TEXT,
+  STREAM_V1,
+  STREAM_V5,
+  stub,
+  stubApi,
+  SWAPPED_CODE,
+  SWAPPED_ID,
+  typical,
+  UNKNOWN_CODE,
+  UNKNOWN_ID,
+} from "./stub-api.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-interface Vector {
-  id: string;
-  value?: { election_id: string };
-  encoding: string;
-  hash?: string;
-}
-const vectors = (
-  JSON.parse(
-    readFileSync(
-      new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-      "utf8",
-    ),
-  ) as { vectors: Vector[] }
-).vectors;
-const typical = vectors.find((v) => v.id === "definition-typical");
-const approval = vectors.find((v) => v.id === "definition-approval");
-if (typical?.value === undefined || approval?.value === undefined)
-  throw new Error("vectors missing");
-
-const ID = typical.value.election_id;
-/** Known to the stub, but its definition names another election. */
-const SWAPPED_ID = "ab".repeat(32);
-const UNKNOWN_ID = "cd".repeat(32);
-const HEAD = { treeSize: "30", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
-/** A creator profile's public handle, as the log names it. */
-const PROFILE_HANDLE = "k7qa2mzr5xw3bn4d";
-
-const LATEST = {
-  seq: "7",
-  action: "hide",
-  reason: "personal-data",
-  decidedAt: "2026-10-01T12:00:00.000Z",
-};
-
-/**
- * The typical poll's board, as many entries as `HEAD` claims: the valid board
- * vector's payloads under the typical poll's ID, at their positions. The stub
- * serves these entries for every poll, so any other poll's board names
- * another election.
- */
-const boardVector = (
-  JSON.parse(
-    readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
-  ) as { boards: { id: string; entries: string[] }[] }
-).boards.find((b) => b.id === "valid");
-if (boardVector === undefined) throw new Error("vectors missing");
-const BOARD = Array.from({ length: Number(HEAD.treeSize) }, (_, i) => {
-  const { payload } = decodeBoardEntry(
-    fromHex(boardVector.entries[i % boardVector.entries.length]!),
-    1,
-  );
-  return toHex(
-    encodeBoardEntry(
-      { election_id: fromHex(ID), index: BigInt(i), segment: Math.floor(i / 5), payload },
-      1,
-    ),
-  );
-});
-
-/** A poll whose text moderation has hidden: the approval vector, under an ID of its own. */
-const HIDDEN_ID = "ef".repeat(32);
-const hiddenDefinition = toHex(
-  encodeElectionDefinition({
-    ...decodeElectionDefinition(fromHex(approval.encoding)),
-    election_id: fromHex(HIDDEN_ID),
-  }),
-);
-
-/** A version-5 poll of four questions: the typical vector under an ID of its own. */
-const typicalV5 = (
-  JSON.parse(
-    readFileSync(
-      new URL("../../../docs/spec/vectors/election-definition-v5.json", import.meta.url),
-      "utf8",
-    ),
-  ) as { vectors: Vector[] }
-).vectors.find((v) => v.id === "definition-v5-typical");
-if (typicalV5 === undefined) throw new Error("vectors missing");
-const QUESTIONS_ID = "a5".repeat(32);
-const questionsDefinition = encodeElectionDefinitionV5({
-  ...decodeElectionDefinitionV5(fromHex(typicalV5.encoding)),
-  election_id: fromHex(QUESTIONS_ID),
-});
-
-const definitions = new Map([
-  [ID, typical.encoding],
-  [QUESTIONS_ID, toHex(questionsDefinition)],
-  [HIDDEN_ID, hiddenDefinition],
-  [SWAPPED_ID, typical.encoding],
-]);
-
-/**
- * What the stub lists for discovery, in order, as the API would: never the
- * hidden poll. Eighteen fillers, the typical poll and one the stub has lost
- * fill the first page, with the lost one last (so it is the page's cursor
- * but not shown); the swapped poll is on the second.
- */
-const FILLER = Array.from({ length: 18 }, (_, i) =>
-  (i + 1).toString(16).padStart(2, "0").repeat(32),
-);
-const LOST_ID = "13".repeat(32);
-const listed = [...FILLER, ID, SWAPPED_ID, LOST_ID].sort();
-for (const id of FILLER)
-  definitions.set(
-    id,
-    toHex(
-      encodeElectionDefinition({
-        ...decodeElectionDefinition(fromHex(typical.encoding)),
-        election_id: fromHex(id),
-      }),
-    ),
-  );
-
-/**
- * The stream's polls (`/discover`), each committed to a published display
- * text: a version-5 poll of two questions, a version-1 poll, one whose
- * served text isn't the one its definition commits to, and one with no text
- * at all. The fillers follow them, without text, so the stream has a second
- * page.
- */
-interface TextVector {
-  id: string;
-  encoding: string;
-  commitment: string;
-}
-const textVector = (name: string, id: string) => {
-  const v = (
-    JSON.parse(
-      readFileSync(new URL(`../../../docs/spec/vectors/${name}`, import.meta.url), "utf8"),
-    ) as { vectors: TextVector[] }
-  ).vectors.find((x) => x.id === id);
-  if (v === undefined) throw new Error("vectors missing");
-  return v;
-};
-const TEXT_V1 = textVector("display-text.json", "display-text-two-languages");
-const TEXT_V2 = textVector("display-text-v2.json", "display-text-v2-two-questions");
-const STREAM_V5 = "c1".repeat(32);
-const STREAM_V1 = "c2".repeat(32);
-const STREAM_BAD_TEXT = "c3".repeat(32);
-const STREAM_NO_TEXT = "c4".repeat(32);
-const streamV1 = (electionId: string) =>
-  toHex(
-    encodeElectionDefinition({
-      ...decodeElectionDefinition(fromHex(typical.encoding)),
-      election_id: fromHex(electionId),
-      option_count: 3,
-      max_selections: 1,
-      display_text_commitment: fromHex(TEXT_V1.commitment),
-    }),
-  );
-{
-  const v5 = decodeElectionDefinitionV5(fromHex(typicalV5.encoding));
-  definitions.set(
-    STREAM_V5,
-    toHex(
-      encodeElectionDefinitionV5({
-        ...v5,
-        election_id: fromHex(STREAM_V5),
-        questions: [3, 2].map((option_count) => ({
-          ...v5.questions[0]!,
-          option_count,
-          min_selections: 0,
-          max_selections: 1,
-        })),
-        display_text_commitment: fromHex(TEXT_V2.commitment),
-      }),
-    ),
-  );
-}
-for (const id of [STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT]) definitions.set(id, streamV1(id));
-/** Polls still open, for their embeds: one question of three answers, and two questions. */
-const OPEN_ONE = "e1".repeat(32);
-const OPEN_MANY = "e2".repeat(32);
-/** Long after any test runs. */
-const FAR = 4_102_444_800n;
-definitions.set(
-  OPEN_ONE,
-  toHex(
-    encodeElectionDefinition({
-      ...decodeElectionDefinition(fromHex(streamV1(OPEN_ONE))),
-      closes_at: FAR,
-    }),
-  ),
-);
-definitions.set(
-  OPEN_MANY,
-  toHex(
-    encodeElectionDefinitionV5({
-      ...decodeElectionDefinitionV5(fromHex(definitions.get(STREAM_V5)!)),
-      election_id: fromHex(OPEN_MANY),
-      closes_at: FAR,
-    }),
-  ),
-);
-const displayTexts = new Map([
-  [STREAM_V5, TEXT_V2.encoding],
-  [STREAM_V1, TEXT_V1.encoding],
-  [OPEN_ONE, TEXT_V1.encoding],
-  [OPEN_MANY, TEXT_V2.encoding],
-  [STREAM_BAD_TEXT, TEXT_V2.encoding],
-]);
-/** The stream under `new`; `closing` is the same polls the other way round. */
-const streamed = [STREAM_V5, STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT, ...FILLER];
-const BALLOT = "https://ballot.test/";
-
-/** A poll's short code at `length`, from the definition the stub serves for it. */
-const codeOf = (id: string, length = 7) =>
-  shortCode(
-    electionDefinitionHash(decodeElectionDefinition(fromHex(definitions.get(id) ?? ""))),
-    length,
-  );
-const CODE = codeOf(ID);
-/** The hidden poll's code, as if an earlier poll's hash shared its first 7 characters. */
-const HIDDEN_CODE = codeOf(HIDDEN_ID, 8);
-/** A code the stub claims for the typical poll, though its hash doesn't start with it. */
-const FALSE_CODE = CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1)}`;
-/** A code the stub claims for the swapped poll, whose served definition names another. */
-const SWAPPED_CODE = "s".repeat(7);
-const UNKNOWN_CODE = "x".repeat(7);
-/** The open polls' codes. */
-const OPEN_ONE_CODE = codeOf(OPEN_ONE);
-const OPEN_MANY_CODE = shortCode(
-  electionDefinitionV5Hash(decodeElectionDefinitionV5(fromHex(definitions.get(OPEN_MANY)!))),
-  7,
-);
-const owners = new Map([
-  [CODE, ID],
-  [OPEN_ONE_CODE, OPEN_ONE],
-  [OPEN_MANY_CODE, OPEN_MANY],
-  [HIDDEN_CODE, HIDDEN_ID],
-  [FALSE_CODE, ID],
-  [SWAPPED_CODE, SWAPPED_ID],
-]);
-/** A listed poll the stub claims a code for that isn't a prefix of its hash. */
-const MISCODED_ID = FILLER[0]!;
-const MISCODED_CODE = codeOf(MISCODED_ID).startsWith("z")
-  ? `y${codeOf(MISCODED_ID).slice(1)}`
-  : `z${codeOf(MISCODED_ID).slice(1)}`;
-/** A listed poll whose code the stub fails to answer, as an API without the route would. */
-const CODE_FAILS_ID = FILLER[2]!;
-/** Each poll's canonical code as the stub claims it; the other polls have no registration. */
-const codes = new Map([
-  [ID, CODE],
-  [OPEN_ONE, OPEN_ONE_CODE],
-  [OPEN_MANY, OPEN_MANY_CODE],
-  [HIDDEN_ID, HIDDEN_CODE],
-  [MISCODED_ID, MISCODED_CODE],
-]);
-
 /** A forgiving spelling of `code`: upper case, with `0` written `O` and `1` written `I`. */
 const forgiving = (code: string) => code.toUpperCase().replaceAll("0", "O").replaceAll("1", "I");
-
-/** While set, the stub drops every connection unanswered, as a dead API would. */
-let down = false;
-
-/** Every request the stub API received, with its headers. */
-const seen: { path: string; query: URLSearchParams; headers: IncomingHttpHeaders }[] = [];
-
-/**
- * The polls the stub finds for a search, as the API would from their
- * question text: "park" is in both streamed texts' questions, "library" only
- * in the version-5 poll's title. Any other query finds nothing, and a query
- * of control characters alone is refused as the API refuses one.
- */
-const SEARCHES = new Map([
-  ["park", [STREAM_V5, STREAM_V1]],
-  ["library", [STREAM_V5]],
-]);
-/** The stream's polls filed under each topic, and at each place by its key. */
-const TOPICS = new Map([
-  ["community", [STREAM_V5, STREAM_V1]],
-  ["transport", [STREAM_V1]],
-]);
-const PLACES = new Map([["riverside park", [STREAM_V5]]]);
-/** A listed poll whose place the stub serves with a bidi override, which no draft could hold (T-67). */
-const OVERRIDE_ID = FILLER[3]!;
-/** Where the stub files each poll, as `GET /elections/tags` serves it; the rest have no tags. */
-const TAGS = new Map<string, { topic?: string; place?: string }>([
-  [ID, { topic: "housing", place: "Old Town" }],
-  [STREAM_V5, { topic: "community", place: "Riverside Park" }],
-  [STREAM_V1, { topic: "transport" }],
-  [OVERRIDE_ID, { topic: "food", place: "Main \u202eteertS" }],
-]);
-
-function stubApi(): Server {
-  return createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://stub");
-    seen.push({ path: url.pathname, query: url.searchParams, headers: req.headers });
-    if (down) return void req.socket.destroy();
-    const json = (status: number, body: unknown) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
-    };
-    const electionId = url.searchParams.get("electionId") ?? "";
-    const definition = definitions.get(electionId);
-    if (url.pathname === "/moderation/log") {
-      const after = BigInt(url.searchParams.get("after") ?? "0");
-      const entries =
-        after < 7n
-          ? [
-              { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
-              { ...LATEST, electionId: HIDDEN_ID },
-              {
-                seq: "8",
-                electionId: HIDDEN_ID,
-                action: "refile",
-                reason: "misfiled",
-                decidedAt: LATEST.decidedAt,
-                topic: "transport",
-                place: "cleared",
-              },
-            ]
-          : [];
-      return json(200, { entries });
-    }
-    if (url.pathname === "/elections/by-code") {
-      // The API's answer for a code it is given in any form; this stub knows only canonical ones.
-      const code = url.searchParams.get("code") ?? "";
-      const electionId = owners.get(code);
-      if (electionId === undefined)
-        return json(404, {
-          defined: true,
-          code: "CODE_NOT_FOUND",
-          status: 404,
-          message: "No poll owns this code.",
-        });
-      return json(200, { electionId, code });
-    }
-    if (url.pathname === "/elections") {
-      const after = url.searchParams.get("after") ?? "";
-      const limit = Number(url.searchParams.get("limit"));
-      const sort = url.searchParams.get("sort");
-      if (sort === "answered")
-        return json(503, {
-          defined: true,
-          code: "SORT_UNAVAILABLE",
-          status: 503,
-          message: "This order is unavailable here for now.",
-        });
-      const q = url.searchParams.get("q");
-      if (q !== null && /^[\p{Cc}\s]*$/u.test(q))
-        return json(400, {
-          defined: false,
-          code: "BAD_REQUEST",
-          status: 400,
-          message: "No search term is left once normalised.",
-        });
-      if (sort === "new" || sort === "closing") {
-        const topic = url.searchParams.get("topic");
-        const place = url.searchParams.get("place");
-        const filters = [
-          q === null ? undefined : (SEARCHES.get(q.toLowerCase()) ?? []),
-          topic === null ? undefined : (TOPICS.get(topic) ?? []),
-          place === null
-            ? undefined
-            : (PLACES.get(place.replace(/\s+/gu, " ").trim().toLowerCase()) ?? []),
-        ];
-        const matches = streamed.filter((id) =>
-          filters.every((only) => only === undefined || only.includes(id)),
-        );
-        const order = sort === "new" ? matches : matches.toReversed();
-        const from = after === "" ? 0 : order.indexOf(after) + 1;
-        if (from === 0 && after !== "")
-          return json(400, {
-            defined: true,
-            code: "CURSOR_NOT_FOUND",
-            status: 400,
-            message: "`after` names no poll this order can place.",
-          });
-        return json(200, { elections: order.slice(from, from + limit) });
-      }
-      return json(200, { elections: listed.filter((id) => id > after).slice(0, limit) });
-    }
-    if (definition === undefined)
-      return json(404, {
-        defined: true,
-        code: "ELECTION_NOT_FOUND",
-        status: 404,
-        message: "No election with this id is known to this server.",
-      });
-    switch (url.pathname) {
-      case "/elections/definition":
-        return json(200, { definition });
-      case "/elections/display-text": {
-        const displayText = displayTexts.get(electionId);
-        return displayText === undefined
-          ? json(404, {
-              defined: true,
-              code: "DISPLAY_TEXT_NOT_FOUND",
-              status: 404,
-              message: "This server holds no display text for this election.",
-            })
-          : json(200, { displayText });
-      }
-      case "/board/head":
-        return json(200, HEAD);
-      case "/board/entries": {
-        const start = Number(url.searchParams.get("start"));
-        if (start > BOARD.length)
-          return json(416, {
-            defined: true,
-            code: "OUT_OF_RANGE",
-            status: 416,
-            message: "The requested positions are beyond the board this server holds.",
-          });
-        // At most 7 entries an answer, as a page the API cut short by bytes would be.
-        const limit = Math.min(Number(url.searchParams.get("limit")), 7);
-        return json(200, { entries: BOARD.slice(start, start + limit) });
-      }
-      case "/moderation/status":
-        return json(
-          200,
-          electionId === HIDDEN_ID ? { state: "hidden", latest: LATEST } : { state: "visible" },
-        );
-      case "/elections/tags":
-        if (electionId === CODE_FAILS_ID) return json(500, {});
-        if (electionId === HIDDEN_ID)
-          return json(451, {
-            defined: true,
-            code: "TAGS_WITHHELD",
-            status: 451,
-            message:
-              "This poll's tags are withheld under the moderation policy; see GET /moderation/status.",
-          });
-        return json(200, TAGS.get(electionId) ?? {});
-      case "/elections/code": {
-        if (electionId === CODE_FAILS_ID) return json(500, {});
-        const code = codes.get(electionId);
-        return code === undefined
-          ? json(404, {
-              defined: true,
-              code: "CODE_NOT_FOUND",
-              status: 404,
-              message: "No registration is recorded for this election.",
-            })
-          : json(200, { code });
-      }
-    }
-    json(404, {});
-  });
-}
 
 const SITE_KEY = "1x00000000000000000000AA";
 
@@ -1926,7 +1518,7 @@ describe("home", () => {
   });
 
   test("stays up without the API, leaving out only the list and quoting nothing", async () => {
-    down = true;
+    stub.down = true;
     try {
       const response = await get("/");
       expect(response.status).toBe(200);
@@ -1936,7 +1528,7 @@ describe("home", () => {
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
     } finally {
-      down = false;
+      stub.down = false;
     }
   });
 });
@@ -1972,7 +1564,7 @@ describe("how it works", () => {
 
 describe("failures", () => {
   test("a short link while the API is unreachable fails uncached, quoting no error", async () => {
-    down = true;
+    stub.down = true;
     try {
       const response = await get(`/p/${CODE}`);
       expect(response.status).toBe(500);
@@ -1983,12 +1575,12 @@ describe("failures", () => {
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
     } finally {
-      down = false;
+      stub.down = false;
     }
   });
 
   test("an unreachable API gives an error page that quotes nothing", async () => {
-    down = true;
+    stub.down = true;
     try {
       const response = await get(`/polls/${ID}`);
       expect(response.status).toBe(500);
@@ -1998,7 +1590,7 @@ describe("failures", () => {
       expect(html).not.toMatch(/ECONNREFUSED|fetch failed/);
       expect(html).not.toMatch(/ECONNRESET|socket hang up/);
     } finally {
-      down = false;
+      stub.down = false;
     }
   });
 });

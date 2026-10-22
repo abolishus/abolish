@@ -192,6 +192,26 @@ export {
   verifyEmailCode,
 } from "./account-emails.ts";
 export {
+  MAX_PHONE_SENDS_PER_DAY,
+  MAX_PHONE_SENDS_PER_HOUR,
+  MAX_SENDS_PER_NUMBER,
+  parsePhoneNumber,
+  PHONE_CODE_SECONDS,
+  PHONE_CODE_TRIES,
+  PHONE_COUNTRIES,
+  PHONE_HOLD_DAYS,
+  PHONE_LINE_TYPES,
+  type PhoneChannel,
+  PhoneVerificationError,
+  type PhoneVerificationErrorCode,
+  type PhoneVerifier,
+  pruneAccountPhones,
+  readAccountPhone,
+  requestPhoneCode,
+  type RequestPhoneCodeOptions,
+  verifyPhoneCode,
+} from "./account-phones.ts";
+export {
   assertDistinctKeyrings,
   KEY_ID,
   type Keyring,

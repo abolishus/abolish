@@ -18,6 +18,13 @@ import {
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 import {
+  accountPhoneCodes,
+  accountPhoneHolds,
+  accountPhoneRecipients,
+  accountPhones,
+  accountPhoneSends,
+} from "./phones.ts";
+import {
   accountPolls,
   accountPollSubmissions,
   ceremonyApprovals,
@@ -35,6 +42,11 @@ export {
   accountEmails,
   accountEmailSends,
   accountModerators,
+  accountPhoneCodes,
+  accountPhoneHolds,
+  accountPhoneRecipients,
+  accountPhones,
+  accountPhoneSends,
   accountPolls,
   accountPollSubmissions,
   accountPasskeys,
@@ -92,6 +104,11 @@ export const TABLE_CLASSES = {
     "account_emails",
     "account_moderators",
     "account_passkeys",
+    "account_phone_codes",
+    "account_phone_holds",
+    "account_phone_recipients",
+    "account_phone_sends",
+    "account_phones",
     "account_poll_submissions",
     "account_polls",
     "account_sessions",

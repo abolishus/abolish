@@ -28,7 +28,8 @@ export type TurnstileAction =
   | "tier0-register"
   | "tier1-relay"
   | "poll-create"
-  | "email-code";
+  | "email-code"
+  | "phone-code";
 
 /**
  * `passed`: Cloudflare vouched for the token, for this site and action.

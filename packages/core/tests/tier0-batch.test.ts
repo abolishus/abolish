@@ -656,7 +656,8 @@ describe("one batch per position", () => {
     expect(signed).toHaveLength(GROUP_REGISTRY_MAX_BATCH);
     expect([...signed, ...(await queued())].sort(cmp)).toEqual([...lost, ...full].sort(cmp));
     await expectConsistent();
-  });
+    // 1,280 commitments through Redis and the batch: seconds on a shared runner.
+  }, 60_000);
 
   test("an unfinalized addition the job didn't send is waited on", async () => {
     const chain = new FakeChain();

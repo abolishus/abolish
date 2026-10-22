@@ -14,9 +14,9 @@ import { buildSchema, hex, SPEC_VECTORS, type Vector, type VectorFile } from "./
 
 // docs/spec/vectors/deployment-record-v2.json, printed by
 // scripts/deployment-record-v2-vectors.py (P2-30 part 3c-1). As for version 1
-// (deployment-record-vectors.test.ts), the deployment record's codec and
-// rules aren't in this package yet (P4-4 part 2c), so the file's own type
-// descriptors decode each vector: every vector round-trips under its
+// (deployment-record-vectors.test.ts), the file's own type descriptors
+// decode each vector, so the file is checked apart from this package's codec
+// and rules, which deployment.test.ts checks against it: every vector round-trips under its
 // deployment hash, a reader of both versions still reads version 1, and the
 // file's rules are the spec's. What this package already has is checked
 // against it: each listed key's key_id is this package's, each well-formed

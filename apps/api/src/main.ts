@@ -40,6 +40,10 @@ const Env = z.strictObject({
   // The ballot client's origins, comma-separated, whose pages may read the
   // API's answers (CORS); the server checks each is an exact origin.
   API_CORS_ORIGINS: z.string().min(1).optional(),
+  // The operator's intake relay (docs/spec/delivery.md, Client rules 4): each
+  // default-panel seat's intake endpoint as the release lists it, an https
+  // URL, comma-separated, seat 1 first. Without it the route answers 503.
+  API_INTAKE_ENDPOINTS: z.string().min(1).optional(),
 });
 
 const env = Env.parse({
@@ -52,6 +56,7 @@ const env = Env.parse({
   API_CHALLENGE_HOST: process.env["API_CHALLENGE_HOST"],
   API_TIER1_GROUP: process.env["API_TIER1_GROUP"],
   API_CORS_ORIGINS: process.env["API_CORS_ORIGINS"],
+  API_INTAKE_ENDPOINTS: process.env["API_INTAKE_ENDPOINTS"],
 });
 
 let redis: Redis | undefined;
@@ -120,6 +125,16 @@ const ceremony = ceremonyFromEnv(
   Object.fromEntries(CEREMONY_ENV.map((name) => [name, process.env[name]])),
 );
 
+// The server checks each endpoint; the relay's seat i is the panel's seat
+// i, so where both are set the two lists must agree.
+const intakeEndpoints = env.API_INTAKE_ENDPOINTS?.split(",");
+if (
+  intakeEndpoints !== undefined &&
+  ceremony !== undefined &&
+  ceremony.panel.keys.length !== intakeEndpoints.length
+)
+  throw new Error("API_INTAKE_ENDPOINTS must list one endpoint per API_CEREMONY_PANEL_KEYS key");
+
 const sql = postgres(env.DATABASE_URL, { onnotice: () => {} });
 const server = createApiServer({
   sql,
@@ -128,6 +143,7 @@ const server = createApiServer({
   ...(tier1 !== undefined && { tier1 }),
   ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
   ...(ceremony !== undefined && { ceremony: { deployment: ceremony } }),
+  ...(intakeEndpoints !== undefined && { intake: { endpoints: intakeEndpoints } }),
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
 });
 server.listen(env.API_PORT, env.API_HOST);

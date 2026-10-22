@@ -7,6 +7,7 @@ import { groupRegistryAbi, trusteeRegistryAbi } from "@abolishus/contracts/abi";
 import {
   decodeGroupAddition,
   encodeGroupAddition,
+  encodeSelfPaidAddition,
   groupAdditionDigest,
   groupRegistryDomainSeparator,
   POSEIDON2_ZERO_ONE,
@@ -212,8 +213,8 @@ async function deployRegistry(): Promise<{ registry: Address; fromBlock: bigint 
 /** Resolves with the block that included the call. */
 async function send(
   registry: Address,
-  functionName: "createGroup" | "addMembers",
-  arg: unknown,
+  functionName: "createGroup" | "addMembers" | "createSelfPaidGroup" | "addSelfPaidMember",
+  arg?: unknown,
 ): Promise<bigint> {
   const hash = await wallet.writeContract({
     account: accounts[5] as Address,
@@ -221,8 +222,10 @@ async function send(
     address: registry,
     abi: groupRegistryAbi,
     functionName,
-    args: [arg],
-  } as Parameters<typeof wallet.writeContract>[0]);
+    args: arg === undefined ? [] : [arg],
+    // The registry's fixed fee for a self-paid addition.
+    ...(functionName === "addSelfPaidMember" ? { value: SELF_PAID_FEE } : {}),
+  } as unknown as Parameters<typeof wallet.writeContract>[0]);
   const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
   if (receipt.status !== "success") throw new Error(`${functionName} reverted`);
   return receipt.blockNumber;
@@ -234,6 +237,14 @@ const cmp = (x: bigint, y: bigint) => (x < y ? -1 : x > y ? 1 : 0);
 const commitments = (n: number) => Array.from({ length: n }, () => (nextCommitment += 7919n));
 
 /** A record signed by the vectors' registrars, as the job would sign it. */
+/** The registry's fee for one self-paid addition, in wei (GroupRegistryLib.SELF_PAID_FEE). */
+const SELF_PAID_FEE = 2n * 10n ** 14n;
+
+/** An `addSelfPaidMember` record of one commitment. */
+function selfPaidRecord(groupId: bigint, commitment: bigint) {
+  return toHex(encodeSelfPaidAddition({ groupId, commitment }));
+}
+
 function signedRecord(
   registry: Address,
   groupId: bigint,
@@ -369,17 +380,21 @@ describe("the adapter", () => {
     await expect(reader.group(9n)).rejects.toThrow("isn't final");
   });
 
-  test("lists every Tier 0 commitment up to the latest block, the same at any log range", async () => {
+  test("lists every Tier 0 commitment, signed and self-paid, up to the latest block, the same at any log range", async () => {
     const { registry, fromBlock } = await deployRegistry();
     await send(registry, "createGroup", 0);
     await send(registry, "createGroup", 0);
+    await send(registry, "createSelfPaidGroup");
     const a = commitments(4);
     const b = commitments(2);
     const c = commitments(5);
+    const paid = commitments(2);
     await send(registry, "addMembers", signedRecord(registry, 0n, 0n, a));
+    await send(registry, "addSelfPaidMember", selfPaidRecord(2n, paid[0] as bigint));
     await send(registry, "addMembers", signedRecord(registry, 1n, 0n, b));
     await send(registry, "addMembers", signedRecord(registry, 0n, 4n, c));
-    const expected = [...a, ...b, ...c].sort(cmp);
+    await send(registry, "addSelfPaidMember", selfPaidRecord(2n, paid[1] as bigint));
+    const expected = [...a, ...b, ...c, ...paid].sort(cmp);
     for (const range of [undefined, 1n, 2n, 3n]) {
       const { chain: reader } = adapter(registry, fromBlock, range);
       const read = await reader.tier0Commitments();

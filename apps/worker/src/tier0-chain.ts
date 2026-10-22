@@ -11,7 +11,7 @@
 // (T-10, T-13).
 
 import { groupRegistryAbi } from "@abolishus/contracts/abi";
-import { decodeGroupAddition } from "@abolishus/crypto";
+import { decodeGroupAddition, decodeSelfPaidAddition } from "@abolishus/crypto";
 import type {
   Tier0Chain,
   Tier0GroupState,
@@ -81,6 +81,13 @@ export class ViemTier0Chain implements Tier0Chain {
       if (!tier0.has(log.args.groupId)) continue;
       all.push(...addition(log.args.record).commitments);
     }
+    // Self-paid groups are Tier 0 for good and log their own event, so a
+    // self-paid copy of a queued commitment is dropped at the recheck
+    // (docs/spec/registration.md, Answers, step 6, and The batch, step 2;
+    // T-16), and a re-issuance never marks a self-paid commitment as never
+    // added (tier0-token.md, Keys, item 4).
+    for (const log of await this.#logs("SelfPaidMemberAdded", {}, latest))
+      all.push(selfPaidAddition(log.args.record));
     return { block: latest, commitments: all };
   }
 
@@ -153,11 +160,13 @@ export class ViemTier0Chain implements Tier0Chain {
   }
 
   /** Every log of `eventName` matching `args` from the deployment block to `toBlock`, in order. */
-  async #logs<E extends "GroupCreated" | "MembersAdded">(
+  async #logs<E extends "GroupCreated" | "MembersAdded" | "SelfPaidMemberAdded">(
     eventName: E,
     args: E extends "GroupCreated"
       ? { groupId?: bigint; tier?: number }
-      : { groupId?: bigint; firstIndex?: bigint },
+      : E extends "MembersAdded"
+        ? { groupId?: bigint; firstIndex?: bigint }
+        : { groupId?: bigint; index?: bigint },
     toBlock: bigint,
   ) {
     const out = [];
@@ -171,7 +180,7 @@ export class ViemTier0Chain implements Tier0Chain {
         fromBlock: from,
         toBlock: to,
         strict: true,
-        // One generic call for both events: viem can't narrow the args type
+        // One generic call for every event: viem can't narrow the args type
         // through `E`, so the result is typed by `RegistryLog` instead.
       } as never);
       // A node that answers with logs outside the asked range, or pending,
@@ -188,16 +197,28 @@ export class ViemTier0Chain implements Tier0Chain {
 
 type RegistryLog<E> = E extends "GroupCreated"
   ? { readonly blockNumber: bigint | null; readonly args: { groupId: bigint; tier: number } }
-  : {
-      readonly blockNumber: bigint | null;
-      readonly args: { groupId: bigint; firstIndex: bigint; record: `0x${string}` };
-    };
+  : E extends "MembersAdded"
+    ? {
+        readonly blockNumber: bigint | null;
+        readonly args: { groupId: bigint; firstIndex: bigint; record: `0x${string}` };
+      }
+    : {
+        readonly blockNumber: bigint | null;
+        readonly args: { groupId: bigint; index: bigint; record: `0x${string}` };
+      };
 
 /** The registry logs only records it accepted; one that doesn't decode is a node not to trust. */
 function addition(record: `0x${string}`) {
   const decoded = decodeGroupAddition(hexToBytes(record));
   if (!decoded.ok) throw new Error("a logged addition doesn't decode");
   return decoded.value;
+}
+
+/** As `addition`, for a self-paid record: its one commitment. */
+function selfPaidAddition(record: `0x${string}`) {
+  const decoded = decodeSelfPaidAddition(hexToBytes(record));
+  if (!decoded.ok) throw new Error("a logged self-paid addition doesn't decode");
+  return decoded.value.commitment;
 }
 
 export interface Tier0Deployment {

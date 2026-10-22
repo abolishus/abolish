@@ -19,5 +19,22 @@ ALTER TABLE account_phone_recipients
 CREATE INDEX account_phones_hash_key ON account_phones (hash_key);
 CREATE INDEX account_phone_holds_hash_key ON account_phone_holds (hash_key);
 
--- UPDATE for the rotation alone; it rewrites `phone_hash` and `hash_key`.
-GRANT UPDATE ON account_phone_recipients TO abolish_app;
+-- UPDATE of the hash columns for the rotation alone, never of `sent_at`, the
+-- cap's clock.
+GRANT UPDATE (phone_hash, hash_key) ON account_phone_recipients TO abolish_app;
+
+-- A check value per phone-hash key, `HMAC(key, "abolish/phone/keycheck/v1")`,
+-- written by the first instance that holds the key. A rotation is one way:
+-- once every chain runs through a key, an instance with that key's ID but
+-- other bytes (a mistyped or re-pasted key) matches none of them, and every
+-- verified number could verify a second account (T-01). So an instance
+-- refuses to rotate unless each of its keys reproduces its stored check. A
+-- PRF's output on a fixed input says nothing about a 256-bit key (T-73).
+-- Account class: names no account. Never updated or deleted, so a check
+-- once written stands for the key's ID for good, as the key does.
+CREATE TABLE account_phone_key_checks (
+  key_id text PRIMARY KEY CHECK (key_id ~ '^[a-z0-9-]{1,32}$'),
+  key_check bytea NOT NULL CHECK (octet_length(key_check) = 32)
+);
+REVOKE ALL ON account_phone_key_checks FROM PUBLIC;
+GRANT SELECT, INSERT ON account_phone_key_checks TO abolish_app;

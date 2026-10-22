@@ -60,6 +60,7 @@ import type { Sql } from "postgres";
 import {
   accountPhoneCodes,
   accountPhoneHolds,
+  accountPhoneKeyChecks,
   accountPhoneRecipients,
   accountPhones,
   accountPhoneSends,
@@ -569,7 +570,20 @@ export interface PhoneHashRotation {
    * way the runbook's to settle, since this instance can't match them.
    */
   readonly unknownKeys: number;
+  /**
+   * Verified numbers left unrotated because another account's row already
+   * holds the value theirs would become: two accounts holding one number.
+   */
+  readonly conflicts: number;
+  /**
+   * Keys whose bytes don't reproduce the check value stored for their ID:
+   * nothing was rotated, since rows rotated under a wrong key would match no
+   * number again.
+   */
+  readonly mismatchedKeys: number;
 }
+
+const KEY_CHECK_LABEL = new TextEncoder().encode("abolish/phone/keycheck/v1");
 
 /**
  * Extends every stored chain made under a key older than `keys`' current one
@@ -586,6 +600,8 @@ export interface PhoneHashRotation {
  * over every value of the chain while it reads and moves a row by its hash.
  * The other tables are read by hash only as members of a number's chain, so
  * one value of a chain or the next counts the same.
+ *
+ * Rotates nothing while any key fails its stored check (`mismatchedKeys`).
  */
 export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<PhoneHashRotation> {
   const db = drizzle({ client });
@@ -606,7 +622,23 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
     hashKey: keys.current.id,
   });
 
+  // Each key's check value, stored by the first instance that holds it; a
+  // key whose bytes differ from the ones its ID was first seen with stops
+  // the rotation before it rewrites anything.
+  const checks = keys.keys.map(({ id, key }) => ({
+    keyId: id,
+    keyCheck: createHmac("sha256", key).update(KEY_CHECK_LABEL).digest(),
+  }));
+  await db.insert(accountPhoneKeyChecks).values(checks).onConflictDoNothing();
+  const stored = new Map(
+    (
+      await db.select().from(accountPhoneKeyChecks).where(inArray(accountPhoneKeyChecks.keyId, ids))
+    ).map((row) => [row.keyId, Buffer.from(row.keyCheck)]),
+  );
+  const mismatchedKeys = checks.filter((c) => !stored.get(c.keyId)?.equals(c.keyCheck)).length;
+
   let rotated = 0;
+  let conflicts = 0;
   /** Each row `read` gives, in its key's order, a batch at a time, through `write`. */
   async function each<K>(
     read: (after: K | undefined) => Promise<StoredChain<K>[]>,
@@ -621,43 +653,9 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
     }
   }
 
-  if (older.length > 0) {
-    await each<string>(
-      (after) =>
-        db
-          .select({
-            at: accountPhones.userId,
-            phoneHash: accountPhones.phoneHash,
-            hashKey: accountPhones.hashKey,
-          })
-          .from(accountPhones)
-          .where(
-            and(
-              inArray(accountPhones.hashKey, older),
-              after === undefined ? undefined : gt(accountPhones.userId, after),
-            ),
-          )
-          .orderBy(asc(accountPhones.userId))
-          .limit(ROTATION_BATCH),
-      (row, later) =>
-        db.transaction(async (tx) => {
-          // Every value this rotation touches is one of the chain's, so an
-          // answer for the number holds at least one of the same locks.
-          await lockNumber(tx, [row.phoneHash, ...later]);
-          const done = await tx
-            .update(accountPhones)
-            .set(to(later))
-            .where(
-              and(
-                eq(accountPhones.userId, row.at),
-                eq(accountPhones.phoneHash, row.phoneHash),
-                eq(accountPhones.hashKey, row.hashKey),
-              ),
-            )
-            .returning({ at: accountPhones.userId });
-          return done.length;
-        }),
-    );
+  if (older.length > 0 && mismatchedKeys === 0) {
+    // The verified numbers last: a row skipped there for a conflict never
+    // keeps the others from rotating.
     await each<bigint>(
       (after) =>
         db
@@ -743,7 +741,9 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
             )
             .orderBy(asc(accountPhoneRecipients.id))
             .limit(ROTATION_BATCH)
-        ).map((row) => ({ ...row, hashKey: row.hashKey ?? "" })),
+        )
+          // `inArray` has kept out the rows with no key.
+          .flatMap((row) => (row.hashKey === null ? [] : [{ ...row, hashKey: row.hashKey }])),
       async (row, later) =>
         (
           await db
@@ -759,6 +759,55 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
             .returning({ at: accountPhoneRecipients.id })
         ).length,
     );
+    await each<string>(
+      (after) =>
+        db
+          .select({
+            at: accountPhones.userId,
+            phoneHash: accountPhones.phoneHash,
+            hashKey: accountPhones.hashKey,
+          })
+          .from(accountPhones)
+          .where(
+            and(
+              inArray(accountPhones.hashKey, older),
+              after === undefined ? undefined : gt(accountPhones.userId, after),
+            ),
+          )
+          .orderBy(asc(accountPhones.userId))
+          .limit(ROTATION_BATCH),
+      (row, later) =>
+        db.transaction(async (tx) => {
+          // Every value this rotation touches is one of the chain's, so an
+          // answer for the number holds at least one of the same locks.
+          await lockNumber(tx, [row.phoneHash, ...later]);
+          // Another row already holds the extended value only if two
+          // accounts hold one number, which an instance on a keyring missing
+          // a key could have let happen (the runbook's two deploys). Left for
+          // the operator rather than failing the run, and never sent to the
+          // database to refuse, whose log would carry the hash.
+          const [taken] = await tx
+            .select({ at: accountPhones.userId })
+            .from(accountPhones)
+            .where(eq(accountPhones.phoneHash, to(later).phoneHash));
+          if (taken !== undefined) {
+            conflicts++;
+            return 0;
+          }
+          const done = await tx
+            .update(accountPhones)
+            .set(to(later))
+            .where(
+              and(
+                eq(accountPhones.userId, row.at),
+                eq(accountPhones.phoneHash, row.phoneHash),
+                eq(accountPhones.hashKey, row.hashKey),
+              ),
+            )
+            .returning({ at: accountPhones.userId });
+          return done.length;
+        }),
+    );
   }
 
   const unknownKeys =
@@ -772,5 +821,5 @@ export async function rotatePhoneHashes(client: Sql, keys: Keyring): Promise<Pho
         notInArray(accountPhoneRecipients.hashKey, ids),
       ),
     ));
-  return { rotated, unknownKeys };
+  return { rotated, unknownKeys, conflicts, mismatchedKeys };
 }

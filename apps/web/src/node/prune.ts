@@ -58,10 +58,14 @@ export function startAccountPrune({
         await pruneAccountPhones(sql, at).catch(() => log({ error: "AccountPhonePruneFailed" }));
         if (phoneKeys !== undefined)
           await rotatePhoneHashes(sql, phoneKeys).then(
-            // Rows this instance can't rotate or match: a key dropped from
-            // its keyring, or one only other instances hold (the runbook).
-            ({ unknownKeys }) => {
+            // What the operator must settle (the account-keys runbook): a
+            // key whose bytes changed, which stops the rotation; rows under a
+            // key dropped from this keyring or held only by other instances;
+            // two accounts holding one number.
+            ({ unknownKeys, conflicts, mismatchedKeys }) => {
+              if (mismatchedKeys > 0) log({ error: "PhoneHashKeyMismatch" });
               if (unknownKeys > 0) log({ error: "PhoneHashKeyMissing" });
+              if (conflicts > 0) log({ error: "PhoneHashConflict" });
             },
             () => log({ error: "PhoneHashRotationFailed" }),
           );

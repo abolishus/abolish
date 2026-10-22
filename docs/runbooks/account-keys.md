@@ -20,6 +20,7 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
 
 - **Never drop, reorder or insert a phone-hash key.** Add new keys at the end only, and keep every one for good. A number's chain runs through every key in order; a keyring missing one, or with two swapped, computes a different chain and stops matching every value made under it, which lets that number verify a second account (T-01). Each key is useless without the later ones and the table, so keeping old ones costs nothing.
 - **Two deploys for every new key**, in every keyring: first listed but not current, then current. An instance that doesn't hold a key can't match values made under it, so a key made current while some instance still runs without it could let one number, or one address, verify two accounts.
+- **Never change a key's bytes under its ID, and never roll the variables back past step 1 once step 2 is live.** A rotation is one way: once every chain runs through a key, only those exact bytes match them. Each instance stores a check value for every phone-hash key the first time it sees the ID, and refuses to rotate while any of its keys fails its check (`PhoneHashKeyMismatch`), but an instance with a wrong key still verifies new numbers under it until it is fixed.
 - **Rotate the phone-hash key after any suspected exposure** of the key, the environment, a host or a backup, and otherwise once a year.
 
 ## Rotating the phone-hash key
@@ -27,7 +28,7 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
 1. **Stage.** Append the new key to `PHONE_HASH_KEYS` and mark the current one with `*`, for example from `p1:<hex>` to `p1:<hex>*,p2:<hex>`. Deploy, and wait until no instance runs the old configuration (Railway's deployment page shows the old one removed).
 2. **Make it current.** Remove the `*`: `p1:<hex>,p2:<hex>`. Deploy, and wait as before.
 3. **The rotation runs by itself.** Every instance's account timer (`apps/web`, `src/node/prune.ts`, every 10 minutes and at start) extends every stored chain not yet under the current key by one HMAC per later key (`rotatePhoneHashes`): the verified numbers, the holds, the codes waiting and the per-number send counts. The number is never needed. Instances still on the staged configuration leave rows under the new key alone, and two instances rotating at once only repeat each other.
-4. **Check it is done**, as the migrator role, at least 10 minutes after step 2's deploy finished:
+4. **Check it is done**, connected as a login role granted `abolish_migrator` (which can't log in itself), at least 10 minutes after step 2's deploy finished:
 
    ```sql
    SELECT 'account_phones' AS t, hash_key, count(*) FROM account_phones GROUP BY hash_key
@@ -38,9 +39,13 @@ Make a key with a CSPRNG on a machine you trust, for example `openssl rand -hex 
 
    Every row should show the new key's ID. A per-number count with no key (`NULL`) predates migration 0029 and is pruned within a day; nothing else should remain.
 
-5. **Watch the log** for two lines, by kind only: `PhoneHashRotationFailed` (a run failed; the next tick tries again; if it repeats, look at the database) and `PhoneHashKeyMissing` (some row is under a key this instance's keyring doesn't hold: a key was dropped or mistyped, which must be put back exactly as it was, or an instance runs an old configuration). Neither line names a key or a row.
+5. **Watch the log** for these lines, by kind only; none names a key or a row:
+   - `PhoneHashRotationFailed`: a run failed; the next tick tries again. If it repeats, look at the database.
+   - `PhoneHashKeyMismatch`: a key's bytes differ from the ones its ID was first seen with, so nothing is rotated. Put back the exact key; never "fix" it by giving the new bytes a new ID in the same position.
+   - `PhoneHashKeyMissing`: some row is under a key this instance's keyring doesn't hold. A key was dropped or its ID mistyped, and must be put back exactly as it was, or this instance runs an old configuration.
+   - `PhoneHashConflict`: two accounts hold one number, which only an instance missing a key can have let happen; that number's older row is left unrotated. Find the two rows with the step 4 query's tables and delete the newer account's `account_phones` row (it verifies again), then the next tick rotates the other.
 
-What it buys: once step 4 shows no old key, a dump of the database taken from then on is useless with the old keys alone (T-73). What it doesn't: a dump or backup taken before it still holds chains under the old keys, so after an exposure, also delete or re-encrypt the backups made before the rotation (T-66, T-69), and run `VACUUM` on the four tables so dead row versions holding the old values are reclaimed. Until vacuumed, old values stay in the table's files and in the write-ahead log the provider keeps for point-in-time recovery.
+What it buys: once step 4 shows no old key, a dump of the database taken from then on is useless with the old keys alone (T-73). What it doesn't: a dump or backup taken before it still holds chains under the old keys, so after an exposure, also delete or re-encrypt the backups made before the rotation (T-66, T-69), and run `VACUUM FULL` on the four tables, which rewrites them and their indexes; plain `VACUUM` only marks dead row versions reusable and leaves their bytes on disk. Even `VACUUM FULL` doesn't reach the write-ahead log the provider keeps for point-in-time recovery, replicas, or disk blocks already freed: shorten the provider's recovery window, or wait it out, before treating the old key as harmless.
 
 ## The e-mail keyrings
 

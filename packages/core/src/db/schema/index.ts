@@ -27,6 +27,7 @@ import { moderationActions, moderationReports } from "./moderation.ts";
 import {
   accountPhoneCodes,
   accountPhoneHolds,
+  accountPhoneKeyChecks,
   accountPhoneRecipients,
   accountPhones,
   accountPhoneSends,
@@ -52,6 +53,7 @@ export {
   accountModerators,
   accountPhoneCodes,
   accountPhoneHolds,
+  accountPhoneKeyChecks,
   accountPhoneRecipients,
   accountPhones,
   accountPhoneSends,
@@ -122,6 +124,7 @@ export const TABLE_CLASSES = {
     "account_passkeys",
     "account_phone_codes",
     "account_phone_holds",
+    "account_phone_key_checks",
     "account_phone_recipients",
     "account_phone_sends",
     "account_phones",

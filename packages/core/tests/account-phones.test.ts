@@ -915,4 +915,40 @@ describe("rotatePhoneHashes", () => {
       expect(await code(verified(c, m, { keys: TWO }))).toBe("number-held");
     }
   });
+
+  test("rotates nothing while a key's bytes differ from those its ID was first seen with", async () => {
+    const [M1, M2] = [hexKey(), hexKey()];
+    const n = fresh();
+    const a = await newAccount();
+    await verified(a, n, { keys: parseKeyring(`m1:${M1}`) });
+    // The first instance holding m2 stores its check; one with m2 retyped is refused.
+    expect((await rotatePhoneHashes(app, parseKeyring(`m1:${M1}*,m2:${M2}`))).mismatchedKeys).toBe(
+      0,
+    );
+    const wrong = await rotatePhoneHashes(app, parseKeyring(`m1:${M1},m2:${hexKey()}`));
+    expect(wrong).toMatchObject({ rotated: 0, mismatchedKeys: 1 });
+    expect((await phoneOf(a))!["hash_key"]).toBe("m1");
+    const right = await rotatePhoneHashes(app, parseKeyring(`m1:${M1},m2:${M2}`));
+    expect(right.mismatchedKeys).toBe(0);
+    expect((await phoneOf(a))!["hash_key"]).toBe("m2");
+    const owner = await db.as("abolish_migrator");
+    await expect(
+      owner`INSERT INTO account_phone_key_checks VALUES ('m3', ${randomBytes(31)})`,
+    ).rejects.toThrow(/check constraint/);
+  });
+
+  test("leaves a number two accounts hold unrotated, counted, and rotates the rest", async () => {
+    const [n, m] = [fresh(), fresh()];
+    const [a, b, c] = [await newAccount(), await newAccount(), await newAccount()];
+    await verified(a, n, { keys: ONE });
+    await verified(c, m, { keys: ONE });
+    // As an instance missing r1 could have let happen: b holds n under r2.
+    await db.admin`
+      INSERT INTO account_phones VALUES (${b}, ${mac(R2, first(n))}, 'r2', ${DAY_OF_NOW})`;
+    const result = await rotatePhoneHashes(app, TWO);
+    expect(result.conflicts).toBe(1);
+    expect(await phoneOf(a)).toEqual({ phone_hash: first(n), hash_key: "r1" });
+    expect(await phoneOf(c)).toEqual({ phone_hash: mac(R2, first(m)), hash_key: "r2" });
+    await db.admin`DELETE FROM account_users WHERE id IN (${a}, ${b})`;
+  });
 });

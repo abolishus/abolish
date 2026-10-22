@@ -2,11 +2,11 @@ import { bigint, pgTable, smallint, text, timestamp } from "drizzle-orm/pg-core"
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0026_account_phones.sql and 0029_account_phone_rotation.sql; a test checks the two
-// agree. All five are in the account class: an account's number, kept only as
-// a keyed hash, the numbers held after an account let them go, the code
-// waiting to verify one, when each account asked for codes, and when each
-// number's hash was sent one (ADR 0038; T-10).
+// Drizzle view of migrations/0026_account_phones.sql and 0029; a test checks
+// they agree. All six are in the account class: an account's number, kept
+// only as a keyed hash, the numbers held after an account let them go, the
+// code waiting to verify one, when each account asked for codes, when each
+// number's hash was sent one, and each hash key's check value (ADR 0038; T-10).
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -50,4 +50,9 @@ export const accountPhoneRecipients = pgTable("account_phone_recipients", {
   sentAt: at("sent_at").notNull(),
   // Null only on rows from before migrations/0029, gone within a day.
   hashKey: text("hash_key"),
+});
+
+export const accountPhoneKeyChecks = pgTable("account_phone_key_checks", {
+  keyId: text("key_id").primaryKey(),
+  keyCheck: bytea("key_check").notNull(),
 });

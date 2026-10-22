@@ -28,7 +28,14 @@ const board = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(
 
 const meta = {
   component: PollSummary,
-  args: { poll, board, moderation: { state: "visible" }, asOf: OPEN_AT, code: "mhanrsz" },
+  args: {
+    poll,
+    board,
+    moderation: { state: "visible" },
+    asOf: OPEN_AT,
+    code: "mhanrsz",
+    share: { url: "https://abolish.us/p/mhanrsz", title: "Poll mhanrsz" },
+  },
 } satisfies Meta<typeof PollSummary>;
 
 export default meta;
@@ -57,6 +64,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByText("3 options")).toBeVisible();
   await expect(canvas.getByRole("heading", { name: "Answering" })).toBeVisible();
   await expect(canvas.getByText(/only in the ballot app, never on this website/)).toBeVisible();
+  await expect(canvas.getByRole("button", { name: "Share this poll" })).toBeVisible();
   await openEvidence(canvasElement);
   await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();
@@ -107,7 +115,8 @@ export const Closed: Story = {
 
 /** No registration recorded yet: no code resolves, so none is printed. */
 export const NoShortCode: Story = {
-  args: { code: undefined },
+  // The route offers no share sheet without a short link.
+  args: { code: undefined, share: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await openEvidence(canvasElement);
@@ -130,6 +139,8 @@ export const EmptyBoard: Story = {
 
 export const Hidden: Story = {
   args: {
+    // The route offers no share sheet for a hidden poll.
+    share: undefined,
     moderation: {
       state: "hidden",
       latest: {

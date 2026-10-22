@@ -16,11 +16,22 @@ export const Route = createFileRoute("/polls/$electionId")({
     if (!isElectionId(params.electionId)) throw notFound();
     const page = await fetchPoll({ data: params.electionId });
     if (page.kind === "not-found") throw notFound();
+    const origin = siteOrigin();
     const preview =
       page.kind === "poll"
-        ? await previewMeta(page.poll, page.code, siteOrigin(), Date.now())
+        ? await previewMeta(page.poll, page.code, origin, Date.now())
         : undefined;
-    return { page, preview };
+    // The share sheet offers the short link only, the same for everyone
+    // (docs/design/sharing.md), and none for a hidden poll, whose text
+    // moderation withheld (docs/moderation-policy.md).
+    const share =
+      page.kind === "poll" &&
+      page.code !== undefined &&
+      page.moderation.state !== "hidden" &&
+      preview !== undefined
+        ? { url: `${origin}/p/${page.code}`, title: preview.title }
+        : undefined;
+    return { page, preview, share };
   },
   head: ({ loaderData }) => {
     const page = loaderData?.page;
@@ -53,8 +64,8 @@ export const Route = createFileRoute("/polls/$electionId")({
   },
   component: function Poll() {
     const t = useTranslate(catalogs);
-    const { page } = Route.useLoaderData();
-    if (page.kind === "poll") return <PollSummary {...page} />;
+    const { page, share } = Route.useLoaderData();
+    if (page.kind === "poll") return <PollSummary {...page} share={share} />;
     return (
       <Notice title={t("unavailableTitle")}>
         {t(page.problem === "undecodable" ? "definitionUndecodable" : "definitionMismatch")}

@@ -13,6 +13,7 @@ import {
 } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
+import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
 
 export interface PollSummaryProps {
@@ -23,6 +24,8 @@ export interface PollSummaryProps {
   asOf: Instant;
   /** The canonical short code, if one is served. */
   code: string | undefined;
+  /** The share sheet's link and title, for a poll with a short link that isn't hidden. */
+  share?: PollShareProps | undefined;
 }
 
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
@@ -99,7 +102,7 @@ const STATUS_TEXT = {
  * T-34). A native disclosure keeps the evidence in the server's HTML, so it
  * opens without the page's script.
  */
-export function PollSummary({ poll, board, moderation, asOf, code }: PollSummaryProps) {
+export function PollSummary({ poll, board, moderation, asOf, code, share }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
   const status = pollStatus(poll, asOf);
@@ -188,6 +191,11 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
         <p className="m-0 text-base text-pretty">
           {t(status === "closed" ? "pollAnswerClosed" : "pollAnswer")}
         </p>
+        {share === undefined ? null : (
+          <div className="pt-2">
+            <PollShare {...share} />
+          </div>
+        )}
       </section>
 
       <details className="group border-t border-border pt-8">

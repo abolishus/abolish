@@ -342,6 +342,11 @@ export {
   tier0KeyPeriodAt,
   type Tier0KeyPeriodTimes,
   tier0KeyPeriodTimes,
+  type Tier0ListedKey,
+  type Tier0ListedKeys,
+  reissueTier0Token,
+  type Tier0ReissueRequest,
+  Tier0ReissueUnavailable,
 } from "./tier0-tokens.ts";
 export {
   TIER1_BATCH_LOCK_MS,

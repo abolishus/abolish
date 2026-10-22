@@ -434,6 +434,17 @@ describe("checkTier0IssuerDeployment", () => {
     expect(refusal(record())).toBeUndefined();
   });
 
+  test("returns every key the record lists by key_id, retired or not, held or not", () => {
+    const retired = listed.map((k) => ({ ...k, retired: k.period === Q + 3 }));
+    const keys = checkTier0IssuerDeployment(ISSUER, record({ tier0_token_keys: retired }));
+    expect([...keys]).toEqual(
+      retired.map((k) => [
+        hex(tier0TokenKeyId(k.period, k.key)),
+        { period: k.period, retired: k.retired },
+      ]),
+    );
+  });
+
   test("refuses a record that doesn't decode, is version 1 or is ill formed", () => {
     expect(refusal(record().subarray(0, 100))).toBe(
       "the deployment record doesn't decode: truncated",

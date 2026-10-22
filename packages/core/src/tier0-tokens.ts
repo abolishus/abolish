@@ -25,6 +25,7 @@ import {
   Tier0TokenError,
   type Tier0TokenEvaluation,
   tier0TokenBlindEvaluate,
+  tier0TokenBlindedFrom,
   tier0TokenInfo,
   tier0TokenKeyId,
   tier0TokenKeyIssues,
@@ -42,6 +43,7 @@ import {
   accountTokens,
   tier0TokenIssuances,
 } from "./db/schema/index.ts";
+import type { Tier0ShownList } from "./tier0-shown.ts";
 
 const U32_MAX = 2 ** 32 - 1;
 const U64_MAX = (1n << 64n) - 1n;
@@ -232,8 +234,15 @@ export function tier0Issuer({
  * Keys the record lists and the issuer doesn't hold are left alone: a
  * period's key may be loaded only when it is near. Errors name a period or
  * a rule, never a key, though only public keys are compared here.
+ *
+ * Returns every key the record lists, by `key_id`, for re-issuance's item 2
+ * (`reissueTier0Token`), which must tell a key retired early from one that
+ * still redeems.
  */
-export function checkTier0IssuerDeployment(issuer: Tier0Issuer, encoding: Uint8Array): void {
+export function checkTier0IssuerDeployment(
+  issuer: Tier0Issuer,
+  encoding: Uint8Array,
+): Tier0ListedKeys {
   let record;
   try {
     record = decodeDeploymentRecord(encoding);
@@ -282,7 +291,24 @@ export function checkTier0IssuerDeployment(issuer: Tier0Issuer, encoding: Uint8A
     if (entry.retired)
       throw new RangeError(`the deployment record lists the key of period ${key.period} retired`);
   }
+  // Well formed, so every listed key is an element and its `key_id` computes.
+  return new Map(
+    d.tier0_token_keys.map((k) => [
+      hexOf(tier0TokenKeyId(k.period, k.key)),
+      { period: k.period, retired: k.retired },
+    ]),
+  );
 }
+
+/** A key the deployment record lists ([[deployment]], Record (version 2)). */
+export interface Tier0ListedKey {
+  readonly period: number;
+  /** Retired early: it issues and redeems nothing (T-74). */
+  readonly retired: boolean;
+}
+
+/** The deployment record's keys, by their `key_id` as lowercase hex. */
+export type Tier0ListedKeys = ReadonlyMap<string, Tier0ListedKey>;
 
 /** The codes of [[tier0-token]], Errors, that issuance answers. */
 export type Tier0IssuanceErrorCode =
@@ -297,7 +323,9 @@ export type Tier0IssuanceErrorCode =
   /** Step 2.5: the account has its token and this isn't a retry of it. */
   | "token-taken"
   /** Step 4: `skS + m = 0` for this group's `info`. */
-  | "inverse";
+  | "inverse"
+  /** Keys, re-issuance: a check of items 2 to 4 failed. */
+  | "reissue-refused";
 
 export class Tier0IssuanceError extends Error {
   override readonly name = "Tier0IssuanceError";
@@ -320,8 +348,39 @@ export interface Tier0IssuanceRequest {
 const ACCOUNT_ID = /^[a-z0-9]{32}$/;
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
+const hexOf = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 type Tx = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0];
+
+/**
+ * Step 4's evaluation, run inside the transaction that wrote the record, so
+ * an `inverse` refusal takes the record and count with it: no token under
+ * this key for this group.
+ */
+function evaluateInside(
+  key: Tier0IssuerKey,
+  blindedElement: Uint8Array,
+  info: Uint8Array,
+): Tier0TokenEvaluation {
+  try {
+    return tier0TokenBlindEvaluate(key.secretKey, blindedElement, info);
+  } catch (e) {
+    if (e instanceof Tier0TokenError && e.code === "inverse")
+      throw new Tier0IssuanceError("inverse");
+    throw e;
+  }
+}
+
+/** Counts a token issued under `key` for `info` (T-74). */
+async function countIssued(tx: Tx, key: Tier0IssuerKey, info: Uint8Array): Promise<void> {
+  await tx
+    .insert(tier0TokenIssuances)
+    .values({ keyId: key.keyId, info, issued: 1 })
+    .onConflictDoUpdate({
+      target: [tier0TokenIssuances.keyId, tier0TokenIssuances.info],
+      set: { issued: q`${tier0TokenIssuances.issued} + 1` },
+    });
+}
 
 /**
  * Whether `accountId` may take a token (step 2.1): verified by e-mail, and by
@@ -423,19 +482,9 @@ export async function issueTier0Token(
       throw e;
     }
 
-    const evaluate = () => {
-      try {
-        return tier0TokenBlindEvaluate(key.secretKey, blindedElement, info);
-      } catch (e) {
-        // Thrown inside the transaction, so the record and count it wrote go
-        // with it: no token under this key for this group (step 4). Only a
-        // first issuance can reach this, since `inverse` depends on the key
-        // and `info` alone, so no retry of a recorded token can.
-        if (e instanceof Tier0TokenError && e.code === "inverse")
-          throw new Tier0IssuanceError("inverse");
-        throw e;
-      }
-    };
+    // Only a first issuance can answer `inverse`, since it depends on the
+    // key and `info` alone, so no retry of a recorded token can.
+    const evaluate = () => evaluateInside(key, blindedElement, info);
 
     if (issues) {
       // Step 3: insert-if-absent on the account and deployment, so of two
@@ -455,13 +504,7 @@ export async function issueTier0Token(
         .onConflictDoNothing()
         .returning({ userId: accountTokens.userId });
       if (inserted.length === 1) {
-        await tx
-          .insert(tier0TokenIssuances)
-          .values({ keyId: key.keyId, info, issued: 1 })
-          .onConflictDoUpdate({
-            target: [tier0TokenIssuances.keyId, tier0TokenIssuances.info],
-            set: { issued: q`${tier0TokenIssuances.issued} + 1` },
-          });
+        await countIssued(tx, key, info);
         return evaluate();
       }
     }
@@ -478,6 +521,172 @@ export async function issueTier0Token(
       sameBytes(held.blindedElement, blindedElement);
     if (!retry) throw new Tier0IssuanceError(issues ? "token-taken" : "key-not-issuing");
     return evaluate();
+  });
+}
+
+/** What the client sends to re-issue (Keys), after the transport's form checks. */
+export interface Tier0ReissueRequest {
+  /** The dead token's `key_id`, its commitment `C` (32 bytes, `field<bn254>`) and its `blind`; never the token. */
+  readonly dead: {
+    readonly keyId: Uint8Array;
+    readonly commitment: Uint8Array;
+    readonly blind: Uint8Array;
+  };
+  /** The new request, `key_id'`, the region and `B'`, made as in Issuance, step 1. */
+  readonly next: Tier0IssuanceRequest;
+}
+
+/**
+ * The shown list's mark could not be judged: the index lags or Redis failed.
+ * Nothing was marked or replaced, and the client may repeat the re-issuance.
+ */
+export class Tier0ReissueUnavailable extends Error {
+  override readonly name = "Tier0ReissueUnavailable";
+  constructor() {
+    super("re-issuance unavailable: the Tier 0 index or queue can't be read now");
+  }
+}
+
+/**
+ * Item 2's key, given the account's record and the shown `key_id`: the dead
+ * key's period, whose redemption window bounds the shown list's mark, or
+ * `undefined` if the key isn't one this record may re-issue against.
+ *
+ * - A record that still names its key re-issues only against that key, once
+ *   it no longer redeems: retired early (the deployment record lists it so),
+ *   or past `q + 1` before the timer marked the record dead.
+ * - A record marked dead names no key; item 3's binding to its `B` then shows
+ *   which key it was. One the deployment record still lists must not redeem.
+ *   One it no longer lists is from a period that ended before the release's
+ *   (releases drop ended periods), so the record's period is at most
+ *   `current - 2`, the bound a dead mark itself has: the mark lasts until
+ *   that period's lapse, at or after the real one, which only keeps an
+ *   abandoned `C` on the list longer.
+ */
+function deadKeyPeriod(
+  held: { readonly keyId: Uint8Array | null; readonly keyPeriod: number | null },
+  keyId: Uint8Array,
+  listed: Tier0ListedKeys,
+  current: number,
+): number | undefined {
+  const entry = listed.get(hexOf(keyId));
+  if (held.keyId !== null || held.keyPeriod !== null) {
+    if (held.keyId === null || held.keyPeriod === null || !sameBytes(held.keyId, keyId))
+      return undefined;
+    const retired = entry?.retired === true && entry.period === held.keyPeriod;
+    return retired || held.keyPeriod < current - 1 ? held.keyPeriod : undefined;
+  }
+  if (entry !== undefined)
+    return entry.retired || entry.period < current - 1 ? entry.period : undefined;
+  return current >= 2 ? current - 2 : undefined;
+}
+
+/**
+ * Re-issuance ([[tier0-token]], Keys) for the signed-in `accountId`, whose
+ * token's key no longer redeems (retired early, or past `q + 1`): checks the
+ * new request as Issuance, steps 2.1 to 2.4, under the key that issues now,
+ * in the record's region (item 1); that the shown `key_id` is the record's
+ * dead key (item 2); that `blind · HashToGroup(input)` is the record's `B`
+ * (item 3); then marks `C` on the shown list, which refuses a `C` ever added
+ * to a Tier 0 group, in flight or queued, and replaces the record's key and
+ * `B` with the new request's (item 4); and answers `Z` and its proof for
+ * `B'` (item 5). Items 2 to 4 refuse with `reissue-refused`, a region other
+ * than the record's too, since moving region stays refused. A lagging index
+ * or failed Redis throws `Tier0ReissueUnavailable` with nothing marked.
+ *
+ * The record's row is locked from item 2 to the replacement, so two
+ * re-issuances of one account are serialised and the second finds the
+ * record replaced: neither the account nor the dead token is shown twice.
+ * The mark is in Redis and the replacement in Postgres, so they can't be one
+ * transaction: the mark comes first and is idempotent, so a replacement that
+ * fails (or an `inverse` evaluation, which rolls it back) leaves `C` marked
+ * and the record unchanged, and the client repeats with the same `C`. A `C`
+ * once shown is abandoned whatever the answer. After the replacement, a lost
+ * answer is retried as an ordinary issuance of `B'` (Issuance, step 2.5).
+ *
+ * T-10: `B'` is perfectly hiding, and the mark holds `C` with its key's
+ * lapse alone, so nothing here joins the account to `C` beyond the moment of
+ * this request, which the transport keeps no record of. T-01: one record per
+ * account and deployment, replaced only against its own dead token. T-74: a
+ * re-issued token is counted under its new key.
+ */
+export async function reissueTier0Token(
+  client: Sql,
+  accountId: string,
+  request: Tier0ReissueRequest,
+  {
+    issuer,
+    listed,
+    shown,
+    now,
+  }: {
+    readonly issuer: Tier0Issuer;
+    /** The keys the deployment record lists (`checkTier0IssuerDeployment`). */
+    readonly listed: Tier0ListedKeys;
+    /** The shown list, on the registration queue's Redis. */
+    readonly shown: Pick<Tier0ShownList, "show">;
+    readonly now: Date;
+  },
+): Promise<Tier0TokenEvaluation> {
+  if (!ACCOUNT_ID.test(accountId)) throw new RangeError("not an account ID");
+  const seconds = Math.floor(now.getTime() / 1000);
+  const current = tier0TokenKeyPeriod(seconds);
+  const { dead, next } = request;
+  const deployment = and(
+    eq(accountTokens.userId, accountId),
+    eq(accountTokens.chainId, issuer.chainId),
+    eq(accountTokens.groupRegistry, issuer.groupRegistry),
+  );
+
+  return drizzle({ client }).transaction(async (tx) => {
+    // Item 1: Issuance, steps 2.1 to 2.4, on the new request. Its key must
+    // issue now: no retry of `B'` is possible before the record holds it.
+    if (!(await mayTakeToken(tx, accountId, issuer.phoneVerification)))
+      throw new Tier0IssuanceError("account");
+    const key =
+      next.keyId instanceof Uint8Array && next.keyId.length === 32
+        ? issuer.keys.byKeyId(next.keyId)
+        : undefined;
+    if (key === undefined || !tier0TokenKeyIssues(key.period, seconds))
+      throw new Tier0IssuanceError("key-not-issuing");
+    const info = Number.isSafeInteger(next.region) ? issuer.infos.get(next.region) : undefined;
+    if (info === undefined) throw new Tier0IssuanceError("region-unknown");
+    let blindedElement: Uint8Array;
+    try {
+      blindedElement = decodeTier0TokenBlindedElement(next.blindedElement);
+    } catch (e) {
+      if (e instanceof Tier0TokenError || e instanceof TypeError || e instanceof RangeError)
+        throw new Tier0IssuanceError("blinded-element");
+      throw e;
+    }
+
+    const isBytes32 = (b: unknown): b is Uint8Array => b instanceof Uint8Array && b.length === 32;
+    if (!isBytes32(dead.keyId) || !isBytes32(dead.commitment) || !isBytes32(dead.blind))
+      throw new Tier0IssuanceError("reissue-refused");
+
+    // Item 2, locking the record until it is replaced.
+    const [held] = await tx.select().from(accountTokens).where(deployment).for("update");
+    if (held === undefined || held.region !== next.region)
+      throw new Tier0IssuanceError("reissue-refused");
+    const period = deadKeyPeriod(held, dead.keyId, listed, current);
+    if (period === undefined) throw new Tier0IssuanceError("reissue-refused");
+
+    // Item 3: false for a `blind` or `C` that doesn't decode, or a `C` that is forbidden.
+    if (!tier0TokenBlindedFrom(dead.keyId, dead.commitment, dead.blind, held.blindedElement))
+      throw new Tier0IssuanceError("reissue-refused");
+
+    // Item 4: the mark, then the replacement under the row's lock.
+    const outcome = await shown.show(BigInt(`0x${hexOf(dead.commitment)}`), period);
+    if (outcome === "unavailable") throw new Tier0ReissueUnavailable();
+    if (outcome !== "shown") throw new Tier0IssuanceError("reissue-refused");
+    await tx
+      .update(accountTokens)
+      .set({ keyId: key.keyId, keyPeriod: key.period, blindedElement })
+      .where(deployment);
+    await countIssued(tx, key, info);
+
+    // Item 5.
+    return evaluateInside(key, blindedElement, info);
   });
 }
 

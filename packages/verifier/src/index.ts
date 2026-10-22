@@ -168,6 +168,7 @@ export {
   type TransactionSource,
   walkArchive,
 } from "./archive.ts";
+export { ARCHIVE_LOCATED, type AnchorLogsRule, earlierLocators } from "./anchor-logs.ts";
 export { type ArweaveGateways, type ArweaveStats, arweaveSource } from "./arweave.ts";
 export {
   ACCUMULATOR_SLOT,

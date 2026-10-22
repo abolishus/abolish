@@ -3,6 +3,7 @@ import {
   type ArchiveManifest,
   boardEntryHash,
   type BoardEntryVersion,
+  type ContractLog,
   copyCheckpoints,
   decodeBoardEntry,
   encodeArchiveLocator,
@@ -10,6 +11,7 @@ import {
   encodeCheckpoint,
   objectCar,
   objectCid,
+  replayEventAccumulator,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { describe, expect, test } from "vite-plus/test";
@@ -17,6 +19,7 @@ import {
   BUNDLE_FORMAT,
   BUNDLE_FORMAT_DEFINITION,
   type Bundle,
+  BundleError,
   type CheckResult,
   parseBundle,
   readArchive,
@@ -142,6 +145,53 @@ function arweave(held: readonly Archived[]) {
 
 const locatorOf = (m: Archived) => encodeArchiveLocator(m.cid, m.transaction);
 
+// The anchor's logs (docs/spec/contracts.md, Board anchor): `ArchiveLocated`
+// by its signature hash (`cast keccak "ArchiveLocated(uint16,bytes)"`,
+// Foundry 1.8.3) with the locator as the anchor's `abi.encode(locator)`,
+// written out here, and the accumulator's slot `S` as the spec gives it.
+const ARCHIVE_LOCATED = hex("1b37e1203b2f89451d0e152945afd74082680705f81b99a67769ec77cf307c2f");
+const ACCUMULATOR = 0x1073a090f5464cb55b258e445c2f90eb0f9b00fb8b1700430d20b9c53b939600n;
+const B = 20_000_000n;
+
+const abiBytes = (b: Uint8Array) =>
+  concat([word(32n), word(BigInt(b.length)), b, new Uint8Array((32 - (b.length % 32)) % 32)]);
+
+const located = (locator: Uint8Array, block = B - 10n): ContractLog => ({
+  block,
+  timestamp: block * 12n,
+  topics: [ARCHIVE_LOCATED, word(BigInt(((locator[0] as number) << 8) | (locator[1] as number)))],
+  data: abiBytes(locator),
+});
+
+// Another of the anchor's logs, a receipt key's registration, say.
+const other = (block = B - 20n): ContractLog => ({
+  block,
+  timestamp: block * 12n,
+  topics: [new Uint8Array(32).fill(0xaa), new Uint8Array(32).fill(0xbb)],
+  data: word(2n),
+});
+
+/** The anchor's accumulator and count in its storage, after `logs`. */
+function accumulatorStorage(logs: readonly ContractLog[]) {
+  const { accumulator, count } = replayEventAccumulator(
+    definition.l1_chain_id,
+    definition.l1_anchor,
+    logs,
+  );
+  // A trie holds no zero word.
+  const entries: (readonly [Uint8Array, Uint8Array])[] = [[word(ACCUMULATOR), stored(accumulator)]];
+  if (count > 0n) entries.push([word(ACCUMULATOR + 1n), stored(word(count))]);
+  return entries;
+}
+
+const logsJson = (logs: readonly ContractLog[]) =>
+  logs.map((l) => ({
+    block: l.block.toString(),
+    timestamp: l.timestamp.toString(),
+    topics: l.topics.map(toHex),
+    data: toHex(l.data),
+  }));
+
 function bundle(
   options: {
     readonly locator?: Uint8Array;
@@ -150,16 +200,27 @@ function bundle(
     readonly withCheckpoints?: boolean;
     readonly nodes?: readonly string[];
     readonly definition?: string;
+    /** The logs the bundle carries, and the ones the anchor's state counts, if others. */
+    readonly logs?: readonly ContractLog[];
+    readonly stateLogs?: readonly ContractLog[];
+    readonly extra?: readonly (readonly [Uint8Array, Uint8Array])[];
   } = {},
 ): Bundle {
+  const stateLogs = options.stateLogs ?? options.logs;
   const l1 = anchoredL1(
     definition.election_id,
     definition.l1_anchor,
     copy,
     VERSION,
     clock,
-    { number: 20_000_000n, timestamp: NOW },
-    options.locator === undefined ? [] : locatorStorage(options.locator, options.count ?? 2n),
+    { number: B, timestamp: NOW },
+    [
+      ...(options.locator === undefined
+        ? []
+        : locatorStorage(options.locator, options.count ?? 2n)),
+      ...(stateLogs === undefined ? [] : accumulatorStorage(stateLogs)),
+      ...(options.extra ?? []),
+    ],
   );
   if (options.withCheckpoints === true)
     l1.checkpoints = [...checkpoints.values()].map((c) => toHex(encodeCheckpoint(c)));
@@ -171,6 +232,7 @@ function bundle(
       definition: options.definition ?? honest?.definition,
       clock: honest?.clock,
       l1,
+      ...(options.logs !== undefined && { anchorLogs: logsJson(options.logs) }),
     }),
     concat(board),
   );
@@ -180,18 +242,19 @@ const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as Chec
 const without43 = (r: Report) => r.checks.filter((c) => c.id !== "4.3");
 
 describe("readArchive", () => {
-  test("a whole archive reads every listed object and changes no other row, but 4.3 waits on the earlier locators", async () => {
+  test("a whole archive reads every listed object and changes no other row, but without the anchor's logs 4.3 doesn't pass", async () => {
     const plain = bundle({ locator: locatorOf(m1) });
     const { source, asked } = arweave(WHOLE);
     const read = await readArchive(plain, source);
     const r = verifyBundle(read.bundle);
-    // No bundle carries the anchor's ArchiveLocated logs yet, and only they
-    // show an overwritten locator (T-69): never a pass without them.
+    // Only the anchor's ArchiveLocated logs show an overwritten locator
+    // (T-69): never a pass without them.
     expect(row(r, "4.3")).toEqual({
       id: "4.3",
       kind: "election",
       status: "unverifiable",
-      code: "not-implemented",
+      code: "anchor-logs-missing",
+      at: {},
     });
     expect(row(verifyBundle(plain), "4.3").code).toBe("not-implemented");
     expect(without43(r)).toEqual(without43(verifyBundle(plain)));
@@ -219,7 +282,7 @@ describe("readArchive", () => {
     const r = verifyBundle(withCopy);
     expect(row(r, "4.1").status).toBe("pass");
     expect(row(r, "4.2").status).toBe("pass");
-    expect(row(r, "4.3").code).toBe("not-implemented");
+    expect(row(r, "4.3").code).toBe("anchor-logs-missing");
     expect(r.board.byCid).toEqual({});
   });
 
@@ -509,5 +572,221 @@ describe("readArchive", () => {
     await expect(
       readBoardByCid(bundle({ board: [] }), undefined, 1, undefined, undefined),
     ).rejects.toThrow(TypeError);
+  });
+});
+
+describe("the earlier locators, from the anchor's logs", () => {
+  // Another manifest at a sequence, under its own transaction.
+  const under = (m: ReturnType<typeof manifest>, n: number) => ({ ...m, transaction: tx(n) });
+  // Manifest 0 lists the segment objects; this one, the lists.
+  const m0x = under(manifest(0n, [], objects.slice(runs.length)), 50);
+  const m2 = manifest(2n, [m1], []);
+  // A latest that links nothing earlier: the authority cut manifest 0 off.
+  const m1cut = under(manifest(1n, [], objects.slice(runs.length)), 51);
+  const honestLogs = [other(), located(locatorOf(m0)), located(locatorOf(m1))];
+
+  const run = async (b: Bundle, held: readonly Archived[] = WHOLE) => {
+    const { source, asked } = arweave(held);
+    return { r: verifyBundle((await readArchive(b, source)).bundle), asked };
+  };
+
+  test("a whole archive whose every earlier locator is its chain's passes 4.3, and changes no other row", async () => {
+    const logged = bundle({ locator: locatorOf(m1), logs: honestLogs });
+    const { r, asked } = await run(logged);
+    expect(row(r, "4.3")).toEqual({ id: "4.3", kind: "election", status: "pass" });
+    expect(r.archive).toMatchObject({
+      count: "2",
+      earlier: 2,
+      walk: { latest: "1", manifests: 2, reads: 2, findings: [] },
+      objects: { findings: [] },
+    });
+    // The earlier locators name the chain's own manifests: nothing more is read.
+    expect(asked).toEqual([m1, m0, ...objects].map((o) => bytesToHex(o.transaction)));
+    const { r: plain } = await run(bundle({ locator: locatorOf(m1) }));
+    expect(without43(r)).toEqual(without43(plain));
+    expect(r.inputs.anchorLogs).toBe("l1-state-proof");
+    expect(plain.inputs.anchorLogs).toBeUndefined();
+  });
+
+  test("logs after B are ignored", async () => {
+    const later = [...honestLogs, located(locatorOf(m2), B + 1n)];
+    const { r } = await run(bundle({ locator: locatorOf(m1), logs: later, stateLogs: honestLogs }));
+    expect(row(r, "4.3").status).toBe("pass");
+  });
+
+  test("an earlier locator naming another manifest where the chain names one is locator-mismatch (T-69)", async () => {
+    const logs = [located(locatorOf(m0x)), located(locatorOf(m1))];
+    const { r } = await run(bundle({ locator: locatorOf(m1), logs }), [...WHOLE, m0x]);
+    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "locator-mismatch" });
+    expect(r.archive).toMatchObject({
+      walk: {
+        findings: [
+          {
+            code: "locator-mismatch",
+            locator: 0,
+            sequence: "0",
+            named: bytesToHex(m0x.cid),
+            chain: bytesToHex(m0.cid),
+          },
+        ],
+      },
+    });
+  });
+
+  test("a locator rolled back below one logged before it is locator-mismatch (T-69)", async () => {
+    const logs = [...honestLogs, located(locatorOf(m2)), located(locatorOf(m1))];
+    const { r } = await run(bundle({ locator: locatorOf(m1), count: 4n, logs }), [...WHOLE, m2]);
+    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "locator-mismatch" });
+    expect(r.archive).toMatchObject({
+      earlier: 4,
+      walk: {
+        findings: [
+          { code: "locator-mismatch", locator: 2, sequence: "2", named: bytesToHex(m2.cid) },
+        ],
+      },
+    });
+  });
+
+  test("a manifest reached only through an earlier locator is earlier-only, and its objects are read", async () => {
+    const held = [m0, m1cut, ...objects];
+    const cut = await run(bundle({ locator: locatorOf(m1cut) }), held);
+    expect(cut.r.archive).toMatchObject({
+      walk: { findings: [{ code: "archive-gap", first: "0", last: "0" }] },
+    });
+    const logs = [located(locatorOf(m0)), located(locatorOf(m1cut))];
+    const { r } = await run(bundle({ locator: locatorOf(m1cut), logs }), held);
+    expect(row(r, "4.3")).toMatchObject({ status: "unverifiable", code: "earlier-only" });
+    expect(r.archive).toMatchObject({
+      walk: { manifests: 2, findings: [{ code: "earlier-only", first: "0", last: "0" }] },
+      objects: { read: objects.length, findings: [] },
+    });
+  });
+
+  // Logs that aren't the anchor's whole sequence up to B, or that its state
+  // contradicts, give no earlier locator: the read stops before any fetch.
+  const stops = async (b: Bundle, rule: string) => {
+    const { r, asked } = await run(b);
+    expect(row(r, "4.3")).toEqual({
+      id: "4.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "anchor-logs",
+      at: {},
+    });
+    expect(r.archive).toEqual({ stopped: "anchor-logs", rule });
+    expect(asked).toEqual([]);
+  };
+
+  test("logs with one left out, altered or added are no earlier locators", async () => {
+    const locator = locatorOf(m1);
+    await stops(
+      bundle({ locator, logs: honestLogs.slice(1), stateLogs: honestLogs }),
+      "accumulator",
+    );
+    const altered = honestLogs.map((l, i) => (i === 0 ? { ...l, data: word(3n) } : l));
+    await stops(bundle({ locator, logs: altered, stateLogs: honestLogs }), "accumulator");
+    const moved = honestLogs.map((l, i) => (i === 0 ? { ...l, block: l.block + 1n } : l));
+    await stops(bundle({ locator, logs: moved, stateLogs: honestLogs }), "accumulator");
+    // One more at or before B than the anchor counts.
+    await stops(
+      bundle({ locator, logs: [...honestLogs, other(B)], stateLogs: honestLogs }),
+      "block-range",
+    );
+    // An accumulator that counts no log.
+    await stops(bundle({ locator, logs: honestLogs, stateLogs: [] }), "block-range");
+  });
+
+  test("logs the anchor counts after B, or out of order, are no earlier locators", async () => {
+    const locator = locatorOf(m1);
+    const after = [other(B + 1n), located(locatorOf(m0), B + 1n), located(locator, B + 1n)];
+    await stops(bundle({ locator, logs: after }), "block-range");
+    const backwards = [other(B - 5n), located(locatorOf(m0), B - 6n), located(locator, B - 6n)];
+    await stops(bundle({ locator, logs: backwards }), "order");
+  });
+
+  test("a count word no accumulator writes is no earlier locators", async () => {
+    await stops(
+      bundle({
+        locator: locatorOf(m1),
+        logs: honestLogs,
+        stateLogs: [],
+        extra: [[word(ACCUMULATOR + 1n), stored(word(2n ** 64n))]],
+      }),
+      "count",
+    );
+  });
+
+  test("an ArchiveLocated log that isn't the anchor's framing of a locator is locator-log", async () => {
+    const locator = locatorOf(m1);
+    const good = located(locator);
+    const data = good.data;
+    const bad: ContractLog[] = [
+      // The version topic isn't the locator's.
+      { ...good, topics: [ARCHIVE_LOCATED, word(2n)] },
+      { ...good, topics: [ARCHIVE_LOCATED] },
+      // Another offset, a length past the bytes, padding not zero, a word after.
+      { ...good, data: concat([word(64n), data.subarray(32)]) },
+      { ...good, data: concat([word(32n), word(BigInt(locator.length + 32)), data.subarray(64)]) },
+      { ...good, data: data.map((x, i) => (i === data.length - 1 ? 1 : x)) },
+      { ...good, data: concat([data, word(0n)]) },
+      // Lengths the anchor refuses.
+      { ...good, data: abiBytes(Uint8Array.of(0, 1)) },
+      { ...good, data: abiBytes(new Uint8Array(129).fill(1)) },
+    ];
+    for (const log of bad) {
+      const logs = [other(), log];
+      await stops(bundle({ locator, count: 1n, logs }), "locator-log");
+    }
+    // The good one, alone, passes.
+    const { r } = await run(bundle({ locator, count: 1n, logs: [other(), good] }));
+    expect(r.archive).toMatchObject({ earlier: 1, walk: { findings: [] } });
+  });
+
+  test("logs whose locators the anchor's state contradicts are no earlier locators", async () => {
+    const locator = locatorOf(m1);
+    // More locators posted than logged.
+    await stops(bundle({ locator, count: 3n, logs: honestLogs }), "locators");
+    // The last logged isn't the latest.
+    const swapped = [other(), located(locator), located(locatorOf(m0))];
+    await stops(bundle({ locator, logs: swapped }), "locators");
+    await stops(bundle({ locator, count: 0n, logs: [other()] }), "locators");
+  });
+
+  test("with no locator in state the logs aren't judged", async () => {
+    const { r } = await run(bundle({ logs: honestLogs.slice(1), stateLogs: honestLogs }));
+    expect(r.archive).toEqual({ stopped: "locator-none", count: "0" });
+  });
+
+  test("a bundle's anchorLogs are parsed strictly", () => {
+    const base = (anchorLogs: unknown, format = BUNDLE_FORMAT_DEFINITION) =>
+      JSON.stringify({
+        format,
+        definition: honest?.definition,
+        clock: honest?.clock,
+        l1: {
+          ...anchoredL1(definition.election_id, definition.l1_anchor, copy, VERSION, clock, {
+            number: B,
+            timestamp: NOW,
+          }),
+        },
+        anchorLogs,
+      });
+    const good = logsJson(honestLogs);
+    expect(parseBundle(base(good), concat(copy))).toMatchObject({ anchorLogs: honestLogs });
+    expect(parseBundle(base([]), concat(copy))).toMatchObject({ anchorLogs: [] });
+    const one = good[0] as Record<string, unknown>;
+    for (const bad of [
+      {},
+      [{ ...one, topics: [] }],
+      [{ ...one, topics: Array(5).fill(one["topics"] && (one["topics"] as string[])[0]) }],
+      [{ ...one, topics: ["aa"] }],
+      [{ ...one, data: "" }],
+      [{ ...one, data: "0x01" }],
+      [{ ...one, block: "01" }],
+      [{ ...one, timestamp: "18446744073709551616" }],
+      [{ ...one, n: "0" }],
+      [{ block: one["block"], timestamp: one["timestamp"], topics: one["topics"] }],
+    ])
+      expect(() => parseBundle(base(bad), concat(copy))).toThrow(BundleError);
   });
 });

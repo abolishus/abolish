@@ -103,7 +103,7 @@ Every event of every one of our L2 contracts is archived, and the ones an electi
 
 The fields are the step's input, re-framed in [[notation]]'s primitives: the step counts topics with a `u8`, the record with a `list`'s `u32`, so a third-party decoder needs no construct of its own, and the step is recomputed from the decoded values, `k` being the number of topics. Decoding is strict ([[notation]], Strict decoding) and context-free; a record with no topics, or with topics or data that aren't an event of its contract, decodes and then fails the event check below. A record's `chain_id` is the definition's `l2_chain_id`, never a field.
 
-Our contracts on L1 have no contract-event records: a verifier reads the board anchor's anchors and locators, and the relay's recorded calls, from L1 state, never from their logs (Board anchor, Verification; L1 relay, Verification).
+Our contracts on L1 have no contract-event records: a verifier reads the board anchor's anchors and latest locator, and the relay's recorded calls, from L1 state, never from their logs (Board anchor, Verification; L1 relay, Verification). The one exception is the anchor's earlier locators, which only its `ArchiveLocated` logs keep: a verifier takes them from the anchor's whole log sequence, replayed against the accumulator in the anchor's L1 state (Archive locator; [[verifier]], Archive), never from a list of logs alone.
 
 Versions 2 to 9 have version 1's layout, field for field; the nine differ only in their event tables and in what the board's framing reads (Event check). The election's profile pins one version for every contract's events, and a record of another is `profile-mismatch` ([[versioning]], Election profile).
 

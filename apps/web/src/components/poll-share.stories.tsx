@@ -94,3 +94,37 @@ export const CopyFails: Story = {
     await expect(sheet.getByRole("button", { name: "Copy link" })).toBeVisible();
   },
 };
+
+export const QrCode: Story = {
+  name: "QR code",
+  play: async ({ canvasElement }) => {
+    const sheet = await openSheet(canvasElement);
+    const toggle = sheet.getByRole("button", { name: "Show a QR code" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(sheet.queryByRole("img")).toBeNull();
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const code = sheet.getByRole("img", { name: "QR code for abolish.us/p/mhanrsz" });
+    await expect(code).toBeVisible();
+    // The upper-case link fits version 2 (25 modules and the 4-module quiet
+    // zone) in alphanumeric mode; the lower-case one would need version 3.
+    await expect(code).toHaveAttribute("viewBox", "0 0 33 33");
+    await expect(code.querySelector("rect")).toHaveAttribute("fill", "#ffffff");
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(sheet.queryByRole("img")).toBeNull();
+  },
+};
+
+export const QrCodeDark: Story = {
+  name: "QR code, dark",
+  parameters: { theme: "dark" },
+  play: async ({ canvasElement }) => {
+    const sheet = await openSheet(canvasElement);
+    await userEvent.click(sheet.getByRole("button", { name: "Show a QR code" }));
+    // Dark modules on a light ground in both themes: many scanners can't read an inverted code.
+    const code = sheet.getByRole("img", { name: "QR code for abolish.us/p/mhanrsz" });
+    await expect(code.querySelector("path")).toHaveAttribute("fill", "#000000");
+    await expect(code.querySelector("rect")).toHaveAttribute("fill", "#ffffff");
+  },
+};

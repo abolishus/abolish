@@ -21,7 +21,9 @@
 // contract takes the batch beside it, at the cost of the seat's gas only.
 import {
   ballotHash,
+  ballotHashV3,
   type BallotRecord,
+  type BallotRecordV3,
   batchShareComplaints,
   bytesVar,
   COMPLAINT_BATCH_MAX,
@@ -249,25 +251,10 @@ export class ComplaintDuty {
       else held.push(posting);
     }
     if (postings.size === 0) return [];
-    const votes = new Map<string, BallotRecord["committed_vote"]>();
+    const votes = new Map<string, Vote>();
     for (const bytes of await o.ballots(election)) {
-      let b;
-      try {
-        b = decodeBallot(bytes, 1);
-      } catch (e) {
-        if (e instanceof DecodeError) continue;
-        throw e;
-      }
-      if (!equal(b.definition_hash, election.definitionHash)) continue;
-      // T-38: the ballot hash is recomputed, so a source can't pass another
-      // ballot's vote under a hash in the scope.
-      const h = hex(
-        ballotHash(
-          { definitionHash: election.definitionHash, tier: b.tier, nullifier: b.nullifier },
-          b.committed_vote,
-        ),
-      );
-      if (postings.has(h)) votes.set(h, b.committed_vote);
+      const held = heldVote(bytes, election.definitionHash);
+      if (held !== undefined && postings.has(held.hash)) votes.set(held.hash, held.vote);
     }
     const missing = [...postings.keys()].filter((h) => !votes.has(h)).length;
     // Anyone can post against a scope ballot whose record a source withholds,
@@ -301,5 +288,41 @@ export class ComplaintDuty {
       });
     }
     return owed;
+  }
+}
+
+// Version 3's vote shares, proves and opens over its flat options as version
+// 1's does, so the posting check and the complaint read either the same way
+// (docs/spec/share-encryption.md, Ballot versions 2 and 3).
+type Vote = BallotRecord["committed_vote"] | BallotRecordV3["committed_vote"];
+
+/**
+ * A ballot record's vote and its ballot hash, recomputed, under the
+ * definition: ballot version 1 (definition version 1) by its tier, version 3
+ * (definition version 5) by its cell. Undefined for a record that doesn't
+ * decode under the version its version byte names, or names another
+ * definition. T-38: the hash is recomputed, so a source can't pass another
+ * ballot's vote under a hash in the scope; it binds the ballot version, so a
+ * record read under a layout other than the one the scope's ballot was
+ * admitted under never matches it (T-34).
+ */
+function heldVote(
+  bytes: Uint8Array,
+  definitionHash: Uint8Array,
+): { readonly hash: string; readonly vote: Vote } | undefined {
+  try {
+    if (bytes[2] === 3) {
+      const b = decodeBallot(bytes, 3);
+      if (!equal(b.definition_hash, definitionHash)) return undefined;
+      const ctx = { definitionHash, cell: b.cell, nullifier: b.nullifier };
+      return { hash: hex(ballotHashV3(ctx, b.committed_vote)), vote: b.committed_vote };
+    }
+    const b = decodeBallot(bytes, 1);
+    if (!equal(b.definition_hash, definitionHash)) return undefined;
+    const ctx = { definitionHash, tier: b.tier, nullifier: b.nullifier };
+    return { hash: hex(ballotHash(ctx, b.committed_vote)), vote: b.committed_vote };
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
   }
 }

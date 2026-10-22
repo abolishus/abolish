@@ -23,6 +23,7 @@ import {
   BOARD_ENTRY,
   type BoardEntryVersion,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -143,12 +144,18 @@ export async function l1BoardAnchors(
     options.l2FromBlock,
     await l2Finalized(l2),
   );
-  if (reg.decoded.version !== 1) throw new L1AnchorError("definition-version");
-  const d = reg.decoded.value;
+  // Versions 1 and 5, the ones the seat approves (`checkStub`): both carry
+  // the fields below at the same names, and each is hashed under its own layout.
+  const decoded = reg.decoded;
+  if (decoded.version !== 1 && decoded.version !== 5) throw new L1AnchorError("definition-version");
+  const d = decoded.value;
   // The hash binds the election identifier and every field below, so the
   // registered definition is the approved one or the reader refuses it.
-  if (!equal(electionDefinitionHash(d), election.definitionHash))
-    throw new L1AnchorError("definition-hash");
+  const hash =
+    decoded.version === 1
+      ? electionDefinitionHash(decoded.value)
+      : electionDefinitionV5Hash(decoded.value);
+  if (!equal(hash, election.definitionHash)) throw new L1AnchorError("definition-hash");
   if (
     !equal(d.l1_anchor, anchor) ||
     !equal(d.election_registry, options.registry) ||

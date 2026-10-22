@@ -23,6 +23,7 @@ import {
   type ContractEventVersion,
   decodeBoardEntry,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   type EventContracts,
   type FinalizedL1,
   L1_REF_MARGIN,
@@ -255,13 +256,17 @@ async function registered(
     l2Head,
   );
   // The hash binds every field, the transcript's hash among them, so the
-  // definition admission reads is the one the seat approved.
-  if (
-    reg.decoded.version !== 1 ||
-    !equal(electionDefinitionHash(reg.decoded.value), election.definitionHash)
-  )
-    throw new ViewError("definition");
-  const d = reg.decoded.value;
+  // definition admission reads is the one the seat approved: of version 1
+  // or 5, the versions the seat approves (`checkStub`), each hashed under
+  // its own layout.
+  const decoded = reg.decoded;
+  if (decoded.version !== 1 && decoded.version !== 5) throw new ViewError("definition");
+  const hash =
+    decoded.version === 1
+      ? electionDefinitionHash(decoded.value)
+      : electionDefinitionV5Hash(decoded.value);
+  if (!equal(hash, election.definitionHash)) throw new ViewError("definition");
+  const d = decoded.value;
   // The versions the verifier reads this election's board and events under (4.2, 4.4).
   const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);

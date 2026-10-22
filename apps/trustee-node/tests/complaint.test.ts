@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import {
   ballotHash,
+  ballotHashV3,
   checkComplaint,
   COMMITTED_VOTE,
   decode,
@@ -15,6 +16,7 @@ import {
   decodeShareComplaintBatch,
   deliveryDeadlines,
   encodeBallot,
+  encodeBallotV3,
   encodeSharePosting,
   type FinalizedL1,
   identityKey,
@@ -148,6 +150,41 @@ function ballotOf(id: string, ref: bigint, voter = 0n) {
     entry: { path: "board", value: SEGMENT },
   };
   return { hash, vote, record, copy };
+}
+
+/**
+ * `ballotOf` as a version-3 ballot naming `cell` (definition version 5,
+ * P2-14): the vector's vote with its one sum proof as its one question's
+ * range proof. The duty checks no validity proof, and version 3's shares,
+ * ciphertexts and postings are version 1's (share-encryption.md, Ballot
+ * versions 2 and 3), so its postings fail or open as version 1's do.
+ */
+function ballotOfV3(id: string, ref: bigint, cell = 0) {
+  const { vote: v1, copy } = ballotOf(id, ref);
+  const vote = {
+    vss: v1.vss,
+    share_hashes: v1.share_hashes,
+    option_proofs: v1.option_proofs,
+    sum_proofs: [v1.sum_proof],
+  };
+  const hash = ballotHashV3({ definitionHash: DEFINITION, cell, nullifier: copy.nullifier }, vote);
+  const record = encodeBallotV3({
+    definition_hash: DEFINITION,
+    cell,
+    nullifier: copy.nullifier,
+    l1_ref_number: ref,
+    l1_ref_hash: copy.l1RefHash,
+    membership_proof: proof,
+    committed_vote: vote,
+  });
+  const message = membershipMessage({
+    definitionHash: DEFINITION,
+    tier: 0,
+    ballotHash: hash,
+    l1RefNumber: ref,
+    l1RefHash: copy.l1RefHash,
+  });
+  return { hash, vote: v1, record, copy: { ...copy, ballotHash: hash, message } };
 }
 
 interface Posted {
@@ -526,6 +563,32 @@ describe("ComplaintDuty", () => {
     h.now = giveUp;
     expect(await h.duty().step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
     checkSent(h, 2, held, BAD);
+  });
+
+  test("complains about a version-3 ballot's failing posting, by the ballot hash its cell gives (T-29)", async () => {
+    const bad = ballotOfV3("bad-share", 160n, 1);
+    const h = harness(2, [bad.copy]);
+    h.postings = [postingOf(BAD, bad)];
+    h.ballots = [bad.record];
+    expect(await h.duty().step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
+    checkSent(h, 2, bad, BAD);
+  });
+
+  test("never takes a version-3 scope ballot's vote from a record of another layout or cell (T-34, T-38)", async () => {
+    const bad = ballotOfV3("bad-share", 160n, 1);
+    const h = harness(2, [bad.copy]);
+    h.postings = [postingOf(BAD, bad)];
+    // The same vote and nullifier as a version-1 record, and as a version-3
+    // record naming another cell: neither hashes to the scope's ballot hash.
+    h.ballots = [ballotOf("bad-share", 160n).record, ballotOfV3("bad-share", 160n, 0).record];
+    expect(await h.duty().step()).toEqual({
+      state: "waiting-ballots",
+      missing: 1,
+      until: C_K - RELEASE_WINDOWS.margin,
+    });
+    h.ballots = [bad.record];
+    expect((await h.duty().step()).state).toBe("sent");
+    checkSent(h, 2, bad, BAD);
   });
 
   test("never waits on, or complains about, a ballot the seat receipted", async () => {

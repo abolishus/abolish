@@ -1,1 +1,41 @@
 @import "@abolishus/ui/styles.css";
+
+/*
+ * The flyer (`/p/<code>/flyer`, docs/design/sharing.md, Printable flyer):
+ * the sheet names its paper as a page, which prints edge to edge with no
+ * margin, and printing a page that holds a sheet prints the sheet alone.
+ * Here rather than in utilities: the CSP's `style-src 'self'` allows no
+ * inline style, so the page can't write its own `@page`.
+ */
+@page flyer-a4 {
+  size: A4 portrait;
+  margin: 0;
+}
+
+@page flyer-letter {
+  size: letter portrait;
+  margin: 0;
+}
+
+@media print {
+  body:has([data-flyer]) :where(*:not(:has([data-flyer]), [data-flyer], [data-flyer] *)) {
+    display: none;
+  }
+
+  /* The sheet's ancestors: no frame, padding or minimum height around it. */
+  body:has([data-flyer]),
+  body:has([data-flyer]) :where(:has([data-flyer])) {
+    display: block;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  [data-flyer] {
+    print-color-adjust: exact;
+    break-inside: avoid;
+  }
+}

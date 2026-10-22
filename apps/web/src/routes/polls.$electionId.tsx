@@ -29,7 +29,11 @@ export const Route = createFileRoute("/polls/$electionId")({
       page.code !== undefined &&
       page.moderation.state !== "hidden" &&
       preview !== undefined
-        ? { url: `${origin}/p/${page.code}`, title: preview.title }
+        ? {
+            url: `${origin}/p/${page.code}`,
+            title: preview.title,
+            flyer: `/p/${page.code}/flyer`,
+          }
         : undefined;
     return { page, preview, share };
   },

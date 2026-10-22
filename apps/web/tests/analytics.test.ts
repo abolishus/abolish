@@ -44,6 +44,22 @@ describe("pages", () => {
       expect(pageOf(path)).toBe("other");
   });
 
+  test("a flyer is its template, in any case, whatever its code", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("/p/", "/P/"),
+        fc.stringMatching(/^[^/?#]+$/),
+        fc.constantFrom("/flyer", "/FLYER"),
+        (at, code, flyer) => {
+          expect(pageOf(`${at}${code}${flyer}`)).toBe("/p/:code/flyer");
+        },
+      ),
+      runs,
+    );
+    for (const path of ["/p//flyer", "/p/a/flyer/", "/p/a/b/flyer", "/p/a/flyers", "/x/p/a/flyer"])
+      expect(pageOf(path)).toBe("other");
+  });
+
   test("every path is one of the fixed templates, so none carries a path's text", () => {
     fc.assert(
       fc.property(fc.webPath(), (path) => {

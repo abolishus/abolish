@@ -22,7 +22,7 @@ export interface ProfileChoiceProps {
   readonly onWant?: (on: boolean) => void;
   /** The element naming the poll, so each row's box says which poll it is. */
   readonly describedBy?: string;
-  /** Called once the choice changed on the server, so the page reads the profile again. */
+  /** Called after every change sent, refused or not, so the page reads the profile again. */
   readonly onChanged?: () => void;
   /** Called when the session turns out to have ended. */
   readonly onSignedOut?: () => void;

@@ -53,7 +53,7 @@ export interface AccountPollsProps {
   readonly profiles?: ProfilesClient;
   /** Bumped when the profile may have changed elsewhere on the page, so it is read again. */
   readonly profileRevision?: number;
-  /** Called once a poll's choice changed, so the rest of the page reads the profile again. */
+  /** Called after each poll's choice is sent, so the rest of the page reads the profile again. */
   readonly onProfileChanged?: () => void;
 }
 

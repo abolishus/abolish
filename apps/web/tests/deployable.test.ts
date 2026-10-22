@@ -4,7 +4,12 @@
 // assets and the account handler.
 
 import { shortCode } from "@abolishus/core/short-codes";
-import { generateTier0TokenKeyPair, tier0TokenKeyPeriod } from "@abolishus/crypto";
+import {
+  decodeDeploymentRecord,
+  encodeDeploymentRecord,
+  generateTier0TokenKeyPair,
+  tier0TokenKeyPeriod,
+} from "@abolishus/crypto";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -102,17 +107,63 @@ const PHONE = {
   PHONE_DAILY_CEILING: "1000",
 };
 
+const PERIOD = tier0TokenKeyPeriod(Math.floor(Date.now() / 1000));
+/** A key pair for each period from the last to six ahead. */
+const PAIRS = new Map(
+  Array.from({ length: 8 }, (_, i) => [PERIOD - 1 + i, generateTier0TokenKeyPair()] as const),
+);
 /** A period's issuer key as TIER0_ISSUER_KEYS lists it. */
 const issuerKey = (period: number) =>
-  `${period}:${Buffer.from(generateTier0TokenKeyPair().secretKey).toString("hex")}`;
-const PERIOD = tier0TokenKeyPeriod(Math.floor(Date.now() / 1000));
+  `${period}:${Buffer.from((PAIRS.get(period) ?? generateTier0TokenKeyPair()).secretKey).toString("hex")}`;
+const REGISTRY = randomBytes(20);
+
+/**
+ * The spec's typical version-2 deployment record, made this deployment's:
+ * its L2, registry and region 0's groups, with `PAIRS`' public keys.
+ */
+function deploymentRecord(retired = -1): string {
+  const typical = decodeDeploymentRecord(
+    Buffer.from(
+      (
+        JSON.parse(
+          readFileSync(
+            new URL("../../../docs/spec/vectors/deployment-record-v2.json", import.meta.url),
+            "utf8",
+          ),
+        ) as { vectors: { id: string; encoding: string }[] }
+      ).vectors.find((v) => v.id === "typical")!.encoding,
+      "hex",
+    ),
+  );
+  if (typical.version !== 2) throw new Error("the typical vector isn't version 2");
+  return Buffer.from(
+    encodeDeploymentRecord({
+      version: 2,
+      value: {
+        ...typical.value,
+        l2_chain_id: 421_614n,
+        group_registry: Uint8Array.from(REGISTRY),
+        groups: [
+          { group_id: 7n, tier: 0, self_paid: false, region: 0 },
+          { group_id: 8n, tier: 0, self_paid: true, region: 0 },
+        ],
+        tier0_token_keys: [...PAIRS].map(([period, p]) => ({
+          period,
+          key: p.publicKey,
+          retired: period === retired,
+        })),
+      },
+    }),
+  ).toString("hex");
+}
 
 /** A whole Tier 0 issuer configuration: this period's key and the next. */
 const TIER0 = {
   TIER0_ISSUER_KEYS: `${issuerKey(PERIOD)},${issuerKey(PERIOD + 1)}`,
   TIER0_CHAIN_ID: "421614",
-  TIER0_GROUP_REGISTRY: `0x${randomBytes(20).toString("hex")}`,
+  TIER0_GROUP_REGISTRY: `0x${REGISTRY.toString("hex")}`,
   TIER0_GROUP: "7",
+  TIER0_DEPLOYMENT_RECORD: deploymentRecord(),
 };
 
 describe("dist/node/main.mjs", () => {
@@ -425,13 +476,35 @@ describe("dist/node/main.mjs", () => {
     [
       "part of a Tier 0 issuer configuration",
       { TIER0_GROUP: undefined },
-      "TIER0_GROUP go together",
+      "TIER0_DEPLOYMENT_RECORD go together",
     ],
     ["a malformed issuer key", { TIER0_ISSUER_KEYS: `${PERIOD}:0123` }, "TIER0_ISSUER_KEYS"],
     [
       "an issuer key past its redemption window",
       { TIER0_ISSUER_KEYS: `${issuerKey(PERIOD - 2)},${issuerKey(PERIOD)}` },
       `period ${PERIOD - 2} no longer redeems`,
+    ],
+    [
+      "an issuer key the deployment record lists otherwise",
+      {
+        TIER0_ISSUER_KEYS: `${issuerKey(PERIOD)},${issuerKey(PERIOD + 1)},${issuerKey(PERIOD + 9)}`,
+      },
+      `TIER0_DEPLOYMENT_RECORD: the deployment record lists no key for period ${PERIOD + 9}`,
+    ],
+    [
+      "an issuer key the deployment record lists retired",
+      { TIER0_DEPLOYMENT_RECORD: deploymentRecord(PERIOD + 1) },
+      `TIER0_DEPLOYMENT_RECORD: the deployment record lists the key of period ${PERIOD + 1} retired`,
+    ],
+    [
+      "another deployment's record",
+      { TIER0_GROUP_REGISTRY: `0x${randomBytes(20).toString("hex")}` },
+      "TIER0_DEPLOYMENT_RECORD: the deployment record names another group registry",
+    ],
+    [
+      "a deployment record that isn't hex",
+      { TIER0_DEPLOYMENT_RECORD: "0x0020" },
+      "TIER0_DEPLOYMENT_RECORD",
     ],
     [
       "a registry that isn't an address",

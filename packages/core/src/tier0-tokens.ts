@@ -14,7 +14,10 @@
 // group, with no account, so redemptions beyond them show a stolen key.
 
 import {
+  DecodeError,
+  decodeDeploymentRecord,
   decodeTier0TokenBlindedElement,
+  deploymentRecordRule,
   Tier0TokenError,
   type Tier0TokenEvaluation,
   tier0TokenBlindEvaluate,
@@ -149,6 +152,70 @@ export function tier0Issuer({
     infos.set(region, tier0TokenInfo({ chainId, groupRegistry: registry, groupId }));
   }
   return { keys, chainId, groupRegistry: registry, infos };
+}
+
+/**
+ * Refuses an issuer that disagrees with the deployment record its release
+ * names (`encoding`, record `0x0020`; [[deployment]], Record (version 2)):
+ * a record that isn't a well-formed version 2, another L2 or group registry,
+ * a region whose group isn't the record's signed Tier 0 group there, or a
+ * held key the record doesn't list for its period, lists under another
+ * `pkS`, or lists retired. A client finalises only under the keys its
+ * release lists, so an answer under any other key is one no client takes,
+ * and a key retired early must stop issuing everywhere at once (T-74).
+ * Keys the record lists and the issuer doesn't hold are left alone: a
+ * period's key may be loaded only when it is near. Errors name a period or
+ * a rule, never a key, though only public keys are compared here.
+ */
+export function checkTier0IssuerDeployment(issuer: Tier0Issuer, encoding: Uint8Array): void {
+  let record;
+  try {
+    record = decodeDeploymentRecord(encoding);
+  } catch (e) {
+    if (e instanceof DecodeError)
+      throw new RangeError(`the deployment record doesn't decode: ${e.code}`);
+    throw e;
+  }
+  if (record.version !== 2)
+    throw new RangeError("the deployment record is version 1, which lists no token key");
+  const fault = deploymentRecordRule(record);
+  if (fault !== undefined)
+    throw new RangeError(`the deployment record is ill formed: ${fault.rule}`);
+  const d = record.value;
+  if (d.l2_chain_id !== issuer.chainId)
+    throw new RangeError("the deployment record names another L2 chain ID");
+  if (!sameBytes(d.group_registry, issuer.groupRegistry))
+    throw new RangeError("the deployment record names another group registry");
+  for (const [region, info] of issuer.infos)
+    if (
+      !d.groups.some(
+        (g) =>
+          g.tier === 0 &&
+          !g.self_paid &&
+          g.region === region &&
+          sameBytes(
+            tier0TokenInfo({
+              chainId: d.l2_chain_id,
+              groupRegistry: d.group_registry,
+              groupId: g.group_id,
+            }),
+            info,
+          ),
+      )
+    )
+      throw new RangeError(
+        `region ${region}'s group isn't the deployment record's signed Tier 0 group there`,
+      );
+  const listed = new Map(d.tier0_token_keys.map((k) => [k.period, k]));
+  for (const key of issuer.keys.keys) {
+    const entry = listed.get(key.period);
+    if (entry === undefined)
+      throw new RangeError(`the deployment record lists no key for period ${key.period}`);
+    if (!sameBytes(entry.key, key.publicKey))
+      throw new RangeError(`the issuer key of period ${key.period} isn't the deployment record's`);
+    if (entry.retired)
+      throw new RangeError(`the deployment record lists the key of period ${key.period} retired`);
+  }
 }
 
 /** The codes of [[tier0-token]], Errors, that issuance answers. */

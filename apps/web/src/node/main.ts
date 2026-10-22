@@ -7,6 +7,7 @@ import {
   assertDistinctKeyrings,
   checkEmailKeys,
   checkPhoneKeys,
+  checkTier0IssuerDeployment,
   createAccounts,
   createPostmarkSender,
   createTurnstile,
@@ -88,8 +89,11 @@ const Env = z
     // The Tier 0 token issuer (src/node/token.ts; [[tier0-token]]): its keys
     // (`period:hex,…`, each period's `skS`, held here apart from every other
     // secret, T-74), and the deployment record's L2 chain ID, group registry
-    // and region 0's Tier 0 group, which every token's group `info` binds.
-    // All four or none: without them POST /token answers 503.
+    // and region 0's Tier 0 group, which every token's group `info` binds;
+    // and that record itself, the version-2 deployment record the release
+    // names, as lowercase hex, which every held key must be listed in, for
+    // its period and not retired, or the site doesn't start (T-74). All five
+    // or none: without them POST /token answers 503.
     TIER0_ISSUER_KEYS: z.string().min(1).optional(),
     TIER0_CHAIN_ID: z
       .string()
@@ -102,6 +106,10 @@ const Env = z
     TIER0_GROUP: z
       .string()
       .regex(/^(0|[1-9][0-9]{0,19})$/)
+      .optional(),
+    TIER0_DEPLOYMENT_RECORD: z
+      .string()
+      .regex(/^(?:[0-9a-f]{2})+$/)
       .optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
@@ -147,13 +155,17 @@ const Env = z
   .refine(
     (env) =>
       new Set(
-        [env.TIER0_ISSUER_KEYS, env.TIER0_CHAIN_ID, env.TIER0_GROUP_REGISTRY, env.TIER0_GROUP].map(
-          (v) => v === undefined,
-        ),
+        [
+          env.TIER0_ISSUER_KEYS,
+          env.TIER0_CHAIN_ID,
+          env.TIER0_GROUP_REGISTRY,
+          env.TIER0_GROUP,
+          env.TIER0_DEPLOYMENT_RECORD,
+        ].map((v) => v === undefined),
       ).size === 1,
     {
       message:
-        "TIER0_ISSUER_KEYS, TIER0_CHAIN_ID, TIER0_GROUP_REGISTRY and TIER0_GROUP go together",
+        "TIER0_ISSUER_KEYS, TIER0_CHAIN_ID, TIER0_GROUP_REGISTRY, TIER0_GROUP and TIER0_DEPLOYMENT_RECORD go together",
     },
   );
 
@@ -183,6 +195,7 @@ const env = Env.parse({
   TIER0_CHAIN_ID: process.env["TIER0_CHAIN_ID"] || undefined,
   TIER0_GROUP_REGISTRY: process.env["TIER0_GROUP_REGISTRY"] || undefined,
   TIER0_GROUP: process.env["TIER0_GROUP"] || undefined,
+  TIER0_DEPLOYMENT_RECORD: process.env["TIER0_DEPLOYMENT_RECORD"] || undefined,
 });
 
 /** Runs `make`, naming `name` and never the value in any failure: a key or a token (T-65). */
@@ -268,19 +281,27 @@ function phoneService(): PhoneService | undefined {
 /**
  * The Tier 0 token issuer, if configured. Its keys' errors name an entry's
  * position, never its text, which is a key (T-65, T-74); a key past its
- * redemption window is refused here, at start.
+ * redemption window, or one the release's deployment record doesn't list
+ * for its period or lists retired, is refused here, at start.
  */
 function tokenIssuer(): Tier0Issuer | undefined {
-  const { TIER0_ISSUER_KEYS, TIER0_CHAIN_ID, TIER0_GROUP_REGISTRY, TIER0_GROUP } = env;
+  const {
+    TIER0_ISSUER_KEYS,
+    TIER0_CHAIN_ID,
+    TIER0_GROUP_REGISTRY,
+    TIER0_GROUP,
+    TIER0_DEPLOYMENT_RECORD,
+  } = env;
   if (
     TIER0_ISSUER_KEYS === undefined ||
     TIER0_CHAIN_ID === undefined ||
     TIER0_GROUP_REGISTRY === undefined ||
-    TIER0_GROUP === undefined
+    TIER0_GROUP === undefined ||
+    TIER0_DEPLOYMENT_RECORD === undefined
   )
     return undefined;
   const keys = attempt("TIER0_ISSUER_KEYS", () => parseTier0IssuerKeys(TIER0_ISSUER_KEYS));
-  return attempt("TIER0_ISSUER_KEYS, TIER0_CHAIN_ID or TIER0_GROUP", () =>
+  const issuer = attempt("TIER0_ISSUER_KEYS, TIER0_CHAIN_ID or TIER0_GROUP", () =>
     tier0Issuer({
       keys,
       chainId: BigInt(TIER0_CHAIN_ID),
@@ -289,6 +310,14 @@ function tokenIssuer(): Tier0Issuer | undefined {
       now: new Date(),
     }),
   );
+  // Its errors name a period or a rule, never a key.
+  attempt("TIER0_DEPLOYMENT_RECORD", () =>
+    checkTier0IssuerDeployment(
+      issuer,
+      Uint8Array.from(Buffer.from(TIER0_DEPLOYMENT_RECORD, "hex")),
+    ),
+  );
+  return issuer;
 }
 
 const write = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);

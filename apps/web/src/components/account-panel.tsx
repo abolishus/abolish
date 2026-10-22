@@ -39,9 +39,10 @@ const RULED = "m-0 grid list-none border-t border-foreground p-0";
 
 /**
  * The account on our servers beside the voting identity on the device, with
- * nothing joining them (T-10): what each holds, as the design keeps it.
+ * nothing joining them (T-10): what each holds, as the design keeps it. The
+ * phone's line only where this deployment verifies phones.
  */
-function Separation() {
+function Separation({ phone }: { phone: boolean }) {
   const t = useTranslate(catalogs);
   const side = (
     icon: ReactNode,
@@ -76,7 +77,7 @@ function Separation() {
           "separationAccount_passkeys",
           "separationAccount_sessions",
           "separationAccount_email",
-          "separationAccount_phone",
+          ...(phone ? (["separationAccount_phone"] as const) : []),
         ],
         "separationAccountNote",
       )}
@@ -104,6 +105,8 @@ export interface AccountPanelProps {
   readonly drafts: DraftsClient;
   /** The signed-in account's e-mail and phone. */
   readonly verify: VerifyClient;
+  /** Whether this deployment verifies a phone before an account votes. */
+  readonly phone: boolean;
 }
 
 /**
@@ -112,7 +115,7 @@ export interface AccountPanelProps {
  * here can name a ballot (T-10). Votes are cast only in the ballot client,
  * with a voting identity kept on the device under its own passkey (ADR 0017).
  */
-export function AccountPanel({ client, drafts, verify }: AccountPanelProps) {
+export function AccountPanel({ client, drafts, verify, phone }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -246,7 +249,7 @@ export function AccountPanel({ client, drafts, verify }: AccountPanelProps) {
       {view.kind === "signed-in" ? (
         <>
           {/* First, so an account that hasn't verified sees it at sign-in (P2-31 part 4). */}
-          <AccountVerification client={verify} index="01" />
+          <AccountVerification client={verify} index="01" phone={phone} />
           <AccountPolls client={drafts} index="02" onSignedOut={signedOut} />
           <Section
             index="03"
@@ -369,7 +372,7 @@ export function AccountPanel({ client, drafts, verify }: AccountPanelProps) {
           id="separate-title"
           lede={<p className="m-0">{t("separationLede")}</p>}
         >
-          <Separation />
+          <Separation phone={phone} />
         </Section>
       )}
     </section>

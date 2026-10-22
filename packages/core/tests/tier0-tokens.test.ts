@@ -85,7 +85,10 @@ const ISSUER: Tier0Issuer = tier0Issuer({
   groupRegistry: REGISTRY,
   groups: new Map([[0, GROUP_ID]]),
   now: NOW,
+  phoneVerification: true,
 });
+// The same deployment with phone verification off ([[0038-verified-accounts]], Owner decision (2026-10-22)).
+const EMAIL_ONLY: Tier0Issuer = { ...ISSUER, phoneVerification: false };
 const INFO = tier0TokenInfo({ chainId: CHAIN_ID, groupRegistry: REGISTRY, groupId: GROUP_ID });
 
 async function newAccount({ email = true, phone = true } = {}): Promise<string> {
@@ -251,7 +254,14 @@ describe("parseTier0IssuerKeys", () => {
 describe("tier0Issuer", () => {
   test("refuses a deployment it can't compute info for", () => {
     const groups = new Map([[0, GROUP_ID]]);
-    const base = { keys: KEYS, chainId: CHAIN_ID, groupRegistry: REGISTRY, groups, now: NOW };
+    const base = {
+      keys: KEYS,
+      chainId: CHAIN_ID,
+      groupRegistry: REGISTRY,
+      groups,
+      now: NOW,
+      phoneVerification: true,
+    };
     expect(() => tier0Issuer({ ...base, chainId: 1n << 64n })).toThrow(RangeError);
     expect(() => tier0Issuer({ ...base, chainId: -1n })).toThrow(RangeError);
     expect(() => tier0Issuer({ ...base, groupRegistry: new Uint8Array(19) })).toThrow(RangeError);
@@ -269,12 +279,30 @@ describe("tier0Issuer", () => {
     ).toThrow(RangeError);
   });
 
+  test("takes the phone verification setting only as a boolean", () => {
+    const base = {
+      keys: KEYS,
+      chainId: CHAIN_ID,
+      groupRegistry: REGISTRY,
+      groups: new Map([[0, GROUP_ID]]),
+      now: NOW,
+    };
+    expect(tier0Issuer({ ...base, phoneVerification: true }).phoneVerification).toBe(true);
+    expect(tier0Issuer({ ...base, phoneVerification: false }).phoneVerification).toBe(false);
+    // A value read from the environment and passed unparsed is refused, not taken as on or off.
+    for (const value of [undefined, "off", "on", 0, 1])
+      expect(() =>
+        tier0Issuer({ ...base, phoneVerification: value as unknown as boolean }),
+      ).toThrow(TypeError);
+  });
+
   test("refuses at load a key whose redemption window has ended (T-74)", () => {
     const base = {
       keys: KEYS,
       chainId: CHAIN_ID,
       groupRegistry: REGISTRY,
       groups: new Map([[0, GROUP_ID]]),
+      phoneVerification: true,
     };
     // Q - 1 still redeems during Q, to its last second, and not a second after.
     expect(() => tier0Issuer({ ...base, now: at(Q, TOKEN_KEY_PERIOD - 1) })).not.toThrow();
@@ -476,6 +504,40 @@ describe("issuance", () => {
     }
   });
 
+  test("with phone verification off, asks for a verified e-mail only", async () => {
+    for (const phone of [false, true]) {
+      const account = await newAccount({ email: true, phone });
+      await expect(issue(account, blind().request, { issuer: EMAIL_ONLY })).resolves.toBeDefined();
+      expect(await record(account)).toBeDefined();
+    }
+    for (const phone of [false, true]) {
+      const account = await newAccount({ email: false, phone });
+      expect(await refusal(issue(account, blind().request, { issuer: EMAIL_ONLY }))).toBe(
+        "account",
+      );
+      expect(await record(account)).toBeUndefined();
+    }
+  });
+
+  test("turning phone verification on refuses an account's next token until it verifies a number", async () => {
+    // The account took its token while the setting was off, with no phone.
+    const account = await newAccount({ phone: false });
+    const c = blind();
+    const before = await issue(account, c.request, { issuer: EMAIL_ONLY });
+    // A retry, or a request under the next key, waits on a phone, checked
+    // before anything else, as for an account that never took a token.
+    expect(await refusal(issue(account, c.request))).toBe("account");
+    const next = blind(Q + 1);
+    expect(await refusal(issue(account, next.request, { now: at(Q + 1) }))).toBe("account");
+    await app`
+      INSERT INTO account_phones VALUES (${account}, ${randomBytes(32)}, 'p1',
+        date_trunc('day', now(), 'UTC'))`;
+    // Verified now: the retry answers as the first request did.
+    expect(hex((await issue(account, c.request)).evaluationElement)).toBe(
+      hex(before.evaluationElement),
+    );
+  });
+
   test("checks the phone inside issuance's transaction, waiting on a move in flight (T-01)", async () => {
     const account = await newAccount();
     let issuing: Promise<Tier0IssuanceErrorCode> | undefined;
@@ -652,6 +714,7 @@ describe("issuance", () => {
       groupRegistry: registry,
       groups: new Map([[0, GROUP_ID]]),
       now: NOW,
+      phoneVerification: true,
     });
     const info = tier0TokenInfo({ chainId: CHAIN_ID, groupRegistry: registry, groupId: GROUP_ID });
     const keyId = keyIdOf(Q);

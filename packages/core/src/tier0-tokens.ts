@@ -1,6 +1,8 @@
 // The Tier 0 token issuer ([[tier0-token]], Keys and Issuance;
 // [[0039-tier0-token-issuance]]; P2-30 part 3a): an account verified by
-// e-mail and phone takes one token per deployment, for the group of one region, by
+// e-mail, and by phone where the deployment turns phone verification on
+// ([[0038-verified-accounts]], Owner decision (2026-10-22)), takes one token
+// per deployment, for the group of one region, by
 // sending a blinded element `B` under the current period's key; the issuer
 // records the account's token and answers RFC 9497's `BlindEvaluate`, which
 // the ballot client finalises against the key its release publishes. The
@@ -105,6 +107,8 @@ export interface Tier0Issuer {
   readonly groupRegistry: Uint8Array;
   /** Each region served and its group's `info` (Group info). */
   readonly infos: ReadonlyMap<number, Uint8Array>;
+  /** Whether an account also needs a verified phone to take a token. */
+  readonly phoneVerification: boolean;
 }
 
 export interface Tier0IssuerOptions {
@@ -115,6 +119,13 @@ export interface Tier0IssuerOptions {
   readonly groups: ReadonlyMap<number, bigint>;
   /** When the issuer is loaded. */
   readonly now: Date;
+  /**
+   * The deployment's phone verification setting: on, an account takes a
+   * token only once verified by e-mail and by phone; off, by e-mail alone
+   * ([[0038-verified-accounts]], Owner decision (2026-10-22)). Required, so no
+   * caller turns it off by leaving it out.
+   */
+  readonly phoneVerification: boolean;
 }
 
 /**
@@ -130,11 +141,14 @@ export function tier0Issuer({
   groupRegistry,
   groups,
   now,
+  phoneVerification,
 }: Tier0IssuerOptions): Tier0Issuer {
   const current = tier0TokenKeyPeriod(Math.floor(now.getTime() / 1000));
   for (const key of keys.keys)
     if (key.period < current - 1)
       throw new RangeError(`the issuer key of period ${key.period} no longer redeems`);
+  if (typeof phoneVerification !== "boolean")
+    throw new TypeError("phoneVerification must be a boolean");
   if (typeof chainId !== "bigint" || chainId < 0n || chainId > U64_MAX)
     throw new RangeError("chainId must be a u64");
   if (!(groupRegistry instanceof Uint8Array) || groupRegistry.length !== 20)
@@ -151,7 +165,7 @@ export function tier0Issuer({
       throw new RangeError("a group_id must be a u64");
     infos.set(region, tier0TokenInfo({ chainId, groupRegistry: registry, groupId }));
   }
-  return { keys, chainId, groupRegistry: registry, infos };
+  return { keys, chainId, groupRegistry: registry, infos, phoneVerification };
 }
 
 /**
@@ -259,15 +273,22 @@ const sameBytes = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer
 type Tx = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0];
 
 /**
- * Whether `accountId` may take a token (step 2.1): verified by e-mail and by
- * phone ([[0038-verified-accounts]]). Both rows are locked for the rest of
- * the transaction, so a number moved to another account, or an address
- * changed, can't leave between this check and the record (T-01). The
+ * Whether `accountId` may take a token (step 2.1): verified by e-mail, and by
+ * phone when `phoneVerification` is on ([[0038-verified-accounts]]). Each row
+ * read is locked for the rest of the transaction, so a number moved to
+ * another account, or an address changed, can't leave between this check and
+ * the record (T-01). With the setting off no phone row is read: an account
+ * holding one is treated as one that doesn't, so turning the setting on later
+ * makes every account hold a verified number before its next token. The
  * account's own row is locked first, in the order its deletion's cascade
  * takes them, so an account deleted mid-request is refused here rather than
  * deadlocking with the record's reference to it.
  */
-async function mayTakeToken(tx: Tx, accountId: string): Promise<boolean> {
+async function mayTakeToken(
+  tx: Tx,
+  accountId: string,
+  phoneVerification: boolean,
+): Promise<boolean> {
   const user = await tx
     .select({ id: accountUsers.id })
     .from(accountUsers)
@@ -279,12 +300,14 @@ async function mayTakeToken(tx: Tx, accountId: string): Promise<boolean> {
     .from(accountEmails)
     .where(eq(accountEmails.userId, accountId))
     .for("share");
+  if (email.length !== 1) return false;
+  if (!phoneVerification) return true;
   const phone = await tx
     .select({ userId: accountPhones.userId })
     .from(accountPhones)
     .where(eq(accountPhones.userId, accountId))
     .for("share");
-  return email.length === 1 && phone.length === 1;
+  return phone.length === 1;
 }
 
 /**
@@ -312,7 +335,8 @@ export async function issueTier0Token(
   );
 
   return drizzle({ client }).transaction(async (tx) => {
-    if (!(await mayTakeToken(tx, accountId))) throw new Tier0IssuanceError("account");
+    if (!(await mayTakeToken(tx, accountId, issuer.phoneVerification)))
+      throw new Tier0IssuanceError("account");
 
     const key =
       request.keyId instanceof Uint8Array && request.keyId.length === 32

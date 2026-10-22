@@ -88,14 +88,17 @@ async function readHeld(client: VerifyClient, kind: Kind, locale: string): Promi
   }
 }
 
-function useHeld(client: VerifyClient, kind: Kind) {
+/** What the server holds for `kind`, read unless `read` is false. */
+function useHeld(client: VerifyClient, kind: Kind, read = true) {
   const { locale } = useI18n();
   const [held, setHeld] = useState<Held>({ kind: "loading" });
   const refresh = useCallback(
     async () => setHeld(await readHeld(client, kind, locale)),
     [client, kind, locale],
   );
-  useEffect(() => void refresh(), [refresh]);
+  useEffect(() => {
+    if (read) void refresh();
+  }, [refresh, read]);
   return [held, setHeld, refresh] as const;
 }
 
@@ -403,20 +406,28 @@ export interface VerifyPageProps {
   readonly client: VerifyClient;
   /** Turnstile, if this deployment has a site key; without one no code can be asked for. */
   readonly challenge?: Challenge | undefined;
+  /** Whether this deployment verifies a phone before an account votes; without it the page asks for none. */
+  readonly phone: boolean;
 }
 
 /**
- * Verifying the account's e-mail address and phone number
- * ([[0038-verified-accounts]]; P2-31 part 4): each by a code sent to it,
- * after a Turnstile check (T-52). Nothing here touches a ballot or a voting
- * identity (T-10); the number is held only while its code waits, since the
- * server never keeps it (T-73).
+ * Verifying the account's e-mail address, and its phone number where this
+ * deployment turns phone verification on ([[0038-verified-accounts]]; P2-31
+ * parts 4 and 6a): each by a code sent to it, after a Turnstile check
+ * (T-52). Nothing here touches a ballot or a voting identity (T-10); the
+ * number is held only while its code waits, since the server never keeps it
+ * (T-73).
  */
-export function VerifyPage({ client, challenge }: VerifyPageProps) {
+export function VerifyPage({ client, challenge, phone }: VerifyPageProps) {
   const t = useTranslate(catalogs);
+  const scope = phone ? "phone" : "email";
   return (
     <div className="grid gap-16">
-      <PageHeader eyebrow={t("verifyEyebrow")} title={t("verifyTitle")} lede={t("verifyLede")}>
+      <PageHeader
+        eyebrow={t("verifyEyebrow")}
+        title={t(`verifyPageTitle_${scope}`)}
+        lede={t(`verifyPageLede_${scope}`)}
+      >
         <p className="m-0">
           <a href="/account" className="underline underline-offset-4">
             {t("verifyBack")}
@@ -427,7 +438,7 @@ export function VerifyPage({ client, challenge }: VerifyPageProps) {
         </noscript>
       </PageHeader>
       <Step kind="email" index="01" client={client} challenge={challenge} />
-      <Step kind="phone" index="02" client={client} challenge={challenge} />
+      {phone ? <Step kind="phone" index="02" client={client} challenge={challenge} /> : null}
     </div>
   );
 }
@@ -436,18 +447,25 @@ export interface AccountVerificationProps {
   readonly client: VerifyClient;
   /** The section's number on the page. */
   readonly index: string;
+  /** Whether this deployment verifies a phone before an account votes. */
+  readonly phone: boolean;
 }
 
 /**
  * The account page's view of its verification: what is verified, and the
  * way to the page that verifies it (`/account/verify`, the only account
- * page besides the editor whose policy allows Turnstile).
+ * page besides the editor whose policy allows Turnstile). The phone is asked
+ * for when the account first votes, never at sign-up ([[0038-verified-accounts]],
+ * Owner decision (2026-10-22)), so only the e-mail is pressed for here: a
+ * missing number reads as asked for later, and the way to verify it early
+ * stays.
  */
-export function AccountVerification({ client, index }: AccountVerificationProps) {
+export function AccountVerification({ client, index, phone: phoneOn }: AccountVerificationProps) {
   const t = useTranslate(catalogs);
+  const scope = phoneOn ? "phone" : "email";
   const [email] = useHeld(client, "email");
-  const [phone] = useHeld(client, "phone");
-  const row = (label: string, held: Held, done: string) => (
+  const [phone] = useHeld(client, "phone", phoneOn);
+  const row = (label: string, held: Held, done: string, none: string) => (
     <li className="grid gap-1 border-b border-border py-4 md:grid-cols-[12rem_minmax(0,1fr)]">
       <span className="font-semibold">{label}</span>
       <span className="flex items-start gap-2 break-words" suppressHydrationWarning>
@@ -462,7 +480,7 @@ export function AccountVerification({ client, index }: AccountVerificationProps)
             : held.kind === "verified"
               ? done
               : held.kind === "none"
-                ? t("verificationNotYet")
+                ? none
                 : held.kind === "unavailable"
                   ? t("verificationUnavailable")
                   : t("verificationUnread")}
@@ -470,14 +488,14 @@ export function AccountVerification({ client, index }: AccountVerificationProps)
       </span>
     </li>
   );
-  const complete = email.kind === "verified" && phone.kind === "verified";
+  const complete = email.kind === "verified";
   return (
     <Section
       index={index}
       mark={t("verificationMark")}
-      title={t("verificationTitle")}
+      title={t(`verificationTitle_${scope}`)}
       id="verification-title"
-      lede={<p className="m-0">{t("verificationLede")}</p>}
+      lede={<p className="m-0">{t(`verificationLede_${scope}`)}</p>}
     >
       <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
         {row(
@@ -486,19 +504,23 @@ export function AccountVerification({ client, index }: AccountVerificationProps)
           email.kind === "verified"
             ? t("verificationEmailDone", { address: email.address ?? "" })
             : "",
+          t("verificationNotYet"),
         )}
-        {row(
-          t("verificationPhone"),
-          phone,
-          phone.kind === "verified" ? t("verificationPhoneDone", { date: phone.date }) : "",
-        )}
+        {phoneOn
+          ? row(
+              t("verificationPhone"),
+              phone,
+              phone.kind === "verified" ? t("verificationPhoneDone", { date: phone.date }) : "",
+              t("verificationPhoneLater"),
+            )
+          : null}
       </ul>
       <div>
         <a
           href="/account/verify"
           className={buttonVariants({ variant: complete ? "outline" : "default", size: "lg" })}
         >
-          {t(complete ? "verificationManage" : "verificationGo")}
+          {t(complete ? `verificationManage_${scope}` : "verificationGo")}
         </a>
       </div>
     </Section>

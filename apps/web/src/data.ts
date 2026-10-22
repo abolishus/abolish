@@ -138,3 +138,14 @@ export const fetchChallengeKey = createServerFn({ method: "GET" }).handler((): s
   const key = process.env["TURNSTILE_SITE_KEY"];
   return isSiteKey(key) ? key : null;
 });
+
+/**
+ * Whether this deployment verifies a phone before an account votes
+ * (`PHONE_VERIFICATION`; [[0038-verified-accounts]], Owner decision
+ * (2026-10-22)): off unless set to `on`, which the deployable refuses at
+ * start without a phone provider (src/node/main.ts). The token issuer reads
+ * the same setting, so no page asks for a phone the issuer doesn't need.
+ */
+export const fetchPhoneVerification = createServerFn({ method: "GET" }).handler(
+  (): boolean => process.env["PHONE_VERIFICATION"] === "on",
+);

@@ -120,7 +120,7 @@ const notice = async (canvas: ReturnType<typeof within>) =>
 
 const meta = {
   component: AccountPanel,
-  args: { drafts: noPolls, verify: fakeVerify() },
+  args: { drafts: noPolls, verify: fakeVerify(), phone: true },
 } satisfies Meta<typeof AccountPanel>;
 
 export default meta;
@@ -177,11 +177,14 @@ export const SignedIn: Story = {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText("Device passkey")).toBeVisible();
     await expect(canvas.getByText("Added October 2, 2026 at 5:40 PM UTC")).toBeVisible();
-    // Its verification comes first, then its polls; this one has none.
-    await expect(await canvas.findAllByText("Not verified yet")).toHaveLength(2);
-    await expect(
-      canvas.getByRole("link", { name: "Verify your e-mail and phone" }),
-    ).toHaveAttribute("href", "/account/verify");
+    // Its verification comes first, then its polls; this one has none. The
+    // phone is asked for at its first vote, so only the e-mail is pressed for.
+    await expect(await canvas.findByText("Not verified yet")).toBeVisible();
+    await expect(canvas.getByText("Asked for when you first vote")).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Verify your e-mail" })).toHaveAttribute(
+      "href",
+      "/account/verify",
+    );
     await expect(await canvas.findByText("You haven't created a poll yet.")).toBeVisible();
     const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);
@@ -289,8 +292,50 @@ export const Verified: Story = {
     await expect(await within(section).findByText("Verified: sam@example.org")).toBeVisible();
     await expect(within(section).getByText("Verified on October 2, 2026")).toBeVisible();
     await expect(
-      within(section).getByRole("link", { name: "Change your e-mail or phone" }),
+      within(section).getByRole("link", { name: "Manage your e-mail and phone" }),
     ).toHaveAttribute("href", "/account/verify");
+  },
+};
+
+/** Phone verification off for this deployment: the e-mail alone, and no number asked for or read. */
+export const PhoneOff: Story = {
+  args: {
+    client: fakeClient({ signedIn: true, passkeys: ONE }),
+    verify: {
+      ...fakeVerify({
+        email: { address: "sam@example.org", verifiedAt: "2026-10-01T12:00:00.000Z" },
+      }),
+      phone: async () => {
+        throw new Error("the phone is never read with phone verification off");
+      },
+    },
+    phone: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const section = canvas.getByRole("region", { name: "E-mail" });
+    await expect(await within(section).findByText("Verified: sam@example.org")).toBeVisible();
+    await expect(within(section).queryByText("Phone")).toBeNull();
+    await expect(
+      within(section).getByText("Voting needs a verified e-mail address: one account per address."),
+    ).toBeVisible();
+    await expect(within(section).getByRole("link", { name: "Change your e-mail" })).toHaveAttribute(
+      "href",
+      "/account/verify",
+    );
+  },
+};
+
+/** Signed out with phone verification off: no number among what the account holds. */
+export const SignedOutPhoneOff: Story = {
+  args: { client: fakeClient(), phone: false },
+  play: async (context) => {
+    await separates(context);
+    const separation = within(context.canvasElement).getByRole("region", {
+      name: "Your account is not your vote",
+    });
+    await expect(within(separation).getByText("Your e-mail address, encrypted")).toBeVisible();
+    await expect(within(separation).queryByText(/phone number/)).toBeNull();
   },
 };
 

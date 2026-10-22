@@ -8,7 +8,7 @@ What this page doesn't cover:
 
 - **Where the issuer's public keys are published:** the deployment record lists them (Keys) from its version 2, as `tier0_token_keys` ([[deployment]], Record (version 2)).
 - **The routes:** the issuance route behind `apps/web`'s account session and its relay to the ballot client (P2-30 parts 3 and 4), and the registration request's `token` in place of its Turnstile token (P2-30 part 5, which updates [[registration]], Request and Answers).
-- **Who may take a token:** an account verified by email and phone ([[P2-31]]), and the issuer's rate limits (P2-30 part 3).
+- **Who may take a token:** an account verified by email, and by phone where the deployment turns phone verification on ([[P2-31]]; [[0038-verified-accounts]], Owner decision (2026-10-22)), and the issuer's rate limits (P2-30 part 3).
 
 ## Sources
 

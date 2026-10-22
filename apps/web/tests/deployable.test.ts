@@ -181,6 +181,7 @@ describe("dist/node/main.mjs", () => {
       TURNSTILE_SITE_KEY: SITE_KEY,
       ...EMAIL,
       ...PHONE,
+      PHONE_VERIFICATION: "on",
       ...TIER0,
       WEB_PORT: String(port),
     });
@@ -224,6 +225,10 @@ describe("dist/node/main.mjs", () => {
       );
       expect(account.headers.get("content-security-policy")).not.toContain("challenges");
       expect(await editor.text()).toContain(SITE_KEY);
+      // With phone verification on, the verification page asks for a number.
+      const verify = await (await fetch(`${at}/account/verify`)).text();
+      expect(verify).toContain("Verify your e-mail and phone");
+      expect(verify).toContain("Your phone number");
       // A query that reached the session table as abolish_app: a missing
       // table or grant would be a 500.
       const session = await fetch(`${at}/auth/get-session`, {
@@ -405,6 +410,65 @@ describe("dist/node/main.mjs", () => {
       expect(web.err()).toContain(name);
       for (const value of Object.values(configured))
         if (value !== EMAIL.EMAIL_FROM) expect(web.err()).not.toContain(value.slice(3));
+    },
+    30_000,
+  );
+
+  test("leaves phone verification off unless told otherwise, asking for no number", async () => {
+    const port = await freePort();
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
+      TURNSTILE_SITE_KEY: SITE_KEY,
+      ...EMAIL,
+      // A provider configured, but the setting not on: still off.
+      ...PHONE,
+      ...TIER0,
+      WEB_PORT: String(port),
+    });
+    try {
+      const at = `http://127.0.0.1:${port}`;
+      let verify: Response | undefined;
+      for (let i = 0; i < 100 && verify === undefined && web.child.exitCode === null; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        verify = await fetch(`${at}/account/verify`).catch(() => undefined);
+      }
+      expect(verify?.status).toBe(200);
+      const html = (await verify?.text()) ?? "";
+      expect(html).toContain("Verify your e-mail");
+      expect(html).toContain("Your e-mail address");
+      expect(html).not.toContain("Verify your e-mail and phone");
+      expect(html).not.toContain("Your phone number");
+    } finally {
+      if (web.child.exitCode === null) {
+        const exited = once(web.child, "exit");
+        web.child.kill("SIGTERM");
+        await exited;
+      }
+    }
+  }, 30_000);
+
+  test.each([
+    ["on without a phone provider", { PHONE_VERIFICATION: "on" }, "PHONE_VERIFICATION=on needs"],
+    ["a value that is neither on nor off", { PHONE_VERIFICATION: "yes" }, "PHONE_VERIFICATION"],
+  ])(
+    "refuses phone verification %s",
+    async (_, change, message) => {
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...EMAIL,
+        ...change,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain(message);
     },
     30_000,
   );

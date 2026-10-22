@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
+import { APP_FILES } from "../src/app/install.ts";
 import { definitionView } from "../src/poll.ts";
 import { fromHex } from "../src/values.ts";
 import { pollPreview } from "../src/og/poll.ts";
@@ -206,6 +207,11 @@ describe("dist/node/main.mjs", () => {
         const asset = await fetch(`${at}${script}`);
         expect(asset.status).toBe(200);
         expect(asset.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+      }
+      // The install's files ship in the bundle, each as the type the server names (P2-28).
+      for (const [path, type] of Object.entries(APP_FILES)) {
+        const file = await fetch(`${at}${path}`);
+        expect([path, file.status, file.headers.get("content-type")]).toEqual([path, 200, type]);
       }
       const account = await fetch(`${at}/account`);
       expect(account.status).toBe(200);

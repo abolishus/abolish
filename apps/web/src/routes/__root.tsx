@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 
+import { ICON_SVG_PATH, MANIFEST_PATH } from "../app/install.ts";
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
 import { reportErrors } from "../error-reports.ts";
 import { catalogs, LOCALE } from "../messages.ts";
@@ -42,7 +43,13 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: formatMessage(LOCALE, siteName) },
     ],
-    links: [{ rel: "stylesheet", href: stylesheet }],
+    links: [
+      { rel: "stylesheet", href: stylesheet },
+      // Installable (P2-28 part 1a): src/app/install.ts.
+      { rel: "manifest", href: MANIFEST_PATH },
+      { rel: "icon", href: ICON_SVG_PATH, type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
+    ],
   }),
   shellComponent: Document,
   component: Outlet,

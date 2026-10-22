@@ -19,7 +19,7 @@ import type { Sql } from "postgres";
 import { displayTexts, displayTextSearch } from "./db/schema/index.ts";
 import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
 
-/** The longest search query, in UTF-16 code units, as the API contract bounds it. */
+/** The longest search query, in code points, as the API contract bounds it. */
 export const MAX_SEARCH_QUERY = 200;
 
 /** The most whitespace-separated terms in one search query. */

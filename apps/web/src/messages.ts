@@ -334,6 +334,48 @@ const enUS = {
   shareQrNote:
     "Point a phone's camera at it to open this poll. It holds the same link, so it says nothing about who showed it.",
   shareFlyer: "Print a flyer",
+  shareEmbed: "Embed on your site",
+  // The embed panel and the card (docs/design/sharing.md, Embed).
+  embedTitle: "Embed on your site",
+  embedDescription:
+    "Put this poll on a news page or a community site. The card never takes an answer: every answer opens Abolish in a new tab.",
+  embedKind: "What to embed",
+  embedKindCard: "The poll card",
+  embedKindCardNote:
+    "Shows the question and its answers. Loads from {host} with no script and no cookies.",
+  embedKindLink: "A plain link",
+  embedKindLinkNote: "Just the poll as a link. Nothing loads from {host} until someone clicks.",
+  embedTheme: "Colours",
+  embedThemeAuto: "Match the reader's setting",
+  embedThemeLight: "Light",
+  embedThemeDark: "Dark",
+  embedCode: "Code to paste into your page",
+  embedCopy: "Copy code",
+  embedCopied: "Code copied",
+  embedCopyFailed: "Couldn't copy. Select the code above and copy it.",
+  embedCardNote:
+    "The card loads from {host} each time your page is read, so readers' browsers contact {host}, without cookies or a referrer.",
+  embedLinkNote: "The link carries nothing about you, your site or your readers.",
+  embedLinkLine: "Answer on Abolish; anyone can check the count.",
+  embedPreview: "Open the card in a new tab",
+  embedBack: "Back to sharing",
+  embedNewTab: "(opens in a new tab)",
+  embedPick: {
+    one: "Pick one. Your pick opens Abolish in a new tab, where you check it and send it.",
+    other:
+      "Pick an answer to question 1 of {count}. It opens Abolish in a new tab, where you answer the rest and send them.",
+  },
+  embedAnswer: { one: "Answer on Abolish", other: "Answer {count} questions on Abolish" },
+  embedSeePoll: "See the poll on {host}",
+  embedCloses: "Closes",
+  embedClosed: "Closed",
+  embedOpens: "Opens",
+  embedNeverHere: "Answers are taken only on Abolish, never in this card.",
+  embedHiddenTitle: "This poll is hidden",
+  embedHidden: "Moderation has hidden this poll's text, so it isn't shown here.",
+  embedHiddenLink: "See why on its page",
+  embedNotFoundTitle: "No poll here",
+  embedNotFound: "This card's link doesn't name a poll.",
   // The flyer (docs/design/sharing.md, Printable flyer).
   flyerTitle: "Print a flyer",
   flyerBack: "Back to the poll",

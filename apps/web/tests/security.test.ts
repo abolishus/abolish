@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  embedHeaders,
+  isEmbedPage,
   contentSecurityPolicy,
   isChallengePage,
   newNonce,
@@ -115,4 +117,46 @@ describe("headers", () => {
     expect(headers["cross-origin-resource-policy"]).toBe("same-origin");
     expect(headers["permissions-policy"]).toContain("camera=()");
   });
+});
+
+describe("the embed's policy (P2-24 part 3)", () => {
+  const csp = embedHeaders()["content-security-policy"] ?? "";
+  const directives = csp.split("; ");
+
+  test("runs no script at all, posts nothing, and sandboxes itself (T-43, T-67)", () => {
+    expect(directives).toContain("default-src 'none'");
+    expect(csp).not.toContain("script-src");
+    expect(directives).toContain("form-action 'none'");
+    expect(directives).toContain("base-uri 'none'");
+    expect(directives).toContain(
+      "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+    );
+    // Never `allow-scripts`, `allow-forms` or a way to steer the host page.
+    expect(csp).not.toMatch(/allow-(?:scripts|forms|top-navigation|modals)/);
+  });
+
+  test("may be framed by any site, and loads nothing but our own styles and fonts", () => {
+    expect(directives).toContain("frame-ancestors *");
+    expect(directives).toContain("style-src 'self'");
+    expect(directives).toContain("font-src 'self'");
+    expect(csp).not.toContain("connect-src");
+    expect(csp).not.toContain("frame-src");
+  });
+
+  test("asks for no referrer and may be cached briefly, since it carries no nonce (T-11)", () => {
+    const headers = embedHeaders();
+    expect(headers["referrer-policy"]).toBe("no-referrer");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["cache-control"]).toBe("public, max-age=60");
+  });
+});
+
+describe("embed pages", () => {
+  test.each(["/embed/p/3j55dw1", "/EMBED/P/3J55DW1", "/embed/p/anything"])("%s is one", (path) =>
+    expect(isEmbedPage(path)).toBe(true),
+  );
+  test.each(["/embed", "/embed/p", "/embed/p/", "/embed/p/a/b", "/x/embed/p/a", "/p/3j55dw1"])(
+    "%s isn't",
+    (path) => expect(isEmbedPage(path)).toBe(false),
+  );
 });

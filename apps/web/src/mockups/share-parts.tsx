@@ -1,8 +1,6 @@
 import { cn, Fingerprint } from "@abolishus/ui";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
-import { qrPlaceholder, shortCode, shortLink } from "./share-data.ts";
-
 /**
  * A fixed-size surface (a 1200×630 card, an A4 page) drawn at its real size
  * and scaled down to fit its container, so it never pushes a phone sideways.
@@ -46,53 +44,6 @@ export function ScaleToFit({
   );
 }
 
-/**
- * A clearly labelled placeholder QR code: the shape of the real thing, drawn
- * from the poll id, encoding nothing. A real encoder replaces it.
- */
-export function QrPlaceholder({
-  id,
-  size = 160,
-  caption = true,
-  className,
-}: {
-  id: string;
-  size?: number;
-  /** Show "Placeholder" under the code. */
-  caption?: boolean;
-  className?: string;
-}) {
-  const grid = qrPlaceholder(id);
-  const n = grid.length;
-  return (
-    <span className={cn("inline-grid justify-items-center gap-1", className)}>
-      <svg
-        role="img"
-        aria-label={`QR code for ${shortLink(id)} (placeholder, not scannable)`}
-        viewBox={`-2 -2 ${n + 4} ${n + 4}`}
-        width={size}
-        height={size}
-        shapeRendering="crispEdges"
-        className="shrink-0 bg-white text-black"
-      >
-        <rect x={-2} y={-2} width={n + 4} height={n + 4} fill="white" />
-        {grid.flatMap((row, y) =>
-          row.map((on, x) =>
-            on ? (
-              <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill="currentColor" />
-            ) : null,
-          ),
-        )}
-      </svg>
-      {caption ? (
-        <span aria-hidden="true" className="text-xs text-muted-foreground">
-          Placeholder QR · {shortCode(id)}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 /** The poll's seal: its fingerprint in a ring, sized for the surface. */
 export function SealMark({
   id,
@@ -112,20 +63,4 @@ export function SealMark({
       />
     </span>
   );
-}
-
-export type CopyState = "idle" | "copied" | "failed";
-
-/** Copy text to the clipboard; the state says what happened, in words. */
-export function useCopy() {
-  const [state, setState] = useState<CopyState>("idle");
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setState("copied");
-    } catch {
-      setState("failed");
-    }
-  };
-  return { state, copy };
 }

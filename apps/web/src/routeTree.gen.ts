@@ -18,6 +18,7 @@ import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
 import { Route as PollsElectionIdRouteImport } from "./routes/polls.$electionId.tsx";
 import { Route as AccountPollsIdRouteImport } from "./routes/account_.polls.$id.tsx";
+import { Route as EmbedPCodeRouteImport } from "./routes/embed.p.$code.tsx";
 import { Route as PCodeFlyerRouteImport } from "./routes/p.$code_.flyer.tsx";
 import { Route as PollsElectionIdPreviewDotpngRouteImport } from "./routes/polls.$electionId.preview[.]png.ts";
 import { Route as PollsElectionIdBoardRouteImport } from "./routes/polls.$electionId_.board.tsx";
@@ -68,6 +69,11 @@ const AccountPollsIdRoute = AccountPollsIdRouteImport.update({
   path: "/account/polls/$id",
   getParentRoute: () => rootRouteImport,
 } as any);
+const EmbedPCodeRoute = EmbedPCodeRouteImport.update({
+  id: "/embed/p/$code",
+  path: "/embed/p/$code",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const PCodeFlyerRoute = PCodeFlyerRouteImport.update({
   id: "/p/$code_/flyer",
   path: "/p/$code/flyer",
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
   "/account/polls/$id": typeof AccountPollsIdRoute;
+  "/embed/p/$code": typeof EmbedPCodeRoute;
   "/p/$code/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId/board": typeof PollsElectionIdBoardRoute;
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls": typeof PollsIndexRoute;
   "/account/polls/$id": typeof AccountPollsIdRoute;
+  "/embed/p/$code": typeof EmbedPCodeRoute;
   "/p/$code/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId/board": typeof PollsElectionIdBoardRoute;
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
   "/account_/polls/$id": typeof AccountPollsIdRoute;
+  "/embed/p/$code": typeof EmbedPCodeRoute;
   "/p/$code_/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId_/board": typeof PollsElectionIdBoardRoute;
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls/"
     | "/account/polls/$id"
+    | "/embed/p/$code"
     | "/p/$code/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId/board"
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls"
     | "/account/polls/$id"
+    | "/embed/p/$code"
     | "/p/$code/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId/board"
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | "/polls/$electionId"
     | "/polls/"
     | "/account_/polls/$id"
+    | "/embed/p/$code"
     | "/p/$code_/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId_/board"
@@ -193,6 +205,7 @@ export interface RootRouteChildren {
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
   PollsIndexRoute: typeof PollsIndexRoute;
   AccountPollsIdRoute: typeof AccountPollsIdRoute;
+  EmbedPCodeRoute: typeof EmbedPCodeRoute;
   PCodeFlyerRoute: typeof PCodeFlyerRoute;
   PollsElectionIdBoardRoute: typeof PollsElectionIdBoardRoute;
   AccountPollsIdSetupRoute: typeof AccountPollsIdSetupRoute;
@@ -263,6 +276,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AccountPollsIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/embed/p/$code": {
+      id: "/embed/p/$code";
+      path: "/embed/p/$code";
+      fullPath: "/embed/p/$code";
+      preLoaderRoute: typeof EmbedPCodeRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/p/$code_/flyer": {
       id: "/p/$code_/flyer";
       path: "/p/$code/flyer";
@@ -316,6 +336,7 @@ const rootRouteChildren: RootRouteChildren = {
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,
   PollsIndexRoute: PollsIndexRoute,
   AccountPollsIdRoute: AccountPollsIdRoute,
+  EmbedPCodeRoute: EmbedPCodeRoute,
   PCodeFlyerRoute: PCodeFlyerRoute,
   PollsElectionIdBoardRoute: PollsElectionIdBoardRoute,
   AccountPollsIdSetupRoute: AccountPollsIdSetupRoute,

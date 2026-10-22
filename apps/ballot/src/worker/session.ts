@@ -20,8 +20,10 @@ import {
   castSealV3,
   challengeSealV3,
   type ContractEventRecord,
+  decodeBallot,
   decodeContractEvent,
   DecodeError,
+  declineSealV3,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   encodeElectionStubV5,
@@ -64,6 +66,8 @@ import {
   type FindCellResult,
   type IntakeRequest,
   type IntakeResult,
+  type DeclineRequest,
+  type DeclineResult,
   type PostingRequest,
   type PostingResult,
   PROVER_TIMEOUT_MS,
@@ -517,5 +521,31 @@ export class BallotSession {
     } finally {
       m.fill(0);
     }
+  }
+
+  /**
+   * The voter declined to post the unreceipted seats of `request.ballot`, a
+   * cast of the held poll: every seal this worker cast for it has each
+   * `m_i` it still keeps zeroed and dropped (`declineSealV3`; [[delivery]],
+   * Client rule 4), so no recast hands one to the page and none stays in
+   * this realm (T-18). A ballot that isn't a version-3 record of the held
+   * poll is `unknown`; a cast this worker never made erases nothing here.
+   */
+  decline(request: DeclineRequest): DeclineResult {
+    const poll = this.#poll;
+    if (poll === undefined) return { ok: false, problem: "unknown" };
+    try {
+      if (toHex(decodeBallot(request.ballot, 3).definition_hash) !== poll.definitionHash)
+        return { ok: false, problem: "unknown" };
+    } catch (e) {
+      if (e instanceof DecodeError) return { ok: false, problem: "unknown" };
+      throw e;
+    }
+    for (const [id, commitment] of this.#cast) {
+      const sealed = this.#seals.get(id);
+      if (commitment === undefined || sealed === undefined) continue;
+      declineSealV3(sealed, request.ballot);
+    }
+    return { ok: true };
   }
 }

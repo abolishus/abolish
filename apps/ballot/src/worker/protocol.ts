@@ -172,6 +172,19 @@ export interface PostingRequest {
 }
 
 /**
+ * The voter declined to post the unreceipted seats of `ballot`, a cast of
+ * the poll the worker last checked: every `m_i` a seal it cast still keeps
+ * for that ballot is zeroed and dropped (`declineSealV3`; [[delivery]],
+ * Client rule 4), as the page erases its own record's (T-18).
+ */
+export interface DeclineRequest {
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly id: number;
+  readonly kind: "decline";
+  readonly ballot: Uint8Array;
+}
+
+/**
  * The identity commitment of `secret`, `Poseidon2(s · B8)`
  * ([[identity-backup]], Identity secret), which a Tier 0 registration sends
  * ([[registration]], Request). Asked of the worker, like every use of the
@@ -285,7 +298,8 @@ export type WorkerRequest =
   | CastRequest
   | ReceiptRequest
   | IntakeRequest
-  | PostingRequest;
+  | PostingRequest
+  | DeclineRequest;
 
 /**
  * Why no proof came back: one of `MembershipProverError`'s codes, or
@@ -436,6 +450,15 @@ export type PostingResult =
       readonly code: Extract<CastPostingResult, { ok: false }>["code"];
     };
 
+/**
+ * The decline's outcome: `declined`, whether or not a seal still held an
+ * `m_i` for the ballot (one cast on an earlier page holds none here), or
+ * `unknown` for no poll held or a ballot that isn't a version-3 record of it.
+ */
+export type DeclineResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly problem: "unknown" };
+
 export type WorkerResponse =
   | {
       readonly v: typeof PROTOCOL_VERSION;
@@ -514,6 +537,12 @@ export type WorkerResponse =
       readonly id: number;
       readonly kind: "posting";
       readonly result: PostingResult;
+    }
+  | {
+      readonly v: typeof PROTOCOL_VERSION;
+      readonly id: number;
+      readonly kind: "decline";
+      readonly result: DeclineResult;
     }
   /** The request was malformed or the worker failed; it names no detail, which could quote a secret. */
   | { readonly v: typeof PROTOCOL_VERSION; readonly id: number; readonly kind: "error" };
@@ -610,6 +639,7 @@ const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret
 const RECEIPT_KEYS = ["ballot", "id", "kind", "receipt", "v"];
 const INTAKE_KEYS = ["definitionHash", "id", "kind", "v"];
 const POSTING_KEYS = ["ballot", "ciphertext", "id", "kind", "m", "seat", "v"];
+const DECLINE_KEYS = ["ballot", "id", "kind", "v"];
 
 const isPanel = (x: unknown): x is Panel =>
   isRecord(x) &&
@@ -815,6 +845,10 @@ export function parseRequest(data: unknown): WorkerRequest | undefined {
       return undefined;
     return { v, id, kind: "posting", ballot, seat, ciphertext, m };
   }
+  if (data["kind"] === "decline") {
+    if (!hasKeys(data, DECLINE_KEYS) || !isBytes(data["ballot"])) return undefined;
+    return { v, id, kind: "decline", ballot: data["ballot"] };
+  }
   return undefined;
 }
 
@@ -837,6 +871,7 @@ const RESPONSE_KINDS: ReadonlySet<unknown> = new Set([
   "receipt",
   "intake",
   "posting",
+  "decline",
   "error",
 ]);
 

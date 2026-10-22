@@ -35,6 +35,9 @@ const WORKING = {
   opening: { title: "openingTitle", detail: "opening" },
   delivering: { title: "deliveringTitle", detail: "delivering" },
   sending: { title: "sendingTitle", detail: "sending" },
+  "checking-posting": { title: "checkingPostingTitle", detail: "checkingPosting" },
+  declining: { title: "decliningTitle", detail: "declining" },
+  posting: { title: "postingTitle", detail: "posting" },
 } as const satisfies Record<
   string,
   { readonly title: keyof Messages; readonly detail: keyof Messages }

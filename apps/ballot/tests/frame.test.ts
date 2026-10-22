@@ -8,6 +8,7 @@ import { ArrivalCheck, ArrivalChecklist, ElectionRefused } from "../src/check.ts
 import type { CheckedElection, ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
 import { Ballot, BrokenLink, Checking, Unavailable } from "../src/open.tsx";
+import { Declined, PostingOffer } from "../src/posting-offer.tsx";
 import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
 import {
   RegisterChallenge,
@@ -132,6 +133,9 @@ describe("the frame under the client's CSP", () => {
           intake: () => new Promise<never>(() => {}),
           deliver: () => new Promise<never>(() => {}),
           receipt: () => new Promise<never>(() => {}),
+          posting: () => new Promise<never>(() => {}),
+          declinePosting: () => new Promise<never>(() => {}),
+          declineSeal: () => new Promise<never>(() => {}),
           keepReceipt: () => new Promise<never>(() => {}),
           send: () => new Promise<never>(() => {}),
           keepBoarded: () => new Promise<never>(() => {}),
@@ -167,6 +171,21 @@ describe("the frame under the client's CSP", () => {
       render(createElement(Working, { poll: POLL, kind: "opening" })),
       render(createElement(Working, { poll: POLL, kind: "delivering" })),
       render(createElement(Working, { poll: POLL, kind: "sending" })),
+      render(createElement(Working, { poll: POLL, kind: "checking-posting" })),
+      render(createElement(Working, { poll: POLL, kind: "declining" })),
+      render(createElement(Working, { poll: POLL, kind: "posting" })),
+      render(
+        createElement(PostingOffer, {
+          poll: POLL,
+          trackingCode: code,
+          missing: 2,
+          failed: true,
+          onRetry: none,
+          onDecline: none,
+          onPost: none,
+        }),
+      ),
+      render(createElement(Declined, { poll: POLL, onAgain: none })),
       ...(
         ["earlier", "undelivered", "busy", "unavailable", "unreachable", "unconfirmed"] as const
       ).map((reason) =>

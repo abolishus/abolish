@@ -16,7 +16,9 @@
 // entry that passes, that entry is kept beside it (Client rule 3). Once the
 // poll's posting cutoff passes, a seat still holding its `m_i` has its
 // `ct_i` and `m_i` erased from every cast: no posting of it can be in time
-// any more (Client rule 4).
+// any more; and once the voter declines to post a cast's unreceipted seats,
+// theirs are erased from it and from every recast of the same seal (Client
+// rule 4).
 // Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
@@ -125,6 +127,9 @@ export interface UnboardedReceipt {
   readonly seat: number;
   readonly receipt: Uint8Array;
 }
+
+/** `declinePosting`'s outcome. */
+export type DeclinePostingOutcome = "declined" | "missing" | "unreadable" | "unwritable";
 
 /** `eraseShares`'s outcome. */
 export type EraseSharesOutcome = "erased" | "none" | "unreadable" | "unwritable";
@@ -904,4 +909,51 @@ export async function eraseShares(
   const key = keyOf(electionId, tier);
   const outcome = await updateCasts(key, factory, withSharesErased);
   return outcome === "recorded" ? "erased" : outcome;
+}
+
+/**
+ * `casts` once the voter declined to post the unreceipted seats of the cast
+ * whose bytes are exactly `ballot` ([[delivery]], Client rule 4; T-18):
+ * each of its seats still holding an `m_i` is left with nothing but the
+ * seat, and so is the same seat's share in every other cast holding the
+ * same `ct_i`, a recast of the same seal, whose `m_i` is the same. Receipted
+ * seats keep everything, for Client rule 3, and so does every other cast:
+ * the voter declined this ballot's posting, not an earlier one's. A cast
+ * holding an erased seat is never resumed (`unsentCast`), so the declined
+ * ballot is never sent from here. `missing` if no cast has these bytes.
+ */
+export function withPostingDeclined(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+): CastRecord[] | "missing" {
+  const own = casts.find((cast) => equalBytes(cast.ballot, ballot));
+  if (own === undefined) return "missing";
+  const declined = own.shares.flatMap((share) => ("m" in share ? [share] : []));
+  return casts.map((cast) => ({
+    ...cast,
+    shares: cast.shares.map((share) =>
+      "m" in share &&
+      declined.some((d) => d.seat === share.seat && equalBytes(d.ciphertext, share.ciphertext))
+        ? { seat: share.seat, erased: true as const }
+        : share,
+    ),
+  }));
+}
+
+/**
+ * Records the voter's decline (`withPostingDeclined`) in `electionId` at
+ * `tier`, in one transaction with the read. As with a receipt, the browser
+ * may keep the replaced bytes on disk until it compacts them (T-18).
+ * `unreadable` for casts this device can't read, which are never replaced,
+ * and `unwritable` for storage the browser refuses.
+ */
+export async function declinePosting(
+  electionId: Uint8Array,
+  tier: number,
+  ballot: Uint8Array,
+  factory: IDBFactory = indexedDB,
+): Promise<DeclinePostingOutcome> {
+  const key = keyOf(electionId, tier);
+  const outcome = await updateCasts(key, factory, (casts) => withPostingDeclined(casts, ballot));
+  return outcome === "recorded" ? "declined" : outcome;
 }

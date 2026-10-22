@@ -15,6 +15,7 @@ import {
   type CastResult,
   type ChallengeResult,
   type IntakeResult,
+  type DeclineResult,
   type PostingResult,
   type ReceiptResult,
   type CommitmentResult,
@@ -309,6 +310,20 @@ export class BallotWorker {
       TIMEOUT_MS,
     );
     if (response.kind !== "posting") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * The voter declined to post `ballot`'s unreceipted seats: the worker
+   * erases every `m_i` a seal it cast still keeps for it (Client rule 4).
+   */
+  async decline(ballot: Uint8Array): Promise<DeclineResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "decline", ballot }),
+      [],
+      TIMEOUT_MS,
+    );
+    if (response.kind !== "decline") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

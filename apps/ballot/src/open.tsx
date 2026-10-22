@@ -8,6 +8,7 @@ import {
   type CastAsked,
   type CastsRead,
   type CheckedReceipt,
+  type DeclinePostingOutcome,
   type EraseSharesOutcome,
   keepsShares,
   newestBlock,
@@ -25,6 +26,7 @@ import type { Delivery, IntakeAnswer } from "./intake.ts";
 import { passedOnDevice, postingCutoff, postingLapsed } from "./lapse.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
+import { Declined, PostingOffer } from "./posting-offer.tsx";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
@@ -46,9 +48,11 @@ import { formatTime } from "./time.ts";
 import type {
   CastResult,
   ChallengeResult,
+  DeclineResult,
   FindCellResult,
   IntakeResult,
   MembershipProofProblem,
+  PostingResult,
   ReceiptResult,
   SealResult,
 } from "./worker/protocol.ts";
@@ -146,6 +150,38 @@ export interface ElectionSource {
     | Extract<ReceiptResult, { readonly ok: false }>
   >;
   /**
+   * The worker's check that a seat's kept share would deliver it if posted
+   * (`BallotWorker.posting`), before any posting is offered or made
+   * ([[delivery]], Client rule 4); rejects if the worker fails. The worker
+   * gets its own copy of `m`.
+   */
+  posting(ballot: Uint8Array, share: PostingShare): Promise<PostingResult>;
+  /**
+   * Posts each of `shares`, the kept shares of the recorded cast whose bytes
+   * are `ballot`, through the contract path, the only path a posting
+   * delivers by ([[delivery]], Direct submit), answering `recorded` only once
+   * every one is recorded by the contract; absent while the build has no
+   * contract path (part 3c-1b-2b-2b-2d-2b-2), and then no posting is
+   * offered.
+   */
+  readonly post?: (
+    electionId: Uint8Array,
+    ballot: Uint8Array,
+    shares: readonly PostingShare[],
+  ) => Promise<PostAnswer>;
+  /**
+   * Erases the unreceipted seats' `ct_i` and `m_i` of the recorded cast
+   * whose bytes are `ballot`, once the voter declined to post them
+   * (`declinePosting`).
+   */
+  declinePosting(
+    electionId: Uint8Array,
+    tier: number,
+    ballot: Uint8Array,
+  ): Promise<DeclinePostingOutcome>;
+  /** The worker's erasure of every `m_i` its seals keep for `ballot` once the voter declined (`BallotWorker.decline`). */
+  declineSeal(ballot: Uint8Array): Promise<DeclineResult>;
+  /**
    * Erases every unreceipted seat's `ct_i` and `m_i` from the recorded casts
    * (`eraseShares`), once the poll's posting cutoff passed.
    */
@@ -195,13 +231,27 @@ export interface ElectionSource {
    * Whether this build has every route to a seat's intake that
    * [[delivery]], Client rule 4, asks for before delivery counts as failed:
    * the operator's relay, a node's own endpoint through an anonymiser, and
-   * the posting the voter may choose. Until one does, no ballot is made:
+   * the posting the voter may choose (`post`). Until one does, no ballot is made:
    * the relay holds the whole record, and an operator that refuses one seat
    * could board it undelivered, outranking the voter's earlier ballot and
    * voiding their vote ([[revoting]], Selection; T-25).
    */
   readonly delivers: boolean;
 }
+
+/** One unreceipted seat's kept share: its `ct_i` and ML-KEM message `m_i`. */
+export interface PostingShare {
+  readonly seat: number;
+  readonly ciphertext: Uint8Array;
+  readonly m: Uint8Array;
+}
+
+/**
+ * A posting's outcome: `recorded` by the contract, `refused` by it, or
+ * `unreachable`, which may still land: a posting is the same whoever
+ * boards it, so posting again is safe.
+ */
+export type PostAnswer = "recorded" | "refused" | "unreachable";
 
 /** An L1 block, by number and hash, that a ballot's membership message names. */
 export interface L1Block {
@@ -237,6 +287,8 @@ const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const fromHex = (hex: string) =>
   Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 /** Fetches, checks and shows one election; `origin` is the page's own, which `onSharedGatewayPath` passed. */
 export function OpenElection({
@@ -426,6 +478,16 @@ type Step =
   | { readonly kind: "proving-refused"; readonly problem: ProvingProblem }
   | { readonly kind: "delivering" }
   | { readonly kind: "sending" }
+  | { readonly kind: "checking-posting" }
+  | {
+      readonly kind: "offer";
+      readonly sending: Sending;
+      /** A posting the voter chose didn't go through. */
+      readonly failed?: true;
+    }
+  | { readonly kind: "declining" }
+  | { readonly kind: "posting" }
+  | { readonly kind: "declined" }
   | {
       readonly kind: "unsent";
       readonly reason: UnsentReason;
@@ -918,8 +980,8 @@ export function Ballot({
    * every qualified seat is receipted ([[0002-everlasting-privacy]],
    * Synchronous intake). A ballot boarded with a seat undelivered would
    * outrank the voter's earlier ballot and then fail delivery, voiding their
-   * vote ([[revoting]], Selection), so until a posting can be offered
-   * (Client rule 4) the voter is told and offered to deliver again.
+   * vote ([[revoting]], Selection), so the voter is offered the choice for
+   * the seats left (`offer`; Client rule 4) as soon as delivery failed.
    */
   async function deliverThenSend(sending: Sending, current: () => boolean): Promise<Step> {
     const { ballot, tier, undelivered } = sending;
@@ -976,15 +1038,149 @@ export function Ballot({
         }
       }
       const left = undelivered.filter(({ seat }) => !receipted.has(seat));
-      if (left.length > 0)
-        return {
-          kind: "unsent",
-          reason: "undelivered",
-          sending: { ...sending, undelivered: left },
-        };
+      if (left.length > 0) {
+        const rest: Sending = { ...sending, undelivered: left };
+        // A cast found recorded on opening the poll names a ballot read from
+        // storage alone, which no posting may name (`castPostingSeatV3`):
+        // its voter sends it again or answers anew.
+        return sending.resumed === true
+          ? { kind: "unsent", reason: "undelivered", sending: rest }
+          : offer(rest, current);
+      }
     }
     if (current()) setStep({ kind: "sending" });
     return send({ ...sending, undelivered: [] });
+  }
+
+  /**
+   * The kept share of each of `sending`'s unreceipted seats, read back from
+   * this device's record and passed by the worker's posting check against
+   * the ballot it cast on this page, the only ballot a posting may name
+   * ([[delivery]], Client rule 4; `castPostingSeatV3`), with `sending` less
+   * any seat receipted since (another tab), which is never posted (Client
+   * rule 2). So a posting is offered or made only for an `m_i` that would
+   * deliver its seat, never one storage altered after the voter gave up the
+   * seat's everlasting privacy for it (T-18, T-15): a share that fails is an
+   * unreadable record. The caller zeroes the shares' `m` once done.
+   */
+  async function postable(
+    sending: Sending,
+  ): Promise<{ readonly sending: Sending; readonly shares: readonly PostingShare[] } | Step> {
+    const { ballot, tier, undelivered } = sending;
+    const read = await source.casts(electionId, tier);
+    if (read.kind === "unreadable") return stopped("casts-unreadable");
+    const cast = read.casts.find((c) => equalBytes(c.ballot, ballot));
+    // Recorded before delivery: a store without it now was changed elsewhere.
+    if (cast === undefined) return stopped("cast-faulty");
+    const shares: PostingShare[] = [];
+    const left: Sending["undelivered"][number][] = [];
+    let passed = false;
+    try {
+      for (const seat of undelivered) {
+        const kept = cast.shares.find((share) => share.seat === seat.seat);
+        if (kept !== undefined && "receipt" in kept) continue;
+        // Erased since (a decline or the cutoff in another tab), or not the
+        // ciphertext delivered: nothing is posted from this record.
+        if (kept === undefined || !("m" in kept) || !equalBytes(kept.ciphertext, seat.ciphertext))
+          return stopped("cast-faulty");
+        shares.push({ seat: kept.seat, ciphertext: kept.ciphertext, m: kept.m });
+        left.push(seat);
+      }
+      for (const share of shares) {
+        const verdict = await source.posting(ballot, share);
+        // A worker that no longer holds the poll checks nothing.
+        if (!verdict.ok)
+          return stopped(verdict.problem === "unknown" ? "cast-failed" : "casts-unreadable");
+      }
+      passed = true;
+      return { sending: { ...sending, undelivered: left }, shares };
+    } finally {
+      if (!passed) for (const { m } of shares) m.fill(0);
+    }
+  }
+
+  /**
+   * Offers the voter the choice for a cast whose unreceipted seats no route
+   * receipted ([[delivery]], Client rule 4), once their kept shares pass
+   * (`postable`), asked as soon as delivery failed so a voter who leaves the
+   * ballot can answer again while the poll is open. A cast every seat
+   * receipted since is sent.
+   */
+  async function offer(sending: Sending, current: () => boolean): Promise<Step> {
+    if (current()) setStep({ kind: "checking-posting" });
+    const checked = await postable(sending);
+    if ("kind" in checked) return checked;
+    for (const { m } of checked.shares) m.fill(0);
+    if (checked.sending.undelivered.length === 0) {
+      if (current()) setStep({ kind: "sending" });
+      return send(checked.sending);
+    }
+    return { kind: "offer", sending: checked.sending };
+  }
+
+  /**
+   * The voter chose to post the missing parts, after the offer said what
+   * that costs: each kept share passes the worker's check again, since the
+   * record may have changed since the offer, then goes through the contract
+   * path, and only once every one is recorded is the ballot sent: a ballot
+   * boarded with a seat neither receipted nor posted would void the voter's
+   * earlier one (Client rule 4; [[revoting]], Selection). A posting that
+   * doesn't go through returns to the offer.
+   */
+  function post(sending: Sending) {
+    const posting = source.post;
+    if (posting === undefined) return;
+    setStep({ kind: "posting" });
+    run(
+      async (current) => {
+        const checked = await postable(sending);
+        if ("kind" in checked) return checked;
+        let answer: PostAnswer;
+        try {
+          answer =
+            checked.shares.length === 0
+              ? "recorded"
+              : await posting(electionId, sending.ballot, checked.shares).catch(
+                  (): PostAnswer => "unreachable",
+                );
+        } finally {
+          for (const { m } of checked.shares) m.fill(0);
+        }
+        if (answer !== "recorded") return { kind: "offer", sending: checked.sending, failed: true };
+        if (current()) setStep({ kind: "sending" });
+        return send({ ...checked.sending, undelivered: [] });
+      },
+      { kind: "offer", sending, failed: true },
+    );
+  }
+
+  /**
+   * The voter left the ballot rather than post its missing parts: their
+   * `ct_i` and `m_i` are erased from this device's record and every `m_i`
+   * from the worker's seals ([[delivery]], Client rule 4; T-18), and the
+   * ballot is never sent from here. The worker erases its copies even if
+   * the store refused, since the voter declined either way; a worker that
+   * fails is stopped, and its seals go with it.
+   */
+  function decline(sending: Sending) {
+    const { ballot, tier } = sending;
+    setStep({ kind: "declining" });
+    run(async () => {
+      const erased = await source
+        .declinePosting(electionId, tier, ballot)
+        .catch((): DeclinePostingOutcome => "unwritable");
+      await source.declineSeal(ballot).catch(() => undefined);
+      switch (erased) {
+        case "declined":
+          return { kind: "declined" };
+        case "missing":
+          return stopped("cast-faulty");
+        case "unreadable":
+          return stopped("casts-unreadable");
+        case "unwritable":
+          return stopped("casts-unwritable");
+      }
+    }, stopped("casts-unwritable"));
   }
 
   function sendAgain(sending: Sending) {
@@ -1024,7 +1220,26 @@ export function Ballot({
     case "opening":
     case "delivering":
     case "sending":
+    case "checking-posting":
+    case "declining":
+    case "posting":
       return <Working poll={poll} kind={step.kind} />;
+    case "offer": {
+      const { sending } = step;
+      return (
+        <PostingOffer
+          poll={poll}
+          trackingCode={sending.trackingCode}
+          missing={sending.undelivered.length}
+          failed={step.failed === true}
+          onRetry={() => sendAgain(sending)}
+          onDecline={() => decline(sending)}
+          onPost={source.post === undefined ? undefined : () => post(sending)}
+        />
+      );
+    }
+    case "declined":
+      return <Declined poll={poll} onAgain={again} />;
     case "sealed":
       return (
         <Sealed

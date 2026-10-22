@@ -14,6 +14,7 @@ import type { Backer } from "./backup-offer.tsx";
 import type {
   CastsRead,
   CheckedReceipt,
+  DeclinePostingOutcome,
   EraseSharesOutcome,
   KeptShare,
   RecordBoardedOutcome,
@@ -33,6 +34,7 @@ import {
   Checking,
   type ElectionSource,
   type L1Block,
+  type PostAnswer,
   Unavailable,
 } from "./open.tsx";
 import type { ReceiptAnswer } from "./receipts.ts";
@@ -44,7 +46,9 @@ import type { SendAnswer } from "./send.ts";
 import type {
   CastResult,
   ChallengeResult,
+  DeclineResult,
   IntakeResult,
+  PostingResult,
   ReceiptResult,
   SealResult,
   Tier0OutcomeResult,
@@ -233,6 +237,16 @@ interface Voter {
   readonly erased: EraseSharesOutcome;
   /** This device's casts once the shares were erased, when they aren't `held`. */
   readonly heldAfterErase?: CastsRead;
+  /** This device's casts once the cast was recorded, when they aren't `held`. */
+  readonly heldAfterRecord?: CastsRead;
+  /** The worker's posting check of seat `seat`'s kept share at its `call`th check (from 0). */
+  readonly postings: (seat: number, call: number) => PostingResult | "fail";
+  /** The contract path's answers to each posting in turn, the last one repeating; absent, the build has none. */
+  readonly posted?: readonly (PostAnswer | "fail")[];
+  /** What erasing a declined cast's shares answers. */
+  readonly declined: DeclinePostingOutcome;
+  /** What the worker's erasure of its seals' shares answers. */
+  readonly declinedSeal: DeclineResult | "fail";
 }
 
 /** Before every story poll's posting cutoff, by both clocks. */
@@ -260,6 +274,9 @@ const VOTER: Voter = {
   now: Number(BEFORE_CUTOFF) * 1000,
   chainTime: { ok: true, timestamp: BEFORE_CUTOFF },
   erased: "erased",
+  postings: () => ({ ok: true }),
+  declined: "declined",
+  declinedSeal: { ok: true },
 };
 
 type Mock<F extends (...args: never[]) => unknown> = F & ReturnType<typeof fn<F>>;
@@ -286,6 +303,12 @@ const MOCKS = new WeakMap<
     readonly keepReceiptBoarded: Mock<ElectionSource["keepReceiptBoarded"]>;
     readonly eraseShares: Mock<ElectionSource["eraseShares"]>;
     readonly chainTime: Mock<ElectionSource["chainTime"]>;
+    readonly posting: Mock<ElectionSource["posting"]>;
+    readonly post: Mock<NonNullable<ElectionSource["post"]>>;
+    readonly declinePosting: Mock<ElectionSource["declinePosting"]>;
+    readonly declineSeal: Mock<ElectionSource["declineSeal"]>;
+    /** Each `m` the page handed the worker or the contract path, as given, and a copy taken when it was. */
+    readonly ms: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
     /** Each secret the page handed on, as given, and a copy taken when it was. */
     readonly secrets: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
     /** Finishes a held cast. */
@@ -337,6 +360,11 @@ function source(
     chainTime: chainTimeRead,
     erased,
     heldAfterErase,
+    heldAfterRecord,
+    postings,
+    posted,
+    declined,
+    declinedSeal,
   } = {
     ...VOTER,
     ...voter,
@@ -366,13 +394,17 @@ function source(
   });
   let sent = 0;
   let erasures = 0;
+  let records = 0;
   const casts = fn<ElectionSource["casts"]>(() =>
     Promise.resolve(
       sent > 0 && heldAfterSend !== undefined
         ? heldAfterSend
         : erasures > 0 && heldAfterErase !== undefined
           ? heldAfterErase
-          : held,
+          : records > 0 && heldAfterRecord !== undefined
+            ? // Each read hands out copies, as readCasts does, so zeroing one changes no other.
+              structuredClone(heldAfterRecord)
+            : held,
     ),
   );
   const eraseShares = fn<ElectionSource["eraseShares"]>(() => {
@@ -380,7 +412,25 @@ function source(
     return Promise.resolve(erased);
   });
   const chainTime = fn<ElectionSource["chainTime"]>(() => Promise.resolve(chainTimeRead));
-  const record = fn<ElectionSource["record"]>(() => Promise.resolve(recorded));
+  const record = fn<ElectionSource["record"]>(() => {
+    records++;
+    return Promise.resolve(recorded);
+  });
+  const ms: { given: Uint8Array; copy: Uint8Array }[] = [];
+  const checks = new Map<number, number>();
+  const posting = fn<ElectionSource["posting"]>((_, share) => {
+    ms.push({ given: share.m, copy: share.m.slice() });
+    const call = checks.get(share.seat) ?? 0;
+    checks.set(share.seat, call + 1);
+    return answer(postings(share.seat, call));
+  });
+  let posts = 0;
+  const post = fn<NonNullable<ElectionSource["post"]>>((_, __, shares) => {
+    for (const { m } of shares) ms.push({ given: m, copy: m.slice() });
+    return answer((posted ?? ["fail"])[Math.min(posts++, (posted ?? []).length - 1)] ?? "fail");
+  });
+  const declinePosting = fn<ElectionSource["declinePosting"]>(() => Promise.resolve(declined));
+  const declineSeal = fn<ElectionSource["declineSeal"]>(() => answer(declinedSeal));
   const intake = fn<ElectionSource["intake"]>(() => answer(intakeResult));
   const deliveries = new Map<number, number>();
   const deliver = fn<ElectionSource["deliver"]>((seat) => {
@@ -435,6 +485,10 @@ function source(
     keepReceiptBoarded,
     eraseShares,
     chainTime,
+    posting,
+    ...(posted === undefined ? {} : { post }),
+    declinePosting,
+    declineSeal,
     now: () => now,
     forcedInclusion: 46_800n,
     registrar,
@@ -459,6 +513,11 @@ function source(
     keepReceiptBoarded,
     eraseShares,
     chainTime,
+    posting,
+    post,
+    declinePosting,
+    declineSeal,
+    ms,
     secrets,
     release: () => release(),
   });
@@ -1186,6 +1245,32 @@ export const CastAnotherCell: Story = {
 const castsSource = (voter: Partial<Voter>) =>
   source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }, SEALED, OPENED, voter);
 
+/** This device's record once `CAST` was recorded: every qualified seat with its `ct_i` and `m_i`. */
+const CAST_RECORDED: CastsRead = {
+  kind: "read",
+  casts: [
+    {
+      ballot: CAST.ballot,
+      l1Number: L1.number,
+      shares: CAST.ciphertexts.map(({ seat, ciphertext, m }) => ({
+        seat,
+        ciphertext,
+        m: m ?? new Uint8Array(32),
+      })),
+    },
+  ],
+};
+
+/** A cast whose seat 3 never receipts, recorded as `CAST_RECORDED`, so the posting is offered. */
+const offerSource = (voter: Partial<Voter> = {}) =>
+  castsSource({
+    delivered: (seat) => (seat === 3 ? { kind: "refused", code: "intake-busy" } : receiptOf(seat)),
+    heldAfterRecord: CAST_RECORDED,
+    ...voter,
+  });
+
+const OFFER = "Some trustees haven't taken your ballot";
+
 export const CastsUnreadable: Story = {
   name: "Cast, and this device's record of its casts can't be read",
   args: { source: castsSource({ held: { kind: "unreadable" } }) },
@@ -1341,15 +1426,16 @@ export const DeliveredAgainAfterARefusal: Story = {
     source: castsSource({
       delivered: (seat, call) =>
         seat === 3 && call === 0 ? { kind: "refused", code: "intake-busy" } : receiptOf(seat),
+      heldAfterRecord: CAST_RECORDED,
     }),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    await castInto(canvas, OFFER);
     // Never boarded with a seat undelivered, which would void an earlier ballot.
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
     await expect(mocks(args.source).keepReceipt).toHaveBeenCalledOnce();
-    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Try the trustees again" }));
     await expect(
       await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
     ).toHaveFocus();
@@ -1371,18 +1457,15 @@ export const UndeliveredEveryWay: Story = {
     source: castsSource({
       delivered: (seat, call) =>
         call > 0 ? "fail" : seat === 1 ? { kind: "busy" } : { kind: "unavailable" },
+      heldAfterRecord: CAST_RECORDED,
     }),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
-    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
-    await expect(
-      await canvas.findByRole("heading", {
-        level: 1,
-        name: "Your ballot hasn't reached every trustee yet",
-      }),
-    ).toHaveFocus();
+    await castInto(canvas, OFFER);
+    await expect(canvas.getByText(/and 2 didn't take theirs/)).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Try the trustees again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: OFFER })).toHaveFocus();
     await expect(mocks(args.source).deliver).toHaveBeenCalledTimes(4);
     await expect(mocks(args.source).receipt).not.toHaveBeenCalled();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
@@ -1395,11 +1478,12 @@ export const ReceiptRefusedByTheWorker: Story = {
     source: castsSource({
       receipts: (receipt) =>
         receipt[1] === 3 ? { ok: false, problem: "refused" } : passes(receipt),
+      heldAfterRecord: CAST_RECORDED,
     }),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    await castInto(canvas, OFFER);
     // Only the passing receipt is kept: the other seat keeps its m_i (Client rule 1; T-25).
     await expect(mocks(args.source).keepReceipt).toHaveBeenCalledOnce();
     await expect(mocks(args.source).keepReceipt.mock.calls[0]?.[3]).toEqual({
@@ -1414,12 +1498,237 @@ export const ReceiptForAnotherSeat: Story = {
   name: "A seat's intake answers with another seat's receipt",
   args: {
     // Seat 3's relay answers with seat 1's receipt, which is seat 1's all the same.
-    source: castsSource({ delivered: () => receiptOf(1) }),
+    source: castsSource({ delivered: () => receiptOf(1), heldAfterRecord: CAST_RECORDED }),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await castInto(canvas, "Your ballot hasn't reached every trustee yet");
+    await castInto(canvas, OFFER);
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOffered: Story = {
+  name: "A seat no route receipts is offered for posting once the worker passes its kept share",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.getByText(/and one didn't take theirs/)).toBeVisible();
+    // The stored share of the seat left, checked against the ballot cast on this page.
+    await expect(of.posting).toHaveBeenCalledOnce();
+    await expect(of.posting.mock.calls[0]?.[0]).toEqual(CAST.ballot);
+    await expect(of.posting.mock.calls[0]?.[1]).toMatchObject({
+      seat: 3,
+      ciphertext: new Uint8Array(4).fill(3),
+    });
+    // The page's copy of m is zeroed once judged (T-18).
+    await expect(of.ms[0]?.copy).toEqual(new Uint8Array(32).fill(0x83));
+    await expect(of.ms[0]?.given).toEqual(new Uint8Array(32));
+    // What a posting costs is said before it can be chosen (Client rule 4; T-15).
+    await expect(canvas.getByText(/lose their long-term protection/)).toBeVisible();
+    await expect(canvas.getByText(/read your whole ballot/)).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Post publicly, then send" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+    // Nothing is posted, erased or sent until the voter chooses.
+    await expect(of.post).not.toHaveBeenCalled();
+    await expect(of.declinePosting).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOfferWithoutAContractPath: Story = {
+  name: "A build with no contract path offers no posting, only trying again or leaving the ballot",
+  args: { source: offerSource() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, OFFER);
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(canvas.queryByText(/lose their long-term protection/)).toBeNull();
+    await expect(canvas.getByRole("button", { name: "Try the trustees again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+    await expect(mocks(args.source).posting).toHaveBeenCalledOnce();
+  },
+};
+
+export const PostingChosen: Story = {
+  name: "The voter posts the seat left: its share is checked again, posted, then the ballot sent",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toHaveFocus();
+    // Checked again before it goes: the record may have changed since the offer.
+    await expect(of.posting).toHaveBeenCalledTimes(2);
+    await expect(of.post).toHaveBeenCalledOnce();
+    await expect(of.post.mock.calls[0]?.[0]).toEqual(fromHex(ELECTION_ID));
+    await expect(of.post.mock.calls[0]?.[1]).toEqual(CAST.ballot);
+    await expect(of.post.mock.calls[0]?.[2].map(({ seat }) => seat)).toEqual([3]);
+    // Posted before the ballot leaves: a ballot boarded with the seat neither
+    // receipted nor posted would void the voter's earlier one.
+    await expect(of.post.mock.invocationCallOrder[0]).toBeLessThan(
+      of.send.mock.invocationCallOrder[0] ?? 0,
+    );
+    await expect(of.send).toHaveBeenCalledWith(fromHex(ELECTION_ID), CAST.ballot);
+    // Every copy of m the page handed on is zeroed once used.
+    for (const { given } of of.ms) await expect(given).toEqual(new Uint8Array(32));
+    await expect(of.declinePosting).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingFailsThenGoes: Story = {
+  name: "A posting the contract path refuses or never answers returns to the offer, and nothing is sent",
+  args: { source: offerSource({ posted: ["refused", "fail", "recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+      await expect(await canvas.findByText("The posting didn't go through")).toBeVisible();
+      await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(OFFER);
+      await expect(of.post).toHaveBeenCalledTimes(attempt);
+      await expect(of.send).not.toHaveBeenCalled();
+    }
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.send).toHaveBeenCalledOnce();
+  },
+};
+
+export const PostingDeclined: Story = {
+  name: "The voter leaves the ballot: its kept shares are erased here and in the worker, and nothing is sent",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Leave this ballot" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "This ballot won't count" }),
+    ).toHaveFocus();
+    await expect(of.declinePosting).toHaveBeenCalledWith(fromHex(ELECTION_ID), 0, CAST.ballot);
+    await expect(of.declineSeal).toHaveBeenCalledWith(CAST.ballot);
+    await expect(of.post).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    await expect(await canvas.findByRole("heading", { level: 1 })).toHaveTextContent(FIRST);
+  },
+};
+
+export const PostingDeclinedUnwritable: Story = {
+  name: "A decline the browser can't record still erases the worker's copies and says so",
+  args: { source: offerSource({ declined: "unwritable", declinedSeal: "fail" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Leave this ballot" }));
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device couldn't record your ballot",
+      }),
+    ).toBeVisible();
+    await expect(of.declineSeal).toHaveBeenCalledOnce();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingCheckRefused: Story = {
+  name: "A kept share the worker's posting check refuses is never offered: the record is unreadable",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      postings: () => ({ ok: false, problem: "refused", code: "posting-encapsulation" }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device's record of your ballots can't be read");
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(mocks(args.source).post).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+    for (const { given } of mocks(args.source).ms) await expect(given).toEqual(new Uint8Array(32));
+  },
+};
+
+export const PostingCheckWithoutThePoll: Story = {
+  name: "A worker that no longer holds the poll at the posting check offers nothing",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      postings: () => ({ ok: false, problem: "unknown" }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "This device couldn't make your ballot");
+    await expect(mocks(args.source).post).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingRecordChanged: Story = {
+  name: "A record whose kept share was erased or changed since the cast offers nothing",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      heldAfterRecord: {
+        kind: "read",
+        casts: [
+          {
+            ballot: CAST.ballot,
+            l1Number: L1.number,
+            shares: [
+              { seat: 1, ciphertext: new Uint8Array(4).fill(1), m: new Uint8Array(32) },
+              { seat: 3, erased: true },
+            ],
+          },
+        ],
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot didn't pass this device's check");
+    await expect(mocks(args.source).posting).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingNotNeeded: Story = {
+  name: "A seat another tab receipted since is never posted: the ballot is sent",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      heldAfterRecord: {
+        kind: "read",
+        casts: [
+          {
+            ballot: CAST.ballot,
+            l1Number: L1.number,
+            shares: [
+              { seat: 1, ciphertext: new Uint8Array(4).fill(1), receipt: Uint8Array.of(0xec, 1) },
+              { seat: 3, ciphertext: new Uint8Array(4).fill(3), receipt: Uint8Array.of(0xec, 3) },
+            ],
+          },
+        ],
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot is on the board");
+    await expect(mocks(args.source).posting).not.toHaveBeenCalled();
+    await expect(mocks(args.source).post).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).toHaveBeenCalledOnce();
   },
 };
 

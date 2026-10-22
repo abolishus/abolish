@@ -332,6 +332,46 @@ describe("casting a seal", () => {
   );
 
   test(
+    "a decline erases every m_i the seal keeps for its cast, so a recast hands none, and nothing for another poll's ballot (Client rule 4)",
+    async () => {
+      const { session, seal } = sealed();
+      const p = snarkjs();
+      const result = await session.cast(castRequest(seal, p.port));
+      p.close();
+      admitted(result);
+      if (!result.ok) throw new Error("unreachable");
+      const decline = (ballot: Uint8Array, on = session) =>
+        on.decline({ v: PROTOCOL_VERSION, id: 9, kind: "decline", ballot });
+      // Bytes that aren't a version-3 record, or no poll held, erase nothing.
+      expect(decline(result.ballot.subarray(1))).toEqual({ ok: false, problem: "unknown" });
+      expect(decline(result.ballot, new BallotSession())).toEqual({
+        ok: false,
+        problem: "unknown",
+      });
+      const recastAt = async (l1Number: bigint) => {
+        const later = snarkjs();
+        const recast = await session.cast(
+          castRequest(seal, later.port, { l1Number, l1Hash: new Uint8Array(32) }),
+        );
+        later.close();
+        admitted(recast);
+        if (!recast.ok) throw new Error("unreachable");
+        return recast;
+      };
+      expect((await recastAt(9_000_100n)).ciphertexts.every(({ m }) => m?.length === 32)).toBe(
+        true,
+      );
+      expect(decline(result.ballot)).toEqual({ ok: true });
+      for (const share of (await recastAt(9_000_200n)).ciphertexts)
+        expect(share).not.toHaveProperty("m");
+      // The page's copy from the first cast is its own; a second decline is a no-op.
+      expect(result.ciphertexts.every(({ m }) => m?.length === 32)).toBe(true);
+      expect(decline(result.ballot)).toEqual({ ok: true });
+    },
+    4 * PROOF_TIMEOUT,
+  );
+
+  test(
     "the record passes the admission checks, carries the seal's core, and recasts with the same vote; the seal is never opened",
     async () => {
       const { session, seal } = sealed();

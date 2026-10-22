@@ -818,3 +818,37 @@ export function receiptSealV3(
   }
   return seat;
 }
+
+/**
+ * The voter declined to post a cast of `sealed`, a seal this client cast
+ * (`castSealV3`), whose bytes are `ballot` ([[delivery]], Client rule 4):
+ * every `m_i` the seal still keeps, the unreceipted seats', is zeroed and
+ * dropped, so no later `finishSealV3` of it hands one out and nothing a
+ * posting would need stays in this realm (T-18, T-15). The seats it erased,
+ * in seat order, or `undefined`, with nothing erased, for a ballot that
+ * doesn't carry the seal's ballot hash: a decline for another seal's cast
+ * never erases this one's. Throws on a seal not yet cast and on bytes that
+ * aren't a version-3 ballot record.
+ */
+export function declineSealV3(
+  sealed: SealedBallotV3,
+  ballot: Uint8Array,
+): readonly number[] | undefined {
+  const seal = sealOf(sealed);
+  const { cast } = seal;
+  if (cast === undefined) throw new TypeError("declineSealV3: this seal wasn't cast");
+  const record = decodeBallot(ballot, 3);
+  const ballotHash = ballotHashV3(
+    { definitionHash: record.definition_hash, cell: record.cell, nullifier: record.nullifier },
+    record.committed_vote,
+  );
+  if (!equalBytes(ballotHash, cast.ballotHash)) return undefined;
+  const erased: number[] = [];
+  for (const kept of cast.messages) {
+    if (kept.m === undefined) continue;
+    kept.m.fill(0);
+    delete kept.m;
+    erased.push(kept.seat);
+  }
+  return erased;
+}

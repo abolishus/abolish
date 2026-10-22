@@ -12,6 +12,7 @@ import { App, SharedOrigin } from "./app.tsx";
 import { backUp, fetchIdentityBackup, putIdentityBackup } from "./backup.ts";
 import {
   castAsAsked,
+  declinePosting,
   eraseShares,
   readCasts,
   recordBoarded,
@@ -267,6 +268,11 @@ const source: ElectionSource = {
   deliver: (seat, delivery) =>
     deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
   receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
+  posting: (ballot, share) => withWorker((used) => used.posting(ballot, share)),
+  // No `post` yet: the contract path a posting goes through is part
+  // 3c-1b-2b-2b-2d-2b-2, and until then no posting is offered.
+  declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
+  declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),
   chainTime: () => loadChainTime(STAGING, (url, init) => fetch(url, init)),
   now: () => Date.now(),
@@ -283,7 +289,7 @@ const source: ElectionSource = {
     recordReceiptBoarded(electionId, tier, ballot, checked, boarded),
   registrar,
   // Only the operator's relay so far: the route that bypasses it and the
-  // posting offer come first (P2-8 part 3c-1b-2b-2b-2c).
+  // contract path for a posting come first (P2-8 part 3c-1b-2b-2b-2d-2b-2).
   delivers: false,
 };
 

@@ -61,7 +61,9 @@ export type KeptShare =
        * The board entry carrying a receipt that passed for this seat of the
        * ballot, and the link after it: this one, or an earlier receipt for
        * the seat the board path already carried ([[delivery]], Boarding,
-       * rule 5), which the worker passed as it did this one.
+       * rule 5), which the worker passed as it did this one. Later checks
+       * of the board (an anchored inclusion, a resubmission) are of the
+       * receipt this entry carries, which may not be `receipt`.
        */
       readonly boarded?: Boarded;
     };

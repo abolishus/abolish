@@ -808,7 +808,7 @@ export function Ballot({
           .keepBoarded(electionId, tier, ballot, checked)
           .catch(() => "unwritable" as const);
         if (kept === "conflict") return stopped("answer-conflict");
-        await boardReceipts(tier, ballot);
+        afterSent(tier, ballot);
         return { kind: "sent", trackingCode, index: checked.index };
       }
       // A copy of this ballot is already on the board: it counts as this
@@ -817,7 +817,7 @@ export function Ballot({
       // receipts are this one's.
       case "rejected":
         if (answer.code !== "repeat") return stopped("send-rejected", answer.code);
-        await boardReceipts(tier, ballot);
+        afterSent(tier, ballot);
         return { kind: "sent", trackingCode };
       case "not-open":
         return stopped("not-open");
@@ -861,8 +861,19 @@ export function Ballot({
       const kept = await source
         .keepReceiptBoarded(electionId, tier, ballot, checked.checked, entry)
         .catch((): RecordReceiptOutcome => "unwritable");
-      if (kept !== "recorded") return;
+      // A store this device can't read or write keeps no later entry
+      // either; `missing` is this seat's alone.
+      if (kept === "unreadable" || kept === "unwritable") return;
     }
+  }
+
+  /**
+   * Boards a sent cast's receipts once the voter is shown it sent, never
+   * before: an operator that stalls the receipt route would otherwise hold
+   * the voter on the sending screen with their ballot already boarded.
+   */
+  function afterSent(tier: number, ballot: Uint8Array) {
+    void boardReceipts(tier, ballot).catch(() => {});
   }
 
   /**

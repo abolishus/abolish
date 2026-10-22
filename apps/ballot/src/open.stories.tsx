@@ -219,7 +219,8 @@ interface Voter {
   /** This device's casts once the ballot was sent, when they aren't `held`. */
   readonly heldAfterSend?: CastsRead;
   /** What the receipt route answers to the `call`th submission (from 0) of `receipt`. */
-  readonly receiptAnswers: (receipt: Uint8Array, call: number) => ReceiptAnswer | "fail";
+  /** `hold`: never answers. */
+  readonly receiptAnswers: (receipt: Uint8Array, call: number) => ReceiptAnswer | "fail" | "hold";
   /** What keeping a receipt's checked entry answers. */
   readonly keptReceiptEntry: RecordReceiptOutcome;
 }
@@ -363,7 +364,8 @@ function source(
   const submitReceipt = fn<ElectionSource["submitReceipt"]>((_, receipt) => {
     const call = submissions.get(toHex(receipt)) ?? 0;
     submissions.set(toHex(receipt), call + 1);
-    return answer(receiptAnswers(receipt, call));
+    const result = receiptAnswers(receipt, call);
+    return result === "hold" ? new Promise<never>(() => {}) : answer(result);
   });
   const keepReceiptBoarded = fn<ElectionSource["keepReceiptBoarded"]>(() =>
     Promise.resolve(keptReceiptEntry),
@@ -1466,6 +1468,8 @@ export const ReceiptsBoarded: Story = {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
     const of = mocks(args.source);
+    // Shown sent first, then each entry checked and kept.
+    await waitFor(() => expect(of.keepReceiptBoarded).toHaveBeenCalledTimes(2));
     // Only after the ballot's own answer was kept, read from the store.
     await expect(of.submitReceipt.mock.calls).toEqual(
       [1, 3].map((seat) => [fromHex(ELECTION_ID), shareReceipt(seat)]),
@@ -1502,6 +1506,7 @@ export const EarlierReceiptBoarded: Story = {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
     const of = mocks(args.source);
+    await waitFor(() => expect(of.keepReceiptBoarded).toHaveBeenCalledTimes(2));
     // The earlier receipt is judged by the worker against this ballot, as
     // the voter's own was, and kept as the seat's entry (Client rule 3).
     await expect(of.receipt.mock.calls.slice(2)).toEqual(
@@ -1532,6 +1537,7 @@ export const ReceiptEntriesRefused: Story = {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
     const of = mocks(args.source);
+    await waitFor(() => expect(of.receipt).toHaveBeenCalledTimes(3));
     await expect(of.submitReceipt).toHaveBeenCalledTimes(2);
     // Another seat's receipt never reaches the worker; the refused one does.
     await expect(of.receipt.mock.calls.slice(2)).toEqual([[CAST.ballot, shareReceipt(3, 9)]]);
@@ -1554,7 +1560,7 @@ export const ReceiptRouteRefuses: Story = {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
     const of = mocks(args.source);
-    await expect(of.submitReceipt).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(of.submitReceipt).toHaveBeenCalledTimes(2));
     await expect(of.receipt).toHaveBeenCalledTimes(2);
     await expect(of.keepReceiptBoarded).not.toHaveBeenCalled();
   },
@@ -1574,8 +1580,21 @@ export const ReceiptWorkerStops: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
+    await waitFor(() => expect(mocks(args.source).receipt).toHaveBeenCalledTimes(3));
     await expect(mocks(args.source).submitReceipt).toHaveBeenCalledOnce();
     await expect(mocks(args.source).keepReceiptBoarded).not.toHaveBeenCalled();
+  },
+};
+
+export const ReceiptRouteStalls: Story = {
+  name: "A receipt route that never answers leaves the ballot shown sent",
+  args: { source: receiptsSource({ receiptAnswers: () => "hold" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot is on the board");
+    await expect(canvas.getByText("Entry 41 on the board")).toBeVisible();
+    await waitFor(() => expect(mocks(args.source).submitReceipt).toHaveBeenCalledOnce());
+    await expect(canvas.getByRole("button", { name: "Answer again" })).toBeVisible();
   },
 };
 
@@ -1585,8 +1604,8 @@ export const RepeatReceiptsBoarded: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await castInto(canvas, "Your ballot is on the board");
+    await waitFor(() => expect(mocks(args.source).keepReceiptBoarded).toHaveBeenCalledTimes(2));
     await expect(mocks(args.source).submitReceipt).toHaveBeenCalledTimes(2);
-    await expect(mocks(args.source).keepReceiptBoarded).toHaveBeenCalledTimes(2);
   },
 };
 

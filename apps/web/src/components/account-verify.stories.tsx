@@ -185,7 +185,7 @@ export const VerifiesPhone: Story = {
     await userEvent.click(phone.getByRole("button", { name: "Send a code" }));
     await userEvent.click(await phone.findByRole("button", { name: "I'm a person" }));
     await expect(await phone.findByRole("status")).toHaveTextContent(
-      "A code is on its way to (415) 555-0100",
+      "If (415) 555-0100 can take a code, one is on its way",
     );
     await expect(actions(args.challenge)).toEqual(["phone-code"]);
 
@@ -209,6 +209,8 @@ export const VerifiesPhone: Story = {
     // The number is gone from the page once verified: it isn't kept anywhere.
     await userEvent.click(phone.getByRole("button", { name: "Use another number" }));
     await expect(phone.getByLabelText("Phone number")).toHaveValue("");
+    // And the "verified" notice goes with the old number.
+    await expect(phone.getByRole("status")).toBeEmptyDOMElement();
   },
 };
 
@@ -230,6 +232,10 @@ export const Verified: Story = {
     await expect(email.queryByLabelText("E-mail address")).toBeNull();
     await userEvent.click(email.getByRole("button", { name: "Use another address" }));
     await expect(email.getByLabelText("E-mail address")).toBeVisible();
+    // Changing it can be left again, with what is held still shown.
+    await userEvent.click(email.getByRole("button", { name: "Cancel" }));
+    await expect(email.queryByLabelText("E-mail address")).toBeNull();
+    await expect(email.getByRole("button", { name: "Use another address" })).toBeVisible();
     const phone = await step(canvas, "Your phone number");
     await expect(await phone.findByText(/^Verified on October 2, 2026\./)).toBeVisible();
   },
@@ -296,6 +302,8 @@ export const ChallengeUnavailable: Story = {
     );
     await expect(calls(args.client)).toEqual([]);
     await expect(email.getByRole("button", { name: "Send a code" })).toBeEnabled();
+    // The failure isn't the address's: the field isn't marked invalid.
+    await expect(email.getByLabelText("E-mail address")).not.toHaveAttribute("aria-invalid");
   },
 };
 

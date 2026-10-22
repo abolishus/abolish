@@ -984,10 +984,11 @@ const enUS = {
   verifySent_email:
     "We sent a message to {address}. Enter the code from it; it works for 15 minutes. Nothing arrived? Check the address and send another.",
   verifySent_phone:
-    "A code is on its way to {number}, by text to a mobile or by a call to a home phone. It works for 10 minutes. Nothing arrived? Check the number and send another.",
+    "If {number} can take a code, one is on its way, by text to a mobile or by a call to a home phone. It works for 10 minutes. Nothing arrived? Check the number and send another.",
   verifyCodeLabel: "Code",
   verifyCodeSubmit: "Verify",
   verifyStartOver: "Start over",
+  verifyCancel: "Cancel",
   verifyChecked_email: "Your e-mail address is verified.",
   verifyChecked_phone: "Your phone number is verified.",
   verifyNoTarget_email: "Enter your e-mail address.",

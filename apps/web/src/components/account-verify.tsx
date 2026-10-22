@@ -46,6 +46,18 @@ const RESTARTS: ReadonlySet<VerifyFailure> = new Set([
   "numberHeld",
 ]);
 
+/** Refusals about what was typed in the address or number's field, which it marks invalid. */
+const TARGET_FAILURES: ReadonlySet<Failure["failure"]> = new Set([
+  "noTarget",
+  "invalidAddress",
+  "invalidNumber",
+  "unsupportedCountry",
+  "virtualNumber",
+]);
+
+/** Refusals about the code typed. */
+const CODE_FAILURES: ReadonlySet<Failure["failure"]> = new Set(["noCodeTyped", "wrongCode"]);
+
 /** What a refusal means for what the server holds. */
 const heldAfter = (failure: VerifyFailure): Held | undefined =>
   failure === "signedOut"
@@ -119,7 +131,10 @@ function Step({
   const refused = (e: unknown) => {
     const why = e instanceof VerifyError ? e.failure : "failed";
     const after = heldAfter(why);
-    if (after !== undefined) setHeld(after);
+    if (after !== undefined) {
+      setHeld(after);
+      setStage({ kind: "shown" });
+    }
     setFailure({
       failure: why,
       triesLeft: e instanceof VerifyError ? e.triesLeft : undefined,
@@ -198,13 +213,29 @@ function Step({
     }
   };
 
+  const change = () => {
+    setChecked(false);
+    setFailure(undefined);
+    setStage({ kind: "entering" });
+  };
+
+  const cancel = () => {
+    setFailure(undefined);
+    setTarget("");
+    setStage({ kind: "shown" });
+    heading.current?.focus();
+  };
+
   const startOver = () => {
+    setChecked(false);
     setFailure(undefined);
     setCode("");
     setStage({ kind: "entering" });
     heading.current?.focus();
   };
 
+  const targetInvalid = failure !== undefined && TARGET_FAILURES.has(failure.failure);
+  const codeInvalid = failure !== undefined && CODE_FAILURES.has(failure.failure);
   const fieldId = `verify-${kind}`;
   const codeId = `verify-${kind}-code`;
   const failureId = `verify-${kind}-failure`;
@@ -262,7 +293,7 @@ function Step({
 
         {held.kind === "verified" && stage.kind === "shown" ? (
           <div>
-            <Button variant="outline" onClick={() => setStage({ kind: "entering" })}>
+            <Button variant="outline" onClick={change}>
               {t(`verifyChange_${kind}`)}
             </Button>
           </div>
@@ -287,16 +318,21 @@ function Step({
                 aria-describedby={
                   failure === undefined ? `${fieldId}-help` : `${fieldId}-help ${failureId}`
                 }
-                aria-invalid={failure === undefined ? undefined : true}
+                aria-invalid={targetInvalid ? true : undefined}
                 disabled={busy}
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
               />
             </div>
-            <div>
+            <div className="flex flex-wrap gap-2">
               <Button type="submit" size="lg" disabled={busy}>
                 {t("verifySend")}
               </Button>
+              {held.kind === "verified" ? (
+                <Button type="button" size="lg" variant="outline" disabled={busy} onClick={cancel}>
+                  {t("verifyCancel")}
+                </Button>
+              ) : null}
             </div>
             <p className="m-0 text-sm text-muted-foreground">{t("verifyCloudflare")}</p>
           </form>
@@ -310,7 +346,7 @@ function Step({
           hidden={stage.kind !== "checking"}
         />
 
-        {stage.kind === "code" ? (
+        {canVerify && stage.kind === "code" ? (
           <form noValidate onSubmit={(e) => void verify(e)} className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor={codeId} className="text-base font-semibold">
@@ -323,7 +359,7 @@ function Step({
                 autoComplete="one-time-code"
                 spellCheck={false}
                 aria-describedby={failure === undefined ? undefined : failureId}
-                aria-invalid={failure === undefined ? undefined : true}
+                aria-invalid={codeInvalid ? true : undefined}
                 disabled={busy}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}

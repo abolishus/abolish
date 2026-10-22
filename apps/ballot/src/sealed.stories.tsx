@@ -250,8 +250,10 @@ export const UnsentUndelivered: Story = {
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Your ballot hasn't reached every trustee yet",
     );
-    // Never boarded undelivered, which would void an earlier ballot.
-    await expect(canvas.getByText(/Nothing was sent to the board/)).toBeVisible();
+    // Never boarded from here undelivered, and never a promise that the
+    // earlier ballot stands: the relay holds this one (T-25).
+    await expect(canvas.getByText(/This device sent nothing to the board/)).toBeVisible();
+    await expect(canvas.getByText(/answer again while the poll is open/)).toBeVisible();
     onSend.mockClear();
     await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
     await expect(onSend).toHaveBeenCalledOnce();

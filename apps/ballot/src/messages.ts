@@ -270,7 +270,7 @@ const enUS = {
     "This device recorded your sealed ballot and is giving each of the poll's trustees its sealed part. Keep this page open.",
   unsentUndeliveredTitle: "Your ballot hasn't reached every trustee yet",
   unsentUndelivered:
-    "A ballot counts only once each of the poll's trustees has its sealed part, and some didn't take theirs this time. Nothing was sent to the board, so your earlier ballot, if any, still stands. Send it again in a minute.",
+    "A ballot counts only once each of the poll's trustees has its sealed part, and some didn't take theirs this time. This device sent nothing to the board, but whoever passed the parts on could still put this ballot there, where it would replace your earlier one without counting. Send it again in a minute; if it still doesn't go through, answer again while the poll is open.",
   sendingTitle: "Sending your ballot",
   sending:
     "This device recorded your sealed ballot and is sending it to the public board. Keep this page open.",

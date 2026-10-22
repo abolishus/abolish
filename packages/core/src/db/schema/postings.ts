@@ -1,10 +1,11 @@
 import { bigint, numeric, pgTable, primaryKey, smallint, text } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0038_posting_ledger.sql; a test checks the two
-// agree. The identity class: the posting relay's durable record, on the
-// ballot side of the no-join rules (docs/spec/posting-relay.md, Caps and In
-// flight; T-10, T-13, T-18).
+// Drizzle view of migrations/0038_posting_ledger.sql and
+// 0039_posting_in_flight_tending.sql; a test checks the two agree. The
+// identity class: the posting relay's durable record, on the ballot side of
+// the no-join rules (docs/spec/posting-relay.md, Caps and In flight; T-10,
+// T-13, T-18).
 
 export const postingSent = pgTable("posting_sent", {
   postingKey: bytea("posting_key").primaryKey(),
@@ -48,4 +49,8 @@ export const postingInFlight = pgTable("posting_in_flight", {
   cost: numeric("cost").notNull(),
   signed: bytea("signed").notNull(),
   transactions: bytea("transactions").notNull(),
+  signedAt: bigint("signed_at", { mode: "bigint" }).notNull(),
+  broadcastAt: bigint("broadcast_at", { mode: "bigint" }).notNull(),
+  landedIn: bytea("landed_in"),
+  paid: numeric("paid"),
 });

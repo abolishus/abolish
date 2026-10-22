@@ -9,3 +9,9 @@ export {
 } from "./server.ts";
 export { CEREMONY_ENV, ceremonyFromEnv } from "./ceremony-env.ts";
 export { type CeremonyOptions, MAX_CEREMONY_POST } from "./ceremony.ts";
+export {
+  type IntakeRelayOptions,
+  intakeEndpoints,
+  MAX_INTAKE_ANSWER,
+  MAX_INTAKE_SEATS,
+} from "./intake.ts";

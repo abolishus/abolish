@@ -6,6 +6,7 @@ import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
 import { BodyError, readBody } from "./body.ts";
 import { type CeremonyOptions, ceremonyHandler, ceremonyRoute } from "./ceremony.ts";
+import { type IntakeRelayOptions, intakeRelay, intakeRoute } from "./intake.ts";
 import { hasDuplicateKey } from "./json.ts";
 import { type BallotSubmitter, router } from "./router.ts";
 
@@ -60,6 +61,8 @@ const METHOD_OF: ReadonlyMap<string, string> = new Map(
 function routeOf(req: IncomingMessage): string {
   const ceremony = ceremonyRoute(req);
   if (ceremony !== undefined) return ceremony.template;
+  const intake = intakeRoute(req);
+  if (intake !== undefined) return intake.template;
   const path = (req.url ?? "").split("?", 1)[0] ?? "";
   // A preflight is logged under its path, from the same fixed list.
   if (req.method === "OPTIONS") return METHOD_OF.has(path) ? `OPTIONS ${path}` : "unmatched";
@@ -93,13 +96,18 @@ function corsOriginSet(origins: readonly string[]): ReadonlySet<string> {
 const PREFLIGHT_MAX_AGE = 600;
 
 /**
- * Answers a CORS preflight for `path`: allowed only from a listed origin, for
- * the procedure's own method, with no request header but `content-type`.
+ * Answers a CORS preflight for a route whose one method is `method`: allowed
+ * only from a listed origin, for that method, with no request header but
+ * `content-type`.
  * Nothing else is ever allowed: no credentials, so a browser never sends a
  * cookie here (T-10), and no other header a page could use to smuggle state.
  */
-function preflight(req: IncomingMessage, res: ServerResponse, path: string, allowed: boolean) {
-  const method = METHOD_OF.get(path);
+function preflight(
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string | undefined,
+  allowed: boolean,
+) {
   const headers = (req.headers["access-control-request-headers"] ?? "")
     .split(",")
     .map((h) => h.trim().toLowerCase())
@@ -172,6 +180,7 @@ const REFUSALS: Record<number, string> = {
   413: "PAYLOAD_TOO_LARGE",
   415: "UNSUPPORTED_MEDIA_TYPE",
   500: "INTERNAL_SERVER_ERROR",
+  502: "BAD_GATEWAY",
   503: "SERVICE_UNAVAILABLE",
 };
 
@@ -228,6 +237,12 @@ export interface ApiOptions {
    * answer 503.
    */
   readonly ceremony?: CeremonyOptions;
+  /**
+   * The operator's intake relay to the default panel's seats
+   * (docs/spec/delivery.md, Client rules 4); without it the route answers
+   * 503.
+   */
+  readonly intake?: IntakeRelayOptions;
 }
 
 /** A whole request (headers and body) must arrive within this. */
@@ -247,6 +262,7 @@ export function createApiServer({
   deadlineMs = 60_000,
   corsOrigins = [],
   ceremony,
+  intake,
 }: ApiOptions): Server {
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
@@ -255,6 +271,10 @@ export function createApiServer({
     ceremony === undefined
       ? undefined
       : ceremonyHandler(sql, ceremony, () => new Date(Number(now()) * 1000));
+  const relay =
+    intake === undefined
+      ? undefined
+      : intakeRelay(intake, ({ failure }) => log({ error: `intake-relay-${failure}` }));
   let inFlight = 0;
   const handler = new OpenAPIHandler(router, {
     // Procedures' own errors (ELECTION_NOT_FOUND, …) are answers, not
@@ -313,11 +333,23 @@ export function createApiServer({
           if (status !== undefined) refuse(res, status);
           return;
         }
+        const intakeSeat = intakeRoute(req);
+        if (intakeSeat !== undefined) {
+          if (req.method === "OPTIONS") {
+            if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
+              return refuse(res, 400);
+            return preflight(req, res, "POST", allowed);
+          }
+          if (relay === undefined) return refuse(res, 503);
+          const status = await relay(req, res, intakeSeat);
+          if (status !== undefined) refuse(res, status);
+          return;
+        }
         if (req.method === "OPTIONS") {
           // A preflight carries no input, so no body either (T-31).
           if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
             return refuse(res, 400);
-          return preflight(req, res, route.slice("OPTIONS ".length), allowed);
+          return preflight(req, res, METHOD_OF.get(route.slice("OPTIONS ".length)), allowed);
         }
         if (req.method === "POST") {
           // A POST takes its input from the body alone, so nothing that keys on

@@ -560,7 +560,7 @@ async function tallyDuties(
           summing: summingRule({ election, l1: reader, counted: a.anchorClock, records, clock }),
           counted: countedSource(wiring.counted),
           peers,
-          board: await wiring.openings(election),
+          board: wiring.openings(election),
         });
         return {
           step: () => duty.step(),
@@ -631,7 +631,7 @@ export function dutyWiring(
   readonly counted: CountedSourceOptions;
   readonly receipts: (election: ApprovedElection) => ReceiptDutyOptions;
   readonly complaints: (election: ApprovedElection) => ComplaintDutyOptions;
-  readonly openings: (election: ApprovedElection) => Promise<() => Promise<BoardOpenings>>;
+  readonly openings: (election: ApprovedElection) => () => Promise<BoardOpenings>;
 } {
   const { l2ChainId } = config;
   // The directory first: a block it holds costs no request and tells no
@@ -733,14 +733,21 @@ export function dutyWiring(
     }),
     // The board's openings through `s_T`, from the same blocks: the
     // directory holds the extents the seat attested, so mostly the
-    // segments after `s_S` come from the gateways.
-    openings: async (election) =>
-      boardOpenings({
-        election,
-        l1: await l1BoardAnchors(anchors, election, "tally"),
-        blocks,
-        maxBytes: a.maxBoardBytes,
-      }),
+    // segments after `s_S` come from the gateways. The reader is set up at
+    // the first read, so one that can't be (a node down, `s_T` past a
+    // `u32`) is a read not made, never the tally duty given up.
+    openings: (election) => {
+      let read: (() => Promise<BoardOpenings>) | undefined;
+      return async () => {
+        read ??= boardOpenings({
+          election,
+          l1: await l1BoardAnchors(anchors, election, "tally"),
+          blocks,
+          maxBytes: a.maxBoardBytes,
+        });
+        return read();
+      };
+    },
   };
 }
 

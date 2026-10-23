@@ -41,8 +41,8 @@ export type BoardOpenings =
   | { readonly state: "board-failed"; readonly code: BoardErrorCode }
   /**
    * Every tally opening through `checkpoint`, the latest counted
-   * checkpoint's hash, in board order. A later read through the same
-   * checkpoint returns this same object.
+   * checkpoint's hash, in board order. A later read over the same counted
+   * checkpoints returns this same object.
    */
   | {
       readonly state: "read";
@@ -67,38 +67,44 @@ const UNREAD: ReadonlySet<BoardErrorCode> = new Set<BoardErrorCode>([
   "checkpoint-missing",
   "copy-mismatch",
 ]);
-// Step 6 judges segments and the seal past the latest anchor, never the
-// entries through it, which are all a read gives.
-const PAST_COPY: ReadonlySet<BoardErrorCode> = new Set<BoardErrorCode>(["unanchored", "unsealed"]);
+// The reader's last segment is `s_T`, not the seal, so a seal never
+// anchored by it says nothing about the entries read. An unanchored segment
+// among them is a failure of the board itself, reported as any other.
+const PAST_COPY: ReadonlySet<BoardErrorCode> = new Set<BoardErrorCode>(["unsealed"]);
 
-const equal = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && a.every((x, i) => x === b[i]);
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /**
  * The reader of one election's anchored tally openings. Each call reads the
- * election's anchors from finalized L1 and, only when the latest counted
- * checkpoint has changed since the last read that succeeded, the board
- * through it again: an anchored copy never changes, so the seat fetches the
- * board once per checkpoint, not once per step (T-52).
+ * election's anchors from finalized L1 and, only when its counted
+ * checkpoints have changed since the last read that succeeded (a later one,
+ * or a late timely one for an earlier segment, whose run the board checks
+ * must judge too), the board through them again: an anchored copy never
+ * changes, so the seat fetches the board once per set of checkpoints, not
+ * once per step (T-52).
  */
 export function boardOpenings(options: BoardOpeningsOptions): () => Promise<BoardOpenings> {
   const { election, l1, blocks, maxBytes } = options;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
     throw new RangeError("boardOpenings: maxBytes must be a positive integer");
-  let last: Extract<BoardOpenings, { state: "read" }> | undefined;
+  let last:
+    | { readonly key: string; readonly read: Extract<BoardOpenings, { state: "read" }> }
+    | undefined;
   return async () => {
     const { anchors, clock, now } = await l1.read(election.electionId);
-    let latest: Checkpoint | undefined;
+    let counted: Checkpoint[];
     try {
-      for (const cp of countedCheckpoints(election.electionId, anchors, clock, now))
-        if (latest === undefined || cp.segment > latest.segment) latest = cp;
+      counted = countedCheckpoints(election.electionId, anchors, clock, now);
     } catch (e) {
       if (e instanceof BoardError) return { state: "board-failed", code: e.code };
       throw e;
     }
+    let latest: Checkpoint | undefined;
+    for (const cp of counted) if (latest === undefined || cp.segment > latest.segment) latest = cp;
     if (latest === undefined) return { state: "unread" };
+    const key = counted.map((cp) => hex(checkpointHash(cp))).join(",");
+    if (last?.key === key) return last.read;
     const checkpoint = checkpointHash(latest);
-    if (last !== undefined && equal(last.checkpoint, checkpoint)) return last;
     const copy = await readBoardCopy(election.electionId, anchors, clock, now, blocks, maxBytes);
     if (copy.stopped !== undefined) return { state: "unread" };
     try {
@@ -115,7 +121,8 @@ export function boardOpenings(options: BoardOpeningsOptions): () => Promise<Boar
       if ((((payload[0] as number) << 8) | (payload[1] as number)) === RECORD_TYPES.tallyOpening)
         openings.push({ payload, segment });
     }
-    last = { state: "read", checkpoint, openings };
-    return last;
+    const read = { state: "read", checkpoint, openings } as const;
+    last = { key, read };
+    return read;
   };
 }

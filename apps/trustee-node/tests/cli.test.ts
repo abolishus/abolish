@@ -718,7 +718,7 @@ describe("run with the availability duty", () => {
     expect(asked.length).toBeGreaterThan(0);
   });
 
-  test("reads the board's openings back through the seat's own nodes, refusing a node on another chain", async () => {
+  test("reads the board's openings back through the seat's own nodes from the first read, refusing a node on another chain", async () => {
     const parsed = parseConfig(
       JSON.stringify({
         ...seatConfig,
@@ -752,20 +752,21 @@ describe("run with the availability duty", () => {
       store: new MemoryStore(),
       clock: () => 7n,
     });
-    await expect(
-      w.openings({
-        index: 1,
-        stubHash: new Uint8Array(32),
-        definitionHash: new Uint8Array(32),
-        electionId: new Uint8Array(32),
-        opensAt: 0n,
-        closesAt: 0n,
-        l1InclusionBound: 0n,
-        members: 0n,
-        signingSecret: new Uint8Array(32),
-        kemKeyPair: kemKeygen(),
-      }),
-    ).rejects.toThrow(L1AnchorError);
+    const read = w.openings({
+      index: 1,
+      stubHash: new Uint8Array(32),
+      definitionHash: new Uint8Array(32),
+      electionId: new Uint8Array(32),
+      opensAt: 0n,
+      closesAt: 0n,
+      l1InclusionBound: 0n,
+      members: 0n,
+      signingSecret: new Uint8Array(32),
+      kemKeyPair: kemKeygen(),
+    });
+    // Nothing is asked until the first read.
+    expect(asked).toEqual([]);
+    await expect(read()).rejects.toThrow(L1AnchorError);
     expect(asked).toEqual(["eth_chainId"]);
   });
 

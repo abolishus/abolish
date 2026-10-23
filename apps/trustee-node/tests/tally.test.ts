@@ -23,10 +23,13 @@ import {
   tallyRules,
   verifyStatement,
 } from "@abolishus/crypto";
+import { RpcError } from "@abolishus/node";
+import { L1Error } from "@abolishus/verifier";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { heldShares } from "../src/intake.ts";
+import { L1AnchorError } from "../src/l1.ts";
 import type { BoardOpening, BoardOpenings } from "../src/openings.ts";
 import type { SeatStore } from "../src/store.ts";
 import type { SummingPanel, SummingStatus } from "../src/summing.ts";
@@ -677,6 +680,36 @@ describe("the board's openings read back", () => {
       cells: [{ state: "opened" }],
       board: "wrong-index",
     });
+  });
+
+  test("a board read that fails is no read: the seat still sends its sums, and a bug still throws", async () => {
+    let fail: Error = new RpcError("eth_getProof: status 429");
+    const wire = new Wire();
+    const d = duties(wire, {
+      stores: fresh(),
+      change: () => ({
+        board: async () => {
+          throw fail;
+        },
+      }),
+    });
+    await prime(wire);
+    for (const e of [
+      new RpcError("eth_getProof: status 429"),
+      new L1Error("l1-range-too-long"),
+      new L1AnchorError("outside-clock"),
+    ]) {
+      fail = e;
+      wire.sent.length = 0;
+      expect(await d[0]!.step()).toEqual({
+        state: "tallying",
+        cells: [{ state: "combining", held: 1, sent: 2 }],
+        board: "unread",
+      });
+      expect(wire.sent).toHaveLength(2);
+    }
+    fail = new TypeError("a bug");
+    await expect(d[0]!.step()).rejects.toThrow(TypeError);
   });
 
   test("the board is read only once the counted set is fixed", async () => {

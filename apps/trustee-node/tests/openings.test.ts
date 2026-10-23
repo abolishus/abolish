@@ -32,7 +32,12 @@ const ballot = (n: number) => payload(RECORD_TYPES.ballot, n);
 const opening = (n: number) => payload(RECORD_TYPES.tallyOpening, n);
 
 /** A board of these payloads in these segments, each segment's run anchored a minute after its period ends. */
-function boardOf(rows: readonly (readonly [number, Uint8Array])[], wrongIndexAt?: number) {
+function boardOf(
+  rows: readonly (readonly [number, Uint8Array])[],
+  wrongIndexAt?: number,
+  /** Segments anchored again with no new entries. */
+  reanchored: readonly number[] = [],
+) {
   const entries = rows.map(([segment, p], index) =>
     encodeBoardEntry(
       {
@@ -45,8 +50,9 @@ function boardOf(rows: readonly (readonly [number, Uint8Array])[], wrongIndexAt?
     ),
   );
   const segments = [...new Set(rows.map(([s]) => s))];
-  const checkpoints = copyCheckpoints(ELECTION_ID, entries, segments);
-  const anchors: Anchor[] = segments.map((s) => ({
+  const all = [...segments, ...reanchored].sort((a, b) => a - b);
+  const checkpoints = copyCheckpoints(ELECTION_ID, entries, all);
+  const anchors: Anchor[] = all.map((s) => ({
     checkpoint: checkpoints.get(s) as Checkpoint,
     anchoredAt: EPOCH + (BigInt(s) + 1n) * PERIOD + 60n,
   }));
@@ -67,13 +73,25 @@ function boardOf(rows: readonly (readonly [number, Uint8Array])[], wrongIndexAt?
 interface World {
   /** How many of the board's anchors finalized L1 shows. */
   shown: number;
+  /** Segments whose anchors finalized L1 doesn't show yet, among those. */
+  readonly pending: Set<number>;
   readonly withheld: Set<number>;
+  /** Finalized L1's time, if not a minute past the last anchor shown. */
+  now?: bigint;
+  clock: AnchorClock;
   fetched: number;
   read: () => ReturnType<ReturnType<typeof boardOpenings>>;
 }
 
 function world(board: ReturnType<typeof boardOf>, shown = board.anchors.length): World {
-  const w: World = { shown, withheld: new Set(), fetched: 0, read: undefined as never };
+  const w: World = {
+    shown,
+    pending: new Set(),
+    withheld: new Set(),
+    clock: CLOCK,
+    fetched: 0,
+    read: undefined as never,
+  };
   const hidden = () =>
     new Set([...w.withheld].flatMap((s) => board.bySegment.get(s) ?? ([] as string[])));
   const read = boardOpenings({
@@ -81,11 +99,13 @@ function world(board: ReturnType<typeof boardOf>, shown = board.anchors.length):
     l1: {
       boardVersion: 1,
       read: async () => {
-        const anchors = board.anchors.slice(0, w.shown);
+        const anchors = board.anchors
+          .slice(0, w.shown)
+          .filter((a) => !w.pending.has(a.checkpoint.segment));
         const last = anchors.at(-1);
         // Finalized L1 a minute past the last anchor shown.
-        const now = last === undefined ? EPOCH : last.anchoredAt + 60n;
-        return { anchors, clock: CLOCK, now };
+        const now = w.now ?? (last === undefined ? EPOCH : last.anchoredAt + 60n);
+        return { anchors, clock: w.clock, now };
       },
     },
     blocks: async (cid) => {
@@ -160,6 +180,42 @@ describe("the board's openings", () => {
     for (const [i, cid] of ours.entries())
       board.blocks.set(cid, other.blocks.get(theirs[i] as string) as Uint8Array);
     expect(await w.read()).toEqual({ state: "unread" });
+  });
+
+  test("an opening's run read only once its own checkpoint is anchored, even with a later one anchored first", async () => {
+    const w = world(boardOf(ROWS), 3);
+    // Segment 9's anchor is shown before segment 5's, as a deadline longer
+    // than a period allows: the run between them isn't one checkpoint's.
+    w.pending.add(5);
+    expect(await w.read()).toEqual({ state: "unread" });
+    w.pending.clear();
+    expect((await w.read()).state).toBe("read");
+  });
+
+  test("a late anchor of an earlier segment makes the board read again, though the latest is the same", async () => {
+    // Segment 7 is anchored again with no new entries, after segment 9.
+    const w = world(boardOf(ROWS, undefined, [7]), 4);
+    w.pending.add(7);
+    const first = await w.read();
+    expect(first.state).toBe("read");
+    const fetched = w.fetched;
+    w.pending.clear();
+    const second = await w.read();
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+    expect(w.fetched).toBeGreaterThan(fetched);
+  });
+
+  test("a seal past the reader's last segment, never anchored, doesn't stop the read", async () => {
+    const w = world(boardOf(ROWS), 3);
+    // The reader stops at segment 10, whose deadline has long passed with no checkpoint of it.
+    w.clock = { ...CLOCK, lastSegment: 10 };
+    w.now = EPOCH + 100n * PERIOD;
+    const read = await w.read();
+    expect(read.state === "read" && read.openings).toEqual([
+      { payload: opening(2), segment: 5 },
+      { payload: opening(4), segment: 9 },
+    ]);
   });
 
   test("a board failing a check no later read settles is reported, its openings never given", async () => {

@@ -58,8 +58,11 @@ import {
   type TallyRules,
   tallyRules,
 } from "@abolishus/crypto";
+import { L2Error, RpcError } from "@abolishus/node";
+import { L1Error } from "@abolishus/verifier";
 import type { ApprovedElection, IntakeSecrets } from "./ceremony.ts";
 import { heldShares } from "./intake.ts";
+import { L1AnchorError } from "./l1.ts";
 import type { BoardOpenings } from "./openings.ts";
 import type { SeatStore } from "./store.ts";
 import type { SummingRule } from "./summing.ts";
@@ -156,9 +159,9 @@ export type CellStatus =
    * The anchored board carries a passing opening of the cell, whoever
    * combined it: one of `m` entries over the seat's own aggregate of the
    * cell that opens every option (docs/spec/tally.md, Opening checks), the
-   * first such in board order in segment `segment`, whose counted
-   * checkpoint the seat read anchored on its own finalized L1 (Destruction,
-   * When). The seat sends nothing more for the cell.
+   * first such in board order in segment `segment`, included under a
+   * counted checkpoint the seat read anchored on its own finalized L1
+   * (Destruction, When). The seat sends nothing more for the cell.
    */
   | { readonly state: "published"; readonly segment: number }
   /** The seat signed the cell's opening; it is in `openings()`. */
@@ -314,7 +317,17 @@ export class TallyDuty {
    * option, leaves the cell as it was (Opening checks).
    */
   async #readBack(fixed: Fixed): Promise<"read" | "unread" | BoardErrorCode> {
-    const read = await this.#o.board();
+    let read: BoardOpenings;
+    try {
+      read = await this.#o.board();
+    } catch (e) {
+      // A node that can't answer, or a reader that can't be set up, is a
+      // read not made: the seat still sends its sums and combines this
+      // step, so the board's read never holds up the tally (T-54).
+      if ([RpcError, L1Error, L2Error, L1AnchorError].some((type) => e instanceof type))
+        return "unread";
+      throw e;
+    }
     if (read.state === "unread") return "unread";
     if (read.state === "board-failed") return read.code;
     if (read === this.#checkedRead) return "read";

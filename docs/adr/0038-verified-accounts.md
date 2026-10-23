@@ -170,3 +170,15 @@ A freed e-mail address is held as a freed number is (A number an account leaves,
 - **Held 90 days** from the UTC day an account deleted itself or changed its address, in its own table, with no account column. A held address is answered as one another account holds: a notice instead of a code, so only whoever reads the mailbox learns that an account let it go (T-11); a code sent before the hold began is refused with the code `address-taken`. No move: an address isn't recycled by a carrier, so nothing frees it sooner.
 - **Kept as its hash only**, under the key it was made with. Options were (A) the hash alone, (B) the address sealed too, so the rotation could re-hash it, and (C) a nested chain like the phone's. B was rejected: an account that let its address go, or deleted itself, would leave the address readable for 90 days. C needs every hash key kept for good, which part 3d chose not to need for e-mail. So with A, a hold stays under its own key, and an old hash key is retired no sooner than 91 days after it stops being current ([[account-keys]]); a key retired sooner frees its holds early.
 - **Always on**, whatever the phone setting: one rule for every deployment, and with phone verification on it costs only the 90 days an account's own old address waits.
+
+## Amendment (P2-27 part 3a, 2026-10-23)
+
+Status: Accepted (agent) — owner may veto.
+
+Moderation notices ([[P2-27]] part 3) are the first message the e-mail provider gets about something other than an address's own verification. "What the providers learn" said neither provider learns a poll, and the public moderation log (`GET /moderation/log`) gives each decision's action, reason code and time to the microsecond, so a notice that repeated any of them, or went out when the decision was made, would let the provider (or whoever compels it, A-1, T-69) match the address to the poll or profile, naming the author the log deliberately doesn't. Options:
+
+- **(A) The decision in the e-mail, sent at once.** Most useful to the author; the provider matches each send to its log row whenever decisions are sparse, as they will be at launch. Rejected.
+- **(B) Generic words, sent at once.** The send time alone still matches a log row when decisions are sparse. Rejected.
+- **(C) Generic words, one notice per account at most, due after the UTC midnight that follows its newest decision.** Chosen. The provider learns that the address's account had a poll or profile moderated, or an appeal reviewed, on a given day, and nothing narrower; what was decided is on the account page, behind the sign-in. A day's wait costs an appeal nothing: appeals have no deadline.
+
+What the provider learns is amended to: each address, when it was sent a code, and on which days its account had a moderation decision; never which poll or profile, what was decided, an account ID, an answer or a ballot. Residual (T-73): on a day with a single decision about one author, that day's notice still pairs the address with it.

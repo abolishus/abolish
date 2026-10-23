@@ -66,6 +66,8 @@ export const ACCOUNT_EXPORT = {
   account_email_sends: "rate-limit counts, gone in a day",
   account_emails: "exported",
   account_moderators: "exported",
+  account_notices:
+    "a moderation notice waiting to be e-mailed, gone once sent: a due time and a try count",
   account_passkeys: "exported",
   account_phone_codes: "a pending code: the number's hash, gone in 10 minutes",
   account_phone_holds: "names no account: a freed number's hash",

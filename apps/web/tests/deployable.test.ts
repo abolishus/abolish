@@ -534,14 +534,19 @@ describe("dist/node/main.mjs", () => {
   }, 60_000);
 
   test.each([
-    ["a malformed keyring", { PHONE_HASH_KEYS: "p1:0123" }, "PHONE_HASH_KEYS"],
+    // Values no line or column of the bundle's stack trace can contain.
+    ["a malformed keyring", { PHONE_HASH_KEYS: "p1:notakeyatall" }, "PHONE_HASH_KEYS"],
     [
       "a key also in an e-mail keyring",
       { PHONE_HASH_KEYS: `p1:${EMAIL.EMAIL_HASH_KEYS.slice(3)}` },
       "PHONE_HASH_KEYS and the e-mail keyrings",
     ],
     ["a key SID that isn't one", { TWILIO_KEY_SID: `XX${"0".repeat(32)}` }, "keySid"],
-    ["a service SID that isn't one", { TWILIO_VERIFY_SERVICE_SID: "VA0123" }, "verifyServiceSid"],
+    [
+      "a service SID that isn't one",
+      { TWILIO_VERIFY_SERVICE_SID: "VAnotaserviceid" },
+      "verifyServiceSid",
+    ],
   ])(
     "refuses %s, naming the variable and quoting none of it",
     async (_, change, name) => {

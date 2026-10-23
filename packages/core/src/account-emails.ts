@@ -106,10 +106,12 @@ export type EmailMessage =
   /** `to` is another account's address: no code, just the fact that someone asked. */
   | { readonly kind: "email-held"; readonly to: string }
   /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
-  | { readonly kind: "email-on-hold"; readonly to: string };
+  | { readonly kind: "email-on-hold"; readonly to: string }
+  /** Moderation touched a poll or the profile of the account `to` is verified for (src/account-notices.ts). */
+  | { readonly kind: "notice"; readonly to: string };
 
 /**
- * The sending service, shared with notifications (P2-27). `unavailable`:
+ * The sending service, shared with notices (src/account-notices.ts). `unavailable`:
  * the provider didn't take the message. It must send plain transactional
  * mail with open and link tracking off (ADR 0038; T-67).
  */
@@ -150,6 +152,20 @@ export function renderEmail(message: EmailMessage): {
           "Someone asked to verify this address for an Abolish account, but an account that had it verified let it go less than 90 days ago.",
           "",
           "An address can't be verified again until 90 days after an account lets it go, so no code was sent and nothing changed.",
+        ].join("\n"),
+      };
+    case "notice":
+      // T-73: no action, ground, poll, profile, link or time, since the
+      // public log could match any of them to the decision
+      // (src/account-notices.ts).
+      return {
+        subject: "A moderation decision on Abolish",
+        text: [
+          "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made.",
+          "",
+          "Sign in to Abolish to see what was decided. You can appeal a removal once, from your account page.",
+          "",
+          "We send moderation notices whatever your notification settings. They never say which poll or profile, or what was decided, so the service that delivers them can't tell.",
         ].join("\n"),
       };
   }

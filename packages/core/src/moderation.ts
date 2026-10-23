@@ -4,11 +4,13 @@
 // this module reads and writes `moderation_actions` alone, and nothing that
 // builds or checks a result reads that table. A result stays verifiable from
 // chain + IPFS whatever is decided here (G-9), and hiding a poll's text
-// leaves its counts published, by option index.
+// leaves its counts published, by option index. Each decision queues a
+// notice to the poll's author (src/account-notices.ts), in its transaction.
 
 import { and, asc, desc, eq, gt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
+import { queueNotice } from "./account-notices.ts";
 import { isBytes } from "./bytes.ts";
 import { decodeStoredDefinition } from "./definitions.ts";
 import {
@@ -273,6 +275,13 @@ export async function recordDecision(
     .insert(moderationActions)
     .values({ electionId: id, action, reason, moderator, decidedAt })
     .returning({ seq: moderationActions.seq });
+  // A poll our website set up has its author's account; one created
+  // straight on chain has none to tell.
+  const [author] = await tx
+    .select({ userId: accountPolls.userId })
+    .from(accountPolls)
+    .where(eq(accountPolls.electionId, id));
+  if (author !== undefined) await queueNotice(tx, author.userId, decidedAt);
   // INSERT … RETURNING yields exactly the one row inserted.
   return { seq: row!.seq, state };
 }

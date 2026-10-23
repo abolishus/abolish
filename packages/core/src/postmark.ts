@@ -61,7 +61,7 @@ export function createPostmarkSender({
   if (!STREAM.test(messageStream)) throw new Error("messageStream is not a stream ID");
   return {
     async send(message: EmailMessage) {
-      // One bare address, as requestEmailCode only ever passes: no comma,
+      // One bare address, as requestEmailCode and sendNotices only ever pass: no comma,
       // angle bracket or quote that could add a recipient.
       if (parseEmailAddress(message.to) !== message.to) return "unavailable";
       const { subject, text } = renderEmail(message);

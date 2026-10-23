@@ -191,6 +191,7 @@ export {
   type ArchivedSequence,
   DEFAULT_RUN_BYTES,
   DEFAULT_RUN_READS,
+  HELD_PER_EVENT,
   readRuns,
   runBound,
   type RunFinding,

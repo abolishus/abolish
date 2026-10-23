@@ -17,6 +17,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   archivedDataLimit,
   DEFAULT_RUN_BYTES,
+  HELD_PER_EVENT,
   readRuns,
   type RunFinding,
   type RunListing,
@@ -145,7 +146,10 @@ describe("readRuns", () => {
     ]);
     expect(got.reads).toBe(3);
     expect(asked.map((a) => a.transaction)).toEqual(runs.map((s) => bytesToHex(s.transaction)));
-    expect(got.spent).toBe(runs.reduce((n, s) => n + objectCar(s.bytes).length, 0));
+    // Each answer, and each event taken as its record held.
+    expect(got.spent).toBe(
+      runs.reduce((n, s) => n + objectCar(s.bytes).length, 0) + 10 * HELD_PER_EVENT,
+    );
     // Each ask's limit is the CAR of a run of its listing's count.
     for (const [i, s] of runs.entries())
       expect(asked[i]?.limit).toBe(archivedDataLimit(runBound(s.run.events.length)));
@@ -337,6 +341,26 @@ describe("readRuns", () => {
     },
   );
 
+  test("a run taken is charged as held, not as its encoding, and one not taken only as its bytes", async () => {
+    // Empty events: 24 bytes each encoded, far more decoded.
+    const empty: RunEvent = { l2_block: 0n, l2_timestamp: 0n, topics: [], data: new Uint8Array() };
+    const s = stored(0n, 1_000, 1, { events: Array.from({ length: 1_000 }, () => empty) });
+    const car = objectCar(s.bytes).length;
+    expect(car).toBeLessThan(1_000 * HELD_PER_EVENT);
+    const got = await readRuns([listing(s)], BOARD, L2, 1_000n, arweave([s]).source);
+    expect(got.spent).toBe(car + 1_000 * HELD_PER_EVENT);
+    // Foreign, it is never decoded into records: only its answer is charged.
+    const foreign = await readRuns(
+      [listing(s, { first: 0n, count: 999 })],
+      BOARD,
+      L2,
+      1_000n,
+      arweave([s]).source,
+    );
+    expect(foreign.spent).toBe(car);
+    expect(foreign.records).toEqual([]);
+  });
+
   test("junk before the run is that source's failure, and an answer past the limit is never parsed", async () => {
     const s = stored(0n, 1, 1);
     const limit = archivedDataLimit(runBound(1));
@@ -346,7 +370,7 @@ describe("readRuns", () => {
     const got = await readRuns([listing(s)], BOARD, L2, 1n, arweave([s], before).source);
     expect(got.complete).toBe(true);
     // The junk is charged; the answer past the limit isn't held.
-    expect(got.spent).toBe(3 + objectCar(s.bytes).length);
+    expect(got.spent).toBe(3 + objectCar(s.bytes).length + HELD_PER_EVENT);
   });
 
   test("a transaction listed twice is asked once", async () => {
@@ -383,9 +407,15 @@ describe("readRuns", () => {
   test("a byte budget short of a run's bound with nothing read is over budget, never unavailable", async () => {
     const s = stored(0n, 1, 1);
     const car = objectCar(s.bytes).length;
-    // Enough for the honest run: read, though the budget is under its bound.
-    const fits = await readRuns([listing(s)], BOARD, L2, 1n, arweave([s]).source, car);
-    expect(fits).toMatchObject({ complete: true, spent: car });
+    // Enough for the honest run and its record held: read, though the
+    // budget is under its bound.
+    const budget = car + HELD_PER_EVENT;
+    const fits = await readRuns([listing(s)], BOARD, L2, 1n, arweave([s]).source, budget);
+    expect(fits).toMatchObject({ complete: true, spent: budget });
+    // Its bytes fit, but not the record it would hold.
+    const held = await readRuns([listing(s)], BOARD, L2, 1n, arweave([s]).source, budget - 1);
+    expect(held).toMatchObject({ complete: false, records: [], spent: car });
+    expect(codes(held.findings)).toEqual(["runs-over-budget"]);
     // Nothing served under a budget short of the bound: an honest answer may have been too long.
     const none = await readRuns([listing(s)], BOARD, L2, 1n, arweave([]).source, 1_000);
     expect(none.findings).toEqual([

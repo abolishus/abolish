@@ -35,6 +35,14 @@ export function runBound(count: number): number {
   return Math.min(MAX_CONTRACT_EVENT_RUN, 3 + 8 + 20 + 8 + 4 + count * event);
 }
 
+/**
+ * What one event of a run taken is charged as held: its contract-event
+ * record decoded, with its topics' and data's arrays, well over the few
+ * hundred bytes it measures at, so `maxBytes` bounds what the reads hold
+ * and not only what they fetch (T-52).
+ */
+export const HELD_PER_EVENT = 512;
+
 /** The run reads' byte budget when the caller sets none: 1 GiB, as the listed objects'. */
 export const DEFAULT_RUN_BYTES = 2 ** 30;
 
@@ -85,7 +93,11 @@ export type RunFinding =
       readonly maxReads: number;
     };
 
-/** A run taken into the sequence, with the listing it was read under. */
+/**
+ * A run taken into the sequence: its listing's claim and the transaction its
+ * CID was read from, which a listing naming a CID read for an earlier one
+ * may not list, since the CID fixes the bytes whichever served them.
+ */
 export interface TakenRun {
   readonly first: bigint;
   readonly count: number;
@@ -102,7 +114,10 @@ export interface ArchivedSequence {
   /** Whether the runs taken reach the count asked for; if not, the last finding says why. */
   readonly complete: boolean;
   readonly findings: readonly RunFinding[];
-  /** Bytes charged against `maxBytes`: every answer the sources gave, or the run it read, if longer. */
+  /**
+   * Bytes charged against `maxBytes`: every answer the sources gave, or the
+   * run it read, if longer, and `HELD_PER_EVENT` for each event taken.
+   */
   readonly spent: number;
   /** Transactions asked of the sources, against `maxReads`. */
   readonly reads: number;
@@ -118,8 +133,17 @@ const equal = (a: Uint8Array, b: Uint8Array) => a.length === b.length && compare
 
 // What a CID's bytes came to once data read as it: the CID fixes the bytes,
 // so a second reference to it is judged from this, never read again.
+// A run is kept as its bytes, already charged, and what its listing is held
+// to: decoded, its events take many times their encoding, so only a run
+// taken is decoded again and kept (T-52).
 type Settled =
-  | { readonly kind: "run"; readonly run: ContractEventRun; readonly transaction: Uint8Array }
+  | {
+      readonly kind: "run";
+      readonly bytes: Uint8Array;
+      readonly head: Omit<ContractEventRun, "events">;
+      readonly count: number;
+      readonly transaction: Uint8Array;
+    }
   | {
       readonly kind: "run-malformed" | "run-over-bound";
       readonly transaction: Uint8Array;
@@ -147,7 +171,9 @@ type Settled =
  * taken stops the reads with `run-gap`. Both budgets are the reader's
  * (T-52), charged as the listed objects' are: every answer against
  * `maxBytes`, read or not, a run read at its own length where that is more,
- * and every transaction asked against `maxReads`. The reads stop
+ * each event of a run taken at `HELD_PER_EVENT` for its record kept, and
+ * every transaction asked against `maxReads`; a run not taken is kept only
+ * as its bytes, so the reads hold about `maxBytes` at most. The reads stop
  * (`runs-over-budget`) where either runs out, or where no answer read while
  * what is left of `maxBytes` was short of the run's bound, since an honest
  * answer may have been too long to hold; what they didn't reach is
@@ -230,7 +256,8 @@ export async function readRuns(
             ? { kind: "run-over-bound", transaction, length: got.length }
             : "over-budget";
         try {
-          return { kind: "run", run: decodeContractEventRun(got.bytes, 1), transaction };
+          const { events, ...head } = decodeContractEventRun(got.bytes, 1);
+          return { kind: "run", bytes: got.bytes, head, count: events.length, transaction };
         } catch (e) {
           // The CID fixes the bytes, so no other source can do better.
           if (e instanceof DecodeError)
@@ -272,17 +299,26 @@ export async function readRuns(
         findings.push({ code: got.kind, first, cid, transaction });
         continue;
       }
-      const run = got.run;
+      const { head } = got;
       if (
-        run.l2_chain_id !== l2ChainId ||
-        !equal(run.contract, contract) ||
-        run.first !== first ||
-        run.events.length !== listing.count
+        head.l2_chain_id !== l2ChainId ||
+        !equal(head.contract, contract) ||
+        head.first !== first ||
+        got.count !== listing.count
       ) {
         findings.push({ code: "run-foreign", first, cid, transaction });
         continue;
       }
-      records.push(...contractEventRunRecords(run));
+      // The records kept are charged as held, not as their encoding: a run
+      // of empty events is a few bytes an event and many times that decoded.
+      const held = got.count * HELD_PER_EVENT;
+      if (held > left()) {
+        findings.push({ code: "runs-over-budget", n, maxBytes, maxReads });
+        return done(false);
+      }
+      spent += held;
+      for (const r of contractEventRunRecords(decodeContractEventRun(got.bytes, 1)))
+        records.push(r);
       taken.push({ first, count: listing.count, cid, transaction });
       next = n + BigInt(listing.count);
       break;

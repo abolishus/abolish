@@ -362,6 +362,7 @@ def build(constants):
     case("membership-other-tier-root", "Tess's posting with tier 0's root of step N0", tess, dan_root, posting(tess, AUTHOR, 2), {"check": "ballot", "code": "membership-proof"})
     case("membership-root-zero", "Dan's posting with a supplied root of 0, which any secret can prove membership of", dan, 0, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "membership-proof"})
     case("membership-root-r", "Dan's posting with a supplied root equal to the BN254 scalar field order", dan, R, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "membership-proof"})
+    case("membership-root-aliased", "Dan's posting with the root of step N0 plus r: a check that reduced the supplied root rather than refusing it would pass the pairing", dan, dan_root + R, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "membership-proof"})
     case("membership-root-max", "Dan's posting with the supplied root 2²⁵⁶ − 1", dan, 2**256 - 1, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "membership-proof"})
 
     # The versions: a rolling poll's posting has this call alone, and this call takes a rolling poll's alone.
@@ -387,7 +388,25 @@ def build(constants):
     case("posting-length", "Dan's default seat 1 posting with its sealed field one byte short: it frames, but its length isn't 4 + 64 · T + 16", dan, dan_root, posting(dan, DEFAULT, 1, ct=short), {"check": "delivery", "code": "posting-length"})
 
     # The ballot's steps, which come before the posting is compared with it.
-    case("ballot-cell", "Dan's ballot relabelled to cell 2: the partition has one cell per rolling tier", dict(dan, cell=2), dan_root, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "ballot-cell"})
+    case("ballot-stray", "Dan's posting with his ballot relabelled to an election the registry holds no parameters for", dict(dan, definitionHash=other_hash, variant="dan-stray"), dan_root, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "ballot-stray"})
+    case(
+        "ballot-profile-mismatch",
+        "The fixed poll's posting with Dan's version-5 ballot relabelled to the fixed poll, which pins version 4: the record's version is checked against the pin before the pin against this call",
+        dict(dan, definitionHash=fixed_rules["definitionHash"], variant="dan-fixed"),
+        dan_root,
+        fixed_posting,
+        {"check": "ballot", "code": "profile-mismatch", "offset": 2},
+    )
+    no_half = dict(dan["vote"], authorVss=[], authorShareHashes=[])
+    case(
+        "validity-shape",
+        "Dan's posting with his ballot stripped of its author half, in a poll with an author panel",
+        dict(dan, vote=no_half, committedVote=b4.enc_committed_vote(no_half), variant="dan-no-author-half"),
+        dan_root,
+        posting(dan, DEFAULT, 1),
+        {"check": "ballot", "code": "validity-shape"},
+    )
+    case("ballot-cell", "Dan's ballot relabelled to cell 2: the partition has one cell per rolling tier", dict(dan, cell=2, variant="dan-cell-2"), dan_root, posting(dan, DEFAULT, 1), {"check": "ballot", "code": "ballot-cell"})
     case(
         "share-hash-unqualified",
         "Dan's posting to default seat 1 when the default key set lacks seat 3, whose share hash his ballot fills",
@@ -419,12 +438,10 @@ def build(constants):
     checks = []
     for c in cases:
         b = c["ballot"]
-        if c["call"] != "submitRollingPosting" or b.get("version") != 5 or c["root"] is None or not 0 < c["root"] < R:
+        # Only the cases whose ballot check reaches the pairing: a relabelled ballot is refused before it.
+        if c["call"] != "submitRollingPosting" or "name" not in b or "variant" in b or not 0 < c["root"] < R:
             continue
-        el = b["election"]
-        if b["cell"] >= len(el["cells"]):
-            continue
-        tier = el["cells"][b["cell"]]["tier"]
+        tier = b["election"]["cells"][b["cell"]]["tier"]
         msg = rev.message(b["definitionHash"], tier, r5.ballot_hash(b), b["l1RefNumber"], b["l1RefHash"])
         signals = {"root": c["root"], "nullifier": b["nullifier"], "message": mem.field_map(msg), "scope": r5.rolling_scope_field(b["definitionHash"], tier)}
         checks.append({"case": c["id"], "proof": b["proof"], "signals": {k: str(v) for k, v in signals.items()}})
@@ -469,16 +486,19 @@ def assemble(constants, proofs_path, out_dir):
     def ballot_id(b):
         if "name" not in b:
             bid = "fixed-poll"
-        elif b["cell"] != s["ballots"][b["name"]]["cell"]:
-            bid = f"{b['name']}-cell-{b['cell']}"
+        elif "variant" in b:
+            bid = b["variant"]
         else:
             bid = b["name"]
         if bid not in seen:
             seen.add(bid)
             enc = encoding(b)
-            v = {"id": bid, "election": next(k for k, x in s["elections"].items() if x["definitionHash"] == enc[3:35]), "encoding": enc.hex()}
+            # A variant's proof was made for the ballot it was relabelled from, and a stray one names no election here.
+            v = {"id": bid, "election": next((k for k, x in s["elections"].items() if x["definitionHash"] == enc[3:35]), None), "encoding": enc.hex()}
             if "name" in b:
-                v.update(ballotHash=r5.ballot_hash(b).hex(), cell=b["cell"], step=b["step"], provedRoot=str(b["provedRoot"]))
+                v.update(ballotHash=r5.ballot_hash(b).hex(), cell=b["cell"], step=b["step"])
+            if "name" in b and "variant" not in b:
+                v["provedRoot"] = str(b["provedRoot"])
             ballots_json.append(v)
         return bid
 

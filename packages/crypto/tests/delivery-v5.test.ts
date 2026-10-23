@@ -70,7 +70,7 @@ interface Vectors {
   readonly elections: Readonly<Record<string, Election>>;
   readonly ballots: readonly {
     readonly id: string;
-    readonly election: string;
+    readonly election: string | null;
     readonly encoding: string;
     readonly ballotHash?: string;
     readonly cell?: number;
@@ -361,9 +361,10 @@ describe("delivery records under ballot version 5 (docs/spec/vectors/delivery-v5
       const b = decodeV5(record);
       expect(toHex(ballotHash(b))).toBe(v.ballotHash);
       expect([b.cell, b.step]).toEqual([v.cell, v.step]);
-      const re = recordsElection(toHex(b.definition_hash))!;
-      const cell = re.cells[b.cell];
-      if (cell === undefined) continue;
+      // A relabelled ballot carries the proof of the one it came from, and
+      // names no proved root.
+      const cell = recordsElection(toHex(b.definition_hash))?.cells[b.cell];
+      if (v.provedRoot === undefined || cell === undefined) continue;
       // Its proof verifies against the root it was made against, a step root
       // ballot-v5-records.json's generator rebuilt from the group events.
       expect(cell.steps.map((s) => s.root)).toContain(v.provedRoot);
@@ -415,7 +416,10 @@ describe("delivery records under ballot version 5 (docs/spec/vectors/delivery-v5
         "delivery/profile-mismatch",
         "delivery/delivery-seat",
         "delivery/posting-length",
+        "ballot/ballot-stray",
+        "ballot/profile-mismatch",
         "ballot/unknown-version",
+        "ballot/validity-shape",
         "ballot/ballot-cell",
         "ballot/share-hash-unqualified",
         "ballot/membership-proof",
@@ -426,7 +430,13 @@ describe("delivery records under ballot version 5 (docs/spec/vectors/delivery-v5
     // A root the board accepts and the verifier rejects, and the roots no
     // proof can be made against.
     expect(V.postings.some((p) => p.rootCheck === "root-step-mismatch")).toBe(true);
-    for (const r of ["0", R.toString(), (2n ** 256n - 1n).toString()])
+    // A root at or above r is refused, never reduced: the aliased root's
+    // reduction is the step's own, which the proof holds against.
+    const aliased = V.postings.find((p) => p.id === "membership-root-aliased")!;
+    const dan = hex(ballots.get(aliased.ballot)!.encoding);
+    expect(BigInt(aliased.root!)).toBeGreaterThanOrEqual(R);
+    expect(proofHolds(dan, 0, BigInt(aliased.root!) % R)).toBe(true);
+    for (const r of ["0", R.toString(), aliased.root!, (2n ** 256n - 1n).toString()])
       expect(V.postings.find((p) => p.root === r && "code" in p)).toMatchObject({
         code: "membership-proof",
       });

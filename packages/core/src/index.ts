@@ -719,6 +719,7 @@ export {
 export {
   createWebPushSender,
   MAX_PUSH_ENDPOINT,
+  MAX_PUSH_TIMEOUT_MS,
   newVapidKey,
   parsePushEndpoint,
   PUSH_TTL_SECONDS,

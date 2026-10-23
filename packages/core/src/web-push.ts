@@ -128,6 +128,9 @@ export function vapidAuthorization(
   return `vapid t=${input}.${toBase64Url(signature)}, k=${vapidPublicKey(keys)}`;
 }
 
+/** The longest a push may wait for its service: each notice lease outlasts a batch at this. */
+export const MAX_PUSH_TIMEOUT_MS = 5_000;
+
 /** How long the push service keeps a message for a browser that is offline: a week. */
 export const PUSH_TTL_SECONDS = 7 * 24 * 60 * 60;
 // RFC 8030 section 5.4: a later message with the same topic replaces one
@@ -142,7 +145,10 @@ export interface WebPushOptions {
    * 2.1): a `mailto:` address or an https URL. Apple refuses tokens without it.
    */
   readonly subject: string;
-  /** How long to wait for a push service before answering `unavailable`. */
+  /**
+   * How long to wait for a push service before answering `unavailable`, at
+   * most `MAX_PUSH_TIMEOUT_MS`: `sendNotices`' leases are sized for it.
+   */
   readonly timeoutMs?: number;
   /** For tests; the platform's otherwise. */
   readonly fetch?: typeof globalThis.fetch;
@@ -168,9 +174,11 @@ function checkSubject(subject: string): void {
 export function createWebPushSender({
   secretKey,
   subject,
-  timeoutMs = 5_000,
+  timeoutMs = MAX_PUSH_TIMEOUT_MS,
   fetch = globalThis.fetch,
 }: WebPushOptions): PushSender {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_PUSH_TIMEOUT_MS)
+    throw new RangeError(`timeoutMs must be 1 to ${MAX_PUSH_TIMEOUT_MS}`);
   const keys = vapidKeys(secretKey);
   checkSubject(subject);
   return {

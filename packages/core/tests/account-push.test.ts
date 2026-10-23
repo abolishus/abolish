@@ -167,6 +167,14 @@ describe("subscribing", () => {
     expect([...(await endpointsOf(a)), ...(await endpointsOf(b))]).toEqual([e]);
   });
 
+  test("refuses a time that is no time, keeping nothing", async () => {
+    const account = await newAccount(app);
+    await expect(subscribePush(app, account, endpoint(), new Date(Number.NaN))).rejects.toThrow(
+      "now is no time",
+    );
+    expect(await endpointsOf(account)).toEqual([]);
+  });
+
   test("an account that is gone is unknown, and nothing is kept", async () => {
     const e = endpoint();
     expect(await subscribePush(app, "no-such-account", e, NOW)).toBe("unknown-account");

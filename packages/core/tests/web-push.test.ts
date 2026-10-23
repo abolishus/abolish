@@ -5,6 +5,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   createWebPushSender,
   MAX_PUSH_ENDPOINT,
+  MAX_PUSH_TIMEOUT_MS,
   newVapidKey,
   parsePushEndpoint,
   PUSH_TTL_SECONDS,
@@ -333,6 +334,17 @@ describe("createWebPushSender", () => {
       })) as typeof globalThis.fetch;
     const sender = createWebPushSender({ secretKey: A3.d, subject: SUBJECT, timeoutMs: 20, fetch });
     expect(await sender.send(FCM, NOW)).toBe("unavailable");
+  });
+
+  test(`refuses a timeout past ${MAX_PUSH_TIMEOUT_MS} ms, which the notices' leases aren't sized for`, () => {
+    for (const timeoutMs of [0, -1, 1.5, MAX_PUSH_TIMEOUT_MS + 1, Number.NaN])
+      expect(
+        () => createWebPushSender({ secretKey: A3.d, subject: SUBJECT, timeoutMs }),
+        String(timeoutMs),
+      ).toThrow("timeoutMs");
+    expect(() =>
+      createWebPushSender({ secretKey: A3.d, subject: SUBJECT, timeoutMs: MAX_PUSH_TIMEOUT_MS }),
+    ).not.toThrow();
   });
 
   test("refuses a bad key or subject when made", () => {

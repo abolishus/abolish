@@ -43,7 +43,7 @@ import type { Sql } from "postgres";
 import { type EmailKeys, type EmailSender, unsealEmailAddress } from "./account-emails.ts";
 import { accountEmails, accountNotices, accountPushSubscriptions } from "./db/schema/index.ts";
 import type { ModerationTx } from "./moderation.ts";
-import type { PushSender } from "./web-push.ts";
+import type { PushOutcome, PushSender } from "./web-push.ts";
 
 /** Tries a notice gets, the first included, before it is dropped. */
 export const NOTICE_TRIES = 5;
@@ -196,18 +196,35 @@ export async function sendNotices(
   return { sent, retrying, dropped, pushed, pushFailed };
 }
 
-/** Pushes to every browser `userId` subscribed, side by side, deleting each that has ended. */
-async function pushTo(client: Sql, push: PushSender, userId: string, now: Date) {
+/**
+ * Pushes to every browser `userId` subscribed, side by side, deleting each
+ * that has ended. Never throws: a push or a cleanup that fails is a push not
+ * taken, and the e-mail and the rest of the batch still go.
+ */
+async function pushTo(
+  client: Sql,
+  push: PushSender,
+  userId: string,
+  now: Date,
+): Promise<PushOutcome[]> {
   const db = drizzle({ client });
   const s = accountPushSubscriptions;
-  const endpoints = await db.select({ endpoint: s.endpoint }).from(s).where(eq(s.userId, userId));
+  let endpoints: { endpoint: string }[];
+  try {
+    endpoints = await db.select({ endpoint: s.endpoint }).from(s).where(eq(s.userId, userId));
+  } catch {
+    return [];
+  }
   return Promise.all(
-    endpoints.map(async ({ endpoint }) => {
-      // A sender that throws is a push not taken: the e-mail still goes.
-      const outcome = await push.send(endpoint, now).catch(() => "unavailable" as const);
-      if (outcome === "gone")
-        await db.delete(s).where(and(eq(s.endpoint, endpoint), eq(s.userId, userId)));
-      return outcome;
+    endpoints.map(async ({ endpoint }): Promise<PushOutcome> => {
+      try {
+        const outcome = await push.send(endpoint, now);
+        if (outcome === "gone")
+          await db.delete(s).where(and(eq(s.endpoint, endpoint), eq(s.userId, userId)));
+        return outcome;
+      } catch {
+        return "unavailable";
+      }
     }),
   );
 }

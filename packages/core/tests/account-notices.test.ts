@@ -714,6 +714,43 @@ describe("web push", () => {
     expect(await subscriptions(author)).toEqual([failing!, throwing!, fine!].sort(byCode));
   });
 
+  test("a sender that throws at once, or a failed cleanup, still lets the e-mail and the batch go", async () => {
+    await clear();
+    const [first, second] = [await newAccount(app), await newAccount(app)];
+    await verified(first);
+    await verified(second);
+    const [e1, e2] = [endpoint(), endpoint()];
+    await subscribePush(app, first, e1, NOW);
+    await subscribePush(app, second, e2, NOW);
+    await insertNotice(first, NOW);
+    await insertNotice(second, NOW);
+    const push: PushSender = {
+      send: (endpoint) => {
+        if (endpoint === e1) throw new Error("thrown, not rejected");
+        return Promise.resolve("gone");
+      },
+    };
+    // The cleanup of the ended subscription fails: the app role may not delete.
+    await db.admin.unsafe(
+      `REVOKE DELETE ON "${db.schema}".account_push_subscriptions FROM abolish_app`,
+    );
+    try {
+      const { messages, sender } = recorder();
+      expect(await sendNotices(app, { sender, keys: KEYS, push, now: NOW })).toEqual({
+        sent: 2,
+        retrying: 0,
+        dropped: 0,
+        pushed: 0,
+        pushFailed: 2,
+      });
+      expect(messages).toHaveLength(2);
+    } finally {
+      await db.admin.unsafe(
+        `GRANT DELETE ON "${db.schema}".account_push_subscriptions TO abolish_app`,
+      );
+    }
+  });
+
   test("an ended subscription moved to another account meanwhile stays with it", async () => {
     await clear();
     const [author, other] = [await newAccount(app), await newAccount(app)];

@@ -35,10 +35,11 @@ export function AccountExport({ client, index, onSignedOut }: AccountExportProps
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [failure, setFailure] = useState<ExportFailure | undefined>();
-  // The button is disabled while the file is made, which takes focus from
-  // it: focus goes back to the section's heading, so keyboard users keep
-  // their place.
+  // The button is disabled while the file is made, which can drop focus to
+  // the page: then it goes to the section's heading, so keyboard users keep
+  // their place. Focus the visitor moved elsewhere meanwhile stays there.
   const heading = useRef<HTMLHeadingElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
 
   const download = async () => {
     setBusy(true);
@@ -53,7 +54,8 @@ export function AccountExport({ client, index, onSignedOut }: AccountExportProps
       if (why === "signedOut") onSignedOut?.();
     } finally {
       setBusy(false);
-      heading.current?.focus();
+      const at = document.activeElement;
+      if (at === null || at === document.body || at === button.current) heading.current?.focus();
     }
   };
 
@@ -77,7 +79,7 @@ export function AccountExport({ client, index, onSignedOut }: AccountExportProps
         <p className="m-0">{t("exportNever")}</p>
         <p className="m-0 text-muted-foreground">{t("exportCare")}</p>
         <div>
-          <Button variant="outline" disabled={busy} onClick={download}>
+          <Button ref={button} variant="outline" disabled={busy} onClick={download}>
             <Download aria-hidden="true" data-icon="inline-start" />
             {t(busy ? "exportPreparing" : "exportDownload")}
           </Button>

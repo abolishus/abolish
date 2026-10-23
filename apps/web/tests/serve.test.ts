@@ -2646,7 +2646,7 @@ describe("an account's own data under /export", () => {
     for (const secret of [account, id, "own@example.org"]) expect(lines).not.toContain(secret);
   });
 
-  test("an account deleted since its session was read is signed out", async () => {
+  test("a deleted account's session, and an account gone after its session was read, are signed out", async () => {
     const { browser, account } = await signedIn();
     // The session goes with the account, so the front reads it as signed out.
     await sql`DELETE FROM account_users WHERE id = ${account}`;
@@ -2654,6 +2654,22 @@ describe("an account's own data under /export", () => {
       code: "SIGNED_OUT",
       status: 401,
     });
+    // Gone between the session's read and the export's: core finds no account.
+    const raced = createExportHandler({
+      sql,
+      accountOf: async () => account,
+      emailKeys: EMAIL_KEYS,
+      origin: ORIGIN,
+      now: () => NOW,
+    });
+    const res = await raced(
+      new Request(`${ORIGIN}/export`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    expect(await res.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
   });
 
   test("refuses signed-out, malformed and cross-site calls", async () => {

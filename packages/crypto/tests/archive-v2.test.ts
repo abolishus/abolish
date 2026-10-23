@@ -460,7 +460,7 @@ describe("version-2 manifest properties", () => {
     expect(() => encodeArchiveManifest(m)).toThrow(EncodeError);
     const empty: ArchiveManifestV2 = { ...m, evidence: [] };
     expect(() => encodeArchiveManifest(empty)).toThrow(EncodeError);
-    expect(() => encodeArchiveManifest(m, 3 as 2)).toThrow(EncodeError);
+    expect(() => encodeArchiveManifest(m, 4 as 2)).toThrow(EncodeError);
     // A manifest of evidence alone is well formed.
     const alone = { ...m, objects: [], links: [] };
     expect(decodeArchiveManifest(encodeArchiveManifest(alone, 2), 2)).toEqual(alone);
@@ -505,10 +505,9 @@ describe("contract-event evidence properties", () => {
 });
 
 describe("argument checks", () => {
-  test("locators of version 1 and 2 only, and the reader's known versions only those", () => {
+  test("locators of version 2 encode at version 1's length", () => {
+    // archive-v3.test.ts checks the versions known since version 3.
     const cid = prefixed(0x55, new Uint8Array(32));
     expect(encodeArchiveLocator(cid, new Uint8Array(32), 2).length).toBe(LOCATOR_V1_LENGTH);
-    expect(() => encodeArchiveLocator(cid, new Uint8Array(32), 3 as 2)).toThrow(EncodeError);
-    expect(() => decodeArchiveLocator(new Uint8Array(70), [3 as 2])).toThrow(TypeError);
   });
 });

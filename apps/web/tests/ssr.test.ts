@@ -1835,7 +1835,37 @@ describe("link preview", () => {
     expect(await pngSize(response)).toEqual([1080, 1080]);
   });
 
+  // P2-28 part 4c-2: the page's language picks the preview's words, and the
+  // image's address carries it, since a chat fetches the image with none of
+  // the reader's headers.
+  test("a page in Spanish names the Spanish image and words, whatever the image's request asks", async () => {
+    const html = await (await get(`/polls/${ID}`, { "accept-language": "es-MX,es;q=0.9" })).text();
+    expect(html).toContain(`<meta property="og:title" content="Encuesta ${CODE}"`);
+    expect(html).toMatch(/<meta property="og:description" content="[^"]*el conteo\."/);
+    const found = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
+    if (found === undefined) throw new Error("no og:image");
+    const image = new URL(found.replaceAll("&amp;", "&"));
+    expect(image.pathname).toBe(`/polls/${ID}/preview.png`);
+    expect(image.searchParams.get("lang")).toBe("es-US");
+    const english = await ogImage();
+    expect(english.searchParams.has("lang")).toBe(false);
+    expect(image.searchParams.get("v")).not.toBe(english.searchParams.get("v"));
+    // The address alone decides: an English reader's request gets the same image.
+    const bodies: string[] = [];
+    for (const headers of [{}, { "accept-language": "en-US" }, { cookie: "lang=en-US" }]) {
+      const response = await get(image.pathname + image.search, headers);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(response.headers.get("etag")).toBe(`"${image.searchParams.get("v")}"`);
+      bodies.push(Buffer.from(await response.arrayBuffer()).toString("base64"));
+    }
+    expect(new Set(bodies).size).toBe(1);
+  });
+
   test.each([
+    ["the default's name", `/polls/${ID}/preview.png?lang=en-US`, 400],
+    ["a language that isn't exactly ours", `/polls/${ID}/preview.png?lang=es`, 400],
+    ["a language we don't have", `/polls/${ID}/preview.png?lang=fr-FR`, 400],
     ["an unknown poll", `/polls/${UNKNOWN_ID}/preview.png`, 404],
     ["a non-canonical ID", `/polls/${ID.toUpperCase()}/preview.png`, 404],
     ["another election's definition", `/polls/${SWAPPED_ID}/preview.png`, 404],

@@ -768,7 +768,7 @@ describe("link previews from the bundle", () => {
       expect(preview.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
       expect(preview.headers.get("set-cookie")).toBeNull();
       const expected = await renderPreview(
-        pollPreview(view.poll, code, "abolish.test", Date.now()),
+        pollPreview(view.poll, code, "abolish.test", Date.now(), "en-US"),
         "landscape",
       );
       expect(new Uint8Array(await preview.arrayBuffer())).toEqual(expected);

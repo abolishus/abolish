@@ -14,7 +14,7 @@ import { titles } from "../titles.ts";
 import { isElectionId } from "../values.ts";
 
 export const Route = createFileRoute("/polls/$electionId")({
-  loader: async ({ params }) => {
+  loader: async ({ context: { locale }, params }) => {
     // One spelling per poll (T-31): anything but canonical hex isn't a poll page.
     if (!isElectionId(params.electionId)) throw notFound();
     const page = await fetchPoll({ data: params.electionId });
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/polls/$electionId")({
     const origin = siteOrigin();
     const preview =
       page.kind === "poll"
-        ? await previewMeta(page.poll, page.code, origin, Date.now())
+        ? await previewMeta(page.poll, page.code, origin, Date.now(), locale)
         : undefined;
     // The share sheet offers the short link only, the same for everyone
     // (docs/design/sharing.md), and none for a hidden poll, whose text

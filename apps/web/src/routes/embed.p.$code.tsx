@@ -106,7 +106,9 @@ export const Route = createFileRoute("/embed/p/$code")({
             text("embedHiddenTitle"),
             <EmbedNotice kind="hidden" url={url} />,
           );
-        const title = headline(pollPreview(embed.poll, code, new URL(origin).host, Date.now()));
+        const title = headline(
+          pollPreview(embed.poll, code, new URL(origin).host, Date.now(), locale),
+        );
         return page(
           200,
           locale,

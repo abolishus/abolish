@@ -167,6 +167,7 @@ export {
   MANIFEST_DATA_LIMIT,
   type ManifestOrigin,
   type ReachedManifest,
+  type RunListing,
   readListedObjects,
   type TransactionSource,
   walkArchive,
@@ -186,6 +187,16 @@ export {
   type ProvenEvidence,
   readEvidence,
 } from "./evidence.ts";
+export {
+  type ArchivedSequence,
+  DEFAULT_RUN_BYTES,
+  DEFAULT_RUN_READS,
+  HELD_PER_EVENT,
+  readRuns,
+  runBound,
+  type RunFinding,
+  type TakenRun,
+} from "./runs.ts";
 export { ARCHIVE_LOCATED, type AnchorLogsRule, earlierLocators } from "./anchor-logs.ts";
 export { type ArweaveGateways, type ArweaveStats, arweaveSource } from "./arweave.ts";
 export {

@@ -310,13 +310,13 @@ describe("walkArchive over version-2 chains", () => {
     expect(walk.evidence.map((e) => e.l2Block)).toEqual([10n]);
   });
 
-  test("a version-3 locator is reported, never guessed", async () => {
+  test("a version-4 locator is reported, never guessed", async () => {
     const m0 = manifest(2, 0n, []);
     const bytes = locator(m0, 2);
-    bytes[1] = 3;
+    bytes[1] = 4;
     const { source, asked } = arweave([m0]);
     const walk = await walkArchive(bytes, DEPLOYMENT, source);
-    expect(walk.findings).toEqual([{ code: "locator-version", locator: "latest", version: 3 }]);
+    expect(walk.findings).toEqual([{ code: "locator-version", locator: "latest", version: 4 }]);
     expect(asked).toEqual([]);
   });
 

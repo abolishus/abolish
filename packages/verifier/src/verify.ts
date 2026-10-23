@@ -724,6 +724,7 @@ export async function readArchive(
           manifests: [],
           listings: new Map<string, readonly Uint8Array[]>(),
           evidence: [],
+          runs: [],
           findings: [{ code: "locator-framing", locator: "latest" } as const],
           reads: 0,
         };

@@ -5,12 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type ArchiveManifest,
+  type ArchiveManifestV3,
   boardEntryHash,
   type BoardEntryVersion,
   type ContractLog,
   copyCheckpoints,
   decodeBoardEntry,
   encodeArchiveLocator,
+  decodeArchiveManifest,
   encodeArchiveManifest,
   encodeCheckpoint,
   arweaveId,
@@ -283,6 +285,34 @@ describe("readArchive", () => {
     });
     // The manifests from the latest down, then each object once, segment objects first.
     expect(asked).toEqual([m1, m0, ...objects].map((o) => bytesToHex(o.transaction)));
+  });
+
+  test("a version-3 locator's chain is walked as an earlier version's, its runs listing nothing 4.3 reads", async () => {
+    const m: ArchiveManifestV3 = {
+      ...decodeArchiveManifest(m1.bytes, 1),
+      evidence: [],
+      runs: [
+        {
+          contract: definition.board,
+          first: 0n,
+          count: 1,
+          cid: objectCid(Uint8Array.of(0x00, 0x26, 0x01)),
+          transaction: tx(900),
+        },
+      ],
+    };
+    const v3 = { ...archived(encodeArchiveManifest(m, 3), tx(1)), sequence: 1n };
+    const plain = bundle({ locator: encodeArchiveLocator(v3.cid, v3.transaction, 3) });
+    const { source, asked } = arweave([m0, v3, ...objects]);
+    const r = verifyBundle((await readArchive(plain, source)).bundle);
+    expect(row(r, "4.3").code).toBe("anchor-logs-missing");
+    expect(r.archive).toMatchObject({
+      count: "2",
+      walk: { latest: "1", manifests: 2, reads: 2, findings: [] },
+      objects: { read: objects.length, findings: [] },
+    });
+    // The run listed is never fetched: nothing reads runs yet.
+    expect(asked).toEqual([v3, m0, ...objects].map((o) => bytesToHex(o.transaction)));
   });
 
   test("the objects read serve a board copy by CID with no other source", async () => {

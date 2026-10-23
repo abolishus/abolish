@@ -81,7 +81,9 @@ export type AvailabilityEvidenceCode =
   | OutputRootErrorCode
   | EventAccumulatorProofError
   | ContractEventError
-  | "decode";
+  | "decode"
+  /** A failure resting on an archived record, whose output root no reader checks on L1 yet (T-71). */
+  | "evidence-unchecked";
 
 export interface AvailabilityInputs {
   readonly definitionHash: Uint8Array;
@@ -213,10 +215,13 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   }
   // The archive's record stands in for a bundle proof that doesn't hold or
   // is too early to hold the point; a bundle proof at or after `t_A` is
-  // enough, and an earlier archived one adds nothing (Archive, step 5).
+  // enough, and an earlier archived one adds nothing (Archive, step 5). A
+  // record dated after the finalized L1 time is never taken: it would hold
+  // `t_A` before the chain reached it, and its date is its writer's word.
   const { archived } = inputs;
   const used =
     archived !== undefined &&
+    archived.accumulator.timestamp <= inputs.now &&
     (proven === undefined ||
       (proven.timestamp < tA && archived.accumulator.timestamp > proven.timestamp))
       ? archived
@@ -338,6 +343,12 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     return { row: { status: "unverifiable", code: "availability-pending", at: {} }, report };
   // A failure at one point fails the election whatever the other's evidence.
   const failure = judged.failures.find((f) => f.point === AVAILABILITY_POINTS.ballotExtent);
+  // The archive's authority writes the record whole, and until P1-19 reads
+  // its game on L1 its output root is its own word, so it could prove a
+  // prefix of the events that leaves the attestations out (T-71): it can
+  // show a point held, never fail one, which an unforgeable root must.
+  if (failure !== undefined && used !== undefined)
+    return { row: { status: "unverifiable", code: "evidence-unchecked", at: {} }, report };
   if (failure !== undefined)
     return {
       row: {

@@ -583,7 +583,9 @@ describe("the board's accumulator from the archive", { timeout: 120_000 }, () =>
     const before = availabilityChecks(inputs(sent, { l2: early }));
     expect(before.row).toEqual({ status: "unverifiable", code: "availability-pending", at: {} });
     expect(before.report?.proven.source).toBe("bundle");
-    const r = availabilityChecks(inputs(sent, { l2: early, archived: late.archived(9) }));
+    const r = availabilityChecks(
+      inputs(sent, { l2: early, archived: late.archived(9), now: T_A + 10n }),
+    );
     expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
     expect(r.report?.ballotExtent.panels?.[0]).toMatchObject({ holds: true, attested: [1, 2] });
     expect(r.report?.proven).toEqual({
@@ -609,7 +611,9 @@ describe("the board's accumulator from the archive", { timeout: 120_000 }, () =>
       code: "output-root",
       at: {},
     });
-    const r = availabilityChecks(inputs(sent, { l2: broken, archived: late.archived(9) }));
+    const r = availabilityChecks(
+      inputs(sent, { l2: broken, archived: late.archived(9), now: T_A + 10n }),
+    );
     expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
     // Even one too early to hold the point: pending, as the bundle's would be.
     const pending = availabilityChecks(inputs(sent, { l2: broken, archived: early.archived(9) }));
@@ -637,21 +641,56 @@ describe("the board's accumulator from the archive", { timeout: 120_000 }, () =>
     ).toBe("bundle");
   });
 
+  test("an archived record dated after the finalized L1 time is never taken", () => {
+    const r = availabilityChecks(
+      inputs(sent, { l2: early, archived: late.archived(9), now: T_A + 9n }),
+    );
+    expect(r.report?.proven.source).toBe("bundle");
+    expect(r.row).toMatchObject({ code: "availability-pending" });
+    // At the record's own time it is.
+    expect(
+      availabilityChecks(inputs(sent, { l2: early, archived: late.archived(9), now: T_A + 10n }))
+        .report?.proven.source,
+    ).toBe("archive");
+  });
+
   test("the archived record's count is replayed against the bundle's events like the bundle's own", () => {
     // Seat 1's attestation dropped from the events: the replay doesn't hold.
     const short = { ...early, events: early.events.slice(1) };
     expect(
-      availabilityChecks(inputs(sent, { l2: short, archived: late.archived(9) })).row,
+      availabilityChecks(inputs(sent, { l2: short, archived: late.archived(9), now: T_A + 10n }))
+        .row,
     ).toMatchObject({ status: "unverifiable", code: "index" });
-    // A failing archived set: one short of the threshold fails, from the archive alone.
+    // One short of the threshold, from the archive alone: reported, never failed.
     const one = [attest(1)];
     const r = availabilityChecks(
       inputs(one, {
         l2: board(one, { timestamp: T_A - 1n }),
         archived: board(one, { timestamp: T_A + 10n }).archived(9),
+        now: T_A + 10n,
       }),
     );
-    expect(r.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 1 } });
+    expect(r.row).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
     expect(r.report?.proven.source).toBe("archive");
+    expect(r.report?.ballotExtent.panels?.[0]).toMatchObject({ holds: false, attested: [1] });
+  });
+
+  test("an archived record over a prefix of the events, leaving the attestations out, can't fail 4.6", () => {
+    // The authority's record: the accumulator before any attestation, dated past t_A.
+    const forged = board(sent, { timestamp: T_A + 10n });
+    const prefix = board([], { timestamp: T_A + 10n });
+    const r = availabilityChecks(
+      inputs(sent, {
+        l2: { ...early, proof: { ...early.proof, outputRoot: filled(32, 1) } },
+        // A block before every attestation's, with a time after t_A: the record's word.
+        archived: {
+          ...forged.archived(9),
+          accumulator: { ...prefix.archived(9).accumulator, block: 99_000n },
+        },
+        now: T_A + 10n,
+      }),
+    );
+    expect(r.report?.proven).toMatchObject({ source: "archive", count: "0" });
+    expect(r.row).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
   });
 });

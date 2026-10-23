@@ -15,9 +15,12 @@ import {
   ceremonyContext,
   checkAuthorApprovals,
   checkCeremonyTranscript,
+  checkContractEvent,
   DecodeError,
   decodeAuthorApprovals,
   decodeBoardEntry,
+  decodeCeremonyRegistration,
+  decodeContractEvent,
   encodeAuthorApprovals,
   KEM_PUBLIC_KEY,
   keySetEntry,
@@ -34,9 +37,10 @@ import {
 import { encode } from "../src/codec.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/author-ceremony.json comes from an independent Python
-// implementation (scripts/author-ceremony-vectors.py), so these expected
-// values never come from the code under test.
+// docs/spec/vectors/author-ceremony.json and author-registration.json come
+// from independent Python implementations (scripts/author-ceremony-vectors.py
+// and scripts/author-registration-vectors.py), so these expected values never
+// come from the code under test.
 
 type Kind = "default" | "author";
 
@@ -128,6 +132,39 @@ interface Vectors {
 const V = JSON.parse(
   readFileSync(new URL("author-ceremony.json", SPEC_VECTORS), "utf8"),
 ) as Vectors;
+
+interface RegistrationVectors {
+  readonly format: string;
+  readonly election: Vectors["election"] & {
+    readonly definitionHash: string;
+    readonly contracts: Readonly<
+      Record<"election-registry" | "trustee-registry" | "group-registry" | "board", string>
+    >;
+  };
+  readonly registrations: readonly {
+    readonly id: string;
+    readonly transcript: string;
+    readonly registration: string;
+  }[];
+  readonly events: readonly {
+    readonly id: string;
+    readonly record: string;
+    readonly registration: string;
+    readonly read: boolean;
+  }[];
+  readonly cases: readonly {
+    readonly id: string;
+    readonly transcript: string;
+    readonly records: readonly string[];
+    readonly events: readonly string[];
+    readonly recordedKeySetHash?: string;
+    readonly result: { readonly ok: boolean; readonly code?: string; readonly seats?: number[] };
+  }[];
+}
+
+const R = JSON.parse(
+  readFileSync(new URL("author-registration.json", SPEC_VECTORS), "utf8"),
+) as RegistrationVectors;
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
@@ -414,5 +451,128 @@ describe("author approvals", () => {
       }),
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 100) },
     );
+  });
+});
+
+describe("author-registration.json", () => {
+  const contracts = {
+    electionRegistry: hex(R.election.contracts["election-registry"]),
+    trusteeRegistry: hex(R.election.contracts["trustee-registry"]),
+    groupRegistry: hex(R.election.contracts["group-registry"]),
+    board: hex(R.election.contracts.board),
+  };
+  const eventOf = (id: string) => {
+    const e = R.events.find((x) => x.id === id);
+    if (e === undefined) throw new Error(`no event ${id}`);
+    return e;
+  };
+  const registrationOf = (id: string) => {
+    const r = R.registrations.find((x) => x.id === id);
+    if (r === undefined) throw new Error(`no registration ${id}`);
+    return hex(r.registration);
+  };
+
+  test("is the format this reader knows, of author-ceremony.json's election", () => {
+    expect(R.format).toBe("abolish-author-registration-vectors/1");
+    const { definitionHash: _, contracts: __, ...election } = R.election;
+    expect(election).toEqual(V.election);
+    expect(R.election.contracts["trustee-registry"]).toBe(V.election.trusteeRegistry);
+  });
+
+  test.each(R.events.map((e) => [e.id, e] as const))(
+    "event %s carries its registration exactly when the vector reads it",
+    (_, e) => {
+      const record = decodeContractEvent(hex(e.record), 9);
+      const checked = checkContractEvent(record, contracts, 9);
+      const read =
+        checked.ok &&
+        checked.event.event === "AuthorPanelRegistered" &&
+        toHex(checked.event.definitionHash) === R.election.definitionHash;
+      expect(read).toBe(e.read);
+      if (checked.ok && checked.event.event === "AuthorPanelRegistered")
+        expect(toHex(checked.event.registration)).toBe(e.registration);
+      // Version 8 names no AuthorPanelRegistered.
+      expect(() => decodeContractEvent(hex(e.record), 8)).toThrow(DecodeError);
+    },
+  );
+
+  test.each(R.cases.map((c) => [c.id, c] as const))(
+    "%s: records and registrations decide the check as the vector says",
+    (_, c) => {
+      const registrations = c.events
+        .map(eventOf)
+        .filter((e) => e.read)
+        .map((e) => hex(e.registration));
+      expect(
+        checkAuthorApprovals(
+          approvalContext(c.transcript),
+          c.records.map(recordOf),
+          registrations,
+          c.recordedKeySetHash === undefined ? undefined : hex(c.recordedKeySetHash),
+        ),
+      ).toEqual(c.result);
+    },
+  );
+
+  test("a registration whose key isn't a point doesn't decode, though its layout holds", () => {
+    expect(() => decodeCeremonyRegistration(registrationOf("not-a-point"))).toThrow(DecodeError);
+    expect(decodeCeremonyRegistration(registrationOf("all")).approvals.map((a) => a.index)).toEqual(
+      [1, 2, 3],
+    );
+  });
+
+  test("no one-byte change to a registration approves another key set or header, or fails the check", () => {
+    const ctx = approvalContext("author-honest-3");
+    const all = registrationOf("all");
+    const approvalsAt = 97 + 97 * 3 + 1;
+    const missing = { ok: false, code: "author-approvals-missing", seats: [] };
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: all.length - 1 }),
+        fc.integer({ min: 1, max: 255 }),
+        (at, flip) => {
+          const changed = Uint8Array.from(all);
+          changed[at] = (changed[at] as number) ^ flip;
+          const r = checkAuthorApprovals(ctx, [], [changed]);
+          if (at < approvalsAt)
+            // The header, a seat or a count: the approvals no longer sign
+            // what the registration says, so no quorum registered it and it
+            // carries nothing, never `key-set-mismatch` (T-37, T-53).
+            expect(r).toEqual(missing);
+          else {
+            // An approval: at most its own seat stops counting, and two of
+            // three still make the quorum, unless the record no longer decodes.
+            const seat = Math.floor((at - approvalsAt) / 65) + 1;
+            if (!r.ok) expect(r).toEqual(missing);
+            else
+              for (const other of [1, 2, 3].filter((x) => x !== seat))
+                expect(r.seats).toContain(other);
+          }
+        },
+      ),
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 100) },
+    );
+  }, 120_000);
+
+  test("another key set fails the check only as the recorded one, ahead of approvals", () => {
+    const ctx = approvalContext("author-honest-3");
+    const other = registrationOf("other-key-set");
+    const otherHash = keySetHash(decodeCeremonyRegistration(other).keySet);
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], otherHash)).toEqual({
+      ok: false,
+      code: "key-set-mismatch",
+    });
+    // The transcript's own recorded hash adds nothing and refuses nothing.
+    const own = keySetHash(ctx.registered.map(keySetEntry));
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], own)).toEqual(
+      checkAuthorApprovals(ctx, [recordOf("all")]),
+    );
+    // Found on a copy it carries nothing (T-53).
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [other])).toEqual({
+      ok: true,
+      seats: [1, 2, 3],
+    });
+    expect(() => checkAuthorApprovals(ctx, [], "x" as unknown as Uint8Array[])).toThrow(TypeError);
+    expect(() => checkAuthorApprovals(ctx, [], [], own.subarray(1))).toThrow(TypeError);
   });
 });

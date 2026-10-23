@@ -12,9 +12,10 @@
 // resends the stored bytes until the board contract has recorded them
 // (T-24, T-25, T-49, T-53, T-54, T-71).
 //
-// A counted-extent attestation names no roots: the stub's capacity check
-// refuses every election that commits roots, the only ones that have any,
-// until the node fetches leaf objects (P1-12f part 3c).
+// A counted-extent attestation names no roots: a seat names only roots whose
+// leaf objects it holds and has checked, and the node fetches none yet
+// (P1-12f part 3c). Honest seats send roots only in elections that commit
+// them, which the stub's capacity check refuses until then.
 import {
   type Anchor,
   type AnchorClock,
@@ -432,6 +433,11 @@ export class AvailabilitySeat {
       counted === undefined
         ? (closesAt - clock.epoch) / clock.period + 1n
         : countedExtent(clock, closesAt, l1InclusionBound).segment;
+    // A reader stopping before `s_S` (the ballot extent's, say) would drop
+    // the anchors past its last segment, and the seat's one attestation of
+    // point 2 would name an earlier checkpoint for good.
+    if (counted !== undefined && BigInt(clock.lastSegment) < segment)
+      throw new L1AnchorError("clock");
     const fixedAt = clock.epoch + (segment + 1n) * clock.period + clock.deadline;
     // L1 timestamps increase, so at a finalized time at or past the deadline
     // every block up to it is final.

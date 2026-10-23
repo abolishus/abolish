@@ -798,6 +798,76 @@ describe("the counted extent", () => {
     expect(w.sent).toEqual([]);
   });
 
+  test("refuses a reader stopping before s_S, so C_A is never attested as point 2", async () => {
+    const w = counted();
+    // The ballot extent's reader: its clock's last segment is s_A.
+    w.l1Now = w.fixedAt;
+    const seat = new AvailabilitySeat({
+      store: w.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: {
+        read: async () => ({
+          anchors: w.anchors,
+          clock: { ...w.clock, lastSegment: 25 },
+          now: w.l1Now,
+        }),
+      },
+      blocks: async () => [],
+      pin: async () => undefined,
+      contract: { send: async (r) => void w.sent.push(r), recorded: async () => undefined },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    await expect(seat.step()).rejects.toEqual(new L1AnchorError("clock"));
+    expect(w.sent).toEqual([]);
+    expect(await attested(w.store, w.election.definitionHash, 2)).toBe(false);
+  });
+
+  test("a recorded ballot-extent attestation leaves the counted extent's to do", async () => {
+    const w = counted();
+    const recordedPoints: number[] = [];
+    const seat = new AvailabilitySeat({
+      store: w.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: { read: async () => ({ anchors: w.anchors, clock: w.clock, now: w.l1Now }) },
+      blocks: async (cid) => {
+        for (const blocks of w.board.objects.values()) {
+          const b = blocks.get(key(cid));
+          if (b !== undefined) return [b];
+        }
+        return [];
+      },
+      pin: async () => undefined,
+      contract: {
+        send: async (r) => void w.sent.push(r),
+        // The contract holds the seat's point-1 attestation only.
+        recorded: async (_kind, _hash, _panel, _seat, point) => {
+          recordedPoints.push(point);
+          return point === 1 ? new Uint8Array(138) : undefined;
+        },
+      },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    expect(await seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    expect(recordedPoints).toEqual([2]);
+  });
+
+  test("raises an alarm when the contract holds another counted-extent attestation for the seat's slot", async () => {
+    const w = counted();
+    await w.seat.step();
+    const other = Uint8Array.from(w.sent[0] as Uint8Array);
+    other.set([(other.at(-1) as number) ^ 1], other.length - 1);
+    w.recorded.set("attestation", other);
+    expect(await w.seat.step()).toEqual({ state: "foreign-record", kind: "attestation" });
+  });
+
   test("refuses an election closing before the pinned clock's epoch", () => {
     const w = counted();
     expect(

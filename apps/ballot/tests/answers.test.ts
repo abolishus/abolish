@@ -15,6 +15,7 @@ import {
   votesOf,
 } from "../src/answers.ts";
 import type { CheckedElection } from "../src/election.ts";
+import { LOCALES, pollLanguages } from "../src/locales.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -368,12 +369,40 @@ describe("the questions of a checked election", () => {
 describe("the translation shown is the reader's where the election has it", () => {
   const of = (...tags: string[]) => tags.map((language) => ({ language }));
 
-  test("an exact tag first, then the primary language, then the election's first", () => {
+  test("the reader's first language the election has, by exact tag then primary language, else the election's first", () => {
     expect(pickLanguage(of("en", "es-419"), ["es-419", "en"])).toBe("es-419");
     expect(pickLanguage(of("en", "es"), ["es-MX", "en-US"])).toBe("es");
     expect(pickLanguage(of("en", "es"), ["fr-FR", "es"])).toBe("es");
     expect(pickLanguage(of("en", "es"), ["fr-FR"])).toBe("en");
     expect(pickLanguage(of("de"), [])).toBe("de");
+    // A language the reader prefers wins over a later one matched exactly (P2-28 part 4b).
+    expect(pickLanguage(of("en", "es-mx"), ["en-US", "es-MX"])).toBe("en");
+    expect(pickLanguage(of("en-us", "es"), ["es-US", "en-US", "en"])).toBe("es");
+    // Within one language, the reader's exact tag still decides.
+    expect(pickLanguage(of("es-us", "es-mx"), ["es-MX", "es-US"])).toBe("es-mx");
+  });
+
+  test("a language chosen in the frame wins whenever the election has it", () => {
+    const tag = fc.stringMatching(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/);
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(tag, { maxLength: 5 }),
+        fc.constantFrom(...LOCALES),
+        fc.constantFrom("", "-us", "-mx", "-419"),
+        fc.nat(),
+        fc.array(fc.oneof(tag, fc.string()), { maxLength: 6 }),
+        (others, chosen, region, at, browser) => {
+          const primary = chosen.split("-")[0] ?? "";
+          // The election has the chosen language in some region, among any others.
+          const ours = primary + region;
+          const tags = others.filter((t) => t !== ours);
+          tags.splice(at % (tags.length + 1), 0, ours);
+          const picked = pickLanguage(of(...tags), pollLanguages(chosen, browser));
+          expect(picked.split("-")[0]).toBe(primary);
+        },
+      ),
+      { numRuns },
+    );
   });
 
   test("only one of the election's own tags is ever chosen", () => {

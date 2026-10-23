@@ -55,11 +55,16 @@ export function questionsOf(election: CheckedElection, language: string): Ballot
 }
 
 /**
- * Which of an election's translations to show, for a reader whose browser
- * prefers `preferred` (`navigator.languages`, most preferred first): the first
- * preference a translation's tag matches exactly, else the first whose
- * primary language matches, else the election's first translation. Only an
- * election's own tags are returned, so `questionsOf` always finds one.
+ * Which of an election's translations to show, for a reader who prefers
+ * `preferred` (most preferred first: the frame's chosen language, if any,
+ * then `navigator.languages`). Languages are taken in the order their first
+ * preference appears, and within one language the first preference a
+ * translation's tag matches exactly, else the first translation of that
+ * primary language; failing every language, the election's first
+ * translation. So a reader who prefers English to Spanish reads a poll's
+ * `en` before its `es-mx`, whatever the regions (RFC 4647's lookup, by
+ * language). Only an election's own tags are returned, so `questionsOf`
+ * always finds one.
  */
 export function pickLanguage(
   translations: readonly { readonly language: string }[],
@@ -68,12 +73,17 @@ export function pickLanguage(
   const tags = translations.map((t) => t.language);
   const wanted = preferred.map((p) => p.toLowerCase());
   const primary = (tag: string) => tag.split("-")[0];
+  const languages = [...new Set(wanted.map(primary))];
   const choice =
-    wanted.map((w) => tags.find((tag) => tag === w)).find((tag) => tag !== undefined) ??
-    wanted
-      .map((w) => tags.find((tag) => primary(tag) === primary(w)))
-      .find((tag) => tag !== undefined) ??
-    tags[0];
+    languages
+      .map(
+        (language) =>
+          wanted
+            .filter((w) => primary(w) === language)
+            .map((w) => tags.find((tag) => tag === w))
+            .find((tag) => tag !== undefined) ?? tags.find((tag) => primary(tag) === language),
+      )
+      .find((tag) => tag !== undefined) ?? tags[0];
   if (choice === undefined) throw new RangeError("an election has at least one translation");
   return choice;
 }

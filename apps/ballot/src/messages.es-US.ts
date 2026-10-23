@@ -318,10 +318,10 @@ export const esUS: Messages = {
   postingRetryTitle: "Intentar otra vez",
   postingRetryExplained:
     "Este dispositivo les entrega otra vez a los custodios las mismas partes selladas, así que nada cuenta dos veces. Espera un minuto antes.",
-  postingPostTitle: "Publicar las partes que faltan",
+  postingPostTitle: "Publicar las partes que faltan en el registro público",
   postingPostExplained:
     "Las partes que faltan van al registro público con la clave de su sello exterior, para que los custodios puedan abrirlas sin haberlas tomado. Tu voto sigue siendo secreto hoy, pero esas partes pierden su protección a largo plazo: quien más adelante rompa el cifrado de hoy podrá leerlas, y si se publican suficientes partes de tu boleta para abrirla, podrá leer tu boleta entera. Esto no se puede deshacer.",
-  postingPost: "Publicar y después enviar",
+  postingPost: "Publicar en público y después enviar",
   postingDeclineTitle: "Dejar esta boleta",
   postingDeclineExplained:
     "Este dispositivo borra las partes que guardó para estos custodios, y esta boleta no contará. Quien pasó las partes todavía podría ponerla en el tablero, donde reemplazaría tu boleta anterior sin contar, así que responde otra vez mientras la encuesta esté abierta.",

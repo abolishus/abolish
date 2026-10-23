@@ -202,6 +202,9 @@ class Refused extends Error {}
 export class TallyDuty {
   readonly #o: TallyDutyOptions;
   #fixed: Fixed | undefined;
+  // The definition and key set once checked against the approval: the rule
+  // is asked each step, for as long as it waits.
+  #approved: { definition: Definition; registered: readonly RegisteredKeys[] } | undefined;
   // Each cell's passing sums by sending seat, from messages received since
   // the node started: they are resent by their senders after a restart.
   readonly #received = new Map<number, Map<number, readonly Share[]>>();
@@ -336,8 +339,14 @@ export class TallyDuty {
   /** The election's definition, key set and counted cells, once the source fixes them. */
   async #fix(): Promise<Fixed | Exclude<TallyDutyStatus, { state: "tallying" }>> {
     if (this.#fixed !== undefined) return this.#fixed;
+    const { store, election } = this.#o;
+    // The verdict is final once the rule gives it, so it is kept: a later
+    // read, from a node that lags or lies, never makes the seat sum over an
+    // election it found failed (T-54).
+    const unavailable = `tally/${hex(election.stubHash)}/unavailable`;
+    if ((await store.get(unavailable)) !== undefined) return { state: "unavailable" };
     try {
-      const checked = this.#checked();
+      const checked = (this.#approved ??= this.#checked());
       // Nothing about the counted set is read before the rule allows it, so
       // no seat's sums exist while an attestation could still be withheld
       // or a failed point still be summed over (T-54).
@@ -346,7 +355,10 @@ export class TallyDuty {
         registered: checked.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
       });
       if (allowed.state === "waiting") return { state: "waiting" };
-      if (allowed.state === "unavailable") return { state: "unavailable" };
+      if (allowed.state === "unavailable") {
+        await store.putOnce(unavailable, Uint8Array.of(1));
+        return { state: "unavailable" };
+      }
       if (allowed.state === "unheld-roots")
         throw new Refused("an attested root whose leaf object the seat doesn't hold");
       const counted = await this.#o.counted(this.#o.election);

@@ -245,6 +245,19 @@ describe("summingRule", () => {
   });
 
   test("records that don't count are no quorum", async () => {
+    // Seat 2's ballot-extent attestation after t_A, with only seat 1's in time.
+    const lateBallot = world();
+    attest(lateBallot, [1], [1]);
+    attest(lateBallot, [1, 2], [2]);
+    lateBallot.events.unshift({
+      payload: attestation(lateBallot, 2, 1),
+      submittedAt: lateBallot.windows.ballotDeadline + 1n,
+    });
+    lateBallot.events.sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : 1));
+    expect(await lateBallot.check()).toEqual({
+      state: "unavailable",
+      failures: [{ point: 1, panel: SEAT_PANELS.default }],
+    });
     const cases: Array<[string, (w: World) => AvailabilityEvent]> = [
       [
         "late",
@@ -343,15 +356,70 @@ describe("summingRule", () => {
     });
   });
 
-  test("an attested root the seat doesn't hold stops it summing", async () => {
+  test("a root available to the panel stops it summing; one named by fewer than q − k + 1 seats doesn't", async () => {
+    // q = 3 and k = 2, so a root is available when two seats name it.
+    const root = (b: number) => new Uint8Array(32).fill(b);
+    const naming = (roots: ReadonlyMap<number, readonly Uint8Array[]>) => {
+      const w = world();
+      attest(w, [1, 2, 3], [1]);
+      for (const index of [1, 2, 3])
+        w.events.push({
+          payload: attestation(w, index, 2, { roots: roots.get(index) ?? [] }),
+          submittedAt: w.windows.countedDeadline,
+        });
+      return w.check();
+    };
+    // One seat alone can't keep the others from summing.
+    expect(await naming(new Map([[2, [root(7)]]]))).toEqual({ state: "available" });
+    expect(
+      await naming(
+        new Map([
+          [1, [root(7)]],
+          [2, [root(8)]],
+        ]),
+      ),
+    ).toEqual({ state: "available" });
+    expect(
+      await naming(
+        new Map([
+          [1, [root(7)]],
+          [3, [root(7), root(8)]],
+        ]),
+      ),
+    ).toEqual({ state: "unheld-roots" });
+    // A late attestation's roots don't count towards it.
     const w = world();
     attest(w, [1, 2], [1]);
-    attest(w, [1], [2]);
+    attest(w, [1, 2], [2]);
     w.events.push({
-      payload: attestation(w, 2, 2, { roots: [new Uint8Array(32).fill(7)] }),
-      submittedAt: w.windows.countedDeadline,
+      payload: attestation(w, 3, 2, { roots: [root(7)] }),
+      submittedAt: w.windows.countedDeadline + 1n,
     });
-    expect(await w.check()).toEqual({ state: "unheld-roots" });
+    expect(await w.check()).toEqual({ state: "available" });
+  });
+
+  test("a board failing from L1 alone names no checkpoint, so nothing counts", async () => {
+    const w = world();
+    attest(w, [1, 2, 3]);
+    // Another checkpoint anchored in time for C_S's segment: equivocation.
+    const cp = cS(w);
+    const cid = Uint8Array.from(cp.object_cid);
+    cid[cid.length - 1] = (cid.at(-1) as number) ^ 1;
+    w.anchors = [
+      ...w.anchors,
+      {
+        checkpoint: { ...cp, object_cid: cid },
+        anchoredAt:
+          (w.anchors.find((a) => a.checkpoint.segment === cp.segment) as Anchor).anchoredAt + 1n,
+      },
+    ];
+    expect(await w.check()).toEqual({
+      state: "unavailable",
+      failures: [
+        { point: 1, panel: SEAT_PANELS.default },
+        { point: 2, panel: SEAT_PANELS.default },
+      ],
+    });
   });
 
   test("a reader under another clock, or stopping before s_S, is refused; so is a close before the clock's epoch", async () => {

@@ -21,6 +21,7 @@ import {
   availabilityWindows,
   checkAvailability,
   checkpointHash,
+  countedAttestations,
   type DeadlineClock,
   SEAT_PANELS,
   type SeatPanel,
@@ -28,6 +29,8 @@ import {
 import { countedDue, type FinalizedBoardAnchors, pointExtent } from "./availability.ts";
 import type { ApprovedElection } from "./ceremony.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /**
  * Every availability attestation and complaint the board contract emitted
@@ -73,11 +76,13 @@ export type SummingStatus =
       }[];
     }
   /**
-   * An attestation that counts names an obligation root, whose leaf object
-   * the seat doesn't hold (the node fetches none, P1-12f part 3c): it sends
-   * nothing, as the rule requires, and the operator is alerted. Honest seats
-   * name roots only in elections that commit them, which the stub's
-   * capacity check refuses.
+   * A root is available (`q − k + 1` of the panel's seats name it in
+   * counted-extent attestations that count), and the seat holds no leaf
+   * object (the node fetches none, P1-12f part 3c): it sends nothing, as the
+   * rule requires, and the operator is alerted. Honest seats name roots
+   * only in elections that commit them, which the stub's capacity check
+   * refuses, so only `q − k + 1` seats naming one falsely get here, which
+   * the spec's collusion residual covers.
    */
   | { readonly state: "unheld-roots" }
   /** Both points hold the quorum: the seat may sum over the counted set. */
@@ -134,8 +139,16 @@ export function summingRule(options: SummingOptions): SummingRule {
       );
       if (report.verdict === "unavailable")
         return { state: "unavailable", failures: report.failures };
-      if (report.points.some((p) => p.panels.some((q) => q.attested.some((a) => a.roots.length))))
-        return { state: "unheld-roots" };
+      // A root is available once `q − k + 1` of the panel's `q` seats name
+      // it in counted-extent attestations that count; one named by fewer is
+      // withheld, delivers nothing and needs no leaves, so one seat naming a
+      // root can't stop the others summing (docs/spec/delivery.md, Leaf
+      // availability; T-54).
+      const named = new Map<string, number>();
+      for (const a of countedAttestations(report))
+        for (const root of new Set(a.roots.map(hex))) named.set(root, (named.get(root) ?? 0) + 1);
+      const available = panel.registered.length - panel.threshold + 1;
+      if ([...named.values()].some((n) => n >= available)) return { state: "unheld-roots" };
       return { state: "available" };
     },
   };

@@ -27,7 +27,7 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { heldShares } from "../src/intake.ts";
 import type { SeatStore } from "../src/store.ts";
-import type { SummingPanel } from "../src/summing.ts";
+import type { SummingPanel, SummingStatus } from "../src/summing.ts";
 import {
   type CountedSet,
   type SummedSharePeers,
@@ -261,11 +261,23 @@ describe("the tally duty", () => {
         }),
       });
       for (const duty of d) expect(await duty.step()).toEqual(step);
-      // A message arriving meanwhile is dropped too: nothing is fixed.
       expect(read).toBe(0);
       expect(wire.sent).toEqual([]);
       expect((await d[0]!.openings()).size).toBe(0);
     }
+    // An unavailable election stays so for the seat, whatever the rule later says.
+    const wire = new Wire();
+    let status: SummingStatus = { state: "unavailable", failures: [{ point: 1, panel: 1 }] };
+    const d = duties(wire, {
+      stores: fresh(),
+      change: () => ({ summing: { check: async () => status } }),
+    });
+    expect(await d[0]!.step()).toEqual({ state: "unavailable" });
+    status = { state: "available" };
+    expect(await d[0]!.step()).toEqual({ state: "unavailable" });
+    expect(wire.sent).toEqual([]);
+    // Waiting is never kept.
+    expect((await d[1]!.step()).state).toBe("tallying");
     // k and every registered seat's per-election signing key, from the transcript the seat approved.
     const keys = approved.map((a) => ({
       index: a.index,

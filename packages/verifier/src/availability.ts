@@ -3,7 +3,8 @@
 // seats attested, through the L2 contract path, that it held the board an
 // election's result rests on, before any result existed. It reads only L1
 // (the counted checkpoints) and the board contract's events, replayed
-// against its event accumulator proven under an L2 output root, never the
+// against its event accumulator proven under an L2 output root (the
+// bundle's, or an archived record's once no L2 node serves it), never the
 // board copy, so a withheld board fails here rather than leaving the
 // election unverifiable for good (T-24, T-25, T-53, T-54;
 // 0029-board-data-availability).
@@ -45,6 +46,7 @@ import {
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
+import type { ArchivedAccumulator } from "./evidence.ts";
 import { countedFloor } from "./openings.ts";
 import {
   accumulatorAtOutputRoot,
@@ -79,7 +81,9 @@ export type AvailabilityEvidenceCode =
   | OutputRootErrorCode
   | EventAccumulatorProofError
   | ContractEventError
-  | "decode";
+  | "decode"
+  /** A failure resting on an archived record, whose output root no reader checks on L1 yet (T-71). */
+  | "evidence-unchecked";
 
 export interface AvailabilityInputs {
   readonly definitionHash: Uint8Array;
@@ -98,6 +102,12 @@ export interface AvailabilityInputs {
   /** The finalized L1 time the anchors were read at. */
   readonly now: bigint;
   readonly l2: L2BoardEvidence;
+  /**
+   * The board's accumulator from the permanent archive, where the run read
+   * it (docs/spec/verifier.md, Archive, step 5): taken where the bundle's
+   * own proof doesn't hold, or is before `t_A` and earlier than it.
+   */
+  readonly archived?: ArchivedAccumulator;
 }
 
 export interface AvailabilityOutcome {
@@ -132,6 +142,16 @@ export interface AvailabilityReport {
     readonly hash: string;
     readonly timestamp: string;
     readonly count: string;
+    /** Where the proof came from: the bundle's `l2Board`, or an archived record. */
+    readonly source: "bundle" | "archive";
+    /** For an archived record: its listing and the game whose claim it is worth (T-71). */
+    readonly evidence?: {
+      readonly cid: string;
+      readonly transaction: string;
+      readonly gameIndex: string;
+      readonly game: string;
+      readonly outputRoot: string;
+    };
   };
   readonly ballotExtent: {
     /** `t_A`. */
@@ -186,13 +206,29 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   }).ballotDeadline;
 
   let proven;
+  let failed: OutputRootErrorCode | undefined;
   try {
     proven = accumulatorAtOutputRoot(inputs.l2.proof, inputs.contracts.board);
   } catch (e) {
-    if (e instanceof OutputRootError)
-      return { row: { status: "unverifiable", code: e.code, at: {} } };
-    throw e;
+    if (!(e instanceof OutputRootError)) throw e;
+    failed = e.code;
   }
+  // The archive's record stands in for a bundle proof that doesn't hold or
+  // is too early to hold the point; a bundle proof at or after `t_A` is
+  // enough, and an earlier archived one adds nothing (Archive, step 5). A
+  // record dated after the finalized L1 time is never taken: it would hold
+  // `t_A` before the chain reached it, and its date is its writer's word.
+  const { archived } = inputs;
+  const used =
+    archived !== undefined &&
+    archived.accumulator.timestamp <= inputs.now &&
+    (proven === undefined ||
+      (proven.timestamp < tA && archived.accumulator.timestamp > proven.timestamp))
+      ? archived
+      : undefined;
+  if (used !== undefined) proven = used.accumulator;
+  if (proven === undefined)
+    return { row: { status: "unverifiable", code: failed as OutputRootErrorCode, at: {} } };
   const records: ContractEventRecord[] = [];
   for (const [at, bytes] of inputs.l2.events.entries())
     try {
@@ -272,6 +308,16 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
       hash: bytesToHex(proven.blockHash),
       timestamp: proven.timestamp.toString(),
       count: proven.count.toString(),
+      source: used === undefined ? "bundle" : "archive",
+      ...(used !== undefined && {
+        evidence: {
+          cid: bytesToHex(used.cid),
+          transaction: bytesToHex(used.transaction),
+          gameIndex: used.gameIndex.toString(),
+          game: bytesToHex(used.game),
+          outputRoot: bytesToHex(used.outputRoot),
+        },
+      }),
     },
     ballotExtent: {
       deadline: tA.toString(),
@@ -297,6 +343,12 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     return { row: { status: "unverifiable", code: "availability-pending", at: {} }, report };
   // A failure at one point fails the election whatever the other's evidence.
   const failure = judged.failures.find((f) => f.point === AVAILABILITY_POINTS.ballotExtent);
+  // The archive's authority writes the record whole, and until P1-19 reads
+  // its game on L1 its output root is its own word, so it could prove a
+  // prefix of the events that leaves the attestations out (T-71): it can
+  // show a point held, never fail one, which an unforgeable root must.
+  if (failure !== undefined && used !== undefined)
+    return { row: { status: "unverifiable", code: "evidence-unchecked", at: {} }, report };
   if (failure !== undefined)
     return {
       row: {

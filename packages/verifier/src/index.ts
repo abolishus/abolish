@@ -172,11 +172,16 @@ export {
   walkArchive,
 } from "./archive.ts";
 export {
+  type ArchivedAccumulator,
   checkContractEventEvidence,
+  type ContractEvidence,
+  DEFAULT_EVIDENCE_READS,
   EVIDENCE_DATA_LIMIT,
   type EvidenceCheck,
   type EvidenceCheckCode,
+  type EvidenceFinding,
   type EvidenceRead,
+  latestEvidence,
   MAX_EVIDENCE_RECORD,
   type ProvenEvidence,
   readEvidence,

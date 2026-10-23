@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import {
+  type ArchiveManifestV2,
   copyCheckpoints,
   decodeBoardEntry,
+  encodeArchiveLocator,
+  encodeArchiveManifest,
+  encodeContractEventEvidence,
+  objectCar,
+  objectCid,
   DELIVERY_WINDOW,
   encodeCheckpoint,
   encodeBoardEntry,
@@ -18,6 +24,7 @@ import {
   type CheckResult,
   PINNED_MARGIN,
   parseBundle,
+  readArchive,
   type Report,
   splitEntries,
   verifyBundle,
@@ -25,7 +32,7 @@ import {
 import { decodeDefinition } from "../src/definition.ts";
 import { run, toHex } from "./headers.ts";
 import { ACCUMULATOR_SLOT } from "../src/output-root.ts";
-import { anchoredL1, l2State, word } from "./state.ts";
+import { anchoredL1, l2State, locatorStorage, word } from "./state.ts";
 
 // A whole run over a sealed board that 4.1 and 4.2 accept: verifier-tallies.json's
 // `honest` election (definition version 1, board-entry version 4, its
@@ -68,9 +75,9 @@ const copy = splitEntries(hex(honest.board)).entries;
 // `t_A = t_D − R` (docs/spec/availability.md, Windows).
 const T_A = CLOSES + BigInt(definition.l1_inclusion_bound) + DELIVERY_WINDOW - PINNED_MARGIN;
 
-// The board contract with no event at all, its accumulator at genesis,
-// proven under an output root of a block at `timestamp`.
-function emptyBoard(timestamp: bigint) {
+// The board contract with no event at all, its accumulator at genesis, in
+// the state of an L2 block `block` at `timestamp`.
+function emptyState(timestamp: bigint, block = 1_000n) {
   const { accumulator, count } = replayEventAccumulator(
     definition.l2_chain_id,
     definition.board,
@@ -86,9 +93,15 @@ function emptyBoard(timestamp: bigint) {
         ],
       },
     ],
-    1_000n,
+    block,
     timestamp,
   );
+  return evidence;
+}
+
+// That state's proof, as a format-6 bundle's `l2Board` gives it.
+function emptyBoard(timestamp: bigint) {
+  const evidence = emptyState(timestamp);
   return {
     events: [],
     outputRoot: toHex(evidence.outputRoot),
@@ -102,11 +115,18 @@ function bundleJson(
   l2Board?: Readonly<Record<string, unknown>>,
   anchored: readonly Uint8Array[] = copy,
   withCheckpoints = false,
+  locator?: Uint8Array,
+  now = NOW,
 ): Record<string, unknown> {
-  const l1 = anchoredL1(definition.election_id, definition.l1_anchor, anchored, VERSION, clock, {
-    number: 20_000_000n,
-    timestamp: NOW,
-  });
+  const l1 = anchoredL1(
+    definition.election_id,
+    definition.l1_anchor,
+    anchored,
+    VERSION,
+    clock,
+    { number: 20_000_000n, timestamp: now },
+    locator === undefined ? [] : locatorStorage(locator, 1n),
+  );
   // Checkpoints no copy matches come from their logs (docs/spec/verifier.md, Bundle).
   if (withCheckpoints) {
     const segments = [...new Set(anchored.map((e) => decodeBoardEntry(e, VERSION).segment))];
@@ -315,3 +335,141 @@ describe(
     });
   },
 );
+
+describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_000 }, () => {
+  const tx = (n: number) => new Uint8Array(32).fill(n);
+  const bytewise = (a: Uint8Array, b: Uint8Array) => {
+    for (let i = 0; i < Math.min(a.length, b.length); i++)
+      if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
+    return a.length - b.length;
+  };
+  // The empty board at L2 block `block`, `block` seconds after `t_A`, as an
+  // archived record; the finalized L1 time is past every record's.
+  const late = T_A;
+  const L1_NOW = (T_A > NOW ? T_A : NOW) + 10_000n;
+  function evidenceRecord(block: bigint) {
+    const e = emptyState(late + block, block);
+    const nodes = [...new Map(e.nodes.map((n) => [toHex(n), n])).values()].sort(bytewise);
+    return encodeContractEventEvidence({
+      l2_chain_id: definition.l2_chain_id,
+      contract: definition.board,
+      game_index: 7n,
+      game: new Uint8Array(20).fill(0x9a),
+      output_root: e.outputRoot,
+      message_passer_storage_root: e.messagePasserStorageRoot,
+      header: e.header,
+      nodes,
+    });
+  }
+  // A version-2 manifest listing `records` (block, transaction) and nothing else.
+  function archive(records: readonly (readonly [bigint, number])[]) {
+    const held = new Map<string, Uint8Array>();
+    const evidence = records
+      .map(([block, t]) => {
+        const r = evidenceRecord(block);
+        held.set(toHex(tx(t)), objectCar(r));
+        return {
+          contract: definition.board,
+          l2_block: block,
+          cid: objectCid(r),
+          transaction: tx(t),
+        };
+      })
+      .sort((a, b) =>
+        a.l2_block !== b.l2_block ? (a.l2_block < b.l2_block ? -1 : 1) : bytewise(a.cid, b.cid),
+      );
+    const m: ArchiveManifestV2 = {
+      l1_chain_id: definition.l1_chain_id,
+      anchor: definition.l1_anchor,
+      sequence: 0n,
+      objects: [],
+      links: [],
+      evidence,
+    };
+    const manifest = encodeArchiveManifest(m, 2);
+    held.set(toHex(tx(0xee)), objectCar(manifest));
+    const asked: string[] = [];
+    return {
+      locator: encodeArchiveLocator(objectCid(manifest), tx(0xee), 2),
+      asked,
+      source: async (t: Uint8Array) => {
+        asked.push(toHex(t));
+        const car = held.get(toHex(t));
+        return car === undefined ? [] : [car];
+      },
+    };
+  }
+  const evidenceOf = (r: Report) =>
+    r.archive !== undefined && "evidence" in r.archive ? r.archive.evidence : undefined;
+  const withArchive = (locator: Uint8Array) =>
+    parseBundle(
+      JSON.stringify(bundleJson(emptyBoard(T_A - 1n), copy, false, locator, L1_NOW)),
+      Uint8Array.from(copy.flatMap((e) => [...e])),
+    );
+
+  test("a bundle proof before t_A leaves 4.6 pending, and the archive's record shows the point", async () => {
+    const a = archive([
+      [2_000n, 1],
+      [3_000n, 2],
+    ]);
+    const plain = verifyBundle(withArchive(a.locator));
+    expect(row(plain, "4.6")).toEqual({
+      status: "unverifiable",
+      code: "availability-pending",
+      at: {},
+    });
+    const r = verifyBundle((await readArchive(withArchive(a.locator), a.source)).bundle);
+    // The latest record only: the earlier one is never asked for.
+    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(2))]);
+    // No seat attested, but the record's output root is its writer's word
+    // until P1-19 reads its game: shown, never failed (T-71).
+    expect(row(r, "4.6")).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
+    expect(r.availability?.ballotExtent.panels?.[0]).toMatchObject({
+      holds: false,
+      silent: [1, 2, 3],
+    });
+    expect(r.availability?.proven).toMatchObject({
+      block: "3000",
+      timestamp: (late + 3_000n).toString(),
+      count: "0",
+      source: "archive",
+      evidence: { transaction: toHex(tx(2)), gameIndex: "7", game: "9a".repeat(20) },
+    });
+    expect(evidenceOf(r)).toMatchObject({ reads: 1, findings: [] });
+    // The evidence is 4.6's: 4.3 and every other row are as with no record served.
+    const manifestOnly = async (t: Uint8Array) => (toHex(t) === toHex(tx(0xee)) ? a.source(t) : []);
+    const none = verifyBundle((await readArchive(withArchive(a.locator), manifestOnly)).bundle);
+    expect(row(none, "4.6")).toMatchObject({ code: "availability-pending" });
+    expect(r.checks.filter((c) => c.id !== "4.6")).toEqual(
+      none.checks.filter((c) => c.id !== "4.6"),
+    );
+  });
+
+  test("evidence that doesn't hold up is reported in the archive's evidence, never 4.3's row", async () => {
+    const a = archive([[2_000n, 1]]);
+    // Transaction 1 serves nothing.
+    const source = async (t: Uint8Array) => (toHex(t) === toHex(tx(1)) ? [] : a.source(t));
+    const r = verifyBundle((await readArchive(withArchive(a.locator), source)).bundle);
+    expect(row(r, "4.6")).toMatchObject({ code: "availability-pending" });
+    expect(r.availability?.proven.source).toBe("bundle");
+    expect(evidenceOf(r)?.findings).toMatchObject([
+      { code: "evidence-unavailable", l2Block: "2000" },
+    ]);
+    expect(row(r, "4.3").code).not.toMatch(/^evidence/);
+    // The read budget reaches the reads.
+    await expect(
+      readArchive(withArchive(a.locator), a.source, { maxEvidenceReads: 0 }),
+    ).rejects.toThrow(RangeError);
+  });
+
+  test("a format-5 bundle's archive read keeps no evidence", async () => {
+    const a = archive([[2_000n, 1]]);
+    const five = parseBundle(
+      JSON.stringify(bundleJson(undefined, copy, false, a.locator, L1_NOW)),
+      Uint8Array.from(copy.flatMap((e) => [...e])),
+    );
+    const r = verifyBundle((await readArchive(five, a.source)).bundle);
+    expect(evidenceOf(r)).toBeUndefined();
+    expect(a.asked).toEqual([toHex(tx(0xee))]);
+  });
+});

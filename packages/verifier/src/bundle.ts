@@ -26,6 +26,7 @@ import {
 } from "./l1.ts";
 import type { AnchorLogsRule } from "./anchor-logs.ts";
 import type { ArchiveFinding, ListedFinding } from "./archive.ts";
+import type { ContractEvidence } from "./evidence.ts";
 import type { L2BoardEvidence } from "./availability.ts";
 import type { GatewayStats } from "./gateways.ts";
 
@@ -80,7 +81,9 @@ export interface CidRead {
  * doesn't hold (an L1 code), or the anchor holds no locator yet
  * (`locator-none`). Otherwise `walk` is the chain from the latest locator
  * and, where the board checks' steps 1 and 2 fix the counted checkpoints,
- * `objects` the listed objects read. Nothing in it is a verdict.
+ * `objects` the listed objects read, and for a format-6 bundle `evidence`,
+ * the board contract's archived evidence read for 4.6. Nothing in it is a
+ * verdict.
  */
 export type ArchiveRead =
   | { readonly stopped: "not-reached" | L1ErrorCode }
@@ -108,6 +111,8 @@ export type ArchiveRead =
         readonly spent: number;
         readonly findings: readonly ListedFinding[];
       };
+      /** Format 6: the board contract's evidence (docs/spec/verifier.md, Archive, step 5); never 4.3's. */
+      readonly evidence?: ContractEvidence;
     };
 
 interface BundleCommon {

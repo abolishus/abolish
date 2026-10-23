@@ -7,6 +7,7 @@
 
 import { parseArgs } from "node:util";
 import { DEFAULT_MANIFEST_BUDGET, DEFAULT_OBJECT_READS } from "./archive.ts";
+import { DEFAULT_EVIDENCE_READS } from "./evidence.ts";
 import { arweaveSource } from "./arweave.ts";
 import { BundleError } from "./bundle.ts";
 import { type ArchiveSources, DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "./files.ts";
@@ -57,7 +58,7 @@ export const EXIT_CODES = Object.freeze({
 const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]...
                       [--arweave <url>]... [--max-archive-manifests <n>]
                       [--max-archive-bytes <n>] [--max-archive-reads <n>]
-                      [--] <bundle-directory>
+                      [--max-archive-evidence-reads <n>] [--] <bundle-directory>
        abolish-verify keys [--] <evidence-directory>
 
 Verifies one election from a bundle (bundle.json, and board.bin, blocks.car,
@@ -84,7 +85,11 @@ ${DEFAULT_MANIFEST_BUDGET}, each up to about 620 KiB from each gateway asked),
 --max-archive-bytes for the listed objects' answers (default
 ${DEFAULT_ARCHIVE_BYTES}) and --max-archive-reads transactions asked for them
 (default ${DEFAULT_OBJECT_READS}). A budget run out leaves 4.3 unverifiable,
-never failed: raise it for an older deployment or a longer election.
+never failed: raise it for an older deployment or a longer election. For a
+bundle of format 6 the run also reads the board contract's archived
+evidence, which check 4.6 can take in place of the bundle's: at most
+--max-archive-evidence-reads transactions (default ${DEFAULT_EVIDENCE_READS}, each up to
+about 35 KiB from each gateway asked).
 
 keys judges the Tier 0 token keys of every release in the release registry
 from keys.json (docs/spec/verifier.md, Token keys across releases), and
@@ -100,6 +105,7 @@ const ARCHIVE_BUDGETS = {
   "max-archive-manifests": "maxManifests",
   "max-archive-bytes": "maxBytes",
   "max-archive-reads": "maxReads",
+  "max-archive-evidence-reads": "maxEvidenceReads",
 } as const satisfies Record<string, keyof ArchiveReadOptions>;
 type ArchiveBudget = keyof typeof ARCHIVE_BUDGETS;
 
@@ -284,6 +290,7 @@ export async function runCli(
         "max-archive-manifests": { type: "string" },
         "max-archive-bytes": { type: "string" },
         "max-archive-reads": { type: "string" },
+        "max-archive-evidence-reads": { type: "string" },
       },
       allowPositionals: true,
       strict: true,
@@ -293,6 +300,7 @@ export async function runCli(
       "max-archive-manifests": values["max-archive-manifests"],
       "max-archive-bytes": values["max-archive-bytes"],
       "max-archive-reads": values["max-archive-reads"],
+      "max-archive-evidence-reads": values["max-archive-evidence-reads"],
     };
   } catch (e) {
     out.stderr(`${printable(e instanceof Error ? e.message : String(e))}\n${USAGE}`);

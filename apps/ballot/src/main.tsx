@@ -35,7 +35,14 @@ import {
 import { deliverShare } from "./intake.ts";
 import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
-import { loadBoard, loadChainTime, loadElection, loadGroupRegistry, loadPostings } from "./load.ts";
+import {
+  loadBoard,
+  loadChainTime,
+  loadDeposits,
+  loadElection,
+  loadGroupRegistry,
+  loadPostings,
+} from "./load.ts";
 import {
   keepChosenLocale,
   type Locale,
@@ -46,7 +53,13 @@ import {
 import { catalogs } from "./messages.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
-import { postingTopics, postThroughRelay, sendPosting, timedFetch } from "./posting.ts";
+import {
+  postingCalldata,
+  postingTopics,
+  postThroughRelay,
+  sendPosting,
+  timedFetch,
+} from "./posting.ts";
 import type { Recoverer } from "./recover.tsx";
 import { recover } from "./recovery.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
@@ -281,37 +294,46 @@ const source: ElectionSource = {
   ...(STAGING.board === undefined
     ? {}
     : {
-        post: (
+        async post(
           _electionId: Uint8Array,
           ballot: Uint8Array,
           postings: readonly Uint8Array[],
           cutoff: bigint,
-        ) => {
+        ) {
           const { definitionHash, ballotHash } = postingTopics(postings);
-          // Each request bounded, so neither the relay nor the RPC can hold
+          // Each request bounded, so neither the relay nor the RPCs can hold
           // the client past its deadlines (T-25, T-50).
           const fetchFn = timedFetch((url, init) => fetch(url, init));
-          return postThroughRelay(
-            {
-              send: (posting) => sendPosting(STAGING, posting, ballot, fetchFn),
-              find: (head, from, stop) =>
-                loadPostings(
-                  STAGING,
-                  definitionHash,
-                  ballotHash,
-                  fetchFn,
-                  head,
-                  from,
-                  undefined,
-                  undefined,
-                  stop,
-                ),
-              now: () => Date.now(),
-              sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-            },
-            postings,
-            cutoff,
-          );
+          // The calls a deposit must carry, each holding its posting's `m_i`
+          // until the run ends (T-18).
+          const calls = postings.map((posting) => postingCalldata(posting, ballot));
+          try {
+            return await postThroughRelay(
+              {
+                send: (posting) => sendPosting(STAGING, posting, ballot, fetchFn),
+                find: (head, from, stop) =>
+                  loadPostings(
+                    STAGING,
+                    definitionHash,
+                    ballotHash,
+                    fetchFn,
+                    head,
+                    from,
+                    undefined,
+                    undefined,
+                    stop,
+                  ),
+                deposits: (since, stop) => loadDeposits(STAGING, calls, since, fetchFn, stop),
+                now: () => Date.now(),
+                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+              },
+              postings,
+              cutoff,
+              STAGING.forcedInclusion,
+            );
+          } finally {
+            for (const call of calls) call.fill(0);
+          }
         },
       }),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),

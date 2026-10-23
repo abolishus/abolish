@@ -24,7 +24,7 @@ import {
   PARAMETERS,
 } from "@abolishus/crypto";
 
-import type { Deployment } from "./deployment.ts";
+import { type Deployment, onL1 } from "./deployment.ts";
 
 /** Why the client couldn't fetch what it checks. */
 export type LoadProblem =
@@ -655,15 +655,258 @@ export async function loadPostings(
   }
 }
 
+export type LoadedDeposits =
+  | {
+      readonly ok: true;
+      /** The L1 head's timestamp. */
+      readonly timestamp: bigint;
+      /**
+       * For each call asked about, in order, the timestamp of the L1 block
+       * of its newest qualifying deposit, or `undefined` where none is.
+       */
+      readonly landed: readonly (bigint | undefined)[];
+    }
+  | { readonly ok: false; readonly problem: LoadProblem };
+
+// keccak256("TransactionDeposited(address,address,uint256,bytes)"): the
+// portal's deposit event, version 0's (OP Stack, Deposits).
+const DEPOSITED = "b3813568d9991fc951961fcb4c784893574240a28925604d09fc577c55bb7c32";
+// The most of the portal's logs one deposits read takes. Every deposit to
+// the board in the window is read, a forced ballot's of up to 120 KB among
+// them, so this is room for hundreds; a node serving more, or an L1 flooded
+// with deposits to the board, only brings the fallback sooner (T-52).
+const MAX_DEPOSITS_BYTES = 64 * 1024 * 1024;
+// A deposit's `opaqueData`: `mint` and `value` (32 bytes each), `gasLimit`
+// (8) and `isCreation` (1), then the call's data.
+const OPAQUE_HEAD = 73;
+// The furthest back a deposits read starts, in L1 blocks (about 27 hours of
+// 12-second slots), and the most blocks holding deposits to the board whose
+// times it reads: room for any honest run, and a node claiming more only
+// brings the fallback sooner (T-52).
+const MAX_DEPOSIT_LOOKBACK = 8_192n;
+const MAX_DEPOSIT_BLOCKS = 256;
+
+/**
+ * Looks on L1, through the deployment's own L1 endpoint, for a deposit that
+ * forces each of `calls` (each a posting's `submitPosting` calldata) to the
+ * board: a **qualifying deposit** ([[posting-relay]], Outcome) is a
+ * `TransactionDeposited` event of the portal the release pins, version 0,
+ * from any sender, to the board, with `value` 0, no creation, the call's
+ * exact data, and a gas limit at least the client's own `eth_estimateGas`
+ * of the call through its L2 endpoint, so a deposit made to fail for want
+ * of gas never holds the client (T-25). It reads the L1 head and every
+ * deposit to the board from the newest block whose time is by `since`
+ * (found by going back in doubling steps, at most `MAX_DEPOSIT_LOOKBACK`
+ * blocks), with the time of each block holding one, and answers, for each call, the
+ * time of its newest qualifying deposit's L1 block, which reaches L2 by
+ * that time plus `F` ([[0004-l2-choice]], Forced inclusion).
+ *
+ * The requests to L1 name only the portal and the board, never a posting,
+ * so the L1 endpoint learns nothing of which ballot the client watches
+ * (T-11, T-13). A call is estimated on L2 only once a deposit on L1 carries
+ * its exact bytes, which are then public (T-18). Either endpoint is trusted
+ * only to delay: a deposit the L1 one makes up, or an estimate the L2 one
+ * understates so that a deposit made to fail qualifies, keeps the client
+ * waiting, to its deadline `c_P` at most; one it hides, or an estimate
+ * failed or inflated, only brings the fallback sooner. As the board's reads,
+ * it runs out a `maxBytes` budget, charged each block looked up, each range
+ * and each log (T-52), and is given up, as `unreachable`, as soon as `stop`
+ * says so before a request (T-25).
+ */
+export async function loadDeposits(
+  deployment: Deployment,
+  calls: readonly Uint8Array[],
+  since: bigint,
+  fetchFn: Fetch,
+  stop: () => boolean = () => false,
+  range = LOG_RANGE,
+  maxBytes = MAX_DEPOSITS_BYTES,
+): Promise<LoadedDeposits> {
+  const board = deployment.board;
+  if (board === undefined) return { ok: false, problem: "no-registry" };
+  const l1 = onL1(deployment);
+  const boardTopic = `${"0".repeat(24)}${board.address.slice(2)}`;
+  const topics = [`0x${DEPOSITED}`, null, `0x${boardTopic}`, `0x${"0".repeat(64)}`];
+  // Each call's deposits, by gas limit and L1 block.
+  const found: { gasLimit: bigint; block: bigint }[][] = calls.map(() => []);
+  // The blocks holding any deposit to the board, in order.
+  const blocks = new Set<bigint>();
+  let budget = maxBytes;
+  const charge = (cost: number) => {
+    budget -= cost;
+    if (budget < 0) throw new Stop("bad-answer");
+  };
+  const ask = () => {
+    if (stop()) throw new Stop("unreachable");
+  };
+  try {
+    const [, head] = await both(checkChain(l1, fetchFn), headBlock(l1, fetchFn, "latest"));
+    // Back in doubling steps to a block by `since`, at most
+    // MAX_DEPOSIT_LOOKBACK blocks: a run's read comes within about an hour
+    // of its start, and an endpoint whose every block is later than `since`
+    // can't send the read back to the chain's start (T-52).
+    let start: bigint | undefined;
+    for (let back = 64n; start === undefined; back *= 2n) {
+      if (back > MAX_DEPOSIT_LOOKBACK) throw new Stop("bad-answer");
+      ask();
+      charge(RANGE_COST);
+      const at = head.block > back ? head.block - back : 0n;
+      if (at === 0n || (await blockTime(l1, fetchFn, at)) <= since) start = at;
+    }
+    let id = 3;
+    let last: readonly [bigint, bigint] | undefined;
+    for (let from = start; from <= head.block; from += range) {
+      ask();
+      const to = from + range - 1n < head.block ? from + range - 1n : head.block;
+      const logs = await rpcResult(
+        l1,
+        fetchFn,
+        id++,
+        "eth_getLogs",
+        [{ address: board.portal, topics, fromBlock: quantity(from), toBlock: quantity(to) }],
+        MAX_LOGS_ANSWER,
+      ).catch((e: unknown) => {
+        throw e instanceof TypeError ? new Stop("unreachable") : e;
+      });
+      if (!Array.isArray(logs)) throw new Stop("bad-answer");
+      charge(RANGE_COST);
+      for (const log of logs as unknown[]) {
+        const read = logOf(log, board.portal, from, to);
+        if (
+          last !== undefined &&
+          !(read.block > last[0] || (read.block === last[0] && read.index > last[1]))
+        )
+          throw new Stop("bad-answer");
+        last = [read.block, read.index];
+        charge(read.data.length + ENTRY_COST);
+        const deposit = depositOf(read.topics, read.data, boardTopic);
+        if (deposit === undefined) continue;
+        blocks.add(read.block);
+        calls.forEach((call, i) => {
+          if (equalBytes(deposit.data, call))
+            found[i]?.push({ gasLimit: deposit.gasLimit, block: read.block });
+        });
+      }
+    }
+    // The time of every block holding a deposit to the board, whichever
+    // call it carries, so the requests to L1 are the same whether or not
+    // one of the client's calls is among them (T-11, T-13).
+    if (blocks.size > MAX_DEPOSIT_BLOCKS) throw new Stop("bad-answer");
+    const times = new Map<bigint, bigint>();
+    for (const block of blocks) {
+      ask();
+      const time = await blockTime(l1, fetchFn, block);
+      // Never ahead of the head it was read under (T-25).
+      if (time > head.timestamp) throw new Stop("bad-answer");
+      times.set(block, time);
+    }
+    const landed: (bigint | undefined)[] = [];
+    for (const [i, call] of calls.entries()) {
+      const deposits = found[i] ?? [];
+      let newest: bigint | undefined;
+      if (deposits.length > 0) {
+        ask();
+        const needed = await estimate(deployment, fetchFn, board.address, call);
+        for (const { gasLimit, block } of deposits)
+          if (
+            needed !== undefined &&
+            gasLimit >= needed &&
+            (newest === undefined || block > newest)
+          )
+            newest = block;
+      }
+      landed.push(newest === undefined ? undefined : times.get(newest));
+    }
+    return { ok: true, timestamp: head.timestamp, landed };
+  } catch (error) {
+    if (error instanceof Stop) return { ok: false, problem: error.problem };
+    throw error;
+  }
+}
+
+/**
+ * The deposit a portal log is, or `undefined` where it isn't one to the
+ * board under version 0, or carries value or a creation (which the board,
+ * not payable, would refuse): its gas limit and the call's data. The log's
+ * data is the ABI encoding of one `bytes`, `opaqueData`, which must be
+ * canonical: offset 32, its length, and zero padding to a whole word.
+ */
+function depositOf(
+  topics: readonly Uint8Array[],
+  data: Uint8Array,
+  boardTopic: string,
+): { gasLimit: bigint; data: Uint8Array } | undefined {
+  // At most four topics, as `logOf` reads them.
+  const [event, , to, version] = topics;
+  if (
+    event === undefined ||
+    to === undefined ||
+    version === undefined ||
+    toHex(event) !== DEPOSITED ||
+    toHex(to) !== boardTopic ||
+    version.some((b) => b !== 0) ||
+    data.length < 64
+  )
+    return undefined;
+  const word = (at: number) => BigInt(`0x${toHex(data.subarray(at, at + 32))}`);
+  const length = word(32);
+  if (word(0) !== 32n || length < BigInt(OPAQUE_HEAD) || length > BigInt(data.length))
+    return undefined;
+  const n = Number(length);
+  if (data.length !== 64 + Math.ceil(n / 32) * 32 || data.subarray(64 + n).some((b) => b !== 0))
+    return undefined;
+  const opaque = data.subarray(64, 64 + n);
+  // `value` and `isCreation` zero; `mint` is the sender's to credit itself.
+  if (opaque.subarray(32, 64).some((b) => b !== 0) || opaque[72] !== 0) return undefined;
+  return {
+    gasLimit: BigInt(`0x${toHex(opaque.subarray(64, 72))}`),
+    data: opaque.subarray(OPAQUE_HEAD),
+  };
+}
+
+/**
+ * The L2 endpoint's `eth_estimateGas` of `call` to the board at its latest
+ * block, or `undefined` if it can't give one (the call reverts, or the
+ * node fails or isn't on the deployment's chain): then no deposit of the
+ * call qualifies, which only brings the fallback sooner.
+ */
+async function estimate(
+  deployment: Deployment,
+  fetchFn: Fetch,
+  board: string,
+  call: Uint8Array,
+): Promise<bigint | undefined> {
+  try {
+    await checkChain(deployment, fetchFn);
+    const gas = await rpc(deployment, fetchFn, 3, "eth_estimateGas", [
+      { to: board, data: `0x${toHex(call)}` },
+    ]);
+    if (!QUANTITY.test(gas)) return undefined;
+    return BigInt(gas);
+  } catch (error) {
+    if (error instanceof Stop || error instanceof TypeError) return undefined;
+    throw error;
+  }
+}
+
+/** The timestamp of block `n`, which the node must answer as that block. */
+async function blockTime(deployment: Deployment, fetchFn: Fetch, n: bigint): Promise<bigint> {
+  const block = await headBlock(deployment, fetchFn, quantity(n)).catch((e: unknown) => {
+    throw e instanceof TypeError ? new Stop("unreachable") : e;
+  });
+  if (block.block !== n) throw new Stop("bad-answer");
+  return block.timestamp;
+}
+
 /** Request 2: the L2's finalized block, by number and timestamp: logs past it could be reorganised away (T-34). */
 const finalizedHead = (deployment: Deployment, fetchFn: Fetch) =>
   headBlock(deployment, fetchFn, BLOCK);
 
-/** The L2's block at `tag`, by number and timestamp. */
+/** The chain's block at `tag` (a head's name, or a number as a quantity), by number and timestamp. */
 async function headBlock(
   deployment: Deployment,
   fetchFn: Fetch,
-  tag: "finalized" | "latest",
+  tag: string,
 ): Promise<{ block: bigint; timestamp: bigint }> {
   const block = await rpcResult(
     deployment,

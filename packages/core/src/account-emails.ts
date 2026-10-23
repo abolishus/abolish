@@ -275,6 +275,9 @@ function unseal(keys: EmailKeys, accountId: string, box: Uint8Array, keyId: stri
   }
 }
 
+/** `unseal`, for the account's own export (src/account-export.ts) only. */
+export const unsealEmailAddress = unseal;
+
 /**
  * A code's hash, keyed with a hash key so a dump of the table alone can't
  * search the 10^8 codes for it.

@@ -245,6 +245,13 @@ export {
   verifyEmailCode,
 } from "./account-emails.ts";
 export {
+  ACCOUNT_EXPORT,
+  ACCOUNT_EXPORT_VERSION,
+  type AccountExport,
+  exportAccount,
+  type ExportedAppeal,
+} from "./account-export.ts";
+export {
   MAX_PHONE_SENDS_PER_DAY,
   MAX_PHONE_SENDS_PER_HOUR,
   MAX_SENDS_PER_NUMBER,

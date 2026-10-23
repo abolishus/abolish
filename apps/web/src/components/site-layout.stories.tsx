@@ -15,10 +15,20 @@ type Story = StoryObj<typeof meta>;
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const nav = canvas.getByRole("navigation", { name: "Site" });
-  await expect(within(nav).getByRole("link", { name: "Moderation log" })).toHaveAttribute(
+  await expect(within(nav).getByRole("link", { name: "Discover" })).toHaveAttribute(
+    "href",
+    "/discover",
+  );
+  // A phone's header leaves out the two links that don't fit; the footer
+  // lists all four at every width.
+  const wide = canvasElement.ownerDocument.documentElement.clientWidth >= 768;
+  await expect(within(nav).queryAllByRole("link")).toHaveLength(wide ? 4 : 2);
+  const footer = canvas.getByRole("navigation", { name: "The record" });
+  await expect(within(footer).getByRole("link", { name: "Moderation log" })).toHaveAttribute(
     "href",
     "/moderation",
   );
+  await expect(within(footer).getAllByRole("link")).toHaveLength(4);
   await expect(canvas.getByRole("main")).toBeVisible();
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
     "There is no page at this address",
@@ -53,7 +63,7 @@ export const Current: Story = {
       "aria-current",
       "page",
     );
-    await expect(within(nav).getByRole("link", { name: "Moderation log" })).not.toHaveAttribute(
+    await expect(within(nav).getByRole("link", { name: "Discover" })).not.toHaveAttribute(
       "aria-current",
     );
   },
@@ -138,5 +148,27 @@ export const NotFoundPhone: Story = {
   play: async ({ canvasElement }) => {
     const ways = within(canvasElement).getByRole("navigation", { name: "Other places to go" });
     await firstScreen(canvasElement, within(ways).getByRole("link", { name: /^Discover/ }));
+  },
+};
+
+/** A phone's header is one row: the wordmark, Discover, Polls and Account. */
+export const HeaderPhone: Story = {
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const nav = canvas.getByRole("navigation", { name: "Site" });
+    await expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual(["Discover", "Polls"]);
+    // 48px links and the header's padding: wrapped, it was 177px tall.
+    const header = canvasElement.querySelector("header");
+    await expect(header?.getBoundingClientRect().height).toBeLessThan(80);
+    const account = canvas.getByRole("link", { name: "Account" });
+    await expect(account.getBoundingClientRect().top).toBe(
+      within(nav).getByRole("link", { name: "Discover" }).getBoundingClientRect().top,
+    );
   },
 };

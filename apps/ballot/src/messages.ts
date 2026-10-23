@@ -329,6 +329,31 @@ const enUS = {
   postingRelayedTitle: "The posting isn't on the board yet",
   postingRelayed:
     "Our posting relay, run by the poll's operator, was given the missing parts with the key to their outer seal, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Try posting again in a minute: the same parts go again, never new ones.",
+  postingWalletOfferTitle: "Post from your own wallet",
+  postingWalletOffer:
+    "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does. This device sends your ballot only once the record shows them.",
+  postingWalletPost: "Post from my wallet, then send",
+  walletSentTitle: "Your wallet's posting isn't on the board yet",
+  walletSent:
+    "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
+  walletRejectedTitle: "Your wallet didn't send anything",
+  walletRejected:
+    "A request was declined in your wallet, so this device sent nothing from it. Choose again below.",
+  walletRefusedTitle: "The board won't take this posting",
+  walletRefused:
+    "Your wallet's check of the posting says the board would refuse it, so nothing was sent and none of your fee was spent. Your wallet and its node were given the missing parts for that check. Try the trustees again, or leave this ballot.",
+  walletWrongChainTitle: "Your wallet is on another network",
+  walletWrongChain:
+    "Your wallet didn't switch to the network the poll's board is on, so nothing was sent. Switch it there, then post from your wallet again.",
+  walletMissingTitle: "No wallet in this browser",
+  walletMissing:
+    "This device found no Ethereum wallet to ask. Add one to this browser, or open the ballot in a browser that has one, then post from your wallet again.",
+  walletLateTitle: "The time for posting has passed",
+  walletLate:
+    "The poll's posting cutoff has passed, so nothing was sent from your wallet and nothing more can be posted for this ballot.",
+  walletFailedTitle: "Your wallet didn't answer",
+  walletFailed:
+    "Your wallet or its node didn't answer in time, or answered with an error. It may have been given the missing parts, so count them as given. Try again in a minute.",
   declinedTitle: "This ballot won't count",
   declined:
     "This device erased the parts it kept for the trustees that didn't take theirs. Answer again while the poll is open: your new ballot replaces this one, and your earlier one, wherever they reach the board.",
@@ -337,6 +362,9 @@ const enUS = {
   postingTitle: "Posting the missing parts",
   posting:
     "This device is posting the missing parts publicly, then sending your ballot. Keep this page open.",
+  postingWalletTitle: "Posting from your wallet",
+  postingWallet:
+    "Confirm each request in your wallet. This device then waits for the board to record the missing parts before it sends your ballot. Keep this page open.",
   sentTitle: "Your ballot is on the board",
   sent: "The public board took your sealed ballot, and this device checked that the board's answer carries exactly the ballot it sent.",
   sentCopy: "The public board already holds a copy of your sealed ballot, which stands for yours.",

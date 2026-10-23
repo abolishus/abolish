@@ -46,6 +46,7 @@ import {
 } from "./sealed.tsx";
 import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
+import type { WalletAnswer } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -173,6 +174,20 @@ export interface ElectionSource {
     postings: readonly Uint8Array[],
     cutoff: bigint,
   ) => Promise<PostAnswer>;
+  /**
+   * Posts each of `postings` as `post` does, from the voter's own wallet
+   * once a run through the relay fell back ([[posting-relay]], Own wallet;
+   * [[0042-posting-relay]], rule 6), answering `recorded` only once every
+   * one is recorded by the contract, and sending nothing past `cutoff`, the
+   * poll's `c_D`; absent where `post` is, and then never offered. The caller
+   * zeroes the records once this settles.
+   */
+  readonly postOwn?: (
+    electionId: Uint8Array,
+    ballot: Uint8Array,
+    postings: readonly Uint8Array[],
+    cutoff: bigint,
+  ) => Promise<WalletAnswer>;
   /**
    * The election's lock across this origin's tabs (`electionLock`), held
    * from a posting's check through its posting and by every delivery and
@@ -502,9 +517,18 @@ type Step =
       readonly failed?: true;
       /** And the relay had its parts, which may still reach the board. */
       readonly relayed?: true;
+      /**
+       * A run through the relay fell back, so the voter's own wallet may be
+       * offered ([[0042-posting-relay]], rule 6): never before, while the
+       * relay may still record.
+       */
+      readonly fallback?: true;
+      /** What the voter's own wallet last met, if it didn't record them. */
+      readonly wallet?: Exclude<WalletAnswer, "recorded">;
     }
   | { readonly kind: "declining" }
   | { readonly kind: "posting" }
+  | { readonly kind: "posting-wallet" }
   | { readonly kind: "declined" }
   | {
       readonly kind: "unsent";
@@ -631,6 +655,7 @@ export function Ballot({
   // A posting only under the lock: without it another tab could keep a
   // receipt for a seat this one posts (Client rule 2; T-15).
   const posting = source.exclusive === undefined ? undefined : source.post;
+  const postingOwn = posting === undefined ? undefined : source.postOwn;
 
   function again() {
     setStep({ kind: "answering" });
@@ -1192,34 +1217,79 @@ export function Ballot({
     setStep({ kind: "posting" });
     run(
       async (current) => {
-        // From the check through the posting under the election's lock: a
-        // tab that keeps a receipt for a seat between them would have this
-        // one post a receipted seat (Client rule 2; T-15).
-        const posted = await locked(async () => {
-          const checked = await postable(sending);
-          if ("kind" in checked) return checked;
-          try {
-            const answer: PostAnswer =
-              checked.postings.length === 0
-                ? "recorded"
-                : await posting(electionId, sending.ballot, checked.postings, cutoff()).catch(
-                    (): PostAnswer => "unreachable",
-                  );
-            return { checked: checked.sending, answer };
-          } finally {
-            for (const record of checked.postings) record.fill(0);
-          }
-        });
+        const posted = await postChecked(sending, (postings) =>
+          posting(electionId, sending.ballot, postings, cutoff()).catch(
+            (): PostAnswer => "unreachable",
+          ),
+        );
         if ("kind" in posted) return posted;
         const { checked, answer } = posted;
-        if (answer === "relayed")
-          return { kind: "offer", sending: checked, failed: true, relayed: true };
-        if (answer !== "recorded") return { kind: "offer", sending: checked, failed: true };
-        if (current()) setStep({ kind: "sending" });
-        return send({ ...checked, undelivered: [] });
+        if (answer === "recorded") return sendPosted(checked, current);
+        // Every answer but `recorded` is the end of a run that fell back
+        // ([[posting-relay]], Outcome), so the voter's own wallet may now
+        // be offered beside trying the relay again.
+        return answer === "relayed"
+          ? { kind: "offer", sending: checked, failed: true, relayed: true, fallback: true }
+          : { kind: "offer", sending: checked, failed: true, fallback: true };
       },
       { kind: "offer", sending, failed: true },
     );
+  }
+
+  /**
+   * The voter chose their own wallet, after the relay fell back and the
+   * offer said that the paying address is published beside the ballot
+   * ([[0042-posting-relay]], rule 6; T-13): the same check and lock as
+   * `post`, then the wallet's run. A run that doesn't record them returns
+   * to the offer with what the wallet met, the relay still there to try.
+   */
+  function postFromOwnWallet(sending: Sending, relayed: boolean) {
+    if (postingOwn === undefined) return;
+    setStep({ kind: "posting-wallet" });
+    const back = (wallet: Exclude<WalletAnswer, "recorded">): Step =>
+      relayed
+        ? { kind: "offer", sending, failed: true, relayed: true, fallback: true, wallet }
+        : { kind: "offer", sending, failed: true, fallback: true, wallet };
+    run(async (current) => {
+      const posted = await postChecked(sending, (postings) =>
+        postingOwn(electionId, sending.ballot, postings, cutoff()).catch(
+          (): WalletAnswer => "failed",
+        ),
+      );
+      if ("kind" in posted) return posted;
+      const { checked, answer } = posted;
+      if (answer === "recorded") return sendPosted(checked, current);
+      return { ...back(answer), sending: checked };
+    }, back("failed"));
+  }
+
+  /**
+   * Each kept share checked again (`postable`), since the record may have
+   * changed since the offer, then `through` given the records, from the
+   * check through the posting under the election's lock: a tab that keeps
+   * a receipt for a seat between them would have this one post a receipted
+   * seat (Client rule 2; T-15). The records are zeroed once it settles.
+   */
+  async function postChecked<A extends PostAnswer | WalletAnswer>(
+    sending: Sending,
+    through: (postings: readonly Uint8Array[]) => Promise<A>,
+  ): Promise<{ readonly checked: Sending; readonly answer: A | "recorded" } | Step> {
+    return locked(async () => {
+      const checked = await postable(sending);
+      if ("kind" in checked) return checked;
+      try {
+        const answer = checked.postings.length === 0 ? "recorded" : await through(checked.postings);
+        return { checked: checked.sending, answer };
+      } finally {
+        for (const record of checked.postings) record.fill(0);
+      }
+    });
+  }
+
+  /** Every unreceipted seat recorded by the contract: only now is the ballot sent. */
+  function sendPosted(checked: Sending, current: () => boolean): Promise<Step> {
+    if (current()) setStep({ kind: "sending" });
+    return send({ ...checked, undelivered: [] });
   }
 
   /**
@@ -1297,6 +1367,7 @@ export function Ballot({
     case "checking-posting":
     case "declining":
     case "posting":
+    case "posting-wallet":
       return <Working poll={poll} kind={step.kind} />;
     case "offer": {
       const { sending } = step;
@@ -1310,6 +1381,12 @@ export function Ballot({
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
           onPost={posting === undefined ? undefined : () => post(sending)}
+          onWallet={
+            step.fallback === true && postingOwn !== undefined
+              ? () => postFromOwnWallet(sending, step.relayed === true)
+              : undefined
+          }
+          wallet={step.wallet}
         />
       );
     }

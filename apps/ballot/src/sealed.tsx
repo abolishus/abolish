@@ -38,6 +38,7 @@ const WORKING = {
   "checking-posting": { title: "checkingPostingTitle", detail: "checkingPosting" },
   declining: { title: "decliningTitle", detail: "declining" },
   posting: { title: "postingTitle", detail: "posting" },
+  "posting-wallet": { title: "postingWalletTitle", detail: "postingWallet" },
 } as const satisfies Record<
   string,
   { readonly title: keyof Messages; readonly detail: keyof Messages }

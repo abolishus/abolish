@@ -398,7 +398,7 @@ jobs:
       ]
     if: needs.current.outputs.is_head == 'true'
     runs-on: ubuntu-24.04
-    # Up to twelve Railway deployments, one after another.
+    # Up to thirteen Railway deployments, one after another.
     timeout-minutes: 60
     # Secrets live only in this environment, which allows `main` alone
     # (owner setting): a workflow run for a PR branch can't read them (T-65).
@@ -474,6 +474,7 @@ jobs:
           BALLOT_SERVICE_ID: ${{ vars.RAILWAY_BALLOT_SERVICE_ID }}
           SETUP_WORKER_SERVICE_ID: ${{ vars.RAILWAY_SETUP_WORKER_SERVICE_ID }}
           CREATION_WORKER_SERVICE_ID: ${{ vars.RAILWAY_CREATION_WORKER_SERVICE_ID }}
+          POSTING_WORKER_SERVICE_ID: ${{ vars.RAILWAY_POSTING_WORKER_SERVICE_ID }}
           # Space- or comma-separated, seat 1 first.
           SEAT_SERVICE_IDS: ${{ vars.RAILWAY_SEAT_SERVICE_IDS }}
           # Railway's GraphQL API (backboard.railway.com/graphql/v2).
@@ -529,8 +530,11 @@ jobs:
           deploy "$API_SERVICE_ID" "$API_IMAGE"
           deploy "$WEB_SERVICE_ID" "$WEB_IMAGE"
           deploy "$BALLOT_SERVICE_ID" "$BALLOT_IMAGE"
-          # One image, two services: each worker's variables decide what it
-          # runs, and the creation worker holds the creation key alone.
+          # One image, three services: each worker's variables decide what it
+          # runs (the posting worker's start command is `node posting.mjs`,
+          # set on its Railway service), the creation worker holds the
+          # creation key alone and the posting worker the posting key alone
+          # (docs/runbooks/posting-relay.md).
           if [ -n "$SETUP_WORKER_SERVICE_ID" ]; then
             deploy "$SETUP_WORKER_SERVICE_ID" "$WORKER_IMAGE"
           else
@@ -540,6 +544,11 @@ jobs:
             deploy "$CREATION_WORKER_SERVICE_ID" "$WORKER_IMAGE"
           else
             echo "::notice::RAILWAY_CREATION_WORKER_SERVICE_ID is not set; not deploying the creation worker"
+          fi
+          if [ -n "$POSTING_WORKER_SERVICE_ID" ]; then
+            deploy "$POSTING_WORKER_SERVICE_ID" "$WORKER_IMAGE"
+          else
+            echo "::notice::RAILWAY_POSTING_WORKER_SERVICE_ID is not set; not deploying the posting worker"
           fi
           # One seat at a time, each live before the next, so a seat Railway
           # reports failed stops the release before the rest

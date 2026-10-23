@@ -978,7 +978,7 @@ Specified in [[P2-17]] part 2b-2b and built in its part 5, before any registry r
 
 Then it emits `RollingBallotSubmitted` (Events), carrying the root and the record, and returns. What changes in the ballot check, which reads version 5 on this call alone:
 
-- **Step 3.** The election must pin ballot version 5: a pinned version other than 5 is `unknown-version` at 2 here, since a fixed poll's root is registered and must never be replaced by a submitter's. The other ballot paths read versions 1 to 4 only (Ballots (version 4), step 3), so a rolling poll's ballot is `unknown-version` at 2 there, and this call is its one contract path. A record version other than the pin is `profile-mismatch` at 2, as before.
+- **Step 3.** As before, a record version other than the one the election pins is `profile-mismatch` at 2, checked first; then the election must pin ballot version 5: a pinned version other than 5 is `unknown-version` at 2 here, since a fixed poll's root is registered and must never be replaced by a submitter's. The other ballot paths read versions 1 to 4 only (Ballots (version 4), step 3), so a rolling poll's ballot is `unknown-version` at 2 there, and this call is its one contract path.
 - **Step 4.** As version 4's: `cell` any `u8`, `nullifier` below `r`, the proof at 108; then the `step` at 364, any `u32`, which the contract never compares with the root clock (a record ending inside it is `truncated` at 364).
 - **Step 5.** The committed vote is framed at 368 as Ballots (version 4) frames it, its six fields in order, with nothing after it.
 - **Step 6, `ballot-cell`**, as for versions 2 to 4: `cell` below `cell_count`, its tier from `cell(definition_hash, c)`, whose recorded root the call never reads.

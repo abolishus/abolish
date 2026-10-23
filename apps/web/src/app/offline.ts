@@ -13,6 +13,15 @@
 // its own policy and entry points (ADR 0020; T-41, T-43), and nothing here
 // reaches it.
 //
+// Each language has its own worker, page and notice (P2-28 part 4c): a page
+// registers the worker for its own locale, `/sw.js?lang=es-US` beside the
+// default's plain `/sw.js`, and that worker keeps and shows only that
+// locale's offline page and notice. A worker can't read the footer's cookie,
+// and the shell takes no input from a page once it runs, so its language is
+// fixed by the address it was registered from; a visitor who switches
+// language registers the other worker at the next page, which replaces this
+// one and drops its cache.
+//
 // The same worker shows web push's notice (P2-27 part 4b; T-76): a push
 // from our server carries no payload, so it shows one fixed notice, words
 // set here when the worker is served, whatever a push carries, and a click
@@ -26,6 +35,7 @@
 // cache (`updateViaCache: "none"`), so a changed worker replaces the old one
 // at the next page a visitor opens.
 
+import { DEFAULT_LOCALE, isLocale, type Locale } from "../locales.ts";
 import { toHex } from "../values.ts";
 
 /** Where the worker is served: the site's root, so its scope is every page. */
@@ -34,13 +44,34 @@ export const WORKER_PATH = "/sw.js";
 /** The page shown when a page can't be fetched. */
 export const OFFLINE_PATH = "/offline";
 
+// The default's shell has no query, so its addresses are what they were
+// before there was a second language.
+const shellQuery = (locale: Locale) => (locale === DEFAULT_LOCALE ? "" : `?lang=${locale}`);
+
+/** The worker for `locale`'s shell, as a page registers it. */
+export const workerPath = (locale: Locale) => `${WORKER_PATH}${shellQuery(locale)}`;
+
+/** `locale`'s offline page, as its worker keeps it. */
+export const offlinePath = (locale: Locale) => `${OFFLINE_PATH}${shellQuery(locale)}`;
+
+/**
+ * The locale a request for the shell's page or worker names by its query
+ * (`search`, as `URL` has it): none is the default's, `?lang=` one of our
+ * other locales; anything else is no shell of ours.
+ */
+export function shellLocale(search: string): Locale | undefined {
+  if (search === "") return DEFAULT_LOCALE;
+  const named = /^\?lang=([A-Za-z-]+)$/.exec(search)?.[1];
+  return isLocale(named) && named !== DEFAULT_LOCALE ? named : undefined;
+}
+
 /** The names of every cache the worker fills begin with this. */
 export const CACHE_PREFIX = "abolish-offline:";
 
 export interface OfflineWorkerConfig {
   /** This version's cache: `CACHE_PREFIX` and the offline page's hash. */
   readonly cache: string;
-  /** `OFFLINE_PATH`. */
+  /** `offlinePath` of the worker's locale. */
   readonly offline: string;
   /** The offline page's stylesheet, a content-hashed path under `/assets/`. */
   readonly stylesheet: string;
@@ -186,8 +217,12 @@ export function offlineWorker(scope: OfflineWorkerScope, config: OfflineWorkerCo
 export const offlineWorkerSource = (config: OfflineWorkerConfig): string =>
   `"use strict";\n(${offlineWorker.toString()})(self, ${JSON.stringify(config)});\n`;
 
-/** The worker's configuration for an offline page whose HTML is `html`, showing `notice` on a push. */
+/**
+ * The worker's configuration for `locale`'s offline page, whose HTML is
+ * `html`, showing `notice` on a push.
+ */
 export async function offlineWorkerConfig(
+  locale: Locale,
   html: string,
   stylesheet: string,
   notice: PushNotice,
@@ -199,17 +234,17 @@ export async function offlineWorkerConfig(
   // page does (its words, or its stylesheet's name) and the browser
   // installs the worker again, filling a fresh cache.
   const hash = toHex(digest.slice(0, 16));
-  return { cache: `${CACHE_PREFIX}${hash}`, offline: OFFLINE_PATH, stylesheet, notice };
+  return { cache: `${CACHE_PREFIX}${hash}`, offline: offlinePath(locale), stylesheet, notice };
 }
 
 /**
- * Registers the worker from a page. Where a browser has no service workers,
+ * Registers `locale`'s worker from a page in that locale. Where a browser has no service workers,
  * or refuses one (a private window, a policy), the site works as before,
  * only not offline, so a refusal is left unreported.
  */
-export function registerOfflineShell(navigator: Navigator): void {
+export function registerOfflineShell(navigator: Navigator, locale: Locale): void {
   if (!("serviceWorker" in navigator)) return;
   navigator.serviceWorker
-    .register(WORKER_PATH, { scope: "/", updateViaCache: "none" })
+    .register(workerPath(locale), { scope: "/", updateViaCache: "none" })
     .catch(() => {});
 }

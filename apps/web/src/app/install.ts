@@ -10,11 +10,17 @@
 // and each PNG is the icon's SVG below rendered at its size, so the bytes
 // shipped are always what this source says (repro-build).
 //
+// Each locale has its own manifest (P2-28 part 4c), linked from its pages,
+// so a phone installs the website named and described in the language it
+// was installed from. All share the one `id`, so it is the same app
+// whichever page installed it.
+//
 // T-67, T-11: the manifest names no tracking parameter in `start_url`, and
 // fetching it or an icon is never counted as a page view.
 
 import { formatMessage } from "@abolishus/ui";
 
+import { DEFAULT_LOCALE, LOCALES, type Locale } from "../locales.ts";
 import type { Messages } from "../messages.ts";
 
 /** The light palette's tokens (packages/ui/src/styles.css) as sRGB, as src/og/card.tsx has them. */
@@ -56,15 +62,21 @@ export const ICON_PNGS: readonly IconFile[] = [
 export const ICON_SVG_PATH = "/icons/icon.svg";
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
+/** `locale`'s manifest: the default's at `MANIFEST_PATH`, as before there was a second. */
+export const manifestPath = (locale: Locale) =>
+  locale === DEFAULT_LOCALE ? MANIFEST_PATH : `/manifest.${locale}.webmanifest`;
+
 /** Every file the install serves, with its content type: nothing else under these names. */
 export const APP_FILES: Readonly<Record<string, string>> = {
-  [MANIFEST_PATH]: "application/manifest+json",
+  ...Object.fromEntries(
+    LOCALES.map((locale) => [manifestPath(locale), "application/manifest+json"]),
+  ),
   [ICON_SVG_PATH]: "image/svg+xml",
   ...Object.fromEntries(ICON_PNGS.map((icon) => [icon.path, "image/png"])),
 };
 
 /** The web app manifest for `locale`'s catalog. */
-export function webManifest(locale: string, messages: Messages) {
+export function webManifest(locale: Locale, messages: Messages) {
   const say = (key: keyof Messages) => formatMessage(locale, messages[key]);
   return {
     id: "/",
@@ -92,6 +104,6 @@ export function webManifest(locale: string, messages: Messages) {
   };
 }
 
-/** The manifest's file, as `public/manifest.webmanifest` holds it. */
-export const manifestFile = (locale: string, messages: Messages) =>
+/** `locale`'s manifest's file, as `public/` holds it at `manifestPath(locale)`. */
+export const manifestFile = (locale: Locale, messages: Messages) =>
   `${JSON.stringify(webManifest(locale, messages), null, 2)}\n`;

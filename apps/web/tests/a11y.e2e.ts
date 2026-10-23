@@ -29,7 +29,8 @@ import { type Browser, type BrowserContextOptions, chromium, type Page } from "p
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
-import { DEFAULT_LOCALE, LOCALES } from "../src/locales.ts";
+import { OFFLINE_PATH, offlinePath } from "../src/app/offline.ts";
+import { DEFAULT_LOCALE, isLocale, LOCALES } from "../src/locales.ts";
 import { loadCatalog } from "../src/messages.ts";
 import { titles } from "../src/titles.ts";
 import { createWebServer, type StartHandler } from "../src/node/serve.ts";
@@ -187,7 +188,11 @@ async function open(
     (route) => route.abort(),
   );
   await prepare?.(page);
-  await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+  // The offline page's language is its address's, not the browser's (P2-28
+  // part 4c): a visitor reading in a locale gets that locale's, as the
+  // worker their pages registered keeps it.
+  const at = path === OFFLINE_PATH && isLocale(options.locale) ? offlinePath(options.locale) : path;
+  await page.goto(`${origin}${at}`, { waitUntil: "networkidle" });
   return { context, page };
 }
 
@@ -971,11 +976,8 @@ describe.each(VIEWS)("the text at $name width", ({ viewport }) => {
         const { context, page } = await open(path, { viewport, locale });
         try {
           // 3.1.1 Language of Page: the catalog's language, which axe checks
-          // is valid but not that it is the right one. The offline page is
-          // the same bytes for everyone, in the source language.
-          expect(await page.locator("html").getAttribute("lang")).toBe(
-            path === "/offline" ? DEFAULT_LOCALE : locale,
-          );
+          // is valid but not that it is the right one.
+          expect(await page.locator("html").getAttribute("lang")).toBe(locale);
           expect(await textCut(page)).toEqual([]);
           // 1.4.12 Text Spacing.
           await spaceText(page);

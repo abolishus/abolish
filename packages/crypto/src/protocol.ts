@@ -327,6 +327,9 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
+// Version 9 is left out until the verifier reads its author registration in
+// 3.1 ([[P2-16]] part 5d-3): until then 2.3 reports a profile pinning it
+// unverifiable, never failed (T-36, T-37).
 // Only version 8's tables name every board event (the close rule's, the
 // batches', the obligation root's and the availability records') and every
 // group-registry event (the Tier 1 addition and the self-paid group and

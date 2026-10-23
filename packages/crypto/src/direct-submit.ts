@@ -1,13 +1,17 @@
 // The board contract's stateless framing of the records it accepts
 // (docs/spec/contracts.md, Board, Ballots steps 1 and 3 to 5 and the proof's
 // points, Delivery records steps 1, 3 and 4), for the contract-event record's
-// version-2 check of the board's events. It runs the contract's framing, and
-// none of its shape checks (seat 0, counts that disagree, a posting's length),
-// and decodes nothing the contract doesn't: a ristretto255 element is only
-// checked to be an even value below 2²⁵⁵ − 19 and not 0, never decoded, since
-// the board admits a member's ballot whose elements aren't points and the
-// verifier rejects it later (T-53). Checking more here would let any member
-// fail a deployment's events by direct-submitting such a ballot (T-17, T-31).
+// check of the board's events: versions 2 to 8 frame ballot versions 1 to 3
+// and the version-1 delivery records, and version 9 adds ballot version 4 and
+// the version-2 delivery records, which name their seat's panel (What the
+// board frames (version 9); Ballots (version 4); Delivery records (version
+// 2)). It runs the contract's framing, and none of its shape checks (seat
+// 0, counts that disagree, a posting's length), and decodes nothing the
+// contract doesn't: a ristretto255 element is only checked to be an even
+// value below 2²⁵⁵ − 19 and not 0, never decoded, since the board admits a
+// member's ballot whose elements aren't points and the verifier rejects it
+// later (T-53). Checking more here would let any member fail a deployment's
+// events by direct-submitting such a ballot (T-17, T-31).
 
 import {
   bytesFixed,
@@ -29,6 +33,7 @@ import { TIERS } from "./election-definition.ts";
 import { H, scalar } from "./group.ts";
 import { membershipProof } from "./membership-proof.ts";
 import { PARAMETERS } from "./parameters.ts";
+import { SEAT_PANELS } from "./ballot.ts";
 import { COMPLAINT_BATCH_MAX } from "./delivery.ts";
 import { RECORD_TYPES } from "./record.ts";
 import { MLKEM_CT_LEN, MAX_SEALED } from "./share-encryption.ts";
@@ -81,9 +86,17 @@ const voteHead = [
 
 // Ballot versions 1 and 2: one sum proof; version 3: one range proof per question.
 const VOTE = struct([...voteHead, ["sum_proof", list(branch, MAX_OPTIONS + 1)]] as const);
-const VOTE_V3 = struct([
-  ...voteHead,
-  ["sum_proofs", list(list(branch, MAX_OPTIONS + 1), MAX_QUESTIONS)],
+const sumProofs = ["sum_proofs", list(list(branch, MAX_OPTIONS + 1), MAX_QUESTIONS)] as const;
+const VOTE_V3 = struct([...voteHead, sumProofs] as const);
+// Version 4: the author half after the default half, framed as it is
+// (Ballots (version 4), step 5), so an author element is never decoded either.
+const VOTE_V4 = struct([
+  ["vss", list(list(framedElement, MAX_TRUSTEES), MAX_OPTIONS)],
+  ["share_hashes", list(bytesFixed(32), MAX_TRUSTEES)],
+  ["author_vss", list(list(framedElement, MAX_TRUSTEES), MAX_OPTIONS)],
+  ["author_share_hashes", list(bytesFixed(32), MAX_TRUSTEES)],
+  ["option_proofs", list(bitProof, MAX_OPTIONS)],
+  sumProofs,
 ] as const);
 
 const ballotFields = (label: Codec<number>, vote: Codec<unknown>) =>
@@ -99,11 +112,22 @@ const ballotFields = (label: Codec<number>, vote: Codec<unknown>) =>
     ["committed_vote", vote],
   ] as const);
 
-const BALLOT_BODY: Readonly<Record<1 | 2 | 3, Codec<unknown>>> = {
+const BALLOT_BODY: Readonly<Record<1 | 2 | 3 | 4, Codec<unknown>>> = {
   1: ballotFields(enum8(TIERS), VOTE),
   2: ballotFields(u8, VOTE),
   3: ballotFields(u8, VOTE_V3),
+  4: ballotFields(u8, VOTE_V4),
 };
+
+/**
+ * Whose framing to apply: the contract-event version's (What the board
+ * frames). Version 8's, which versions 2 to 7 share, takes ballot versions 1
+ * to 3 and the version-1 delivery records; version 9's adds ballot version 4
+ * and the version-2 delivery records. A board deployed with the earlier
+ * framing refuses the records only the later one takes, so a record version
+ * 8 refuses is never one such a board emitted (T-53).
+ */
+export type BoardFraming = 8 | 9;
 
 // The fields' offsets in a ballot record of any version (docs/spec/ballot-validity.md).
 const DEFINITION_AT = 3;
@@ -121,17 +145,23 @@ export interface FramedRecord {
 
 /**
  * Frames a ballot record (`0x0002`) as the board does before reading its
- * election: a version from 1 to 3, the fixed fields, the committed vote
- * under that version, nothing after it, and the membership proof's points.
- * Returns its `definition_hash` and its `ballot_hash`, computed from the
- * record's bytes (docs/spec/ballot-validity.md, Ballot hash; Hashes (version
- * 3)), or undefined for any record the board refuses whatever its election.
+ * election: a version from 1 to 3 (or 4, under `framing` 9), the fixed
+ * fields, the committed vote under that version, nothing after it, and the
+ * membership proof's points. Returns its `definition_hash` and its
+ * `ballot_hash`, computed from the record's bytes with the one formula every
+ * version shares (docs/spec/ballot-validity.md, Ballot hash; Hashes (version
+ * 3); Hashes (version 4)), or undefined for any record the board refuses
+ * whatever its election.
  */
 export function frameBallot(
   record: Uint8Array,
-): (FramedRecord & { version: 1 | 2 | 3 }) | undefined {
+  framing: BoardFraming = 8,
+): (FramedRecord & { version: 1 | 2 | 3 | 4 }) | undefined {
   const version = record[2];
-  if (typeOf(record) !== RECORD_TYPES.ballot || (version !== 1 && version !== 2 && version !== 3))
+  if (
+    typeOf(record) !== RECORD_TYPES.ballot ||
+    (version !== 1 && version !== 2 && version !== 3 && (version !== 4 || framing !== 9))
+  )
     return undefined;
   try {
     decode(BALLOT_BODY[version], record.subarray(3));
@@ -153,50 +183,78 @@ export function frameBallot(
   };
 }
 
+// A version-2 record's panel, before its seat: the default panel or the author panel.
+const panel = enum8([SEAT_PANELS.default, SEAT_PANELS.author]);
+
 const deliveryHead = [
   ["definition_hash", bytesFixed(32)],
   ["ballot_hash", bytesFixed(32)],
   ["seat", u8],
 ] as const;
 
-const DELIVERY_BODY: ReadonlyMap<number, Codec<unknown>> = new Map<number, Codec<unknown>>([
-  [
-    RECORD_TYPES.shareReceipt,
-    struct([...deliveryHead, ["share_hash", bytesFixed(32)], ["signature", p256Sig]] as const),
-  ],
-  [
-    RECORD_TYPES.sharePosting,
-    struct([
-      ...deliveryHead,
-      ["m", bytesFixed(32)],
-      ["ct_mlkem", bytesFixed(MLKEM_CT_LEN)],
-      ["ct_dh", framedElement],
-      ["pok_c", scalar],
-      ["pok_z", scalar],
-      ["sealed", bytesVar(MAX_SEALED)],
-    ] as const),
-  ],
-  [
-    RECORD_TYPES.shareComplaint,
-    struct([
-      ...deliveryHead,
-      ["dh", framedElement],
-      ["c", scalar],
-      ["z", scalar],
-      ["signature", p256Sig],
-    ] as const),
-  ],
-]);
+// Version 2: `panel` at 67, before the seat, and every later field one byte
+// further on (docs/spec/delivery.md, Records (version 2), Decoding).
+const deliveryHeadV2 = [
+  ["definition_hash", bytesFixed(32)],
+  ["ballot_hash", bytesFixed(32)],
+  ["panel", panel],
+  ["seat", u8],
+] as const;
+
+function deliveryBodies(
+  head: typeof deliveryHead | typeof deliveryHeadV2,
+): ReadonlyMap<number, Codec<unknown>> {
+  return new Map<number, Codec<unknown>>([
+    [
+      RECORD_TYPES.shareReceipt,
+      struct([...head, ["share_hash", bytesFixed(32)], ["signature", p256Sig]] as const),
+    ],
+    [
+      RECORD_TYPES.sharePosting,
+      struct([
+        ...head,
+        ["m", bytesFixed(32)],
+        ["ct_mlkem", bytesFixed(MLKEM_CT_LEN)],
+        ["ct_dh", framedElement],
+        ["pok_c", scalar],
+        ["pok_z", scalar],
+        ["sealed", bytesVar(MAX_SEALED)],
+      ] as const),
+    ],
+    [
+      RECORD_TYPES.shareComplaint,
+      struct([
+        ...head,
+        ["dh", framedElement],
+        ["c", scalar],
+        ["z", scalar],
+        ["signature", p256Sig],
+      ] as const),
+    ],
+  ]);
+}
+
+const DELIVERY_BODY: Readonly<Record<1 | 2, ReadonlyMap<number, Codec<unknown>>>> = {
+  1: deliveryBodies(deliveryHead),
+  2: deliveryBodies(deliveryHeadV2),
+};
 
 /**
  * Frames a share receipt (`0x000c`), posting (`0x000d`) or complaint
  * (`0x000e`) of record type `type` as the board does (Delivery records, step
- * 4): version 1, every field framed, nothing after the last. Returns the
- * `definition_hash` and `ballot_hash` it names, or undefined.
+ * 4): version 1 (or 2, under `framing` 9), every field framed, nothing after
+ * the last. Returns the `definition_hash` and `ballot_hash` it names, at the
+ * same offsets under either version, or undefined.
  */
-export function frameDelivery(type: number, record: Uint8Array): FramedRecord | undefined {
-  const body = DELIVERY_BODY.get(type);
-  if (body === undefined || typeOf(record) !== type || record[2] !== 1) return undefined;
+export function frameDelivery(
+  type: number,
+  record: Uint8Array,
+  framing: BoardFraming = 8,
+): FramedRecord | undefined {
+  const version = record[2];
+  if (version !== 1 && (version !== 2 || framing !== 9)) return undefined;
+  const body = DELIVERY_BODY[version].get(type);
+  if (body === undefined || typeOf(record) !== type) return undefined;
   try {
     decode(body, record.subarray(3));
   } catch (e) {
@@ -239,29 +297,46 @@ const framedComplaintEntries: Codec<number> = {
   },
 };
 
-const COMPLAINT_BATCH_BODY = struct([
-  ["definition_hash", bytesFixed(32)],
-  ["seat", u8],
-  ["complaints", framedComplaintEntries],
-  ["signature", p256Sig],
-] as const);
+const COMPLAINT_BATCH_BODY: Readonly<Record<1 | 2, Codec<unknown>>> = {
+  1: struct([
+    ["definition_hash", bytesFixed(32)],
+    ["seat", u8],
+    ["complaints", framedComplaintEntries],
+    ["signature", p256Sig],
+  ] as const),
+  // Version 2: `panel` at 35 and `seat` at 36.
+  2: struct([
+    ["definition_hash", bytesFixed(32)],
+    ["panel", panel],
+    ["seat", u8],
+    ["complaints", framedComplaintEntries],
+    ["signature", p256Sig],
+  ] as const),
+};
 
 /**
  * Frames a share-complaint batch (`0x0017`) as the board does (Delivery
- * records, step 4): version 1, its entries ascending with each `D` framed,
- * never decoded, so a seat's batch the board emits always passes the event
- * check (T-53). Returns the `definition_hash` and `seat` it names, or
+ * records, step 4): version 1 (or 2, under `framing` 9), its entries
+ * ascending with each `D` framed, never decoded, so a seat's batch the board
+ * emits always passes the event check (T-53). Returns the `definition_hash`
+ * and `seat` it names, the seat read where its version puts it, or
  * undefined.
  */
 export function frameComplaintBatch(
   record: Uint8Array,
+  framing: BoardFraming = 8,
 ): { readonly definitionHash: Uint8Array; readonly seat: number } | undefined {
-  if (typeOf(record) !== RECORD_TYPES.shareComplaintBatch || record[2] !== 1) return undefined;
+  const version = record[2];
+  if (
+    typeOf(record) !== RECORD_TYPES.shareComplaintBatch ||
+    (version !== 1 && (version !== 2 || framing !== 9))
+  )
+    return undefined;
   try {
-    decode(COMPLAINT_BATCH_BODY, record.subarray(3));
+    decode(COMPLAINT_BATCH_BODY[version], record.subarray(3));
   } catch (e) {
     if (e instanceof DecodeError) return undefined;
     throw e;
   }
-  return { definitionHash: record.slice(3, 35), seat: record[35] as number };
+  return { definitionHash: record.slice(3, 35), seat: record[version === 1 ? 35 : 36] as number };
 }

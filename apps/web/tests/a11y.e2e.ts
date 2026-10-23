@@ -14,8 +14,11 @@
 // page's accessibility tree, what Chromium hands a screen reader: every page
 // has a title of its own, nothing is read twice in a row, every control's
 // name holds the words it shows, and links of one name lead to one place
-// unless what is around them tells them apart. Whether the text says what it
-// should is part 3b-3.
+// unless what is around them tells them apart. The text's part (part 3b-3)
+// reads each page as a reader who needs its text larger or more spaced out:
+// in the catalog's language, nothing cut off or drawn over other text as it
+// is, with WCAG's text spacing (1.4.12) or at twice its size (1.4.4). The
+// words themselves are held to the voice in tests/messages.test.ts.
 
 import type { Server } from "node:http";
 import { type AddressInfo, createServer } from "node:net";
@@ -26,6 +29,7 @@ import { type Browser, type BrowserContextOptions, chromium, type Page } from "p
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
+import { LOCALE } from "../src/messages.ts";
 import { createWebServer, type StartHandler } from "../src/node/serve.ts";
 import {
   BALLOT,
@@ -157,7 +161,11 @@ const describeViolation = (v: axe.Result) =>
  * has no script of its own, so it draws the same without its policy. Every
  * other page keeps its own.
  */
-async function open(path: string, options: BrowserContextOptions = {}) {
+async function open(
+  path: string,
+  options: BrowserContextOptions = {},
+  prepare?: (page: Page) => Promise<void>,
+) {
   const context = await browser.newContext({
     ...options,
     bypassCSP: path.startsWith("/embed/"),
@@ -167,6 +175,7 @@ async function open(path: string, options: BrowserContextOptions = {}) {
     (url) => url.origin !== origin,
     (route) => route.abort(),
   );
+  await prepare?.(page);
   await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
   return { context, page };
 }
@@ -830,5 +839,184 @@ describe("each page's title", () => {
       // A poll that isn't there is the site's 404.
       ["/nowhere", `/polls/${UNKNOWN_ID}`],
     ]);
+  });
+});
+
+/**
+ * The text a box around it cuts off, or that lies over other text, as
+ * lines: a line drawn past the edge of a box that hides or clips its
+ * overflow (a box that scrolls itself keeps it reachable, and nothing past
+ * it is judged), or two lines of different text drawn over each other by
+ * more than half a line. Text kept for screen readers only (`sr-only`,
+ * clipped to a pixel) isn't drawn to be read, and isn't judged; nor is
+ * anything inside `except`.
+ */
+function textCut(page: Page, except?: string) {
+  return page.evaluate((except) => {
+    const out: string[] = [];
+    const lines: { rect: DOMRect; node: Text }[] = [];
+    const say = (node: Text) => `"${(node.textContent ?? "").trim().slice(0, 40)}"`;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      const node = n as Text;
+      const owner = node.parentElement;
+      if (owner === null || (node.textContent ?? "").trim() === "") continue;
+      if (except !== undefined && owner.closest(except) !== null) continue;
+      if (!owner.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+      let unread = false;
+      const cut = new Set<string>();
+      for (
+        let up: Element | null = owner;
+        up !== null && up !== document.body;
+        up = up.parentElement
+      ) {
+        const { overflowX, overflowY } = getComputedStyle(up);
+        if (/auto|scroll/.test(overflowX) || /auto|scroll/.test(overflowY)) break;
+        const [clipsX, clipsY] = [/hidden|clip/.test(overflowX), /hidden|clip/.test(overflowY)];
+        if (!clipsX && !clipsY) continue;
+        const box = up.getBoundingClientRect();
+        if (box.width <= 1 || box.height <= 1) {
+          unread = true;
+          break;
+        }
+        const left = box.left + up.clientLeft;
+        const top = box.top + up.clientTop;
+        const right = left + up.clientWidth;
+        const bottom = top + up.clientHeight;
+        for (const r of rects) {
+          if (clipsX && (r.left < left - 1 || r.right > right + 1)) cut.add("at the side");
+          if (clipsY && (r.top < top - 1 || r.bottom > bottom + 1)) cut.add("below");
+        }
+      }
+      if (unread) continue;
+      for (const how of cut) out.push(`${say(node)} cut off ${how}`);
+      for (const rect of rects) lines.push({ rect, node });
+    }
+    for (const [i, a] of lines.entries())
+      for (const b of lines.slice(i + 1)) {
+        if (a.node === b.node) continue;
+        const w = Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left);
+        const h = Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top);
+        if (w > 2 && h > Math.min(a.rect.height, b.rect.height) / 2)
+          out.push(`${say(a.node)} over ${say(b.node)}`);
+      }
+    return [...new Set(out)];
+  }, except);
+}
+
+/**
+ * WCAG 1.4.12's spacing over the page's own styles: lines 1.5 times the
+ * text, paragraphs followed by twice it, letters 0.12 and words 0.16 of
+ * it apart. Through a constructed stylesheet, which the policy allows.
+ */
+async function spaceText(page: Page) {
+  await page.evaluate(() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      "* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important }" +
+        " p { margin-block-end: 2em !important }",
+    );
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
+}
+
+/**
+ * The browser's default text size doubled before the page loads, as a
+ * reader's own setting does (1.4.4): every size in `rem` doubles, and so
+ * does every breakpoint, which are in `rem` too.
+ */
+async function doubleText(page: Page) {
+  const debug = await page.context().newCDPSession(page);
+  await debug.send("Page.setFontSizes", { fontSizes: { standard: 32, fixed: 26 } });
+}
+
+/**
+ * The flyer's sheet is drawn to its paper (src/components/poll-flyer.tsx):
+ * its text is sized to the sheet, not to the reader's text, so it neither
+ * grows nor reflows. What it says, the poll page says in text that does.
+ */
+const SHEET = "[data-flyer]";
+
+describe.each(VIEWS)("the text at $name width", ({ viewport }) => {
+  test.each(PAGES)(
+    "%s: nothing cut off or drawn over other text, as it is and with WCAG's text spacing",
+    async (path) => {
+      const { context, page } = await open(path, { viewport });
+      try {
+        // 3.1.1 Language of Page: the catalog's language, which axe checks
+        // is valid but not that it is the right one.
+        expect(await page.locator("html").getAttribute("lang")).toBe(LOCALE);
+        expect(await textCut(page)).toEqual([]);
+        // 1.4.12 Text Spacing.
+        await spaceText(page);
+        expect(await textCut(page, SHEET)).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    },
+  );
+});
+
+// At twice the text's size a desktop's 1280 px holds 40 of the larger rem,
+// a tablet's layout, which is what 1.4.4 asks to work. At the phone's
+// width it would be a screen 180 px wide, which no criterion asks for
+// (1.4.10 Reflow is 320 px at 400% zoom, the phone test above).
+describe("the text at twice its size", () => {
+  test.each(PAGES)(
+    "%s: grows, and nothing is cut off, drawn over other text or past the edge",
+    async (path) => {
+      const { context, page } = await open(path, VIEWS[0], doubleText);
+      try {
+        expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(
+          "32px",
+        );
+        expect(await textCut(page, SHEET)).toEqual([]);
+        expect(await pastTheEdge(page)).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    },
+  );
+});
+
+describe("the text's check itself", () => {
+  test("finds what it checks for: text a box cuts off, text over other text, and not what only a screen reader reads", async () => {
+    const { context, page } = await open("/how-it-works", VIEWS[0]);
+    try {
+      await page.evaluate(() => {
+        const main = document.querySelector("main");
+        if (main === null) throw new Error("no main");
+        const text = (words: string) => {
+          const p = document.createElement("p");
+          p.textContent = words;
+          return p;
+        };
+        // Through the CSSOM, which the policy's style-src allows.
+        const box = document.createElement("div");
+        Object.assign(box.style, { height: "1em", overflow: "hidden", width: "10em" });
+        box.append(text("A sentence too long for its box, which hides the rest"));
+        const stack = document.createElement("div");
+        stack.style.position = "relative";
+        const [under, over] = [text("Underneath"), text("On top")];
+        Object.assign(over.style, { position: "absolute", top: "0", left: "0" });
+        stack.append(under, over);
+        const unread = text("Only for screen readers");
+        unread.className = "sr-only";
+        main.prepend(box, stack, unread);
+      });
+      const found = await textCut(page);
+      expect(found).toEqual(
+        expect.arrayContaining([
+          '"A sentence too long for its box, which h" cut off below',
+          '"Underneath" over "On top"',
+        ]),
+      );
+      expect(found.join("\n")).not.toContain("Only for screen readers");
+    } finally {
+      await context.close();
+    }
   });
 });

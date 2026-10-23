@@ -21,6 +21,7 @@ import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
 import {
   type Address,
+  BaseError,
   bytesToHex,
   createPublicClient,
   createWalletClient,
@@ -656,6 +657,10 @@ describe("the startup check", () => {
     const { address: silent } = await board();
     await mine(FINALITY_DEPTH + 1);
     expect(await refusal({ ...d, board: silent })).toBe("the address isn't a board");
+    // One byte, too short for an address: no board either, not a node failing.
+    const { address: short } = await board("0x60016000f3");
+    await mine(FINALITY_DEPTH + 1);
+    expect(await refusal({ ...d, board: short })).toBe("the address isn't a board");
   });
 
   test("refuses a board whose registry isn't one, or names another board", async () => {
@@ -666,6 +671,23 @@ describe("the startup check", () => {
     await rpc("anvil_setCode", [registry, answering(accounts[0] as Address)]);
     await mine(FINALITY_DEPTH + 1);
     expect(await refusal(d)).toBe("the board's election registry names another board");
+  });
+
+  test("rethrows a node that fails mid-read rather than calling the address no board", async () => {
+    const { deployment: d } = await deployment();
+    let calls = 0;
+    const failing = nodeClient((method, _params, forward) => {
+      // The board's read answers; the registry's dies in transit.
+      if (method === "eth_call" && ++calls === 2)
+        return Promise.reject(new Error("socket hang up"));
+      return forward();
+    });
+    const error = await checkPostingDeployment(failing, d).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(BaseError);
+    expect((error as Error).message).not.toContain("isn't");
   });
 
   test("reads the registry's answer at the finalized head, not the latest", async () => {

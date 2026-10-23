@@ -34,10 +34,13 @@ import {
   type PostingSimulation,
 } from "@abolishus/core";
 import {
+  AbiDecodingDataSizeTooSmallError,
   type Address,
   BaseError,
   bytesToHex,
   ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
   encodeAbiParameters,
   encodeFunctionData,
   ExecutionRevertedError,
@@ -130,7 +133,20 @@ export async function checkPostingDeployment(
     try {
       return await call();
     } catch (e) {
-      if (e instanceof ContractFunctionExecutionError) throw new Error(`the address isn't ${what}`);
+      // Only a revert, or an answer empty or too short to decode, says what the
+      // address is: viem wraps
+      // a node that fails mid-call the same way, and that is rethrown for
+      // the caller to report as unreachable.
+      if (
+        e instanceof ContractFunctionExecutionError &&
+        e.walk(
+          (c) =>
+            c instanceof ContractFunctionRevertedError ||
+            c instanceof ContractFunctionZeroDataError ||
+            c instanceof AbiDecodingDataSizeTooSmallError,
+        ) !== null
+      )
+        throw new Error(`the address isn't ${what}`);
       throw e;
     }
   };

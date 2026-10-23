@@ -746,7 +746,10 @@ describe("the forced path", () => {
     });
     const heads = async () => ({ latest: await onL1.latest(), finalized: await onL1.finalized() });
 
-    await l2.rpc("evm_setAutomine", [false]);
+    // Both chains mine only when told: Anvil's automine mines in the
+    // background, so a transaction it took may not be in a block yet when
+    // the next call reads.
+    await Promise.all([l1, l2].map((n) => n.rpc("evm_setAutomine", [false])));
     try {
       const posting = freshPosting();
       const decoded = decodeSharePosting(posting, 1);
@@ -772,7 +775,6 @@ describe("the forced path", () => {
       await l1.mine(1);
       const deposited = await deposits.tend(await heads());
       expect(deposited).toMatchObject({ deposited: 1, unjudged: 0, errors: 0 });
-      // Automine is on for L1: the deposit is in a block already.
       const [row] = await db.admin`SELECT deposits FROM posting_deposits`;
       const hash = new Uint8Array(row?.["deposits"] as Buffer);
       const tx = await l1.client.getTransaction({ hash: bytesToHex(hash) });
@@ -780,13 +782,15 @@ describe("the forced path", () => {
       const { args } = decodeFunctionData({ abi: portalAbi, data: tx.input });
       expect(args).toEqual([board, 0n, 600_000n, false, call(posting, BALLOT)]);
 
+      expect(await deposits.tend(await heads())).toMatchObject({ landed: 0, errors: 0 });
+      await l1.mine(1);
       expect(await deposits.tend(await heads())).toMatchObject({ landed: 1, errors: 0 });
       await l1.mine(FINALITY_DEPTH);
       expect(await deposits.tend(await heads())).toMatchObject({ final: 1, errors: 0 });
       // A landed deposit is never sent again.
       expect((await deposits.tend(await heads())).deposited).toBe(0);
     } finally {
-      await l2.rpc("evm_setAutomine", [true]);
+      await Promise.all([l1, l2].map((n) => n.rpc("evm_setAutomine", [true])));
     }
   }, 30_000);
 });

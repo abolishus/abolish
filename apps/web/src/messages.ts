@@ -634,7 +634,7 @@ const enUS = {
   notFound:
     "The link may be mistyped or cut short. Polls and their results are never deleted, so a poll's own link keeps working.",
   notFoundPoll:
-    "Looking for a poll someone shared? Ask them to send the link again, or search for its question on Discover.",
+    "Looking for a poll someone shared? Ask them to send the link again, or search for it below.",
   unavailableTitle: "Poll unavailable",
   definitionUndecodable:
     "The server sent a definition that doesn't decode under the protocol, so this page won't show it.",

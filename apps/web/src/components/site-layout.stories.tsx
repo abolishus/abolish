@@ -114,3 +114,29 @@ export const OfflineDark: Story = {
   parameters: { theme: "dark" },
   play: offline,
 };
+
+// A small phone's first screen: 360 by 640, the frame's header included.
+const firstScreen = async (canvasElement: HTMLElement, first: HTMLElement) => {
+  await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+  await expect(first.getBoundingClientRect().top).toBeLessThan(640 - 48);
+};
+
+/** The error page's one action is on a small phone's first screen. */
+export const ErrorPhone: Story = {
+  args: { children: <Failed /> },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const retry = within(canvasElement).getByRole("button", { name: "Try again" });
+    await firstScreen(canvasElement, retry);
+    await expect(retry.getBoundingClientRect().bottom).toBeLessThanOrEqual(640);
+  },
+};
+
+/** Not found's first place to go starts on a small phone's first screen. */
+export const NotFoundPhone: Story = {
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const ways = within(canvasElement).getByRole("navigation", { name: "Other places to go" });
+    await firstScreen(canvasElement, within(ways).getByRole("link", { name: /^Discover/ }));
+  },
+};

@@ -2,7 +2,7 @@ import { bigint, pgTable, primaryKey, smallint, text, timestamp } from "drizzle-
 import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0025_account_emails.sql, 0031 and 0037; a test
+// Drizzle view of migrations/0025_account_emails.sql, 0031, 0037 and 0044; a test
 // checks they agree. All six are in the account class: an account's address,
 // kept only as ciphertext and a keyed hash, the code waiting to verify one,
 // when each account was sent codes, when each address hash was sent messages,
@@ -20,6 +20,11 @@ export const accountEmails = pgTable("account_emails", {
   addressBox: bytea("address_box").notNull(),
   boxKey: text("box_key").notNull(),
   verifiedAt: at("verified_at").notNull(),
+  // EMAIL_LOCALES (src/account-emails.ts), which writes and reads it, so the
+  // two can't differ without a type error.
+  locale: text("locale", { enum: ["en-US", "es-US"] })
+    .notNull()
+    .default("en-US"),
 });
 
 export const accountEmailCodes = pgTable("account_email_codes", {

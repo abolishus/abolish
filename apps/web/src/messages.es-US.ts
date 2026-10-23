@@ -856,7 +856,8 @@ export const esUS: Messages = {
     "Por correo electrónico, a la dirección que verificaste arriba. Sin una, no se envía nada, y lo que te avisaríamos sigue estando aquí, en esta página.",
   noticesModeration:
     "Una decisión de moderación sobre una de tus encuestas, tu perfil o tu apelación",
-  noticesModerationHelp: "Siempre se envía, para que puedas apelar. No se puede desactivar.",
+  noticesModerationHelp:
+    "Siempre se envía, para que puedas apelar. No se puede desactivar. Llega en el idioma en que verificaste tu dirección.",
   noticesWhen:
     "Llega el día después de la decisión y solo dice que hubo una. Qué se decidió, y por qué, está aquí, en esta página, y en el registro público de moderación: lo dejamos fuera del correo para que el servicio que lo entrega sepa lo menos posible.",
   pushLabel: "Avisar también a este navegador",

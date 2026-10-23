@@ -21,6 +21,10 @@
 // SameSite=Strict, and every POST must also carry our own Origin. T-52: a
 // request for a code costs a Turnstile solve for `email-code`, and every
 // limit is core's.
+//
+// A message is in the request's language, as its page is (P2-28 part 4c-3):
+// the footer's `lang` cookie, else `Accept-Language`. Verifying an address
+// keeps that language for the account's moderation notices.
 
 import {
   type EmailKeys,
@@ -35,6 +39,7 @@ import {
 } from "@abolishus/core";
 import type { Sql } from "postgres";
 import * as z from "zod";
+import { negotiateLocale } from "../locales.ts";
 
 /** Every e-mail route: `METHOD /path`. Anything else is answered 404. */
 export const EMAIL_ROUTES = ["GET /email", "POST /email/request", "POST /email/verify"] as const;
@@ -149,6 +154,10 @@ export function createEmailHandler({
       );
     }
 
+    const locale = negotiateLocale(
+      request.headers.get("cookie"),
+      request.headers.get("accept-language"),
+    );
     let body: unknown;
     try {
       body = JSON.parse(await request.text());
@@ -164,6 +173,7 @@ export function createEmailHandler({
             ...emailing,
             turnstile,
             token: request.headers.get(TURNSTILE_HEADER),
+            locale,
             now: now(),
           });
           return answer(202, {});
@@ -171,7 +181,11 @@ export function createEmailHandler({
         case "POST /email/verify": {
           const input = Inputs[route].safeParse(body);
           if (!input.success) return refuse(400, "BAD_REQUEST");
-          await verifyEmailCode(sql, account, input.data.code, { keys: emailing.keys, now: now() });
+          await verifyEmailCode(sql, account, input.data.code, {
+            keys: emailing.keys,
+            locale,
+            now: now(),
+          });
           return answer(200, {});
         }
       }

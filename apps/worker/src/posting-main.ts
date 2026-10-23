@@ -31,8 +31,9 @@ import { TIER1_ENV } from "./tier1-env.ts";
 // The posting worker's entry point (docs/spec/posting-relay.md, Roles; ADR
 // 0042, option A; P2-8 part 3c-1b-2b-2b-2d-2b-2b-2b-2b-2b-2): a deployment of
 // its own, the only one holding the posting key, which runs the queue's
-// tick, the ledger's tend and its prune and nothing else (posting-runner.ts).
-// and the forced path's deposits on L1 (part 2b-2b-2b-2b-3b-2). It reads
+// tick, the ledger's tend, the forced path's deposits on L1 (part
+// 2b-2b-2b-2b-3b-2) and the ledger's prune, and nothing else
+// (posting-runner.ts). It reads
 // Postgres as a user granted abolish_app (never the owner) and the relay's
 // own store, never the other workers' Redis, whose BullMQ queues persist
 // (T-18). It refuses to start beside any other job's variable, so the key

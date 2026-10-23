@@ -74,11 +74,13 @@ export interface PostingRegistryLog {
 /**
  * Whether a registration `lag` seconds out of the index, or out of the
  * finalized head the index is checked at, can't hide an interval a landing
- * span meets: a definition registers only before it
- * opens (the registry's `AlreadyOpen`), so its receipt interval starts at
- * least `DELIVERY_WINDOW − F − R` after its L2 block, whose time is at most
- * `MAX_SEQUENCER_DRIFT` ahead of L1's, and a span signed now ends
- * `POSTING_DEPOSIT_SPAN` after an L1 head no newer than the clock.
+ * span meets. A definition registers only before it opens (the
+ * registry's `AlreadyOpen`), so its receipt interval, from
+ * `c_I = closes_at + l1_inclusion_bound + DELIVERY_WINDOW − F − R`
+ * (`intakeCutoff`), starts at least `DELIVERY_WINDOW − F − R` after its L2
+ * block, whose time is at most `MAX_SEQUENCER_DRIFT` ahead of L1's, and a
+ * span signed now ends `POSTING_DEPOSIT_SPAN` after an L1 head no newer
+ * than the clock.
  */
 export function postingIndexLagFits(
   lag: bigint,

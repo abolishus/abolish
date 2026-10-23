@@ -202,11 +202,10 @@ function counting(
  * (`author_panel_id`, `author_stub_hash`, `author_transcript_hash`) and at
  * least `q_A` distinct seats' approvals in it verify over its own key set,
  * as the election registry requires before it emits one; then
- * `key-set-mismatch` when that key set isn't the checker's own, since the
- * board takes the author seats' keys from it (T-37, T-14). Undefined for
- * anything else, which the registry never emits for this definition
- * (contracts.md, Author panel registration, checks 2 to 9), so bytes no
- * quorum signed can't fail the check (T-53).
+ * `key-set-mismatch` when that key set isn't the checker's own, which fails
+ * the check only for the registration the registry recorded (T-37, T-14).
+ * Undefined for anything else, which the registry never emits for this
+ * definition (contracts.md, Author panel registration, checks 2 to 9).
  */
 function fromRegistration(
   p: Prepared,
@@ -244,10 +243,15 @@ function fromRegistration(
  * refused whatever they hold (`ceremony-participation`). `registrations`
  * are the `registration` of every `AuthorPanelRegistered` whose
  * `definitionHash` is the registered definition's, which only the caller
- * can match (The registration's approvals): one of this run's, `q_A` seats
- * approving its key set, fails the check when that set isn't the checker's
- * (`key-set-mismatch`). Otherwise
- * every record that decodes strictly and names the transcript, and every
+ * can match, from wherever it found them (The registration's approvals):
+ * one of this run's, `q_A` seats approving its key set, adds its approvals
+ * when that set is the checker's and carries nothing otherwise, since only
+ * the one the registry recorded sets the keys the board uses. `recorded` is
+ * that one, when the caller has authenticated it (read from L2 state, or an
+ * event the accumulator replay proves): a key set there other than the
+ * checker's fails the check (`key-set-mismatch`, T-37, T-14). So bytes no one
+ * can show the registry recorded never fail it (T-53). Otherwise every
+ * record that decodes strictly and names the transcript, and every
  * registration of this run, is counted, each seat once however many valid
  * signatures it has; it approves with at least `q_A` seats. With none
  * naming the transcript the check is `author-approvals-missing` (the copy
@@ -257,12 +261,20 @@ export function checkAuthorApprovals(
   context: AuthorApprovalContext,
   records: readonly Uint8Array[],
   registrations: readonly Uint8Array[] = [],
+  recorded?: Uint8Array,
 ): AuthorApprovalsCheck {
   const p = prepare(context);
   if (!Array.isArray(registrations))
     throw new TypeError("author approvals: expected the registrations as an array");
+  if (recorded !== undefined && !(recorded instanceof Uint8Array))
+    throw new TypeError("author approvals: expected the recorded registration as bytes");
   if (p.ctx.registered.length < p.quorum) return { ok: false, code: "ceremony-participation" };
   const named: AuthorApprovals[] = [];
+  if (recorded !== undefined) {
+    const record = fromRegistration(p, recorded);
+    if (record === "key-set-mismatch") return { ok: false, code: record };
+    if (record !== undefined) named.push(record);
+  }
   for (const bytes of records) {
     const record = decoded(bytes);
     if (record instanceof DecodeError) continue;
@@ -270,8 +282,7 @@ export function checkAuthorApprovals(
   }
   for (const bytes of registrations) {
     const record = fromRegistration(p, bytes);
-    if (record === "key-set-mismatch") return { ok: false, code: record };
-    if (record !== undefined) named.push(record);
+    if (record !== undefined && record !== "key-set-mismatch") named.push(record);
   }
   const counted = new Set<number>();
   for (const record of named) for (const seat of counting(p, record) ?? []) counted.add(seat);

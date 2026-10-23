@@ -105,16 +105,38 @@ def decode_registration(b):
 # --- Author panel, Check, with the registrations -----------------------------------
 
 
-def check(panel, transcript, records, registrations):
-    """The approvals records and registrations of this definition, decided as Author panel, Check, and The
-    registration's approvals say: participation first, then any registration of this run (this run's header and
-    q_A seats approving its own key set, as the registry requires) whose key set isn't the checker's, then the
-    seats counted across both."""
+def this_run(panel, transcript, b):
+    """A registration of this run (this run's header, seats within n_A, q_A seats approving its own key set, as the
+    registry requires before it emits one), as (its key set hash, its approvals); None for anything else."""
+    q = max(panel["k"], len(panel["keys"]) - 1)
+    reg = decode_registration(b)
+    # The registry's check 6 bounds the seats by n_A.
+    if reg is None or reg["seats"][-1][0] > len(panel["keys"]):
+        return None
+    if (reg["panelId"], reg["stubHash"], reg["transcriptHash"]) != (ac.panel_id(panel), ELECTION["authorStubHash"], transcript["hash"]):
+        return None
+    own = ks.key_set_hash(reg["seats"])
+    if len(ac.counting(panel, {"approvals": reg["approvals"]}, transcript["hash"], own) or []) < q:
+        return None
+    return own, reg["approvals"]
+
+
+def check(panel, transcript, records, registrations, recorded=None):
+    """Author panel, Check, with The registration's approvals: participation first; then the registration the
+    registry recorded, when the checker has it authenticated, failing with key-set-mismatch if it is this run's
+    over another key set; then the seats counted across the records and every registration of this run over the
+    checker's own key set. A registration found anywhere else of another key set carries nothing."""
     q = max(panel["k"], len(panel["keys"]) - 1)
     if len(transcript["registered"]) < q:
         return {"ok": False, "code": "ceremony-participation"}
     thash, ksh = transcript["hash"], transcript["keySetHash"]
     named = []
+    if recorded is not None:
+        r = this_run(panel, transcript, recorded)
+        if r is not None and r[0] != ksh:
+            return {"ok": False, "code": "key-set-mismatch"}
+        if r is not None:
+            named.append({"transcriptHash": thash, "approvals": r[1]})
     for b in records:
         try:
             rec = ac.decode_record(b)
@@ -123,18 +145,9 @@ def check(panel, transcript, records, registrations):
         if rec["transcriptHash"] == thash:
             named.append(rec)
     for b in registrations:
-        reg = decode_registration(b)
-        # The registry's check 6 bounds the seats by n_A.
-        if reg is None or reg["seats"][-1][0] > len(panel["keys"]):
-            continue
-        if (reg["panelId"], reg["stubHash"], reg["transcriptHash"]) != (ac.panel_id(panel), ELECTION["authorStubHash"], thash):
-            continue
-        own = ks.key_set_hash(reg["seats"])
-        if len(ac.counting(panel, {"approvals": reg["approvals"]}, thash, own) or []) < q:
-            continue
-        if own != ksh:
-            return {"ok": False, "code": "key-set-mismatch"}
-        named.append({"transcriptHash": thash, "approvals": reg["approvals"]})
+        r = this_run(panel, transcript, b)
+        if r is not None and r[0] == ksh:
+            named.append({"transcriptHash": thash, "approvals": r[1]})
     counted = set()
     for rec in named:
         counted.update(ac.counting(panel, rec, thash, ksh) or [])
@@ -294,13 +307,17 @@ def main(root):
 
     cases = []
 
-    def case(id_, desc, tid, record_ids, event_ids, expect):
+    def case(id_, desc, tid, record_ids, event_ids, expect, recorded=None):
+        """`recorded`, a registration's id: the one the registry recorded, which the checker has authenticated."""
         t = transcripts[tid]
         read = [bytes.fromhex(events[e]["registration"]) for e in event_ids if events[e]["read"]]
-        res = check(t["panel"], t, [approvals_records[r] for r in record_ids], read)
+        rec = None if recorded is None else bytes.fromhex(registrations[recorded]["registration"])
+        res = check(t["panel"], t, [approvals_records[r] for r in record_ids], read, rec)
         assert (res["seats"] if res["ok"] else res["code"]) == expect, (id_, res, expect)
-        cases.append({"id": id_, "description": desc, "transcript": tid, "records": list(record_ids),
-                      "events": list(event_ids), "result": res})
+        c = {"id": id_, "description": desc, "transcript": tid, "records": list(record_ids), "events": list(event_ids)}
+        if recorded is not None:
+            c["recorded"] = recorded
+        cases.append({**c, "result": res})
 
     case("all", "Only the registration, every seat approving: 3.1's author part holds without any approvals record.",
          T, [], ["all"], [1, 2, 3])
@@ -317,9 +334,18 @@ def main(root):
          "author-approvals-missing")
     case("no-approvals-and-record", "Beside the quorum's approvals record it changes nothing.", T, ["quorum"],
          ["no-approvals"], [1, 3])
-    case("other-key-set", "A registration of this run whose key set q_A seats approved isn't the transcript's: it fails, "
-         "whatever approves.", T, ["all"], ["all", "other-key-set"], "key-set-mismatch")
-    case("other-key-set-alone", "The same registration alone.", T, [], ["other-key-set"], "key-set-mismatch")
+    case("other-key-set", "A registration of this run over another key set, q_A seats approving it, found on the copy: "
+         "only the one the registry recorded sets the board's keys, so it carries nothing and the others approve (T-53).",
+         T, ["all"], ["all", "other-key-set"], [1, 2, 3])
+    case("other-key-set-alone", "The same registration alone carries nothing.", T, [], ["other-key-set"],
+         "author-approvals-missing")
+    case("recorded", "The registration the registry recorded, authenticated, approves alone.", T, [], [], [1, 2, 3],
+         recorded="all")
+    case("recorded-other-key-set", "The recorded registration is over another key set: the check fails, whatever "
+         "approves, since the board takes the author seats' keys from it (T-37).", T, ["all"], ["all"],
+         "key-set-mismatch", recorded="other-key-set")
+    case("recorded-other-key-set-unsigned", "A recorded registration no quorum signed is none the registry emits: it "
+         "carries nothing.", T, ["all"], [], [1, 2, 3], recorded="other-key-set-unsigned")
     case("other-key-set-unsigned", "Another key set no one approved, beside every seat's record: it carries nothing, so "
          "it can't fail the check (T-53).", T, ["all"], ["other-key-set-unsigned"], [1, 2, 3])
     case("other-key-set-short", "Another key set one seat approved, beside every seat's record: it carries nothing.", T,
@@ -346,8 +372,8 @@ def main(root):
          "author-approvals-missing")
     case("short", "Two qualified seats where rule 7 needs three: refused whatever the registration.", "author-short", [],
          ["short"], "ceremony-participation")
-    case("short-other-key-set", "Participation is decided before a registration's key set.", "author-short", [],
-         ["short-other-key-set"], "ceremony-participation")
+    case("short-other-key-set", "Participation is decided before the recorded registration's key set.", "author-short",
+         [], [], "ceremony-participation", recorded="short-other-key-set")
 
     doc = {
         "format": "abolish-author-registration-vectors/1",

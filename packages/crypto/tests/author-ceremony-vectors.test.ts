@@ -157,6 +157,7 @@ interface RegistrationVectors {
     readonly transcript: string;
     readonly records: readonly string[];
     readonly events: readonly string[];
+    readonly recorded?: string;
     readonly result: { readonly ok: boolean; readonly code?: string; readonly seats?: number[] };
   }[];
 }
@@ -503,7 +504,12 @@ describe("author-registration.json", () => {
         .filter((e) => e.read)
         .map((e) => hex(e.registration));
       expect(
-        checkAuthorApprovals(approvalContext(c.transcript), c.records.map(recordOf), registrations),
+        checkAuthorApprovals(
+          approvalContext(c.transcript),
+          c.records.map(recordOf),
+          registrations,
+          c.recorded === undefined ? undefined : registrationOf(c.recorded),
+        ),
       ).toEqual(c.result);
     },
   );
@@ -528,6 +534,9 @@ describe("author-registration.json", () => {
           const changed = Uint8Array.from(all);
           changed[at] = (changed[at] as number) ^ flip;
           const r = checkAuthorApprovals(ctx, [], [changed]);
+          // As the recorded registration it reads alike: no quorum signed
+          // the changed key set, so it is none the registry emits.
+          expect(checkAuthorApprovals(ctx, [], [], changed)).toEqual(r);
           if (at < approvalsAt)
             // The header, a seat or a count: the approvals no longer sign
             // what the registration says, so no quorum registered it and it
@@ -548,11 +557,21 @@ describe("author-registration.json", () => {
     );
   }, 120_000);
 
-  test("a registration of another key set fails the check before any approval counts", () => {
+  test("another key set fails the check only as the recorded registration, ahead of approvals", () => {
     const ctx = approvalContext("author-honest-3");
-    expect(checkAuthorApprovals(ctx, [recordOf("all")], [registrationOf("other-key-set")])).toEqual(
-      { ok: false, code: "key-set-mismatch" },
-    );
+    const other = registrationOf("other-key-set");
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], other)).toEqual({
+      ok: false,
+      code: "key-set-mismatch",
+    });
+    // Found anywhere else it carries nothing (T-53).
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [other])).toEqual({
+      ok: true,
+      seats: [1, 2, 3],
+    });
     expect(() => checkAuthorApprovals(ctx, [], "x" as unknown as Uint8Array[])).toThrow(TypeError);
+    expect(() => checkAuthorApprovals(ctx, [], [], "x" as unknown as Uint8Array)).toThrow(
+      TypeError,
+    );
   });
 });

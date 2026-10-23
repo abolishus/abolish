@@ -203,7 +203,9 @@ const typeOf = (payload: Uint8Array) => ((payload[0] as number) << 8) | (payload
  * An approval is a seat's signed statement whoever boarded it, so, like an
  * approvals record, it counts outside the anchored extent too; a record
  * that doesn't decode or fails the check carries nothing here and is 4.4's
- * to report. No earlier version names the event (T-53).
+ * to report. No earlier version names the event. None of them is known to
+ * be the one the registry recorded until 4.4's replay or the L2 reads
+ * authenticate it, so they only add approvals, never fail 3.1 (T-53).
  */
 function authorRegistrations(
   d: CeremonyDefinition,
@@ -458,9 +460,10 @@ export function ceremonyChecks(
   // registry's registrations of this definition there: every one of this
   // election, wherever it sits, since an approval is a seat's signed
   // statement whoever boarded it, checked against the key set this
-  // verifier's own check returned, and a registration of another key set
-  // fails (ceremony.md, Author panel, Check, The registration's approvals
-  // and Boarding; T-37, T-17).
+  // verifier's own check returned. The registration the registry recorded
+  // isn't read yet (3.1's registration part, below), so one of another key
+  // set carries nothing here (ceremony.md, Author panel, Check, The
+  // registration's approvals and Boarding; T-37, T-17, T-53).
   let approvals: CeremonyOutcome = NOT_REACHED;
   let approving: readonly number[] | undefined;
   if (theirs.checked && theirs.registered !== undefined) {
@@ -487,9 +490,7 @@ export function ceremonyChecks(
       ? PASS
       : approved.code === "author-approvals-missing"
         ? { status: "unverifiable", code: "author-approvals-missing", at: tag }
-        : approved.code === "key-set-mismatch"
-          ? { status: "fail", code: "key-set-mismatch", at: tag }
-          : { status: "fail", code: "author-approvals", at: tag };
+        : { status: "fail", code: approved.code, at: tag };
   }
   const r32 = combine(own.r32, theirs.r32);
   return {

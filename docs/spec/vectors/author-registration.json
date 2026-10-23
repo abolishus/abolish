@@ -364,24 +364,61 @@
     },
     {
       "id": "other-key-set",
-      "description": "A registration of this run whose key set q_A seats approved isn't the transcript's: it fails, whatever approves.",
+      "description": "A registration of this run over another key set, q_A seats approving it, found on the copy: only the one the registry recorded sets the board's keys, so it carries nothing and the others approve (T-53).",
       "transcript": "author-honest-3",
       "records": ["all"],
       "events": ["all", "other-key-set"],
+      "result": {
+        "ok": true,
+        "seats": [1, 2, 3]
+      }
+    },
+    {
+      "id": "other-key-set-alone",
+      "description": "The same registration alone carries nothing.",
+      "transcript": "author-honest-3",
+      "records": [],
+      "events": ["other-key-set"],
+      "result": {
+        "ok": false,
+        "code": "author-approvals-missing",
+        "seats": []
+      }
+    },
+    {
+      "id": "recorded",
+      "description": "The registration the registry recorded, authenticated, approves alone.",
+      "transcript": "author-honest-3",
+      "records": [],
+      "events": [],
+      "recorded": "all",
+      "result": {
+        "ok": true,
+        "seats": [1, 2, 3]
+      }
+    },
+    {
+      "id": "recorded-other-key-set",
+      "description": "The recorded registration is over another key set: the check fails, whatever approves, since the board takes the author seats' keys from it (T-37).",
+      "transcript": "author-honest-3",
+      "records": ["all"],
+      "events": ["all"],
+      "recorded": "other-key-set",
       "result": {
         "ok": false,
         "code": "key-set-mismatch"
       }
     },
     {
-      "id": "other-key-set-alone",
-      "description": "The same registration alone.",
+      "id": "recorded-other-key-set-unsigned",
+      "description": "A recorded registration no quorum signed is none the registry emits: it carries nothing.",
       "transcript": "author-honest-3",
-      "records": [],
-      "events": ["other-key-set"],
+      "records": ["all"],
+      "events": [],
+      "recorded": "other-key-set-unsigned",
       "result": {
-        "ok": false,
-        "code": "key-set-mismatch"
+        "ok": true,
+        "seats": [1, 2, 3]
       }
     },
     {
@@ -549,10 +586,11 @@
     },
     {
       "id": "short-other-key-set",
-      "description": "Participation is decided before a registration's key set.",
+      "description": "Participation is decided before the recorded registration's key set.",
       "transcript": "author-short",
       "records": [],
-      "events": ["short-other-key-set"],
+      "events": [],
+      "recorded": "short-other-key-set",
       "result": {
         "ok": false,
         "code": "ceremony-participation"

@@ -19,9 +19,8 @@ import {
   readArchivedObject,
 } from "@abolishus/crypto";
 import type { EvidenceListing, TransactionSource } from "./archive.ts";
-import { NodePool } from "./l1.ts";
 import {
-  accumulatorAtOutputRoot,
+  accumulatorAndNodesUsed,
   type OutputRootAccumulator,
   OutputRootError,
   type OutputRootErrorCode,
@@ -96,10 +95,10 @@ export function checkContractEventEvidence(
     throw new RangeError("a contract address is 20 bytes");
   if (record.l2_chain_id !== l2ChainId || !equal(record.contract, claim.contract))
     return { ok: false, code: "evidence-foreign" };
-  const pool = new NodePool(record.nodes);
   let accumulator: OutputRootAccumulator;
+  let allNodesUsed: boolean;
   try {
-    accumulator = accumulatorAtOutputRoot(
+    ({ accumulator, allNodesUsed } = accumulatorAndNodesUsed(
       {
         outputRoot: record.output_root,
         messagePasserStorageRoot: record.message_passer_storage_root,
@@ -107,14 +106,13 @@ export function checkContractEventEvidence(
         nodes: record.nodes,
       },
       record.contract,
-      pool,
-    );
+    ));
   } catch (e) {
     if (e instanceof OutputRootError) return { ok: false, code: e.code };
     throw e;
   }
   if (accumulator.block !== claim.l2Block) return { ok: false, code: "evidence-block" };
-  if (!pool.allUsed()) return { ok: false, code: "evidence-node-unused" };
+  if (!allNodesUsed) return { ok: false, code: "evidence-node-unused" };
   return {
     ok: true,
     accumulator,

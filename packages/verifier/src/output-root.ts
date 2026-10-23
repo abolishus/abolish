@@ -102,16 +102,23 @@ export interface StorageAtOutputRoot {
  * neither can be chosen apart from the root; the block's number and
  * timestamp come from that header. An absent slot reads as zero; an account
  * that is absent or has no code is `l2-contract-absent` (docs/spec/contracts.md,
- * Event accumulator, Verification and Output root). `pool` holds
- * `evidence.nodes` where the caller asks afterwards which nodes the walks
- * used.
+ * Event accumulator, Verification and Output root).
  */
 export function storageAtOutputRoot(
   evidence: OutputRootEvidence,
   address: Uint8Array,
   slots: readonly Uint8Array[],
-  pool?: NodePool,
 ): StorageAtOutputRoot {
+  const { block, words } = readStorage(evidence, address, slots);
+  return { block, words };
+}
+
+// `storageAtOutputRoot`, with the pool its walks looked nodes up in.
+function readStorage(
+  evidence: OutputRootEvidence,
+  address: Uint8Array,
+  slots: readonly Uint8Array[],
+): StorageAtOutputRoot & { readonly nodes: NodePool } {
   if (!(address instanceof Uint8Array) || address.length !== 20)
     throw new RangeError("address must be 20 bytes");
   for (const slot of slots)
@@ -133,10 +140,14 @@ export function storageAtOutputRoot(
   const claimed = outputRootV0(block.stateRoot, mp, block.hash);
   if (!equal(claimed, evidence.outputRoot)) throw new OutputRootError("output-root");
   try {
-    const nodes = pool ?? new NodePool(evidence.nodes);
+    const nodes = new NodePool(evidence.nodes);
     const root = contractStorageRoot(nodes, block.stateRoot, address);
     if (root === undefined) throw new OutputRootError("l2-contract-absent");
-    return { block, words: slots.map((slot) => storageWord(nodes.get(root, keccak_256(slot)))) };
+    return {
+      block,
+      words: slots.map((slot) => storageWord(nodes.get(root, keccak_256(slot)))),
+      nodes,
+    };
   } catch (e) {
     if (e instanceof L1Error)
       throw new OutputRootError(
@@ -161,23 +172,36 @@ export interface OutputRootAccumulator extends ProvenEventAccumulator {
 export function accumulatorAtOutputRoot(
   evidence: OutputRootEvidence,
   address: Uint8Array,
-  pool?: NodePool,
 ): OutputRootAccumulator {
-  const { block, words } = storageAtOutputRoot(
-    evidence,
-    address,
-    [word(ACCUMULATOR_SLOT), word(ACCUMULATOR_SLOT + 1n)],
-    pool,
-  );
+  return accumulatorAndNodesUsed(evidence, address).accumulator;
+}
+
+/**
+ * `accumulatorAtOutputRoot`, and whether its walks looked up every one of
+ * `evidence.nodes`: the contract-event evidence check refuses a record
+ * holding a node its proof doesn't use (T-17). Not exported from the
+ * package: the pool is always the evidence's own.
+ */
+export function accumulatorAndNodesUsed(
+  evidence: OutputRootEvidence,
+  address: Uint8Array,
+): { readonly accumulator: OutputRootAccumulator; readonly allNodesUsed: boolean } {
+  const { block, words, nodes } = readStorage(evidence, address, [
+    word(ACCUMULATOR_SLOT),
+    word(ACCUMULATOR_SLOT + 1n),
+  ]);
   const [accumulator, countWord] = words as [Uint8Array, Uint8Array];
   if (countWord.subarray(0, 24).some((x) => x !== 0)) throw new OutputRootError("l2-count");
   let count = 0n;
   for (const x of countWord.subarray(24)) count = (count << 8n) | BigInt(x);
   return {
-    block: block.number,
-    timestamp: block.timestamp,
-    blockHash: block.hash,
-    accumulator,
-    count,
+    accumulator: {
+      block: block.number,
+      timestamp: block.timestamp,
+      blockHash: block.hash,
+      accumulator,
+      count,
+    },
+    allNodesUsed: nodes.allUsed(),
   };
 }

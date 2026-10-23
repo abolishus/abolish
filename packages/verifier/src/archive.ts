@@ -215,7 +215,9 @@ interface Slot {
   reached: boolean;
   done: boolean;
   conflict: boolean;
-  readonly tried: Uint8Array[];
+  // Transactions in hex, so a link already tried costs one lookup however
+  // many manifests repeat it (T-52).
+  readonly tried: Set<string>;
   readonly unavailable: { readonly transaction: Uint8Array; readonly from: ManifestOrigin }[];
 }
 
@@ -290,7 +292,9 @@ export async function walkArchive(
   // Keyed by contract, block and CID: one reference, however many
   // manifests list it, with each distinct transaction once.
   const evidence = new Map<string, EvidenceListing & { readonly transactions: Uint8Array[] }>();
-  let evidenceKept = 0;
+  // Every (reference, transaction) pair kept, so a repeat costs one lookup
+  // whatever the authority repeats (T-52).
+  const keptPairs = new Set<string>();
   let evidenceOver = false;
   const slots = new Map<bigint, Slot>();
   const byCid = new Map<string, bigint>();
@@ -367,13 +371,14 @@ export async function walkArchive(
     for (const ref of refs) {
       if (!contracts.has(bytesToHex(ref.contract))) continue;
       const key = `${bytesToHex(ref.contract)}:${ref.l2_block}:${bytesToHex(ref.cid)}`;
-      const known = evidence.get(key);
-      if (known?.transactions.some((t) => equal(t, ref.transaction)) === true) continue;
-      if (evidenceKept === evidenceBudget) {
+      const pair = `${key}:${bytesToHex(ref.transaction)}`;
+      if (keptPairs.has(pair)) continue;
+      if (keptPairs.size === evidenceBudget) {
         evidenceOver = true;
         return;
       }
-      evidenceKept++;
+      keptPairs.add(pair);
+      const known = evidence.get(key);
       if (known !== undefined) known.transactions.push(ref.transaction);
       else
         evidence.set(key, {
@@ -392,7 +397,7 @@ export async function walkArchive(
       reached: false,
       done: false,
       conflict: false,
-      tried: [],
+      tried: new Set(),
       unavailable: [],
     };
     slots.set(sequence, slot);
@@ -420,10 +425,9 @@ export async function walkArchive(
         known.conflict = true;
         continue;
       }
-      if (known?.done === true || known?.tried.some((t) => equal(t, link.transaction)) === true)
-        continue;
+      if (known?.done === true || known?.tried.has(bytesToHex(link.transaction)) === true) continue;
       if (reads + queue.length - head >= budget) return false;
-      (known ?? claim(link.sequence, link.cid, slot.fixed)).tried.push(link.transaction);
+      (known ?? claim(link.sequence, link.cid, slot.fixed)).tried.add(bytesToHex(link.transaction));
       queue.push({ sequence: link.sequence, transaction: link.transaction });
     }
     return true;
@@ -491,7 +495,7 @@ export async function walkArchive(
     else if (m !== undefined) {
       latest = m.sequence;
       const slot = claim(m.sequence, named.manifest, named.version);
-      slot.tried.push(named.transaction);
+      slot.tried.add(bytesToHex(named.transaction));
       overBudget = !reach(slot, m) || !(await drain());
       for (const [sequence, slot] of slots) if (slot.reached) alone.add(sequence);
     }
@@ -533,12 +537,12 @@ export async function walkArchive(
         if (at === undefined) continue;
         own.add(e.locator);
         const slot = slots.get(at) as Slot;
-        if (slot.done || slot.tried.some((t) => equal(t, e.transaction))) continue;
+        if (slot.done || slot.tried.has(bytesToHex(e.transaction))) continue;
         if (reads >= budget) {
           overBudget = true;
           break;
         }
-        slot.tried.push(e.transaction);
+        slot.tried.add(bytesToHex(e.transaction));
         if (!(await attempt(at, slot, e.transaction, { locator: e.locator })) || !(await drain())) {
           overBudget = true;
           break;
@@ -580,7 +584,7 @@ export async function walkArchive(
       // Another earlier locator already followed a manifest there.
       if (slots.has(m.sequence)) continue;
       const slot = claim(m.sequence, e.manifest, e.version);
-      slot.tried.push(e.transaction);
+      slot.tried.add(bytesToHex(e.transaction));
       if (!reach(slot, m) || !(await drain())) overBudget = true;
     }
   }

@@ -57,11 +57,15 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
               {t("homeStreamTitle")}
             </h2>
             {/* Said once here rather than on each card, which on a phone
-                read the same two sentences three times down the page. */}
-            <p className="m-0 max-w-prose text-lg text-pretty">
-              {t("homeStreamLede")}
-              {answerable ? <> {t("homeStreamPick")}</> : null}
-            </p>
+                read the same two sentences three times down the page. Only
+                over cards: above the empty or unavailable note it promised
+                the questions that note then says aren't there. */}
+            {newest !== undefined && newest.cards.length > 0 ? (
+              <p className="m-0 max-w-prose text-lg text-pretty">
+                {t("homeStreamLede")}
+                {answerable ? <> {t("homeStreamPick")}</> : null}
+              </p>
+            ) : null}
           </div>
           {/* Beside the title only where the cards share a row: where they
               stack, it follows them, so the first card comes straight after

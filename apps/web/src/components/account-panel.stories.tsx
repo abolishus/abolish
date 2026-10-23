@@ -216,7 +216,8 @@ export const SignedIn: Story = {
       "/account/verify",
     );
     await expect(await canvas.findByText("You haven't created a poll yet.")).toBeVisible();
-    // The account's data, before its deletion.
+    // What it's told by e-mail, then its data, before its deletion.
+    await expect(canvas.getByRole("heading", { name: "What we tell you about" })).toBeVisible();
     await expect(canvas.getByRole("heading", { name: "Download your data" })).toBeVisible();
     const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);

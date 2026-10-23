@@ -14,6 +14,7 @@ import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import { AccountExport } from "./account-export.tsx";
+import { AccountNotices } from "./account-notices.tsx";
 import { AccountPolls } from "./account-polls.tsx";
 import { AccountProfile } from "./account-profile.tsx";
 import { AccountVerification } from "./account-verify.tsx";
@@ -285,8 +286,9 @@ export function AccountPanel({
             revision={profileRevision}
             onChanged={() => setPollsRevision((n) => n + 1)}
           />
+          <AccountNotices index="04" />
           <Section
-            index="04"
+            index="05"
             mark={t("passkeysTitle")}
             title={t("passkeysHeading")}
             id="passkeys-title"
@@ -349,10 +351,10 @@ export function AccountPanel({
             </div>
           </Section>
 
-          <AccountExport client={accountExport} index="05" onSignedOut={signedOut} />
+          <AccountExport client={accountExport} index="06" onSignedOut={signedOut} />
 
           <Section
-            index="06"
+            index="07"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

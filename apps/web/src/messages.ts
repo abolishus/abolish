@@ -783,6 +783,14 @@ const enUS = {
   passkeyLast: "Your last passkey",
   passkeyAdd: "Add a passkey",
   passkeyAdded: "Passkey added.",
+  noticesMark: "Notifications",
+  noticesTitle: "What we tell you about",
+  noticesLede:
+    "By e-mail, to the address you verified above. Without one, nothing is sent, and what we'd tell you is still here on this page.",
+  noticesModeration: "A moderation decision about one of your polls, your profile or your appeal",
+  noticesModerationHelp: "Always sent, so that you can appeal. It can't be turned off.",
+  noticesWhen:
+    "It comes the day after the decision and says only that there was one. What was decided, and why, is here on this page and in the public moderation log: we keep it out of the e-mail, so the service that delivers it learns as little as it can.",
   exportMark: "Your data",
   exportTitle: "Download your data",
   exportLede: "A copy of your account's data, as one JSON file you can open in any text editor.",

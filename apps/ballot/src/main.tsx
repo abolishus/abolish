@@ -288,8 +288,16 @@ const source: ElectionSource = {
   record: async (electionId, tier, ballot, shares, asked) =>
     castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot, shares) : "not-asked",
   intake: (definitionHash) => withWorker((used) => used.intake(definitionHash)),
+  // Each request bounded, as a posting's are: delivery runs under the
+  // election's lock, so a relay that never answers would otherwise hold
+  // every tab's delivery, posting and decline (T-25, T-52).
   deliver: (seat, delivery) =>
-    deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
+    deliverShare(
+      STAGING,
+      seat,
+      delivery,
+      timedFetch((url, init) => fetch(url, init)),
+    ),
   receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
   posting: (ballot, share) => withWorker((used) => used.posting(ballot, share)),
   // A posting goes through the relay to the board this build pins; with no

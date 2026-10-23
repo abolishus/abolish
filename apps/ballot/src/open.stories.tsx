@@ -1789,6 +1789,69 @@ export const PostingWaitsForTheLock: Story = {
   },
 };
 
+export const PostingCheckedAndPostedUnderOneLock: Story = {
+  name: "A posting's check and the posting share one hold of the lock: another tab asking between them waits for both",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    const order: string[] = [];
+    let other: Promise<unknown> = Promise.resolve();
+    // Another tab asks for the lock, to keep a receipt, as the check runs.
+    of.posting.mockImplementationOnce((_, share) => {
+      other = of.exclusive(fromHex(ELECTION_ID), async () => void order.push("other tab"));
+      return Promise.resolve({ ok: true, record: Uint8Array.of(share.seat, ...share.m) });
+    });
+    of.post.mockImplementationOnce(() => {
+      order.push("post");
+      return Promise.resolve("recorded");
+    });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await other;
+    // Released between the check and the posting, the other tab would go first.
+    await expect(order).toEqual(["post", "other tab"]);
+  },
+};
+
+export const DeliveryLockRefused: Story = {
+  name: "A lock the browser refuses at delivery keeps every share and offers sending again",
+  args: { source: castsSource({ heldAfterRecord: CAST_RECORDED }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    of.exclusive.mockImplementation(() =>
+      Promise.reject(new DOMException("not fully active", "InvalidStateError")),
+    );
+    await castInto(canvas, "Your ballot couldn't be sent");
+    await expect(of.deliver).not.toHaveBeenCalled();
+    await expect(of.keepReceipt).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Send again" })).toBeVisible();
+  },
+};
+
+export const DeclineLockRefused: Story = {
+  name: "A lock the browser refuses at a decline erases nothing and leaves the offer",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    of.exclusive.mockImplementation(() =>
+      Promise.reject(new DOMException("not fully active", "InvalidStateError")),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Leave this ballot" }));
+    await expect(await canvas.findByRole("button", { name: "Leave this ballot" })).toBeVisible();
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(OFFER);
+    await expect(of.declinePosting).not.toHaveBeenCalled();
+    await expect(of.declineSeal).not.toHaveBeenCalled();
+  },
+};
+
 export const DeclineUnderTheLock: Story = {
   name: "Leaving the ballot erases its shares under the election's lock",
   args: { source: offerSource({ posted: ["recorded"] }) },

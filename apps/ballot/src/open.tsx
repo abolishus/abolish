@@ -679,7 +679,9 @@ export function Ballot({
         chain ??= source.chainTime();
         const time = await chain;
         // An RPC that fails or answers wrongly leaves the shares kept: erasing
-        // on its word alone could lose a posting still in time (T-25).
+        // on its word alone could lose a posting still in time (T-25). Not
+        // under the election's lock: past the cutoff no posting is in time,
+        // and one still running posts from its own copies.
         if (time.ok && postingLapsed(c, time.timestamp, source.now())) {
           await source.eraseShares(electionId, tier);
           held = await source.casts(electionId, tier);
@@ -1076,7 +1078,9 @@ export function Ballot({
     const { undelivered } = sending;
     if (undelivered.length > 0) {
       if (current()) setStep({ kind: "delivering" });
-      const delivered = await locked(() => deliverShares(sending));
+      // A lock this browser refused leaves every share kept: sent again.
+      const delivered = await locked(() => deliverShares(sending)).catch(() => undefined);
+      if (delivered === undefined) return { kind: "unsent", reason: "unreachable", sending };
       if ("kind" in delivered) return delivered;
       const { receipted } = delivered;
       const left = undelivered.filter(({ seat }) => !receipted.has(seat));
@@ -1237,7 +1241,9 @@ export function Ballot({
           .catch((): DeclinePostingOutcome => "unwritable");
         await source.declineSeal(ballot).catch(() => undefined);
         return outcome;
-      });
+      }).catch(() => undefined);
+      // A lock this browser refused erased nothing: the offer stands.
+      if (erased === undefined) return { kind: "offer", sending };
       switch (erased) {
         case "declined":
           return { kind: "declined" };

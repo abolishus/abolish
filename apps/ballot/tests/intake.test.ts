@@ -2,6 +2,8 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import { deliverShare, type Delivery, type IntakeAnswer } from "../src/intake.ts";
+import type { Fetch } from "../src/load.ts";
+import { timedFetch } from "../src/posting.ts";
 
 // Delivering one seat's share through the operator's relay (src/intake.ts;
 // [[delivery]], Client rule 4): the request carries the node's own envelope
@@ -165,6 +167,25 @@ describe("deliverShare", () => {
     ["a created status", () => octets(new Uint8Array(170), 201)],
   ])("reads %s as unreachable", async (_, answer) => {
     expect((await deliverAgainst(answer)).read).toEqual({ kind: "unreachable" });
+  });
+
+  test("a relay that never finishes its answer is unreachable once the request's bound passes", async () => {
+    // As main.tsx wires it: delivery holds the election's lock, so a stalled
+    // relay must not hold it (T-25, T-52). The answer's headers come, its
+    // body never ends, and the bound's abort errors it, as fetch does.
+    const stalled: Fetch = async (_, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    };
+    const read = await deliverShare({ api: API }, 1, DELIVERY, timedFetch(stalled, 20));
+    expect(read).toEqual({ kind: "unreachable" });
   });
 
   test("a network failure is unreachable", async () => {

@@ -1384,6 +1384,17 @@ describe("account page", () => {
     expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
     expect(seen).toEqual([]);
   });
+
+  test("asks a visitor who came to ask a question to sign in for it, and honours no other next", async () => {
+    const asking = await (await get("/account?next=new-poll")).text();
+    expect(asking).toMatch(/<h1[^>]*>Sign in to ask your question</);
+    for (const next of ["https%3A%2F%2Fevil.example", "%2Fpolls", "new-poll%2F"]) {
+      // The router drops an unknown value, sending the visitor to the plain page.
+      const response = await get(`/account?next=${next}`);
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe("/account");
+    }
+  });
 });
 
 describe("verification page", () => {
@@ -1514,7 +1525,7 @@ describe("home", () => {
     );
     expect(html).toContain(`href="${BALLOT}#election=${STREAM_V1}&amp;pick=0"`);
     expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
-    expect(html).toMatch(/<a href="\/account"[^>]*>Ask a question</);
+    expect(html).toMatch(/<a href="\/account\?next=new-poll"[^>]*>Ask a question</);
     expect(html).toMatch(/<a href="\/discover"[^>]*>Browse questions</);
     expect(html).toMatch(/<a href="\/discover"[^>]*>See all questions/);
     // The ID lookup is the register's, not the front page's.

@@ -84,6 +84,16 @@ export function negotiateLocale(
 }
 
 /**
+ * The one cookie a page may get (src/node/serve.ts): the footer's choice, as
+ * `negotiateLocale` would take it, and nothing else of the header, so no
+ * session reaches a page (T-10). `undefined` when it holds no choice.
+ */
+export function localeCookieOnly(cookieHeader: string | null | undefined): string | undefined {
+  const chosen = cookie(cookieHeader ?? "", LOCALE_COOKIE);
+  return isLocale(chosen) ? `${LOCALE_COOKIE}=${chosen}` : undefined;
+}
+
+/**
  * The `Cookie` the footer's switch writes: a year, the whole site, sent on
  * top-level navigations only (`SameSite=Lax`), and `Secure` over HTTPS.
  */

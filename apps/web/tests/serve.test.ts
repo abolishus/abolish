@@ -977,6 +977,22 @@ describe("the front", () => {
     expect(started.map((r) => r.headers.get("cookie"))).toEqual([null, null]);
   });
 
+  test("hands a page the footer's language and no other cookie (P2-28 part 4a; T-10)", async () => {
+    started.length = 0;
+    await raw("/how-it-works", { headers: { cookie: "session=secret; lang=es-US; other=1" } });
+    await raw("/_serverFn/abc", { method: "POST", headers: { cookie: "lang=en-US; session=s" } });
+    // A cookie that names none of ours, or names one twice, is no choice: none is passed.
+    for (const cookie of ["session=secret; lang=fr-FR", "lang=es-US; lang=en-US", "session=x"])
+      await raw("/polls", { headers: { cookie } });
+    expect(started.map((r) => r.headers.get("cookie"))).toEqual([
+      "lang=es-US",
+      "lang=en-US",
+      null,
+      null,
+      null,
+    ]);
+  });
+
   test("serves the manifest and its icons from the fixed list, and nothing beside them", async () => {
     started.length = 0;
     const manifest = await raw("/manifest.webmanifest");

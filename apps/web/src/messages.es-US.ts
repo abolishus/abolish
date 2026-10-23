@@ -761,7 +761,7 @@ export const esUS: Messages = {
   accountNew: "Soy nuevo aquí",
   accountNewLede:
     "Creamos una llave de acceso en este dispositivo y guardamos solo su clave pública. No hace falta un nombre. Luego verificas una dirección de correo electrónico, que se necesita para votar: una cuenta por dirección.",
-  accountSignUp: "Crear una cuenta con una llave de acceso",
+  accountSignUp: "Crear cuenta con llave de acceso",
   accountSignIn: "Iniciar sesión con una llave de acceso",
   accountSignOut: "Cerrar sesión",
   accountSignOutOthers: "Cerrar sesión en todos los demás lugares",

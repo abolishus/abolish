@@ -7,6 +7,7 @@ import {
   LOCALE_COOKIE,
   LOCALES,
   localeCookie,
+  localeCookieOnly,
   negotiateLocale,
 } from "../src/locales.ts";
 
@@ -94,6 +95,25 @@ describe("localeCookie", () => {
     );
     expect(localeCookie("en-US", false)).toBe(
       `${LOCALE_COOKIE}=en-US; Path=/; Max-Age=31536000; SameSite=Lax`,
+    );
+  });
+});
+
+describe("localeCookieOnly", () => {
+  test("keeps the footer's choice from a Cookie header and nothing else of it", () => {
+    expect(localeCookieOnly("session=secret; lang=es-US; x=1")).toBe("lang=es-US");
+    for (const header of [undefined, null, "", "session=s", "lang=fr", "lang=en-US; lang=es-US"])
+      expect(localeCookieOnly(header)).toBeUndefined();
+  });
+
+  test("passes on exactly what negotiateLocale takes from the header, for any header", () => {
+    fc.assert(
+      fc.property(fc.string(), fc.string(), (header, accept) => {
+        const kept = localeCookieOnly(header);
+        expect(negotiateLocale(kept, accept)).toBe(negotiateLocale(header, accept));
+        if (kept !== undefined) expect(LOCALES.map((l) => `${LOCALE_COOKIE}=${l}`)).toContain(kept);
+      }),
+      runs,
     );
   });
 });

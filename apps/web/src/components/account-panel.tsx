@@ -9,9 +9,11 @@ import {
   type PasskeyView,
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
+import type { ExportClient } from "../account/export.ts";
 import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
+import { AccountExport } from "./account-export.tsx";
 import { AccountPolls } from "./account-polls.tsx";
 import { AccountProfile } from "./account-profile.tsx";
 import { AccountVerification } from "./account-verify.tsx";
@@ -109,6 +111,8 @@ export interface AccountPanelProps {
   readonly profiles: ProfilesClient;
   /** The signed-in account's e-mail and phone. */
   readonly verify: VerifyClient;
+  /** The signed-in account's own data, to download. */
+  readonly accountExport: ExportClient;
   /** Whether this deployment verifies a phone before an account votes. */
   readonly phone: boolean;
 }
@@ -119,7 +123,14 @@ export interface AccountPanelProps {
  * here can name a ballot (T-10). Votes are cast only in the ballot client,
  * with a voting identity kept on the device under its own passkey (ADR 0017).
  */
-export function AccountPanel({ client, drafts, profiles, verify, phone }: AccountPanelProps) {
+export function AccountPanel({
+  client,
+  drafts,
+  profiles,
+  verify,
+  accountExport,
+  phone,
+}: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -338,8 +349,10 @@ export function AccountPanel({ client, drafts, profiles, verify, phone }: Accoun
             </div>
           </Section>
 
+          <AccountExport client={accountExport} index="05" onSignedOut={signedOut} />
+
           <Section
-            index="05"
+            index="06"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

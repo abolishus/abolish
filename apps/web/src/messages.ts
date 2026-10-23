@@ -783,6 +783,28 @@ const enUS = {
   passkeyLast: "Your last passkey",
   passkeyAdd: "Add a passkey",
   passkeyAdded: "Passkey added.",
+  exportMark: "Your data",
+  exportTitle: "Download your data",
+  exportLede: "A copy of your account's data, as one JSON file you can open in any text editor.",
+  exportHolds_account:
+    "When the account was made, its passkeys, sign-ins and sessions, and its moderator name if it moderates",
+  exportHolds_verification:
+    "Your verified e-mail address where this site can still read it, and the days your e-mail and phone were verified",
+  exportHolds_polls: "Every poll you wrote, as you wrote it, what became of it, and your appeals",
+  exportHolds_profile:
+    "Your public profile, the polls it shows, its appeals and the day you last named it",
+  exportHolds_reactions: "Your reactions to polls",
+  exportHolds_token:
+    "The group, region and key period of your Tier 0 token, never the voting identity it went to",
+  exportNever:
+    "It never holds your answers, receipts or voting identity: those stay on your device, and our servers can't tie them to your account. It holds no sign-in secrets, and not your phone number: we keep only a keyed fingerprint of it, which isn't in the file.",
+  exportCare:
+    "Keep the file somewhere safe: it dates when you used the site, and anyone who has it can read it.",
+  exportDownload: "Download your data",
+  exportPreparing: "Preparing your file…",
+  exportDone: "Your data is downloading.",
+  exportFailure_signedOut: "You've been signed out. Sign in again to download your data.",
+  exportFailure_failed: "Your data couldn't be downloaded. Try again.",
   accountDeleteMark: "Delete",
   accountDeleteTitle: "Delete your account",
   accountDeleteLede:

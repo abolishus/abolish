@@ -5,8 +5,8 @@
 // /phone (src/node/phone.ts), its Tier 0 token under /token
 // (src/node/token.ts), reactions on a poll under /reactions
 // (src/node/reactions.ts), a profile's reports and its author's appeals
-// under /profiles (src/node/profiles.ts), and the client's hashed assets
-// from disk, with
+// under /profiles (src/node/profiles.ts), an account's own data under
+// /export (src/node/export.ts), and the client's hashed assets from disk, with
 // the web app manifest and its icons (src/app/install.ts), and the offline
 // shell's page and worker, which Start renders (src/app/offline.ts).
 //
@@ -61,6 +61,9 @@ export type ReactionsHandler = (request: Request) => Promise<Response>;
 /** The profiles handler (`createProfilesHandler(...)` from src/node/profiles.ts). */
 export type ProfilesHandler = (request: Request) => Promise<Response>;
 
+/** The export handler (`createExportHandler(...)` from src/node/export.ts). */
+export type ExportHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -72,6 +75,7 @@ export type RouteClass =
   | "token"
   | "reactions"
   | "profiles"
+  | "export"
   | "asset"
   | "offline"
   | "ingest"
@@ -122,6 +126,7 @@ export interface WebServerOptions {
   readonly token: TokenHandler;
   readonly reactions: ReactionsHandler;
   readonly profiles: ProfilesHandler;
+  readonly accountExport: ExportHandler;
   /**
    * What every page and server function gets in its request context
    * (src/start.ts): readers of the account side's public records, by a
@@ -189,6 +194,7 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "token",
   "reactions",
   "profiles",
+  "export",
 ]);
 
 /**
@@ -207,6 +213,7 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/token" || path.startsWith("/token/")) return "token";
   if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
   if (path === "/profiles" || path.startsWith("/profiles/")) return "profiles";
+  if (path === "/export" || path.startsWith("/export/")) return "export";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (
@@ -285,6 +292,7 @@ export function createWebServer({
   token,
   reactions,
   profiles,
+  accountExport,
   context = {},
   clientDir,
   origin,
@@ -389,7 +397,7 @@ export function createWebServer({
     });
     if (!ACCOUNT_ROUTES.has(route))
       return send(res, await start.fetch(request, { context }), method === "HEAD");
-    // The account, drafts, e-mail, phone, token, reactions and profiles handlers answer
+    // The account, drafts, e-mail, phone, token, reactions, profiles and export handlers answer
     // JSON and set few headers of their own (src/security.ts covers pages). A
     // copy: a response's own headers can be immutable.
     const handler =
@@ -405,7 +413,9 @@ export function createWebServer({
                 ? token
                 : route === "reactions"
                   ? reactions
-                  : profiles;
+                  : route === "profiles"
+                    ? profiles
+                    : accountExport;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");

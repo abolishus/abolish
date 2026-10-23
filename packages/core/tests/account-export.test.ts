@@ -284,6 +284,17 @@ describe("exportAccount", () => {
     expect(out?.profileNamedOn).toBe("2026-10-22T00:00:00.000Z");
   });
 
+  test("without the e-mail keys the address is null and the rest still exports", async () => {
+    const user = await newAccount();
+    await verified(user, "keyless@example.org");
+    await draft(user, { title: "Kept" });
+    const withKeys = await exportAccount(app, user, at);
+    const without = await exportAccount(app, user, { keys: undefined, now: NOW });
+    expect(withKeys?.email?.address).toBe("keyless@example.org");
+    expect(without?.email).toEqual({ address: null, verifiedOn: withKeys?.email?.verifiedOn });
+    expect({ ...without, email: null }).toEqual({ ...withKeys, email: null });
+  });
+
   test("an unknown or deleted account has none; a malformed ID is refused", async () => {
     expect(await exportAccount(app, newAccountId(), at)).toBeUndefined();
     const user = await newAccount();

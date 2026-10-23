@@ -32,6 +32,7 @@ import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
 import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
+import { createExportHandler } from "./export.ts";
 import { createProfilesHandler } from "./profiles.ts";
 import { createReactionsHandler } from "./reactions.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
@@ -402,6 +403,13 @@ const profiles = createProfilesHandler({
   accountOf: (headers) => accounts.accountOf(headers),
   origin,
 });
+// Without the e-mail service the export gives a verified address as `null`.
+const accountExport = createExportHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  emailKeys: emailVerification?.keys,
+  origin,
+});
 // A profile's page reads it by its public handle alone, never with a
 // session (pages never get the cookie), from the account side the API never
 // reads (T-10; [[0040-creator-profiles]]).
@@ -447,6 +455,7 @@ const server = createWebServer({
   token,
   reactions,
   profiles,
+  accountExport,
   context: { readProfile: publicProfile, readAskedBy: pollAskedBy },
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,

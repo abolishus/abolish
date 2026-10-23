@@ -267,6 +267,14 @@ describe("dist/node/main.mjs", () => {
         body: JSON.stringify({ handle: "a".repeat(16), reason: "spam" }),
       });
       expect(await report.json()).toEqual({ code: "UNKNOWN_PROFILE", status: 404 });
+      // And the export route, which needs a session (core's tests read every
+      // account table through `exportAccount` as abolish_app).
+      const exported = await fetch(`${at}/export`, {
+        method: "POST",
+        headers: { origin: "https://abolish.test", "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(await exported.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
       // And a profile's page, read through the front's reader in Start's
       // request context as abolish_app: no reader, table or grant would be a 500.
       const profile = await fetch(`${at}/by/${"a".repeat(16)}`);
@@ -285,6 +293,7 @@ describe("dist/node/main.mjs", () => {
       expect(lines.map((l) => l.route)).toContain("token");
       expect(lines.map((l) => l.route)).toContain("reactions");
       expect(lines.map((l) => l.route)).toContain("profiles");
+      expect(lines.map((l) => l.route)).toContain("export");
       // No start-up prune of the account tables failed as abolish_app.
       expect(web.out()).not.toContain("AccountPruneFailed");
       expect(web.out()).not.toContain("Tier0TokenDeadMarkFailed");

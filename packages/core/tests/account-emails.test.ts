@@ -490,7 +490,7 @@ describe("verifying a code", () => {
       now: NOW,
     });
     expect(await localeOf()).toBe("es-US");
-    // Verifying again, a new address or the same one, takes the new request's.
+    // Verifying again takes the new request's.
     await verifyEmailCode(app, account, codeOf(await ask(account, fresh(), { now: later(1) })), {
       locale: "en-US",
       keys: KEYS,

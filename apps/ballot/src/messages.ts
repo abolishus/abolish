@@ -333,24 +333,27 @@ const enUS = {
   postingWalletOffer:
     "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does. This device sends your ballot only once the record shows them.",
   postingWalletPost: "Post from my wallet, then send",
+  postingHandedTitle: "The missing parts may still reach the board",
+  postingHanded:
+    "An earlier try gave the missing parts to our posting relay or to your wallet, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back.",
   walletSentTitle: "Your wallet's posting isn't on the board yet",
   walletSent:
     "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
   walletRejectedTitle: "Your wallet didn't send anything",
   walletRejected:
-    "A request was declined in your wallet, so this device sent nothing from it. Choose again below.",
+    "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts. Choose again below.",
   walletRefusedTitle: "The board won't take this posting",
   walletRefused:
     "Your wallet's check of the posting says the board would refuse it, so nothing was sent and none of your fee was spent. Your wallet and its node were given the missing parts for that check. Try the trustees again, or leave this ballot.",
   walletWrongChainTitle: "Your wallet is on another network",
   walletWrongChain:
-    "Your wallet didn't switch to the network the poll's board is on, so nothing was sent. Switch it there, then post from your wallet again.",
+    "Your wallet didn't switch to the network the poll's board is on, so nothing was sent this time. Switch it there, then post from your wallet again.",
   walletMissingTitle: "No wallet in this browser",
   walletMissing:
     "This device found no Ethereum wallet to ask. Add one to this browser, or open the ballot in a browser that has one, then post from your wallet again.",
   walletLateTitle: "The time for posting has passed",
   walletLate:
-    "The poll's posting cutoff has passed, so nothing was sent from your wallet and nothing more can be posted for this ballot.",
+    "The poll's posting cutoff has passed, so nothing was sent from your wallet this time and nothing more can be posted for this ballot.",
   walletFailedTitle: "Your wallet didn't answer",
   walletFailed:
     "Your wallet or its node didn't answer in time, or answered with an error. It may have been given the missing parts, so count them as given. Try again in a minute.",

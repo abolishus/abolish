@@ -525,6 +525,12 @@ type Step =
       readonly fallback?: true;
       /** What the voter's own wallet last met, if it didn't record them. */
       readonly wallet?: Exclude<WalletAnswer, "recorded">;
+      /**
+       * Some run, this one or an earlier one, may have handed the parts to
+       * the relay or a wallet, so they may still reach the board: the
+       * offer never says nothing was posted again (T-15).
+       */
+      readonly handed?: true;
     }
   | { readonly kind: "declining" }
   | { readonly kind: "posting" }
@@ -1212,7 +1218,7 @@ export function Ballot({
    * earlier one (Client rule 4; [[revoting]], Selection). A posting that
    * doesn't go through returns to the offer.
    */
-  function post(sending: Sending) {
+  function post(sending: Sending, handed: boolean) {
     if (posting === undefined) return;
     setStep({ kind: "posting" });
     run(
@@ -1228,12 +1234,37 @@ export function Ballot({
         // Every answer but `recorded` is the end of a run that fell back
         // ([[posting-relay]], Outcome), so the voter's own wallet may now
         // be offered beside trying the relay again.
-        return answer === "relayed"
-          ? { kind: "offer", sending: checked, failed: true, relayed: true, fallback: true }
-          : { kind: "offer", sending: checked, failed: true, fallback: true };
+        const relayed = answer === "relayed";
+        return fellBack(checked, { relayed, handed: handed || relayed });
       },
-      { kind: "offer", sending, failed: true },
+      handed
+        ? { kind: "offer", sending, failed: true, handed: true }
+        : { kind: "offer", sending, failed: true },
     );
+  }
+
+  /** The offer once a run fell back, with what it and the earlier runs left behind. */
+  function fellBack(
+    sending: Sending,
+    {
+      relayed,
+      handed,
+      wallet,
+    }: {
+      readonly relayed: boolean;
+      readonly handed: boolean;
+      readonly wallet?: Exclude<WalletAnswer, "recorded">;
+    },
+  ): Step {
+    return {
+      kind: "offer",
+      sending,
+      failed: true,
+      fallback: true,
+      ...(relayed ? { relayed: true } : {}),
+      ...(handed ? { handed: true } : {}),
+      ...(wallet === undefined ? {} : { wallet }),
+    };
   }
 
   /**
@@ -1243,13 +1274,17 @@ export function Ballot({
    * `post`, then the wallet's run. A run that doesn't record them returns
    * to the offer with what the wallet met, the relay still there to try.
    */
-  function postFromOwnWallet(sending: Sending, relayed: boolean) {
+  function postFromOwnWallet(sending: Sending, relayed: boolean, handed: boolean) {
     if (postingOwn === undefined) return;
     setStep({ kind: "posting-wallet" });
+    // Every answer but these may come after the wallet's estimate, which
+    // carries the parts (Own wallet, step 3), so they count as handed.
     const back = (wallet: Exclude<WalletAnswer, "recorded">): Step =>
-      relayed
-        ? { kind: "offer", sending, failed: true, relayed: true, fallback: true, wallet }
-        : { kind: "offer", sending, failed: true, fallback: true, wallet };
+      fellBack(sending, {
+        relayed,
+        handed: handed || !["late", "wrong-chain", "no-wallet"].includes(wallet),
+        wallet,
+      });
     run(async (current) => {
       const posted = await postChecked(sending, (postings) =>
         postingOwn(electionId, sending.ballot, postings, cutoff()).catch(
@@ -1380,10 +1415,11 @@ export function Ballot({
           relayed={step.relayed === true}
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
-          onPost={posting === undefined ? undefined : () => post(sending)}
+          handed={step.handed === true}
+          onPost={posting === undefined ? undefined : () => post(sending, step.handed === true)}
           onWallet={
             step.fallback === true && postingOwn !== undefined
-              ? () => postFromOwnWallet(sending, step.relayed === true)
+              ? () => postFromOwnWallet(sending, step.relayed === true, step.handed === true)
               : undefined
           }
           wallet={step.wallet}

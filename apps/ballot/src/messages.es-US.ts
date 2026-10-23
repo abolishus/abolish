@@ -336,24 +336,27 @@ export const esUS: Messages = {
   postingWalletOffer:
     "Nuestro servicio de publicación no puso las partes que faltan en el registro público, así que tu propia billetera de Ethereum puede hacerlo, pagando la tarifa de la red. La dirección que paga se publica para siempre junto a esta boleta y a cada nueva respuesta que des en esta encuesta, así que usa una dirección nueva con fondos privados, nunca una ligada a ti o a una cuenta de un intercambio. Tu billetera y el nodo que usa ven las partes que faltan antes que el registro público. Este dispositivo envía tu boleta solo cuando el registro las muestra.",
   postingWalletPost: "Publicar desde mi billetera y enviar",
+  postingHandedTitle: "Las partes que faltan todavía pueden llegar al tablero",
+  postingHanded:
+    "Un intento anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
   walletSentTitle: "La publicación de tu billetera todavía no está en el tablero",
   walletSent:
     "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",
   walletRejectedTitle: "Tu billetera no envió nada",
   walletRejected:
-    "Se rechazó una solicitud en tu billetera, así que este dispositivo no envió nada desde ella. Escoge otra vez abajo.",
+    "Se rechazó una solicitud en tu billetera, así que no se envió nada más desde ella. Si tu billetera ya te había mostrado la publicación, ella y su nodo vieron las partes que faltan. Escoge otra vez abajo.",
   walletRefusedTitle: "El tablero no aceptará esta publicación",
   walletRefused:
     "La comprobación de tu billetera dice que el tablero rechazaría la publicación, así que no se envió nada y no se gastó nada de tu tarifa. Tu billetera y su nodo recibieron las partes que faltan para esa comprobación. Intenta otra vez con los custodios, o deja esta boleta.",
   walletWrongChainTitle: "Tu billetera está en otra red",
   walletWrongChain:
-    "Tu billetera no cambió a la red en la que está el tablero de la encuesta, así que no se envió nada. Cámbiala a esa red y publica desde tu billetera otra vez.",
+    "Tu billetera no cambió a la red en la que está el tablero de la encuesta, así que esta vez no se envió nada. Cámbiala a esa red y publica desde tu billetera otra vez.",
   walletMissingTitle: "No hay billetera en este navegador",
   walletMissing:
     "Este dispositivo no encontró ninguna billetera de Ethereum a la cual preguntar. Agrega una a este navegador, o abre la boleta en un navegador que tenga una, y publica desde tu billetera otra vez.",
   walletLateTitle: "Ya pasó el tiempo para publicar",
   walletLate:
-    "Ya pasó el límite para publicar de la encuesta, así que no se envió nada desde tu billetera y ya no se puede publicar nada más para esta boleta.",
+    "Ya pasó el límite para publicar de la encuesta, así que esta vez no se envió nada desde tu billetera y ya no se puede publicar nada más para esta boleta.",
   walletFailedTitle: "Tu billetera no respondió",
   walletFailed:
     "Tu billetera o su nodo no respondió a tiempo, o respondió con un error. Puede que haya recibido las partes que faltan, así que cuéntalas como entregadas. Intenta otra vez en un minuto.",

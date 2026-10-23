@@ -367,7 +367,7 @@ const source: ElectionSource = {
           try {
             return await postFromWallet(
               {
-                send: (call) => session.send(call),
+                send: (call, late) => session.send(call, late),
                 find: (head, from, stop) =>
                   loadPostings(
                     STAGING,

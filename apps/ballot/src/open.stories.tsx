@@ -1760,6 +1760,32 @@ export const PostingFromTheWalletNotRecorded: Story = {
   },
 };
 
+export const PostingHandedStaysSaid: Story = {
+  name: "Once a wallet had the parts, no later try says nothing was posted",
+  args: {
+    source: offerSource({ posted: ["refused", "unreachable"], ownPosted: ["sent", "late"] }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Post from my wallet, then send" }),
+    );
+    await canvas.findByText("Your wallet's posting isn't on the board yet");
+    // The relay, tried again, sends nothing; the wallet's parts may still land (T-15).
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByText("The missing parts may still reach the board"),
+    ).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+    // And the wallet, tried again past the cutoff, says so beside it.
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(await canvas.findByText("The time for posting has passed")).toBeVisible();
+    await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
+  },
+};
+
 export const PostingDeclined: Story = {
   name: "The voter leaves the ballot: its kept shares are erased here and in the worker, and nothing is sent",
   args: { source: offerSource({ posted: ["recorded"] }) },

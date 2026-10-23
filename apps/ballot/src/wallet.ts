@@ -209,9 +209,12 @@ export class WalletSession {
    * Answers `sent`, or `unknown` when the wallet didn't answer in time and
    * may still send it.
    */
-  async send(call: Uint8Array): Promise<"sent" | "unknown"> {
+  async send(call: Uint8Array, late: () => boolean = () => false): Promise<"sent" | "unknown"> {
     const from = await this.from();
     await this.onChain();
+    // Checked again here, after the requests that may each have waited on
+    // the voter: the estimate is the first to carry the parts (T-18).
+    if (late()) throw new WalletRefusal("late");
     const tx = { from, to: this.board.address, data: toHex(call), value: "0x0" };
     let estimate: unknown;
     try {
@@ -229,7 +232,9 @@ export class WalletSession {
       ]);
     } catch (error) {
       if (rejectedByVoter(error)) throw new WalletRefusal("rejected");
-      throw new WalletRefusal(reverted(error) ? "refused" : "failed");
+      // Even a revert here may follow a broadcast, so it never reads as
+      // refused, which says nothing was sent.
+      throw new WalletRefusal("failed");
     }
     // A confirmation the voter is still reading may yet send it.
     if (hash === TIMEOUT) return "unknown";
@@ -240,8 +245,11 @@ export class WalletSession {
 
 /** What a wallet run needs from the network and the clocks, injectable for tests. */
 export interface WalletIo {
-  /** Sends one posting's calldata from the wallet (`WalletSession.send`). */
-  send(call: Uint8Array): Promise<"sent" | "unknown">;
+  /**
+   * Sends one posting's calldata from the wallet (`WalletSession.send`),
+   * refusing as `late` once `late` says the cutoff passed.
+   */
+  send(call: Uint8Array, late: () => boolean): Promise<"sent" | "unknown">;
   /** `loadPostings` for the ballot through the build's L2 endpoint, as the relay's run reads it. */
   find(
     head: "finalized" | "latest",
@@ -335,7 +343,7 @@ export async function postFromWallet(
       if (p.sentAt !== undefined || holds(p.seenAt)) continue;
       if (time() > cutoff) return sent ? "sent" : "late";
       try {
-        await io.send(p.call);
+        await io.send(p.call, () => time() > cutoff);
       } catch (error) {
         if (sent) return "sent";
         if (error instanceof WalletRefusal) return error.answer;

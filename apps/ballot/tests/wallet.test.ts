@@ -204,6 +204,35 @@ describe("WalletSession.send", () => {
     });
   });
 
+  test("reads a revert at the send as failed, never refused, since it may follow a broadcast", async () => {
+    const { provider } = wallet({
+      ...honest(),
+      eth_sendTransaction: () => {
+        throw revert();
+      },
+    });
+    await expect(new WalletSession(provider, CHAIN, BOARD).send(CALL)).rejects.toMatchObject({
+      answer: "failed",
+    });
+  });
+
+  test("checks the cutoff again before the estimate, the first request to carry the parts", async () => {
+    let late = false;
+    const { provider, methods } = wallet({
+      ...honest(),
+      // The voter took their time over the account.
+      eth_requestAccounts: () => {
+        late = true;
+        return [ACCOUNT];
+      },
+    });
+    await expect(
+      new WalletSession(provider, CHAIN, BOARD).send(CALL, () => late),
+    ).rejects.toMatchObject({ answer: "late" });
+    expect(methods()).not.toContain("eth_estimateGas");
+    expect(methods()).not.toContain("eth_sendTransaction");
+  });
+
   test("reads answers no wallet gives as failed, and sends nothing on them", async () => {
     const cases: [string, unknown][] = [
       ["eth_requestAccounts", []],

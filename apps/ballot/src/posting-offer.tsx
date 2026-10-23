@@ -13,8 +13,9 @@ import type { WalletAnswer } from "./wallet.ts";
 
 const shortHex = (hash: string) => groupHex(hash).slice(0, 2).join(" ");
 
-// What the voter's own wallet met, as the offer says it. Every answer that
-// may have handed the wallet the parts says so, never "nothing posted" (T-15).
+// What the voter's own wallet met, as the offer says it. A run that may have
+// handed the wallet the parts says so, and so does every later offer, never
+// "nothing posted" (`handed`; T-15).
 const WALLET_NOTES = {
   sent: { title: "walletSentTitle", detail: "walletSent" },
   rejected: { title: "walletRejectedTitle", detail: "walletRejected" },
@@ -27,6 +28,9 @@ const WALLET_NOTES = {
   Exclude<WalletAnswer, "recorded">,
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 >;
+
+// The wallet's notes that themselves say the parts were given or posted.
+const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["sent", "refused", "failed"]);
 
 /**
  * The offer, asked as soon as delivery failed so a voter who leaves the
@@ -48,6 +52,7 @@ export function PostingOffer({
   relayed = false,
   onRetry,
   onDecline,
+  handed = false,
   onPost,
   onWallet,
   wallet,
@@ -58,6 +63,8 @@ export function PostingOffer({
   missing: number;
   failed?: boolean;
   relayed?: boolean;
+  /** An earlier run may have handed the parts out, whatever the latest one met. */
+  handed?: boolean;
   onRetry: () => void;
   onDecline: () => void;
   onPost?: (() => void) | undefined;
@@ -66,6 +73,9 @@ export function PostingOffer({
 }) {
   const t = useTranslate(catalogs);
   const walletNote = wallet === undefined ? undefined : WALLET_NOTES[wallet];
+  // The relay's note, or the wallet's that already says the parts were
+  // given, covers what an earlier run handed out; any other gets this one.
+  const handedNote = handed && !relayed && (wallet === undefined || !SAYS_GIVEN.has(wallet));
   return (
     <EverydayFrame
       poll={poll}
@@ -83,10 +93,17 @@ export function PostingOffer({
       <ScreenTitle title={t("postingOfferTitle")} focus>
         <p className="m-0">{t("postingOffer", { count: missing })}</p>
       </ScreenTitle>
-      {failed && (walletNote === undefined || relayed) ? (
+      {failed && (relayed || (walletNote === undefined && !handed)) ? (
         <div className="mt-6">
           <Note tone="warn" title={t(relayed ? "postingRelayedTitle" : "postingFailedTitle")}>
             <p className="m-0">{t(relayed ? "postingRelayed" : "postingFailed")}</p>
+          </Note>
+        </div>
+      ) : null}
+      {handedNote ? (
+        <div className="mt-6">
+          <Note tone="warn" title={t("postingHandedTitle")}>
+            <p className="m-0">{t("postingHanded")}</p>
           </Note>
         </div>
       ) : null}

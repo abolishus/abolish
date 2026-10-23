@@ -822,6 +822,28 @@ describe("contract-path records under contract-event version 9, once 4.4 passes"
     }
   });
 
+  test("one naming another definition is stray, listed by the check, and holds nothing", () => {
+    const other = sha256(text("counted-v4.test another definition"));
+    for (const [id, name] of [
+      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+      ["receipt-root-author", "ObligationRootSubmitted"],
+    ] as const) {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const r9 = batches.records.find((x) => x.id === id);
+      if (r9 === undefined) throw new Error(`no record ${id}`);
+      const record = hex(r9.encoding);
+      record.set(other, 3);
+      const at = e.board(200, event(name, [other, word(record[36] as number)], record, T_D));
+      const r = run(e);
+      expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
+      expect(r.delivery?.excluded, id).toEqual([]);
+      expect(r.delivery?.records, id).toEqual([
+        { entry: at, code: "delivery-stray", panel: record[35], seat: record[36] },
+      ]);
+    }
+  });
+
   test("under a version-8 pin, a version-9 record doesn't decode and carries nothing (4.4's to report)", () => {
     const e = election();
     e.deliver([ALICE], 200);

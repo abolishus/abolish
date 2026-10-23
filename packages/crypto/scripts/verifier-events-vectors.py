@@ -337,7 +337,7 @@ def main(out_dir):
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-events-vectors.py, from verifier-ceremony-vectors.py and the records of "
-            "contract-event.json and contract-event-v2.json to contract-event-v8.json (independent Python implementations)"
+            "contract-event.json and contract-event-v2.json to contract-event-v9.json (independent Python implementations)"
         ),
         "inputs": {f["file"]: f["sha256"] for f in FILES.values()},
         "cases": cases,

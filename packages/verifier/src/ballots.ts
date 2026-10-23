@@ -373,8 +373,8 @@ export function ballotChecks(
     // Every path's copy, the relayed one's too: a member's ballot 5.4
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
-    // window (T-45, T-71). A version-4 ballot's ordinary and relayed copies
-    // come framed by contract-event version 9, which 2.3 requires beside it.
+    // window (T-45, T-71). Only contract-event version 9 frames a version-4
+    // ballot's ordinary and relayed copies.
     live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {
       rejected.push({

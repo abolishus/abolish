@@ -459,12 +459,21 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
           inputs.destruction,
         );
-      // A version-2 batch or root (contract-event version 9 frames them) may
-      // deliver or exclude any ballot of its seat's panel, by its pairs or
-      // its leaves, which this release doesn't read into 5.9 yet ([[P2-16]]
-      // part 5d-3c): the counted set is undecided while one is in the
-      // extent, never a guess either way (T-25, T-53).
-      if (definition.version === 6 && fixed && BATCH_EVENTS.has(checked.event.event))
+      // A version-2 batch or root of this election (contract-event version 9
+      // frames them) may deliver or exclude any ballot of its seat's panel,
+      // by its pairs or its leaves, which this release doesn't read into 5.9
+      // yet ([[P2-16]] part 5d-3c): the counted set is undecided while one is
+      // in the extent, never a guess either way (T-25, T-53). One naming
+      // another definition is stray, whatever it holds, so the check lists
+      // it and it holds nothing: another election's seat can't stall this
+      // one's rows from the board's shared sequence.
+      if (
+        definition.version === 6 &&
+        fixed &&
+        BATCH_EVENTS.has(checked.event.event) &&
+        "definitionHash" in checked.event &&
+        equal(checked.event.definitionHash, definitionHash)
+      )
         return countedRows(
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
           inputs.destruction,

@@ -2,7 +2,7 @@
   "format": "abolish-verifier-events-vectors/1",
   "title": "The verifier's contract-event check over the board: definitions and boards, with the row 4.4",
   "spec": "docs/spec/verifier.md",
-  "generator": "packages/crypto/scripts/verifier-events-vectors.py, from verifier-ceremony-vectors.py and the records of contract-event.json and contract-event-v2.json to contract-event-v8.json (independent Python implementations)",
+  "generator": "packages/crypto/scripts/verifier-events-vectors.py, from verifier-ceremony-vectors.py and the records of contract-event.json and contract-event-v2.json to contract-event-v9.json (independent Python implementations)",
   "inputs": {
     "contract-event.json": "c81c3255f089aa74cea3718e0d320b48f98d395871e0ca0272d096d7401566d4",
     "contract-event-v2.json": "68348e0d7d5a0a1e89fb780ececdaa0763041004fcaec4086a2152c5c2f8423e",

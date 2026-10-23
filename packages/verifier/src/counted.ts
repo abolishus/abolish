@@ -454,6 +454,17 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       // and can't hold the rows open. Version 9 frames both.
       const fixed = checked.event.record[2] === (definition.version === 6 ? 2 : 1);
       if (BigInt(segment) > floor && !fixed) continue;
+      // Under ballot version 4 one naming another definition is stray
+      // wherever it sits and delivers nothing here, so above the floor it
+      // isn't read either: another election's seat can't hold these rows
+      // open from the board's shared sequence (T-53).
+      if (
+        BigInt(segment) > floor &&
+        definition.version === 6 &&
+        "definitionHash" in checked.event &&
+        !equal(checked.event.definitionHash, definitionHash)
+      )
+        continue;
       if (BigInt(segment) > floor)
         return countedRows(
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },

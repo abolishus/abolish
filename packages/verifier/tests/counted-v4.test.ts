@@ -822,6 +822,25 @@ describe("contract-path records under contract-event version 9, once 4.4 passes"
     }
   });
 
+  test("one naming another definition above the floor isn't read, whenever it was sent by t_K", () => {
+    const other = sha256(text("counted-v4.test another definition"));
+    for (const [id, name] of [
+      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+      ["receipt-root-author", "ObligationRootSubmitted"],
+    ] as const) {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const r9 = batches.records.find((x) => x.id === id);
+      if (r9 === undefined) throw new Error(`no record ${id}`);
+      const record = hex(r9.encoding);
+      record.set(other, 3);
+      e.board(S_K + 1, event(name, [other, word(record[36] as number)], record, T_K));
+      const r = run(e);
+      expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
+      expect(r.delivery, id).toEqual({ excluded: [], records: [], rejected: [] });
+    }
+  });
+
   test("one naming another definition is stray, listed by the check, and holds nothing", () => {
     const other = sha256(text("counted-v4.test another definition"));
     for (const [id, name] of [

@@ -184,6 +184,8 @@ describe("schema", () => {
       ["account_email_sends", "DELETE,INSERT,SELECT"],
       ["account_emails", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_moderators", "INSERT,SELECT"],
+      // Plus UPDATE of the tries and the due time (account-notices.test.ts).
+      ["account_notices", "DELETE,INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_phone_codes", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_phone_holds", "DELETE,INSERT,SELECT,UPDATE"],

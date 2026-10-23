@@ -57,6 +57,7 @@ import {
 } from "./profiles.ts";
 import { pollTagActions, pollTags } from "./poll-tags.ts";
 import { postingBallots, postingInFlight, postingSent, postingSpend } from "./postings.ts";
+import { accountNotices } from "./notices.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
 
@@ -70,6 +71,7 @@ export {
   accountEmails,
   accountEmailSends,
   accountModerators,
+  accountNotices,
   accountPhoneCodes,
   accountPhoneHolds,
   accountPhoneKeyChecks,
@@ -125,9 +127,9 @@ export {
  * data and are rebuilt from chain + IPFS. Account tables hold accounts
  * (better-auth), the polls each account wrote (ADR 0032), the Tier 0 token
  * each account took ([[tier0-token]]), the reactions it set on polls
- * ([[P2-25]]) and its creator profile with the handles ever issued
- * ([[0040-creator-profiles]]): who someone is to the app, never how they
- * voted. Operational tables (moderation, caches)
+ * ([[P2-25]]), its creator profile with the handles ever issued
+ * ([[0040-creator-profiles]]) and the notices waiting to be e-mailed to it
+ * ([[P2-27]]): who someone is to the app, never how they voted. Operational tables (moderation, caches)
  * hold nothing a result depends on.
  * Identity tables hold voting-identity backups (ADR 0017) and the posting
  * relay's record of what it sent ([[posting-relay]], Caps and In flight):
@@ -161,6 +163,7 @@ export const TABLE_CLASSES = {
     "account_email_sends",
     "account_emails",
     "account_moderators",
+    "account_notices",
     "account_passkeys",
     "account_phone_codes",
     "account_phone_holds",

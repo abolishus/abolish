@@ -59,6 +59,8 @@ import {
   accountEmailSends,
 } from "./db/schema/index.ts";
 import { assertDistinctKeyrings, type Keyring } from "./keyring.ts";
+import type { Notice } from "./account-notices.ts";
+import type { RemovalReason, RestoreReason } from "./moderation.ts";
 import type { Turnstile } from "./turnstile.ts";
 
 /** Digits in a code. */
@@ -106,10 +108,12 @@ export type EmailMessage =
   /** `to` is another account's address: no code, just the fact that someone asked. */
   | { readonly kind: "email-held"; readonly to: string }
   /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
-  | { readonly kind: "email-on-hold"; readonly to: string };
+  | { readonly kind: "email-on-hold"; readonly to: string }
+  /** What moderation did to the poll or profile of the account `to` is verified for (src/account-notices.ts). */
+  | { readonly kind: "notice"; readonly to: string; readonly notice: Notice };
 
 /**
- * The sending service, shared with notifications (P2-27). `unavailable`:
+ * The sending service, shared with notices (src/account-notices.ts). `unavailable`:
  * the provider didn't take the message. It must send plain transactional
  * mail with open and link tracking off (ADR 0038; T-67).
  */
@@ -152,7 +156,80 @@ export function renderEmail(message: EmailMessage): {
           "An address can't be verified again until 90 days after an account lets it go, so no code was sent and nothing changed.",
         ].join("\n"),
       };
+    case "notice":
+      return renderNotice(message.notice);
   }
+}
+
+// docs/moderation-policy.md, Reasons, in the words a notice uses.
+const GROUNDS: Record<RemovalReason, string> = {
+  illegal: "content that is illegal to host",
+  "personal-data": "a private person's personal data",
+  threat: "a threat of violence",
+  harassment: "harassment of a private person",
+  spam: "spam",
+  impersonation: "impersonation",
+  "legal-notice": "a legal notice we must act on",
+};
+const RESTORED: Record<RestoreReason, string> = {
+  "appeal-upheld": "your appeal was upheld",
+  error: "the earlier decision was a mistake",
+  "notice-withdrawn": "the legal notice behind it was withdrawn",
+};
+
+// T-73: no poll's question, profile's name, handle, link or time: which poll
+// or profile it was is on the account page, behind the account's sign-in.
+function renderNotice(notice: Notice): { readonly subject: string; readonly text: string } {
+  const always = "We send moderation notices whatever your notification settings.";
+  const lines = (subject: string, ...text: string[]) => ({
+    subject,
+    text: [...text, "", always].join("\n"),
+  });
+  if (notice.event === "restore") {
+    const why = RESTORED[notice.reason];
+    return notice.subject === "poll"
+      ? lines(
+          "A moderator restored one of your polls",
+          `A moderator restored one of your polls on Abolish: ${why}. It is listed and shown again.`,
+          "",
+          "Sign in to Abolish to see which poll.",
+        )
+      : lines(
+          "A moderator restored your public profile",
+          `A moderator restored your public profile on Abolish: ${why}. Its name and polls are shown again.`,
+        );
+  }
+  const ground = GROUNDS[notice.reason];
+  if (notice.event === "appeal-rejected")
+    return notice.subject === "poll"
+      ? lines(
+          "Your appeal about one of your polls was turned down",
+          `A moderator reviewed your appeal and kept the decision on one of your polls on Abolish, on the ground of ${ground}.`,
+          "",
+          "Sign in to Abolish to see which poll.",
+        )
+      : lines(
+          "Your appeal about your public profile was turned down",
+          `A moderator reviewed your appeal and kept your public profile on Abolish hidden, on the ground of ${ground}.`,
+        );
+  if (notice.subject === "profile")
+    return lines(
+      "A moderator hid your public profile",
+      `A moderator hid your public profile on Abolish, on the ground of ${ground}. Its page shows the reason instead of its name and polls, and your polls don't say who asked while it stands.`,
+      "",
+      "Sign in to Abolish to see the decision and to appeal it.",
+    );
+  return lines(
+    notice.event === "delist"
+      ? "A moderator took one of your polls off Discover"
+      : "A moderator hid one of your polls",
+    notice.event === "delist"
+      ? `A moderator took one of your polls on Abolish off Discover and search, on the ground of ${ground}. Anyone with its link can still see it.`
+      : `A moderator hid one of your polls on Abolish, on the ground of ${ground}. Our pages no longer show its question and options.`,
+    "Its results stay published, and anyone can still check them.",
+    "",
+    "Sign in to Abolish to see which poll and to appeal the decision.",
+  );
 }
 
 export type EmailVerificationErrorCode =

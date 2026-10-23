@@ -3,7 +3,8 @@
 // each decision against their poll once; a moderator other than the one who
 // decided, and other than the creator, reviews it. An upheld appeal is a
 // `restore` citing `appeal-upheld` in the public log, recorded only here; a
-// rejected one leaves the poll and the log as they are.
+// rejected one leaves the poll and the log as they are, and queues a notice
+// to the creator (src/account-notices.ts).
 //
 // T-10: `account_moderators` and `account_appeals` are account tables. The
 // moderation queue and the operator's commands get an appeal's election and
@@ -12,6 +13,7 @@
 import { and, asc, desc, eq, gt, isNull, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
+import { queueNotice } from "./account-notices.ts";
 import {
   accountAppeals,
   accountModerators,
@@ -403,6 +405,8 @@ export async function decideAppeal(
         outcome: accountAppeals.outcome,
         electionId: moderationActions.electionId,
         decidedBy: moderationActions.moderator,
+        reason: moderationActions.reason,
+        author: accountPolls.userId,
       })
       .from(accountAppeals)
       .innerJoin(moderationActions, eq(moderationActions.seq, accountAppeals.decisionSeq))
@@ -433,9 +437,18 @@ export async function decideAppeal(
     } else {
       review = { outcome: "rejected", state: stateAfter(newest.action) };
     }
+    const reviewedAt = await clock(tx);
+    if (review.outcome === "rejected")
+      await queueNotice(
+        tx,
+        appeal.author,
+        // An appeal is filed only against a removal (`fileAppeal`).
+        { subject: "poll", event: "appeal-rejected", reason: appeal.reason as RemovalReason },
+        reviewedAt,
+      );
     await tx
       .update(accountAppeals)
-      .set({ outcome: review.outcome, reviewer: moderator, reviewedAt: await clock(tx) })
+      .set({ outcome: review.outcome, reviewer: moderator, reviewedAt })
       .where(eq(accountAppeals.decisionSeq, decisionSeq));
     return review;
   });

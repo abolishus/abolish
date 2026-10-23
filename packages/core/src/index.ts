@@ -146,6 +146,7 @@ export {
   accountPasskeys,
   accountAppeals,
   accountModerators,
+  accountNotices,
   accountPolls,
   accountPollSubmissions,
   accountProfileAppeals,
@@ -244,6 +245,16 @@ export {
   rotateEmailKeys,
   verifyEmailCode,
 } from "./account-emails.ts";
+export {
+  MAX_NOTICE_BATCH,
+  type Notice,
+  NOTICE_TRIES,
+  NOTICE_WAIT_SECONDS,
+  type NoticeRun,
+  queueNotice,
+  sendNotices,
+  type SendNoticesOptions,
+} from "./account-notices.ts";
 export {
   ACCOUNT_EXPORT,
   ACCOUNT_EXPORT_VERSION,

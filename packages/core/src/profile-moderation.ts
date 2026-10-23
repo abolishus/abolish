@@ -10,11 +10,14 @@
 //
 // T-10: the log, the reports and the moderators' queues name a profile by
 // its public handle, never its account. Only the own-profile rule and the
-// author's appeals read `account_profiles`, on the account side.
+// author's appeals read `account_profiles`, on the account side, and so does
+// the notice each decision and rejected appeal queues for the author
+// (src/account-notices.ts).
 
 import { and, asc, desc, eq, gt, isNull, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
+import { queueNotice } from "./account-notices.ts";
 import {
   AppealError,
   type AppealDecision,
@@ -188,6 +191,14 @@ async function recordProfileDecision(
     // The insert trigger draws `seq` from the poll log's sequence.
     .values({ seq: 0n, handle, action, reason, moderator, decidedAt })
     .returning({ seq: profileModerationActions.seq });
+  await queueNotice(
+    tx,
+    author,
+    decision.action === "restore"
+      ? { subject: "profile", event: "restore", reason: decision.reason }
+      : { subject: "profile", event: "hide", reason: decision.reason },
+    decidedAt,
+  );
   // INSERT … RETURNING yields exactly the one row inserted.
   return { seq: row!.seq, state };
 }
@@ -655,6 +666,7 @@ export async function decideProfileAppeal(
         outcome: a.outcome,
         handle: a.handle,
         decidedBy: profileModerationActions.moderator,
+        reason: profileModerationActions.reason,
       })
       .from(a)
       .innerJoin(profileModerationActions, sameProfile)
@@ -669,7 +681,8 @@ export async function decideProfileAppeal(
     if (appeal.decidedBy === moderator || (stands && run.some((r) => r.moderator === moderator)))
       throw new AppealError("same-moderator");
     // The appeal's foreign key keeps its profile while it exists.
-    if ((await profileAccount(tx, appeal.handle)) === account) throw new AppealError("own-profile");
+    const author = (await profileAccount(tx, appeal.handle))!;
+    if (author === account) throw new AppealError("own-profile");
     // An appeal is filed against a decision, so its profile has one.
     const newest = run[0]!;
     let review: ProfileAppealReview;
@@ -685,9 +698,18 @@ export async function decideProfileAppeal(
     } else {
       review = { outcome: "rejected", state: stateAfter(newest.action) };
     }
+    const reviewedAt = await clock(tx);
+    if (review.outcome === "rejected")
+      await queueNotice(
+        tx,
+        author,
+        // An appeal is filed only against a hide (`fileProfileAppeal`).
+        { subject: "profile", event: "appeal-rejected", reason: appeal.reason as RemovalReason },
+        reviewedAt,
+      );
     await tx
       .update(a)
-      .set({ outcome: review.outcome, reviewer: moderator, reviewedAt: await clock(tx) })
+      .set({ outcome: review.outcome, reviewer: moderator, reviewedAt })
       .where(eq(a.decisionSeq, decisionSeq));
     return review;
   });

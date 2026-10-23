@@ -28,6 +28,7 @@ import {
   H,
   MAX_EVENT_DATA,
   MAX_EVENT_TOPICS,
+  membershipVkEncoding,
   replayEventAccumulator,
   verifyMembershipProof,
 } from "../src/index.ts";
@@ -1405,6 +1406,11 @@ describe("contract-event version 10 (docs/spec/vectors/contract-event-v10.json)"
     expect(proofHolds("rolling-root-mismatch", "stepRoot")).toBe(false);
     expect(proofHolds("rolling-root-front-run", "suppliedRoot")).toBe(false);
     expect(proofHolds("rolling-root-front-run", "stepRoot")).toBe(true);
+    // The argument that a proof fixes its root needs the pinned key's IC_1,
+    // the root's coefficient in L, not to be the identity (contracts.md,
+    // Board, Rolling ballots, One root per record).
+    const ic1 = membershipVkEncoding().subarray(448 + 64, 448 + 128);
+    expect(ic1.some((b) => b !== 0)).toBe(true);
   });
 });
 

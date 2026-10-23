@@ -4,6 +4,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  BN254_R,
   checkContractEvent,
   checkEventAccumulatorProof,
   COMPLAINT_BATCH_MAX,
@@ -19,12 +20,17 @@ import {
   type ContractRole,
   DecodeError,
   decodeContractEvent,
+  ds,
   encodeContractEvent,
   EncodeError,
   type EventContracts,
+  frameBallot,
+  H,
   MAX_EVENT_DATA,
   MAX_EVENT_TOPICS,
+  membershipVkEncoding,
   replayEventAccumulator,
+  verifyMembershipProof,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -1055,6 +1061,356 @@ describe("contract-event version 9 against version 8", () => {
       const i = at(record);
       expect(() => decode(element, record.subarray(i, i + 32))).toThrow(DecodeError);
     }
+  });
+});
+
+// docs/spec/vectors/contract-event-v10.json (version 10, the board's rolling
+// ballot event) from scripts/contract-event-v10-vectors.py, with its own
+// framing of ballot version 5 and the step roots of
+// scripts/ballot-v5-records-vectors.py. packages/crypto doesn't read version
+// 10 until P2-17 part 3, so this reads it from the spec: version 9's layout
+// and tables, through packages/crypto, and the one event version 10 adds,
+// read here (docs/spec/contracts.md, Event tables (version 10)).
+interface RollingRoot {
+  readonly record: string;
+  readonly ballot: string;
+  readonly step: number;
+  readonly suppliedRoot: string;
+  readonly stepRoot: string | null;
+  readonly rootCheck: "match" | "root-step-mismatch" | "not-reached";
+}
+const V10 = load("contract-event-v10.json") as Vectors & {
+  readonly underVersion9: Readonly<Record<string, string>>;
+  readonly rollingRoots: readonly RollingRoot[];
+};
+const ROLLING = "RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)";
+const STEP_AT = 364;
+const ROLLING_VOTE_AT = 368;
+
+const bigWord = (w: Uint8Array) => BigInt(`0x${bytesToHex(w) || "0"}`);
+const sameBytes = (a: Uint8Array, b: Uint8Array) => bytesToHex(a) === bytesToHex(b);
+
+// What the board frames (version 10): a version-5 ballot is version 4's
+// record with a `u32` step, any value, between the proof and the committed
+// vote, so it frames exactly when its bytes without the step, labelled
+// version 4, frame under version 9; its ballot hash is the one formula
+// every version shares, over the bytes from the step on (Hashes (version 5)).
+function frameRolling(
+  record: Uint8Array,
+): { definitionHash: Uint8Array; ballotHash: Uint8Array } | undefined {
+  if (record.length < ROLLING_VOTE_AT || record[0] !== 0 || record[1] !== 2 || record[2] !== 5)
+    return undefined;
+  const asV4 = concat([
+    record.subarray(0, 2),
+    Uint8Array.of(4),
+    record.subarray(3, STEP_AT),
+    record.subarray(ROLLING_VOTE_AT),
+  ]);
+  if (frameBallot(asV4, 9) === undefined) return undefined;
+  const hashed = concat([
+    record.subarray(3, 35),
+    record.subarray(0, 3),
+    record.subarray(35, 68),
+    record.subarray(STEP_AT),
+  ]);
+  return { definitionHash: record.slice(3, 35), ballotHash: H(ds("abolish/v1/ballot", hashed)) };
+}
+
+// `abi.encode(bytes32 root, bytes record)`, canonical: the root's word, the
+// offset 0x40, the length, the record, zero padding and nothing after.
+function rollingData(data: Uint8Array): { root: bigint; record: Uint8Array } | undefined {
+  if (data.length < 96 || bigWord(data.subarray(32, 64)) !== 64n) return undefined;
+  const length = bigWord(data.subarray(64, 96));
+  if (length > BigInt(MAX_EVENT_DATA)) return undefined;
+  const end = 96 + Number(length);
+  const padded = 96 + 32 * Math.ceil(Number(length) / 32);
+  if (data.length !== padded || data.subarray(end).some((b) => b !== 0)) return undefined;
+  return { root: bigWord(data.subarray(0, 32)), record: data.slice(96, end) };
+}
+
+/** Version 10's event check, projected to the vector file's shape. */
+function checkV10(record: ContractEventRecord, contracts: EventContracts): unknown {
+  const [topic0, definitionHash, ballotHash] = record.topics;
+  if (
+    !sameBytes(record.contract, contracts.board) ||
+    topic0 === undefined ||
+    !sameBytes(topic0, sigTopic(ROLLING))
+  ) {
+    // Every other event is version 9's, row for row, and the rolling
+    // event's topic 0 from any other role is unknown there, as here.
+    const result = checkContractEvent(record, contracts, 9);
+    return result.ok ? { role: result.role, event: project(result.event) } : result;
+  }
+  if (record.topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+    return { ok: false, error: "event-topics" };
+  const data = rollingData(record.data);
+  const framed = data && frameRolling(data.record);
+  if (
+    data === undefined ||
+    data.root === 0n ||
+    data.root >= BN254_R ||
+    framed === undefined ||
+    !sameBytes(framed.definitionHash, definitionHash) ||
+    !sameBytes(framed.ballotHash, ballotHash)
+  )
+    return { ok: false, error: "event-data" };
+  return {
+    role: "board",
+    event: {
+      event: "RollingBallotSubmitted",
+      definitionHash: bytesToHex(definitionHash),
+      ballotHash: bytesToHex(ballotHash),
+      root: String(data.root),
+      record: bytesToHex(data.record),
+    },
+  };
+}
+
+// Version 10's layout is version 9's, field for field (Layout (versions 1
+// to 10)): the same bytes with the version byte 10.
+const relabel = (b: Uint8Array, version: number) =>
+  concat([b.subarray(0, 2), Uint8Array.of(version), b.subarray(3)]);
+function decodeV10(b: Uint8Array): ContractEventRecord {
+  if (b.length >= 3 && b[0] === 0 && b[1] === 8 && b[2] !== 10)
+    throw new DecodeError("profile-mismatch", 2);
+  return decodeContractEvent(relabel(b, 9), 9);
+}
+
+describe("contract-event version 10 (docs/spec/vectors/contract-event-v10.json)", () => {
+  const v10 = contractsOf(V10);
+  const v9 = contractsOf(FILES[9]);
+  const toV10 = (contract: string, from: Vectors) => {
+    const role = (Object.keys(from.contracts) as ContractRole[]).find(
+      (r) => from.contracts[r] === contract,
+    );
+    return hex(role === undefined ? contract : V10.contracts[role]);
+  };
+
+  test("contract-event-v10.json is the contract-event format for record type 0x0008, version 10", () => {
+    expect(V10.format).toBe("abolish-contract-event-vectors/10");
+    expect(V10.recordType).toBe("0x0008");
+    expect(V10.version).toBe(10);
+    expect(V10.maxEventData).toBe(MAX_EVENT_DATA);
+    expect(V10.maxEventTopics).toBe(MAX_EVENT_TOPICS);
+  });
+
+  test("its tables are version 9's with the rolling ballot event after the board's", () => {
+    for (const role of [
+      "election-registry",
+      "trustee-registry",
+      "group-registry",
+      "board",
+    ] as const)
+      expect(V10.events.filter((e) => e.role === role).map((e) => e.signature)).toEqual([
+        ...CONTRACT_EVENT_SIGNATURES[9][role],
+        ...(role === "board" ? [ROLLING] : []),
+      ]);
+    for (const e of V10.events)
+      expect(bytesToHex(keccak_256(new TextEncoder().encode(e.signature)))).toBe(e.topic0);
+    expect(V10.events.find((e) => e.signature === ROLLING)?.indexed).toEqual([
+      "definitionHash",
+      "ballotHash",
+    ]);
+  });
+
+  test.each(V10.records.map((r) => [r.id, r] as const))(
+    "%s: encodes, decodes and passes the event check as its contract's event",
+    (_id, v) => {
+      const record = recordOf(v.fields);
+      expect(relabel(encodeContractEvent(record, 9), 10)).toEqual(hex(v.encoding));
+      expect(decodeV10(hex(v.encoding))).toEqual(record);
+      expect(checkV10(record, v10)).toEqual({ role: v.role, event: v.event });
+    },
+  );
+
+  test.each(V10.eventFailures.map((r) => [r.id, r] as const))(
+    "%s: decodes, and the event check fails with its code",
+    (_id, v) => {
+      const record = decodeV10(hex(v.encoding));
+      expect(record).toEqual(recordOf(v.fields));
+      expect(checkV10(record, v10)).toEqual({ ok: false, error: v.error });
+    },
+  );
+
+  test.each(V10.decodeErrors.map((v) => [v.id, v] as const))(
+    "%s: rejected with its code and offset",
+    (_id, v) => {
+      let error: unknown;
+      try {
+        decodeV10(hex(v.encoding));
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(DecodeError);
+      expect((error as DecodeError).code).toBe(v.error);
+      expect((error as DecodeError).offset).toBe(v.offset);
+    },
+  );
+
+  test("the board's records replay into the file's accumulators", () => {
+    const [s] = V10.sequences;
+    if (s === undefined || V10.sequences.length !== 1) throw new Error("one sequence expected");
+    const byId = new Map(V10.records.map((r) => [r.id, r]));
+    const records = s.records.map((id) => decodeV10(hex(byId.get(id)?.encoding ?? "")));
+    const chainId = BigInt(V10.chainId);
+    const address = hex(V10.contracts[s.role]);
+    for (const [i, acc] of s.accumulators.entries())
+      expect(
+        bytesToHex(
+          replayEventAccumulator(chainId, address, records.slice(0, i + 1).map(contractEventLog))
+            .accumulator,
+        ),
+      ).toBe(acc);
+    expect(String(records.length)).toBe(s.count);
+  });
+
+  // Version 10 keeps every row of version 9's and adds one event, whose
+  // topic 0 no earlier record carries (Event tables (version 10)).
+  test("every version-9 vector, and every board failure of versions 2 to 5 and 8, keeps its verdict", () => {
+    const all: [VectorRecord, Vectors][] = [
+      ...[...FILES[9].records, ...FILES[9].eventFailures].map(
+        (v) => [v, FILES[9]] as [VectorRecord, Vectors],
+      ),
+      ...([2, 3, 4, 5, 8] as const).flatMap((from) =>
+        FILES[from].eventFailures
+          .filter((v) => v.fields.contract === FILES[from].contracts.board)
+          .map((v) => [v, FILES[from]] as [VectorRecord, Vectors]),
+      ),
+    ];
+    expect(all.length).toBeGreaterThan(300);
+    for (const [v, from] of all) {
+      const record = { ...recordOf(v.fields), contract: toV10(v.fields.contract, from) };
+      expect(checkV10(record, v10)).toEqual(
+        v.error === undefined ? { role: v.role, event: v.event } : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  // Under version 9 the rolling event is no event of the board's, so a
+  // profile pinning version 9 can't be given a board with the rolling call:
+  // version 9 must be retired first (T-53).
+  test("underVersion9 gives each rolling record's verdict under version 9, and the rest pass it alike", () => {
+    const topic0 = bytesToHex(sigTopic(ROLLING));
+    const toV9 = (v: VectorRecord) => ({
+      ...recordOf(v.fields),
+      contract: hex(
+        FILES[9].contracts[
+          (Object.keys(V10.contracts) as ContractRole[]).find(
+            (r) => V10.contracts[r] === v.fields.contract,
+          ) ?? "board"
+        ],
+      ),
+    });
+    for (const v of V10.records) {
+      const rolling = v.fields.topics[0] === topic0;
+      expect(V10.underVersion9[v.id]).toBe(rolling ? "unknown-event" : undefined);
+      const result = checkContractEvent(toV9(v), v9, 9);
+      expect(result.ok ? { role: result.role, event: project(result.event) } : result).toEqual(
+        rolling ? { ok: false, error: "unknown-event" } : { role: v.role, event: v.event },
+      );
+    }
+    const failing = V10.eventFailures.filter(
+      (v) => v.fields.topics[0] === topic0 && v.fields.contract === V10.contracts.board,
+    );
+    expect(failing.length).toBeGreaterThan(20);
+    for (const v of failing)
+      expect(checkContractEvent(toV9(v), v9, 9)).toEqual({ ok: false, error: "unknown-event" });
+  });
+
+  // The supplied root against the step's (ballot-validity.md, Admission
+  // (version 5), root-step-mismatch): the step roots are
+  // ballot-v5-records.json's, rebuilt by its own generator from the group
+  // registry's events, and the board's check of the proof against the
+  // supplied root is packages/crypto's Groth16 verifier under the signals
+  // that file derives from each ballot.
+  test("each rolling record's supplied root, and its comparison with the step's root", () => {
+    const v5 = JSON.parse(
+      readFileSync(new URL("ballot-v5-records.json", SPEC_VECTORS), "utf8"),
+    ) as {
+      readonly elections: Readonly<
+        Record<
+          string,
+          {
+            readonly definitionHash: string;
+            readonly cells: readonly {
+              readonly steps: readonly { readonly step: number; readonly root: string }[];
+            }[];
+          }
+        >
+      >;
+      readonly ballots: readonly {
+        readonly id: string;
+        readonly election: string;
+        readonly encoding: string;
+        readonly signals?: {
+          readonly nullifier: string;
+          readonly message: string;
+          readonly scope: string;
+        };
+      }[];
+    };
+    const ballots = new Map(v5.ballots.map((b) => [b.id, b]));
+    const records = new Map(V10.records.map((r) => [r.id, r]));
+    expect(V10.rollingRoots.length).toBe(v5.ballots.length + 2);
+    for (const r of V10.rollingRoots) {
+      const v = records.get(r.record);
+      const b = ballots.get(r.ballot);
+      if (v === undefined || b === undefined)
+        throw new Error(`no record or ballot for ${r.record}`);
+      const event = (
+        checkV10(recordOf(v.fields), v10) as { event: { root: string; record: string } }
+      ).event;
+      expect(event.root).toBe(r.suppliedRoot);
+      expect(event.record).toBe(b.encoding);
+      const record = hex(b.encoding);
+      const step = new DataView(record.buffer, record.byteOffset).getUint32(STEP_AT);
+      expect(step).toBe(r.step);
+      const election = v5.elections[b.election];
+      const stepRoot =
+        election !== undefined && bytesToHex(record.subarray(3, 35)) === election.definitionHash
+          ? election.cells[record[35] ?? 0]?.steps.find((s) => s.step === step)?.root
+          : undefined;
+      expect(stepRoot ?? null).toBe(r.stepRoot);
+      const check =
+        stepRoot === undefined
+          ? "not-reached"
+          : stepRoot === r.suppliedRoot
+            ? "match"
+            : "root-step-mismatch";
+      expect(r.rootCheck).toBe(check);
+    }
+
+    // The mismatched root the board accepts: membership-other-step-root's
+    // proof verifies against the supplied root, step N0 − 1's, and not
+    // against the root of the step it names, so only the verifier's
+    // comparison rejects it. The front-runner's relabelled copy is the
+    // reverse: its proof fails against the root supplied, so the board
+    // refuses it and the honest submission stands (T-25).
+    const proofHolds = (id: string, which: "suppliedRoot" | "stepRoot") => {
+      const r = V10.rollingRoots.find((x) => x.record === id);
+      const b = r && ballots.get(r.ballot);
+      const root = r?.[which];
+      if (b?.signals === undefined || root === undefined || root === null)
+        throw new Error(`no signals or root for ${id}`);
+      return verifyMembershipProof(hex(b.encoding).subarray(108, STEP_AT), {
+        root: BigInt(root),
+        nullifier: BigInt(b.signals.nullifier),
+        message: BigInt(b.signals.message),
+        scope: BigInt(b.signals.scope),
+      });
+    };
+    expect(V10.rollingRoots.find((x) => x.record === "rolling-root-mismatch")?.rootCheck).toBe(
+      "root-step-mismatch",
+    );
+    expect(proofHolds("rolling-root-mismatch", "suppliedRoot")).toBe(true);
+    expect(proofHolds("rolling-root-mismatch", "stepRoot")).toBe(false);
+    expect(proofHolds("rolling-root-front-run", "suppliedRoot")).toBe(false);
+    expect(proofHolds("rolling-root-front-run", "stepRoot")).toBe(true);
+    // The argument that a proof fixes its root needs the pinned key's IC_1,
+    // the root's coefficient in L, not to be the identity (contracts.md,
+    // Board, Rolling ballots, One root per record).
+    const ic1 = membershipVkEncoding().subarray(448 + 64, 448 + 128);
+    expect(ic1.some((b) => b !== 0)).toBe(true);
   });
 });
 

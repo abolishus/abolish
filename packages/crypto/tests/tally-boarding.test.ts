@@ -13,7 +13,6 @@ import {
   sortTallyOpenings,
   type TallyElection,
   tallyOpeningBoarding,
-  tallyOpeningStatement,
   type WholeOpeningVersion,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
@@ -99,7 +98,7 @@ const byId = (id: string) => {
  * attribution, and the earlier openings the vector attributes to the same
  * seat in the same cell.
  */
-function expected(e: Election, at: number, pinned: WholeOpeningVersion): unknown {
+function expected(e: Election, at: number): unknown {
   const rejected = e.result.rejected.find((r) => r.at === at);
   if (rejected !== undefined) return { ok: false, code: "decode", error: rejected.error };
   if (e.result.stray.some((r) => r.at === at)) return { ok: false, code: "tally-stray" };
@@ -118,9 +117,13 @@ function expected(e: Election, at: number, pinned: WholeOpeningVersion): unknown
       .filter((r) => r.at < at && r.signer === passing.signer)
       .sort((a, b) => a.at - b.at)[0];
     if (earlier === undefined) return { ok: true, cell, signer: passing.signer };
-    const message = (i: number) =>
-      tallyOpeningStatement(decodeTallyOpening(hex(e.openings[i] as string), pinned));
-    const same = Buffer.from(message(earlier.at)).equals(Buffer.from(message(at)));
+    // The signed message is the record between its 3-byte header and its
+    // 64-byte signature (docs/spec/tally.md, Signature).
+    const message = (i: number) => {
+      const record = hex(e.openings[i] as string);
+      return Buffer.from(record.subarray(3, record.length - 64));
+    };
+    const same = message(earlier.at).equals(message(at));
     return { ok: false, code: same ? "tally-repeat" : "tally-second", of: earlier.at };
   }
   throw new Error(`opening ${at} of ${e.id} isn't in its report`);
@@ -141,7 +144,7 @@ describe("the Boarding rule over tally-opening.json", () => {
     test.each(elections)(`version ${pinned}: each opening of $id after the ones before it`, (e) => {
       const payloads = e.openings.map(hex);
       for (const [at, payload] of payloads.entries())
-        expect(judge(e, payload, payloads.slice(0, at), pinned)).toEqual(expected(e, at, pinned));
+        expect(judge(e, payload, payloads.slice(0, at), pinned)).toEqual(expected(e, at));
     });
 
   test("boards a passing opening of a cell whose count is out of range: the opening alone is judged", () => {
@@ -188,6 +191,15 @@ describe("one opening per seat and cell", () => {
     const seat2OfCell0 = hex(duplicates.openings[1] as string);
     expect(judge(signed, seat2OfCell0, [seat1])).toEqual({ ok: true, cell: 0, signer: 2 });
     expect(judge(signed, seat2, [seat2OfCell0, seat1])).toEqual({ ok: true, cell: 1, signer: 2 });
+  });
+
+  test("leaves the seat's stray opening of another definition alone, though it names the cell", () => {
+    const stray = byId("stray");
+    const other = hex(stray.openings[2] as string);
+    expect(stray.result.stray).toContainEqual({ at: 2, signer: 2 });
+    expect(decodeTallyOpening(other, 1)).toMatchObject({ cell: 0, signer: 2 });
+    const seat2OfCell0 = hex(byId("duplicates").openings[1] as string);
+    expect(judge(signed, seat2OfCell0, [other])).toEqual({ ok: true, cell: 0, signer: 2 });
   });
 
   test("passes over earlier entries that don't decode under the pin", () => {

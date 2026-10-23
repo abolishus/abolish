@@ -518,9 +518,14 @@ export type TallyBoarding =
  * set, it opens every option of that aggregate, its signature attributes it
  * to a registered seat, and no opening of that cell by that seat is among
  * `boarded`, the tally-opening payloads already on the board in board order
- * (`at` positions in it). `aggregates` holds each cell's aggregate over the
- * anchored counted set (`aggregateCell`), in partition order, so a caller
- * judging many openings sums each cell's ballots once.
+ * (`of` is a position in it). `aggregates` holds each cell's aggregate over
+ * the anchored counted set (`aggregateCell`), one per cell of the registered
+ * partition in partition order, so a caller judging many openings sums each
+ * cell's ballots once; its length is taken as the partition's size, so a
+ * caller passing fewer would refuse a real cell's openings as stray.
+ *
+ * A seat's node resends an opening until the seal, so its caller should
+ * answer `tally-repeat` with the entry at `of` rather than an error.
  *
  * Every opening it passes is fixed by its cell's aggregate (binding), so the
  * board carries no chosen bytes beyond a registered seat's signature nonce,
@@ -559,14 +564,30 @@ export function tallyOpeningBoarding(
   // there: anyone can write an unattributed one naming the seat, which must
   // never keep the seat's own off the board (T-29, T-54).
   const signed = tallyOpeningStatement(opening);
-  for (const earlier of sortTallyOpenings(election, aggregates.length, boarded, pinned)) {
-    if ("error" in earlier || earlier.cell !== cell || earlier.signer !== signer) continue;
+  for (const [at, payload] of boarded.entries()) {
+    let earlier: TallyOpening;
+    try {
+      earlier = decodeTallyOpening(payload, pinned);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      continue;
+    }
+    // Only an opening of this cell naming this seat can be the seat's, so
+    // only those cost a signature check: a board of others' openings is
+    // judged without verifying each (T-52).
+    if (
+      earlier.cell !== cell ||
+      earlier.signer !== signer ||
+      !sameBytes(earlier.definition_hash, election.definitionHash) ||
+      attribution(election, earlier) !== signer
+    )
+      continue;
     // Anyone can replay a signed record, so a repeat is refused like a
     // second, though only a second is evidence against the seat (T-29).
-    const code = sameBytes(tallyOpeningStatement(earlier.opening), signed)
+    const code = sameBytes(tallyOpeningStatement(earlier), signed)
       ? "tally-repeat"
       : "tally-second";
-    return { ok: false, code, of: earlier.at };
+    return { ok: false, code, of: at };
   }
   return { ok: true, cell, signer };
 }

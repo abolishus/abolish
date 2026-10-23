@@ -48,6 +48,7 @@ import type { RecoveryOutcome } from "./recovery.ts";
 import type { Registrar } from "./register.tsx";
 import type { Tier0Answer } from "./registration.ts";
 import type { SendAnswer } from "./send.ts";
+import type { WalletAnswer } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -254,6 +255,8 @@ interface Voter {
   ) => { readonly ok: true } | Exclude<PostingResult, { readonly ok: true }> | "fail";
   /** The contract path's answers to each posting in turn, the last one repeating; absent, the build has none. */
   readonly posted?: readonly (PostAnswer | "fail")[];
+  /** The voter's own wallet's answers to each run in turn, the last one repeating; absent, the build offers none. */
+  readonly ownPosted?: readonly (WalletAnswer | "fail")[];
   /** What erasing a declined cast's shares answers. */
   readonly declined: DeclinePostingOutcome;
   /** What the worker's erasure of its seals' shares answers. */
@@ -321,6 +324,7 @@ const MOCKS = new WeakMap<
     readonly chainTime: Mock<ElectionSource["chainTime"]>;
     readonly posting: Mock<ElectionSource["posting"]>;
     readonly post: Mock<NonNullable<ElectionSource["post"]>>;
+    readonly postOwn: Mock<NonNullable<ElectionSource["postOwn"]>>;
     readonly declinePosting: Mock<ElectionSource["declinePosting"]>;
     readonly declineSeal: Mock<ElectionSource["declineSeal"]>;
     readonly exclusive: Mock<Lock>;
@@ -382,6 +386,7 @@ function source(
     heldAfterRecord,
     postings,
     posted,
+    ownPosted,
     declined,
     declinedSeal,
     locks,
@@ -474,6 +479,14 @@ function source(
     for (const record of records) ms.push({ given: record, copy: record.slice() });
     return answer((posted ?? ["fail"])[Math.min(posts++, (posted ?? []).length - 1)] ?? "fail");
   });
+  let ownPosts = 0;
+  const postOwn = fn<NonNullable<ElectionSource["postOwn"]>>((_, __, records) => {
+    guard("postOwn");
+    for (const record of records) ms.push({ given: record, copy: record.slice() });
+    return answer(
+      (ownPosted ?? ["fail"])[Math.min(ownPosts++, (ownPosted ?? []).length - 1)] ?? "fail",
+    );
+  });
   const declinePosting = fn<ElectionSource["declinePosting"]>(() => {
     guard("declinePosting");
     return Promise.resolve(declined);
@@ -542,6 +555,7 @@ function source(
     chainTime,
     posting,
     ...(posted === undefined ? {} : { post }),
+    ...(ownPosted === undefined ? {} : { postOwn }),
     declinePosting,
     declineSeal,
     // Each run answers what it was given, whatever its type, as Web Locks does.
@@ -572,6 +586,7 @@ function source(
     chainTime,
     posting,
     post,
+    postOwn,
     declinePosting,
     declineSeal,
     exclusive,
@@ -1682,6 +1697,92 @@ export const PostingRelayedNotRecorded: Story = {
     await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(OFFER);
     await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingFromTheWallet: Story = {
+  name: "Once the relay refused, the voter's own wallet posts the seat under the lock, then the ballot is sent",
+  args: { source: offerSource({ posted: ["refused"], ownPosted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    // Never offered before the relay was tried and fell back (rule 6).
+    await expect(
+      canvas.queryByRole("button", { name: "Post from my wallet, then send" }),
+    ).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Post from my wallet, then send" }),
+    );
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.postOwn).toHaveBeenCalledOnce();
+    await expect(of.postOwn.mock.calls[0]?.[0]).toEqual(fromHex(ELECTION_ID));
+    await expect(of.postOwn.mock.calls[0]?.[1]).toEqual(CAST.ballot);
+    await expect(of.postOwn.mock.calls[0]?.[3]).toBe(CUTOFF);
+    // The share checked again before the wallet's run, both under one hold of the lock.
+    const at = (step: string) =>
+      of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);
+    await expect(at("postOwn")).toEqual([1]);
+    await expect(at("posting")).toEqual([0, 1, 1]);
+    await expect(of.postOwn.mock.invocationCallOrder[0]).toBeLessThan(
+      of.send.mock.invocationCallOrder[0] ?? 0,
+    );
+    // Every copy of m the page handed on is zeroed once used (T-18).
+    for (const { given } of of.ms) await expect(given).toEqual(new Uint8Array(given.length));
+  },
+};
+
+export const PostingFromTheWalletNotRecorded: Story = {
+  name: "A wallet's posting the board doesn't show returns to the offer saying it may still land, and nothing is sent",
+  args: { source: offerSource({ posted: ["relayed"], ownPosted: ["sent", "fail"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Post from my wallet, then send" }),
+    );
+    await expect(
+      await canvas.findByText("Your wallet's posting isn't on the board yet"),
+    ).toBeVisible();
+    // The relay had them too, and that is still said (T-15).
+    await expect(canvas.getByText("The posting isn't on the board yet")).toBeVisible();
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(OFFER);
+    // A wallet run that throws reads as one that failed, and the offer stands.
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(await canvas.findByText("Your wallet didn't answer")).toBeVisible();
+    await expect(of.postOwn).toHaveBeenCalledTimes(2);
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingHandedStaysSaid: Story = {
+  name: "Once a wallet had the parts, no later try says nothing was posted",
+  args: {
+    source: offerSource({ posted: ["refused", "unreachable"], ownPosted: ["sent", "late"] }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Post from my wallet, then send" }),
+    );
+    await canvas.findByText("Your wallet's posting isn't on the board yet");
+    // The relay, tried again, sends nothing; the wallet's parts may still land (T-15).
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByText("The missing parts may still reach the board"),
+    ).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+    // And the wallet, tried again past the cutoff, says so beside it.
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(await canvas.findByText("The time for posting has passed")).toBeVisible();
+    await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
   },
 };
 

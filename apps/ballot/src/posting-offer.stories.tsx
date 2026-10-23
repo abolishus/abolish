@@ -89,6 +89,101 @@ export const OfferedWithoutPosting: Story = {
   },
 };
 
+export const OfferedTheWallet: Story = {
+  name: "Once the relay fell back, the voter's own wallet is offered with what it costs",
+  args: { failed: true, relayed: true, onWallet: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Post from your own wallet")).toBeVisible();
+    // The cost is said before the choice: the paying address beside the
+    // ballot and its re-votes, and how to choose one (rule 6; T-13).
+    await expect(canvas.getByText(/published for good beside this ballot/)).toBeVisible();
+    await expect(canvas.getByText(/use a fresh address funded privately/)).toBeVisible();
+    await expect(canvas.getByText(/see the missing parts before the public record/)).toBeVisible();
+    // Beside the other choices, never above them: after the relay's, and
+    // never the frame's primary action, which stays trying again.
+    const buttons = canvas.getAllByRole("button").map((b) => b.textContent);
+    await expect(buttons.indexOf("Post from my wallet, then send")).toBeGreaterThan(
+      buttons.indexOf("Post publicly, then send"),
+    );
+    await expect(buttons.indexOf("Post publicly, then send")).toBeGreaterThanOrEqual(0);
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(args.onWallet).toHaveBeenCalledOnce();
+    await expect(args.onPost).not.toHaveBeenCalled();
+  },
+};
+
+export const OfferedWithoutTheWallet: Story = {
+  name: "Before the relay fell back, no wallet is offered",
+  args: { failed: false, onWallet: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText("Post from your own wallet")).toBeNull();
+    await expect(
+      canvas.queryByRole("button", { name: "Post from my wallet, then send" }),
+    ).toBeNull();
+  },
+};
+
+export const WalletSentNotRecorded: Story = {
+  name: "Parts the wallet sent but the board doesn't show yet are never called unposted",
+  args: { failed: true, onWallet: fn(), wallet: "sent" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Your wallet's posting isn't on the board yet")).toBeVisible();
+    await expect(canvas.getByText(/count them as posted/)).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+  },
+};
+
+export const WalletRelayedThenRejected: Story = {
+  name: "A request declined in the wallet after the relay had the parts says both",
+  args: { failed: true, relayed: true, onWallet: fn(), wallet: "rejected" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Your wallet didn't send anything")).toBeVisible();
+    // The relay still had them (T-15).
+    await expect(canvas.getByText("The posting isn't on the board yet")).toBeVisible();
+  },
+};
+
+export const WalletRefusedAfterSending: Story = {
+  name: "A refusal after an earlier run sent the parts still says they may reach the board",
+  args: { failed: true, handed: true, onWallet: fn(), wallet: "refused" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("The board won't take this posting")).toBeVisible();
+    // The earlier run's parts may still land (T-15).
+    await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
+  },
+};
+
+export const WalletProblems: Story = {
+  name: "Each thing the wallet can meet has its own words",
+  args: { failed: true, onWallet: fn() },
+  render: (args) => (
+    <div>
+      {(["refused", "wrong-chain", "no-wallet", "late", "failed"] as const).map((wallet) => (
+        <PostingOffer key={wallet} {...args} wallet={wallet} />
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const title of [
+      "The board won't take this posting",
+      "Your wallet is on another network",
+      "No wallet in this browser",
+      "The time for posting has passed",
+      "Your wallet didn't answer",
+    ])
+      await expect(canvas.getByText(title)).toBeVisible();
+    // A wallet that may have had the parts says so, never "nothing posted" (T-15).
+    await expect(canvas.getByText(/count them as given/)).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+  },
+};
+
 export const OfferedDark: Story = {
   name: "The offer, dark",
   parameters: { layout: "fullscreen", theme: "dark" },

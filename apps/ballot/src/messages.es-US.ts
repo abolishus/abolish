@@ -332,6 +332,34 @@ export const esUS: Messages = {
   postingRelayedTitle: "La publicación todavía no está en el tablero",
   postingRelayed:
     "Nuestro servicio de publicación, operado por quien administra la encuesta, recibió las partes que faltan con la clave de su sello exterior, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Intenta publicar otra vez en un minuto: se envían las mismas partes, nunca otras nuevas.",
+  postingWalletOfferTitle: "Publicar desde tu propia billetera",
+  postingWalletOffer:
+    "Nuestro servicio de publicación no puso las partes que faltan en el registro público, así que tu propia billetera de Ethereum puede hacerlo, pagando la tarifa de la red. La dirección que paga se publica para siempre junto a esta boleta y a cada nueva respuesta que des en esta encuesta, así que usa una dirección nueva con fondos privados, nunca una ligada a ti o a una cuenta de un intercambio. Tu billetera y el nodo que usa ven las partes que faltan antes que el registro público. Este dispositivo envía tu boleta solo cuando el registro las muestra.",
+  postingWalletPost: "Publicar desde mi billetera y enviar",
+  postingHandedTitle: "Las partes que faltan todavía pueden llegar al tablero",
+  postingHanded:
+    "Este intento o uno anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
+  walletSentTitle: "La publicación de tu billetera todavía no está en el tablero",
+  walletSent:
+    "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Rechaza cualquier solicitud que siga abierta en tu billetera, espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",
+  walletRejectedTitle: "Tu billetera no envió nada",
+  walletRejected:
+    "Se rechazó una solicitud en tu billetera, así que no se envió nada más desde ella. Si tu billetera ya te había mostrado la publicación, ella y su nodo vieron las partes que faltan. Escoge otra vez abajo.",
+  walletRefusedTitle: "El tablero no aceptará esta publicación",
+  walletRefused:
+    "La comprobación de tu billetera dice que el tablero rechazaría la publicación, así que no se envió nada y no se gastó nada de tu tarifa. Tu billetera y su nodo recibieron las partes que faltan para esa comprobación. Intenta otra vez con los custodios, o deja esta boleta.",
+  walletWrongChainTitle: "Tu billetera está en otra red",
+  walletWrongChain:
+    "Tu billetera no cambió a la red en la que está el tablero de la encuesta, así que esta vez no se envió nada. Cámbiala a esa red y publica desde tu billetera otra vez.",
+  walletMissingTitle: "No hay billetera en este navegador",
+  walletMissing:
+    "Este dispositivo no encontró ninguna billetera de Ethereum a la cual preguntar. Agrega una a este navegador, o abre la boleta en un navegador que tenga una, y publica desde tu billetera otra vez.",
+  walletLateTitle: "Ya pasó el tiempo para publicar",
+  walletLate:
+    "Ya pasó el límite para publicar de la encuesta, así que esta vez no se envió nada desde tu billetera y ya no se puede publicar nada más para esta boleta.",
+  walletFailedTitle: "Tu billetera no respondió",
+  walletFailed:
+    "Tu billetera o su nodo no respondió a tiempo, o respondió con un error. Puede que haya recibido las partes que faltan, así que cuéntalas como entregadas. Rechaza cualquier solicitud que siga abierta en tu billetera y luego intenta otra vez en un minuto.",
   declinedTitle: "Esta boleta no contará",
   declined:
     "Este dispositivo borró las partes que guardó para los custodios que no tomaron la suya. Responde otra vez mientras la encuesta esté abierta: tu nueva boleta reemplaza a esta, y a tu boleta anterior, dondequiera que lleguen al tablero.",
@@ -340,6 +368,9 @@ export const esUS: Messages = {
   postingTitle: "Publicando las partes que faltan",
   posting:
     "Este dispositivo está publicando las partes que faltan y después enviará tu boleta. Mantén esta página abierta.",
+  postingWalletTitle: "Publicando desde tu billetera",
+  postingWallet:
+    "Confirma cada solicitud en tu billetera. Después este dispositivo espera a que el tablero registre las partes que faltan antes de enviar tu boleta. Mantén esta página abierta.",
   sentTitle: "Tu boleta está en el tablero",
   sent: "El tablero público recibió tu boleta sellada, y este dispositivo comprobó que la respuesta del tablero contiene exactamente la boleta que envió.",
   sentCopy: "El tablero público ya tiene una copia de tu boleta sellada, que vale por la tuya.",

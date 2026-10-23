@@ -1,7 +1,8 @@
 import { Button, Fingerprint, groupHex, Hash, useTranslate } from "@abolishus/ui";
 
 import { ACTION, EverydayFrame, type FramePoll, Note, Part, ScreenTitle } from "./frame.tsx";
-import { catalogs } from "./messages.ts";
+import { catalogs, type Messages } from "./messages.ts";
+import type { WalletAnswer } from "./wallet.ts";
 
 // The voter's choice for a cast ballot some of whose trustees never took
 // their sealed part ([[delivery]], Client rule 4): try the trustees again,
@@ -12,6 +13,25 @@ import { catalogs } from "./messages.ts";
 
 const shortHex = (hash: string) => groupHex(hash).slice(0, 2).join(" ");
 
+// What the voter's own wallet met, as the offer says it. A run that may have
+// handed the wallet the parts says so, and so does every later offer, never
+// "nothing posted" (`handed`; T-15).
+const WALLET_NOTES = {
+  sent: { title: "walletSentTitle", detail: "walletSent" },
+  rejected: { title: "walletRejectedTitle", detail: "walletRejected" },
+  refused: { title: "walletRefusedTitle", detail: "walletRefused" },
+  "wrong-chain": { title: "walletWrongChainTitle", detail: "walletWrongChain" },
+  "no-wallet": { title: "walletMissingTitle", detail: "walletMissing" },
+  late: { title: "walletLateTitle", detail: "walletLate" },
+  failed: { title: "walletFailedTitle", detail: "walletFailed" },
+} as const satisfies Record<
+  Exclude<WalletAnswer, "recorded">,
+  { readonly title: keyof Messages; readonly detail: keyof Messages }
+>;
+
+// The wallet's notes that themselves say the parts may still reach the board.
+const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["sent"]);
+
 /**
  * The offer, asked as soon as delivery failed so a voter who leaves the
  * ballot can still answer again while the poll is open. `onPost` is absent
@@ -19,7 +39,10 @@ const shortHex = (hash: string) => groupHex(hash).slice(0, 2).join(" ");
  * posting the voter chose didn't go through, and `relayed` that it didn't
  * after the relay had the parts, which may then still reach the board, so
  * the voter is never told nothing was posted ([[posting-relay]], Outcome;
- * T-15).
+ * T-15). `onWallet` is present only once a run through the relay fell
+ * back, and offers the voter's own wallet with what it costs: the paying
+ * address is published beside the ballot ([[0042-posting-relay]], rule 6;
+ * T-13); `wallet` is what that wallet last met.
  */
 export function PostingOffer({
   poll,
@@ -29,7 +52,10 @@ export function PostingOffer({
   relayed = false,
   onRetry,
   onDecline,
+  handed = false,
   onPost,
+  onWallet,
+  wallet,
 }: {
   poll: FramePoll;
   trackingCode: string;
@@ -37,11 +63,19 @@ export function PostingOffer({
   missing: number;
   failed?: boolean;
   relayed?: boolean;
+  /** An earlier run may have handed the parts out, whatever the latest one met. */
+  handed?: boolean;
   onRetry: () => void;
   onDecline: () => void;
   onPost?: (() => void) | undefined;
+  onWallet?: (() => void) | undefined;
+  wallet?: Exclude<WalletAnswer, "recorded"> | undefined;
 }) {
   const t = useTranslate(catalogs);
+  const walletNote = wallet === undefined ? undefined : WALLET_NOTES[wallet];
+  // The relay's note, or the wallet's that already says the parts were
+  // given, covers what an earlier run handed out; any other gets this one.
+  const handedNote = handed && !relayed && (wallet === undefined || !SAYS_GIVEN.has(wallet));
   return (
     <EverydayFrame
       poll={poll}
@@ -59,13 +93,27 @@ export function PostingOffer({
       <ScreenTitle title={t("postingOfferTitle")} focus>
         <p className="m-0">{t("postingOffer", { count: missing })}</p>
       </ScreenTitle>
-      {failed ? (
+      {failed && (relayed || (walletNote === undefined && !handed)) ? (
         <div className="mt-6">
           <Note tone="warn" title={t(relayed ? "postingRelayedTitle" : "postingFailedTitle")}>
             <p className="m-0">{t(relayed ? "postingRelayed" : "postingFailed")}</p>
           </Note>
         </div>
       ) : null}
+      {handedNote ? (
+        <div className="mt-6">
+          <Note tone="warn" title={t("postingHandedTitle")}>
+            <p className="m-0">{t("postingHanded")}</p>
+          </Note>
+        </div>
+      ) : null}
+      {walletNote === undefined ? null : (
+        <div className="mt-6">
+          <Note tone="warn" title={t(walletNote.title)}>
+            <p className="m-0">{t(walletNote.detail)}</p>
+          </Note>
+        </div>
+      )}
       <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
         <Fingerprint
           value={trackingCode}
@@ -83,6 +131,16 @@ export function PostingOffer({
           <div>
             <Button size="lg" variant="outline" className={ACTION} onClick={onPost}>
               {t("postingPost")}
+            </Button>
+          </div>
+        </Part>
+      )}
+      {onWallet === undefined ? null : (
+        <Part title={t("postingWalletOfferTitle")}>
+          <p className="m-0">{t("postingWalletOffer")}</p>
+          <div>
+            <Button size="lg" variant="outline" className={ACTION} onClick={onWallet}>
+              {t("postingWalletPost")}
             </Button>
           </div>
         </Part>

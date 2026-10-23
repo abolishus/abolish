@@ -69,6 +69,7 @@ import type { Registrar } from "./register.tsx";
 import { submitReceipt } from "./receipts.ts";
 import { sendTier0Request } from "./registration.ts";
 import { sendBallot } from "./send.ts";
+import { injectedWallet, postFromWallet, type WalletAnswer, WalletSession } from "./wallet.ts";
 import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
@@ -90,6 +91,7 @@ const fromHex = (hex: string) =>
 const challengeFrame: Registrar["Challenge"] | undefined = undefined;
 const region = tier0Region(STAGING);
 const groupRegistry = STAGING.groupRegistry;
+const board = STAGING.board;
 const pinned = STAGING.registrars;
 const confirmingDeployment = confirming(STAGING);
 // The passkey backup, where this build offers one (`Deployment.backups`).
@@ -302,7 +304,7 @@ const source: ElectionSource = {
   posting: (ballot, share) => withWorker((used) => used.posting(ballot, share)),
   // A posting goes through the relay to the board this build pins; with no
   // board there is no contract path, and no posting is offered.
-  ...(STAGING.board === undefined
+  ...(board === undefined
     ? {}
     : {
         async post(
@@ -341,6 +343,49 @@ const source: ElectionSource = {
               postings,
               cutoff,
               STAGING.forcedInclusion,
+            );
+          } finally {
+            for (const call of calls) call.fill(0);
+          }
+        },
+        // The voter's own wallet, once the relay fell back: the browser's
+        // provider pays, and the outcome is read from the board through
+        // this build's L2 endpoint, never the wallet's (T-25).
+        async postOwn(
+          _electionId: Uint8Array,
+          ballot: Uint8Array,
+          postings: readonly Uint8Array[],
+          cutoff: bigint,
+        ): Promise<WalletAnswer> {
+          const wallet = injectedWallet();
+          if (wallet === undefined) return "no-wallet";
+          const { definitionHash, ballotHash } = postingTopics(postings);
+          const fetchFn = timedFetch((url, init) => fetch(url, init));
+          // Each holding its posting's `m_i` until the run ends (T-18).
+          const calls = postings.map((posting) => postingCalldata(posting, ballot));
+          const session = new WalletSession(wallet, STAGING.chainId, board);
+          try {
+            return await postFromWallet(
+              {
+                send: (call, late) => session.send(call, late),
+                find: (head, from, stop) =>
+                  loadPostings(
+                    STAGING,
+                    definitionHash,
+                    ballotHash,
+                    fetchFn,
+                    head,
+                    from,
+                    undefined,
+                    undefined,
+                    stop,
+                  ),
+                now: () => Date.now(),
+                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+              },
+              postings,
+              calls,
+              cutoff,
             );
           } finally {
             for (const call of calls) call.fill(0);

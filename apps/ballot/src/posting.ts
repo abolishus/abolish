@@ -9,9 +9,9 @@
 // back unless the latest head shows it, and at the client's deadline `c_P`
 // whatever happened (T-25, T-50).
 //
-// The fallback, the voter's own wallet (rule 6), is part 3c-1b-2b-2b-2d-2b-2d;
-// until it exists a fallback ends the posting as not recorded, and the
-// voter may try again. Once a posting was sent at all, the relay may have
+// A fallback ends the run as not recorded, and the voter may then try
+// again or post from their own wallet (rule 6; wallet.ts). Once a posting
+// was sent at all, the relay may have
 // read each `m_i`, whether or not it answered (a hostile one reads the body
 // and resets the connection), so a posting that ends unrecorded is
 // `relayed`, never "nothing posted": the relay, or its L1 deposit, may
@@ -34,6 +34,7 @@ export const POSTING_SEND_MARGIN = 6_600n;
 export const POSTING_PATIENCE = 1_800n;
 export const POSTING_FORCE_AFTER = 600n;
 export const POSTING_SEEN = 600n;
+export const POSTING_FINALITY = 1_800n;
 
 /** How long the client waits between rounds of sending and reading the board. */
 export const POSTING_POLL_MS = 30_000;

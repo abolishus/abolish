@@ -1,5 +1,8 @@
 import type { Message } from "@abolishus/ui";
 
+import type { Locale } from "./locales.ts";
+import { esUS } from "./messages.es-US.ts";
+
 // The ballot client's own strings. Every locale's catalog has `en-US`'s type,
 // so a missing key fails type-checking (@abolishus/ui, i18n).
 
@@ -14,6 +17,7 @@ const enUS = {
   questionOf: "Question {current} of {total}",
   stepOf: "Step {current} of {total}",
   stepNamed: "{step}: {name}",
+  languageLabel: "Language",
   // What this client is, before any poll is open.
   title: "Abolish ballot",
   lede: "To vote, open the ballot link for your election.",
@@ -608,4 +612,13 @@ const enUS = {
 
 export type Messages = Record<keyof typeof enUS, Message>;
 
-export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };
+// Both catalogs are in the entry's script: the client's page may import no
+// chunk of its own (tests/bundle.test.ts), and Spanish adds about 12 KiB
+// gzipped.
+export const catalogs: Readonly<Record<Locale, Messages>> = { "en-US": enUS, "es-US": esUS };
+
+/** Each language named in itself, for the frame's switch. */
+export const LOCALE_NAMES: Readonly<Record<Locale, string>> = {
+  "en-US": "English",
+  "es-US": "Español",
+};

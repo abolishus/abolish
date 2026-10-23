@@ -2,6 +2,7 @@ import { cn, Fingerprint, groupHex, useTranslate } from "@abolishus/ui";
 import { Check, Info, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { LanguageSwitch } from "./language-switch.tsx";
 import { catalogs } from "./messages.ts";
 
 // The ballot client's frame, in the two registers of [[language]]: the
@@ -107,6 +108,7 @@ export function EverydayFrame({ poll, progress, primary, secondary, children }: 
         )}
       </header>
       <Body>{children}</Body>
+      <LanguageSwitch />
       <ActionBar primary={primary} secondary={secondary} rule="border-border" />
     </div>
   );
@@ -168,6 +170,7 @@ export function CivicFrame({ poll, progress, stepName, primary, secondary, child
         )}
       </header>
       <Body>{children}</Body>
+      <LanguageSwitch />
       <ActionBar primary={primary} secondary={secondary} rule="border-foreground" />
     </div>
   );

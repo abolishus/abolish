@@ -9,6 +9,8 @@ import { type ComponentProps, useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import RECORDS from "../../../docs/spec/vectors/ballot-v3-records.json" with { type: "json" };
+import { I18nProvider } from "@abolishus/ui";
+
 import { App } from "./app.tsx";
 import type { Backer } from "./backup-offer.tsx";
 import type {
@@ -24,8 +26,10 @@ import type {
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import type { IdentityRead } from "./identity.ts";
 import type { IntakeAnswer } from "./intake.ts";
+import { LocaleChoice } from "./language-switch.tsx";
 import { parseLink } from "./link.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadedRegistry } from "./load.ts";
+import { type Locale, pollLanguages } from "./locales.ts";
 import type { ProverArtifacts } from "./prover-artifacts.ts";
 import {
   type ArtifactProblem,
@@ -2283,6 +2287,71 @@ export const InTheReadersLanguage: Story = {
     await expect(canvas.getByRole("radio", { name: "Doscientos árboles nuevos" })).toBeVisible();
     // Marked as Spanish for assistive technology, inside the English screens.
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveAttribute("lang", "es");
+  },
+};
+
+// The ballot in Spanish (P2-28 part 4b): the frame and the screens in the
+// voter's language, and the poll's own text in its Spanish translation.
+export const InSpanish: Story = {
+  name: "In Spanish",
+  args: { languages: ["es-US", "es-MX", "en-US"] },
+  parameters: { layout: "fullscreen", locale: "es-US" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "¿Qué mejora le importa más?" }),
+    ).toBeVisible();
+    await expect(canvas.getByText("Esta es la encuesta real, comprobada")).toBeVisible();
+    await expect(
+      canvas.getAllByRole("img", { name: "Sello de esta encuesta, 3f8a 0c51" })[0],
+    ).toBeVisible();
+    await expect(canvas.getByText("Elección 3f8a 0c51")).toBeVisible();
+    await userEvent.click(canvas.getByText("Doscientos árboles nuevos"));
+    await userEvent.click(canvas.getByRole("button", { name: "Revisar tus respuestas" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Sellar mis respuestas" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Esta boleta todavía no puede sellar respuestas para esta encuesta",
+    );
+    await expect(canvas.getByText(/un tipo anterior/)).toBeVisible();
+    await expect(canvas.queryByText(/Check your answers|This ballot can't/)).toBeNull();
+  },
+};
+
+// Switching language mid-ballot keeps every answer and the screen the voter
+// is on: answers are kept by option, never by label (P2-28 part 4b).
+function Switchable(props: ComponentProps<typeof App>) {
+  const [chosen, choose] = useState<Locale | undefined>(undefined);
+  return (
+    <I18nProvider locale={chosen ?? "en-US"}>
+      <LocaleChoice value={choose}>
+        <App {...props} languages={pollLanguages(chosen, props.languages)} />
+      </LocaleChoice>
+    </I18nProvider>
+  );
+}
+
+export const SwitchedMidBallot: Story = {
+  name: "Switched to Spanish mid-ballot",
+  render: (args) => <Switchable {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: QUESTION })).toBeVisible();
+    await userEvent.click(canvas.getByText("Two hundred new street trees"));
+    await userEvent.click(canvas.getByRole("button", { name: "Español" }));
+    // The poll's own Spanish, with the same option still chosen.
+    await expect(
+      canvas.getByRole("heading", { level: 1, name: "¿Qué mejora le importa más?" }),
+    ).toBeVisible();
+    await expect(canvas.getByRole("radio", { name: "Doscientos árboles nuevos" })).toBeChecked();
+    await userEvent.click(canvas.getByRole("button", { name: "Revisar tus respuestas" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Revisa tus respuestas",
+    );
+    await expect(canvas.getByText(/Doscientos árboles nuevos/)).toBeVisible();
+    // And back: the same screen and the same answer, in English.
+    await userEvent.click(canvas.getByRole("button", { name: "English" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Check your answers");
+    await expect(canvas.getByText(/Two hundred new street trees/)).toBeVisible();
   },
 };
 

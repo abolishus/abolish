@@ -40,3 +40,29 @@ export const OnASharedOrigin: Story = {
     await expect(canvas.queryByText(/open the ballot link/)).toBeNull();
   },
 };
+
+export const Spanish: Story = {
+  parameters: { layout: "fullscreen", locale: "es-US" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Boleta de Abolish");
+    await expect(canvas.getByText(/abre el enlace de la boleta/)).toBeVisible();
+    await expect(canvas.getByText(/salen de este dispositivo solo cifradas/)).toBeVisible();
+  },
+};
+
+export const OnASharedOriginInSpanish: Story = {
+  name: "On a shared origin, in Spanish",
+  parameters: { layout: "fullscreen", locale: "es-US" },
+  render: () => <SharedOrigin address={ADDRESS} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Esta dirección no es segura para votar",
+    );
+    await expect(canvas.getByText(ADDRESS)).toBeVisible();
+    await expect(canvas.getByRole("heading", { level: 2, name: "No se envió nada" })).toBeVisible();
+    // Never a switch here: this origin's storage is other sites' too (main.tsx).
+    await expect(canvas.queryByRole("navigation")).toBeNull();
+  },
+};

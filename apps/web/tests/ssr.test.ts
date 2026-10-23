@@ -646,8 +646,9 @@ describe("every page", () => {
   test("the frame marks the page the visitor is on, and only that one", async () => {
     const html = await (await get("/polls")).text();
     const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
-    expect(current).toHaveLength(1);
-    expect(current[0]).toContain('href="/polls"');
+    // The header's link and the footer's, which a phone's header leaves out.
+    expect(current).toHaveLength(2);
+    for (const link of current) expect(link).toContain('href="/polls"');
     expect(await (await get("/nowhere")).text()).not.toContain('aria-current="page"');
   });
 
@@ -1947,8 +1948,8 @@ describe("how it works", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
-    expect(current).toHaveLength(1);
-    expect(current[0]).toContain('href="/how-it-works"');
+    expect(current).toHaveLength(2);
+    for (const link of current) expect(link).toContain('href="/how-it-works"');
     for (const id of [
       "tiers",
       "secrecy",

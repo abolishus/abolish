@@ -391,7 +391,8 @@ describe("forcedPathFits", () => {
     // A direct reading: at each moment, Σ gas / length over the intervals
     // containing it, against the target per L1 block, in exact rationals
     // (numerator over the common denominator R · L_K).
-    const rk = COMPLAINT_WINDOW - DELIVERY_WINDOW - 26n * hour;
+    const rk =
+      COMPLAINT_WINDOW - DELIVERY_WINDOW - deployed.contractEventWindow - deployed.forcedInclusion;
     fc.assert(
       fc.property(elections, (es) => {
         const ds = es.map((e) => forcedPathDemand(e, deployed));

@@ -813,6 +813,25 @@ export const esUS: Messages = {
   noticesModerationHelp: "Siempre se envía, para que puedas apelar. No se puede desactivar.",
   noticesWhen:
     "Llega el día después de la decisión y solo dice que hubo una. Qué se decidió, y por qué, está aquí, en esta página, y en el registro público de moderación: lo dejamos fuera del correo para que el servicio que lo entrega sepa lo menos posible.",
+  pushLabel: "Avisar también a este navegador",
+  pushHelp:
+    "Una notificación en este dispositivo cuando sale el correo, que dice solo que hubo una decisión. La entrega la empresa que hace tu navegador, así que sabe que usas Abolish y el día en que se envió.",
+  pushOn: "Se avisará a este navegador.",
+  pushOff: "No se avisará a este navegador.",
+  pushUnsupported: "Este navegador no puede mostrar notificaciones de sitios web.",
+  pushUnavailable: "Este sitio todavía no envía notificaciones al navegador.",
+  pushDenied:
+    "Este navegador bloquea las notificaciones de este sitio. Permítelas en la configuración del navegador y luego vuelve a esta página.",
+  pushFailure_signedOut:
+    "Se cerró tu sesión. Vuelve a iniciar sesión para cambiar las notificaciones.",
+  pushFailure_denied:
+    "No se permitieron las notificaciones, así que no se avisará a este navegador.",
+  pushFailure_service:
+    "El servicio de notificaciones de este navegador no es uno por el que podamos enviar, así que no se le puede avisar.",
+  pushFailure_failed: "Eso no funcionó. Inténtalo de nuevo.",
+  pushNoticeTitle: "Una decisión de moderación",
+  pushNoticeBody:
+    "Sobre una de tus encuestas, tu perfil o una apelación. Abre la página de tu cuenta para verla.",
   exportMark: "Tus datos",
   exportTitle: "Descarga tus datos",
   exportLede:

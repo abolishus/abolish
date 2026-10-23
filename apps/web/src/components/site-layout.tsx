@@ -121,9 +121,13 @@ export function SiteLayout({
               <ul className="m-0 grid list-none gap-1 p-0 text-sm">
                 {NAV.map((item) => (
                   <li key={item.href}>
+                    {/* Marked here too: below 768px How it works and the
+                        moderation log are only in the footer, so this is
+                        the one place a phone shows which page it is on. */}
                     <a
-                      className="inline-flex min-h-8 items-center underline underline-offset-4"
+                      className="inline-flex min-h-8 items-center underline underline-offset-4 aria-[current=page]:font-semibold aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
                       href={item.href}
+                      aria-current={here(item.href)}
                     >
                       {t(item.label)}
                     </a>

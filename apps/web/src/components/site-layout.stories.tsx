@@ -66,6 +66,36 @@ export const Current: Story = {
     await expect(within(nav).getByRole("link", { name: "Discover" })).not.toHaveAttribute(
       "aria-current",
     );
+    const footer = within(canvasElement).getByRole("navigation", { name: "The record" });
+    await expect(within(footer).getByRole("link", { name: "Polls" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  },
+};
+
+/**
+ * On a phone, a page whose link is only in the footer is marked there: the
+ * header names no current page, and the footer's link says it is this one.
+ */
+export const CurrentPhone: Story = {
+  args: { current: "/moderation" },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const nav = canvas.getByRole("navigation", { name: "Site" });
+    // Its header link is there but hidden below 768px.
+    await expect(
+      within(nav)
+        .getAllByRole("link")
+        .filter((a) => a.hasAttribute("aria-current")),
+    ).toHaveLength(0);
+    const footer = canvas.getByRole("navigation", { name: "The record" });
+    const here = within(footer).getByRole("link", { name: "Moderation log" });
+    await expect(here).toHaveAttribute("aria-current", "page");
+    await expect(getComputedStyle(here).fontWeight).toBe("600");
+    await expect(footer.querySelectorAll("[aria-current]")).toHaveLength(1);
   },
 };
 

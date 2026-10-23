@@ -70,6 +70,9 @@ catalog:
   "@types/react-dom": 19.2.3
   "@vitest/browser-playwright": 5.0.1
   "@wagmi/cli": 2.10.0
+  # apps/web's accessibility audit (tests/a11y.e2e.ts): the rules engine the
+  # Storybook a11y addon already runs, at the version it resolves.
+  axe-core: 4.13.0
   better-auth: 1.7.7
   bullmq: 6.3.11
   class-variance-authority: 0.7.1

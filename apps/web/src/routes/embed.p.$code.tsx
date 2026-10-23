@@ -27,7 +27,10 @@ function EmbedDocument({ theme, children }: { theme: EmbedTheme; children: React
         <title>{t("embedTitle")}</title>
         <link rel="stylesheet" href={stylesheet} />
       </head>
-      <body className="bg-transparent">{children}</body>
+      <body className="bg-transparent">
+        {/* The framed page's one landmark, so a screen reader's "main" lands on the card. */}
+        <main>{children}</main>
+      </body>
     </html>
   );
 }

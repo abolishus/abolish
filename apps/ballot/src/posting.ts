@@ -11,10 +11,11 @@
 //
 // The fallback, the voter's own wallet (rule 6), is part 3c-1b-2b-2b-2d-2b-2d;
 // until it exists a fallback ends the posting as not recorded, and the
-// voter may try again. Once the relay answered at all it has read each
-// `m_i`, so a posting that ends unrecorded is `relayed`, never "nothing
-// posted": the relay, or its L1 deposit, may still land it (Outcome, last
-// item; T-15). Nor does the client look on L1 for a deposit the
+// voter may try again. Once a posting was sent at all, the relay may have
+// read each `m_i`, whether or not it answered (a hostile one reads the body
+// and resets the connection), so a posting that ends unrecorded is
+// `relayed`, never "nothing posted": the relay, or its L1 deposit, may
+// still land it (Outcome, last item; T-15). Nor does the client look on L1 for a deposit the
 // relay made yet (Outcome, a qualifying deposit): one only ever delays the
 // fallback, and without it the client falls back sooner, never later.
 
@@ -56,11 +57,8 @@ export type RelayAnswer =
   | { readonly kind: "refused"; readonly code: string }
   /** Not sent yet (busy, rate-limited, or the relay unavailable here): send the same bytes again. */
   | { readonly kind: "busy" }
-  /**
-   * The network failed (`reached` false), or the answer isn't one the route
-   * gives (`reached` true: the relay had the request, and so each `m_i`).
-   */
-  | { readonly kind: "unreachable"; readonly reached: boolean };
+  /** The network failed, or the answer isn't one the route gives. */
+  | { readonly kind: "unreachable" };
 
 // The route's error codes (`ErrorCode` in @abolishus/api-contract).
 const CODE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -114,13 +112,10 @@ export async function sendPosting(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ posting: toHex(posting), ballot: toHex(ballot) }),
     });
-  } catch (e) {
-    // Cut off by `timedFetch` after the request went: the relay may have
-    // read it, so count it as had (T-15).
-    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
-    return { kind: "unreachable", reached: timedOut };
+  } catch {
+    return { kind: "unreachable" };
   }
-  const garbled: RelayAnswer = { kind: "unreachable", reached: true };
+  const garbled: RelayAnswer = { kind: "unreachable" };
   const answer = await readJson(response, MAX_ANSWER);
   if (!isRecord(answer)) return garbled;
   if (response.status === 200) {
@@ -157,9 +152,13 @@ export interface PostingIo {
   send(posting: Uint8Array): Promise<RelayAnswer>;
   /**
    * `loadPostings` for the ballot, at `head`, from block `from` (the
-   * board's deployment when absent).
+   * board's deployment when absent), given up as soon as `stop` says so.
    */
-  find(head: "finalized" | "latest", from: bigint | undefined): Promise<LoadedPostings>;
+  find(
+    head: "finalized" | "latest",
+    from: bigint | undefined,
+    stop: () => boolean,
+  ): Promise<LoadedPostings>;
   /** This device's clock, in milliseconds since the epoch. */
   now(): number;
   /** Waits `ms` milliseconds. */
@@ -183,8 +182,11 @@ interface Pending {
  * POSTING_SEND_MARGIN` passed, a sent posting is neither recorded nor seen
  * at the latest head after `POSTING_FORCE_AFTER + POSTING_SEEN`, or the
  * client's deadline `c_P = c_D − POSTING_CLIENT_MARGIN` passed; and
- * answers `relayed` if the relay answered any request, so has read the
- * postings' `m_i`, else `unreachable` (Outcome, last item; T-15). `cutoff`
+ * answers `relayed` if any posting was sent at all, since the relay may
+ * then have read its `m_i` whatever it answered, else `unreachable`
+ * (Outcome, last item; T-15). A board read is given up at `c_P` between
+ * its requests, and each request is the caller's to bound (`timedFetch`),
+ * so the run ends within one request of `c_P` (T-25, T-50). `cutoff`
  * is the poll's `c_D`, in seconds. A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
@@ -209,11 +211,15 @@ export async function postThroughRelay(
   // there stays recorded, and the board's whole log is read only once.
   let from: bigint | undefined;
   let chainTime = 0n;
-  // Whether the relay has had the postings' bytes: any answer at all.
+  // Whether the relay may have had the postings' bytes: any send at all.
   let read = false;
   const unrecorded = (): PostAnswer => (read ? "relayed" : "unreachable");
+  // The later of the device's clock and the last head's time read.
+  const time = () => (seconds() > chainTime ? seconds() : chainTime);
   const find = (head: "finalized" | "latest") =>
-    io.find(head, from).catch((): LoadedPostings => ({ ok: false, problem: "unreachable" }));
+    io
+      .find(head, from, () => time() > deadline)
+      .catch((): LoadedPostings => ({ ok: false, problem: "unreachable" }));
   for (;;) {
     const final = await find("finalized");
     if (final.ok) {
@@ -224,16 +230,15 @@ export async function postThroughRelay(
     }
     const left = pending.filter((p) => !recorded.has(p));
     if (left.length === 0) return "recorded";
-    // Read again before each send, since a send can take a request's whole timeout.
-    const time = () => (seconds() > chainTime ? seconds() : chainTime);
     if (time() > deadline) return unrecorded();
     for (const p of left) {
       if (p.sentAt !== undefined) continue;
       const now = time();
+      // Read again before each send, since a send can take a request's whole timeout.
       if (now > deadline || now - started >= POSTING_PATIENCE || now > sendCutoff)
         return unrecorded();
-      const answer = await io.send(p.posting);
-      if (answer.kind !== "unreachable" || answer.reached) read = true;
+      read = true;
+      const answer = await io.send(p.posting).catch((): RelayAnswer => ({ kind: "unreachable" }));
       if (answer.kind === "refused") return unrecorded();
       if (answer.kind === "sent") p.sentAt = seconds();
     }

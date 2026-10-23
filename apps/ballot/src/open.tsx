@@ -251,8 +251,9 @@ export interface PostingShare {
 
 /**
  * A posting's outcome: `recorded` by the contract, `refused` by it,
- * `relayed` (not recorded, but the relay had the postings, so their `m_i`
- * are out of the voter's hands and may still land), or `unreachable`,
+ * `relayed` (not recorded, but sent to the relay, which may have read their
+ * `m_i`, so they are out of the voter's hands and may still land), or
+ * `unreachable` (never sent),
  * which may still land too: a posting is the same whoever boards it, so
  * posting again is safe.
  */

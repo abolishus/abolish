@@ -562,7 +562,10 @@ export type LoadedPostings =
  * fallback; one that invents a log can't make it carry another record.
  * As the group registry's read, it runs out a `maxBytes` budget, charged
  * each range and each log's data, so a node that claims a head far ahead,
- * or serves logs without end, ends it as `bad-answer` (T-52).
+ * or serves logs without end, ends it as `bad-answer` (T-52); and it is
+ * given up, as `unreachable`, as soon as `stop` says so before a request,
+ * so a node that answers each range slowly can't hold the caller past its
+ * deadline (T-25).
  */
 export async function loadPostings(
   deployment: Deployment,
@@ -573,6 +576,7 @@ export async function loadPostings(
   from?: bigint,
   range = LOG_RANGE,
   maxBytes = MAX_POSTINGS_BYTES,
+  stop: () => boolean = () => false,
 ): Promise<LoadedPostings> {
   const board = deployment.board;
   if (board === undefined) return { ok: false, problem: "no-registry" };
@@ -598,6 +602,7 @@ export async function loadPostings(
     let id = 3;
     let last: readonly [bigint, bigint] | undefined;
     for (let start = from ?? board.deployedAt; start <= at.block; start += range) {
+      if (stop()) throw new Stop("unreachable");
       const to = start + range - 1n < at.block ? start + range - 1n : at.block;
       const logs = await rpcResult(
         deployment,

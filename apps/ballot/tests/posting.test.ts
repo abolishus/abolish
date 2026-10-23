@@ -113,21 +113,15 @@ describe("sendPosting", () => {
       [500, { code: "INTERNAL_SERVER_ERROR" }],
       [200, "x".repeat(5000)],
     ];
-    // The relay had the request, and so the posting's m_i.
     for (const [status, body] of cases)
       expect(await sendPosting(STAGING, POSTING, BALLOT, route(status, body).fetchFn)).toEqual({
         kind: "unreachable",
-        reached: true,
       });
-    // It never did.
     const down: Fetch = () => Promise.reject(new TypeError("Failed to fetch"));
-    expect(await sendPosting(STAGING, POSTING, BALLOT, down)).toEqual({
-      kind: "unreachable",
-      reached: false,
-    });
+    expect(await sendPosting(STAGING, POSTING, BALLOT, down)).toEqual({ kind: "unreachable" });
   });
 
-  test("a relay that holds the request or its body open is cut off, as unreachable after it had the request", async () => {
+  test("a relay that holds the request or its body open is cut off, as unreachable", async () => {
     // A server that answers nothing until the request is aborted.
     const held: Fetch = (_, init) =>
       new Promise((_resolve, reject) =>
@@ -135,7 +129,6 @@ describe("sendPosting", () => {
       );
     expect(await sendPosting(STAGING, POSTING, BALLOT, timedFetch(held, 20))).toEqual({
       kind: "unreachable",
-      reached: true,
     });
     // One that sends its status, then trickles a body it never ends.
     const trickled: Fetch = (_, init) =>
@@ -152,7 +145,6 @@ describe("sendPosting", () => {
       );
     expect(await sendPosting(STAGING, POSTING, BALLOT, timedFetch(trickled, 20))).toEqual({
       kind: "unreachable",
-      reached: true,
     });
   });
 });
@@ -245,11 +237,10 @@ describe("postThroughRelay", () => {
   });
 
   test("busy or unreachable is sent again each round, until the relay's patience runs out", async () => {
+    // Sent, the relay may have read it, whatever it answered.
     const answers = [
       [{ kind: "busy" }, "relayed"],
-      [{ kind: "unreachable", reached: true }, "relayed"],
-      // Only a relay never reached hasn't read the posting.
-      [{ kind: "unreachable", reached: false }, "unreachable"],
+      [{ kind: "unreachable" }, "relayed"],
     ] as const;
     for (const [answer, outcome] of answers) {
       const w = world({ relay: () => answer });
@@ -274,6 +265,36 @@ describe("postThroughRelay", () => {
     };
     expect(await postThroughRelay(slow, [POSTING, OTHER, POSTING], CUTOFF)).toBe("relayed");
     expect(w.sends).toHaveLength(1);
+  });
+
+  test("a relay that reads the posting and never answers still leaves it relayed", async () => {
+    const w = world({ relay: () => sent });
+    const reset = { ...w.io, send: () => Promise.reject(new TypeError("connection reset")) };
+    expect(await postThroughRelay(reset, [POSTING], CUTOFF)).toBe("relayed");
+    const silent = {
+      ...w.io,
+      send: async (): Promise<RelayAnswer> => {
+        await w.io.sleep(30_000);
+        return { kind: "unreachable" };
+      },
+    };
+    expect(await postThroughRelay(silent, [POSTING], CUTOFF)).toBe("relayed");
+  });
+
+  test("a board read that answers each range slowly is given up at c_P", async () => {
+    const start = CUTOFF - POSTING_CLIENT_MARGIN - 600n;
+    const w = world({ relay: () => sent, start });
+    // Each range takes 29 seconds, just under a request's timeout, without end.
+    const slow = {
+      ...w.io,
+      find: async (_: "finalized" | "latest", __: bigint | undefined, stop: () => boolean) => {
+        while (!stop()) await w.io.sleep(29_000);
+        return { ok: false, problem: "unreachable" } as const;
+      },
+    };
+    expect(await postThroughRelay(slow, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(start + w.elapsed()).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN + 29n);
+    expect(w.sends).toHaveLength(0);
   });
 
   test("nothing is sent past the relay's send cutoff", async () => {
@@ -347,7 +368,7 @@ describe("postThroughRelay", () => {
     const answer = fc.constantFrom<RelayAnswer>(
       sent,
       { kind: "busy" },
-      { kind: "unreachable", reached: true },
+      { kind: "unreachable" },
       { kind: "refused", code: "too-late" },
     );
     await fc.assert(

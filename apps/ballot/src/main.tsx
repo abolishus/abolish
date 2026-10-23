@@ -294,8 +294,18 @@ const source: ElectionSource = {
           return postThroughRelay(
             {
               send: (posting) => sendPosting(STAGING, posting, ballot, fetchFn),
-              find: (head, from) =>
-                loadPostings(STAGING, definitionHash, ballotHash, fetchFn, head, from),
+              find: (head, from, stop) =>
+                loadPostings(
+                  STAGING,
+                  definitionHash,
+                  ballotHash,
+                  fetchFn,
+                  head,
+                  from,
+                  undefined,
+                  undefined,
+                  stop,
+                ),
               now: () => Date.now(),
               sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
             },

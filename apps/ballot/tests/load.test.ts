@@ -1338,6 +1338,30 @@ describe("the board's postings", () => {
     ).toEqual({ ok: false, problem: "bad-answer" });
   });
 
+  test("a read is given up before the next range once its caller says stop", async () => {
+    const { calls, fetchFn } = node([at(120n, 0n, posting)]);
+    let ranges = 0;
+    const counting: Fetch = (url, init) => {
+      if ((JSON.parse(init.body as string) as { method: string }).method === "eth_getLogs")
+        ranges++;
+      return fetchFn(url, init);
+    };
+    expect(
+      await loadPostings(
+        WITH_BOARD,
+        bytes(DEFINITION_TOPIC),
+        bytes(BALLOT_TOPIC),
+        counting,
+        "finalized",
+        undefined,
+        10n,
+        undefined,
+        () => ranges >= 2,
+      ),
+    ).toEqual({ ok: false, problem: "unreachable" });
+    expect(calls.filter((c) => c.method === "eth_getLogs")).toHaveLength(2);
+  });
+
   test("a build that pins no board asks nothing of anyone", async () => {
     const { calls, fetchFn } = node([]);
     expect(

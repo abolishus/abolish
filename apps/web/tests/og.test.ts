@@ -109,7 +109,9 @@ describe("renderPreview", () => {
       const fresh = (await import("../src/og/render.ts")) as typeof import("../src/og/render.ts");
       expect(await fresh.renderPreview(VARIANTS["live"]!, format)).toEqual(first);
     }
-  });
+    // Rendering in a fresh module reloads the fonts: well past the default
+    // timeout on a loaded CI runner.
+  }, 30_000);
 
   test("draws a question in a script its fonts lack without failing", async () => {
     const model = { ...VARIANTS["sealed"]!, question: "Ελληνικά, 中文 und Ümlaute 🎉?" };
@@ -163,7 +165,9 @@ describe("a poll without released results", () => {
       }),
       { numRuns },
     );
-  });
+    // CI's FC_NUM_RUNS (1000) of card text takes about 2 s locally and passed
+    // the 5 s default on a CI runner.
+  }, 30_000);
 
   test("says when results appear, and the count, while sealed", () => {
     const text = cardText(VARIANTS["sealed"]!, "landscape");

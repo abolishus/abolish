@@ -43,6 +43,12 @@ import {
 } from "./posting-relay.ts";
 import { registeredElection } from "./registrations.ts";
 
+/**
+ * Seconds the L2 node's latest block may be behind the worker's clock for
+ * the send cutoff to be read from it (Values): a node behind the chain would
+ * pass step 3 on stale time.
+ */
+export const POSTING_HEAD_AGE = 60;
 /** Milliseconds between the worker's ticks (docs/spec/posting-relay.md, Queue). */
 export const POSTING_TICK_MS = 2_000;
 /** The most gas limit any relayed call or deposit is given (Values). */
@@ -152,7 +158,7 @@ export interface PostingWorkerOptions {
 
 /** A tick's outcomes, as counts only (T-11, T-13). */
 export interface PostingTickReport {
-  /** False when the L2 node's latest block couldn't be read: the index wasn't brought up and nothing was judged. */
+  /** False when the L2 node's latest block couldn't be read, or was older than POSTING_HEAD_AGE: the index wasn't brought up and nothing was judged. */
   readonly chain: boolean;
   /** Pairs answered and taken out of the queue, by outcome. */
   readonly answered: Readonly<Record<"sent" | PostingWorkerRefusal, number>>;
@@ -275,6 +281,10 @@ export class PostingWorker {
     if (typeof head.timestamp !== "bigint" || head.timestamp < 0n || head.timestamp > U64_MAX)
       return { chain: false, answered, kept };
     const now = this.#now();
+    // A head older than POSTING_HEAD_AGE is no head: nothing is judged on
+    // it, and the index, unwritten, ages out, so the route stops queueing.
+    const stale = () => this.#now() - Number(head.timestamp) > POSTING_HEAD_AGE;
+    if (stale()) return { chain: false, answered, kept };
     const queued = fields(await this.#eval(READ_ALL, 1, this.#keys.queue));
     const present = new Set(queued.map(([key]) => key));
     for (const key of this.#unanswered.keys()) if (!present.has(key)) this.#unanswered.delete(key);
@@ -435,6 +445,12 @@ export class PostingWorker {
         );
         if (gasLimit > POSTING_GAS_LIMIT_MAX) {
           await refuse(p.key, "too-costly");
+          continue;
+        }
+        // A tick long on node calls can reach this pair past the head's
+        // age: left for the next tick, on a newer head.
+        if (stale()) {
+          await unanswered(p.key);
           continue;
         }
         // Steps 5 and 6 are the ledger's.

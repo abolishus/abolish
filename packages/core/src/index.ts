@@ -624,6 +624,7 @@ export {
   type PostingReceipt,
   type PostingSigned,
   type PostingTendReport,
+  type PostingPruneReport,
   type PostingWindows,
   PostingLedgerError,
   postingWindows,
@@ -631,6 +632,7 @@ export {
 export {
   POSTING_GAS_HEADROOM,
   POSTING_GAS_LIMIT_MAX,
+  POSTING_HEAD_AGE,
   POSTING_TICK_MS,
   POSTING_UNANSWERED_SPAN,
   POSTING_UNANSWERED_TICKS,

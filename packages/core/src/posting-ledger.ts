@@ -1,9 +1,9 @@
 // The posting relay's ledger (docs/spec/posting-relay.md, Sending, steps 2, 5
 // and 6, Caps and In flight; ADR 0042, rules 4 and 5): the durable record of
 // what the posting worker sent, its caps, the first send of each posting
-// from the posting key, and the tending of what is in flight: rebroadcasts,
+// from the posting key, the tending of what is in flight (rebroadcasts,
 // replacements, the spend reduced to a receipt, and a posting whose nonce
-// another transaction consumed. The worker (posting-worker.ts) decides steps
+// another transaction consumed), and the pruning of what is final. The worker (posting-worker.ts) decides steps
 // 1 to 4 and hands each pair that passes them here.
 //
 // Never paid for twice (ADR 0042, rule 4): every send runs in one database
@@ -20,13 +20,14 @@
 
 import { deliveryDeadlines, intakeCutoff } from "@abolishus/crypto";
 import { PINNED_FORCED_INCLUSION, PINNED_MARGIN } from "@abolishus/verifier";
-import { and, asc, eq, max, ne, sql as q } from "drizzle-orm";
+import { and, asc, eq, lt, max, ne, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { postingBallots, postingInFlight, postingSent, postingSpend } from "./db/schema/index.ts";
 import { type PostingOutcome, type PostingSent, POSTING_SEND_MARGIN } from "./posting-relay.ts";
 import {
   POSTING_GAS_LIMIT_MAX,
+  POSTING_HEAD_AGE,
   type PostingHead,
   type PostingLedger,
   type PostingToSend,
@@ -106,6 +107,8 @@ export interface PostingKeyChain {
   receipt(hash: Uint8Array): Promise<PostingReceipt | undefined>;
   /** Whether a `SharePosted` event of the board at the latest head has exactly `posting` as its record. */
   posted(posting: Uint8Array): Promise<boolean>;
+  /** Whether a `SharePosted` event of the board at the L2's finalized head has exactly `posting` as its record. */
+  postedFinal(posting: Uint8Array): Promise<boolean>;
 }
 
 /** What one `tend` did, as counts only (T-11, T-13). */
@@ -125,6 +128,18 @@ export interface PostingTendReport {
   /** Postings whose nonce another transaction consumed without their event, which the election's budget leaves unsent again. */
   readonly held: number;
   /** Entries a node or store failure left for the next tend. */
+  readonly failed: number;
+}
+
+/** What one `prune` did, as counts only (T-11, T-13). */
+export interface PostingPruneReport {
+  /** Entries whose exact bytes are in a `SharePosted` event at the finalized head, dropped. */
+  readonly final: number;
+  /** Entries dropped as the finalized head passed their election's `t_D`, final or not. */
+  readonly expired: number;
+  /** Elections whose caps (postings sent, ballot hashes, spend) were deleted as the finalized head passed their `t_D`. */
+  readonly elections: number;
+  /** Entries a node or store failure left for the next prune. */
   readonly failed: number;
 }
 
@@ -386,6 +401,134 @@ export class PostgresPostingLedger implements PostingLedger {
     return counts;
   }
 
+  /**
+   * Prunes what is final (In flight; Caps): `finalized` is the L2's
+   * finalized head. Once its time passes an election's `t_D`, no posting of
+   * it can be in time, so its entries and its caps are deleted whatever
+   * their state, `m_i` with them (T-18). Before then, an entry whose exact
+   * bytes are in a `SharePosted` event at the finalized head is dropped once
+   * the key's count is past its nonce, so a transaction of it still pending
+   * keeps its nonce from the next send; its caps stay, so its bytes are
+   * still never paid for again. A failure on one entry leaves it for the
+   * next prune and goes on to the next.
+   */
+  async prune(finalized: PostingHead): Promise<PostingPruneReport> {
+    const at = finalized.timestamp;
+    if (typeof at !== "bigint" || at < 0n || at > U64_MAX)
+      throw new RangeError("finalized.timestamp must be a u64");
+    // A finalized head can't be ahead of the clock. One that claims to be
+    // would delete the caps of every election whose `t_D` it names as past,
+    // so a lying or faulty node could have postings paid for again and the
+    // budgets reopened (T-25, T-52): nothing is pruned on it.
+    if (at > BigInt(this.#clock()))
+      throw new PostingLedgerError("the finalized head is ahead of the clock");
+    let expired: number;
+    let elections: number;
+    let left: { key: Uint8Array; nonce: bigint; posting: Uint8Array }[];
+    try {
+      ({ expired, elections } = await this.#expire(at));
+      const rows = await drizzle({ client: this.#sql })
+        .select({
+          key: postingInFlight.postingKey,
+          nonce: postingInFlight.nonce,
+          posting: postingInFlight.posting,
+        })
+        .from(postingInFlight)
+        .orderBy(asc(postingInFlight.nonce));
+      left = rows.map((r) => ({
+        key: new Uint8Array(r.key),
+        nonce: r.nonce,
+        posting: new Uint8Array(r.posting),
+      }));
+    } catch (e) {
+      throw scrubbed(e);
+    }
+    let final = 0;
+    let failed = 0;
+    let count: bigint | undefined;
+    try {
+      if (left.length > 0) count = await this.#nonce();
+    } catch {
+      return { final, expired, elections, failed: left.length };
+    }
+    for (const entry of left) {
+      // A transaction at its nonce may still be pending: kept, and tended.
+      if (count === undefined || entry.nonce >= count) continue;
+      try {
+        if (await this.#finalOne(entry)) final++;
+      } catch {
+        failed++;
+      }
+    }
+    return { final, expired, elections, failed };
+  }
+
+  /** The key's count at the latest block, in form. */
+  async #nonce(): Promise<bigint> {
+    const n = await this.#call(() => this.#chain.nonce());
+    if (!isWei(n) || n > U64_MAX)
+      throw new PostingLedgerError("the chain answered a nonce out of form");
+    return n;
+  }
+
+  /** Every entry and cap of an election whose `t_D` the finalized head passed, in one transaction. */
+  #expire(at: bigint): Promise<{ expired: number; elections: number }> {
+    return drizzle({ client: this.#sql }).transaction(
+      async (tx) => {
+        // Under the lock, so no send or tend is midway through an entry.
+        await tx.execute(LOCK);
+        const entries = await tx
+          .delete(postingInFlight)
+          .where(lt(postingInFlight.deliveryEnds, at))
+          .returning({ key: postingInFlight.postingKey });
+        await tx.delete(postingSent).where(lt(postingSent.deliveryEnds, at));
+        await tx.delete(postingBallots).where(lt(postingBallots.deliveryEnds, at));
+        const spends = await tx
+          .delete(postingSpend)
+          .where(lt(postingSpend.deliveryEnds, at))
+          .returning({ electionId: postingSpend.electionId });
+        return { expired: entries.length, elections: spends.length };
+      },
+      { isolationLevel: "read committed" },
+    );
+  }
+
+  /**
+   * One entry checked at the finalized head, the node read outside the
+   * lock, and dropped under it only if a tend hasn't signed it again at
+   * another nonce meanwhile, which a later prune judges again.
+   */
+  async #finalOne(entry: {
+    readonly key: Uint8Array;
+    readonly nonce: bigint;
+    readonly posting: Uint8Array;
+  }): Promise<boolean> {
+    const posted = await this.#call(() => this.#chain.postedFinal(entry.posting));
+    if (typeof posted !== "boolean")
+      throw new PostingLedgerError("the chain answered an event out of form");
+    if (!posted) return false;
+    try {
+      return await drizzle({ client: this.#sql }).transaction(
+        async (tx) => {
+          await tx.execute(LOCK);
+          const gone = await tx
+            .delete(postingInFlight)
+            .where(
+              and(
+                eq(postingInFlight.postingKey, entry.key),
+                eq(postingInFlight.nonce, entry.nonce),
+              ),
+            )
+            .returning({ key: postingInFlight.postingKey });
+          return gone.length === 1;
+        },
+        { isolationLevel: "read committed" },
+      );
+    } catch (e) {
+      throw scrubbed(e);
+    }
+  }
+
   /** One entry's tend, in one transaction under the ledger's lock. */
   #tendOne(key: Uint8Array, latest: bigint): Promise<Tended> {
     return drizzle({ client: this.#sql }).transaction(
@@ -411,17 +554,11 @@ export class PostgresPostingLedger implements PostingLedger {
             .update(postingSent)
             .set({ transaction: hash, layer: "l2" })
             .where(eq(postingSent.postingKey, key));
-        const readNonce = async () => {
-          const n = await this.#call(() => this.#chain.nonce());
-          if (!isWei(n) || n > U64_MAX)
-            throw new PostingLedgerError("the chain answered a nonce out of form");
-          return n;
-        };
 
         // The key's count before the receipts, so a transaction of this
         // entry that consumed its nonce is seen below on one view of the
         // chain; the count is read again before a consumed nonce is acted on.
-        const count = await readNonce();
+        const count = await this.#nonce();
         // Every transaction that carried it and is in a block: replacements
         // share a nonce, so one of each nonce at most, but a resend at a new
         // nonce can land beside the one it followed, and each is paid for.
@@ -480,7 +617,7 @@ export class PostgresPostingLedger implements PostingLedger {
           // A count that moved while the receipts and the event were read is
           // a view of the chain that changed under them (a reorganisation,
           // or an endpoint behind a balancer): judged again at the next tend.
-          if ((await readNonce()) !== count) return NONE;
+          if ((await this.#nonce()) !== count) return NONE;
           if (posted) {
             // None of its transactions ran, so it cost nothing on L2; a
             // deposit's reserve stays counted.
@@ -492,8 +629,11 @@ export class PostgresPostingLedger implements PostingLedger {
             return { kind: "posted" };
           }
           // Past the send cutoff nothing new is sent on L2: it is left to
-          // its deposit, if any.
+          // its deposit, if any. The cutoff is read only from a head within
+          // POSTING_HEAD_AGE of the clock, so a lagging node or a long tend
+          // can't pass it on stale time; a newer head judges it again.
           if (latest > row.contractCutoff - POSTING_SEND_MARGIN) return NONE;
+          if (now - latest > BigInt(POSTING_HEAD_AGE)) return NONE;
           return this.#resend(tx, row, { posting, ballot, count, now });
         }
 
@@ -659,9 +799,7 @@ export class PostgresPostingLedger implements PostingLedger {
 
         // The next nonce: past what the chain has taken and past every
         // transaction still in flight, which may not be in a block yet.
-        const count = await this.#call(() => this.#chain.nonce());
-        if (!isWei(count) || count > U64_MAX)
-          throw new PostingLedgerError("the chain answered a nonce out of form");
+        const count = await this.#nonce();
         const [highest] = await tx
           .select({ nonce: max(postingInFlight.nonce) })
           .from(postingInFlight);

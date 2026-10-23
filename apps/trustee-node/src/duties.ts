@@ -1,17 +1,18 @@
 // A seat's duties in a deployment: for each election the seat approved, one
 // duty, built once its sources can be set up and stepped on a schedule until
-// it settles. Three kinds run so: the availability duty (`AvailabilitySeat`,
-// docs/spec/availability.md, What a seat does; T-24, T-54), the receipt duty
+// it settles. Four kinds run so: the availability duty at each point
+// (`AvailabilitySeat`, docs/spec/availability.md, What a seat does; T-24,
+// T-54), the receipt duty
 // (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52) and
 // the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29).
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
 import { setTimeout as sleep } from "node:timers/promises";
-import { availabilityWindows, deliveryDeadlines } from "@abolishus/crypto";
+import { availabilityWindows, type DeadlineClock, deliveryDeadlines } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
-import type { AvailabilitySeat, AvailabilityStatus } from "./availability.ts";
+import { type AvailabilitySeat, type AvailabilityStatus, countedDue } from "./availability.ts";
 import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
@@ -42,10 +43,15 @@ export type KindEvent<K extends string, S> =
   | { readonly event: `${K}-abandoned`; readonly stubHash: string };
 
 export type AvailabilityEvent = KindEvent<"availability", AvailabilityStatus>;
+export type CountedAvailabilityEvent = KindEvent<"counted-availability", AvailabilityStatus>;
 export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
 export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 /** What the duties report. */
-export type DutyEvent = AvailabilityEvent | ReceiptEvent | ComplaintEvent;
+export type DutyEvent =
+  | AvailabilityEvent
+  | CountedAvailabilityEvent
+  | ReceiptEvent
+  | ComplaintEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -229,11 +235,28 @@ class ElectionDuties<K extends string, S extends object> {
   }
 }
 
+// An availability duty is over once its attestation is recorded, on an
+// alarm no step can clear, or past its cutoff with nothing left that can
+// count, once its deadline is behind the step.
+const availabilitySettles = (status: AvailabilityStatus, wall: bigint, deadline: bigint) => {
+  switch (status.state) {
+    case "recorded":
+    case "unrecorded":
+    case "foreign-record":
+      return true;
+    case "past-cutoff":
+      return wall > deadline;
+    default:
+      return false;
+  }
+};
+
 /**
- * The availability duty of every election the seat approved: each one's
- * `AvailabilitySeat`, built once its L1 reader can be set up and stepped
- * until its attestation is recorded, an alarm no step can clear, or `c_I`
- * has passed with nothing left that can count, once `t_A` is behind the node.
+ * The ballot-extent availability duty of every election the seat approved:
+ * each one's `AvailabilitySeat`, built once its L1 reader can be set up and
+ * stepped until its attestation is recorded, an alarm no step can clear, or
+ * `c_I` has passed with nothing left that can count, once `t_A` is behind
+ * the node.
  */
 export class AvailabilityDuties extends ElectionDuties<"availability", AvailabilityStatus> {
   constructor(options: DutyOptions<Duty, AvailabilityEvent>) {
@@ -243,18 +266,34 @@ export class AvailabilityDuties extends ElectionDuties<"availability", Availabil
         // `t_A`, as `AvailabilitySeat.deadline` computes it.
         deadline: (e) =>
           availabilityWindows(e.closesAt, e.l1InclusionBound, 0n, RELEASE_WINDOWS).ballotDeadline,
-        settles: (status, wall, deadline) => {
-          switch (status.state) {
-            case "recorded":
-            case "unrecorded":
-            case "foreign-record":
-              return true;
-            case "past-cutoff":
-              return wall > deadline;
-            default:
-              return false;
-          }
-        },
+        settles: availabilitySettles,
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * The counted-extent availability duty of every election the seat approved
+ * (docs/spec/availability.md, What a seat does, 2, at point 2): each one's
+ * `AvailabilitySeat` over the deployment's pinned anchoring clock, settled
+ * as the ballot extent's is, by `c_A'` and `t_A'`. The tally rests on it:
+ * no summed share is sent before `t_A' + R` and a quorum of these
+ * attestations (T-54, T-14).
+ */
+export class CountedAvailabilityDuties extends ElectionDuties<
+  "counted-availability",
+  AvailabilityStatus
+> {
+  constructor(options: DutyOptions<Duty, CountedAvailabilityEvent>, clock: DeadlineClock) {
+    super(
+      {
+        name: "counted-availability",
+        // `t_A'`, as `AvailabilitySeat.deadline` computes it under `counted`.
+        deadline: (e) =>
+          availabilityWindows(e.closesAt, e.l1InclusionBound, countedDue(e, clock), RELEASE_WINDOWS)
+            .countedDeadline,
+        settles: availabilitySettles,
       },
       options,
     );

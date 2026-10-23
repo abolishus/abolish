@@ -309,7 +309,7 @@ describe("run with the availability duty", () => {
     change: Record<string, unknown>,
     abortOn?: string,
     // Awaited before aborting, while the node still runs.
-    onEvent?: (e: { event?: string; address?: AddressInfo }) => Promise<void>,
+    onEvent?: (e: { event?: string; address?: AddressInfo; url?: string }) => Promise<void>,
   ) {
     const configFile = join(dir, `${name}.json`);
     await writeFile(
@@ -326,7 +326,7 @@ describe("run with the availability duty", () => {
       ...t.io,
       out: (v) => {
         t.out.push(v);
-        const e = v as { event?: string; address?: AddressInfo };
+        const e = v as { event?: string; address?: AddressInfo; url?: string };
         if (e.event !== abortOn) return;
         if (onEvent === undefined) stop.abort();
         else void onEvent(e).finally(() => stop.abort());
@@ -367,6 +367,63 @@ describe("run with the availability duty", () => {
     expect(answer).toBe(200);
     await expect(fetch(url)).rejects.toThrow();
   }, 60_000);
+
+  test("with a tally section, serves the summed-share channel while it runs and closes it when stopped", async () => {
+    let url = "";
+    let answer: number | undefined;
+    const tally = {
+      host: "127.0.0.1",
+      port: 0,
+      peers: { "2": "https://seat-2.example/v1/summed-shares" },
+    };
+    const run = await runWith("tally", { tally }, "summed-shares", async (e) => {
+      url = e.url ?? "";
+      // Acknowledged on arrival whatever the duties make of it (T-39).
+      answer = (
+        await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: new Uint8Array(8),
+        })
+      ).status;
+    });
+    expect(run.code).toBe(0);
+    // The ceremony's first poll may report its coordinator unreachable after these.
+    expect(run.out.slice(0, 3)).toEqual([
+      { event: "serving", address: expect.objectContaining({ address: "127.0.0.1" }) },
+      {
+        event: "summed-shares",
+        url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/v1\/summed-shares$/),
+      },
+      { event: "started", seat: 1, availability: true },
+    ]);
+    expect(answer).toBe(202);
+    await expect(fetch(url, { method: "POST" })).rejects.toThrow();
+  }, 60_000);
+
+  test.each<[string, Record<string, unknown>, string]>([
+    [
+      "a peer endpoint over plain HTTP off loopback",
+      { peers: { "2": "http://seat-2.example/v1/summed-shares" } },
+      "availability.tally.peers: summed-share peers: seat 2's endpoint must be https",
+    ],
+    [
+      "a peer endpoint that isn't a URL",
+      { peers: { "2": "seat-2" } },
+      "availability.tally.peers: Invalid URL",
+    ],
+    ["a CA file that isn't there", { caFile: "/nonexistent" }, "tally CA: ENOENT"],
+  ])(
+    "refuses %s as bad configuration",
+    async (name, change, error) => {
+      const run = await runWith(name.replaceAll(" ", "-"), {
+        tally: { host: "127.0.0.1", port: 0, peers: {}, ...change },
+      });
+      expect(run.code).toBe(2);
+      expect(run.err).toEqual([{ error }]);
+    },
+    60_000,
+  );
 
   test("refuses a port already taken as bad configuration", async () => {
     const taken = createServer();
@@ -575,6 +632,69 @@ describe("run with the availability duty", () => {
       kemKeyPair: kemKeygen(),
     };
     expect(await w.view.extent(election)).toBeUndefined();
+    expect(await w.counted.extent(election)).toBeUndefined();
+    expect(asked).toEqual([]);
+  });
+
+  test("gives the counted set's source the counted extent only, under the pinned clock, and none for a seat that attested only the ballot extent", async () => {
+    const parsed = parseConfig(
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, "counted-store"),
+        availability: availability({ boardFromBlock: "33", registryFromBlock: "22" }),
+      }),
+    );
+    const a = parsed.availability;
+    if (a === undefined) return expect.fail("no availability");
+    const servedDir = join(dir, "counted-blocks");
+    await mkdir(servedDir);
+    const asked: string[] = [];
+    const node = {
+      call: async (method: string) => {
+        asked.push(method);
+        throw new Error("not asked");
+      },
+    };
+    const store = new MemoryStore();
+    const definitionHash = new Uint8Array(32).fill(2);
+    // The ballot extent's attestation, as the availability duty stores it.
+    await store.putOnce(`availability/${hex(definitionHash)}/ballot/attestation`, Uint8Array.of(1));
+    const w = dutyWiring(parsed, a, {
+      l1: node,
+      l2: node,
+      contract: { send: async () => {}, recorded: async () => undefined },
+      receipts: { send: async () => {}, recorded: async () => [] },
+      complaints: {
+        postings: async () => ({ finalizedAt: 0n, postings: [] }),
+        send: async () => {},
+        recorded: async () => [],
+      },
+      served: await servedBlocks(servedDir),
+      gateways: async () => [],
+      store,
+      clock: () => 7n,
+    });
+    expect(w.counted).toMatchObject({
+      counted: a.anchorClock,
+      board: a.board,
+      boardFromBlock: 33n,
+      registryFromBlock: 22n,
+      panel: parsed.panel,
+    });
+    expect(
+      await w.counted.extent({
+        index: 1,
+        stubHash: new Uint8Array(32),
+        definitionHash,
+        electionId: new Uint8Array(32),
+        opensAt: 0n,
+        closesAt: 0n,
+        l1InclusionBound: 0n,
+        members: 0n,
+        signingSecret: new Uint8Array(32),
+        kemKeyPair: kemKeygen(),
+      }),
+    ).toBeUndefined();
     expect(asked).toEqual([]);
   });
 

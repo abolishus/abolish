@@ -64,6 +64,7 @@ interface Approved {
   readonly stores: readonly MemoryStore[];
   readonly signingKeys: ReadonlyMap<number, Uint8Array>;
   readonly threshold: number;
+  readonly transcript: Uint8Array;
 }
 
 let approved: Approved;
@@ -84,6 +85,7 @@ beforeAll(async () => {
     stores,
     signingKeys: new Map(run.keys.map((k) => [k.index, k.signing_key])),
     threshold: 2,
+    transcript: run.transcript,
   };
 });
 
@@ -280,6 +282,9 @@ describe("approvedElection", () => {
     });
     expect(await restarted.approvedElection(e.stubHash)).toEqual(approved.elections[1]);
     expect(await restarted.approvedElection(new Uint8Array(32))).toBeUndefined();
+    // The tally's transcript is the seat's own copy of the one it approved.
+    expect(await restarted.approvedTranscript(e.stubHash)).toEqual(approved.transcript);
+    expect(await restarted.approvedTranscript(new Uint8Array(32))).toBeUndefined();
     expect(await world(1).seat.step()).toMatchObject({ state: "sent" });
   });
 });

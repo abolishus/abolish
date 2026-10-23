@@ -220,6 +220,70 @@ describe("the intake endpoint's configuration", () => {
   });
 });
 
+describe("the tally's configuration", () => {
+  const tally = (change: Record<string, unknown> = {}) =>
+    config({
+      availability: availability({
+        tally: {
+          host: "0.0.0.0",
+          port: 9443,
+          tlsCertFile: "/c.pem",
+          tlsKeyFile: "/k.pem",
+          peers: {
+            "1": "https://seat-1.example/v1/summed-shares",
+            "3": "https://seat-3.example/v1/summed-shares",
+          },
+          ...change,
+        },
+      }),
+    });
+
+  test("listens as the intake endpoint does and names each other seat's endpoint by its index", () => {
+    const t = parseConfig(JSON.stringify(tally({ caFile: "/ca.pem" }))).availability?.tally;
+    expect(t).toEqual({
+      host: "0.0.0.0",
+      port: 9443,
+      tls: { certFile: "/c.pem", keyFile: "/k.pem" },
+      queue: 16,
+      peers: new Map([
+        [1, "https://seat-1.example/v1/summed-shares"],
+        [3, "https://seat-3.example/v1/summed-shares"],
+      ]),
+      caFile: "/ca.pem",
+      timeoutMs: 30_000,
+    });
+    const plain = parseConfig(
+      JSON.stringify(
+        tally({
+          host: "127.0.0.1",
+          tlsCertFile: undefined,
+          tlsKeyFile: undefined,
+          timeoutSeconds: 5,
+        }),
+      ),
+    ).availability?.tally;
+    expect(plain).toMatchObject({ host: "127.0.0.1", tls: undefined, timeoutMs: 5000 });
+    // Without it the node runs no tally duty.
+    expect(
+      parseConfig(JSON.stringify(config({ availability: availability() }))).availability?.tally,
+    ).toBeUndefined();
+  });
+
+  test.each([
+    ["plain HTTP off loopback", { tlsCertFile: undefined, tlsKeyFile: undefined }],
+    ["a certificate without its key", { tlsKeyFile: undefined }],
+    ["the seat's own index among the peers", { peers: { "2": "https://seat-2.example/" } }],
+    ["a peer past the panel", { peers: { "5": "https://seat-5.example/" } }],
+    ["a peer named by anything but its index", { peers: { "01": "https://seat-1.example/" } }],
+    ["no timeout", { timeoutSeconds: 0 }],
+    ["an unknown field", { extra: 1 }],
+  ])("refuses %s", (_, change) => {
+    expect(() => parseConfig(JSON.stringify(tally(change)))).toThrow(
+      /^config: availability\.tally(\.|: )/,
+    );
+  });
+});
+
 describe("the identity key file", () => {
   let dir: string;
   beforeAll(async () => {

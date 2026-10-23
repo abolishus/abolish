@@ -2,7 +2,8 @@
 // panel, the seat, where the identity key and the store live, the
 // coordinator, and, for the availability duty, the chains' nodes, the
 // deployment's contracts, the paying account's key, the block sources and
-// where it serves them, and where the intake endpoint listens. JSON at a
+// where it serves them, the tally's summed-share channel and the other
+// seats' endpoints, and where the intake endpoint listens. JSON at a
 // transport boundary, so it is parsed with a strict schema; the panel's keys
 // are protocol bytes, so they are checked by
 // `@abolishus/crypto` (`panelId`) and must hash to the `panelId` the trustee
@@ -36,6 +37,21 @@ const seconds = z
   .min(0)
   .max(7 * 86_400)
   .transform(BigInt);
+
+const LOOPBACK = ["127.0.0.1", "::1", "localhost"];
+
+// Where the summed-share channel listens, as the intake endpoint does, and
+// the other seats' endpoints by seat index (README, Summed-share channel).
+const TALLY = z.strictObject({
+  host: z.string().min(1),
+  port: z.number().int().min(0).max(65_535),
+  tlsCertFile: z.string().min(1).optional(),
+  tlsKeyFile: z.string().min(1).optional(),
+  queue: z.number().int().min(1).max(1024).default(16),
+  peers: z.record(z.string().regex(/^[1-9][0-9]{0,2}$/), z.string().min(1)),
+  caFile: z.string().min(1).optional(),
+  timeoutSeconds: z.number().int().min(1).max(300).default(30),
+});
 
 const AVAILABILITY = z.strictObject({
   l1: z.string().min(1),
@@ -72,9 +88,8 @@ const AVAILABILITY = z.strictObject({
     // Loopback unless the operator publishes it, as `apps/node`'s `serve`.
     host: z.string().min(1).default("127.0.0.1"),
   }),
+  tally: TALLY.optional(),
 });
-
-const LOOPBACK = ["127.0.0.1", "::1", "localhost"];
 
 const INTAKE = z
   .strictObject({
@@ -161,6 +176,24 @@ export interface AvailabilityConfig {
   readonly blocks: string;
   /** Where the seat serves that directory as a trustless gateway. */
   readonly serve: { readonly port: number; readonly host: string };
+  /** The tally duty's channel, or undefined: the node then runs no tally duty. */
+  readonly tally: TallyConfig | undefined;
+}
+
+/**
+ * The summed-share channel (README, Summed-share channel): where the seat's
+ * endpoint listens, as the intake endpoint does, and each other seat's
+ * endpoint by seat index (`https:`, or `http:` on loopback), with the CA its
+ * certificates chain to in place of the system's roots.
+ */
+export interface TallyConfig {
+  readonly host: string;
+  readonly port: number;
+  readonly tls: { readonly certFile: string; readonly keyFile: string } | undefined;
+  readonly queue: number;
+  readonly peers: ReadonlyMap<number, string>;
+  readonly caFile: string | undefined;
+  readonly timeoutMs: number;
 }
 
 export interface NodeConfig {
@@ -219,7 +252,7 @@ export function parseConfig(json: string): NodeConfig {
     store: c.store,
     coordinator: c.coordinator,
     pollSeconds: c.pollSeconds,
-    availability: c.availability && availabilityOf(c.availability),
+    availability: c.availability && availabilityOf(c.availability, c.seat, panel),
     intake: c.intake && {
       host: c.intake.host,
       port: c.intake.port,
@@ -232,7 +265,11 @@ export function parseConfig(json: string): NodeConfig {
   };
 }
 
-function availabilityOf(a: z.output<typeof AVAILABILITY>): AvailabilityConfig {
+function availabilityOf(
+  a: z.output<typeof AVAILABILITY>,
+  seat: number,
+  panel: Panel,
+): AvailabilityConfig {
   // Neither error quotes the URL, which may hold a provider's key.
   const url = (field: string, parse: (text: string) => URL, text: string) => {
     try {
@@ -265,6 +302,35 @@ function availabilityOf(a: z.output<typeof AVAILABILITY>): AvailabilityConfig {
     gateways: a.gateways.map((g, i) => url(`gateways.${i}`, parseGateway, g)),
     blocks: a.blocks,
     serve: a.serve,
+    tally: a.tally && tallyOf(a.tally, seat, panel),
+  };
+}
+
+function tallyOf(t: z.output<typeof TALLY>, seat: number, panel: Panel): TallyConfig {
+  const fail = (field: string, message: string) =>
+    new ConfigError(`config: availability.tally.${field}: ${message}`);
+  if ((t.tlsCertFile === undefined) !== (t.tlsKeyFile === undefined))
+    throw fail("tlsCertFile", "needs both tlsCertFile and tlsKeyFile, or neither");
+  if (t.tlsCertFile === undefined && !LOOPBACK.includes(t.host))
+    throw fail("host", "plain HTTP only on a loopback address");
+  const peers = new Map<number, string>();
+  for (const [key, url] of Object.entries(t.peers)) {
+    const index = Number(key);
+    if (index > panel.keys.length || index === seat)
+      throw fail(`peers.${key}`, "not another seat of the panel");
+    peers.set(index, url);
+  }
+  return {
+    host: t.host,
+    port: t.port,
+    tls:
+      t.tlsCertFile === undefined || t.tlsKeyFile === undefined
+        ? undefined
+        : { certFile: t.tlsCertFile, keyFile: t.tlsKeyFile },
+    queue: t.queue,
+    peers,
+    caFile: t.caFile,
+    timeoutMs: t.timeoutSeconds * 1000,
   };
 }
 

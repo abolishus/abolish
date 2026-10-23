@@ -1,7 +1,8 @@
 // The node's command line: `keygen`, a seat's identity key; `run`, one
 // seat's node against its coordinator, with its availability and receipt
 // duties and the gateway serving what it attests when the configuration
-// names the chains and sources they need, and its intake endpoint when it
+// names the chains and sources they need, its tally duty and summed-share
+// channel when it names the other seats' endpoints, and its intake endpoint when it
 // names where to listen; `run-env`, the same from the environment and a
 // persistent volume (env-seat.ts); and `local-ceremony`, a whole
 // ceremony between a local panel's nodes and a local coordinator over HTTP
@@ -32,6 +33,7 @@ import {
 import { type ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import { type ComplaintDutyOptions, ComplaintDuty, type ComplaintPath } from "./complaint.ts";
 import { HttpCoordinator } from "./client.ts";
+import { httpPeers, serveSummedShares } from "./channel.ts";
 import {
   type AvailabilityConfig,
   ConfigError,
@@ -40,6 +42,7 @@ import {
   readAccountKey,
   readIdentityKey,
   readTlsKey,
+  type TallyConfig,
 } from "./config.ts";
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
 import {
@@ -48,6 +51,8 @@ import {
   CountedAvailabilityDuties,
   type DutyEvent,
   ReceiptDuties,
+  TallyDuties,
+  tallyDeadline,
 } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
 import { seatFromEnv } from "./env-seat.ts";
@@ -56,6 +61,7 @@ import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
 import {
+  l2AvailabilityRecords,
   l2Postings,
   l2RecordedAvailability,
   l2RecordedComplaintBatches,
@@ -66,7 +72,16 @@ import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
-import { complaintBallots, obligationView, type ViewOptions } from "./view.ts";
+import { type AvailabilityRecords, summingRule } from "./summing.ts";
+import { TallyDuty } from "./tally.ts";
+import {
+  complaintBallots,
+  countedSource,
+  type CountedSourceOptions,
+  obligationView,
+  tallyDefinition,
+  type ViewOptions,
+} from "./view.ts";
 
 export interface CliIo {
   readonly out: (value: unknown) => void;
@@ -212,6 +227,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
           availability.counted.run(signal, ms),
           availability.receipts.run(signal, ms),
           availability.complaints.run(signal, ms),
+          ...(availability.tally ? [availability.tally.run(signal, ms)] : []),
         ]
       : []),
   ].map((loop) =>
@@ -226,6 +242,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
     server.close();
     server.closeAllConnections();
     await once(server, "close");
+    await availability.channel?.close();
   }
   await endpoint?.close();
   for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
@@ -245,18 +262,7 @@ async function intakeEndpoint(
 ): Promise<Endpoint | undefined> {
   const i = config.intake;
   if (i === undefined) return undefined;
-  let tls;
-  if (i.tls !== undefined) {
-    let cert;
-    try {
-      cert = await readFile(i.tls.certFile, "utf8");
-    } catch (e) {
-      throw new ConfigError(
-        `TLS certificate: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`,
-      );
-    }
-    tls = { cert, key: await readTlsKey(i.tls.keyFile) };
-  }
+  const tls = await tlsOf(i.tls);
   const intake = new IntakeSeat({
     panel: config.panel,
     l2ChainId: config.l2ChainId,
@@ -284,12 +290,29 @@ async function intakeEndpoint(
   }
 }
 
+/** An endpoint's certificate chain and key, read from the configured files. */
+async function tlsOf(
+  files: { readonly certFile: string; readonly keyFile: string } | undefined,
+): Promise<{ readonly cert: string; readonly key: string } | undefined> {
+  if (files === undefined) return undefined;
+  let cert;
+  try {
+    cert = await readFile(files.certFile, "utf8");
+  } catch (e) {
+    throw new ConfigError(`TLS certificate: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
+  }
+  return { cert, key: await readTlsKey(files.keyFile) };
+}
+
 /** The duties `run` steps beside the ceremony, and the gateway serving what the seat attests. */
 interface Duties {
   readonly duties: AvailabilityDuties;
   readonly counted: CountedAvailabilityDuties;
   readonly receipts: ReceiptDuties;
   readonly complaints: ComplaintDuties;
+  /** With `availability.tally` only. */
+  readonly tally: TallyDuties | undefined;
+  readonly channel: Endpoint | undefined;
   readonly server: Server;
 }
 
@@ -326,6 +349,7 @@ async function availabilityDuties(
   let contract: ContractPath;
   let receiptPath: ReceiptPath;
   let complaintPath: ComplaintPath;
+  let records: AvailabilityRecords | undefined;
   try {
     const sender = await boardSender({
       l2,
@@ -357,6 +381,7 @@ async function availabilityDuties(
       send: sender.complaintBatch,
       recorded: await l2RecordedComplaintBatches(recorded),
     };
+    if (a.tally !== undefined) records = await l2AvailabilityRecords(recorded);
   } catch (e) {
     // A RangeError here is the sender's option check, which never quotes the key.
     if (e instanceof SendError || e instanceof RecordedError || e instanceof RangeError)
@@ -429,7 +454,126 @@ async function availabilityDuties(
     io.err({ error: `serve: ${e.code ?? "failed"}` }),
   );
   io.out({ event: "serving", address: server.address() });
-  return { duties, counted, receipts, complaints, server };
+  let tally: { readonly duties: TallyDuties; readonly channel: Endpoint } | undefined;
+  if (a.tally !== undefined && records !== undefined) {
+    try {
+      tally = await tallyDuties(config, a, a.tally, { seat, wiring, records, store, clock }, io);
+    } catch (e) {
+      server.close();
+      throw e;
+    }
+  }
+  return {
+    duties,
+    counted,
+    receipts,
+    complaints,
+    tally: tally?.duties,
+    channel: tally?.channel,
+    server,
+  };
+}
+
+/**
+ * The tally duty of every approved election (README, Tally duty), with the
+ * summed-share channel listening and handing every message to it, and the
+ * other seats' endpoints to send through. Each election's duty is built
+ * over the definition registered on the seat's own L2 node, the transcript
+ * the seat's approval signed for, the summed-share rule over the counted
+ * extent's L1 reader and the board's availability records, and the counted
+ * set from the counted extent the seat attested (T-14, T-54, T-15).
+ */
+async function tallyDuties(
+  config: NodeConfig,
+  a: AvailabilityConfig,
+  t: TallyConfig,
+  s: {
+    readonly seat: CeremonySeat;
+    readonly wiring: ReturnType<typeof dutyWiring>;
+    readonly records: AvailabilityRecords;
+    readonly store: SeatStore;
+    readonly clock: () => bigint;
+  },
+  io: CliIo,
+): Promise<{ readonly duties: TallyDuties; readonly channel: Endpoint }> {
+  let ca: string | undefined;
+  if (t.caFile !== undefined) {
+    try {
+      ca = await readFile(t.caFile, "utf8");
+    } catch (e) {
+      throw new ConfigError(`tally CA: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
+    }
+  }
+  let peers;
+  try {
+    peers = httpPeers({
+      peers: t.peers,
+      ...(ca === undefined ? {} : { ca }),
+      timeoutMs: t.timeoutMs,
+    });
+  } catch (e) {
+    // A URL the parser refuses, or another scheme: neither message quotes it.
+    if (e instanceof TypeError || e instanceof RangeError)
+      throw new ConfigError(`availability.tally.peers: ${e.message}`);
+    throw e;
+  }
+  const { seat, wiring, records, store, clock } = s;
+  const duties = new TallyDuties(
+    {
+      seat,
+      clock,
+      log: (e: DutyEvent) => io.out(e),
+      build: async (election) => {
+        const secrets = await seat.intakeSecrets(election.stubHash);
+        const transcript = await seat.approvedTranscript(election.stubHash);
+        // Listed as approved, so both exist; each throws if its records don't.
+        if (secrets === undefined || transcript === undefined)
+          throw new Error("trustee node: an approval without its secrets or transcript");
+        const definition = await tallyDefinition(wiring.view, election);
+        const reader = await l1BoardAnchors(
+          wiring.anchors,
+          election,
+          AVAILABILITY_POINTS.countedExtent,
+        );
+        const duty = new TallyDuty({
+          panel: config.panel,
+          l2ChainId: config.l2ChainId,
+          trusteeRegistry: config.trusteeRegistry,
+          election,
+          secrets,
+          definition,
+          transcript,
+          store,
+          summing: summingRule({ election, l1: reader, counted: a.anchorClock, records, clock }),
+          counted: countedSource(wiring.counted),
+          peers,
+        });
+        return {
+          step: () => duty.step(),
+          receive: (message) => duty.receive(message),
+          deadline: tallyDeadline(election, a.anchorClock),
+        };
+      },
+    },
+    a.anchorClock,
+  );
+  const tls = await tlsOf(t.tls);
+  let channel;
+  try {
+    channel = await serveSummedShares((message) => duties.receive(message), {
+      host: t.host,
+      port: t.port,
+      ...(tls === undefined ? {} : { tls }),
+      queue: t.queue,
+      log: (e) => io.out(e),
+    });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === undefined) throw e;
+    throw new ConfigError(`availability.tally: ${code}`);
+  }
+  io.out({ event: "summed-shares", url: channel.url });
+  return { duties, channel };
 }
 
 /** What `run` builds the duty over, besides the configuration. */
@@ -470,6 +614,7 @@ export function dutyWiring(
     reader: FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion },
   ) => AvailabilityOptions;
   readonly view: ViewOptions;
+  readonly counted: CountedSourceOptions;
   readonly receipts: (election: ApprovedElection) => ReceiptDutyOptions;
   readonly complaints: (election: ApprovedElection) => ComplaintDutyOptions;
 } {
@@ -522,6 +667,30 @@ export function dutyWiring(
         ? new AvailabilitySeat(seat(election, await l1BoardAnchors(anchors, election))).heldExtent()
         : undefined,
   };
+  // The counted set's source reads the counted extent the seat attested at
+  // point 2, set up as the counted availability duty's is, over the same
+  // store (README, Tally duty).
+  const counted: CountedSourceOptions = {
+    panel: view.panel,
+    l1: view.l1,
+    l1ChainId: view.l1ChainId,
+    l2: view.l2,
+    l2ChainId: view.l2ChainId,
+    registry: view.registry,
+    registryFromBlock: view.registryFromBlock,
+    board: view.board,
+    boardFromBlock: view.boardFromBlock,
+    counted: a.anchorClock,
+    extent: async (election) => {
+      const point = AVAILABILITY_POINTS.countedExtent;
+      if (!(await attested(s.store, election.definitionHash, point))) return undefined;
+      const reader = await l1BoardAnchors(anchors, election, point);
+      return new AvailabilitySeat({
+        ...seat(election, reader),
+        counted: a.anchorClock,
+      }).heldExtent();
+    },
+  };
   // One view for every election: it holds no state of its own.
   const decide = obligationView(view);
   const ballots = complaintBallots(view);
@@ -529,6 +698,7 @@ export function dutyWiring(
     anchors,
     seat,
     view,
+    counted,
     receipts: (election) => ({
       store: s.store,
       election,

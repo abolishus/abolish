@@ -29,6 +29,7 @@ import {
   DecodeError,
   decodeBoardEntry,
   decodeContractEvent,
+  type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionV5Hash,
   type EventContracts,
@@ -65,7 +66,7 @@ import { l2BlockTime } from "./recorded.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
-import type { CountedSet } from "./tally.ts";
+import type { CountedSet, TallyDefinition } from "./tally.ts";
 
 export interface ViewOptions {
   readonly store: SeatStore;
@@ -237,6 +238,19 @@ export function complaintBallots(
   };
 }
 
+/**
+ * The registered definition, as the tally duty takes it, from the seat's own
+ * L2 node: the approved one, of version 1 or 5 and naming the deployment's
+ * board, or `ViewError`, as `obligationView` reads it. The duty checks it
+ * against the approval again (T-37).
+ */
+export async function tallyDefinition(
+  options: Omit<ViewOptions, "store" | "extent">,
+  election: ApprovedElection,
+): Promise<TallyDefinition> {
+  return (await registered(options, election)).decoded;
+}
+
 export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent"> {
   /**
    * The counted extent the seat attested, if it did (`heldExtent` of its
@@ -399,6 +413,7 @@ async function registered(
   election: ApprovedElection,
 ): Promise<{
   readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
+  readonly decoded: Exclude<TallyDefinition, ElectionDefinition>;
   readonly boardVersion: BoardEntryVersion;
   readonly eventVersion: ContractEventVersion;
   readonly l2Head: bigint;
@@ -435,7 +450,7 @@ async function registered(
     !equal(d.board, options.board)
   )
     throw new ViewError("definition");
-  return { definition: reg.definition, boardVersion, eventVersion, l2Head };
+  return { definition: reg.definition, decoded, boardVersion, eventVersion, l2Head };
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {

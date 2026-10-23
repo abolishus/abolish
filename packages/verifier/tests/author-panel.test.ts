@@ -81,7 +81,7 @@ const registrations = read("author-registration.json") as {
     readonly transcript: string;
     readonly records: readonly string[];
     readonly events: readonly string[];
-    readonly recorded?: string;
+    readonly recordedKeySetHash?: string;
     readonly result:
       | { readonly ok: true; readonly seats: readonly number[] }
       | { readonly ok: false; readonly code: string; readonly seats?: readonly number[] };
@@ -536,7 +536,7 @@ describe("the author panel's registration on L2", () => {
   test("every registration vector decides 3.1's author part as the spec's check does", () => {
     // The verifier authenticates no registration yet (4.4's replay, the L2
     // reads), so the cases that need the recorded one aren't its.
-    for (const c of registrations.cases.filter((x) => x.recorded === undefined)) {
+    for (const c of registrations.cases.filter((x) => x.recordedKeySetHash === undefined)) {
       const r = ceremonyChecks(
         d9,
         hex(election.stubHash),

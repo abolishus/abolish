@@ -387,23 +387,36 @@
     },
     {
       "id": "recorded",
-      "description": "The registration the registry recorded, authenticated, approves alone.",
+      "description": "The key set the registry recorded is the transcript's: the quorum's record approves.",
+      "transcript": "author-honest-3",
+      "records": ["quorum"],
+      "events": [],
+      "recordedKeySetHash": "aabff210e003a9246f8cbb40bd49240ee2d5f53cc485eab63e80afc08a9d5341",
+      "result": {
+        "ok": true,
+        "seats": [1, 3]
+      }
+    },
+    {
+      "id": "recorded-alone",
+      "description": "A recorded key set hash carries no approval: with nothing else, none names the transcript.",
       "transcript": "author-honest-3",
       "records": [],
       "events": [],
-      "recorded": "all",
+      "recordedKeySetHash": "aabff210e003a9246f8cbb40bd49240ee2d5f53cc485eab63e80afc08a9d5341",
       "result": {
-        "ok": true,
-        "seats": [1, 2, 3]
+        "ok": false,
+        "code": "author-approvals-missing",
+        "seats": []
       }
     },
     {
       "id": "recorded-other-key-set",
-      "description": "The recorded registration is over another key set: the check fails, whatever approves, since the board takes the author seats' keys from it (T-37).",
+      "description": "The registry recorded another key set: the check fails, whatever approves, since the board takes the author seats' keys from it (T-37).",
       "transcript": "author-honest-3",
       "records": ["all"],
       "events": ["all"],
-      "recorded": "other-key-set",
+      "recordedKeySetHash": "7c938a8e17170ea02ba86f31af1717e113ae430d0e00694dca55fb2bec7726f5",
       "result": {
         "ok": false,
         "code": "key-set-mismatch"
@@ -411,14 +424,14 @@
     },
     {
       "id": "recorded-other-key-set-unsigned",
-      "description": "A recorded registration no quorum signed is none the registry emits: it carries nothing.",
+      "description": "The registry recorded another key set whose approvals the checker can't verify: it fails closed, whether or not the registry's own checks held (T-37).",
       "transcript": "author-honest-3",
       "records": ["all"],
       "events": [],
-      "recorded": "other-key-set-unsigned",
+      "recordedKeySetHash": "7c938a8e17170ea02ba86f31af1717e113ae430d0e00694dca55fb2bec7726f5",
       "result": {
-        "ok": true,
-        "seats": [1, 2, 3]
+        "ok": false,
+        "code": "key-set-mismatch"
       }
     },
     {
@@ -586,11 +599,11 @@
     },
     {
       "id": "short-other-key-set",
-      "description": "Participation is decided before the recorded registration's key set.",
+      "description": "Participation is decided before the recorded key set.",
       "transcript": "author-short",
       "records": [],
       "events": [],
-      "recorded": "short-other-key-set",
+      "recordedKeySetHash": "30a5480b7f3a996dc8c2e28641f8ce78d1f301f4210431c94a3862d96be938a5",
       "result": {
         "ok": false,
         "code": "ceremony-participation"

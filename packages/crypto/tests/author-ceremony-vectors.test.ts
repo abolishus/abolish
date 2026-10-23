@@ -157,7 +157,7 @@ interface RegistrationVectors {
     readonly transcript: string;
     readonly records: readonly string[];
     readonly events: readonly string[];
-    readonly recorded?: string;
+    readonly recordedKeySetHash?: string;
     readonly result: { readonly ok: boolean; readonly code?: string; readonly seats?: number[] };
   }[];
 }
@@ -508,7 +508,7 @@ describe("author-registration.json", () => {
           approvalContext(c.transcript),
           c.records.map(recordOf),
           registrations,
-          c.recorded === undefined ? undefined : registrationOf(c.recorded),
+          c.recordedKeySetHash === undefined ? undefined : hex(c.recordedKeySetHash),
         ),
       ).toEqual(c.result);
     },
@@ -534,9 +534,6 @@ describe("author-registration.json", () => {
           const changed = Uint8Array.from(all);
           changed[at] = (changed[at] as number) ^ flip;
           const r = checkAuthorApprovals(ctx, [], [changed]);
-          // As the recorded registration it reads alike: no quorum signed
-          // the changed key set, so it is none the registry emits.
-          expect(checkAuthorApprovals(ctx, [], [], changed)).toEqual(r);
           if (at < approvalsAt)
             // The header, a seat or a count: the approvals no longer sign
             // what the registration says, so no quorum registered it and it
@@ -557,21 +554,25 @@ describe("author-registration.json", () => {
     );
   }, 120_000);
 
-  test("another key set fails the check only as the recorded registration, ahead of approvals", () => {
+  test("another key set fails the check only as the recorded one, ahead of approvals", () => {
     const ctx = approvalContext("author-honest-3");
     const other = registrationOf("other-key-set");
-    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], other)).toEqual({
+    const otherHash = keySetHash(decodeCeremonyRegistration(other).keySet);
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], otherHash)).toEqual({
       ok: false,
       code: "key-set-mismatch",
     });
-    // Found anywhere else it carries nothing (T-53).
+    // The transcript's own recorded hash adds nothing and refuses nothing.
+    const own = keySetHash(ctx.registered.map(keySetEntry));
+    expect(checkAuthorApprovals(ctx, [recordOf("all")], [], own)).toEqual(
+      checkAuthorApprovals(ctx, [recordOf("all")]),
+    );
+    // Found on a copy it carries nothing (T-53).
     expect(checkAuthorApprovals(ctx, [recordOf("all")], [other])).toEqual({
       ok: true,
       seats: [1, 2, 3],
     });
     expect(() => checkAuthorApprovals(ctx, [], "x" as unknown as Uint8Array[])).toThrow(TypeError);
-    expect(() => checkAuthorApprovals(ctx, [], [], "x" as unknown as Uint8Array)).toThrow(
-      TypeError,
-    );
+    expect(() => checkAuthorApprovals(ctx, [], [], own.subarray(1))).toThrow(TypeError);
   });
 });

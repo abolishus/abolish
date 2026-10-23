@@ -165,13 +165,7 @@ function decoded(bytes: Uint8Array): AuthorApprovals | DecodeError {
 
 // The seats whose approvals in one record count, or null when the record's
 // seats aren't strictly increasing within 1 to n_A, which spoils all of it.
-// `keySet` is the key set hash the approvals sign: the checker's own, but
-// for a registration's quorum, the registration's (`fromRegistration`).
-function counting(
-  p: Prepared,
-  record: AuthorApprovals,
-  keySet: Uint8Array = p.keySet,
-): number[] | null {
+function counting(p: Prepared, record: AuthorApprovals): number[] | null {
   let previous = 0;
   for (const { index } of record.approvals) {
     if (index <= previous || index > p.n) return null;
@@ -188,7 +182,7 @@ function counting(
           index,
           stubHash: authorStubHash,
           ceremonyTranscriptHash: authorTranscriptHash,
-          keySetHash: keySet,
+          keySetHash: p.keySet,
         },
         signature,
       ),
@@ -200,17 +194,14 @@ function counting(
  * An `AuthorPanelRegistered` registration read as an approvals record naming
  * the transcript, when it is one of this run's: its header is this run's
  * (`author_panel_id`, `author_stub_hash`, `author_transcript_hash`) and at
- * least `q_A` distinct seats' approvals in it verify over its own key set,
- * as the election registry requires before it emits one; then
- * `key-set-mismatch` when that key set isn't the checker's own, which fails
- * the check only for the registration the registry recorded (T-37, T-14).
- * Undefined for anything else, which the registry never emits for this
- * definition (contracts.md, Author panel registration, checks 2 to 9).
+ * least `q_A` distinct seats' approvals in it verify over its key set, as
+ * the election registry requires before it emits one, and that key set is
+ * the checker's own. Undefined for anything else: a registration found on a
+ * copy over another key set carries nothing, since only the one the registry
+ * recorded sets the board's keys, and that one is judged by its key set
+ * hash alone (`checkAuthorApprovals`' `recordedKeySetHash`; T-53, T-37).
  */
-function fromRegistration(
-  p: Prepared,
-  bytes: Uint8Array,
-): AuthorApprovals | "key-set-mismatch" | undefined {
+function fromRegistration(p: Prepared, bytes: Uint8Array): AuthorApprovals | undefined {
   let r;
   try {
     r = decodeCeremonyRegistration(bytes);
@@ -232,9 +223,8 @@ function fromRegistration(
     transcript_hash: r.ceremonyTranscriptHash,
     approvals: r.approvals.map((a) => ({ index: a.index, signature: a.signature })),
   };
-  const own = keySetHash(r.keySet);
-  if ((counting(p, record, own) ?? []).length < p.quorum) return undefined;
-  return equalBytes(own, p.keySet) ? record : "key-set-mismatch";
+  if (!equalBytes(keySetHash(r.keySet), p.keySet)) return undefined;
+  return (counting(p, record) ?? []).length < p.quorum ? undefined : record;
 }
 
 /**
@@ -246,11 +236,13 @@ function fromRegistration(
  * can match, from wherever it found them (The registration's approvals):
  * one of this run's, `q_A` seats approving its key set, adds its approvals
  * when that set is the checker's and carries nothing otherwise, since only
- * the one the registry recorded sets the keys the board uses. `recorded` is
- * that one, when the caller has authenticated it (read from L2 state, or an
- * event the accumulator replay proves): a key set there other than the
- * checker's fails the check (`key-set-mismatch`, T-37, T-14). So bytes no one
- * can show the registry recorded never fail it (T-53). Otherwise every
+ * the one the registry recorded sets the keys the board uses.
+ * `recordedKeySetHash` is that one's `key_set_hash`, when the caller has
+ * authenticated it (`authorKeySetOf` on L2, or recomputed from an event the
+ * accumulator replay proves): any value other than the checker's fails the
+ * check (`key-set-mismatch`, T-37, T-14), whatever approves and whether or
+ * not the registry's own checks held, and it carries no approval. So bytes
+ * no one can show the registry recorded never fail it (T-53). Otherwise every
  * record that decodes strictly and names the transcript, and every
  * registration of this run, is counted, each seat once however many valid
  * signatures it has; it approves with at least `q_A` seats. With none
@@ -261,20 +253,20 @@ export function checkAuthorApprovals(
   context: AuthorApprovalContext,
   records: readonly Uint8Array[],
   registrations: readonly Uint8Array[] = [],
-  recorded?: Uint8Array,
+  recordedKeySetHash?: Uint8Array,
 ): AuthorApprovalsCheck {
   const p = prepare(context);
   if (!Array.isArray(registrations))
     throw new TypeError("author approvals: expected the registrations as an array");
-  if (recorded !== undefined && !(recorded instanceof Uint8Array))
-    throw new TypeError("author approvals: expected the recorded registration as bytes");
+  if (
+    recordedKeySetHash !== undefined &&
+    !(recordedKeySetHash instanceof Uint8Array && recordedKeySetHash.length === 32)
+  )
+    throw new TypeError("author approvals: expected the recorded key set hash as 32 bytes");
   if (p.ctx.registered.length < p.quorum) return { ok: false, code: "ceremony-participation" };
+  if (recordedKeySetHash !== undefined && !equalBytes(recordedKeySetHash, p.keySet))
+    return { ok: false, code: "key-set-mismatch" };
   const named: AuthorApprovals[] = [];
-  if (recorded !== undefined) {
-    const record = fromRegistration(p, recorded);
-    if (record === "key-set-mismatch") return { ok: false, code: record };
-    if (record !== undefined) named.push(record);
-  }
   for (const bytes of records) {
     const record = decoded(bytes);
     if (record instanceof DecodeError) continue;
@@ -282,7 +274,7 @@ export function checkAuthorApprovals(
   }
   for (const bytes of registrations) {
     const record = fromRegistration(p, bytes);
-    if (record !== undefined && record !== "key-set-mismatch") named.push(record);
+    if (record !== undefined) named.push(record);
   }
   const counted = new Set<number>();
   for (const record of named) for (const seat of counting(p, record) ?? []) counted.add(seat);

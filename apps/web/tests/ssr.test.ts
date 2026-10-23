@@ -18,6 +18,7 @@ import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { offlineWorkerConfig } from "../src/app/offline.ts";
+import { pushNotice } from "../src/app/offline-page.tsx";
 import type { AskedBy } from "../src/poll.ts";
 import type { ProfileRecord } from "../src/server/load.ts";
 import type { StartRequestContext } from "../src/start.ts";
@@ -1646,13 +1647,15 @@ describe("offline shell", () => {
     const source = await response.text();
     const html = await (await get("/offline")).text();
     const stylesheet = /<link rel="stylesheet" href="([^"]+)"/.exec(html)?.[1] ?? "";
-    expect(source).toContain(JSON.stringify(await offlineWorkerConfig(html, stylesheet)));
+    expect(source).toContain(
+      JSON.stringify(await offlineWorkerConfig(html, stylesheet, pushNotice())),
+    );
     // The built server's copy of the worker uses nothing outside itself.
     const listened: string[] = [];
     runInNewContext(source, {
       self: { addEventListener: (type: string) => listened.push(type) },
     });
-    expect(listened).toEqual(["install", "activate", "fetch"]);
+    expect(listened).toEqual(["install", "activate", "fetch", "push", "notificationclick"]);
   });
 
   test("every page lets the worker start, from our own origin only", async () => {
@@ -1725,7 +1728,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${ID}`]: { html: 9, js: 200, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 186, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 191, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 243, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 165, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },

@@ -3,6 +3,7 @@
 // only abolish_app. dist/node/main.mjs serves the built pages, the hashed
 // assets and the account handler.
 
+import { newVapidKey, vapidKeys, vapidPublicKey } from "@abolishus/core";
 import { shortCode } from "@abolishus/core/short-codes";
 import {
   decodeDeploymentRecord,
@@ -491,6 +492,79 @@ describe("dist/node/main.mjs", () => {
       const [code] = (await once(web.child, "exit")) as [number];
       expect(code).not.toBe(0);
       expect(web.err()).toContain(message);
+    },
+    30_000,
+  );
+
+  test("with web push configured, serves its key to anyone, from the bundle alone", async () => {
+    const port = await freePort();
+    const secret = newVapidKey();
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
+      ...EMAIL,
+      VAPID_SECRET_KEY: secret,
+      VAPID_SUBJECT: "mailto:push@abolish.test",
+      WEB_PORT: String(port),
+    });
+    try {
+      const at = `http://127.0.0.1:${port}`;
+      let key: Response | undefined;
+      for (let i = 0; i < 100 && key === undefined && web.child.exitCode === null; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        key = await fetch(`${at}/push/key`).catch(() => undefined);
+      }
+      expect(key?.status).toBe(200);
+      expect(await key?.json()).toEqual({ key: vapidPublicKey(vapidKeys(secret)) });
+      expect(web.err()).not.toContain(secret);
+    } finally {
+      if (web.child.exitCode === null) {
+        const exited = once(web.child, "exit");
+        web.child.kill("SIGTERM");
+        await exited;
+      }
+    }
+  }, 30_000);
+
+  test.each([
+    ["half a configuration", { VAPID_SECRET_KEY: "unpaired" }, false, "go together"],
+    [
+      "web push without the e-mail service",
+      { VAPID_SECRET_KEY: "unpaired", VAPID_SUBJECT: "mailto:push@abolish.test" },
+      false,
+      "VAPID_SECRET_KEY needs the e-mail service",
+    ],
+    [
+      "a key that isn't a P-256 secret key",
+      { VAPID_SECRET_KEY: "unpaired", VAPID_SUBJECT: "mailto:push@abolish.test" },
+      true,
+      "VAPID_SECRET_KEY",
+    ],
+    [
+      "a subject that is neither an address nor an https URL",
+      { VAPID_SECRET_KEY: newVapidKey(), VAPID_SUBJECT: "http://abolish.test" },
+      true,
+      "VAPID_SUBJECT",
+    ],
+  ])(
+    "refuses web push with %s, quoting none of it",
+    async (_, change, email, message) => {
+      const web = run({
+        DATABASE_URL: database(),
+        API_URL: "http://127.0.0.1:9",
+        WEB_ORIGIN: "https://abolish.test",
+        ACCOUNT_SECRET: SECRET,
+        TURNSTILE_SECRET_KEY: "turnstile-secret",
+        ...(email ? EMAIL : {}),
+        ...change,
+      });
+      const [code] = (await once(web.child, "exit")) as [number];
+      expect(code).not.toBe(0);
+      expect(web.err()).toContain(message);
+      expect(web.err()).not.toContain(change.VAPID_SECRET_KEY);
     },
     30_000,
   );

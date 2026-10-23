@@ -13,13 +13,17 @@ import {
   createPostmarkSender,
   createTurnstile,
   createTwilioVerifier,
+  createWebPushSender,
   emailKeys,
   type Keyring,
   parseKeyring,
   parseTier0IssuerKeys,
   readProfile,
+  type PushSender,
   type Tier0Issuer,
   tier0Issuer,
+  vapidKeys,
+  vapidPublicKey,
 } from "@abolishus/core";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
@@ -34,6 +38,7 @@ import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
 import { createExportHandler } from "./export.ts";
 import { createProfilesHandler } from "./profiles.ts";
+import { createPushHandler } from "./push.ts";
 import { createReactionsHandler } from "./reactions.ts";
 import { createWebServer, type StartHandler } from "./serve.ts";
 import { createTokenHandler } from "./token.ts";
@@ -123,6 +128,15 @@ const Env = z
       .string()
       .regex(/^(?:[0-9a-f]{2})+$/)
       .optional(),
+    // Web push beside the moderation notices' e-mail (src/node/push.ts;
+    // packages/core, src/web-push.ts; T-76): the VAPID secret key (a P-256
+    // scalar as unpadded base64url, held here apart from every other secret)
+    // and the contact the push services may reach us at (`mailto:` or an
+    // https URL). Both or neither, and only with the e-mail service, which
+    // sends the notices a push goes beside: without them every /push route
+    // answers 503 and the account page offers no push.
+    VAPID_SECRET_KEY: z.string().min(1).optional(),
+    VAPID_SUBJECT: z.string().min(1).optional(),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -166,6 +180,12 @@ const Env = z
   )
   .refine((env) => env.PHONE_VERIFICATION === "off" || env.PHONE_HASH_KEYS !== undefined, {
     message: "PHONE_VERIFICATION=on needs PHONE_HASH_KEYS and the phone provider's settings",
+  })
+  .refine((env) => (env.VAPID_SECRET_KEY === undefined) === (env.VAPID_SUBJECT === undefined), {
+    message: "VAPID_SECRET_KEY and VAPID_SUBJECT go together",
+  })
+  .refine((env) => env.VAPID_SECRET_KEY === undefined || env.EMAIL_FROM !== undefined, {
+    message: "VAPID_SECRET_KEY needs the e-mail service, whose notices a push goes beside",
   })
   .refine(
     (env) =>
@@ -212,6 +232,8 @@ const env = Env.parse({
   TIER0_GROUP_REGISTRY: process.env["TIER0_GROUP_REGISTRY"] || undefined,
   TIER0_GROUP: process.env["TIER0_GROUP"] || undefined,
   TIER0_DEPLOYMENT_RECORD: process.env["TIER0_DEPLOYMENT_RECORD"] || undefined,
+  VAPID_SECRET_KEY: process.env["VAPID_SECRET_KEY"] || undefined,
+  VAPID_SUBJECT: process.env["VAPID_SUBJECT"] || undefined,
 });
 
 /** Runs `make`, naming `name` and never the value in any failure: a key or a token (T-65). */
@@ -337,6 +359,22 @@ function tokenIssuer(): Tier0Issuer | undefined {
   return issuer;
 }
 
+/**
+ * The push sender and the public key browsers subscribe with, if configured.
+ * Each failure names the variable, never its value (T-65).
+ */
+function webPush(): { readonly sender: PushSender; readonly publicKey: string } | undefined {
+  const { VAPID_SECRET_KEY, VAPID_SUBJECT } = env;
+  if (VAPID_SECRET_KEY === undefined || VAPID_SUBJECT === undefined) return undefined;
+  const keys = attempt("VAPID_SECRET_KEY", () => vapidKeys(VAPID_SECRET_KEY));
+  return {
+    sender: attempt("VAPID_SECRET_KEY or VAPID_SUBJECT", () =>
+      createWebPushSender({ secretKey: VAPID_SECRET_KEY, subject: VAPID_SUBJECT }),
+    ),
+    publicKey: vapidPublicKey(keys),
+  };
+}
+
 const write = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
 // Beside this file in dist/: node/main.mjs, server/server.js, client/.
@@ -410,6 +448,13 @@ const accountExport = createExportHandler({
   emailKeys: emailVerification?.keys,
   origin,
 });
+const pushService = webPush();
+const push = createPushHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  publicKey: pushService?.publicKey,
+  origin,
+});
 // A profile's page reads it by its public handle alone, never with a
 // session (pages never get the cookie), from the account side the API never
 // reads (T-10; [[0040-creator-profiles]]).
@@ -440,6 +485,7 @@ const prune = startAccountPrune({
   ...(emailVerification === undefined
     ? {}
     : { emailKeys: emailVerification.keys, noticeSender: emailVerification.sender }),
+  ...(pushService === undefined ? {} : { pushSender: pushService.sender }),
 });
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
@@ -460,6 +506,7 @@ const server = createWebServer({
   reactions,
   profiles,
   accountExport,
+  push,
   context: { readProfile: publicProfile, readAskedBy: pollAskedBy },
   clientDir: fileURLToPath(new URL("../client/", import.meta.url)),
   origin,

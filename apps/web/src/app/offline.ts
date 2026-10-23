@@ -13,6 +13,12 @@
 // its own policy and entry points (ADR 0020; T-41, T-43), and nothing here
 // reaches it.
 //
+// The same worker shows web push's notice (P2-27 part 4b; T-76): a push
+// from our server carries no payload, so it shows one fixed notice, words
+// set here when the worker is served, whatever a push carries, and a click
+// opens the account page, where what happened is said. It reads nothing
+// from the push and sends nothing on.
+//
 // A service worker outlives the page that registered it, so it is kept as
 // small as it can be (T-43, T-57): it takes no input but the requests it
 // sees, the page may register only our own `/sw.js` (`worker-src 'self'`),
@@ -38,6 +44,18 @@ export interface OfflineWorkerConfig {
   readonly offline: string;
   /** The offline page's stylesheet, a content-hashed path under `/assets/`. */
   readonly stylesheet: string;
+  /** What a push shows: always these words, whatever it carries. */
+  readonly notice: PushNotice;
+}
+
+/** Web push's one notice (P2-27 part 4b). */
+export interface PushNotice {
+  readonly title: string;
+  readonly body: string;
+  /** The site's icon, on this origin. */
+  readonly icon: string;
+  /** The page a click opens, on this origin: the account page. */
+  readonly open: string;
 }
 
 // What the worker uses of its global scope, typed here: the site's code is
@@ -52,17 +70,32 @@ interface FetchEvent extends ExtendableEvent {
   respondWith(response: Promise<Response>): void;
 }
 
+interface NotificationEvent extends ExtendableEvent {
+  readonly notification: { close(): void };
+}
+
 export interface OfflineWorkerScope {
   readonly location: { readonly origin: string };
   readonly caches: CacheStorage;
   readonly registration: {
     readonly navigationPreload?: { enable(): Promise<void> };
+    showNotification(
+      title: string,
+      options: { body: string; icon: string; tag: string },
+    ): Promise<void>;
   };
-  readonly clients: { claim(): Promise<void> };
+  readonly clients: {
+    claim(): Promise<void>;
+    openWindow(url: string): Promise<unknown>;
+  };
   fetch(request: Request | string): Promise<Response>;
   skipWaiting(): Promise<void>;
-  addEventListener(type: "install" | "activate", listener: (event: ExtendableEvent) => void): void;
+  addEventListener(
+    type: "install" | "activate" | "push",
+    listener: (event: ExtendableEvent) => void,
+  ): void;
   addEventListener(type: "fetch", listener: (event: FetchEvent) => void): void;
+  addEventListener(type: "notificationclick", listener: (event: NotificationEvent) => void): void;
 }
 
 /**
@@ -134,16 +167,30 @@ export function offlineWorker(scope: OfflineWorkerScope, config: OfflineWorkerCo
     if (url.search === "" && (url.pathname === config.stylesheet || font.test(url.pathname)))
       event.respondWith(stored(request, url.pathname));
   });
+
+  // A push wakes the worker with nothing to read (T-76): it shows the one
+  // notice, as a browser requires of every push, and never the push's data.
+  // One tag, so a second notice replaces the first rather than stacking.
+  scope.addEventListener("push", (event) => {
+    const { title, body, icon } = config.notice;
+    event.waitUntil(scope.registration.showNotification(title, { body, icon, tag: "notice" }));
+  });
+
+  scope.addEventListener("notificationclick", (event) => {
+    event.notification.close();
+    event.waitUntil(scope.clients.openWindow(config.notice.open));
+  });
 }
 
 /** `/sw.js`: the worker as a classic script, run with `config`. */
 export const offlineWorkerSource = (config: OfflineWorkerConfig): string =>
   `"use strict";\n(${offlineWorker.toString()})(self, ${JSON.stringify(config)});\n`;
 
-/** The worker's configuration for an offline page whose HTML is `html`. */
+/** The worker's configuration for an offline page whose HTML is `html`, showing `notice` on a push. */
 export async function offlineWorkerConfig(
   html: string,
   stylesheet: string,
+  notice: PushNotice,
 ): Promise<OfflineWorkerConfig> {
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(html)),
@@ -152,7 +199,7 @@ export async function offlineWorkerConfig(
   // page does (its words, or its stylesheet's name) and the browser
   // installs the worker again, filling a fresh cache.
   const hash = toHex(digest.slice(0, 16));
-  return { cache: `${CACHE_PREFIX}${hash}`, offline: OFFLINE_PATH, stylesheet };
+  return { cache: `${CACHE_PREFIX}${hash}`, offline: OFFLINE_PATH, stylesheet, notice };
 }
 
 /**

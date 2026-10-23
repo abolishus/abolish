@@ -78,3 +78,21 @@ export async function unsubscribePush(
     .returning({ endpoint: s.endpoint });
   return gone.length > 0;
 }
+
+/**
+ * Whether `endpoint` is subscribed for `userId`: the account page asks so a
+ * browser another account subscribed isn't shown as this one's (an endpoint
+ * belongs to one account at a time).
+ */
+export async function pushSubscribed(
+  client: Sql,
+  userId: string,
+  endpoint: string,
+): Promise<boolean> {
+  const s = accountPushSubscriptions;
+  const rows = await drizzle({ client })
+    .select({ endpoint: s.endpoint })
+    .from(s)
+    .where(and(eq(s.userId, userId), eq(s.endpoint, endpoint)));
+  return rows.length > 0;
+}

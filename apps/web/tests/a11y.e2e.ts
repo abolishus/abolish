@@ -133,6 +133,7 @@ beforeAll(async () => {
     reactions: nothing,
     profiles: nothing,
     accountExport: nothing,
+    push: nothing,
     clientDir: `${root}dist/client`,
     origin,
     log: () => {},

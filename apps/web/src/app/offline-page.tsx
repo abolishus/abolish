@@ -3,8 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { Offline, SiteLayout } from "../components/site-layout.tsx";
 import { catalogs, LOCALE } from "../messages.ts";
-import { pageTitle } from "../titles.ts";
-import { ICON_SVG_PATH } from "./install.ts";
+import { pageTitle, text } from "../titles.ts";
+import { ICON_PNGS, ICON_SVG_PATH } from "./install.ts";
+import type { PushNotice } from "./offline.ts";
 
 function OfflineDocument({ stylesheet }: { stylesheet: string }) {
   const t = useTranslate(catalogs);
@@ -39,3 +40,18 @@ export const offlinePage = (stylesheet: string): string =>
       <OfflineDocument stylesheet={stylesheet} />
     </I18nProvider>,
   )}`;
+
+/**
+ * Web push's one notice, as the worker shows it (P2-27 part 4b): it says
+ * only that a moderator decided something, as the e-mail does, and opens the
+ * account page, which says what (T-73, T-76). A lock screen shows it to
+ * anyone near the device, so it names no poll, profile or decision.
+ */
+export const pushNotice = (): PushNotice => ({
+  title: text("pushNoticeTitle"),
+  body: text("pushNoticeBody"),
+  // The 192-pixel PNG, the list's first (so present): every browser's
+  // notifications take a PNG, not all an SVG.
+  icon: ICON_PNGS[0]!.path,
+  open: "/account",
+});

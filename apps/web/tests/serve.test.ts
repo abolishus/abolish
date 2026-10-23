@@ -22,11 +22,14 @@ import {
   moderate,
   moderateProfile,
   newAccountId,
+  newVapidKey,
   PROFILE_HANDLE,
   parseTier0IssuerKeys,
   readProfileReportQueue,
   tier0Issuer,
   type TurnstileAction,
+  vapidKeys,
+  vapidPublicKey,
 } from "@abolishus/core";
 import {
   generateTier0TokenKeyPair,
@@ -64,6 +67,7 @@ import { createEmailHandler } from "../src/node/email.ts";
 import { createExportHandler } from "../src/node/export.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
 import { createProfilesHandler } from "../src/node/profiles.ts";
+import { createPushHandler } from "../src/node/push.ts";
 import { createReactionsHandler } from "../src/node/reactions.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 import { createTokenHandler } from "../src/node/token.ts";
@@ -97,6 +101,8 @@ const analytics: Analytics = {
 const submitted: [string | null, TurnstileAction][] = [];
 /** The drafts handler's clock. */
 const NOW = new Date("2026-10-17T12:00:00Z");
+/** The push handler's VAPID public key. */
+const PUSH_KEY = vapidPublicKey(vapidKeys(newVapidKey()));
 
 /** Every message the e-mail handler's sender was asked to send. */
 const mailed: EmailMessage[] = [];
@@ -305,6 +311,13 @@ beforeAll(async () => {
       sql,
       accountOf: (headers) => accounts.accountOf(headers),
       emailKeys: EMAIL_KEYS,
+      origin: ORIGIN,
+      now: () => NOW,
+    }),
+    push: createPushHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      publicKey: PUSH_KEY,
       origin: ORIGIN,
       now: () => NOW,
     }),
@@ -1088,7 +1101,7 @@ describe("failures", () => {
     ]);
   });
 
-  test("the reaction counts and a profile's report never get the account cookie; the rest do", async () => {
+  test("the reaction counts, a profile's report and the push key never get the account cookie; the rest do", async () => {
     const seen: [string, string | null][] = [];
     const record = async (request: Request) => {
       seen.push([new URL(request.url).pathname, request.headers.get("cookie")]);
@@ -1104,6 +1117,7 @@ describe("failures", () => {
       reactions: record,
       profiles: record,
       accountExport: record,
+      push: record,
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1124,6 +1138,10 @@ describe("failures", () => {
         "/profiles/delete",
         "/profiles/show",
         "/export",
+        "/push/key",
+        "/push/status",
+        "/push/subscribe",
+        "/push/unsubscribe",
       ])
         await fetch(`http://127.0.0.1:${port}${path}`, {
           method: "POST",
@@ -1147,6 +1165,10 @@ describe("failures", () => {
         ["/profiles/delete", `${SESSION}=tok`],
         ["/profiles/show", `${SESSION}=tok`],
         ["/export", `${SESSION}=tok`],
+        ["/push/key", null],
+        ["/push/status", `${SESSION}=tok`],
+        ["/push/subscribe", `${SESSION}=tok`],
+        ["/push/unsubscribe", `${SESSION}=tok`],
       ]);
     } finally {
       await new Promise((resolve) => front.close(resolve));
@@ -1906,6 +1928,7 @@ describe("an account's Tier 0 token under /token", () => {
       reactions: async () => new Response(),
       profiles: async () => new Response(),
       accountExport: async () => new Response(),
+      push: async () => new Response(),
       clientDir,
       origin: ORIGIN,
       log: (line) => lines.push(line),
@@ -2704,6 +2727,165 @@ describe("an account's own data under /export", () => {
   });
 });
 
+describe("an account's web push subscriptions under /push", () => {
+  const cookieOf = (b: Browser) => [...b.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+  let n = 0;
+  const endpoint = () => `https://fcm.googleapis.com/fcm/send/web${++n}:APA91b`;
+
+  async function signedIn() {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(browser) })))!;
+    return { browser, account };
+  }
+
+  const endpointsOf = async (account: string) =>
+    (
+      await sql`SELECT endpoint FROM account_push_subscriptions WHERE user_id = ${account}
+        ORDER BY endpoint`
+    ).map((r) => r["endpoint"] as string);
+
+  test("the key is the same for anyone, signed in or not", async () => {
+    const res = await new Browser().call("GET", "/push/key");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ key: PUSH_KEY });
+    expect(logged.at(-1)).toMatchObject({ method: "GET", route: "push", status: 200 });
+  });
+
+  test("a signed-in account subscribes this browser, reads it back and unsubscribes it", async () => {
+    const { browser, account } = await signedIn();
+    const e = endpoint();
+    const status = async () => (await browser.call("POST", "/push/status", { endpoint: e })).json();
+    expect(await status()).toEqual({ subscribed: false });
+    const res = await browser.call("POST", "/push/subscribe", { endpoint: e });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await endpointsOf(account)).toEqual([e]);
+    expect(await status()).toEqual({ subscribed: true });
+    expect((await browser.call("POST", "/push/unsubscribe", { endpoint: e })).status).toBe(200);
+    expect(await endpointsOf(account)).toEqual([]);
+    expect(await status()).toEqual({ subscribed: false });
+    // Taking away what isn't there answers alike.
+    expect((await browser.call("POST", "/push/unsubscribe", { endpoint: e })).status).toBe(200);
+
+    // T-10, T-11, T-67, T-76: the log has the route class, never the endpoint or the account.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "push", status: 200 });
+    const lines = JSON.stringify(logged);
+    for (const secret of [account, e]) expect(lines).not.toContain(secret);
+  });
+
+  test("an endpoint is one account's: another's status is false, and it can't unsubscribe it", async () => {
+    const a = await signedIn();
+    const b = await signedIn();
+    const e = endpoint();
+    await a.browser.call("POST", "/push/subscribe", { endpoint: e });
+    expect(await (await b.browser.call("POST", "/push/status", { endpoint: e })).json()).toEqual({
+      subscribed: false,
+    });
+    await b.browser.call("POST", "/push/unsubscribe", { endpoint: e });
+    expect(await endpointsOf(a.account)).toEqual([e]);
+    // The same browser subscribed by another account on a shared device moves to it.
+    await b.browser.call("POST", "/push/subscribe", { endpoint: e });
+    expect(await endpointsOf(a.account)).toEqual([]);
+    expect(await endpointsOf(b.account)).toEqual([e]);
+  });
+
+  test("T-76: refuses an endpoint off the known push services, keeping nothing", async () => {
+    const { browser, account } = await signedIn();
+    for (const wrong of [
+      "http://169.254.169.254/latest/meta-data",
+      "https://fcm.googleapis.com.evil.test/x",
+      "https://fcm.googleapis.com:8443/x",
+      `https://fcm.googleapis.com/${"a".repeat(1100)}`,
+    ])
+      expect(
+        await (await browser.call("POST", "/push/subscribe", { endpoint: wrong })).json(),
+      ).toEqual({ code: "INVALID_ENDPOINT", status: 400 });
+    expect(await endpointsOf(account)).toEqual([]);
+  });
+
+  test("refuses signed-out, malformed and cross-site calls", async () => {
+    const { browser } = await signedIn();
+    const e = endpoint();
+    for (const path of ["/push/status", "/push/subscribe", "/push/unsubscribe"])
+      expect(await (await new Browser().call("POST", path, { endpoint: e })).json()).toEqual({
+        code: "SIGNED_OUT",
+        status: 401,
+      });
+    // No account ID is read from the body: the session names the account (T-10).
+    for (const wrong of [{}, { endpoint: e, account: "a".repeat(32) }, { endpoint: 1 }, [], null])
+      expect(await (await browser.call("POST", "/push/subscribe", wrong)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    const post = (headers: Record<string, string>, body = JSON.stringify({ endpoint: e })) =>
+      fetch(`${base}/push/subscribe`, {
+        method: "POST",
+        headers: { cookie: cookieOf(browser), ...headers },
+        body,
+      });
+    expect(
+      (await post({ origin: "https://elsewhere.test", "content-type": "application/json" })).status,
+    ).toBe(403);
+    expect((await post({ "content-type": "application/json" })).status).toBe(403);
+    expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+    expect(
+      (await post({ origin: ORIGIN, "content-type": "application/json; charset=utf-8" })).status,
+    ).toBe(415);
+    expect((await post({ origin: ORIGIN, "content-type": "application/json" }, "{")).status).toBe(
+      400,
+    );
+    expect((await browser.call("POST", "/push/subscribe?x=1", { endpoint: e })).status).toBe(404);
+    expect((await browser.call("GET", "/push/subscribe")).status).toBe(404);
+    expect((await browser.call("POST", "/push/key", {})).status).toBe(404);
+    expect((await browser.call("GET", "/push/key?x=1")).status).toBe(404);
+    expect((await browser.call("GET", "/push")).status).toBe(404);
+  });
+
+  test("a deployment that doesn't push answers 503 on every route, keeping nothing", async () => {
+    const off = createPushHandler({
+      sql,
+      accountOf: async () => newAccountId(),
+      publicKey: undefined,
+      origin: ORIGIN,
+    });
+    const post = (path: string) =>
+      off(
+        new Request(`${ORIGIN}${path}`, {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ endpoint: endpoint() }),
+        }),
+      );
+    for (const res of [
+      await off(new Request(`${ORIGIN}/push/key`)),
+      await post("/push/status"),
+      await post("/push/subscribe"),
+      await post("/push/unsubscribe"),
+    ])
+      expect(await res.json()).toEqual({ code: "UNAVAILABLE", status: 503 });
+  });
+
+  test("an account gone after its session was read is signed out", async () => {
+    const raced = createPushHandler({
+      sql,
+      accountOf: async () => newAccountId(),
+      publicKey: PUSH_KEY,
+      origin: ORIGIN,
+      now: () => NOW,
+    });
+    const res = await raced(
+      new Request(`${ORIGIN}/push/subscribe`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: endpoint() }),
+      }),
+    );
+    expect(await res.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -2725,6 +2907,7 @@ describe("limits", () => {
       reactions: async () => new Response(null, { status: 404 }),
       profiles: async () => new Response(null, { status: 404 }),
       accountExport: async () => new Response(null, { status: 404 }),
+      push: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -2754,6 +2937,7 @@ describe("limits", () => {
       reactions: async () => new Response(),
       profiles: async () => new Response(),
       accountExport: async () => new Response(),
+      push: async () => new Response(),
       clientDir,
       log: () => {},
     };

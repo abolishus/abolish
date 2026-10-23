@@ -4,6 +4,7 @@ import { accountClient } from "../account/client.ts";
 import { draftsClient } from "../account/drafts.ts";
 import { exportClient } from "../account/export.ts";
 import { profilesClient } from "../account/profiles.ts";
+import { pushClient } from "../account/push.ts";
 import { verifyClient } from "../account/verify.ts";
 import { AccountPanel } from "../components/account-panel.tsx";
 import { fetchPhoneVerification } from "../data.ts";
@@ -23,6 +24,7 @@ export const Route = createFileRoute("/account")({
         profiles={profilesClient}
         verify={verifyClient}
         accountExport={exportClient}
+        push={pushClient}
         phone={phone}
       />
     );

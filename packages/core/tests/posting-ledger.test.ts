@@ -1003,6 +1003,8 @@ describe("prune", () => {
     ...over,
   });
   const before = { number: 1n, timestamp: T_D };
+  // Its sends at NOW; its prunes on a clock past every finalized head here.
+  const LATE = Number(T_D) + 10_000;
   const inFlight = async () =>
     (await db.admin`SELECT posting_key FROM posting_in_flight ORDER BY nonce`).map((r) =>
       hex(new Uint8Array(r["posting_key"])),
@@ -1019,10 +1021,10 @@ describe("prune", () => {
     chain.onBoardFinal.add(hex(p.posting));
     chain.onBoardFinal.add(hex(q.posting));
     // Neither nonce consumed: a transaction at each may still be pending.
-    expect(await l.prune(before)).toEqual(report());
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report());
     expect(await inFlight()).toEqual([p.key, q.key]);
     chain.count = 1n;
-    expect(await l.prune(before)).toEqual(report({ final: 1 }));
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ final: 1 }));
     expect(await inFlight()).toEqual([q.key]);
     // Its bytes are still never paid for again, nor its ballot's cap freed.
     expect(await l.sent(p.key)).toEqual({ transaction: first.transaction, layer: "l2" });
@@ -1037,7 +1039,7 @@ describe("prune", () => {
     await l.send(p);
     chain.count = 1n;
     chain.onBoard.add(hex(p.posting));
-    expect(await l.prune(before)).toEqual(report());
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report());
     expect(await inFlight()).toEqual([p.key]);
   });
 
@@ -1051,9 +1053,11 @@ describe("prune", () => {
     const kept = toSend({ electionId: later, closesAt: CLOSES_AT + 1n });
     await l.send(kept);
     // At t_D itself a posting can still be in time.
-    expect(await l.prune({ number: 1n, timestamp: T_D })).toEqual(report());
+    expect(await ledger(chain, { now: LATE }).prune({ number: 1n, timestamp: T_D })).toEqual(
+      report(),
+    );
     expect(await counts()).toMatchObject({ sent: 3, ballots: 3, spend: 2, in_flight: 3 });
-    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
+    expect(await ledger(chain, { now: LATE }).prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
       report({ expired: 2, elections: 1 }),
     );
     expect(await counts()).toEqual({ sent: 1, ballots: 1, spend: 1, in_flight: 1 });
@@ -1061,7 +1065,9 @@ describe("prune", () => {
     expect(await spentOf(ELECTION)).toBeUndefined();
     expect(await spentOf(later)).toBe(MOST);
     expect(await l.sent(p.key)).toBeUndefined();
-    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(report());
+    expect(await ledger(chain, { now: LATE }).prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
+      report(),
+    );
   });
 
   test("an entry signed again at another nonce while its event was read stays", async () => {
@@ -1074,11 +1080,11 @@ describe("prune", () => {
     chain.onPostedFinal = async () => {
       await db.admin`UPDATE posting_in_flight SET nonce = 1`;
     };
-    expect(await l.prune(before)).toEqual(report());
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report());
     expect(await inFlight()).toEqual([p.key]);
     chain.onPostedFinal = undefined;
     chain.count = 2n;
-    expect(await l.prune(before)).toEqual(report({ final: 1 }));
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ final: 1 }));
   });
 
   test("a failing node leaves entries as they were and goes on to the next", async () => {
@@ -1094,19 +1100,21 @@ describe("prune", () => {
     chain.onPostedFinal = async () => {
       if (++calls === 1) throw new Error("node at https://key@example down");
     };
-    expect(await l.prune(before)).toEqual(report({ final: 1, failed: 1 }));
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(
+      report({ final: 1, failed: 1 }),
+    );
     expect(await inFlight()).toEqual([p.key]);
     chain.onPostedFinal = undefined;
     chain.fail.nonce = new Error("down");
-    expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ failed: 1 }));
     delete chain.fail.nonce;
     for (const count of [-1n, 1n << 64n]) {
       chain.count = count;
-      expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+      expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ failed: 1 }));
     }
     chain.count = 2n;
     chain.postedFinal = async () => "yes" as unknown as boolean;
-    expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+    expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ failed: 1 }));
     expect(await inFlight()).toEqual([p.key]);
   });
 
@@ -1115,7 +1123,7 @@ describe("prune", () => {
     const l = ledger(chain);
     await l.send(toSend());
     chain.fail.nonce = new Error("down");
-    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
+    expect(await ledger(chain, { now: LATE }).prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
       report({ expired: 1, elections: 1 }),
     );
     expect(await counts()).toEqual({ sent: 0, ballots: 0, spend: 0, in_flight: 0 });
@@ -1124,10 +1132,28 @@ describe("prune", () => {
   test("a store failure rejects quoting nothing", async () => {
     const broken = await db.as("abolish_app");
     await broken.end();
-    const err = await ledger(new FakeKey(), { sql: broken })
+    const err = await ledger(new FakeKey(), { sql: broken, now: LATE })
       .prune(before)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PostingLedgerError);
+  });
+
+  test("a finalized head ahead of the clock prunes nothing", async () => {
+    const chain = new FakeKey();
+    const p = toSend();
+    await ledger(chain).send(p);
+    chain.count = 1n;
+    chain.onBoardFinal.add(hex(p.posting));
+    const ahead = { number: 1n, timestamp: T_D + 1n };
+    const err = await ledger(chain, { now: Number(T_D) })
+      .prune(ahead)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PostingLedgerError);
+    expect(await counts()).toEqual({ sent: 1, ballots: 1, spend: 1, in_flight: 1 });
+    // At the clock it prunes.
+    expect(await ledger(chain, { now: Number(T_D) + 1 }).prune(ahead)).toEqual(
+      report({ expired: 1, elections: 1 }),
+    );
   });
 
   test("refuses a head out of range", async () => {
@@ -1164,7 +1190,7 @@ describe("prune", () => {
             if (event === "final") chain.onBoardFinal.add(hex(sent[pick]!.posting));
             if (event === "consume") chain.count = BigInt(pick) + 1n;
             if (event === "late") head += 60n;
-            await l.prune({ number: 1n, timestamp: head });
+            await ledger(chain, { now: LATE }).prune({ number: 1n, timestamp: head });
             const rows = await db.admin`
               SELECT posting, nonce, delivery_ends FROM posting_in_flight`;
             for (const r of rows) {

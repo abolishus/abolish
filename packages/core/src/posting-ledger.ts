@@ -416,6 +416,12 @@ export class PostgresPostingLedger implements PostingLedger {
     const at = finalized.timestamp;
     if (typeof at !== "bigint" || at < 0n || at > U64_MAX)
       throw new RangeError("finalized.timestamp must be a u64");
+    // A finalized head can't be ahead of the clock. One that claims to be
+    // would delete the caps of every election whose `t_D` it names as past,
+    // so a lying or faulty node could have postings paid for again and the
+    // budgets reopened (T-25, T-52): nothing is pruned on it.
+    if (at > BigInt(this.#clock()))
+      throw new PostingLedgerError("the finalized head is ahead of the clock");
     let expired: number;
     let elections: number;
     let left: { key: Uint8Array; nonce: bigint; posting: Uint8Array }[];

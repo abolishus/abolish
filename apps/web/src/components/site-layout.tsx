@@ -170,14 +170,16 @@ function SystemPage({
 }) {
   const t = useTranslate(catalogs);
   return (
-    <div className="grid gap-12">
-      <div className="grid gap-8 pt-6 md:pt-18 lg:grid-cols-12">
+    <div className="grid gap-8 sm:gap-12">
+      {/* Smaller and tighter on a phone, so the page's one action, or the
+          first place to go, is on the first screen at 360 by 640. */}
+      <div className="grid gap-5 sm:gap-8 sm:pt-6 md:pt-18 lg:grid-cols-12">
         {code && (
           <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase lg:col-span-12">
             {code}
           </p>
         )}
-        <h1 className="m-0 font-heading text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-7xl lg:col-span-9">
+        <h1 className="m-0 font-heading text-4xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl lg:col-span-9 lg:text-7xl">
           {title}
         </h1>
         <div className="grid max-w-prose gap-4 text-lg text-pretty lg:col-span-7">{children}</div>

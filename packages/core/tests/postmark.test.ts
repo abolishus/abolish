@@ -8,7 +8,12 @@ import { createPostmarkSender, type EmailMessage, POSTMARK_EMAIL } from "../src/
 
 const TOKEN = "POSTMARK_API_TEST";
 const FROM = "codes@abolish.test";
-const CODE: EmailMessage = { kind: "email-code", to: "Ana@Example.org", code: "01234567" };
+const CODE: EmailMessage = {
+  kind: "email-code",
+  to: "Ana@Example.org",
+  code: "01234567",
+  locale: "en-US",
+};
 
 interface Sent {
   readonly url: string;
@@ -71,7 +76,9 @@ describe("createPostmarkSender", () => {
   test("sends a held address's notice with no code", async () => {
     const { sent, fetch } = postmark(OK);
     const sender = createPostmarkSender({ serverToken: TOKEN, from: FROM, fetch });
-    expect(await sender.send({ kind: "email-held", to: "ana@example.org" })).toBe("sent");
+    expect(await sender.send({ kind: "email-held", to: "ana@example.org", locale: "en-US" })).toBe(
+      "sent",
+    );
     const body = JSON.parse(sent[0]?.init?.body as string) as Record<string, unknown>;
     expect(body["To"]).toBe("ana@example.org");
     expect(body["TextBody"]).not.toMatch(/[0-9]{8}/);
@@ -122,7 +129,7 @@ describe("createPostmarkSender", () => {
   ])("sends nothing to %j, which isn't one bare address", async (to) => {
     const { sent, fetch } = postmark(OK);
     const sender = createPostmarkSender({ serverToken: TOKEN, from: FROM, fetch });
-    expect(await sender.send({ kind: "email-held", to })).toBe("unavailable");
+    expect(await sender.send({ kind: "email-held", to, locale: "en-US" })).toBe("unavailable");
     expect(sent).toHaveLength(0);
   });
 

@@ -32,6 +32,9 @@
 // the account was moderated that day (T-73, T-76). Later tries are the
 // e-mail's alone, so a refused e-mail never wakes a browser twice.
 //
+// A notice is written in the language its account verified its address in
+// (P2-28 part 4c-3): a timer sends it, with no request to take one from.
+//
 // T-10: account-side only; nothing here reads the board or a ballot, and a
 // notice keeps nothing to join the log on but its day. T-52: only a
 // moderator's decision queues one, so no one else can make us mail an
@@ -143,6 +146,7 @@ export async function sendNotices(
         tries: n.tries,
         box: accountEmails.addressBox,
         key: accountEmails.boxKey,
+        locale: accountEmails.locale,
       })
       .from(n)
       .leftJoin(accountEmails, eq(accountEmails.userId, n.userId))
@@ -172,7 +176,7 @@ export async function sendNotices(
       pushFailed += outcomes.filter((o) => o === "unavailable").length;
     }
     let outcome: "sent" | "unavailable" | "no-address" = "no-address";
-    if (c.box !== null && c.key !== null) {
+    if (c.box !== null && c.key !== null && c.locale !== null) {
       let to: string | undefined;
       try {
         to = unsealEmailAddress(keys, c.userId, c.box, c.key);
@@ -180,7 +184,10 @@ export async function sendNotices(
         // A box under a key this deployment no longer holds: tried again,
         // in case the keyring is restored, then dropped like a refusal.
       }
-      outcome = to === undefined ? "unavailable" : await sender.send({ kind: "notice", to });
+      outcome =
+        to === undefined
+          ? "unavailable"
+          : await sender.send({ kind: "notice", to, locale: c.locale });
     }
     if (outcome === "unavailable" && c.tries < NOTICE_TRIES) {
       retrying++;

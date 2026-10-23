@@ -49,7 +49,7 @@ import {
 } from "./db/schema/index.ts";
 
 /** The export's layout; a change to it is a new version. */
-export const ACCOUNT_EXPORT_VERSION = 1;
+export const ACCOUNT_EXPORT_VERSION = 2;
 
 /**
  * What the export takes from each account table: `"exported"`, or why it
@@ -114,9 +114,14 @@ export interface AccountExport {
   readonly signInMethods: readonly { readonly providerId: string; readonly createdAt: string }[];
   /**
    * The address is `null` if its box no longer opens (its key left the
-   * keyring) or the deployment holds no e-mail keys.
+   * keyring) or the deployment holds no e-mail keys. `locale` is the
+   * language its notices are written in (version 2).
    */
-  readonly email: { readonly address: string | null; readonly verifiedOn: string } | null;
+  readonly email: {
+    readonly address: string | null;
+    readonly verifiedOn: string;
+    readonly locale: string;
+  } | null;
   /** The number itself is never kept. */
   readonly phone: { readonly verifiedOn: string } | null;
   readonly polls: readonly {
@@ -226,6 +231,7 @@ export async function exportAccount(
           addressBox: accountEmails.addressBox,
           boxKey: accountEmails.boxKey,
           verifiedAt: accountEmails.verifiedAt,
+          locale: accountEmails.locale,
         })
         .from(accountEmails)
         .where(eq(accountEmails.userId, accountId));
@@ -323,6 +329,7 @@ export async function exportAccount(
             : {
                 address: opened(keys, accountId, email.addressBox, email.boxKey),
                 verifiedOn: iso(dayOf(email.verifiedAt)),
+                locale: email.locale,
               },
         phone: phone === undefined ? null : { verifiedOn: iso(phone.verifiedOn) },
         polls: polls.map((p) => ({

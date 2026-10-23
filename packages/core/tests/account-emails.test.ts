@@ -28,6 +28,8 @@ import {
   parseKeyring,
   pruneAccountEmails,
   readAccountEmail,
+  EMAIL_LOCALES,
+  type EmailLocale,
   renderEmail,
   requestEmailCode,
   rotateEmailKeys,
@@ -116,6 +118,7 @@ async function ask(
     sender,
     turnstile: passing().turnstile,
     token: "t",
+    locale: "en-US",
     now,
   });
   expect(sent).toHaveLength(1);
@@ -137,6 +140,7 @@ const wrong = (right: string) => (right === "00000000" ? "00000001" : "00000000"
 async function verified(account: string, address: string, keys = KEYS) {
   await verifyEmailCode(app, account, codeOf(await ask(account, address, { keys })), {
     keys,
+    locale: "en-US",
     now: NOW,
   });
 }
@@ -169,7 +173,7 @@ describe("schema", () => {
     const account = await newAccount();
     const address = "Clear.Text@Example.org";
     const m = await ask(account, address);
-    await verifyEmailCode(app, account, codeOf(m), { keys: KEYS, now: NOW });
+    await verifyEmailCode(app, account, codeOf(m), { locale: "en-US", keys: KEYS, now: NOW });
     await ask(account, "next.one@example.org");
     const dump = (
       await db.admin`
@@ -266,21 +270,51 @@ describe("parseEmailAddress", () => {
 });
 
 describe("renderEmail", () => {
-  test("is plain text with no link or image to track (T-67)", () => {
-    for (const m of [
-      { kind: "email-code", to: "a@example.org", code: "01234567" },
-      { kind: "email-held", to: "a@example.org" },
-      { kind: "email-on-hold", to: "a@example.org" },
-    ] as const) {
-      const { subject, text } = renderEmail(m);
-      for (const part of [subject, text]) {
-        expect(part).not.toMatch(/https?:|www\.|<|abolish\.us/i);
-        expect(part).not.toContain(m.to);
+  const messages = (locale: EmailLocale) =>
+    [
+      { kind: "email-code", to: "a@example.org", code: "01234567", locale },
+      { kind: "email-held", to: "a@example.org", locale },
+      { kind: "email-on-hold", to: "a@example.org", locale },
+      { kind: "notice", to: "a@example.org", locale },
+    ] as const;
+
+  test("is plain text with no link or image to track, in every language (T-67)", () => {
+    for (const locale of EMAIL_LOCALES)
+      for (const m of messages(locale)) {
+        const { subject, text } = renderEmail(m);
+        for (const part of [subject, text]) {
+          expect(part).not.toMatch(/https?:|www\.|<|abolish\.us/i);
+          expect(part).not.toContain(m.to);
+          // The voice (apps/web's catalog tests): no exclamation, emoji or stray spacing.
+          expect(part).not.toMatch(/[!¡]|\p{Extended_Pictographic}|  |\.\.\.|[{}]/u);
+        }
       }
+  });
+
+  test("puts the code in the subject and body in every language", () => {
+    for (const locale of EMAIL_LOCALES) {
+      const { subject, text } = renderEmail(messages(locale)[0]);
+      expect(subject).toContain("01234567");
+      expect(text).toContain("01234567");
     }
-    expect(
-      renderEmail({ kind: "email-code", to: "a@example.org", code: "01234567" }).text,
-    ).toContain("01234567");
+  });
+
+  test("writes each message in its own language", () => {
+    for (const [i, m] of messages("en-US").entries()) {
+      const en = renderEmail(m);
+      const es = renderEmail(messages("es-US")[i]!);
+      expect(es.subject).not.toBe(en.subject);
+      expect(es.text).not.toBe(en.text);
+      // The same paragraphs, so neither drops a sentence the other says.
+      expect(es.text.split("\n\n")).toHaveLength(en.text.split("\n\n").length);
+    }
+    expect(renderEmail(messages("es-US")[0]).subject).toBe("Tu código de Abolish: 01234567");
+    expect(renderEmail(messages("en-US")[0]).subject).toBe("Your Abolish code: 01234567");
+  });
+
+  test("names no poll, profile, action or time in a notice, in any language (T-73)", () => {
+    const one = EMAIL_LOCALES.map((locale) => renderEmail(messages(locale)[3]));
+    for (const { text } of one) expect(text).not.toMatch(/[0-9]/);
   });
 });
 
@@ -294,13 +328,48 @@ describe("requesting a code", () => {
       sender,
       turnstile,
       token: "tok",
+      locale: "en-US",
       now: NOW,
     });
     expect(calls).toEqual([["tok", "email-code"]]);
     expect(sent).toEqual([
-      { kind: "email-code", to: "Jane@Example.org", code: expect.any(String) },
+      { kind: "email-code", to: "Jane@Example.org", code: expect.any(String), locale: "en-US" },
     ]);
     expect(codeOf(sent[0]!)).toMatch(/^[0-9]{8}$/);
+  });
+
+  test("writes the message in the request's language", async () => {
+    const account = await newAccount();
+    const { sent, sender } = outbox();
+    await requestEmailCode(app, account, fresh(), {
+      keys: KEYS,
+      sender,
+      turnstile: passing().turnstile,
+      token: "t",
+      locale: "es-US",
+      now: NOW,
+    });
+    expect(sent).toEqual([expect.objectContaining({ kind: "email-code", locale: "es-US" })]);
+    expect(renderEmail(sent[0]!).subject).toMatch(/^Tu código de Abolish: [0-9]{8}$/);
+  });
+
+  test("refuses a language it has no words for before spending the solve", async () => {
+    const account = await newAccount();
+    const { calls, turnstile } = passing();
+    const { sent, sender } = outbox();
+    for (const locale of ["fr-FR", "es", "", "EN-US"])
+      await expect(
+        requestEmailCode(app, account, fresh(), {
+          keys: KEYS,
+          sender,
+          turnstile,
+          token: "t",
+          locale: locale as EmailLocale,
+          now: NOW,
+        }),
+      ).rejects.toThrow(TypeError);
+    expect(calls).toEqual([]);
+    expect(sent).toEqual([]);
   });
 
   test("refuses a bad address before spending the solve", async () => {
@@ -312,6 +381,7 @@ describe("requesting a code", () => {
       sender,
       turnstile,
       token: "t",
+      locale: "en-US",
       now: NOW,
     });
     expect(await code(r)).toBe("invalid-address");
@@ -330,6 +400,7 @@ describe("requesting a code", () => {
       sender,
       turnstile: passing(verdict).turnstile,
       token: "t",
+      locale: "en-US",
       now: NOW,
     });
     expect(await code(r)).toBe(expected);
@@ -349,6 +420,7 @@ describe("requesting a code", () => {
       sender,
       turnstile: passing().turnstile,
       token: "t",
+      locale: "en-US",
       now: NOW,
     });
     expect(await code(r)).toBe("send-unavailable");
@@ -370,6 +442,7 @@ describe("requesting a code", () => {
         sender,
         turnstile,
         token: "t",
+        locale: "en-US",
         now,
       });
     expect(await code(at(later(60)))).toBe("too-many-this-hour");
@@ -396,20 +469,57 @@ describe("requesting a code", () => {
     const address = fresh();
     const second = codeOf(await ask(account, address, { now: later(1) }));
     if (first !== second)
-      expect(await code(verifyEmailCode(app, account, first, { keys: KEYS, now: later(2) }))).toBe(
-        "wrong-code",
-      );
-    await verifyEmailCode(app, account, second, { keys: KEYS, now: later(3) });
+      expect(
+        await code(
+          verifyEmailCode(app, account, first, { locale: "en-US", keys: KEYS, now: later(2) }),
+        ),
+      ).toBe("wrong-code");
+    await verifyEmailCode(app, account, second, { locale: "en-US", keys: KEYS, now: later(3) });
     expect((await readAccountEmail(app, account, KEYS))?.address).toBe(address);
   });
 });
 
 describe("verifying a code", () => {
+  test("keeps the verifying request's language for the account's notices", async () => {
+    const account = await newAccount();
+    const localeOf = async () =>
+      (await db.admin`SELECT locale FROM account_emails WHERE user_id = ${account}`)[0]?.["locale"];
+    await verifyEmailCode(app, account, codeOf(await ask(account, fresh())), {
+      locale: "es-US",
+      keys: KEYS,
+      now: NOW,
+    });
+    expect(await localeOf()).toBe("es-US");
+    // Verifying again, a new address or the same one, takes the new request's.
+    await verifyEmailCode(app, account, codeOf(await ask(account, fresh(), { now: later(1) })), {
+      locale: "en-US",
+      keys: KEYS,
+      now: later(2),
+    });
+    expect(await localeOf()).toBe("en-US");
+    await expect(
+      verifyEmailCode(app, account, "00000000", {
+        locale: "pt-BR" as EmailLocale,
+        keys: KEYS,
+        now: NOW,
+      }),
+    ).rejects.toThrow(TypeError);
+  });
+
+  test("the table refuses a language with no words", async () => {
+    const account = await newAccount();
+    await verified(account, fresh());
+    await expect(
+      db.admin`UPDATE account_emails SET locale = 'fr-FR' WHERE user_id = ${account}`,
+    ).rejects.toThrow(/check/i);
+  });
+
   test("makes the address the account's verified one", async () => {
     const account = await newAccount();
     expect(await readAccountEmail(app, account, KEYS)).toBeUndefined();
     const right = codeOf(await ask(account, "Jane@Example.org"));
     await verifyEmailCode(app, account, `${right.slice(0, 4)} ${right.slice(4)}`, {
+      locale: "en-US",
       keys: KEYS,
       now: later(60),
     });
@@ -418,9 +528,11 @@ describe("verifying a code", () => {
       verifiedAt: later(60),
     });
     // Single use.
-    expect(await code(verifyEmailCode(app, account, right, { keys: KEYS, now: later(61) }))).toBe(
-      "no-code",
-    );
+    expect(
+      await code(
+        verifyEmailCode(app, account, right, { locale: "en-US", keys: KEYS, now: later(61) }),
+      ),
+    ).toBe("no-code");
   });
 
   test("a code is gone 15 minutes after it was sent", async () => {
@@ -428,12 +540,16 @@ describe("verifying a code", () => {
     const right = codeOf(await ask(account, fresh()));
     expect(
       await code(
-        verifyEmailCode(app, account, right, { keys: KEYS, now: later(EMAIL_CODE_SECONDS) }),
+        verifyEmailCode(app, account, right, {
+          locale: "en-US",
+          keys: KEYS,
+          now: later(EMAIL_CODE_SECONDS),
+        }),
       ),
     ).toBe("expired");
-    expect(await code(verifyEmailCode(app, account, right, { keys: KEYS, now: NOW }))).toBe(
-      "no-code",
-    );
+    expect(
+      await code(verifyEmailCode(app, account, right, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("no-code");
   });
 
   test("a code survives four wrong answers, not five", async () => {
@@ -441,15 +557,19 @@ describe("verifying a code", () => {
     const right = codeOf(await ask(account, fresh()));
     const answers = [wrong(right), "12", "abcdefgh", `${right}0`];
     for (const [i, answer] of answers.entries()) {
-      const e = await failure(verifyEmailCode(app, account, answer, { keys: KEYS, now: NOW }));
+      const e = await failure(
+        verifyEmailCode(app, account, answer, { locale: "en-US", keys: KEYS, now: NOW }),
+      );
       expect([e.code, e.triesLeft]).toEqual(["wrong-code", 4 - i]);
     }
-    expect(await code(verifyEmailCode(app, account, wrong(right), { keys: KEYS, now: NOW }))).toBe(
-      "too-many-tries",
-    );
-    expect(await code(verifyEmailCode(app, account, right, { keys: KEYS, now: NOW }))).toBe(
-      "no-code",
-    );
+    expect(
+      await code(
+        verifyEmailCode(app, account, wrong(right), { locale: "en-US", keys: KEYS, now: NOW }),
+      ),
+    ).toBe("too-many-tries");
+    expect(
+      await code(verifyEmailCode(app, account, right, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("no-code");
   });
 
   test("a code is bound to the account it was sent for", async () => {
@@ -460,7 +580,9 @@ describe("verifying a code", () => {
     // b's row given a's code hash still refuses a's code.
     await db.admin`UPDATE account_email_codes SET code_hash =
       (SELECT code_hash FROM account_email_codes WHERE user_id = ${a}) WHERE user_id = ${b}`;
-    expect(await code(verifyEmailCode(app, b, right, { keys: KEYS, now: NOW }))).toBe("wrong-code");
+    expect(
+      await code(verifyEmailCode(app, b, right, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("wrong-code");
   });
 
   test("an address box doesn't open for another account", async () => {
@@ -503,9 +625,11 @@ describe("one account per address", () => {
     const b = await newAccount();
     await verified(a, "taken@example.org");
     const m = await ask(b, "Taken@EXAMPLE.org");
-    expect(m).toEqual({ kind: "email-held", to: "Taken@EXAMPLE.org" });
+    expect(m).toEqual({ kind: "email-held", to: "Taken@EXAMPLE.org", locale: "en-US" });
     // Every answer is wrong, as a code's would be until it's guessed.
-    const e = await failure(verifyEmailCode(app, b, "00000000", { keys: KEYS, now: NOW }));
+    const e = await failure(
+      verifyEmailCode(app, b, "00000000", { locale: "en-US", keys: KEYS, now: NOW }),
+    );
     expect([e.code, e.triesLeft]).toEqual(["wrong-code", 4]);
     expect((await readAccountEmail(app, a, KEYS))?.address).toBe("taken@example.org");
   });
@@ -521,9 +645,13 @@ describe("one account per address", () => {
     const b = await newAccount();
     const ca = codeOf(await ask(a, "race@example.org"));
     const cb = codeOf(await ask(b, "Race@example.org"));
-    await verifyEmailCode(app, a, ca, { keys: KEYS, now: NOW });
-    expect(await code(verifyEmailCode(app, b, cb, { keys: KEYS, now: NOW }))).toBe("address-taken");
-    expect(await code(verifyEmailCode(app, b, cb, { keys: KEYS, now: NOW }))).toBe("no-code");
+    await verifyEmailCode(app, a, ca, { locale: "en-US", keys: KEYS, now: NOW });
+    expect(await code(verifyEmailCode(app, b, cb, { locale: "en-US", keys: KEYS, now: NOW }))).toBe(
+      "address-taken",
+    );
+    expect(await code(verifyEmailCode(app, b, cb, { locale: "en-US", keys: KEYS, now: NOW }))).toBe(
+      "no-code",
+    );
     expect(await readAccountEmail(app, b, KEYS)).toBeUndefined();
   });
 
@@ -533,8 +661,8 @@ describe("one account per address", () => {
     const ca = codeOf(await ask(a, "both@example.org"));
     const cb = codeOf(await ask(b, "both@example.org"));
     const results = await Promise.allSettled([
-      verifyEmailCode(app, a, ca, { keys: KEYS, now: NOW }),
-      verifyEmailCode(app2, b, cb, { keys: KEYS, now: NOW }),
+      verifyEmailCode(app, a, ca, { locale: "en-US", keys: KEYS, now: NOW }),
+      verifyEmailCode(app2, b, cb, { locale: "en-US", keys: KEYS, now: NOW }),
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
@@ -599,7 +727,7 @@ describe("the per-address cap", () => {
     const holder = await newAccount();
     // A code and a notice both count.
     const right = codeOf(await ask(holder, address));
-    await verifyEmailCode(app, holder, right, { keys: KEYS, now: NOW });
+    await verifyEmailCode(app, holder, right, { locale: "en-US", keys: KEYS, now: NOW });
     for (let i = 1; i < MAX_SENDS_PER_ADDRESS; i++)
       expect((await ask(await newAccount(), address.toUpperCase(), { now: later(i) })).kind).toBe(
         "email-held",
@@ -612,12 +740,15 @@ describe("the per-address cap", () => {
       sender,
       turnstile,
       token: "t",
+      locale: "en-US",
       now: later(60),
     });
     expect(calls).toHaveLength(1);
     expect(sent).toEqual([]);
     // The account's own send still counts, and its code row answers as any other.
-    const e = await failure(verifyEmailCode(app, late, "00000000", { keys: KEYS, now: later(61) }));
+    const e = await failure(
+      verifyEmailCode(app, late, "00000000", { locale: "en-US", keys: KEYS, now: later(61) }),
+    );
     expect([e.code, e.triesLeft]).toEqual(["wrong-code", 4]);
     // A day after the first message there is room again.
     expect((await ask(await newAccount(), address, { now: later(24 * 3600 + 1) })).kind).toBe(
@@ -643,8 +774,8 @@ describe("the per-address cap", () => {
       const ca = codeOf(await ask(a, address, { keys: old }));
       const cb = codeOf(await ask(b, address, { keys: rolled }));
       const results = await Promise.allSettled([
-        verifyEmailCode(app, a, ca, { keys: old, now: NOW }),
-        verifyEmailCode(app2, b, cb, { keys: rolled, now: NOW }),
+        verifyEmailCode(app, a, ca, { locale: "en-US", keys: old, now: NOW }),
+        verifyEmailCode(app2, b, cb, { locale: "en-US", keys: rolled, now: NOW }),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     }
@@ -665,6 +796,7 @@ describe("failing closed", () => {
         sender,
         turnstile: passing().turnstile,
         token: "t",
+        locale: "en-US",
         now: NOW,
       }),
     ).rejects.toThrow("provider down");
@@ -680,22 +812,26 @@ describe("failing closed", () => {
     const account = await newAccount();
     const right = codeOf(await ask(account, fresh(), { keys: emailKeys(hash, box) }));
     const without = emailKeys(ring("h-other"), box);
-    await expect(verifyEmailCode(app, account, right, { keys: without, now: NOW })).rejects.toThrow(
-      /not in the keyring/,
-    );
+    await expect(
+      verifyEmailCode(app, account, right, { locale: "en-US", keys: without, now: NOW }),
+    ).rejects.toThrow(/not in the keyring/);
     const withoutBox = emailKeys(hash, ring("b-other"));
     await expect(
-      verifyEmailCode(app, account, right, { keys: withoutBox, now: NOW }),
+      verifyEmailCode(app, account, right, { locale: "en-US", keys: withoutBox, now: NOW }),
     ).rejects.toThrow(/not in the keyring/);
     const [row] = await db.admin`SELECT tries FROM account_email_codes WHERE user_id = ${account}`;
     expect(row!["tries"]).toBe(0);
-    await verifyEmailCode(app, account, right, { keys: emailKeys(hash, box), now: NOW });
+    await verifyEmailCode(app, account, right, {
+      locale: "en-US",
+      keys: emailKeys(hash, box),
+      now: NOW,
+    });
   });
 
   test("refuses anything but an account ID", async () => {
     await expect(readAccountEmail(app, "short", KEYS)).rejects.toThrow(RangeError);
     await expect(
-      verifyEmailCode(app, "A".repeat(32), "00000000", { keys: KEYS, now: NOW }),
+      verifyEmailCode(app, "A".repeat(32), "00000000", { locale: "en-US", keys: KEYS, now: NOW }),
     ).rejects.toThrow(RangeError);
   });
 });
@@ -705,6 +841,7 @@ describe("an address an account lets go", () => {
   /** Verifies `address` for `account` at `now`, through a code asked for then. */
   const verifiedAt = async (account: string, address: string, now: Date) =>
     verifyEmailCode(app, account, codeOf(await ask(account, address, { now })), {
+      locale: "en-US",
       keys: KEYS,
       now,
     });
@@ -725,10 +862,10 @@ describe("an address an account lets go", () => {
     await verified(a, old);
     await verified(a, fresh());
     const m = await ask(b, old.toUpperCase());
-    expect(m).toEqual({ kind: "email-on-hold", to: old.toUpperCase() });
-    expect(await code(verifyEmailCode(app, b, "12345678", { keys: KEYS, now: NOW }))).toBe(
-      "wrong-code",
-    );
+    expect(m).toEqual({ kind: "email-on-hold", to: old.toUpperCase(), locale: "en-US" });
+    expect(
+      await code(verifyEmailCode(app, b, "12345678", { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("wrong-code");
   });
 
   test("the hold keeps the address's hash, its key and the day, and no account or box", async () => {
@@ -785,11 +922,11 @@ describe("an address an account lets go", () => {
     const address = fresh();
     const forA = codeOf(await ask(a, address));
     const forB = codeOf(await ask(b, address));
-    await verifyEmailCode(app, a, forA, { keys: KEYS, now: NOW });
+    await verifyEmailCode(app, a, forA, { locale: "en-US", keys: KEYS, now: NOW });
     await app`DELETE FROM account_users WHERE id = ${a}`;
-    expect(await code(verifyEmailCode(app, b, forB, { keys: KEYS, now: NOW }))).toBe(
-      "address-taken",
-    );
+    expect(
+      await code(verifyEmailCode(app, b, forB, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("address-taken");
   });
 
   test("an answer racing the deletion of the account holding the address sees its row or its hold", async () => {
@@ -810,14 +947,14 @@ describe("an address an account lets go", () => {
       await open;
     });
     await started;
-    expect(await code(verifyEmailCode(app, b, forB, { keys: KEYS, now: NOW }))).toBe(
-      "address-taken",
-    );
+    expect(
+      await code(verifyEmailCode(app, b, forB, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("address-taken");
     release();
     await deletion;
-    expect(await code(verifyEmailCode(app2, c, forC, { keys: KEYS, now: NOW }))).toBe(
-      "address-taken",
-    );
+    expect(
+      await code(verifyEmailCode(app2, c, forC, { locale: "en-US", keys: KEYS, now: NOW })),
+    ).toBe("address-taken");
   });
 
   test(`the hold ends ${EMAIL_HOLD_DAYS} days after the day it was freed, not before`, async () => {
@@ -894,6 +1031,7 @@ describe("pruneAccountEmails", () => {
       [fresh(), 89],
     ] as const)
       await verifyEmailCode(app, a, codeOf(await ask(a, address, { now: daysAgo(n) })), {
+        locale: "en-US",
         keys: KEYS,
         now: daysAgo(n),
       });
@@ -953,7 +1091,7 @@ describe("rotateEmailKeys", () => {
     expect(
       await db.admin`SELECT box_key, code_key FROM account_email_codes WHERE user_id = ${a}`,
     ).toEqual([{ box_key: "s2", code_key: "r1" }]);
-    await verifyEmailCode(app, a, codeOf(sent), { keys: NEW, now: NOW });
+    await verifyEmailCode(app, a, codeOf(sent), { locale: "en-US", keys: NEW, now: NOW });
     expect(await readAccountEmail(app, a, RETIRED)).toMatchObject({ address });
   });
 
@@ -1026,10 +1164,10 @@ describe("rotateEmailKeys", () => {
       // Both sent real codes before either verifies; a verifies first.
       const forA = await ask(a, address, { keys: OLD });
       const forB = await ask(b, address, { keys: NEW });
-      await verifyEmailCode(app, a, codeOf(forA), { keys: OLD, now: NOW });
+      await verifyEmailCode(app, a, codeOf(forA), { locale: "en-US", keys: OLD, now: NOW });
       const [rotation, answer] = await Promise.allSettled([
         rotateEmailKeys(app2, NEW),
-        verifyEmailCode(app, b, codeOf(forB), { keys: NEW, now: NOW }),
+        verifyEmailCode(app, b, codeOf(forB), { locale: "en-US", keys: NEW, now: NOW }),
       ]);
       expect(rotation.status).toBe("fulfilled");
       expect(answer.status === "rejected" && answer.reason.code).toBe("address-taken");

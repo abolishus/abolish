@@ -99,16 +99,31 @@ export function emailKeys(hash: Keyring, box: Keyring): EmailKeys {
   return { hash, box };
 }
 
+/**
+ * The languages a message can be written in: the website's (P2-28 part 4),
+ * the first its source. A code or a notice for a held address is in the
+ * language of the request that asked for it; a moderation notice in the one
+ * its account verified its address in (`account_emails.locale`).
+ */
+export const EMAIL_LOCALES = ["en-US", "es-US"] as const;
+
+export type EmailLocale = (typeof EMAIL_LOCALES)[number];
+
+export const isEmailLocale = (value: unknown): value is EmailLocale =>
+  EMAIL_LOCALES.some((locale) => locale === value);
+
 /** What the sending service is asked to send; it renders each with `renderEmail`. */
-export type EmailMessage =
+export type EmailMessage = { readonly locale: EmailLocale } &
   /** A code for `to`, which an account asked to verify. */
-  | { readonly kind: "email-code"; readonly to: string; readonly code: string }
-  /** `to` is another account's address: no code, just the fact that someone asked. */
-  | { readonly kind: "email-held"; readonly to: string }
-  /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
-  | { readonly kind: "email-on-hold"; readonly to: string }
-  /** Moderation touched a poll or the profile of the account `to` is verified for (src/account-notices.ts). */
-  | { readonly kind: "notice"; readonly to: string };
+  (
+    | { readonly kind: "email-code"; readonly to: string; readonly code: string }
+    /** `to` is another account's address: no code, just the fact that someone asked. */
+    | { readonly kind: "email-held"; readonly to: string }
+    /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
+    | { readonly kind: "email-on-hold"; readonly to: string }
+    /** Moderation touched a poll or the profile of the account `to` is verified for (src/account-notices.ts). */
+    | { readonly kind: "notice"; readonly to: string }
+  );
 
 /**
  * The sending service, shared with notices (src/account-notices.ts). `unavailable`:
@@ -119,55 +134,117 @@ export interface EmailSender {
   send(message: EmailMessage): Promise<"sent" | "unavailable">;
 }
 
-/** A message's subject and plain-text body: no link, no image, nothing to track (T-67). */
-export function renderEmail(message: EmailMessage): {
+interface Rendered {
   readonly subject: string;
   readonly text: string;
-} {
+}
+
+// Each language's words, in the website's glossary and register (`tú` in
+// Spanish; apps/web's messages.es-US.ts). T-73: the notice names no action,
+// ground, poll, profile, link or time in any language, since the public log
+// could match any of them to the decision (src/account-notices.ts).
+const WORDS: Record<
+  EmailLocale,
+  {
+    readonly code: (code: string) => Rendered;
+    readonly held: Rendered;
+    readonly onHold: Rendered;
+    readonly notice: Rendered;
+  }
+> = {
+  "en-US": {
+    code: (code) => ({
+      subject: `Your Abolish code: ${code}`,
+      text: [
+        `Your code to verify this address on Abolish is ${code}.`,
+        "",
+        "Enter it on the page that asked for it. It works once, for 15 minutes.",
+        "",
+        "If you didn't ask for it, you can ignore this message: nothing changes until the code is entered.",
+      ].join("\n"),
+    }),
+    held: {
+      subject: "Someone tried to add this address to Abolish",
+      text: [
+        "Someone asked to verify this address for an Abolish account, but it is already verified for another one.",
+        "",
+        "No code was sent and nothing changed. If it was you, sign in with the account that already has this address.",
+      ].join("\n"),
+    },
+    onHold: {
+      subject: "Someone tried to add this address to Abolish",
+      text: [
+        "Someone asked to verify this address for an Abolish account, but an account that had it verified let it go less than 90 days ago.",
+        "",
+        "An address can't be verified again until 90 days after an account lets it go, so no code was sent and nothing changed.",
+      ].join("\n"),
+    },
+    notice: {
+      subject: "A moderation decision on Abolish",
+      text: [
+        "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made.",
+        "",
+        "Sign in to Abolish to see what was decided. You can appeal a removal once, from your account page.",
+        "",
+        "We send moderation notices whatever your notification settings. They never say which poll or profile, or what was decided, so the service that delivers them can't tell.",
+      ].join("\n"),
+    },
+  },
+  "es-US": {
+    code: (code) => ({
+      subject: `Tu código de Abolish: ${code}`,
+      text: [
+        `Tu código para verificar esta dirección en Abolish es ${code}.`,
+        "",
+        "Escríbelo en la página que lo pidió. Sirve una vez, durante 15 minutos.",
+        "",
+        "Si no lo pediste, puedes ignorar este mensaje: nada cambia hasta que se escriba el código.",
+      ].join("\n"),
+    }),
+    held: {
+      subject: "Alguien intentó agregar esta dirección a Abolish",
+      text: [
+        "Alguien pidió verificar esta dirección para una cuenta de Abolish, pero ya está verificada para otra.",
+        "",
+        "No se envió ningún código y nada cambió. Si fuiste tú, inicia sesión con la cuenta que ya tiene esta dirección.",
+      ].join("\n"),
+    },
+    onHold: {
+      subject: "Alguien intentó agregar esta dirección a Abolish",
+      text: [
+        "Alguien pidió verificar esta dirección para una cuenta de Abolish, pero una cuenta que la tenía verificada la dejó hace menos de 90 días.",
+        "",
+        "Una dirección no se puede volver a verificar hasta 90 días después de que una cuenta la deja, así que no se envió ningún código y nada cambió.",
+      ].join("\n"),
+    },
+    notice: {
+      subject: "Una decisión de moderación en Abolish",
+      text: [
+        "Un moderador tomó una decisión sobre una de tus encuestas o tu perfil público en Abolish, o revisó una apelación que hiciste.",
+        "",
+        "Inicia sesión en Abolish para ver qué se decidió. Puedes apelar una eliminación una vez, desde la página de tu cuenta.",
+        "",
+        "Enviamos los avisos de moderación sin importar tu configuración de notificaciones. Nunca dicen qué encuesta o perfil ni qué se decidió, así que el servicio que los entrega no puede saberlo.",
+      ].join("\n"),
+    },
+  },
+};
+
+/**
+ * A message's subject and plain-text body in its language: no link, no
+ * image, nothing to track (T-67).
+ */
+export function renderEmail(message: EmailMessage): Rendered {
+  const words = WORDS[message.locale];
   switch (message.kind) {
     case "email-code":
-      return {
-        subject: `Your Abolish code: ${message.code}`,
-        text: [
-          `Your code to verify this address on Abolish is ${message.code}.`,
-          "",
-          "Enter it on the page that asked for it. It works once, for 15 minutes.",
-          "",
-          "If you didn't ask for it, you can ignore this message: nothing changes until the code is entered.",
-        ].join("\n"),
-      };
+      return words.code(message.code);
     case "email-held":
-      return {
-        subject: "Someone tried to add this address to Abolish",
-        text: [
-          "Someone asked to verify this address for an Abolish account, but it is already verified for another one.",
-          "",
-          "No code was sent and nothing changed. If it was you, sign in with the account that already has this address.",
-        ].join("\n"),
-      };
+      return words.held;
     case "email-on-hold":
-      return {
-        subject: "Someone tried to add this address to Abolish",
-        text: [
-          "Someone asked to verify this address for an Abolish account, but an account that had it verified let it go less than 90 days ago.",
-          "",
-          "An address can't be verified again until 90 days after an account lets it go, so no code was sent and nothing changed.",
-        ].join("\n"),
-      };
+      return words.onHold;
     case "notice":
-      // T-73: no action, ground, poll, profile, link or time, since the
-      // public log could match any of them to the decision
-      // (src/account-notices.ts).
-      return {
-        subject: "A moderation decision on Abolish",
-        text: [
-          "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made.",
-          "",
-          "Sign in to Abolish to see what was decided. You can appeal a removal once, from your account page.",
-          "",
-          "We send moderation notices whatever your notification settings. They never say which poll or profile, or what was decided, so the service that delivers them can't tell.",
-        ].join("\n"),
-      };
+      return words.notice;
   }
 }
 
@@ -419,6 +496,8 @@ export interface RequestEmailCodeOptions {
   readonly turnstile: Turnstile;
   /** The token the form's widget solved for `email-code`, if any. */
   readonly token: string | null;
+  /** The request's language, which the message is written in. */
+  readonly locale: EmailLocale;
   readonly now: Date;
 }
 
@@ -438,9 +517,10 @@ export async function requestEmailCode(
   client: Sql,
   accountId: string,
   input: string,
-  { keys, sender, turnstile, token, now }: RequestEmailCodeOptions,
+  { keys, sender, turnstile, token, locale, now }: RequestEmailCodeOptions,
 ): Promise<void> {
   checkAccountId(accountId);
+  if (!isEmailLocale(locale)) throw new TypeError("locale is not one of EMAIL_LOCALES");
   const address = parseEmailAddress(input);
   if (address === undefined) throw new EmailVerificationError("invalid-address");
   const db = drizzle({ client });
@@ -477,9 +557,9 @@ export async function requestEmailCode(
     await tx
       .insert(accountEmailRecipients)
       .values({ addressHash: hashUnder(keys.hash.current.key, address), sentAt: hourOf(now) });
-    if (held === "account") return { kind: "email-held", to: address };
-    if (held === "hold") return { kind: "email-on-hold", to: address };
-    return { kind: "email-code", to: address, code };
+    if (held === "account") return { kind: "email-held", to: address, locale };
+    if (held === "hold") return { kind: "email-on-hold", to: address, locale };
+    return { kind: "email-code", to: address, code, locale };
   });
   if (message !== undefined && (await sender.send(message)) !== "sent")
     throw new EmailVerificationError("send-unavailable");
@@ -499,15 +579,21 @@ type Verdict =
  * other shape than 8 digits is a wrong one. `address-taken` spends the code
  * too: the address can't be verified until the other account lets it go and
  * its hold ends. An earlier address of the account's is held for
- * `EMAIL_HOLD_DAYS`.
+ * `EMAIL_HOLD_DAYS`. `locale`, the request's language, is the one the
+ * account's moderation notices are written in from then on.
  */
 export async function verifyEmailCode(
   client: Sql,
   accountId: string,
   input: string,
-  { keys, now }: { readonly keys: EmailKeys; readonly now: Date },
+  {
+    keys,
+    locale,
+    now,
+  }: { readonly keys: EmailKeys; readonly locale: EmailLocale; readonly now: Date },
 ): Promise<void> {
   checkAccountId(accountId);
+  if (!isEmailLocale(locale)) throw new TypeError("locale is not one of EMAIL_LOCALES");
   const answer = input.replace(/[\s-]/g, "");
   const db = drizzle({ client });
   const verdict = await db.transaction(async (tx): Promise<Verdict> => {
@@ -564,6 +650,7 @@ export async function verifyEmailCode(
       addressBox: seal(keys, accountId, address),
       boxKey: keys.box.current.id,
       verifiedAt: now,
+      locale,
     };
     await tx
       .insert(accountEmails)

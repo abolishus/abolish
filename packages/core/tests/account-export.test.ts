@@ -61,11 +61,12 @@ async function verified(account: string, address: string): Promise<void> {
     sender: { send: async (m) => (sent.push(m), "sent") },
     turnstile: { verify: async () => "passed" },
     token: "t",
+    locale: "es-US",
     now: NOW,
   });
   const [message] = sent;
   if (message?.kind !== "email-code") throw new Error("no code sent");
-  await verifyEmailCode(app, account, message.code, { keys: KEYS, now: NOW });
+  await verifyEmailCode(app, account, message.code, { keys: KEYS, locale: "es-US", now: NOW });
 }
 
 async function draft(user: string, body: unknown = {}): Promise<string> {
@@ -192,7 +193,11 @@ describe("exportAccount", () => {
       ],
       sessions: [{ createdAt: "2026-10-22T09:00:00.000Z", expiresAt: "2026-10-29T09:00:00.000Z" }],
       signInMethods: [],
-      email: { address: "Someone@Example.org", verifiedOn: "2026-10-22T00:00:00.000Z" },
+      email: {
+        address: "Someone@Example.org",
+        verifiedOn: "2026-10-22T00:00:00.000Z",
+        locale: "es-US",
+      },
       phone: { verifiedOn: "2026-10-10T00:00:00.000Z" },
       polls: [
         {
@@ -291,7 +296,11 @@ describe("exportAccount", () => {
     const withKeys = await exportAccount(app, user, at);
     const without = await exportAccount(app, user, { keys: undefined, now: NOW });
     expect(withKeys?.email?.address).toBe("keyless@example.org");
-    expect(without?.email).toEqual({ address: null, verifiedOn: withKeys?.email?.verifiedOn });
+    expect(without?.email).toEqual({
+      address: null,
+      verifiedOn: withKeys?.email?.verifiedOn,
+      locale: "es-US",
+    });
     expect({ ...without, email: null }).toEqual({ ...withKeys, email: null });
   });
 
@@ -329,8 +338,13 @@ describe("exportAccount", () => {
         }
         for (const [i, m] of made.entries()) {
           const out = await exportAccount(app, m.user, at);
-          // The stand-in box doesn't open under KEYS: the rest still exports.
-          expect(out?.email).toEqual({ address: null, verifiedOn: expect.any(String) });
+          // The stand-in box doesn't open under KEYS: the rest still
+          // exports, and a row written with no language reads English.
+          expect(out?.email).toEqual({
+            address: null,
+            verifiedOn: expect.any(String),
+            locale: "en-US",
+          });
           expect(out?.polls.map((p) => p.id).sort()).toEqual([...m.drafts].sort());
           expect(out?.reactions.map((r) => `${r.electionId} ${r.reaction}`).sort()).toEqual(
             m.reactions.map((r) => `${hex(polls[r.poll]!.electionId)} ${r.reaction}`).sort(),

@@ -399,6 +399,9 @@ describe("2.3's profile combination under version 6", () => {
   test("a sealed poll without an author panel fits", () => {
     expect(electionDefinitionV6Rule(v6())).toBeUndefined();
     expect(profileCombinationRule(v6())).toBeUndefined();
+    // Contract-event version 9 frames ballot version 4, and reads every
+    // record version 8 passes as version 8 does.
+    expect(profileCombinationRule(v6({ [RECORD_TYPES.contractEvent]: 9 }))).toBeUndefined();
     // Every poll class: the default panel's kind is 2.5's, not 2.3's.
     for (const poll_class of Object.values(POLL_CLASSES))
       expect(profileCombinationRule(v6({}, { poll_class }))).toBeUndefined();

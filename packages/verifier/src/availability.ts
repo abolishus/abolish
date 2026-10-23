@@ -155,11 +155,12 @@ const NOT_IMPLEMENTED: AvailabilityOutcome = { status: "unverifiable", code: "no
 export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResult {
   const { clock, eventVersion } = inputs;
   // Version 8 is the first whose tables name the availability events, and
-  // 2.3 fails every profile pinning an earlier one; a later version is a
-  // later release's to read (T-36).
-  if (eventVersion === undefined || eventVersion > 8)
+  // 2.3 fails every profile pinning an earlier one; version 9 names them as
+  // version 8 does, and a later version is a later release's to read (T-36).
+  if (eventVersion === undefined || eventVersion > 9)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
-  if (eventVersion !== 8) return { row: { status: "unverifiable", code: "not-reached" } };
+  if (eventVersion !== 8 && eventVersion !== 9)
+    return { row: { status: "unverifiable", code: "not-reached" } };
   // `C_A`: the counted checkpoint with the largest segment at or before
   // `s_A = period(closes_at) + 1`, from L1 alone. A failure of the board
   // checks' first steps is 4.2's, which no attestation can settle; a seal

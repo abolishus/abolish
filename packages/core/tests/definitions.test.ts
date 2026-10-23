@@ -203,7 +203,7 @@ describe("storeDefinition", () => {
       [RECORD_TYPES.boardEntry, 7, "profile-combination"],
       [RECORD_TYPES.boardEntry, 9, "unsupported-version"],
       [RECORD_TYPES.contractEvent, 7, "profile-combination"],
-      [RECORD_TYPES.contractEvent, 9, "unsupported-version"],
+      [RECORD_TYPES.contractEvent, 10, "unsupported-version"],
       [RECORD_TYPES.ballot, 2, "profile-combination"],
       [RECORD_TYPES.spoiledBallotOpening, 2, "profile-combination"],
       [RECORD_TYPES.tallyOpening, 2, "profile-combination"],

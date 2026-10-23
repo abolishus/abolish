@@ -332,8 +332,15 @@ const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ObligationRootSubmitted",
 ]);
 
+// The events whose record is a batch or an obligation root.
+const BATCH_EVENTS: ReadonlySet<string> = new Set([
+  "ShareReceiptBatchSubmitted",
+  "ShareComplaintBatchSubmitted",
+  "ObligationRootSubmitted",
+]);
+
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6 || v === 7 || v === 8;
+  v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6 || v === 7 || v === 8 || v === 9;
 
 const U32_MAX = 0xffffffff;
 
@@ -439,20 +446,52 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       // floor is, so a record submitted after the windows never holds the
       // rows open.
       if (BigInt(segment) > floor && record.l2_timestamp > deadlines.complaint) continue;
-      // Under ballot version 4 no contract-path record delivers or excludes:
-      // the board's events carry delivery records of version 1, batches and
-      // roots only, none of which that version fixes. So one above the floor
-      // isn't read either, as a board-path one isn't, and can't hold the rows
-      // open; one at or below it is listed as the rejected entry it is.
-      if (BigInt(segment) > floor && definition.version === 6) continue;
+      if (!("record" in checked.event)) continue;
+      // Only a record of the version the ballot version fixes (2 under
+      // ballot version 4, 1 under the others) delivers or excludes
+      // ([[delivery]], Versions): any other is a rejected entry wherever it
+      // sits, so one above the floor isn't read, as a board-path one isn't,
+      // and can't hold the rows open. Version 9 frames both.
+      const fixed = checked.event.record[2] === (definition.version === 6 ? 2 : 1);
+      if (BigInt(segment) > floor && !fixed) continue;
+      // Under ballot version 4 one naming another definition is stray
+      // wherever it sits and delivers nothing here, so above the floor it
+      // isn't read either: another election's seat can't hold these rows
+      // open from the board's shared sequence (T-53).
+      if (
+        BigInt(segment) > floor &&
+        definition.version === 6 &&
+        "definitionHash" in checked.event &&
+        !equal(checked.event.definitionHash, definitionHash)
+      )
+        continue;
       if (BigInt(segment) > floor)
         return countedRows(
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
           inputs.destruction,
         );
-      // Ballot version 4 fixes no obligation-root version, so there a root
-      // is a rejected entry the delivery check lists, whatever it names.
-      if (checked.event.event === "ObligationRootSubmitted" && definition.version !== 6) {
+      // A version-2 batch or root of this election (contract-event version 9
+      // frames them) may deliver or exclude any ballot of its seat's panel,
+      // by its pairs or its leaves, which this release doesn't read into 5.9
+      // yet ([[P2-16]] part 5d-3c): the counted set is undecided while one is
+      // in the extent, never a guess either way (T-25, T-53). One naming
+      // another definition is stray, whatever it holds, so the check lists
+      // it and it holds nothing: another election's seat can't stall this
+      // one's rows from the board's shared sequence.
+      if (
+        definition.version === 6 &&
+        fixed &&
+        BATCH_EVENTS.has(checked.event.event) &&
+        "definitionHash" in checked.event &&
+        equal(checked.event.definitionHash, definitionHash)
+      )
+        return countedRows(
+          { status: "unverifiable", code: "not-implemented", at: { entry: at } },
+          inputs.destruction,
+        );
+      // A root of another version is a rejected entry the delivery check
+      // lists, whatever it names.
+      if (checked.event.event === "ObligationRootSubmitted" && definition.version !== 6 && fixed) {
         // A root for this election may deliver for every ballot by its leaves,
         // which only the counted-extent attestations make available and
         // `checkDelivery` doesn't read yet (P1-12f parts 2 and 3; P4-3 part
@@ -468,7 +507,6 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
         strays.push(at);
         continue;
       }
-      if (!("record" in checked.event)) continue;
       records.push({
         path: "contract",
         submittedAt: record.l2_timestamp,
@@ -876,8 +914,9 @@ function deliveryV2(
               {
                 entry: (inputs.selected[i] as CountedBallot).entry,
                 missing: b.missing.map(({ panel, seat }) => ({ panel, seat })),
-                // Ballot version 4 fixes no batch version, so no complaint
-                // here is a batch's entry.
+                // No batch reaches the check here (a version-2 one leaves
+                // the rows undecided, a version-1 one is a rejected entry),
+                // so no complaint is a batch's entry.
                 complaints: b.excludedBy.map((c) => ({
                   entry: entryOf(c.at),
                   panel: c.panel,

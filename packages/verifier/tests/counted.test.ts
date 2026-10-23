@@ -858,6 +858,135 @@ describe("contract-path obligation roots, once 4.4 passes", () => {
   });
 });
 
+describe("contract-event version 9's records under ballot version 2, once 4.4 passes", () => {
+  // verifier-events.json's version-4 definition pinning contract-event
+  // version 9, which frames the version-2 delivery records beside version
+  // 1's; ballot version 2 fixes version 1, so a version-2 record, batch or
+  // root is a rejected entry here, never a delivery or a hold on 5.9
+  // (docs/spec/verifier.md, Counted set and tally, step 2; T-25, T-53).
+  const definition = definitionOf(caseOf(events, "events-v9-records"));
+  const d = definition.value;
+  const T_D = d.closes_at + BigInt(d.l1_inclusion_bound) + BigInt(PARAMETERS.DELIVERY_WINDOW);
+  const contracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  const abiBytes = (record: Uint8Array) => {
+    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+    out[31] = 0x20;
+    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+    out.set(record, 64);
+    return out;
+  };
+  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+  /** `record` as the board's event `signature` at `t` under version 9; the event check never reads its signature. */
+  const event = (
+    signature: string,
+    topics: readonly Uint8Array[],
+    record: Uint8Array,
+    t: bigint,
+  ) => {
+    const payload = encodeContractEvent(
+      {
+        contract: d.board,
+        n: 0n,
+        l2_block: 1n,
+        l2_timestamp: t,
+        topics: [keccak_256(text(signature)), ...topics],
+        data: abiBytes(record),
+      },
+      9,
+    );
+    const checked = checkContractEvent(decodeContractEvent(payload, 9), contracts, 9);
+    if (!checked.ok) throw new Error(`fixture: ${signature} fails (${checked.error})`);
+    return payload;
+  };
+  const recordOf = (file: string, id: string, hash: Uint8Array) => {
+    const records = (
+      read(file) as {
+        readonly records: readonly { readonly id: string; readonly encoding: string }[];
+      }
+    ).records;
+    const r = records.find((x) => x.id === id);
+    if (r === undefined) throw new Error(`no record ${id} in ${file}`);
+    const record = hex(r.encoding);
+    record.set(hash, 3);
+    return record;
+  };
+  const ROOT = "ObligationRootSubmitted(bytes32,uint8,bytes)";
+  /** delivery-batch-v2.json's author receipt root, renamed to `hash`: version 2. */
+  const rootV2 = (hash: Uint8Array, t: bigint) => {
+    const record = recordOf("delivery-batch-v2.json", "receipt-root-author", hash);
+    return event(ROOT, [hash, word(record[36] as number)], record, t);
+  };
+  /** delivery-batch-v2.json's default receipt batch, renamed to `hash`: version 2. */
+  const batchV2 = (hash: Uint8Array, t: bigint) => {
+    const record = recordOf("delivery-batch-v2.json", "receipt-batch-default", hash);
+    return event(
+      "ShareReceiptBatchSubmitted(bytes32,uint8,bytes)",
+      [hash, word(record[36] as number)],
+      record,
+      t,
+    );
+  };
+  /** delivery-root.json's first root (version 1), renamed to `hash`. */
+  const rootV1 = (hash: Uint8Array, t: bigint) => {
+    const record = hex(
+      (
+        (
+          read("delivery-root.json") as {
+            readonly records: readonly { readonly encoding: string }[];
+          }
+        ).records[0] as { readonly encoding: string }
+      ).encoding,
+    );
+    record.set(hash, 3);
+    return event(ROOT, [hash, word(record[35] as number)], record, t);
+  };
+  const delivered = () => {
+    const e = election(definition);
+    const a = e.cast({ ballotVersion: 2, cell: 0 }, [1, 0, 0], 111n);
+    for (const seat of [1, 2, 3, 4]) e.board(200, e.receipt(a, seat));
+    return { e, a };
+  };
+  const run = ({ e, a }: ReturnType<typeof delivered>) =>
+    countedChecks(e.inputs([a], { eventsPass: true, destruction: false }));
+
+  test("a version-1 root for this election leaves 5.9 undecided, as under version 8", () => {
+    const x = delivered();
+    const at = x.e.board(200, rootV1(x.e.hash, T_D));
+    expect(run(x).rows.get("5.9")).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+      at: { entry: at },
+    });
+  });
+
+  test("a version-2 root or batch for this election is a rejected entry, and holds nothing", () => {
+    for (const make of [rootV2, batchV2]) {
+      const x = delivered();
+      const at = x.e.board(200, make(x.e.hash, T_D));
+      const r = run(x);
+      expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+      expect(r.delivery).toEqual({
+        excluded: [],
+        records: [],
+        rejected: [{ entry: at, decodeError: "profile-mismatch" }],
+      });
+    }
+  });
+
+  test("above the floor a version-2 root isn't read, whenever it was sent", () => {
+    const x = delivered();
+    x.e.board(S_K + 1, rootV2(x.e.hash, T_D));
+    const r = run(x);
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+  });
+});
+
 describe("contract-event version 6's records in the counted set, once 4.4 passes", () => {
   // verifier-events.json's definition pinning contract-event version 6, the
   // version every profile pins: an election naming a Tier 1 group boards

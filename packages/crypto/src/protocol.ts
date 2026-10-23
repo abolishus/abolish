@@ -327,19 +327,24 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Version 9 is left out until the verifier reads its author registration in
-// 3.1 ([[P2-16]] part 5d-3): until then 2.3 reports a profile pinning it
-// unverifiable, never failed (T-36, T-37).
-// Only version 8's tables name every board event (the close rule's, the
+// Only versions 8 and 9 name every board event (the close rule's, the
 // batches', the obligation root's and the availability records') and every
 // group-registry event (the Tier 1 addition and the self-paid group and
 // addition), which land in the sequence every election shares, so 2.3 fails
 // a profile pinning version 1 to 7 ([[close]], Version; [[contracts]],
 // Contract-event record; [[availability]]; T-35, T-50, T-25, T-53, T-24).
+// Version 9 reads every record version 8 passes as version 8 does, so it
+// fits wherever version 8 does ([[contracts]], Event tables (version 9)).
+// Version 8 frames no version-4 ballot or version-2 delivery record, so a
+// profile pinning it beside ballot version 4 fails 4.4 at the first one
+// boarded through the contract path; failing it here instead waits on
+// verifier-ballots-v4.json and its kin moving to version 9 ([[P2-16]] part
+// 5e, before rule 9 serves version 6).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
-  1, 2, 3, 4, 5, 6, 7, 8,
+  1, 2, 3, 4, 5, 6, 7, 8, 9,
 ]);
-const EVENT_VERSION = 8;
+// The versions 2.3 passes: those whose tables name every event.
+const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9]);
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -480,7 +485,7 @@ export function profileCombinationRule(
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
   // Every profile needs the close statement on the board (board-entry
-  // version 5) and every event archived (contract-event version 8),
+  // version 5) and every event archived (contract-event version 8 or 9),
   // whatever its definition version, or its seats have no way
   // to state the close and 5.5 and 6.3 can't be checked ([[close]],
   // Version; T-35, T-50). A contract-event version this package doesn't
@@ -493,7 +498,7 @@ export function profileCombinationRule(
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
     (opening !== 1 || carriesDestruction) &&
     carriesClose &&
-    (!knownEvents || events === EVENT_VERSION);
+    (!knownEvents || WHOLE_EVENTS.has(events));
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)

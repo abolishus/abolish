@@ -507,9 +507,6 @@ describe("the author panel's run", () => {
   });
 });
 
-// The same through a format-4 bundle and the API's admission, under a
-// version-6 definition naming the vector's default panel: its transcript was
-// made for another stub, so only what precedes the transcript is decided.
 describe("the author panel's registration on L2", () => {
   // The definition under a profile pinning contract-event version 9, the
   // first whose tables name `AuthorPanelRegistered`.
@@ -661,6 +658,9 @@ describe("the author panel's registration on L2", () => {
   });
 });
 
+// The same through a format-4 bundle and the API's admission, under a
+// version-6 definition naming the vector's default panel: its transcript was
+// made for another stub, so only what precedes the transcript is decided.
 describe("a version-6 definition beside the default panel", () => {
   const l1File = read("l1-anchor.json") as {
     readonly clock: Readonly<Record<string, string>>;

@@ -125,7 +125,19 @@ const play: Story["play"] = async ({ canvasElement }) => {
   ).toBeVisible();
 };
 
-export const Default: Story = { play };
+export const Default: Story = {
+  play: async (context) => {
+    await play(context);
+    // From 640px each promise starts its own line, where run together the
+    // lines broke after "Anyone" twice.
+    if (context.canvasElement.ownerDocument.documentElement.clientWidth < 640) return;
+    const title = within(context.canvasElement).getByRole("heading", { level: 1 });
+    const lines = [...title.children].map((line) => line.getBoundingClientRect());
+    await expect(lines).toHaveLength(3);
+    await expect(lines[1]?.top).toBeGreaterThanOrEqual(lines[0]?.bottom ?? Infinity);
+    await expect(lines[2]?.top).toBeGreaterThanOrEqual(lines[1]?.bottom ?? Infinity);
+  },
+};
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 

@@ -1,5 +1,6 @@
 import { buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { ArrowRight } from "lucide-react";
+import { Fragment } from "react";
 
 import { catalogs } from "../messages.ts";
 import type { StreamCard as Card } from "../stream.ts";
@@ -27,9 +28,20 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
     <div className="grid gap-16">
       <section className="grid gap-4 sm:gap-8 sm:pt-2 md:pt-10 lg:grid-cols-12 lg:gap-x-10">
         {/* 36px on a phone: at 48px the title took six lines and pushed both
-            actions below a 640px screen. */}
-        <h1 className="m-0 font-heading text-4xl leading-none font-semibold tracking-tight text-balance sm:text-7xl lg:col-span-9">
-          {t("homeTitle")}
+            actions below a 640px screen. From 640px each promise starts its
+            own line: run together, the lines broke after "Anyone" twice and
+            split every promise but the first. The whole row from 1024px,
+            where the longest promise fits on one line; below, it wraps once,
+            between "Anyone can" and "check the count", as on a phone. */}
+        <h1 className="m-0 font-heading text-4xl leading-none font-semibold tracking-tight text-balance sm:text-7xl lg:col-span-12">
+          {t("homeTitle")
+            .split(/(?<=[.!?])\s+/)
+            .map((sentence, i) => (
+              <Fragment key={sentence}>
+                {i > 0 ? " " : null}
+                <span className="sm:block">{sentence}</span>
+              </Fragment>
+            ))}
         </h1>
         <div className="grid content-start gap-4 sm:gap-8 lg:col-span-7">
           <p className="m-0 max-w-prose text-lg text-pretty sm:text-xl">{t("homeLede")}</p>

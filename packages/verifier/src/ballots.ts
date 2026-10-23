@@ -143,6 +143,8 @@ export interface CountedCandidate {
   readonly path: Path["kind"];
   readonly ballot: AdmittedBallot;
   readonly tally?: BallotTally;
+  /** The ballot record as admitted: the entry's payload, or the record its contract event frames. */
+  readonly record: Uint8Array;
 }
 
 /**
@@ -315,6 +317,7 @@ export function ballotChecks(
     readonly path: Path;
     readonly ballot: AdmittedBallot;
     readonly tally: BallotTally;
+    readonly record: Uint8Array;
   }[] = [];
   const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
@@ -428,6 +431,7 @@ export function ballotChecks(
         index: BigInt(at),
       },
       tally: judged.tally,
+      record: payload,
     });
   }
   // `message` is M recomputed from the record, so a re-randomised proof
@@ -526,6 +530,7 @@ export function ballotChecks(
           path: p.path.kind,
           ballot: p.ballot,
           tally: p.tally,
+          record: p.record,
         })),
       }),
     ordinary,

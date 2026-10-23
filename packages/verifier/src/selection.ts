@@ -96,12 +96,17 @@ export function selectionCheck(inputs: SelectionInputs): {
     return {
       row: { status: "unverifiable", code: "not-implemented", at: { entry: beyond.entry } },
     };
-  const chosen = selectBallots(anchored.map((c) => c.ballot));
+  return { row: { status: "pass" }, report: selectAdmitted(anchored) };
+}
+
+/**
+ * Step 6: revoting.md's Selection over admitted ballots that are every
+ * admitted ballot of a fixed counted extent, each by its entry.
+ */
+export function selectAdmitted(admitted: readonly CountedCandidate[]): SelectionReport {
+  const chosen = selectBallots(admitted.map((c) => c.ballot));
   // Admission already rejected every repeat (5.7), so none is left here.
-  if (chosen.repeats.length !== 0) throw new Error("selectionCheck: a repeat was admitted");
+  if (chosen.repeats.length !== 0) throw new Error("selectAdmitted: a repeat was admitted");
   const entry = (b: { readonly index: bigint }) => ({ entry: Number(b.index) });
-  return {
-    row: { status: "pass" },
-    report: { selected: chosen.selected.map(entry), ties: chosen.ties.map(entry) },
-  };
+  return { selected: chosen.selected.map(entry), ties: chosen.ties.map(entry) };
 }

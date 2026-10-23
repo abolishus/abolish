@@ -35,6 +35,7 @@ import {
   type BallotCheck,
   type BallotCheckV2,
   type BallotStep,
+  type BoardEntryVersion,
   ballotHashV3,
   castPostingSeatV3,
   castReceiptSeatV3,
@@ -51,13 +52,20 @@ import {
   type QuestionBallotElection,
   questionBallotElection,
   RECORD_TYPES,
+  type RegisteredKeys,
   SHARE_CIPHERTEXT,
   type Panel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
-import { authorRunOf, decodeDefinition, isReadable, readDefinition } from "./definition.ts";
+import {
+  authorRunOf,
+  decodeDefinition,
+  isReadable,
+  readDefinition,
+  type VerifiedDefinition,
+} from "./definition.ts";
 import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 
 /** Why no ballot of an election can be admitted: the first check that stops them all. */
@@ -223,22 +231,34 @@ export interface ElectionAdmission {
   readonly posting: (posting: Uint8Array, ballot: Uint8Array) => PostingAdmission;
 }
 
+/** An election as the verifier reads it for its ballots: its definition, board-entry version and registered key sets. */
+export interface ReadElection {
+  readonly ok: true;
+  readonly record: VerifiedDefinition;
+  /** Its definition hash. */
+  readonly hash: Uint8Array;
+  readonly boardEntryVersion: BoardEntryVersion;
+  /** The default panel's registered key set (3.2 passed, 2.5 didn't fail). */
+  readonly registered: readonly RegisteredKeys[];
+  /** Beside an author panel, its registered key set, which its approvals approved. */
+  readonly authorRegistered: readonly RegisteredKeys[] | undefined;
+}
+
 /**
- * How an election's ballots are admitted, from its definition's bytes, the
- * panel the release pins for it and the board entries that may carry its
- * transcript (each an encoded entry; only an entry of this election, under
- * the pinned board-entry version, whose payload hashes to the definition's
- * `ceremony_transcript_hash` counts). Every input is what the verifier
- * would read, never a ballot's or a submitter's choice (T-37, T-04).
- * `pins` are the panels the release pins, as `verifyBundle` reads them, so
- * admission and 2.3 judge a live poll's restriction alike.
+ * The checks every ballot of an election waits on, from its definition's
+ * bytes, the panel the release pins for it and the board entries that may
+ * carry its transcript, in the verifier's order: 2.1's decoding and rules,
+ * the pinned board-entry version, 2.3's combination under the release's
+ * pins, then the transcript check (2.5's panel, 3.1, 3.2). The first that
+ * stops them all is the refusal; otherwise the registered key sets every
+ * ballot is judged against (T-37, T-04).
  */
-export function electionAdmission(
+export function readElection(
   definitionBytes: Uint8Array,
   panel: Panel,
   entries: readonly Uint8Array[],
   pins: readonly PinnedPanel[] = PINNED_PANELS,
-): ElectionAdmission | { readonly ok: false; readonly code: ElectionAdmissionCode } {
+): ReadElection | { readonly ok: false; readonly code: ElectionAdmissionCode } {
   const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
   let record;
   try {
@@ -252,7 +272,7 @@ export function electionAdmission(
         : "definition-decode",
     );
   }
-  const { stubHash, rule } = readDefinition(record);
+  const { hash, stubHash, rule } = readDefinition(record);
   if (rule !== undefined) return refuse("definition-rule");
   const d = record.value;
   const boardEntryVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
@@ -288,6 +308,30 @@ export function electionAdmission(
       why === "ceremony-transcript-missing" || why === "unsupported-version" ? why : "not-reached",
     );
   }
+  return { ok: true, record, hash, boardEntryVersion, registered, authorRegistered };
+}
+
+/**
+ * How an election's ballots are admitted, from its definition's bytes, the
+ * panel the release pins for it and the board entries that may carry its
+ * transcript (each an encoded entry; only an entry of this election, under
+ * the pinned board-entry version, whose payload hashes to the definition's
+ * `ceremony_transcript_hash` counts). Every input is what the verifier
+ * would read, never a ballot's or a submitter's choice (T-37, T-04).
+ * `pins` are the panels the release pins, as `verifyBundle` reads them, so
+ * admission and 2.3 judge a live poll's restriction alike.
+ */
+export function electionAdmission(
+  definitionBytes: Uint8Array,
+  panel: Panel,
+  entries: readonly Uint8Array[],
+  pins: readonly PinnedPanel[] = PINNED_PANELS,
+): ElectionAdmission | { readonly ok: false; readonly code: ElectionAdmissionCode } {
+  const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
+  const election = readElection(definitionBytes, panel, entries, pins);
+  if (!election.ok) return election;
+  const { record, registered, authorRegistered } = election;
+  const d = record.value;
   const judge = steppedJudgeFor(record, registered, authorRegistered);
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");

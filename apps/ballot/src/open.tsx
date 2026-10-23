@@ -250,11 +250,13 @@ export interface PostingShare {
 }
 
 /**
- * A posting's outcome: `recorded` by the contract, `refused` by it, or
- * `unreachable`, which may still land: a posting is the same whoever
- * boards it, so posting again is safe.
+ * A posting's outcome: `recorded` by the contract, `refused` by it,
+ * `relayed` (not recorded, but the relay had the postings, so their `m_i`
+ * are out of the voter's hands and may still land), or `unreachable`,
+ * which may still land too: a posting is the same whoever boards it, so
+ * posting again is safe.
  */
-export type PostAnswer = "recorded" | "refused" | "unreachable";
+export type PostAnswer = "recorded" | "refused" | "relayed" | "unreachable";
 
 /** An L1 block, by number and hash, that a ballot's membership message names. */
 export interface L1Block {
@@ -487,6 +489,8 @@ type Step =
       readonly sending: Sending;
       /** A posting the voter chose didn't go through. */
       readonly failed?: true;
+      /** And the relay had its parts, which may still reach the board. */
+      readonly relayed?: true;
     }
   | { readonly kind: "declining" }
   | { readonly kind: "posting" }
@@ -1163,6 +1167,8 @@ export function Ballot({
         } finally {
           for (const record of checked.postings) record.fill(0);
         }
+        if (answer === "relayed")
+          return { kind: "offer", sending: checked.sending, failed: true, relayed: true };
         if (answer !== "recorded") return { kind: "offer", sending: checked.sending, failed: true };
         if (current()) setStep({ kind: "sending" });
         return send({ ...checked.sending, undelivered: [] });
@@ -1249,6 +1255,7 @@ export function Ballot({
           trackingCode={sending.trackingCode}
           missing={sending.undelivered.length}
           failed={step.failed === true}
+          relayed={step.relayed === true}
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
           onPost={source.post === undefined ? undefined : () => post(sending)}

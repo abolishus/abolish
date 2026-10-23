@@ -79,10 +79,16 @@ export class BallotWorker {
       const id = responseId(data);
       const pending = id === undefined ? undefined : this.#pending.get(id);
       if (id === undefined || pending === undefined) {
-        // An open answered after its timeout: no one will zero its secret but here (T-12).
-        const late = data as { kind?: unknown; result?: { secret?: unknown } } | null;
+        // An open answered after its timeout: no one will zero its secret but
+        // here (T-12); nor a posting record's `m_i` (T-18).
+        const late = data as {
+          kind?: unknown;
+          result?: { secret?: unknown; record?: unknown };
+        } | null;
         if (late?.kind === "backup-open" && late.result?.secret instanceof Uint8Array)
           late.result.secret.fill(0);
+        if (late?.kind === "posting" && late.result?.record instanceof Uint8Array)
+          late.result.record.fill(0);
         return;
       }
       this.#pending.delete(id);

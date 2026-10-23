@@ -1313,6 +1313,31 @@ describe("the board's postings", () => {
     }
   });
 
+  test("a node that claims a head far ahead, or serves logs without end, runs the read's budget out", async () => {
+    // Empty ranges up to a head 2^40 blocks on: charged per range.
+    const far = node([], 2n ** 40n);
+    expect(await load(far.fetchFn)).toEqual({ ok: false, problem: "bad-answer" });
+    // The range that runs it out is the last one asked for.
+    expect(far.calls.filter((c) => c.method === "eth_getLogs").length).toBeLessThanOrEqual(
+      16 * 1024 + 1,
+    );
+    // Logs the board frames, more than any ballot has: charged per log.
+    const many = Array.from({ length: 64 }, (_, i) => at(101n + BigInt(i), 0n, posting));
+    const flood = node(many);
+    expect(
+      await loadPostings(
+        WITH_BOARD,
+        bytes(DEFINITION_TOPIC),
+        bytes(BALLOT_TOPIC),
+        flood.fetchFn,
+        "finalized",
+        undefined,
+        undefined,
+        32 * 1024,
+      ),
+    ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
   test("a build that pins no board asks nothing of anyone", async () => {
     const { calls, fetchFn } = node([]);
     expect(

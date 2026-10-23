@@ -1626,6 +1626,21 @@ export const PostingFailsThenGoes: Story = {
   },
 };
 
+export const PostingRelayedNotRecorded: Story = {
+  name: "A posting the relay had but the board never showed returns to the offer saying the parts may still be posted",
+  args: { source: offerSource({ posted: ["relayed"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(await canvas.findByText("The posting isn't on the board yet")).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(OFFER);
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingDeclined: Story = {
   name: "The voter leaves the ballot: its kept shares are erased here and in the worker, and nothing is sent",
   args: { source: offerSource({ posted: ["recorded"] }) },

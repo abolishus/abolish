@@ -46,7 +46,7 @@ import {
 import { catalogs } from "./messages.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
-import { postingTopics, postThroughRelay, sendPosting } from "./posting.ts";
+import { postingTopics, postThroughRelay, sendPosting, timedFetch } from "./posting.ts";
 import type { Recoverer } from "./recover.tsx";
 import { recover } from "./recovery.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
@@ -288,7 +288,9 @@ const source: ElectionSource = {
           cutoff: bigint,
         ) => {
           const { definitionHash, ballotHash } = postingTopics(postings);
-          const fetchFn = (url: string, init: RequestInit) => fetch(url, init);
+          // Each request bounded, so neither the relay nor the RPC can hold
+          // the client past its deadlines (T-25, T-50).
+          const fetchFn = timedFetch((url, init) => fetch(url, init));
           return postThroughRelay(
             {
               send: (posting) => sendPosting(STAGING, posting, ballot, fetchFn),

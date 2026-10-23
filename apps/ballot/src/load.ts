@@ -405,6 +405,11 @@ export type LoadedRegistry =
     }
   | { readonly ok: false; readonly problem: LoadProblem };
 
+// The most of the board's logs one postings read takes: a ballot has at most
+// one posting per seat, a few KiB each, so this is room for any honest board
+// with thousands to spare, and a node serving more is lying (T-52).
+const MAX_POSTINGS_BYTES = 16 * 1024 * 1024;
+
 /** The most blocks one `eth_getLogs` call spans: public endpoints cap ranges (the worker's `TIER0_LOG_RANGE`). */
 export const LOG_RANGE = 10_000n;
 // A finalized block's header with its transaction hashes, and a range's
@@ -549,10 +554,15 @@ export type LoadedPostings =
  * `SharePosted` whose topics are these hashes and whose record the board
  * frames (`checkContractEvent`), so a node can't pass off another event's
  * record as a posting. The requests name the two hashes, as the spec's
- * read does: the RPC learns which ballot the client watches, which the
- * posting itself makes public once sent (T-13). The RPC is trusted for
+ * read does: the RPC learns which ballot the client watches, from the
+ * voter's address, before the ballot or any posting of it is public, and
+ * even if neither ever is (Known-weak in docs/status/P2-8.md; T-11, T-13).
+ * The RPC is trusted for
  * which logs exist: one that hides a posting only delays the client to its
  * fallback; one that invents a log can't make it carry another record.
+ * As the group registry's read, it runs out a `maxBytes` budget, charged
+ * each range and each log's data, so a node that claims a head far ahead,
+ * or serves logs without end, ends it as `bad-answer` (T-52).
  */
 export async function loadPostings(
   deployment: Deployment,
@@ -562,6 +572,7 @@ export async function loadPostings(
   head: "finalized" | "latest",
   from?: bigint,
   range = LOG_RANGE,
+  maxBytes = MAX_POSTINGS_BYTES,
 ): Promise<LoadedPostings> {
   const board = deployment.board;
   if (board === undefined) return { ok: false, problem: "no-registry" };
@@ -578,6 +589,7 @@ export async function loadPostings(
   };
   const topics = [null, `0x${toHex(definitionHash)}`, `0x${toHex(ballotHash)}`];
   const records: Uint8Array[] = [];
+  let budget = maxBytes;
   try {
     const [, at] = await both(
       checkChain(deployment, fetchFn),
@@ -598,6 +610,8 @@ export async function loadPostings(
         throw e instanceof TypeError ? new Stop("unreachable") : e;
       });
       if (!Array.isArray(logs)) throw new Stop("bad-answer");
+      budget -= RANGE_COST;
+      if (budget < 0) throw new Stop("bad-answer");
       for (const log of logs as unknown[]) {
         const read = logOf(log, board.address, start, to);
         if (
@@ -606,6 +620,8 @@ export async function loadPostings(
         )
           throw new Stop("bad-answer");
         last = [read.block, read.index];
+        budget -= read.data.length + ENTRY_COST;
+        if (budget < 0) throw new Stop("bad-answer");
         const checked = checkContractEvent(
           {
             contract,

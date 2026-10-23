@@ -65,6 +65,17 @@ export const OfferedForSeveral: Story = {
   },
 };
 
+export const OfferedAfterRelaying: Story = {
+  name: "A posting the relay had but the board doesn't show yet is never called unposted",
+  args: { missing: 1, failed: true, relayed: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("The posting isn't on the board yet")).toBeVisible();
+    await expect(canvas.getByText(/count them as posted/)).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+  },
+};
+
 export const OfferedWithoutPosting: Story = {
   name: "A build with no contract path offers only trying again or leaving the ballot",
   render: (args) => <PostingOffer {...args} onPost={undefined} />,

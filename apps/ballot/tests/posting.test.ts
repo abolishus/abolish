@@ -7,6 +7,7 @@
 // deadline `c_P` (T-10, T-25, T-50, T-52).
 
 import fc from "fast-check";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 
 import { STAGING } from "../src/deployment.ts";
@@ -20,8 +21,10 @@ import {
   POSTING_SEND_MARGIN,
   type PostingIo,
   postThroughRelay,
+  postingTopics,
   type RelayAnswer,
   sendPosting,
+  timedFetch,
 } from "../src/posting.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -110,12 +113,47 @@ describe("sendPosting", () => {
       [500, { code: "INTERNAL_SERVER_ERROR" }],
       [200, "x".repeat(5000)],
     ];
+    // The relay had the request, and so the posting's m_i.
     for (const [status, body] of cases)
       expect(await sendPosting(STAGING, POSTING, BALLOT, route(status, body).fetchFn)).toEqual({
         kind: "unreachable",
+        reached: true,
       });
+    // It never did.
     const down: Fetch = () => Promise.reject(new TypeError("Failed to fetch"));
-    expect(await sendPosting(STAGING, POSTING, BALLOT, down)).toEqual({ kind: "unreachable" });
+    expect(await sendPosting(STAGING, POSTING, BALLOT, down)).toEqual({
+      kind: "unreachable",
+      reached: false,
+    });
+  });
+
+  test("a relay that holds the request or its body open is cut off, as unreachable", async () => {
+    // A server that answers nothing until the request is aborted.
+    const held: Fetch = (_, init) =>
+      new Promise((_resolve, reject) =>
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+      );
+    expect(await sendPosting(STAGING, POSTING, BALLOT, timedFetch(held, 20))).toEqual({
+      kind: "unreachable",
+      reached: false,
+    });
+    // One that sends its status, then trickles a body it never ends.
+    const trickled: Fetch = (_, init) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("{"));
+              init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    expect(await sendPosting(STAGING, POSTING, BALLOT, timedFetch(trickled, 20))).toEqual({
+      kind: "unreachable",
+      reached: true,
+    });
   });
 });
 
@@ -198,18 +236,24 @@ describe("postThroughRelay", () => {
     expect(w.sends).toHaveLength(0);
   });
 
-  test("a refusal falls back at once", async () => {
+  test("a refusal falls back at once, the relay having read the posting", async () => {
     const w = world({
       relay: (_, call) => (call < 2 ? { kind: "busy" } : { kind: "refused", code: "ballot-cap" }),
     });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("refused");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
     expect(w.sends).toHaveLength(3);
   });
 
   test("busy or unreachable is sent again each round, until the relay's patience runs out", async () => {
-    for (const answer of [{ kind: "busy" }, { kind: "unreachable" }] as const) {
+    const answers = [
+      [{ kind: "busy" }, "relayed"],
+      [{ kind: "unreachable", reached: true }, "relayed"],
+      // Only a relay never reached hasn't read the posting.
+      [{ kind: "unreachable", reached: false }, "unreachable"],
+    ] as const;
+    for (const [answer, outcome] of answers) {
       const w = world({ relay: () => answer });
-      expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+      expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe(outcome);
       expect(w.sends.every((s) => s.at - START < POSTING_PATIENCE)).toBe(true);
       expect(w.sends).toHaveLength(Number(POSTING_PATIENCE / POLL));
       expect(w.elapsed()).toBe(POSTING_PATIENCE);
@@ -225,7 +269,7 @@ describe("postThroughRelay", () => {
 
   test("a sent posting the latest head never shows falls back once its wait is over", async () => {
     const w = world({ relay: () => sent });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
     expect(w.sends).toHaveLength(1);
     expect(w.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
     // The latest head is read only once the wait is over.
@@ -235,7 +279,7 @@ describe("postThroughRelay", () => {
   test("a sighting at the latest head keeps the client waiting, never past c_P", async () => {
     const start = CUTOFF - POSTING_CLIENT_MARGIN - 3_000n;
     const w = world({ relay: () => sent, latest: () => [POSTING], start });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
     // It stops at the first round past c_P.
     expect(start + w.elapsed()).toBeGreaterThan(CUTOFF - POSTING_CLIENT_MARGIN);
     expect(start + w.elapsed() - POLL).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN);
@@ -255,17 +299,39 @@ describe("postThroughRelay", () => {
     expect(w.sends).toHaveLength(0);
   });
 
-  test("an RPC that can't be read records nothing, and the deadlines still end the run", async () => {
+  test("an RPC that can't be read, or whose read throws, records nothing, and the deadlines still end the run", async () => {
     const w = world({ relay: () => sent, readFails: true });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
     expect(w.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
+    const v = world({ relay: () => sent });
+    const throwing = { ...v.io, find: () => Promise.reject(new DOMException("t", "TimeoutError")) };
+    expect(await postThroughRelay(throwing, [POSTING], CUTOFF)).toBe("relayed");
+    expect(v.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
+  });
+
+  test("the latest head's time ends a sighting's wait as the finalized head's does", async () => {
+    const start = CUTOFF - POSTING_CLIENT_MARGIN - 3_000n;
+    // The finalized head can't be read; the latest shows the posting, at a
+    // time past c_P that the device's clock is still 3,000 seconds short of.
+    const w = world({ relay: () => sent, start });
+    const late = {
+      ...w.io,
+      find: (head: "finalized" | "latest"): Promise<LoadedPostings> =>
+        Promise.resolve(
+          head === "finalized"
+            ? { ok: false, problem: "unreachable" }
+            : { ok: true, block: 1n, timestamp: CUTOFF, records: [POSTING] },
+        ),
+    };
+    expect(await postThroughRelay(late, [POSTING], CUTOFF)).toBe("relayed");
+    expect(w.elapsed()).toBeLessThanOrEqual(POSTING_FORCE_AFTER + POSTING_SEEN + POLL);
   });
 
   test("never recorded unless the finalized head carried every posting, and every run ends by c_P", async () => {
     const answer = fc.constantFrom<RelayAnswer>(
       sent,
       { kind: "busy" },
-      { kind: "unreachable" },
+      { kind: "unreachable", reached: true },
       { kind: "refused", code: "too-late" },
     );
     await fc.assert(
@@ -284,6 +350,8 @@ describe("postThroughRelay", () => {
           });
           const result = await postThroughRelay(w.io, [POSTING], CUTOFF);
           if (result === "recorded") expect(finalAt !== null && w.elapsed() >= finalAt).toBe(true);
+          // A posting that ends unrecorded after the relay answered is never called unsent.
+          if (w.sends.length > 0 && result !== "recorded") expect(result).toBe("relayed");
           // Ends within one round of c_P, and never sends past the send cutoff.
           expect(start + w.elapsed()).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN + POLL);
           for (const s of w.sends) expect(s.at).toBeLessThanOrEqual(CUTOFF - POSTING_SEND_MARGIN);
@@ -291,5 +359,29 @@ describe("postThroughRelay", () => {
       ),
       { numRuns },
     );
+  });
+});
+
+describe("postingTopics", () => {
+  // docs/spec/vectors/delivery.json's posting, from an independent generator.
+  const vectors = JSON.parse(
+    readFileSync(new URL("../../../docs/spec/vectors/delivery.json", import.meta.url), "utf8"),
+  ) as { readonly records: readonly { readonly id: string; readonly encoding: string }[] };
+  const hex = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
+  const posting = hex(vectors.records.find((r) => r.id === "posting")?.encoding ?? "");
+
+  test("names the ballot's definition and ballot hash, the record's bytes 3 to 67", () => {
+    expect(postingTopics([posting, posting])).toEqual({
+      definitionHash: posting.slice(3, 35),
+      ballotHash: posting.slice(35, 67),
+    });
+  });
+
+  test("refuses no posting, postings of two ballots, and bytes that aren't a posting", () => {
+    expect(() => postingTopics([])).toThrow(RangeError);
+    const other = posting.slice();
+    other[40] = (other[40] as number) ^ 1;
+    expect(() => postingTopics([posting, other])).toThrow(RangeError);
+    expect(() => postingTopics([posting.subarray(1)])).toThrow();
   });
 });

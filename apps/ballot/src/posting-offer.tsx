@@ -16,13 +16,17 @@ const shortHex = (hash: string) => groupHex(hash).slice(0, 2).join(" ");
  * The offer, asked as soon as delivery failed so a voter who leaves the
  * ballot can still answer again while the poll is open. `onPost` is absent
  * in a build that has no contract path to post through; `failed` says a
- * posting the voter chose didn't go through.
+ * posting the voter chose didn't go through, and `relayed` that it didn't
+ * after the relay had the parts, which may then still reach the board, so
+ * the voter is never told nothing was posted ([[posting-relay]], Outcome;
+ * T-15).
  */
 export function PostingOffer({
   poll,
   trackingCode,
   missing,
   failed = false,
+  relayed = false,
   onRetry,
   onDecline,
   onPost,
@@ -32,6 +36,7 @@ export function PostingOffer({
   /** How many of the poll's trustees haven't taken their part. */
   missing: number;
   failed?: boolean;
+  relayed?: boolean;
   onRetry: () => void;
   onDecline: () => void;
   onPost?: (() => void) | undefined;
@@ -56,8 +61,8 @@ export function PostingOffer({
       </ScreenTitle>
       {failed ? (
         <div className="mt-6">
-          <Note tone="warn" title={t("postingFailedTitle")}>
-            <p className="m-0">{t("postingFailed")}</p>
+          <Note tone="warn" title={t(relayed ? "postingRelayedTitle" : "postingFailedTitle")}>
+            <p className="m-0">{t(relayed ? "postingRelayed" : "postingFailed")}</p>
           </Note>
         </div>
       ) : null}

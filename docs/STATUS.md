@@ -9,7 +9,7 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 **Owner priority (2026-10-21), replacing the earlier notes:** the everyday app first, finished completely before any official work ([[PROJECT_BRIEF]], Priority). Take the first unblocked item, in this order:
 
 1. **The everyday app**: [[P2-31]] part 6 first (without it no one can vote on a deployment with no SMS provider), then [[P2-30]], [[P2-8]], [[P2-22]], [[P2-23]], [[P2-24]], [[P2-25]], [[P2-26]], [[P2-27]], [[P2-28]], [[P2-15]], [[P2-17]], [[P2-14]], [[P2-10]], [[P2-9]], [[P2-19]], [[P2-20]], [[P2-18]], [[P2-21]], and [[P2-29]]'s design iterations as each surface becomes reviewable.
-2. **What an everyday item waits on**, and only that part: the contracts ([[P1-18]]), the verifier and reference election ([[P1-19]], [[P1-20]], [[P1-21]]), intake and receipts ([[P1-12c]], [[P1-13b]]), the trustee node ([[P2-13]]), Tier 0 registration ([[P3-2]]), the indexer ([[P3-5]]), anchoring ([[P4-1]]) and the board's data availability ([[P4-3]]).
+2. **What an everyday item waits on**, and only that part: the contracts ([[P1-18]], [[P1-18b]]), the verifier and reference election ([[P1-19]], [[P1-20]], [[P1-21]]), intake and receipts ([[P1-12c]], [[P1-13b]]), the trustee node ([[P2-13]]), Tier 0 registration ([[P3-2]]), the indexer ([[P3-5]]), anchoring ([[P4-1]]) and the board's data availability ([[P4-3]]).
 3. **Deferred until [[P2-29]] is done**: Tier 1 and Tier 2 ([[P3-3]], [[P3-4]]), per-tier results ([[P3-6]]), the rest of Phase 4 ([[P4-2]], [[P4-4]], [[P4-5]], [[P4-6]]), Phase 5, the independent trustees ([[P1-7]]), and [[P2-16]]'s author-panel parts (6 to 9). An item already mid-part finishes that part; no new part starts.
 
 Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
@@ -50,6 +50,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P1-17b]] Membership verification keys and Groth16 verification
 - [[P1-17c]] `packages/circuits` Noir scaffold
 - [[P1-18]] `packages/contracts` scaffold
+- [[P1-18b]] The contract-event window
 - [[P1-19]] `packages/verifier` CLI
 - [[P1-20]] Reference election fixture
 - [[P1-21]] Simulation surfaces in admin-cli and sdk

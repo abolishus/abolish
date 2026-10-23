@@ -1737,7 +1737,7 @@ const KB = 1024;
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 170, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 165, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 166, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 200, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },

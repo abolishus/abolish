@@ -34,10 +34,12 @@ export const Default: Story = {
     await expect(within(stream).getAllByRole("article")).toHaveLength(3);
     await expect(canvas.queryByText(/viewing now/i)).toBeNull();
 
-    // The trust band redraws as each step reaches the middle of the viewport.
-    const graphic = () => canvas.getByTestId("trust-graphic");
-    await expect(graphic()).toHaveAttribute("data-step", "0");
+    // The trust band redraws as each step reaches the middle of the viewport
+    // (the sticky one, beside the cards from `lg`; below it each card draws its own).
     const scene = canvas.getByRole("region", { name: "What happens to an answer" });
+    const graphic = () =>
+      within(scene.querySelector<HTMLElement>(":scope > div")!).getByTestId("trust-graphic");
+    await expect(graphic()).toHaveAttribute("data-step", "0");
     const steps = [...scene.querySelectorAll<HTMLElement>(":scope > ol > li")];
     await expect(steps).toHaveLength(4);
     steps[2]!.scrollIntoView({ block: "center" });

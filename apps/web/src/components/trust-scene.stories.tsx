@@ -25,11 +25,34 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(scene).toHaveTextContent("every seat is run by Abolish");
   await expect(scene).toHaveTextContent("it takes 4 of the 7 seats");
   // The diagram is decoration beside the text, and draws without inline styles (CSP).
-  const graphic = canvas.getByTestId("trust-graphic");
-  await expect(graphic).toHaveAttribute("aria-hidden", "true");
+  for (const graphic of canvas.getAllByTestId("trust-graphic"))
+    await expect(graphic).toHaveAttribute("aria-hidden", "true");
   await expect(canvasElement.querySelector("[style]")).toBeNull();
 };
 
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/**
+ * On a phone each step's card draws its own diagram, under its words, and
+ * nothing is sticky: the sticky diagram above the cards sat under the card
+ * of the step it drew whenever that step was active.
+ */
+export const Phone: Story = {
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const scene = within(canvasElement).getByRole("region", { name: "What happens to an answer" });
+    await expect(scene.querySelector(":scope > div")).not.toBeVisible();
+    const steps = within(scene).getAllByRole("listitem");
+    await expect(steps).toHaveLength(4);
+    for (const [index, step] of steps.entries()) {
+      const graphic = within(step).getByTestId("trust-graphic");
+      await expect(graphic).toBeVisible();
+      await expect(graphic).toHaveAttribute("data-step", String(index));
+      const heading = within(step).getByRole("heading").getBoundingClientRect();
+      await expect(graphic.getBoundingClientRect().top).toBeGreaterThan(heading.bottom);
+    }
+  },
+};

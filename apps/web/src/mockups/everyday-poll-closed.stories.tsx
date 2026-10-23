@@ -34,8 +34,11 @@ export const Default: Story = {
     const steps = [...scene.querySelectorAll<HTMLElement>(":scope > ol > li")];
     await expect(steps).toHaveLength(4);
     steps[3]!.scrollIntoView({ block: "center" });
+    // The sticky graphic follows the reader's step (drawn from `lg`; below it
+    // each step's card draws its own).
+    const sticky = within(scene.querySelector<HTMLElement>(":scope > div")!);
     await waitFor(() =>
-      expect(canvas.getByTestId("release-graphic")).toHaveAttribute("data-release", "3"),
+      expect(sticky.getByTestId("release-graphic")).toHaveAttribute("data-release", "3"),
     );
     await expect(steps[3]!).toHaveTextContent("Final count, closed 15 Nov, 12:00 UTC");
     await expect(steps[3]!).toHaveTextContent("734 more answers after 7 Nov, 3,152 in all.");

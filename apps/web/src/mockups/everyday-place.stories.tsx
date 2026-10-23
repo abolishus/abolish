@@ -12,8 +12,19 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/**
+ * The scene's sticky graphic, the one that follows the reader's step (drawn
+ * from `lg`; below it each step's card draws its own).
+ */
+const sticky = (canvasElement: HTMLElement) =>
+  within(
+    within(canvasElement)
+      .getByRole("region", { name: "Where your answer is" })
+      .querySelector<HTMLElement>(":scope > div")!,
+  );
+
 const view = (canvasElement: HTMLElement) =>
-  within(canvasElement).getByTestId("board-zoom-view").getAttribute("data-view");
+  sticky(canvasElement).getByTestId("board-zoom-view").getAttribute("data-view");
 
 const place: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
@@ -27,7 +38,12 @@ const place: Story["play"] = async ({ canvasElement }) => {
     "Yours arrived on 3 November between 14:00 and 15:00, with 39 others.",
   );
   await expect(view(canvasElement)).toBe("board");
-  await waitFor(() => expect(canvas.getByTestId("board-map-mine")).toHaveTextContent("Yours"));
+  // The map drawn at this width: the sticky graphic's, or the first card's own.
+  await waitFor(() =>
+    expect(
+      canvas.queryAllByTestId("board-map-mine").find((mine) => mine.checkVisibility()),
+    ).toHaveTextContent("Yours"),
+  );
   steps.at(-1)!.scrollIntoView({ block: "center" });
   await waitFor(() => expect(view(canvasElement)).toBe("proof"));
   const written = canvas.getByRole("group", { name: "Written to Ethereum, 3 November, 15:00 UTC" });

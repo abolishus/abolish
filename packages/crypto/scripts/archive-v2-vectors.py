@@ -140,7 +140,7 @@ def decode_manifest(b):
         if not v1.framed(c, True):
             raise Reject("non-canonical", c_at)
         e = {"contract": contract, "l2Block": block, "cid": c, "transaction": t(32)}
-        # The order is judged once the reference's three keys are read, at the reference.
+        # The order is judged once the whole reference is read, at the reference's offset.
         if evidence and ref_key(evidence[-1]) >= ref_key(e):
             raise Reject("non-canonical", at)
         evidence.append(e)

@@ -240,7 +240,7 @@ const manifestV2: Codec<ArchiveManifestV2> = {
       const cid = cid36.read(r);
       if (!framedCid(cid, true)) throw new DecodeError("non-canonical", cidAt);
       const ref = { contract, l2_block, cid, transaction: id32.read(r) };
-      // The order is judged once the reference's three keys are read, at the reference.
+      // The order is judged once the whole reference is read, at the reference's offset.
       const before = evidence[i - 1];
       if (before !== undefined && compareRefs(before, ref) >= 0)
         throw new DecodeError("non-canonical", at);
@@ -358,9 +358,13 @@ export function encodeArchiveManifest(
   manifest: ArchiveManifest | ArchiveManifestV2,
   version: 1 | 2 = 1,
 ): Uint8Array {
-  return version === 2
-    ? SCHEMA.encode(ARCHIVE_MANIFEST, 2, manifest as ArchiveManifestV2)
-    : SCHEMA.encode(ARCHIVE_MANIFEST, 1, manifest);
+  if (version === 2) return SCHEMA.encode(ARCHIVE_MANIFEST, 2, manifest as ArchiveManifestV2);
+  if (version !== 1) throw new EncodeError("archive manifest: version 1 or 2");
+  // A version-2 value is a version-1 one to the type checker: encoding it as
+  // version 1 would drop its evidence without a word.
+  if (Object.hasOwn(manifest, "evidence"))
+    throw new EncodeError("archive manifest: evidence needs version 2");
+  return SCHEMA.encode(ARCHIVE_MANIFEST, 1, manifest);
 }
 
 /** Strictly decodes a manifest under the version its locator fixes. */

@@ -327,7 +327,8 @@ describe("archive-v2.json", () => {
       code: "profile-mismatch",
       offset: 2,
     });
-    expect(decodeError(() => decodeArchiveManifest(encodeArchiveManifest(m), 2))).toEqual({
+    const { evidence: _, ...v1 } = m;
+    expect(decodeError(() => decodeArchiveManifest(encodeArchiveManifest(v1), 2))).toEqual({
       code: "profile-mismatch",
       offset: 2,
     });
@@ -455,6 +456,11 @@ describe("version-2 manifest properties", () => {
     // Version 1's rules hold under version 2.
     refuse({ ...m, objects: [...m.objects].reverse() });
     refuse({ ...m, links: [...m.links].reverse() });
+    // Version 1 never drops a version-2 value's evidence, and no other version is written.
+    expect(() => encodeArchiveManifest(m)).toThrow(EncodeError);
+    const empty: ArchiveManifestV2 = { ...m, evidence: [] };
+    expect(() => encodeArchiveManifest(empty)).toThrow(EncodeError);
+    expect(() => encodeArchiveManifest(m, 3 as 2)).toThrow(EncodeError);
     // A manifest of evidence alone is well formed.
     const alone = { ...m, objects: [], links: [] };
     expect(decodeArchiveManifest(encodeArchiveManifest(alone, 2), 2)).toEqual(alone);

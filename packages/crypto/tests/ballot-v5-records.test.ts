@@ -1,30 +1,28 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
-  bytesFixed,
-  COMMITTED_VOTE_V4,
-  type CommittedVoteV4,
   DecodeError,
   ds,
-  encode,
-  fieldBn254,
   H,
   membershipMessage,
-  membershipProof,
   PARAMETERS,
-  RECORD_TYPES,
-  RecordSchema,
-  recordType,
   semaphoreField,
-  struct,
   tierTreeRoot,
   tierTreeZeros,
-  u32,
-  u64,
-  u8,
   verifyMembershipProof,
 } from "../src/index.ts";
 import { shapeOkV4 } from "../src/ballot-validity.ts";
+import {
+  BALLOT_V5,
+  type BallotV5,
+  ballotHash,
+  concat,
+  decodeV5,
+  halves,
+  head,
+  rollingScope,
+  SCHEMA,
+} from "./ballot-v5.ts";
 import { memberCount, type RollingEvent, rollingLeaves, tau } from "./rolling-tree.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -129,65 +127,15 @@ const vectors = JSON.parse(
 ) as Vectors;
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
-// Ballot record (version 5): version 4's fields, then `step` after the
-// membership proof, then version 4's committed vote.
-const BALLOT_V5 = recordType(RECORD_TYPES.ballot, {
-  5: struct([
-    ["definition_hash", bytesFixed(32)],
-    ["cell", u8],
-    ["nullifier", fieldBn254],
-    ["l1_ref_number", u64],
-    ["l1_ref_hash", bytesFixed(32)],
-    ["membership_proof", membershipProof],
-    ["step", u32],
-    ["committed_vote", COMMITTED_VOTE_V4],
-  ] as const),
-});
-const SCHEMA = new RecordSchema([BALLOT_V5]);
-const decodeV5 = (bytes: Uint8Array) => SCHEMA.decode(BALLOT_V5, bytes, 5).value;
-type BallotV5 = ReturnType<typeof decodeV5>;
-
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-const head = (b: BallotV5) =>
-  concat(b.definition_hash, Uint8Array.of(0x00, 0x02, 5, b.cell), encode(fieldBn254, b.nullifier));
-
-/** Both halves and both share-hash lists: the committed vote's encoding up to its proofs. */
-function halves(vote: CommittedVoteV4): Uint8Array {
-  const bytes = encode(COMMITTED_VOTE_V4, { ...vote, option_proofs: [], sum_proofs: [] });
-  return bytes.subarray(0, bytes.length - 8); // the two empty lists' counts
-}
-
-// Hashes (version 5): version 4's statement and core with version input 5;
-// the ballot hash binds the step after the nullifier.
+// Hashes (version 5): version 4's statement and core with version input 5.
 const statementHash = (b: BallotV5) =>
   H(ds("abolish/v1/ballot-statement", concat(head(b), halves(b.committed_vote))));
-const ballotHash = (b: BallotV5) =>
-  H(
-    ds(
-      "abolish/v1/ballot",
-      concat(head(b), encode(u32, b.step), encode(COMMITTED_VOTE_V4, b.committed_vote)),
-    ),
-  );
 const coreHash = (b: BallotV5) =>
   H(
     ds(
       "abolish/v1/ballot-core",
       concat(b.definition_hash, Uint8Array.of(0x00, 0x02, 5, b.cell), halves(b.committed_vote)),
     ),
-  );
-
-const rollingScope = (definitionHash: Uint8Array, tier: number) =>
-  semaphoreField(
-    H(ds("abolish/v1/rolling-nullifier-scope", concat(definitionHash, Uint8Array.of(tier)))),
   );
 
 type Election = Vectors["elections"][string];

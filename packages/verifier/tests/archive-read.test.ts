@@ -967,6 +967,9 @@ describe("the command line with --arweave", () => {
       String(2 ** 20),
       "--max-archive-reads",
       String(objects.length),
+      // A format-3 bundle reads no evidence, so its budget changes nothing.
+      "--max-archive-evidence-reads",
+      "1",
     );
     expect(roomy.row.status).toBe("pass");
   });
@@ -978,6 +981,7 @@ describe("the command line with --arweave", () => {
       "--max-archive-manifests",
       "--max-archive-bytes",
       "--max-archive-reads",
+      "--max-archive-evidence-reads",
     ]) {
       for (const bad of ["0", "01", "-1", "1e3", "", " 1", String(2 ** 53)]) {
         const u = await run("--arweave", `${origin}/ar`, budget, bad, d);

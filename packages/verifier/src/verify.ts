@@ -83,6 +83,7 @@ import {
   type TransactionSource,
   walkArchive,
 } from "./archive.ts";
+import { DEFAULT_EVIDENCE_READS, latestEvidence } from "./evidence.ts";
 import type { ArchiveRead, Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -605,6 +606,8 @@ export interface ArchiveReadOptions {
   readonly maxBytes?: number;
   /** Transactions the listed objects' reads may ask; default `DEFAULT_OBJECT_READS`. */
   readonly maxReads?: number;
+  /** Transactions the board's evidence reads may ask (format 6); default `DEFAULT_EVIDENCE_READS`. */
+  readonly maxEvidenceReads?: number;
 }
 
 /** The listed objects' byte budget when the caller sets none: 1 GiB, as a copy's (T-52). */
@@ -644,11 +647,13 @@ export async function readArchive(
   const maxManifests = options.maxManifests ?? DEFAULT_MANIFEST_BUDGET;
   const maxBytes = options.maxBytes ?? DEFAULT_ARCHIVE_BYTES;
   const maxReads = options.maxReads ?? DEFAULT_OBJECT_READS;
+  const maxEvidenceReads = options.maxEvidenceReads ?? DEFAULT_EVIDENCE_READS;
   // Checked before anything is read, whatever the bundle holds.
   for (const [name, value] of [
     ["maxManifests", maxManifests],
     ["maxBytes", maxBytes],
     ["maxReads", maxReads],
+    ["maxEvidenceReads", maxEvidenceReads],
   ] as const)
     if (!Number.isSafeInteger(value) || value < 1)
       throw new RangeError(`${name} must be a positive integer`);
@@ -707,6 +712,9 @@ export async function readArchive(
             maxManifests,
             ...(earlier !== undefined && { earlier }),
             ...(targets !== undefined && { objects: targets.map((t) => t.cid) }),
+            // Format 6's 4.6 replays the board contract's events, so its
+            // evidence is kept (step 5).
+            ...("l2Board" in bundle && { contracts: [d.board] }),
           },
         )
       : // A length word no locator has: reported as the anchor's framing
@@ -727,6 +735,24 @@ export async function readArchive(
     targets === undefined || !whole
       ? undefined
       : await readListedObjects(targets, walk.listings, source, maxBytes, maxReads);
+  // The evidence is 4.6's, never 4.3's: its budget's report is kept apart
+  // from the walk's, or a long evidence list would make 4.3 unverifiable.
+  // A partial walk's listings are read too: a record is held to its proof,
+  // not to being the latest, so a manifest left unread costs only a later one.
+  const evidence =
+    "l2Board" in bundle && state.kind === "locator"
+      ? await latestEvidence(
+          walk.evidence,
+          d.l2_chain_id,
+          bundle.l2Board.events.length,
+          source,
+          maxEvidenceReads,
+        )
+      : undefined;
+  const overEvidence = walk.findings.filter(
+    (f): f is Extract<ArchiveFinding, { code: "evidence-over-budget" }> =>
+      f.code === "evidence-over-budget",
+  );
   return done(
     {
       count: state.count,
@@ -735,8 +761,11 @@ export async function readArchive(
         latest: walk.latest,
         manifests: walk.manifests.length,
         reads: walk.reads,
-        findings: walk.findings,
+        findings: walk.findings.filter((f) => f.code !== "evidence-over-budget"),
       },
+      ...(evidence !== undefined && {
+        evidence: { ...evidence, findings: [...overEvidence, ...evidence.findings] },
+      }),
       ...(objects !== undefined &&
         targets !== undefined && {
           objects: {
@@ -1174,6 +1203,11 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
                 clock: bundle.clock,
                 now: input.now,
                 l2: bundle.l2Board,
+                ...(bundle.archive !== undefined &&
+                  "walk" in bundle.archive &&
+                  bundle.archive.evidence?.proven !== undefined && {
+                    archived: bundle.archive.evidence.proven,
+                  }),
               });
         implemented = new Map<string, Outcome>([...implemented, ["4.6", checkedAvailability.row]]);
         if ("report" in checkedAvailability) availability = checkedAvailability.report;

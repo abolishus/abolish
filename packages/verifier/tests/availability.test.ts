@@ -27,6 +27,7 @@ import {
   PINNED_FORCED_INCLUSION,
   PINNED_MARGIN,
 } from "../src/availability.ts";
+import type { ArchivedAccumulator } from "../src/evidence.ts";
 import { ACCUMULATOR_SLOT } from "../src/output-root.ts";
 import { l2State, word } from "./state.ts";
 
@@ -175,7 +176,25 @@ function board(
   const events = logs
     .slice(0, proven.cut ?? logs.length)
     .map((l) => encodeContractEvent(l, proven.version ?? 8));
-  return { events, proof: state.evidence };
+  return {
+    events,
+    proof: state.evidence,
+    // What the proof shows, as an archived record proving it would.
+    archived: (n: number): ArchivedAccumulator => ({
+      accumulator: {
+        accumulator,
+        count,
+        block,
+        timestamp: proven.timestamp,
+        blockHash: filled(32, n),
+      },
+      gameIndex: BigInt(n),
+      game: filled(20, n),
+      outputRoot: state.evidence.outputRoot,
+      cid: objectCid(Uint8Array.of(n, n)),
+      transaction: filled(32, n),
+    }),
+  };
 }
 
 const inputs = (
@@ -552,5 +571,87 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
       status: "unverifiable",
       code: "not-reached",
     });
+  });
+});
+
+describe("the board's accumulator from the archive", { timeout: 120_000 }, () => {
+  const sent = [attest(1), attest(2, T_A)];
+  const early = board(sent, { timestamp: T_A - 1n });
+  const late = board(sent, { timestamp: T_A + 10n });
+
+  test("an archived record at or after t_A stands in for a bundle proof before it", () => {
+    const before = availabilityChecks(inputs(sent, { l2: early }));
+    expect(before.row).toEqual({ status: "unverifiable", code: "availability-pending", at: {} });
+    expect(before.report?.proven.source).toBe("bundle");
+    const r = availabilityChecks(inputs(sent, { l2: early, archived: late.archived(9) }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(r.report?.ballotExtent.panels?.[0]).toMatchObject({ holds: true, attested: [1, 2] });
+    expect(r.report?.proven).toEqual({
+      block: (T_A + 10n - T_A + 100_000n).toString(),
+      hash: "09".repeat(32),
+      timestamp: (T_A + 10n).toString(),
+      count: "2",
+      source: "archive",
+      evidence: {
+        cid: Buffer.from(objectCid(Uint8Array.of(9, 9))).toString("hex"),
+        transaction: "09".repeat(32),
+        gameIndex: "9",
+        game: "09".repeat(20),
+        outputRoot: Buffer.from(late.proof.outputRoot).toString("hex"),
+      },
+    });
+  });
+
+  test("an archived record stands in for a bundle proof that doesn't hold", () => {
+    const broken = { ...early, proof: { ...early.proof, outputRoot: filled(32, 1) } };
+    expect(availabilityChecks(inputs(sent, { l2: broken })).row).toEqual({
+      status: "unverifiable",
+      code: "output-root",
+      at: {},
+    });
+    const r = availabilityChecks(inputs(sent, { l2: broken, archived: late.archived(9) }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    // Even one too early to hold the point: pending, as the bundle's would be.
+    const pending = availabilityChecks(inputs(sent, { l2: broken, archived: early.archived(9) }));
+    expect(pending.row).toEqual({
+      status: "unverifiable",
+      code: "availability-pending",
+      at: {},
+    });
+    expect(pending.report?.proven.source).toBe("archive");
+  });
+
+  test("a bundle proof at or after t_A is kept, and an archived one no later than it adds nothing", () => {
+    const kept = availabilityChecks(inputs(sent, { l2: late, archived: early.archived(9) }));
+    expect(kept.report?.proven.source).toBe("bundle");
+    expect(kept.report?.proven.evidence).toBeUndefined();
+    const later = board(sent, { timestamp: T_A + 20n });
+    expect(
+      availabilityChecks(inputs(sent, { l2: late, archived: later.archived(9) })).report?.proven
+        .source,
+    ).toBe("bundle");
+    const earlier = board(sent, { timestamp: T_A - 2n });
+    expect(
+      availabilityChecks(inputs(sent, { l2: early, archived: earlier.archived(9) })).report?.proven
+        .source,
+    ).toBe("bundle");
+  });
+
+  test("the archived record's count is replayed against the bundle's events like the bundle's own", () => {
+    // Seat 1's attestation dropped from the events: the replay doesn't hold.
+    const short = { ...early, events: early.events.slice(1) };
+    expect(
+      availabilityChecks(inputs(sent, { l2: short, archived: late.archived(9) })).row,
+    ).toMatchObject({ status: "unverifiable", code: "index" });
+    // A failing archived set: one short of the threshold fails, from the archive alone.
+    const one = [attest(1)];
+    const r = availabilityChecks(
+      inputs(one, {
+        l2: board(one, { timestamp: T_A - 1n }),
+        archived: board(one, { timestamp: T_A + 10n }).archived(9),
+      }),
+    );
+    expect(r.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 1 } });
+    expect(r.report?.proven.source).toBe("archive");
   });
 });

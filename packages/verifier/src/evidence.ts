@@ -180,3 +180,147 @@ export async function readEvidence(
   }
   return { kind: "evidence-unavailable", transactions: listing.transactions };
 }
+
+/**
+ * How many transactions the board's evidence reads ask of the sources when
+ * the caller sets nothing: an honest archive serves the latest record from
+ * its first transaction, and a few more cover records lost and listed again,
+ * or written for a later block than the bundle's events reach.
+ */
+export const DEFAULT_EVIDENCE_READS = 64;
+
+/**
+ * One report on a contract's archived evidence (docs/spec/verifier.md,
+ * Archive, step 5). None is a verdict, and none is 4.3's: the evidence
+ * is read for 4.6, which a record that doesn't hold up leaves where the
+ * bundle's own evidence puts it (T-53).
+ */
+export type EvidenceFinding =
+  /** The walk kept no more references than its budget: what it found is partial. */
+  | { readonly code: "evidence-over-budget"; readonly budget: number }
+  | {
+      readonly code: "evidence-malformed";
+      readonly l2Block: bigint;
+      readonly cid: Uint8Array;
+      readonly transaction: Uint8Array;
+    }
+  | {
+      readonly code: "evidence-check";
+      readonly check: EvidenceCheckCode;
+      readonly l2Block: bigint;
+      readonly cid: Uint8Array;
+      readonly transaction: Uint8Array;
+    }
+  | {
+      readonly code: "evidence-unavailable";
+      readonly l2Block: bigint;
+      readonly cid: Uint8Array;
+      readonly transactions: readonly Uint8Array[];
+    }
+  /** Proven, but over more events than the bundle carries, so nothing could replay it. */
+  | {
+      readonly code: "evidence-count";
+      readonly l2Block: bigint;
+      readonly cid: Uint8Array;
+      readonly count: bigint;
+    }
+  /** The reads ran out before a record was proven: unverifiable for this reader. */
+  | { readonly code: "evidence-reads-over-budget"; readonly maxReads: number };
+
+/** The record a contract's accumulator is taken from, with the listing it was read under. */
+export interface ArchivedAccumulator extends ProvenEvidence {
+  readonly cid: Uint8Array;
+  readonly transaction: Uint8Array;
+}
+
+/** What reading a contract's archived evidence came to. */
+export interface ContractEvidence {
+  /** The latest record proven over at most the bundle's events, if any was. */
+  readonly proven?: ArchivedAccumulator;
+  /** Transactions asked of the sources, against `maxReads`. */
+  readonly reads: number;
+  readonly findings: readonly EvidenceFinding[];
+}
+
+/**
+ * The latest of a contract's archived accumulators that the bundle's events
+ * can replay (docs/spec/verifier.md, Archive, step 5): its listings are
+ * read from the latest claimed block down, ties in walk order, and the first
+ * record proven with a count of at most `events` is taken. A later record
+ * serves every point an earlier one does, since the replay judges each event
+ * by its own L2 timestamp, so one is enough; one over more events than the
+ * bundle carries is passed over, since no replay of them could hold.
+ * Whatever comes of a listing is reported, and every transaction asked
+ * counts against `maxReads`, so an authority listing many dead or
+ * failing records costs at most that many asks (T-52).
+ */
+export async function latestEvidence(
+  listings: readonly EvidenceListing[],
+  l2ChainId: bigint,
+  events: number,
+  source: TransactionSource,
+  maxReads: number = DEFAULT_EVIDENCE_READS,
+): Promise<ContractEvidence> {
+  if (!Number.isSafeInteger(maxReads) || maxReads < 1)
+    throw new RangeError("maxReads must be a positive integer");
+  const findings: EvidenceFinding[] = [];
+  let reads = 0;
+  // `sort` is stable, so listings of one block stay in walk order.
+  const order = [...listings].sort((a, b) =>
+    a.l2Block > b.l2Block ? -1 : a.l2Block < b.l2Block ? 1 : 0,
+  );
+  for (const listing of order) {
+    const { l2Block, cid } = listing;
+    const left = maxReads - reads;
+    if (left === 0) {
+      findings.push({ code: "evidence-reads-over-budget", maxReads });
+      break;
+    }
+    const asked = listing.transactions.slice(0, left);
+    const read = await readEvidence({ ...listing, transactions: asked }, l2ChainId, source);
+    // A settled listing stopped at its transaction; an unavailable one asked them all.
+    reads +=
+      read.kind === "evidence-unavailable"
+        ? asked.length
+        : asked.findIndex((t) => equal(t, read.transaction)) + 1;
+    switch (read.kind) {
+      case "proven":
+        if (read.accumulator.count > BigInt(events)) {
+          findings.push({ code: "evidence-count", l2Block, cid, count: read.accumulator.count });
+          continue;
+        }
+        return {
+          proven: {
+            accumulator: read.accumulator,
+            gameIndex: read.gameIndex,
+            game: read.game,
+            outputRoot: read.outputRoot,
+            cid,
+            transaction: read.transaction,
+          },
+          reads,
+          findings,
+        };
+      case "evidence-check":
+        findings.push({
+          code: "evidence-check",
+          check: read.code,
+          l2Block,
+          cid,
+          transaction: read.transaction,
+        });
+        continue;
+      case "evidence-malformed":
+        findings.push({ code: "evidence-malformed", l2Block, cid, transaction: read.transaction });
+        continue;
+      case "evidence-unavailable":
+        // Transactions left unasked may serve it: the budget's, not the archive's.
+        if (asked.length < listing.transactions.length) {
+          findings.push({ code: "evidence-reads-over-budget", maxReads });
+          return { reads, findings };
+        }
+        findings.push({ code: "evidence-unavailable", l2Block, cid, transactions: asked });
+    }
+  }
+  return { reads, findings };
+}

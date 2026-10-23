@@ -15,8 +15,10 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   ACCUMULATOR_SLOT,
   checkContractEventEvidence,
+  DEFAULT_EVIDENCE_READS,
   EVIDENCE_DATA_LIMIT,
   type EvidenceListing,
+  latestEvidence,
   MAX_EVIDENCE_RECORD,
   readEvidence,
 } from "../src/index.ts";
@@ -390,5 +392,222 @@ describe("readEvidence", () => {
       code: "evidence-foreign",
       transaction: tx(1),
     });
+  });
+});
+
+describe("latestEvidence", () => {
+  const tx = (n: number) => new Uint8Array(32).fill(n);
+  // The honest accumulator over three events, proven at `block`.
+  const at = (block: bigint, count = replayed.count) => {
+    const encoded = encodeContractEventEvidence(
+      record(
+        count === replayed.count ? replayed.accumulator : new Uint8Array(32).fill(7),
+        count,
+        [],
+        block,
+      ),
+    );
+    return { encoded, cid: objectCid(encoded) };
+  };
+  const listing = (
+    r: { readonly cid: Uint8Array },
+    block: bigint,
+    transactions: readonly Uint8Array[],
+  ): EvidenceListing => ({ contract: BOARD, l2Block: block, cid: r.cid, transactions });
+
+  // Serves each transaction's CAR; every ask is recorded.
+  function source(held: ReadonlyMap<string, Uint8Array>) {
+    const asked: string[] = [];
+    return {
+      asked,
+      source: async (t: Uint8Array) => {
+        asked.push(toHex(t));
+        const b = held.get(toHex(t));
+        return b === undefined ? [] : [objectCar(b)];
+      },
+    };
+  }
+
+  test("takes the latest block's record, asking nothing of earlier ones", async () => {
+    const early = at(1_000n);
+    const late = at(2_000n);
+    const { source: s, asked } = source(
+      new Map([
+        [toHex(tx(1)), early.encoded],
+        [toHex(tx(2)), late.encoded],
+      ]),
+    );
+    const got = await latestEvidence(
+      [listing(early, 1_000n, [tx(1)]), listing(late, 2_000n, [tx(2)])],
+      L2,
+      3,
+      s,
+    );
+    expect(got.findings).toEqual([]);
+    expect(got.reads).toBe(1);
+    expect(got.proven).toMatchObject({
+      cid: late.cid,
+      transaction: tx(2),
+      gameIndex: 28_322n,
+      accumulator: { block: 2_000n, count: 3n },
+    });
+    expect(asked).toEqual([toHex(tx(2))]);
+  });
+
+  test("reports each later listing that doesn't hold up and takes the next one that does", async () => {
+    const good = at(1_000n);
+    const v2 = Uint8Array.from(at(3_000n).encoded);
+    v2[2] = 2;
+    const wrongBlock = at(4_000n);
+    const { source: s, asked } = source(
+      new Map([
+        [toHex(tx(1)), good.encoded],
+        [toHex(tx(3)), v2],
+        [toHex(tx(4)), wrongBlock.encoded],
+      ]),
+    );
+    const got = await latestEvidence(
+      [
+        listing(good, 1_000n, [tx(1)]),
+        listing({ cid: objectCid(v2) }, 3_000n, [tx(3)]),
+        // Listed under a block its header isn't.
+        listing(wrongBlock, 5_000n, [tx(4)]),
+        listing(at(2_000n), 2_000n, [tx(5), tx(6)]),
+      ],
+      L2,
+      3,
+      s,
+    );
+    expect(got.findings).toEqual([
+      {
+        code: "evidence-check",
+        check: "evidence-block",
+        l2Block: 5_000n,
+        cid: wrongBlock.cid,
+        transaction: tx(4),
+      },
+      { code: "evidence-malformed", l2Block: 3_000n, cid: objectCid(v2), transaction: tx(3) },
+      {
+        code: "evidence-unavailable",
+        l2Block: 2_000n,
+        cid: at(2_000n).cid,
+        transactions: [tx(5), tx(6)],
+      },
+    ]);
+    expect(got.proven).toMatchObject({ cid: good.cid, transaction: tx(1) });
+    expect(got.reads).toBe(5);
+    expect(asked).toEqual([4, 3, 5, 6, 1].map((n) => toHex(tx(n))));
+  });
+
+  test("passes over a record of more events than the bundle carries", async () => {
+    const early = at(1_000n);
+    const more = at(2_000n, 4n);
+    const { source: s } = source(
+      new Map([
+        [toHex(tx(1)), early.encoded],
+        [toHex(tx(2)), more.encoded],
+      ]),
+    );
+    const listings = [listing(early, 1_000n, [tx(1)]), listing(more, 2_000n, [tx(2)])];
+    const got = await latestEvidence(listings, L2, 3, s);
+    expect(got.findings).toEqual([
+      { code: "evidence-count", l2Block: 2_000n, cid: more.cid, count: 4n },
+    ]);
+    expect(got.proven).toMatchObject({ cid: early.cid });
+    // With four events the later one is taken.
+    expect((await latestEvidence(listings, L2, 4, s)).proven).toMatchObject({ cid: more.cid });
+  });
+
+  test("listings of one block are read in walk order", async () => {
+    const a = at(1_000n);
+    const b = at(1_000n, 1n);
+    const { source: s } = source(
+      new Map([
+        [toHex(tx(1)), a.encoded],
+        [toHex(tx(2)), b.encoded],
+      ]),
+    );
+    const first = await latestEvidence(
+      [listing(b, 1_000n, [tx(2)]), listing(a, 1_000n, [tx(1)])],
+      L2,
+      3,
+      s,
+    );
+    expect(first.proven).toMatchObject({ cid: b.cid, accumulator: { count: 1n } });
+    const second = await latestEvidence(
+      [listing(a, 1_000n, [tx(1)]), listing(b, 1_000n, [tx(2)])],
+      L2,
+      3,
+      s,
+    );
+    expect(second.proven).toMatchObject({ cid: a.cid, accumulator: { count: 3n } });
+  });
+
+  test("the read budget stops the reads, never calling unasked transactions unavailable", async () => {
+    const good = at(1_000n);
+    const { source: s, asked } = source(new Map([[toHex(tx(9)), good.encoded]]));
+    // Three dead transactions for the latest, then the good one.
+    const listings = [
+      listing(good, 1_000n, [tx(9)]),
+      listing(at(2_000n), 2_000n, [tx(1), tx(2), tx(3)]),
+    ];
+    expect(await latestEvidence(listings, L2, 3, s, 2)).toEqual({
+      reads: 2,
+      findings: [{ code: "evidence-reads-over-budget", maxReads: 2 }],
+    });
+    expect(asked).toEqual([toHex(tx(1)), toHex(tx(2))]);
+    // Spent exactly by one listing, the next isn't asked.
+    const spent = await latestEvidence(listings, L2, 3, s, 3);
+    expect(spent.proven).toBeUndefined();
+    expect(spent.findings).toEqual([
+      {
+        code: "evidence-unavailable",
+        l2Block: 2_000n,
+        cid: at(2_000n).cid,
+        transactions: [tx(1), tx(2), tx(3)],
+      },
+      { code: "evidence-reads-over-budget", maxReads: 3 },
+    ]);
+    expect((await latestEvidence(listings, L2, 3, s, 4)).proven).toMatchObject({ cid: good.cid });
+    expect(DEFAULT_EVIDENCE_READS).toBe(64);
+  });
+
+  test("whatever the listings, the reads never pass the budget and every listing asked is reported", async () => {
+    const good = at(1_000n);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.tuple(fc.integer({ min: 1, max: 3_000 }), fc.integer({ min: 0, max: 4 })), {
+          maxLength: 12,
+        }),
+        fc.integer({ min: 1, max: 20 }),
+        async (spec, maxReads) => {
+          // Only transaction 200 serves anything: the good record, at block 1,000.
+          const listings = spec
+            .map(([block, dead], i) =>
+              listing(at(BigInt(block)), BigInt(block), [
+                ...Array.from({ length: dead }, (_, j) => tx(1 + ((i * 5 + j) % 199))),
+                ...(block === 1_000 ? [tx(200)] : []),
+              ]),
+            )
+            .filter((l) => l.transactions.length > 0);
+          const { source: s, asked } = source(new Map([[toHex(tx(200)), good.encoded]]));
+          const got = await latestEvidence(listings, L2, 3, s, maxReads);
+          expect(got.reads).toBe(asked.length);
+          expect(got.reads).toBeLessThanOrEqual(maxReads);
+          if (got.proven === undefined)
+            expect(
+              got.findings.some((f) => f.code === "evidence-reads-over-budget") ||
+                !listings.some((l) => l.l2Block === 1_000n),
+            ).toBe(true);
+          else expect(got.proven.cid).toEqual(good.cid);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("refuses a read budget that isn't a positive integer", async () => {
+    for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 53])
+      await expect(latestEvidence([], L2, 3, async () => [], bad)).rejects.toThrow(RangeError);
   });
 });

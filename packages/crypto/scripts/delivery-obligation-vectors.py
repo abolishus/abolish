@@ -61,11 +61,12 @@ FORCED_PATH = {
 # A share-receipt batch's bytes with its header, for `receiptsPerCall` pairs.
 BATCH_LENGTH = 104 + 64 * 1024
 
-# Hourly periods, a 12-hour anchoring deadline, F and W_C of 13 hours.
+# Hourly periods, a 12-hour anchoring deadline, F of 13 hours and W_C of 14
+# (docs/spec/parameters.md, CONTRACT_EVENT_WINDOW).
 DEPLOYED = {
     "period": HOUR,
     "deadline": 12 * HOUR,
-    "contractEventWindow": 13 * HOUR,
+    "contractEventWindow": 14 * HOUR,
     "forcedInclusion": 13 * HOUR,
 }
 

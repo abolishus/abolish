@@ -5,6 +5,7 @@
 // to chosen bytes (T-17, G-12, T-37), and only to one whose contract-path
 // obligation it can force through L1 in time (check 4; T-25, T-52, T-54).
 import {
+  CONTRACT_EVENT_WINDOW,
   DecodeError,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
@@ -31,14 +32,15 @@ import {
 
 /**
  * The windows this release sizes the forced path by (docs/spec/delivery.md,
- * Capacity): `W_C` and `F` of 13 hours (Base's 12-hour forced-inclusion delay
- * and an hour of missed slots) and `R` of one hour, which `deliveryWindowFits`
- * accepts with hourly anchoring periods and a 12-hour deadline. A release
+ * Capacity): `W_C`, the registry's `CONTRACT_EVENT_WINDOW` of 14 hours, `F` of
+ * 13 hours (Base's 12-hour forced-inclusion delay and an hour of missed slots)
+ * and `R` of one hour, which `deliveryWindowFits` accepts with hourly anchoring
+ * periods and a 12-hour deadline. A release
  * that changes `R` changes every node's and client's intake cutoff, so it is
  * the release's, never a node's own setting.
  */
 export const RELEASE_WINDOWS: ForcedPathWindows = Object.freeze({
-  contractEventWindow: 46_800n,
+  contractEventWindow: CONTRACT_EVENT_WINDOW,
   forcedInclusion: 46_800n,
   margin: 3_600n,
 });

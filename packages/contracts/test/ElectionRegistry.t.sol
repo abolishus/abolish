@@ -762,6 +762,20 @@ contract ElectionRegistryTest is TestBase {
         else _assertNoParameters(lib.hash(enc));
     }
 
+    /// The contract-event window is the sum docs/spec/tally.md (Tally window)
+    /// names, its forced-inclusion term at the sequencing ceiling, so no
+    /// registered definition's forced inclusion can outrun the counted extent
+    /// (T-50, T-35).
+    function test_ContractEventWindowIsItsTerms() public view {
+        assertEq(registry.CONTRACT_EVENT_WINDOW(), 50_400, "W_C, as docs/spec/parameters.md");
+        assertEq(registry.BOARDING_WINDOW(), 1800, "boarding, as docs/spec/parameters.md");
+        assertEq(
+            registry.CONTRACT_EVENT_WINDOW(),
+            registry.MAX_SEQUENCING_WINDOW() * 12 + 3600 + 1800 + registry.BOARDING_WINDOW(),
+            "forced inclusion, missed slots, finality and boarding"
+        );
+    }
+
     /// The sequencing bounds a definition assumes are at most what the windows
     /// were sized for (docs/spec/parameters.md; T-50, T-35, T-71): one above
     /// either ceiling is refused, each ceiling and zero are not.

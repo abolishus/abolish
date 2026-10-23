@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   COMPLAINT_BATCH_MAX,
   COMPLAINT_WINDOW,
+  CONTRACT_EVENT_WINDOW,
   complaintScope,
   definitionMembers,
   DELIVERY_WINDOW,
@@ -119,7 +120,7 @@ const electionOf = (e: Vectors["capacity"][number]["elections"][number]): Forced
 
 const hour = 3600n;
 const deployed: ForcedPathWindows = {
-  contractEventWindow: 13n * hour,
+  contractEventWindow: CONTRACT_EVENT_WINDOW,
   forcedInclusion: 13n * hour,
   margin: hour,
 };
@@ -328,7 +329,8 @@ describe("forcedPathFits", () => {
     expect(forcedPathFits([lone(20_992n)], deployed)).toBe(true);
     expect(forcedPathFits([lone(20_993n)], deployed)).toBe(false);
     const long = { ...deployed, margin: 21n * hour };
-    expect(forcedPathMembersLimit(3, long)).toBe(434_688n);
+    // 434,688 while W_C was taken as 13 hours.
+    expect(forcedPathMembersLimit(3, long)).toBe(425_216n);
   });
 
   test("an empty set fits, and so does an election with no members", () => {

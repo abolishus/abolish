@@ -156,6 +156,17 @@ contract ElectionRegistry is EventAccumulator {
     uint64 public constant MAX_SEQUENCING_WINDOW = 3600;
     uint64 public constant MAX_SEQUENCER_DRIFT = 1800;
 
+    /// The contract-event window `W_C` and its last term (docs/spec/parameters.md;
+    /// docs/spec/tally.md, Tally window), in seconds: forced inclusion at
+    /// `MAX_SEQUENCING_WINDOW` 12-second L1 blocks, an hour of missed slots, L1
+    /// finality and `BOARDING_WINDOW`, the operator's time to board an event
+    /// once derivable from finalized L1. Nothing here reads them: they fix the
+    /// counted extent of every election this registry registers, so they are
+    /// constants of the bytecode verifier 1.2 binds, beside the ceiling they
+    /// are sized from (T-50, T-53, T-25).
+    uint64 public constant CONTRACT_EVENT_WINDOW = 50_400;
+    uint64 public constant BOARDING_WINDOW = 1800;
+
     /// @notice The key set a quorum of the author panel approved was recorded
     /// for the definition whose hash is `definitionHash`, right after its
     /// `DefinitionRegistered`. `registration` is the whole record, in the

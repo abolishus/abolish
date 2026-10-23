@@ -1044,6 +1044,20 @@ export const electionRegistryAbi = [
   {
     type: "function",
     inputs: [],
+    name: "BOARDING_WINDOW",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "CONTRACT_EVENT_WINDOW",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
     name: "L1_BLOCK",
     outputs: [{ name: "", internalType: "address", type: "address" }],
     stateMutability: "view",

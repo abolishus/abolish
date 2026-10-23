@@ -336,10 +336,10 @@ export interface PollList {
  * (T-31, T-34). A poll stops being served between the listing and its
  * definition only if the database lost it, so it drops out of the page.
  */
-export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): Promise<PollList> {
+export async function loadPollList(api: Api, after: string): Promise<PollList> {
   const { elections } = await api.elections.list({
     ...(after === "" ? {} : { after }),
-    limit: String(limit),
+    limit: String(LIST_PAGE),
   });
   const answers = await Promise.all(
     elections.map(async (electionId) => {
@@ -366,7 +366,7 @@ export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): 
     polls,
     asOf: now(),
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
-    next: elections.length === limit ? elections.at(-1) : undefined,
+    next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
   };
 }
 
@@ -447,7 +447,7 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * are checked here (src/server/stream-card.ts), and its tags read as the poll
  * page reads them (`tagsOf`), and who asked it as `readAskedBy` reads it
  * (`askedByOf`). A poll the database lost between the listing and its
- * definition drops out of the page.
+ * definition drops out of the page. A page holds `limit` polls at most.
  */
 export async function loadStream(
   api: Api,
@@ -456,6 +456,7 @@ export async function loadStream(
   { q, topic, place }: StreamFilter,
   locale: string,
   readAskedBy?: ReadAskedBy,
+  limit = STREAM_PAGE,
 ): Promise<Stream> {
   let elections;
   try {
@@ -465,7 +466,7 @@ export async function loadStream(
       ...(q === undefined ? {} : { q }),
       ...(topic === undefined ? {} : { topic }),
       ...(place === undefined ? {} : { place }),
-      limit: String(STREAM_PAGE),
+      limit: String(limit),
     }));
   } catch (error) {
     if (listingError(error, "SORT_UNAVAILABLE")) return { kind: "sort-unavailable" };
@@ -494,7 +495,7 @@ export async function loadStream(
     kind: "stream",
     cards: cards.filter((card) => card !== undefined),
     // The listing's own cursor, as the register's, so a dropped poll doesn't end the stream.
-    next: elections.length === STREAM_PAGE ? elections.at(-1) : undefined,
+    next: elections.length === limit ? elections.at(-1) : undefined,
   };
 }
 

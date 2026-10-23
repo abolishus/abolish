@@ -1463,7 +1463,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(10);
+    expect(ids.length).toBe(9);
     return ids;
   }
 
@@ -1489,7 +1489,7 @@ describe("server functions", () => {
         // The site key's and the phone setting's take no input, and answer
         // the key and the setting: off here, which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a page size|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
+          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }
@@ -1497,33 +1497,44 @@ describe("server functions", () => {
 });
 
 describe("home", () => {
-  test("lists the first polls, with the lookup form and a link to the rest", async () => {
+  test("shows the newest questions as the stream's cards, with ways to ask and browse", async () => {
     const html = await (await get("/")).text();
     const linked = [...html.matchAll(/<h3\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map(
       (m) => m[1],
     );
-    expect(linked).toEqual(listed.slice(0, 6));
-    expect(html).toContain('name="id"');
-    // The rest of the list picks up after the last poll the home page asked for.
-    expect(html).toContain(`href="/polls?after=${listed[5]}"`);
+    expect(linked).toEqual(streamed.slice(0, 3));
+    // The stream's order and checks: a version-5 poll's words, answerable in the ballot client.
+    expect(html).toMatch(
+      /<h3[^>]*lang="en"[^>]*><a href="\/polls\/c1c1[0-9a-f]{60}"[^>]*>Park and library</,
+    );
+    expect(html).toContain(`href="${BALLOT}#election=${STREAM_V1}&amp;pick=0"`);
+    expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
+    expect(html).toMatch(/<a href="\/account"[^>]*>Ask a question</);
+    expect(html).toMatch(/<a href="\/discover"[^>]*>Browse questions</);
+    expect(html).toMatch(/<a href="\/discover"[^>]*>See all questions/);
+    // The ID lookup is the register's, not the front page's.
+    expect(html).not.toContain('name="id"');
     expect(html).toContain("Why you can trust a casual poll");
   });
 
-  test("asks the API for one short page (T-10)", async () => {
+  test("asks the API for one short page of the stream (T-52)", async () => {
     seen.length = 0;
     await get("/");
-    // The listing, then each listed poll's definition: six, not a full page's twenty.
-    expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
-    expect(seen).toHaveLength(7);
+    // The listing, newest first, then each card's definition, text and tags: three, not ten.
+    const listings = seen.filter((r) => r.path === "/elections");
+    expect(listings).toHaveLength(1);
+    expect(listings[0]?.query.get("sort")).toBe("new");
+    expect(listings[0]?.query.get("limit")).toBe("3");
+    expect(seen).toHaveLength(1 + 3 * 3);
   });
 
-  test("stays up without the API, leaving out only the list and quoting nothing", async () => {
+  test("stays up without the API, leaving out only the questions and quoting nothing", async () => {
     stub.down = true;
     try {
       const response = await get("/");
       expect(response.status).toBe(200);
       const html = await response.text();
-      expect(html).toContain('name="id"');
+      expect(html).toContain("Ask a question");
       expect(html).toContain("couldn&#x27;t be loaded just now");
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
@@ -1703,10 +1714,11 @@ const KB = 1024;
  * throttling) every 100 KiB is about half a second. Every page shares about
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet and
- * reactions, the poll form the draft rules and the codecs they check with.
+ * reactions, the poll form the draft rules and the codecs they check with,
+ * home the stream's cards beside its trust scene.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 165, css: 40, fonts: 58 },
+  "/": { html: 10, js: 170, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 165, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 200, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },

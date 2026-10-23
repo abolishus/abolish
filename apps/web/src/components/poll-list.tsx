@@ -3,7 +3,7 @@ import { useId } from "react";
 
 import { catalogs } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
-import type { ListedPoll, PollList as List } from "../server/load.ts";
+import type { ListedPoll } from "../server/load.ts";
 import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./when.tsx";
 
@@ -120,35 +120,5 @@ export function PollRows({
         ))}
       </ol>
     </div>
-  );
-}
-
-/**
- * The polls our API lists for discovery, a page at a time. The listing
- * leaves out delisted and hidden polls (T-68), and it is only ours: the
- * page says that the registry on chain names every poll (T-34).
- */
-export function PollList({ list }: { list: List }) {
-  const t = useTranslate(catalogs);
-  return (
-    <section aria-labelledby="list-title" className="grid gap-6">
-      <h2 id="list-title" className="m-0 font-heading text-3xl font-semibold">
-        {t("listTitle")}
-      </h2>
-      <p className="m-0 max-w-prose text-muted-foreground">{t("listLede")}</p>
-      {list.polls.length === 0 ? (
-        <p className="m-0">{t("listEmpty")}</p>
-      ) : (
-        <PollRows polls={list.polls} asOf={list.asOf} label={t("listTitle")} />
-      )}
-      {list.next !== undefined ? (
-        <a
-          className="justify-self-start underline underline-offset-4"
-          href={`/polls?after=${list.next}`}
-        >
-          {t("listMore")}
-        </a>
-      ) : null}
-    </section>
   );
 }

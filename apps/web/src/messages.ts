@@ -11,13 +11,17 @@ const enUS = {
   siteName: "Abolish",
   homeTitle: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeLede:
-    "Questions big and small, from your street to your county. Every answer is sealed on the voter's own device and posted to a public board, so anyone who downloads the board can count it again.",
-  homeBrowse: "Browse polls",
+    "Questions big and small, from your street to your county. Answering takes a tap or two, and every count is public, so nobody has to take anyone's word for a result.",
+  homeAsk: "Ask a question",
+  homeBrowse: "Browse questions",
   appDescription: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeNonBinding: "Non-binding, and run by citizens.",
-  homeLookupTitle: "Have a poll's ID?",
+  homeStreamTitle: "What people are asking",
+  homeStreamLede: "The newest open questions. Answer any of them from here.",
+  homeStreamAll: "See all questions",
+  homeStreamEmpty: "No questions are open just now. When someone asks one, it shows up here.",
   homeListUnavailable:
-    "The list of polls couldn't be loaded just now. Every poll still opens by its ID.",
+    "The newest questions couldn't be loaded just now. A poll's own link still works.",
   trustTitle: "Why you can trust a casual poll",
   trustLede:
     "A question about street trees gets the same care as a referendum. Here is what happens to an answer, in four steps.",

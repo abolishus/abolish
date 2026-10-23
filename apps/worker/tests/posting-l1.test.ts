@@ -783,9 +783,16 @@ describe("the forced path", () => {
       expect(args).toEqual([board, 0n, 600_000n, false, call(posting, BALLOT)]);
 
       expect(await deposits.tend(await heads())).toMatchObject({ landed: 0, errors: 0 });
-      await l1.mine(1);
+      // The clock keeps up with L1 as a worker's does: nothing is made final
+      // on a head ahead of it, and Anvil stamps a block a second on when
+      // the wall clock has moved on (T-25).
+      const mine = async (blocks: number) => {
+        await l1.mine(blocks);
+        clock = Number((await onL1.latest()).timestamp);
+      };
+      await mine(1);
       expect(await deposits.tend(await heads())).toMatchObject({ landed: 1, errors: 0 });
-      await l1.mine(FINALITY_DEPTH);
+      await mine(FINALITY_DEPTH);
       expect(await deposits.tend(await heads())).toMatchObject({ final: 1, errors: 0 });
       // A landed deposit is never sent again.
       expect((await deposits.tend(await heads())).deposited).toBe(0);

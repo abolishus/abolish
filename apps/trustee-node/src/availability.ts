@@ -256,6 +256,81 @@ export function countedDue(election: ApprovedElection, clock: DeadlineClock): bi
 }
 
 /**
+ * The point's checkpoint and the anchors through it, once it is fixed: the
+ * counted checkpoint with the largest segment at or before the point's,
+ * `s_A = period(closes_at) + 1` (the ballot extent, `counted` absent) or
+ * `s_S` (the counted extent, under the pinned clock `counted`), fixed once
+ * that segment's anchoring deadline (at the counted extent, `t_S`) has
+ * passed on finalized L1, since no anchor for a segment at or before it
+ * counts after that (docs/spec/availability.md, Terms).
+ */
+export function pointExtent(
+  election: ApprovedElection,
+  counted: DeadlineClock | undefined,
+  anchors: readonly Anchor[],
+  clock: AnchorClock,
+  now: bigint,
+):
+  | Extract<AvailabilityStatus, { state: "waiting" | "no-checkpoint" | "board-failed" }>
+  | {
+      readonly checkpoint: Checkpoint;
+      readonly through: Anchor[];
+      readonly boardSegment: bigint;
+    } {
+  const { electionId, closesAt, l1InclusionBound } = election;
+  // The reader's clock must be the one the cutoff was computed from, or
+  // `C_S` would be fixed at another moment than the seat sends by (T-53).
+  if (
+    counted !== undefined &&
+    (clock.epoch !== counted.epoch ||
+      clock.period !== counted.period ||
+      clock.deadline !== counted.deadline)
+  )
+    throw new L1AnchorError("clock");
+  // A board failing from L1 alone is reported first, as the verifier does.
+  if (closesAt < clock.epoch) {
+    try {
+      countedCheckpoints(electionId, anchors, clock, now);
+    } catch (e) {
+      if (e instanceof BoardError) return { state: "board-failed", code: e.code };
+      throw e;
+    }
+    return { state: "no-checkpoint" };
+  }
+  const segment =
+    counted === undefined
+      ? (closesAt - clock.epoch) / clock.period + 1n
+      : countedExtent(clock, closesAt, l1InclusionBound).segment;
+  // A reader stopping before `s_S` (the ballot extent's, say) would drop
+  // the anchors past its last segment, and the seat's one attestation of
+  // point 2 would name an earlier checkpoint for good.
+  if (counted !== undefined && BigInt(clock.lastSegment) < segment)
+    throw new L1AnchorError("clock");
+  const fixedAt = clock.epoch + (segment + 1n) * clock.period + clock.deadline;
+  // L1 timestamps increase, so at a finalized time at or past the deadline
+  // every block up to it is final.
+  if (now < fixedAt) return { state: "waiting", until: fixedAt };
+  let checkpoints: Checkpoint[];
+  try {
+    checkpoints = countedCheckpoints(electionId, anchors, clock, now);
+  } catch (e) {
+    if (e instanceof BoardError) return { state: "board-failed", code: e.code };
+    throw e;
+  }
+  let fixed: Checkpoint | undefined;
+  for (const cp of checkpoints)
+    if (BigInt(cp.segment) <= segment && (fixed === undefined || cp.segment > fixed.segment))
+      fixed = cp;
+  if (fixed === undefined) return { state: "no-checkpoint" };
+  const last = fixed.segment;
+  return {
+    checkpoint: fixed,
+    through: anchors.filter((a) => a.checkpoint.segment <= last),
+    boardSegment: segment,
+  };
+}
+
+/**
  * One seat of the default panel's availability duty at one point for one
  * election it approved: the ballot extent, or the counted extent when the
  * options carry `counted`. `step` is idempotent: the node calls it on a
@@ -389,77 +464,8 @@ export class AvailabilitySeat {
     return { entries: held.entries, boardSegment: extent.boardSegment };
   }
 
-  /**
-   * The point's checkpoint and the anchors through it, once it is fixed: the
-   * counted checkpoint with the largest segment at or before the point's,
-   * `s_A = period(closes_at) + 1` or `s_S`, fixed once that segment's
-   * anchoring deadline (at the counted extent, `t_S`) has passed on
-   * finalized L1, since no anchor for a segment at or before it counts after
-   * that (docs/spec/availability.md, Terms).
-   */
-  #extent(
-    anchors: readonly Anchor[],
-    clock: AnchorClock,
-    now: bigint,
-  ):
-    | AvailabilityStatus
-    | {
-        readonly checkpoint: Checkpoint;
-        readonly through: Anchor[];
-        readonly boardSegment: bigint;
-      } {
-    const { electionId, closesAt, l1InclusionBound } = this.#o.election;
-    const counted = this.#o.counted;
-    // The reader's clock must be the one the cutoff was computed from, or
-    // `C_S` would be fixed at another moment than the seat sends by (T-53).
-    if (
-      counted !== undefined &&
-      (clock.epoch !== counted.epoch ||
-        clock.period !== counted.period ||
-        clock.deadline !== counted.deadline)
-    )
-      throw new L1AnchorError("clock");
-    // A board failing from L1 alone is reported first, as the verifier does.
-    if (closesAt < clock.epoch) {
-      try {
-        countedCheckpoints(electionId, anchors, clock, now);
-      } catch (e) {
-        if (e instanceof BoardError) return { state: "board-failed", code: e.code };
-        throw e;
-      }
-      return { state: "no-checkpoint" };
-    }
-    const segment =
-      counted === undefined
-        ? (closesAt - clock.epoch) / clock.period + 1n
-        : countedExtent(clock, closesAt, l1InclusionBound).segment;
-    // A reader stopping before `s_S` (the ballot extent's, say) would drop
-    // the anchors past its last segment, and the seat's one attestation of
-    // point 2 would name an earlier checkpoint for good.
-    if (counted !== undefined && BigInt(clock.lastSegment) < segment)
-      throw new L1AnchorError("clock");
-    const fixedAt = clock.epoch + (segment + 1n) * clock.period + clock.deadline;
-    // L1 timestamps increase, so at a finalized time at or past the deadline
-    // every block up to it is final.
-    if (now < fixedAt) return { state: "waiting", until: fixedAt };
-    let checkpoints: Checkpoint[];
-    try {
-      checkpoints = countedCheckpoints(electionId, anchors, clock, now);
-    } catch (e) {
-      if (e instanceof BoardError) return { state: "board-failed", code: e.code };
-      throw e;
-    }
-    let fixed: Checkpoint | undefined;
-    for (const cp of checkpoints)
-      if (BigInt(cp.segment) <= segment && (fixed === undefined || cp.segment > fixed.segment))
-        fixed = cp;
-    if (fixed === undefined) return { state: "no-checkpoint" };
-    const last = fixed.segment;
-    return {
-      checkpoint: fixed,
-      through: anchors.filter((a) => a.checkpoint.segment <= last),
-      boardSegment: segment,
-    };
+  #extent(anchors: readonly Anchor[], clock: AnchorClock, now: bigint) {
+    return pointExtent(this.#o.election, this.#o.counted, anchors, clock, now);
   }
 
   /**

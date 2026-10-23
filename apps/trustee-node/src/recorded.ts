@@ -17,6 +17,7 @@
 // stops. Either way it never signs a second record of the slot: what it
 // signs is decided by its store, never by this read (T-24).
 import {
+  type AvailabilityEvent,
   checkContractEvent,
   decodeAvailabilityAttestation,
   decodeAvailabilityComplaint,
@@ -39,6 +40,7 @@ import { keccak256, toBytes } from "viem";
 import type { AvailabilityKind, ContractPath } from "./availability.ts";
 import type { ComplaintPath, RecordedPosting } from "./complaint.ts";
 import type { ReceiptPath } from "./delivery.ts";
+import type { AvailabilityRecords } from "./summing.ts";
 
 export interface RecordedOptions {
   /** The seat's own L2 node. */
@@ -136,6 +138,71 @@ export async function l2RecordedAvailability(
     }
     if (found.length > 1) throw new L2Error("l2-repeated");
     return found[0];
+  };
+}
+
+/**
+ * The summed-share rule's read (`AvailabilityRecords`) over the seat's own
+ * L2 node: every availability attestation and complaint the board emitted
+ * for the definition, whatever its seat, panel or point, from the board's
+ * deployment block to the node's finalized block, in event order with each
+ * one's L2 block timestamp, by which the availability check judges it in
+ * time, and the finalized block's timestamp. A log failing the event check
+ * is passed over, as a withheld one would be; the check judges the rest.
+ * The node is trusted for which logs exist, as for the seat's own slot: one
+ * that hides attestations makes the seat find the election unavailable and
+ * never sum (liveness), and one that shows attestations the board never
+ * recorded, or recorded after `t_A'` under an earlier block's time, can
+ * make it sum over an election that failed, given `k` seats' signed
+ * attestations (T-53). Checks the node's chain once, here
+ * (`RecordedError`); each read throws `RpcError` when the node's answer
+ * can't be read or isn't in block order.
+ */
+export async function l2AvailabilityRecords(
+  options: RecordedOptions,
+): Promise<AvailabilityRecords> {
+  const { l2, board } = options;
+  if ((await chainId(l2)) !== options.l2ChainId) throw new RecordedError("chain");
+  const contracts = boardOnly(board);
+  return async (definitionHash: Uint8Array) => {
+    const finalized = await l2Finalized(l2);
+    const finalizedAt = await l2BlockTime(l2, finalized);
+    if (finalized < options.l2FromBlock) return { finalizedAt, events: [] };
+    const logs = await contractLogs(
+      l2,
+      board,
+      [[EVENTS.attestation.topic, EVENTS.complaint.topic], definitionHash],
+      options.l2FromBlock,
+      finalized,
+    );
+    const events: AvailabilityEvent[] = [];
+    const times = new Map<bigint, bigint>();
+    let previous = options.l2FromBlock;
+    for (const log of logs) {
+      // `eth_getLogs` answers in block order, which the board's event order
+      // follows; a node that doesn't can't be read.
+      if (log.l2_block < previous) throw new RpcError("eth_getLogs: not in block order");
+      previous = log.l2_block;
+      const checked = checkContractEvent(log, contracts, READ_VERSION);
+      if (
+        !checked.ok ||
+        (checked.event.event !== EVENTS.attestation.event &&
+          checked.event.event !== EVENTS.complaint.event) ||
+        !equal(checked.event.definitionHash, definitionHash)
+      )
+        continue;
+      let submittedAt = times.get(log.l2_block);
+      if (submittedAt === undefined) {
+        submittedAt = await l2BlockTime(l2, log.l2_block);
+        times.set(log.l2_block, submittedAt);
+      }
+      // L2 timestamps never decrease along its blocks.
+      const last = events.at(-1)?.submittedAt;
+      if (last !== undefined && submittedAt < last)
+        throw new RpcError("eth_getBlockByNumber: timestamps out of order");
+      events.push({ payload: checked.event.record, submittedAt });
+    }
+    return { finalizedAt, events };
   };
 }
 

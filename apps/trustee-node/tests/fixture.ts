@@ -18,6 +18,7 @@ import {
   RECORD_TYPES,
   type RevealsMessage,
 } from "@abolishus/crypto";
+import type { SummingRule } from "../src/summing.ts";
 import { expect } from "vite-plus/test";
 import { CeremonySeat, type SeatResult, type SeatStore } from "../src/index.ts";
 import { localStub } from "../src/local.ts";
@@ -25,6 +26,8 @@ import { MemoryStore } from "../src/store.ts";
 
 export const L2_CHAIN_ID = 31338n;
 export const TRUSTEE_REGISTRY = new Uint8Array(20).fill(0xa3);
+/** A summed-share rule that allows summing at once: the tally tests' counted sets are given, not read. */
+export const AVAILABLE: SummingRule = { check: async () => ({ state: "available" }) };
 
 export interface Panelists {
   readonly panel: Panel;

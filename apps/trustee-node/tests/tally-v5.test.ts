@@ -42,6 +42,7 @@ import {
   type TallyDutyStatus,
 } from "../src/tally.ts";
 import {
+  AVAILABLE,
   electionV5,
   type ElectionV5,
   L2_CHAIN_ID,
@@ -249,6 +250,7 @@ function duties(wire: Wire, o: Options = {}): TallyDuty[] {
         definition: o.definition ?? tagged(),
         transcript,
         store: own[i] as SeatStore,
+        summing: AVAILABLE,
         counted: async () => o.counted ?? fixed(byCell()),
         peers: wire,
       }),

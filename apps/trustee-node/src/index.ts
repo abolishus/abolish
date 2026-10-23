@@ -6,6 +6,7 @@ export {
   type ContractPath,
   type FinalizedBoardAnchors,
   type HeldExtent,
+  pointExtent,
 } from "./availability.ts";
 export {
   type Approval,
@@ -41,6 +42,14 @@ export {
   type TallyDutyOptions,
   type TallyDutyStatus,
 } from "./tally.ts";
+export {
+  type AvailabilityRecords,
+  type SummingOptions,
+  type SummingPanel,
+  type SummingRule,
+  summingRule,
+  type SummingStatus,
+} from "./summing.ts";
 export {
   type ElectionRefusal,
   heldShares,
@@ -122,6 +131,7 @@ export {
   MAX_RECORD,
 } from "./wire.ts";
 export {
+  l2AvailabilityRecords,
   l2BlockTime,
   l2Postings,
   l2RecordedAvailability,

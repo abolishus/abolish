@@ -14,6 +14,7 @@ import {
   decodeTallyOpening,
   type ElectionDefinition,
   encodeBallot,
+  identityKey,
   type RegisteredKeys,
   sealSummedShares,
   sumShares,
@@ -26,6 +27,7 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { heldShares } from "../src/intake.ts";
 import type { SeatStore } from "../src/store.ts";
+import type { SummingPanel, SummingStatus } from "../src/summing.ts";
 import {
   type CountedSet,
   type SummedSharePeers,
@@ -34,7 +36,7 @@ import {
   type TallyDutyStatus,
 } from "../src/tally.ts";
 import { type Cast, cast, type Setup, seatsOf, setup } from "./ballots.ts";
-import { L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
+import { AVAILABLE, L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 // Each run seals and opens messages over ML-KEM: a tenth of the runs, as the
 // whole-ceremony properties take.
@@ -125,6 +127,7 @@ function duties(wire: Wire, o: Options = {}): TallyDuty[] {
         definition: o.definition ?? s.definition,
         transcript: o.transcript ?? s.transcript,
         store: (o.stores ?? s.stores)[i] as SeatStore,
+        summing: AVAILABLE,
         counted: async () => (o.counted ?? (() => all()))(i + 1),
         peers: wire,
         ...o.change?.(i + 1),
@@ -225,6 +228,72 @@ describe("the tally duty", () => {
       expect(wire.sent).toEqual([]);
       expect((await d[0]!.openings()).size).toBe(0);
     }
+  });
+
+  test("the summed-share rule is asked first, with the approved key set's panel, and nothing is read, summed or sent until it allows", async () => {
+    const asked: SummingPanel[] = [];
+    for (const [status, step] of [
+      [{ state: "waiting", on: "l2", until: 1n }, { state: "waiting" }],
+      [{ state: "unavailable", failures: [{ point: 2, panel: 1 }] }, { state: "unavailable" }],
+      [
+        { state: "unheld-roots" },
+        {
+          state: "refused",
+          reason: "an attested root whose leaf object the seat doesn't hold",
+        },
+      ],
+    ] as const) {
+      const wire = new Wire();
+      let read = 0;
+      const d = duties(wire, {
+        stores: fresh(),
+        counted: () => {
+          read++;
+          return all();
+        },
+        change: () => ({
+          summing: {
+            check: async (panel) => {
+              asked.push(panel);
+              return status;
+            },
+          },
+        }),
+      });
+      for (const duty of d) expect(await duty.step()).toEqual(step);
+      expect(read).toBe(0);
+      expect(wire.sent).toEqual([]);
+      expect((await d[0]!.openings()).size).toBe(0);
+    }
+    // An unavailable election stays so for the seat, whatever the rule later says.
+    const wire = new Wire();
+    let status: SummingStatus = { state: "unavailable", failures: [{ point: 1, panel: 1 }] };
+    const d = duties(wire, {
+      stores: fresh(),
+      change: () => ({ summing: { check: async () => status } }),
+    });
+    expect(await d[0]!.step()).toEqual({ state: "unavailable" });
+    status = { state: "available" };
+    expect(await d[0]!.step()).toEqual({ state: "unavailable" });
+    expect(wire.sent).toEqual([]);
+    // Waiting is never kept.
+    expect((await d[1]!.step()).state).toBe("tallying");
+    // k and every registered seat's per-election signing key, from the transcript the seat approved.
+    const keys = approved.map((a) => ({
+      index: a.index,
+      signingKey: identityKey(a.signingSecret),
+    }));
+    for (const panel of asked) expect(panel).toEqual({ threshold: 2, registered: keys });
+  });
+
+  test("a definition or transcript other than the approved one is refused before the rule is asked", async () => {
+    const wire = new Wire();
+    const d = duties(wire, {
+      stores: fresh(),
+      transcript: s.transcript.slice(0, -1),
+      change: () => ({ summing: { check: async () => expect.fail("asked") } }),
+    });
+    expect((await d[0]!.step()).state).toBe("refused");
   });
 
   test("a message that reaches a seat before its counted set is fixed is ignored", async () => {

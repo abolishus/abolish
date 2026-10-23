@@ -8,7 +8,7 @@ export const esUS: Messages = {
   siteName: "Abolish",
   homeTitle: "Pregunta lo que sea. Cualquiera puede responder. Cualquiera puede revisar el conteo.",
   homeLede:
-    "Preguntas grandes y pequeñas, desde tu calle hasta tu condado. Responder toma un toque o dos, y cada conteo es público, así que nadie tiene que fiarse de la palabra de otro sobre un resultado.",
+    "Para tus amigos, tu calle, tu club o tu clase. Cada conteo es público, así que nadie tiene que fiarse de la palabra de otro sobre el resultado.",
   homeAsk: "Hacer una pregunta",
   homeBrowse: "Ver preguntas",
   appDescription:
@@ -750,6 +750,9 @@ export const esUS: Messages = {
   accountTitle: "Inicia sesión o crea una cuenta",
   accountLede:
     "Una cuenta te permite crear y administrar encuestas. No la necesitas para votar, y nunca emite un voto: las boletas se emiten en la app de votación, y nada de lo que hay aquí puede saber cómo votaste ni si votaste.",
+  accountTitleAsk: "Inicia sesión para hacer tu pregunta",
+  accountLedeAsk:
+    "Una pregunta se hace desde una cuenta, que la guarda como borrador hasta que la publiques y te permite volver a ella. Inicia sesión, o crea una cuenta con una llave de acceso, y a continuación se abre el formulario de la pregunta.",
   accountEyebrowSignedIn: "Cuenta · Sesión iniciada con una llave de acceso",
   accountTitleSignedIn: "Tu cuenta",
   accountLedeSignedIn:

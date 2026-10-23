@@ -263,8 +263,8 @@ describe("walkArchive", () => {
     dagPb[3] = 0x70;
     const cases: [Uint8Array, ArchiveFinding][] = [
       [
-        Uint8Array.of(0, 2, ...good.subarray(2)),
-        { code: "locator-version", locator: "latest", version: 2 },
+        Uint8Array.of(0, 3, ...good.subarray(2)),
+        { code: "locator-version", locator: "latest", version: 3 },
       ],
       [good.subarray(0, 69), { code: "locator-length", locator: "latest" }],
       [dagPb, { code: "locator-cid", locator: "latest" }],

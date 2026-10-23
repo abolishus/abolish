@@ -109,6 +109,16 @@ export function storageAtOutputRoot(
   address: Uint8Array,
   slots: readonly Uint8Array[],
 ): StorageAtOutputRoot {
+  const { block, words } = readStorage(evidence, address, slots);
+  return { block, words };
+}
+
+// `storageAtOutputRoot`, with the pool its walks looked nodes up in.
+function readStorage(
+  evidence: OutputRootEvidence,
+  address: Uint8Array,
+  slots: readonly Uint8Array[],
+): StorageAtOutputRoot & { readonly nodes: NodePool } {
   if (!(address instanceof Uint8Array) || address.length !== 20)
     throw new RangeError("address must be 20 bytes");
   for (const slot of slots)
@@ -133,7 +143,11 @@ export function storageAtOutputRoot(
     const nodes = new NodePool(evidence.nodes);
     const root = contractStorageRoot(nodes, block.stateRoot, address);
     if (root === undefined) throw new OutputRootError("l2-contract-absent");
-    return { block, words: slots.map((slot) => storageWord(nodes.get(root, keccak_256(slot)))) };
+    return {
+      block,
+      words: slots.map((slot) => storageWord(nodes.get(root, keccak_256(slot)))),
+      nodes,
+    };
   } catch (e) {
     if (e instanceof L1Error)
       throw new OutputRootError(
@@ -159,7 +173,20 @@ export function accumulatorAtOutputRoot(
   evidence: OutputRootEvidence,
   address: Uint8Array,
 ): OutputRootAccumulator {
-  const { block, words } = storageAtOutputRoot(evidence, address, [
+  return accumulatorAndNodesUsed(evidence, address).accumulator;
+}
+
+/**
+ * `accumulatorAtOutputRoot`, and whether its walks looked up every one of
+ * `evidence.nodes`: the contract-event evidence check refuses a record
+ * holding a node its proof doesn't use (T-17). Not exported from the
+ * package: the pool is always the evidence's own.
+ */
+export function accumulatorAndNodesUsed(
+  evidence: OutputRootEvidence,
+  address: Uint8Array,
+): { readonly accumulator: OutputRootAccumulator; readonly allNodesUsed: boolean } {
+  const { block, words, nodes } = readStorage(evidence, address, [
     word(ACCUMULATOR_SLOT),
     word(ACCUMULATOR_SLOT + 1n),
   ]);
@@ -168,10 +195,13 @@ export function accumulatorAtOutputRoot(
   let count = 0n;
   for (const x of countWord.subarray(24)) count = (count << 8n) | BigInt(x);
   return {
-    block: block.number,
-    timestamp: block.timestamp,
-    blockHash: block.hash,
-    accumulator,
-    count,
+    accumulator: {
+      block: block.number,
+      timestamp: block.timestamp,
+      blockHash: block.hash,
+      accumulator,
+      count,
+    },
+    allNodesUsed: nodes.allUsed(),
   };
 }

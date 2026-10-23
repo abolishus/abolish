@@ -169,8 +169,18 @@ function nibbles(b: Uint8Array): number[] {
 /** A pool of trie nodes, looked up by their Keccak-256 hash, as `eth_getProof` returns them. */
 export class NodePool {
   readonly #nodes = new Map<string, Uint8Array>();
+  readonly #used = new Set<string>();
   constructor(nodes: readonly Uint8Array[]) {
     for (const n of nodes) this.#nodes.set(bytesToHex(keccak_256(n)), n);
+  }
+
+  /**
+   * Whether every node given was looked up by some walk so far: a set of
+   * nodes holding one that no proof needs carries bytes nothing checks
+   * (T-17), which the contract-event evidence check refuses.
+   */
+  allUsed(): boolean {
+    return this.#used.size === this.#nodes.size;
   }
 
   /**
@@ -221,8 +231,10 @@ export class NodePool {
   }
 
   #node(hash: Uint8Array): readonly Rlp[] {
-    const bytes = this.#nodes.get(bytesToHex(hash));
+    const key = bytesToHex(hash);
+    const bytes = this.#nodes.get(key);
     if (bytes === undefined) throw new L1Error("l1-proof-missing");
+    this.#used.add(key);
     return this.#items(bytes);
   }
 

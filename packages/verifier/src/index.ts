@@ -154,8 +154,10 @@ export {
   type ArchiveFinding,
   type ArchiveWalk,
   type ArchiveWalkOptions,
+  DEFAULT_EVIDENCE_BUDGET,
   DEFAULT_MANIFEST_BUDGET,
   DEFAULT_OBJECT_READS,
+  type EvidenceListing,
   type ListedFinding,
   type ListedObjects,
   type ListedTarget,
@@ -168,6 +170,16 @@ export {
   type TransactionSource,
   walkArchive,
 } from "./archive.ts";
+export {
+  checkContractEventEvidence,
+  EVIDENCE_DATA_LIMIT,
+  type EvidenceCheck,
+  type EvidenceCheckCode,
+  type EvidenceRead,
+  MAX_EVIDENCE_RECORD,
+  type ProvenEvidence,
+  readEvidence,
+} from "./evidence.ts";
 export { ARCHIVE_LOCATED, type AnchorLogsRule, earlierLocators } from "./anchor-logs.ts";
 export { type ArweaveGateways, type ArweaveStats, arweaveSource } from "./arweave.ts";
 export {

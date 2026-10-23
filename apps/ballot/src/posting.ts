@@ -15,15 +15,17 @@
 // read each `m_i`, whether or not it answered (a hostile one reads the body
 // and resets the connection), so a posting that ends unrecorded is
 // `relayed`, never "nothing posted": the relay, or its L1 deposit, may
-// still land it (Outcome, last item; T-15). Nor does the client look on L1 for a deposit the
-// relay made yet (Outcome, a qualifying deposit): one only ever delays the
-// fallback, and without it the client falls back sooner, never later.
+// still land it (Outcome, last item; T-15). A sent posting no head shows
+// once its wait is over is looked for on L1, through the client's own L1
+// endpoint: a qualifying deposit keeps the client waiting until it reaches
+// L2, an L1 block time plus `F`, and to `c_P` at most (Outcome, a
+// qualifying deposit; T-50).
 
 import { decodeSharePosting } from "@abolishus/crypto";
 
 import { MAX_ANSWER, readJson } from "./answer.ts";
 import type { Deployment } from "./deployment.ts";
-import type { Fetch, LoadedPostings } from "./load.ts";
+import type { Fetch, LoadedDeposits, LoadedPostings } from "./load.ts";
 import type { PostAnswer } from "./open.tsx";
 
 // [[posting-relay]], Values, in seconds.
@@ -146,6 +148,34 @@ export async function sendPosting(
     : garbled;
 }
 
+// `submitPosting(bytes,bytes)`'s selector, keccak256's first four bytes.
+const SUBMIT_POSTING = Uint8Array.of(0x4b, 0x6f, 0xf1, 0xd0);
+
+/**
+ * `submitPosting(posting, ballot)`'s calldata, in the ABI's canonical
+ * form: the selector, both records' offsets, then each record's length and
+ * bytes zero-padded to a whole word ([[posting-relay]], Answers, step 2).
+ * It holds the posting's `m_i`, so the caller zeroes it once done (T-18).
+ */
+export function postingCalldata(posting: Uint8Array, ballot: Uint8Array): Uint8Array {
+  const padded = (n: number) => Math.ceil(n / 32) * 32;
+  const word = (n: number) => {
+    const w = new Uint8Array(32);
+    new DataView(w.buffer).setUint32(28, n);
+    return w;
+  };
+  const out = new Uint8Array(4 + 4 * 32 + padded(posting.length) + padded(ballot.length));
+  out.set(SUBMIT_POSTING, 0);
+  out.set(word(64), 4);
+  out.set(word(96 + padded(posting.length)), 36);
+  out.set(word(posting.length), 68);
+  out.set(posting, 100);
+  const at = 100 + padded(posting.length);
+  out.set(word(ballot.length), at);
+  out.set(ballot, at + 32);
+  return out;
+}
+
 /** What the posting loop needs from the network and the clocks, injectable for tests. */
 export interface PostingIo {
   /** `sendPosting` for one record and the ballot. */
@@ -159,6 +189,11 @@ export interface PostingIo {
     from: bigint | undefined,
     stop: () => boolean,
   ): Promise<LoadedPostings>;
+  /**
+   * `loadDeposits` for every posting, in order, from L1 time `since` on,
+   * given up as soon as `stop` says so.
+   */
+  deposits(since: bigint, stop: () => boolean): Promise<LoadedDeposits>;
   /** This device's clock, in milliseconds since the epoch. */
   now(): number;
   /** Waits `ms` milliseconds. */
@@ -171,6 +206,11 @@ interface Pending {
   sentAt: bigint | undefined;
   /** Whether the latest head carried it once it was sent. */
   seen: boolean;
+  /**
+   * When its qualifying deposit on L1 reaches L2 at the latest, its L1
+   * block's time plus `F`, in seconds, once one is found.
+   */
+  lands: bigint | undefined;
 }
 
 /**
@@ -180,12 +220,13 @@ interface Pending {
  * finalized head. Otherwise it ends once the client would fall back: the
  * relay refused one, its patience or its send cutoff `c_D −
  * POSTING_SEND_MARGIN` passed, a sent posting is neither recorded nor seen
- * at the latest head after `POSTING_FORCE_AFTER + POSTING_SEEN`, or the
- * client's deadline `c_P = c_D − POSTING_CLIENT_MARGIN` passed; and
+ * at the latest head after `POSTING_FORCE_AFTER + POSTING_SEEN` and has no
+ * qualifying deposit on L1 whose block's time plus `forcedInclusion` (`F`)
+ * is still ahead, or the client's deadline `c_P = c_D − POSTING_CLIENT_MARGIN` passed; and
  * answers `relayed` if any posting was sent at all, since the relay may
  * then have read its `m_i` whatever it answered, else `unreachable`
- * (Outcome, last item; T-15). A board read is given up at `c_P` between
- * its requests, and each request is the caller's to bound (`timedFetch`),
+ * (Outcome, last item; T-15). A board or L1 read is given up at `c_P`
+ * between its requests, and each request is the caller's to bound (`timedFetch`),
  * so the run ends within one request of `c_P` (T-25, T-50). `cutoff`
  * is the poll's `c_D`, in seconds. A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
@@ -196,6 +237,7 @@ export async function postThroughRelay(
   io: PostingIo,
   postings: readonly Uint8Array[],
   cutoff: bigint,
+  forcedInclusion: bigint,
 ): Promise<PostAnswer> {
   const deadline = cutoff - POSTING_CLIENT_MARGIN;
   const sendCutoff = cutoff - POSTING_SEND_MARGIN;
@@ -205,6 +247,7 @@ export async function postThroughRelay(
     posting,
     sentAt: undefined,
     seen: false,
+    lands: undefined,
   }));
   const recorded = new Set<Pending>();
   // The finalized head is read from where the last read ended: a record
@@ -245,7 +288,9 @@ export async function postThroughRelay(
     const waited = left.filter(
       (p) => p.sentAt !== undefined && time() - p.sentAt >= POSTING_FORCE_AFTER + POSTING_SEEN,
     );
-    if (waited.some((p) => !p.seen)) {
+    // Still waited on: seen at the latest head, or its deposit still to reach L2.
+    const held = (p: Pending) => p.seen || (p.lands !== undefined && time() < p.lands);
+    if (!waited.every(held)) {
       // Looked for at the latest head only once its wait is over: a sighting
       // there only keeps the client waiting, to `c_P` at most.
       const latest = await find("latest");
@@ -255,7 +300,23 @@ export async function postThroughRelay(
         for (const p of waited)
           if (latest.records.some((record) => equalBytes(record, p.posting))) p.seen = true;
       }
-      if (waited.some((p) => !p.seen)) return unrecorded();
+      // Then on L1, once, for a posting neither head shows: a deposit whose
+      // time to reach L2 has passed without its event failed, and isn't
+      // looked for again (Outcome, a qualifying deposit).
+      if (waited.some((p) => !p.seen && p.lands === undefined)) {
+        const l1 = await io
+          .deposits(started, () => time() > deadline)
+          .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
+        if (l1.ok) {
+          if (l1.timestamp > chainTime) chainTime = l1.timestamp;
+          for (const p of waited) {
+            const landed = l1.landed[pending.indexOf(p)];
+            if (!p.seen && p.lands === undefined && landed !== undefined)
+              p.lands = landed + forcedInclusion;
+          }
+        }
+      }
+      if (!waited.every(held)) return unrecorded();
     }
     await io.sleep(POSTING_POLL_MS);
   }

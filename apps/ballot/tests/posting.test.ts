@@ -10,8 +10,10 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 
+import { keccak_256 } from "@noble/hashes/sha3.js";
+
 import { STAGING } from "../src/deployment.ts";
-import type { Fetch, LoadedPostings } from "../src/load.ts";
+import type { Fetch, LoadedDeposits, LoadedPostings } from "../src/load.ts";
 import {
   POSTING_CLIENT_MARGIN,
   POSTING_FORCE_AFTER,
@@ -20,6 +22,7 @@ import {
   POSTING_SEEN,
   POSTING_SEND_MARGIN,
   type PostingIo,
+  postingCalldata,
   postThroughRelay,
   postingTopics,
   type RelayAnswer,
@@ -32,6 +35,8 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const POSTING = Uint8Array.of(0, 13, 1, 0xaa, 0xbb);
 const BALLOT = Uint8Array.of(0, 2, 3, 0xcc);
 const TX = "ab".repeat(32);
+// `F`, staging's.
+const F = STAGING.forcedInclusion;
 
 describe("sendPosting", () => {
   /** The route answering `status` with `body`, recording the request. */
@@ -167,6 +172,8 @@ describe("postThroughRelay", () => {
     chainAhead = 0n,
     start = START,
     readFails = false,
+    landed = () => [],
+    l1Ahead = 0n,
   }: {
     relay: (posting: Uint8Array, call: number) => RelayAnswer;
     finalized?: (t: bigint) => readonly Uint8Array[];
@@ -174,10 +181,14 @@ describe("postThroughRelay", () => {
     chainAhead?: bigint;
     start?: bigint;
     readFails?: boolean;
+    /** Each posting's qualifying deposit's L1 time, by seconds from `start`, as L1 shows them at `t`. */
+    landed?: (t: bigint) => readonly (bigint | undefined)[];
+    l1Ahead?: bigint;
   }) {
     let ms = Number(start) * 1000;
     const sends: { posting: Uint8Array; at: bigint }[] = [];
     const reads: { head: string; from: bigint | undefined }[] = [];
+    const l1Reads: { since: bigint; at: bigint }[] = [];
     const t = () => BigInt(Math.floor(ms / 1000));
     const io: PostingIo = {
       send(posting) {
@@ -195,13 +206,22 @@ describe("postThroughRelay", () => {
           records,
         });
       },
+      deposits(since): Promise<LoadedDeposits> {
+        l1Reads.push({ since, at: t() });
+        if (readFails) return Promise.resolve({ ok: false, problem: "unreachable" });
+        return Promise.resolve({
+          ok: true,
+          timestamp: t() + l1Ahead,
+          landed: landed(t() - start).map((x) => (x === undefined ? undefined : start + x)),
+        });
+      },
       now: () => ms,
       sleep(wait) {
         ms += wait;
         return Promise.resolve();
       },
     };
-    return { io, sends, reads, elapsed: () => t() - start };
+    return { io, sends, reads, l1Reads, elapsed: () => t() - start };
   }
 
   const sent: RelayAnswer = { kind: "sent", transaction: new Uint8Array(32), layer: "l2" };
@@ -212,7 +232,7 @@ describe("postThroughRelay", () => {
       relay: () => sent,
       finalized: (t) => (t >= 900n ? [OTHER, POSTING] : t >= 300n ? [POSTING] : []),
     });
-    expect(await postThroughRelay(w.io, [POSTING, OTHER], CUTOFF)).toBe("recorded");
+    expect(await postThroughRelay(w.io, [POSTING, OTHER], CUTOFF, F)).toBe("recorded");
     expect(w.sends.map((s) => s.posting)).toEqual([POSTING, OTHER]);
     expect(w.elapsed()).toBe(900n);
     // Each finalized read starts past the last one's head.
@@ -224,7 +244,7 @@ describe("postThroughRelay", () => {
 
   test("a posting the board already carries is never sent", async () => {
     const w = world({ relay: () => sent, finalized: () => [POSTING] });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("recorded");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("recorded");
     expect(w.sends).toHaveLength(0);
   });
 
@@ -232,7 +252,7 @@ describe("postThroughRelay", () => {
     const w = world({
       relay: (_, call) => (call < 2 ? { kind: "busy" } : { kind: "refused", code: "ballot-cap" }),
     });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
     expect(w.sends).toHaveLength(3);
   });
 
@@ -244,7 +264,7 @@ describe("postThroughRelay", () => {
     ] as const;
     for (const [answer, outcome] of answers) {
       const w = world({ relay: () => answer });
-      expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe(outcome);
+      expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe(outcome);
       expect(w.sends.every((s) => s.at - START < POSTING_PATIENCE)).toBe(true);
       expect(w.sends).toHaveLength(Number(POSTING_PATIENCE / POLL));
       expect(w.elapsed()).toBe(POSTING_PATIENCE);
@@ -263,14 +283,14 @@ describe("postThroughRelay", () => {
         return answer;
       },
     };
-    expect(await postThroughRelay(slow, [POSTING, OTHER, POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(slow, [POSTING, OTHER, POSTING], CUTOFF, F)).toBe("relayed");
     expect(w.sends).toHaveLength(1);
   });
 
   test("a relay that reads the posting and never answers still leaves it relayed", async () => {
     const w = world({ relay: () => sent });
     const reset = { ...w.io, send: () => Promise.reject(new TypeError("connection reset")) };
-    expect(await postThroughRelay(reset, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(reset, [POSTING], CUTOFF, F)).toBe("relayed");
     const silent = {
       ...w.io,
       send: async (): Promise<RelayAnswer> => {
@@ -278,7 +298,7 @@ describe("postThroughRelay", () => {
         return { kind: "unreachable" };
       },
     };
-    expect(await postThroughRelay(silent, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(silent, [POSTING], CUTOFF, F)).toBe("relayed");
   });
 
   test("a board read that answers each range slowly is given up at c_P", async () => {
@@ -292,7 +312,7 @@ describe("postThroughRelay", () => {
         return { ok: false, problem: "unreachable" } as const;
       },
     };
-    expect(await postThroughRelay(slow, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(slow, [POSTING], CUTOFF, F)).toBe("unreachable");
     expect(start + w.elapsed()).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN + 29n);
     expect(w.sends).toHaveLength(0);
   });
@@ -300,13 +320,13 @@ describe("postThroughRelay", () => {
   test("nothing is sent past the relay's send cutoff", async () => {
     const start = CUTOFF - POSTING_SEND_MARGIN + 1n;
     const w = world({ relay: () => sent, start });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("unreachable");
     expect(w.sends).toHaveLength(0);
   });
 
   test("a sent posting the latest head never shows falls back once its wait is over", async () => {
     const w = world({ relay: () => sent });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
     expect(w.sends).toHaveLength(1);
     expect(w.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
     // The latest head is read only once the wait is over.
@@ -316,7 +336,7 @@ describe("postThroughRelay", () => {
   test("a sighting at the latest head keeps the client waiting, never past c_P", async () => {
     const start = CUTOFF - POSTING_CLIENT_MARGIN - 3_000n;
     const w = world({ relay: () => sent, latest: () => [POSTING], start });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
     // It stops at the first round past c_P.
     expect(start + w.elapsed()).toBeGreaterThan(CUTOFF - POSTING_CLIENT_MARGIN);
     expect(start + w.elapsed() - POLL).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN);
@@ -326,23 +346,23 @@ describe("postThroughRelay", () => {
       latest: () => [POSTING],
       finalized: (t) => (t >= 2_400n ? [POSTING] : []),
     });
-    expect(await postThroughRelay(v.io, [POSTING], CUTOFF)).toBe("recorded");
+    expect(await postThroughRelay(v.io, [POSTING], CUTOFF, F)).toBe("recorded");
     expect(v.elapsed()).toBe(2_400n);
   });
 
   test("the finalized head's time counts toward the deadlines, as the device's clock does", async () => {
     const w = world({ relay: () => sent, chainAhead: 200_000n });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("unreachable");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("unreachable");
     expect(w.sends).toHaveLength(0);
   });
 
   test("an RPC that can't be read, or whose read throws, records nothing, and the deadlines still end the run", async () => {
     const w = world({ relay: () => sent, readFails: true });
-    expect(await postThroughRelay(w.io, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
     expect(w.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
     const v = world({ relay: () => sent });
     const throwing = { ...v.io, find: () => Promise.reject(new DOMException("t", "TimeoutError")) };
-    expect(await postThroughRelay(throwing, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(throwing, [POSTING], CUTOFF, F)).toBe("relayed");
     expect(v.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
   });
 
@@ -360,8 +380,96 @@ describe("postThroughRelay", () => {
             : { ok: true, block: 1n, timestamp: CUTOFF, records: [POSTING] },
         ),
     };
-    expect(await postThroughRelay(late, [POSTING], CUTOFF)).toBe("relayed");
+    expect(await postThroughRelay(late, [POSTING], CUTOFF, F)).toBe("relayed");
     expect(w.elapsed()).toBeLessThanOrEqual(POSTING_FORCE_AFTER + POSTING_SEEN + POLL);
+  });
+
+  test("a qualifying deposit keeps the client waiting until its L1 time plus F, then it falls back", async () => {
+    const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
+    const w = world({ relay: () => sent, landed: () => [700n] });
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
+    // The first round at or past the deposit's time to reach L2.
+    expect(w.elapsed()).toBeGreaterThanOrEqual(700n + F);
+    expect(w.elapsed() - POLL).toBeLessThan(700n + F);
+    // L1 is read once, when the wait is over, from the run's start.
+    expect(w.l1Reads).toEqual([{ since: START, at: START + WAIT }]);
+    // And a posting the deposit lands is recorded.
+    const v = world({
+      relay: () => sent,
+      landed: () => [700n],
+      finalized: (t) => (t >= 30_000n ? [POSTING] : []),
+    });
+    expect(await postThroughRelay(v.io, [POSTING], CUTOFF, F)).toBe("recorded");
+    expect(v.elapsed()).toBe(30_000n);
+  });
+
+  test("a deposit's wait never runs past c_P, and one already past its time holds nothing", async () => {
+    const start = CUTOFF - POSTING_CLIENT_MARGIN - 3_000n;
+    const w = world({ relay: () => sent, landed: () => [1_000n], start });
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(start + w.elapsed()).toBeGreaterThan(CUTOFF - POSTING_CLIENT_MARGIN);
+    expect(start + w.elapsed() - POLL).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN);
+    // A deposit whose L1 time plus F is already behind the clock.
+    const v = world({ relay: () => sent, landed: () => [-F] });
+    expect(await postThroughRelay(v.io, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(v.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
+  });
+
+  test("L1 is looked at only for a posting neither head shows, and each posting needs its own deposit", async () => {
+    // Seen at the latest head: no L1 read.
+    const w = world({ relay: () => sent, latest: () => [POSTING], landed: () => [0n] });
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(w.l1Reads).toHaveLength(0);
+    // Two postings, a deposit for only the second: the first falls back.
+    const v = world({ relay: () => sent, landed: () => [undefined, 700n] });
+    expect(await postThroughRelay(v.io, [POSTING, OTHER], CUTOFF, F)).toBe("relayed");
+    expect(v.elapsed()).toBe(POSTING_FORCE_AFTER + POSTING_SEEN);
+    // One seen, the other deposited: both are waited on.
+    const u = world({
+      relay: () => sent,
+      latest: () => [POSTING],
+      landed: () => [undefined, 700n],
+    });
+    expect(await postThroughRelay(u.io, [POSTING, OTHER], CUTOFF, F)).toBe("relayed");
+    expect(u.elapsed()).toBeGreaterThanOrEqual(700n + F);
+  });
+
+  test("an L1 that can't be read, or whose read throws, falls back once the wait is over", async () => {
+    const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
+    const w = world({ relay: () => sent, landed: () => [700n] });
+    const failing = {
+      ...w.io,
+      deposits: () => Promise.resolve<LoadedDeposits>({ ok: false, problem: "unreachable" }),
+    };
+    expect(await postThroughRelay(failing, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(w.elapsed()).toBe(WAIT);
+    const v = world({ relay: () => sent });
+    const throwing = { ...v.io, deposits: () => Promise.reject(new TypeError("network")) };
+    expect(await postThroughRelay(throwing, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(v.elapsed()).toBe(WAIT);
+  });
+
+  test("the L1 head's time counts toward the deadlines", async () => {
+    // A deposit far from landing, on an L1 whose time is past c_P.
+    const w = world({ relay: () => sent, landed: () => [700n], l1Ahead: 200_000n });
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(w.elapsed()).toBeLessThanOrEqual(POSTING_FORCE_AFTER + POSTING_SEEN + POLL);
+  });
+
+  test("the L1 read is given up at c_P", async () => {
+    // Sent at the send cutoff, so the L1 read starts 1,800 seconds before c_P.
+    const start = CUTOFF - POSTING_SEND_MARGIN;
+    const w = world({ relay: () => sent, start });
+    const slow = {
+      ...w.io,
+      deposits: async (_: bigint, stop: () => boolean): Promise<LoadedDeposits> => {
+        while (!stop()) await w.io.sleep(29_000);
+        return { ok: false, problem: "unreachable" };
+      },
+    };
+    expect(await postThroughRelay(slow, [POSTING], CUTOFF, F)).toBe("relayed");
+    expect(start + w.elapsed()).toBeGreaterThan(CUTOFF - POSTING_CLIENT_MARGIN);
+    expect(start + w.elapsed()).toBeLessThanOrEqual(CUTOFF - POSTING_CLIENT_MARGIN + 29n);
   });
 
   test("never recorded unless the finalized head carried every posting, and every run ends by c_P", async () => {
@@ -377,15 +485,17 @@ describe("postThroughRelay", () => {
         fc.option(fc.bigInt({ min: 0n, max: 4_000n })),
         fc.option(fc.bigInt({ min: 0n, max: 4_000n })),
         fc.bigInt({ min: 0n, max: 10_000n }),
-        async (answers, finalAt, seenAt, before) => {
+        fc.option(fc.bigInt({ min: -60_000n, max: 4_000n })),
+        async (answers, finalAt, seenAt, before, depositAt) => {
           const start = CUTOFF - POSTING_CLIENT_MARGIN - before;
           const w = world({
             relay: (_, call) => answers[Math.min(call, answers.length - 1)] as RelayAnswer,
             finalized: (t) => (finalAt !== null && t >= finalAt ? [POSTING] : []),
             latest: (t) => (seenAt !== null && t >= seenAt ? [POSTING] : []),
+            landed: () => [depositAt ?? undefined],
             start,
           });
-          const result = await postThroughRelay(w.io, [POSTING], CUTOFF);
+          const result = await postThroughRelay(w.io, [POSTING], CUTOFF, F);
           if (result === "recorded") expect(finalAt !== null && w.elapsed() >= finalAt).toBe(true);
           // A posting that ends unrecorded after the relay answered is never called unsent.
           if (w.sends.length > 0 && result !== "recorded") expect(result).toBe("relayed");
@@ -420,5 +530,40 @@ describe("postingTopics", () => {
     other[40] = (other[40] as number) ^ 1;
     expect(() => postingTopics([posting, other])).toThrow(RangeError);
     expect(() => postingTopics([posting.subarray(1)])).toThrow();
+  });
+});
+
+describe("postingCalldata", () => {
+  test("is submitPosting's selector, both offsets, and each record's length and padded bytes", () => {
+    const selector = Buffer.from(
+      keccak_256(new TextEncoder().encode("submitPosting(bytes,bytes)")),
+    ).subarray(0, 4);
+    const word = (n: number) => n.toString(16).padStart(64, "0");
+    expect(Buffer.from(postingCalldata(POSTING, BALLOT)).toString("hex")).toBe(
+      selector.toString("hex") +
+        word(0x40) +
+        word(0x80) +
+        word(5) +
+        "000d01aabb".padEnd(64, "0") +
+        word(4) +
+        "000203cc".padEnd(64, "0"),
+    );
+  });
+
+  test("a record of whole words takes no padding, and the length is the ABI's", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ maxLength: 200 }), fc.uint8Array({ maxLength: 200 }), (p, b) => {
+        const call = postingCalldata(p, b);
+        const padded = (n: number) => Math.ceil(n / 32) * 32;
+        expect(call.length).toBe(132 + padded(p.length) + padded(b.length));
+        const view = new DataView(call.buffer);
+        const second = view.getUint32(4 + 60);
+        expect(second).toBe(96 + padded(p.length));
+        expect(call.subarray(100, 100 + p.length)).toEqual(p);
+        expect(view.getUint32(4 + second + 28)).toBe(b.length);
+        expect(call.subarray(4 + second + 32, 4 + second + 32 + b.length)).toEqual(b);
+      }),
+      { numRuns },
+    );
   });
 });

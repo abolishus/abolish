@@ -26,6 +26,15 @@ export interface Deployment {
   /** The L2's chain ID, which the RPC must report before it is read. */
   readonly chainId: bigint;
   /**
+   * The L1's JSON-RPC endpoint, where the client looks for a deposit that
+   * forces a posting through L1 ([[posting-relay]], Outcome, a qualifying
+   * deposit), and the L1's chain ID, which it must report first. Untrusted
+   * as the L2's: a deposit it shows only ever delays the client's fallback,
+   * to `c_P` at most, and one it hides only brings it sooner (T-25, T-50).
+   */
+  readonly l1Rpc: string;
+  readonly l1ChainId: bigint;
+  /**
    * The election registry's address, as `0x` and 40 lowercase hex digits, or
    * `undefined` while none is deployed: then the client checks no election
    * and shows none (T-34).
@@ -70,13 +79,18 @@ export interface Deployment {
    * which it logged nothing, and the contract-event version its logs are
    * read under. A posting counts as recorded only by the board's own
    * `SharePosted` event read here, never by the relay's word
-   * ([[posting-relay]], Outcome; T-25).
+   * ([[posting-relay]], Outcome; T-25). With it, the L2's deposit contract
+   * on L1 (`OptimismPortal`, the proxy's address, as `0x` and 40 lowercase
+   * hex digits): the portal the release pins, whose `TransactionDeposited`
+   * events are the only deposits the client waits on, never a portal a
+   * relay names (T-50).
    */
   readonly board:
     | {
         readonly address: string;
         readonly deployedAt: bigint;
         readonly eventVersion: ContractEventVersion;
+        readonly portal: string;
       }
     | undefined;
   /**
@@ -138,6 +152,11 @@ export function confirming(deployment: Deployment): Deployment | undefined {
   return confirmRpc === undefined ? undefined : { ...deployment, rpc: confirmRpc };
 }
 
+/** `deployment` read through its L1 endpoint (`l1Rpc`), as its own chain. */
+export function onL1(deployment: Deployment): Deployment {
+  return { ...deployment, rpc: deployment.l1Rpc, chainId: deployment.l1ChainId };
+}
+
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
 export const STAGING: Deployment = {
   api: "https://api-staging.abolish.us",
@@ -145,6 +164,9 @@ export const STAGING: Deployment = {
   // Allnodes' public Base Sepolia endpoint, beside Coinbase's (T-43).
   confirmRpc: "https://base-sepolia-rpc.publicnode.com",
   chainId: 84532n,
+  // Allnodes' public Sepolia endpoint, Base Sepolia's L1 (T-43).
+  l1Rpc: "https://ethereum-sepolia-rpc.publicnode.com",
+  l1ChainId: 11_155_111n,
   // No election registry is deployed yet (P1-12c's and P1-18's gates come
   // first), so a staging build refuses every election link.
   electionRegistry: undefined,

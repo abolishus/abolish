@@ -23,6 +23,7 @@ import {
   type Fetch,
   loadBoard,
   loadChainTime,
+  loadDeposits,
   loadElection,
   loadGroupRegistry,
   loadPostings,
@@ -31,6 +32,7 @@ import {
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const REGISTRY = "0x00000000000000000000000000000000000000aa";
+const PORTAL = "0x00000000000000000000000000000000000000bb";
 const DEPLOYMENT: Deployment = { ...STAGING, electionRegistry: REGISTRY };
 const ID = new Uint8Array(32).fill(0x5d);
 const ID_HEX = "5d".repeat(32);
@@ -1056,11 +1058,17 @@ describe("the deployments", () => {
     expect(STAGING.rpc).toBe("https://sepolia.base.org");
     expect(STAGING.confirmRpc).toBe("https://base-sepolia-rpc.publicnode.com");
     expect(STAGING.chainId).toBe(84532n);
+    expect(STAGING.l1Rpc).toBe("https://ethereum-sepolia-rpc.publicnode.com");
+    expect(STAGING.l1ChainId).toBe(11_155_111n);
     // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
     if (STAGING.electionRegistry !== undefined)
       expect(STAGING.electionRegistry).toMatch(/^0x[0-9a-f]{40}$/);
     if (STAGING.groupRegistry !== undefined)
       expect(STAGING.groupRegistry.address).toMatch(/^0x[0-9a-f]{40}$/);
+    if (STAGING.board !== undefined) {
+      expect(STAGING.board.address).toMatch(/^0x[0-9a-f]{40}$/);
+      expect(STAGING.board.portal).toMatch(/^0x[0-9a-f]{40}$/);
+    }
     // Registrars are addresses, at least `threshold` of them.
     if (STAGING.registrars !== undefined) {
       expect(STAGING.registrars.registrars.every((r) => r.length === 20)).toBe(true);
@@ -1152,7 +1160,7 @@ describe("the board's postings", () => {
   const HEAD = 140n;
   const WITH_BOARD: Deployment = {
     ...DEPLOYMENT,
-    board: { address: BOARD, deployedAt: DEPLOYED_AT, eventVersion: 9 },
+    board: { address: BOARD, deployedAt: DEPLOYED_AT, eventVersion: 9, portal: PORTAL },
   };
   const quantity = (n: bigint) => `0x${n.toString(16)}`;
   const bytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
@@ -1374,5 +1382,295 @@ describe("the board's postings", () => {
       ),
     ).toEqual({ ok: false, problem: "no-registry" });
     expect(calls).toHaveLength(0);
+  });
+});
+
+// A deposit forcing a posting through L1 ([[posting-relay]], Outcome, a
+// qualifying deposit): the portal's `TransactionDeposited` logs are built
+// here by hand from the OP Stack's layout (topics `from`, `to` and
+// `version`; data the ABI encoding of `opaqueData`, which packs `mint`,
+// `value`, `gasLimit`, `isCreation` and the call's data), never by the code
+// under test.
+describe("the portal's deposits", () => {
+  const BOARD = "0x00000000000000000000000000000000000000cc";
+  const WITH_BOARD: Deployment = {
+    ...DEPLOYMENT,
+    board: { address: BOARD, deployedAt: 1n, eventVersion: 9, portal: PORTAL },
+  };
+  const L1_HEAD = 10_000n;
+  // One block every 12 seconds, block 0 at time 0.
+  const timeOf = (n: bigint) => 12n * n;
+  const quantity = (n: bigint) => `0x${n.toString(16)}`;
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  const word = (n: bigint) => n.toString(16).padStart(64, "0");
+  const DEPOSITED = hex(
+    keccak_256(new TextEncoder().encode("TransactionDeposited(address,address,uint256,bytes)")),
+  );
+  const CALL = Uint8Array.from({ length: 200 }, (_, i) => i);
+  const OTHER_CALL = Uint8Array.from({ length: 100 }, (_, i) => 255 - i);
+  const ESTIMATE = 500_000n;
+
+  interface Deposit {
+    readonly block: bigint;
+    readonly index?: bigint;
+    readonly gasLimit?: bigint;
+    readonly data?: Uint8Array;
+    readonly value?: bigint;
+    readonly creation?: boolean;
+    readonly to?: string;
+    readonly version?: bigint;
+    /** Replaces the log's data, as hex. */
+    readonly raw?: string;
+  }
+  function logData(d: Deposit): string {
+    if (d.raw !== undefined) return d.raw;
+    const data = d.data ?? CALL;
+    const opaque =
+      word(7n) +
+      word(d.value ?? 0n) +
+      (d.gasLimit ?? ESTIMATE).toString(16).padStart(16, "0") +
+      (d.creation === true ? "01" : "00") +
+      hex(data);
+    const length = BigInt(opaque.length / 2);
+    const padded = opaque.padEnd(Math.ceil(opaque.length / 64) * 64, "0");
+    return word(32n) + word(length) + padded;
+  }
+
+  /** An L1 node holding `deposits` and an L2 node estimating each call at `estimate`. */
+  function nodes(
+    deposits: readonly Deposit[],
+    { estimate = (): string | undefined => quantity(ESTIMATE), l1Chain = "0xaa36a7" } = {},
+  ) {
+    const calls: { url: string; method: string; params: unknown[]; body: string }[] = [];
+    const fetchFn: Fetch = (url, init) => {
+      const body = JSON.parse(init.body as string) as {
+        id: number;
+        method: string;
+        params: unknown[];
+      };
+      calls.push({ url, method: body.method, params: body.params, body: init.body as string });
+      expect(init).toMatchObject({ credentials: "omit", referrerPolicy: "no-referrer" });
+      let result: unknown;
+      let error: unknown;
+      if (url === WITH_BOARD.l1Rpc) {
+        const [first] = body.params as [unknown];
+        if (body.method === "eth_chainId") result = l1Chain;
+        else if (body.method === "eth_getBlockByNumber") {
+          const n = first === "latest" ? L1_HEAD : BigInt(first as string);
+          result = { number: quantity(n), timestamp: quantity(timeOf(n)), transactions: [] };
+        } else {
+          const filter = first as { fromBlock: string; toBlock: string };
+          result = deposits
+            .filter((d) => d.block >= BigInt(filter.fromBlock) && d.block <= BigInt(filter.toBlock))
+            .map((d) => ({
+              address: PORTAL,
+              topics: [
+                `0x${DEPOSITED}`,
+                `0x${word(0xeeeen)}`,
+                `0x${word(BigInt(d.to ?? BOARD))}`,
+                `0x${word(d.version ?? 0n)}`,
+              ],
+              data: `0x${logData(d)}`,
+              blockNumber: quantity(d.block),
+              logIndex: quantity(d.index ?? 0n),
+              removed: false,
+            }));
+        }
+      } else {
+        expect(url).toBe(WITH_BOARD.rpc);
+        if (body.method === "eth_chainId") result = "0x14a34";
+        else {
+          result = estimate();
+          if (result === undefined) error = { code: 3, message: "execution reverted" };
+        }
+      }
+      const answer =
+        error === undefined
+          ? { jsonrpc: "2.0", id: body.id, result }
+          : { jsonrpc: "2.0", id: body.id, error };
+      return Promise.resolve(new Response(JSON.stringify(answer), { status: 200 }));
+    };
+    return { calls, fetchFn };
+  }
+
+  const SINCE = timeOf(L1_HEAD - 100n);
+  const load = (fetchFn: Fetch, calls = [CALL]) => loadDeposits(WITH_BOARD, calls, SINCE, fetchFn);
+
+  test("a deposit to the board carrying the call's exact data with enough gas qualifies, at its block's time", async () => {
+    const { calls, fetchFn } = nodes([{ block: L1_HEAD - 50n }]);
+    expect(await load(fetchFn)).toEqual({
+      ok: true,
+      timestamp: timeOf(L1_HEAD),
+      landed: [timeOf(L1_HEAD - 50n)],
+    });
+    // The logs are read from the newest block looked up whose time is by `since`, by the portal, the board and version 0.
+    const logs = calls.filter((c) => c.method === "eth_getLogs");
+    expect(logs.map((c) => c.params)).toEqual([
+      [
+        {
+          address: PORTAL,
+          topics: [`0x${DEPOSITED}`, null, `0x${word(BigInt(BOARD))}`, `0x${word(0n)}`],
+          fromBlock: quantity(L1_HEAD - 128n),
+          toBlock: quantity(L1_HEAD),
+        },
+      ],
+    ]);
+    // The call is estimated on L2, to the board, only once a deposit carries it.
+    const estimates = calls.filter((c) => c.method === "eth_estimateGas");
+    expect(estimates.map((c) => [c.url, c.params])).toEqual([
+      [WITH_BOARD.rpc, [{ to: BOARD, data: `0x${hex(CALL)}` }]],
+    ]);
+  });
+
+  test("nothing sent to L1 names the call, and nothing at all is estimated without a deposit", async () => {
+    const { calls, fetchFn } = nodes([{ block: L1_HEAD - 50n, data: OTHER_CALL }]);
+    expect(await load(fetchFn)).toMatchObject({ ok: true, landed: [undefined] });
+    for (const c of calls.filter((c) => c.url === WITH_BOARD.l1Rpc))
+      expect(c.body).not.toContain(hex(CALL));
+    expect(calls.filter((c) => c.method === "eth_estimateGas")).toHaveLength(0);
+  });
+
+  test("a deposit with less gas than the estimate, value, a creation, another target or version, or other data doesn't qualify", async () => {
+    const block = L1_HEAD - 10n;
+    for (const deposit of [
+      { block, gasLimit: ESTIMATE - 1n },
+      { block, value: 1n },
+      { block, creation: true },
+      { block, to: "0x00000000000000000000000000000000000000dd" },
+      { block, version: 1n },
+      { block, data: CALL.subarray(1) },
+      { block, data: Uint8Array.of(...CALL, 0) },
+    ]) {
+      const { fetchFn } = nodes([deposit]);
+      expect(await load(fetchFn)).toMatchObject({ ok: true, landed: [undefined] });
+    }
+    // The estimate failing (a revert, the node's error) or not a quantity qualifies none.
+    for (const estimate of [() => undefined, () => "0x01f"]) {
+      const { fetchFn } = nodes([{ block }], { estimate });
+      expect(await load(fetchFn)).toMatchObject({ ok: true, landed: [undefined] });
+    }
+  });
+
+  test("opaqueData that isn't canonical ABI is no deposit", async () => {
+    const block = L1_HEAD - 10n;
+    const good = logData({ block });
+    for (const raw of [
+      word(64n) + good.slice(64), // another offset
+      good.slice(0, 64) + word(BigInt((good.length - 128) / 2 + 1)) + good.slice(128), // a length past the data
+      good + word(0n), // a trailing word
+      good.slice(0, -2) + "01", // nonzero padding
+      word(32n) + word(72n) + "00".repeat(96), // shorter than its head
+    ]) {
+      const { fetchFn } = nodes([{ block, raw }]);
+      expect(await load(fetchFn)).toMatchObject({ ok: true, landed: [undefined] });
+    }
+  });
+
+  test("each call gets its own newest qualifying deposit", async () => {
+    const { fetchFn } = nodes([
+      { block: L1_HEAD - 90n },
+      { block: L1_HEAD - 40n },
+      { block: L1_HEAD - 30n, gasLimit: 1n },
+      { block: L1_HEAD - 20n, data: OTHER_CALL },
+    ]);
+    expect(await load(fetchFn, [CALL, OTHER_CALL, Uint8Array.of(1)])).toMatchObject({
+      ok: true,
+      landed: [timeOf(L1_HEAD - 40n), timeOf(L1_HEAD - 20n), undefined],
+    });
+  });
+
+  test("the first block read goes back in doubling steps to one by `since`", async () => {
+    for (const [since, from] of [
+      [timeOf(L1_HEAD - 64n), L1_HEAD - 64n],
+      [timeOf(L1_HEAD - 65n), L1_HEAD - 128n],
+      [timeOf(L1_HEAD - 3_000n), L1_HEAD - 4_096n],
+      // Before every block looked up: from the chain's start.
+      [-1n, 0n],
+    ] as const) {
+      const { calls, fetchFn } = nodes([]);
+      expect(await loadDeposits(WITH_BOARD, [CALL], since, fetchFn)).toMatchObject({ ok: true });
+      const first = calls.find((c) => c.method === "eth_getLogs")?.params[0] as {
+        fromBlock: string;
+      };
+      expect(first.fromBlock).toBe(quantity(from));
+    }
+  });
+
+  test("an L1 node on another chain, answering another block, or out of its forms is refused", async () => {
+    expect(await load(nodes([], { l1Chain: "0x1" }).fetchFn)).toEqual({
+      ok: false,
+      problem: "wrong-chain",
+    });
+    const { fetchFn } = nodes([]);
+    const wrongBlock: Fetch = async (url, init) => {
+      const body = JSON.parse(init.body as string) as { id: number; params: unknown[] };
+      if (url === WITH_BOARD.l1Rpc && body.params[0] === quantity(L1_HEAD - 64n))
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: { number: quantity(L1_HEAD), timestamp: "0x0" },
+          }),
+        );
+      return fetchFn(url, init);
+    };
+    expect(await load(wrongBlock)).toEqual({ ok: false, problem: "bad-answer" });
+    // A log out of order.
+    const unordered = nodes([
+      { block: L1_HEAD - 10n, index: 1n },
+      { block: L1_HEAD - 10n, index: 0n },
+    ]);
+    expect(await load(unordered.fetchFn)).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("a node claiming a head far ahead, or serving deposits without end, runs the budget out", async () => {
+    const flood = nodes(
+      Array.from({ length: 64 }, (_, i) => ({ block: L1_HEAD - 1n, index: BigInt(i) })),
+    );
+    expect(
+      await loadDeposits(WITH_BOARD, [CALL], SINCE, flood.fetchFn, undefined, undefined, 16 * 1024),
+    ).toEqual({ ok: false, problem: "bad-answer" });
+    // One block a range: charged per range.
+    const ranges = nodes([]);
+    expect(
+      await loadDeposits(WITH_BOARD, [CALL], SINCE, ranges.fetchFn, undefined, 1n, 32 * 1024),
+    ).toEqual({ ok: false, problem: "bad-answer" });
+    expect(ranges.calls.filter((c) => c.method === "eth_getLogs").length).toBeLessThan(40);
+  });
+
+  test("a read is given up before its next request once its caller says stop", async () => {
+    const { calls, fetchFn } = nodes([{ block: L1_HEAD - 50n }]);
+    let asked = 0;
+    const counting: Fetch = (url, init) => {
+      asked++;
+      return fetchFn(url, init);
+    };
+    expect(await loadDeposits(WITH_BOARD, [CALL], SINCE, counting, () => asked >= 4, 10n)).toEqual({
+      ok: false,
+      problem: "unreachable",
+    });
+    expect(calls).toHaveLength(4);
+  });
+
+  test("a network failure is unreachable, and a build that pins no board asks nothing", async () => {
+    const failing: Fetch = () => Promise.reject(new TypeError("network"));
+    expect(await load(failing)).toEqual({ ok: false, problem: "unreachable" });
+    const { calls, fetchFn } = nodes([]);
+    expect(await loadDeposits(DEPLOYMENT, [CALL], SINCE, fetchFn)).toEqual({
+      ok: false,
+      problem: "no-registry",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("any deposit log, however garbled, is either read or refused, never thrown", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.uint8Array({ maxLength: 400 }), async (bytes) => {
+        const { fetchFn } = nodes([{ block: L1_HEAD - 5n, raw: hex(bytes) }]);
+        const loaded = await load(fetchFn);
+        expect(loaded.ok).toBe(true);
+      }),
+      { numRuns },
+    );
   });
 });

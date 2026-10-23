@@ -17,6 +17,7 @@
 // lies about the registry's state; see Known-weak in docs/status/P2-8.md.
 
 import {
+  checkContractEvent,
   encodeContractEvent,
   MAX_EVENT_DATA,
   MAX_EVENT_TOPICS,
@@ -526,17 +527,129 @@ export async function loadChainTime(
   }
 }
 
+export type LoadedPostings =
+  | {
+      readonly ok: true;
+      /** The head block read up to, and its timestamp. */
+      readonly block: bigint;
+      readonly timestamp: bigint;
+      /** The share postings the board's `SharePosted` events carry for the ballot, in log order. */
+      readonly records: readonly Uint8Array[];
+    }
+  | { readonly ok: false; readonly problem: LoadProblem };
+
+/**
+ * The share postings the deployment's board recorded for the ballot whose
+ * definition and ballot hashes are `definitionHash` and `ballotHash`, from
+ * block `from` (the board's deployment when absent) to the L2's `head`:
+ * `finalized` for a posting the client may stand down on, `latest` only for
+ * a sighting that delays its fallback, never one that cancels it
+ * ([[posting-relay]], Outcome; T-25, T-50). Each log is read as a board
+ * event under the deployment's `eventVersion` and kept only if it is a
+ * `SharePosted` whose topics are these hashes and whose record the board
+ * frames (`checkContractEvent`), so a node can't pass off another event's
+ * record as a posting. The requests name the two hashes, as the spec's
+ * read does: the RPC learns which ballot the client watches, which the
+ * posting itself makes public once sent (T-13). The RPC is trusted for
+ * which logs exist: one that hides a posting only delays the client to its
+ * fallback; one that invents a log can't make it carry another record.
+ */
+export async function loadPostings(
+  deployment: Deployment,
+  definitionHash: Uint8Array,
+  ballotHash: Uint8Array,
+  fetchFn: Fetch,
+  head: "finalized" | "latest",
+  from?: bigint,
+  range = LOG_RANGE,
+): Promise<LoadedPostings> {
+  const board = deployment.board;
+  if (board === undefined) return { ok: false, problem: "no-registry" };
+  if (definitionHash.length !== 32 || ballotHash.length !== 32)
+    throw new RangeError("definitionHash and ballotHash: expected 32 bytes");
+  const contract = fromHex(board.address.slice(2));
+  // The event check names each contract by its role; only the board's logs
+  // are asked for, so the others are an address no contract has.
+  const contracts = {
+    electionRegistry: new Uint8Array(20),
+    trusteeRegistry: new Uint8Array(20),
+    groupRegistry: new Uint8Array(20),
+    board: contract,
+  };
+  const topics = [null, `0x${toHex(definitionHash)}`, `0x${toHex(ballotHash)}`];
+  const records: Uint8Array[] = [];
+  try {
+    const [, at] = await both(
+      checkChain(deployment, fetchFn),
+      headBlock(deployment, fetchFn, head),
+    );
+    let id = 3;
+    let last: readonly [bigint, bigint] | undefined;
+    for (let start = from ?? board.deployedAt; start <= at.block; start += range) {
+      const to = start + range - 1n < at.block ? start + range - 1n : at.block;
+      const logs = await rpcResult(
+        deployment,
+        fetchFn,
+        id++,
+        "eth_getLogs",
+        [{ address: board.address, topics, fromBlock: quantity(start), toBlock: quantity(to) }],
+        MAX_LOGS_ANSWER,
+      ).catch((e: unknown) => {
+        throw e instanceof TypeError ? new Stop("unreachable") : e;
+      });
+      if (!Array.isArray(logs)) throw new Stop("bad-answer");
+      for (const log of logs as unknown[]) {
+        const read = logOf(log, board.address, start, to);
+        if (
+          last !== undefined &&
+          !(read.block > last[0] || (read.block === last[0] && read.index > last[1]))
+        )
+          throw new Stop("bad-answer");
+        last = [read.block, read.index];
+        const checked = checkContractEvent(
+          {
+            contract,
+            n: 0n,
+            l2_block: read.block,
+            l2_timestamp: 0n,
+            topics: read.topics,
+            data: read.data,
+          },
+          contracts,
+          board.eventVersion,
+        );
+        if (
+          checked.ok &&
+          checked.event.event === "SharePosted" &&
+          equalBytes(checked.event.definitionHash, definitionHash) &&
+          equalBytes(checked.event.ballotHash, ballotHash)
+        )
+          records.push(checked.event.record);
+      }
+    }
+    return { ok: true, block: at.block, timestamp: at.timestamp, records };
+  } catch (error) {
+    if (error instanceof Stop) return { ok: false, problem: error.problem };
+    throw error;
+  }
+}
+
 /** Request 2: the L2's finalized block, by number and timestamp: logs past it could be reorganised away (T-34). */
-async function finalizedHead(
+const finalizedHead = (deployment: Deployment, fetchFn: Fetch) =>
+  headBlock(deployment, fetchFn, BLOCK);
+
+/** The L2's block at `tag`, by number and timestamp. */
+async function headBlock(
   deployment: Deployment,
   fetchFn: Fetch,
+  tag: "finalized" | "latest",
 ): Promise<{ block: bigint; timestamp: bigint }> {
   const block = await rpcResult(
     deployment,
     fetchFn,
     2,
     "eth_getBlockByNumber",
-    [BLOCK, false],
+    [tag, false],
     MAX_BLOCK_ANSWER,
   );
   if (!isRecord(block)) throw new Stop("bad-answer");
@@ -632,6 +745,9 @@ async function readJson(response: Response, maxBytes: number): Promise<unknown> 
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
+
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");

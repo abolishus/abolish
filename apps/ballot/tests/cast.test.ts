@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import {
   checkBallotV3,
   decodeBallot,
+  decodeSharePosting,
   encodeShareReceipt,
   identityCommitment,
   intakeBallot,
@@ -288,7 +289,33 @@ describe("casting a seal", () => {
         if (m === undefined) throw new Error(`seat ${seat}: no m kept before any receipt`);
         return { seat, ciphertext, m };
       });
-      for (const share of kept) expect(ask(share)).toEqual({ ok: true });
+      // Each pass hands back the posting record the contract path takes: the
+      // ballot's definition and hash, as a trustee's intake computes it, the
+      // seat, its m and its ciphertext's own bytes (docs/spec/delivery.md,
+      // Share posting).
+      for (const share of kept) {
+        const verdict = ask(share);
+        if (!verdict.ok) throw new Error(`seat ${share.seat}: ${verdict.problem}`);
+        const secrets = seats[share.seat - 1];
+        if (secrets === undefined) throw new Error(`no seat ${share.seat}`);
+        const intake = intakeBallot(
+          election,
+          {
+            seat: share.seat,
+            kemSecret: secrets.kem.secretKey,
+            signingSecret: secrets.signingSecret,
+          },
+          result.ballot,
+          share.ciphertext,
+        );
+        if (!intake.ok) throw new Error(intake.code);
+        const record = decodeSharePosting(verdict.record, 1);
+        expect(toHex(record.definition_hash)).toBe(toHex(registeredHash));
+        expect(toHex(record.ballot_hash)).toBe(toHex(intake.ballotHash));
+        expect(record.seat).toBe(share.seat);
+        expect(toHex(record.m)).toBe(toHex(share.m));
+        expect(toHex(verdict.record.subarray(3 + 32 + 32 + 1 + 32))).toBe(toHex(share.ciphertext));
+      }
       const [first, second] = kept as [(typeof kept)[number], (typeof kept)[number]];
       const flipped = Uint8Array.from(first.m);
       flipped[31] = (flipped[31] as number) ^ 0x80;
@@ -317,7 +344,7 @@ describe("casting a seal", () => {
         ...first,
         m: Uint8Array.from(first.m),
       };
-      expect(session.posting(request)).toEqual({ ok: true });
+      expect(session.posting(request)).toMatchObject({ ok: true });
       expect(request.m.every((b) => b === 0)).toBe(true);
       expect(first.m.some((b) => b !== 0)).toBe(true);
       // A ballot that isn't a cast of the poll held, a seat outside its panel, or no poll held.

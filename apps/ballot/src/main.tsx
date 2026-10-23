@@ -35,7 +35,7 @@ import {
 import { deliverShare } from "./intake.ts";
 import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
-import { loadBoard, loadChainTime, loadElection, loadGroupRegistry } from "./load.ts";
+import { loadBoard, loadChainTime, loadElection, loadGroupRegistry, loadPostings } from "./load.ts";
 import {
   keepChosenLocale,
   type Locale,
@@ -46,6 +46,7 @@ import {
 import { catalogs } from "./messages.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
+import { postingTopics, postThroughRelay, sendPosting } from "./posting.ts";
 import type { Recoverer } from "./recover.tsx";
 import { recover } from "./recovery.ts";
 import { loadProverArtifacts, ProverArtifactError } from "./prover-artifacts.ts";
@@ -275,8 +276,32 @@ const source: ElectionSource = {
     deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
   receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
   posting: (ballot, share) => withWorker((used) => used.posting(ballot, share)),
-  // No `post` yet: the contract path a posting goes through is part
-  // 3c-1b-2b-2b-2d-2b-2, and until then no posting is offered.
+  // A posting goes through the relay to the board this build pins; with no
+  // board there is no contract path, and no posting is offered.
+  ...(STAGING.board === undefined
+    ? {}
+    : {
+        post: (
+          _electionId: Uint8Array,
+          ballot: Uint8Array,
+          postings: readonly Uint8Array[],
+          cutoff: bigint,
+        ) => {
+          const { definitionHash, ballotHash } = postingTopics(postings);
+          const fetchFn = (url: string, init: RequestInit) => fetch(url, init);
+          return postThroughRelay(
+            {
+              send: (posting) => sendPosting(STAGING, posting, ballot, fetchFn),
+              find: (head, from) =>
+                loadPostings(STAGING, definitionHash, ballotHash, fetchFn, head, from),
+              now: () => Date.now(),
+              sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            },
+            postings,
+            cutoff,
+          );
+        },
+      }),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
   declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),

@@ -71,6 +71,8 @@ scope.onmessage = ({ data }) => {
       } finally {
         // The page has its own copy now, or none; this realm's goes (T-12).
         if (response.kind === "backup-open" && response.result.ok) response.result.secret.fill(0);
+        // A posting record holds its seat's `m_i` (T-18).
+        if (response.kind === "posting" && response.result.ok) response.result.record.fill(0);
       }
     },
     () => scope.postMessage({ v: PROTOCOL_VERSION, id: request.id, kind: "error" }),

@@ -41,13 +41,13 @@ import {
   encodeOpeningV2,
   openChallengeV2,
 } from "./challenge.ts";
-import { DecodeError, type DecodeErrorCode } from "./codec.ts";
+import { decode, DecodeError, type DecodeErrorCode } from "./codec.ts";
 import {
   type ContractEventRecord,
   type ContractEventVersion,
   decodeContractEvent,
 } from "./contract-event.ts";
-import { decodeShareReceipt, type ShareReceiptRecord } from "./delivery.ts";
+import { decodeShareReceipt, encodeSharePosting, type ShareReceiptRecord } from "./delivery.ts";
 import type { ElectionDefinitionV5 } from "./election-definition.ts";
 import { equalBytes } from "./nullifier-key.ts";
 import { decodeMembershipProof, membershipVkHash } from "./membership-proof.ts";
@@ -76,6 +76,7 @@ import {
   type KemPublicKey,
   type Posting,
   type PostingResult,
+  SHARE_CIPHERTEXT,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
 import { checkShareReceiptV3 } from "./share-receipt.ts";
@@ -780,6 +781,48 @@ export function castPostingSeatV3(
     share_hashes,
     posting,
   );
+}
+
+/** `castPostingRecordV3`'s verdict: the posting record on a pass, else `castPostingSeatV3`'s refusal. */
+export type CastPostingRecordResult =
+  | { readonly ok: true; readonly record: Uint8Array }
+  | Extract<CastPostingResult, { readonly ok: false }>;
+
+/**
+ * The share posting record (`0x000d`, version 1, the one ballot version 3
+ * fixes; docs/spec/delivery.md, Share posting) of `posting` for `seat` of
+ * `ballot`, once it passes `castPostingSeatV3` in `election`: the bytes the
+ * ballot client sends through the contract path, beside `ballot`
+ * ([[posting-relay]], Request). It names the ballot's definition and the
+ * ballot hash recomputed from `ballot`, as the board's `SharePosted` topics
+ * and the relay's step 3 read it, so a posting that fails is never made at
+ * all: the voter gives up a seat's everlasting privacy only for bytes that
+ * deliver it (T-15, T-18). The record holds `m_i`; the caller zeroes it
+ * once sent. Throws as `castPostingSeatV3` does.
+ */
+export function castPostingRecordV3(
+  election: QuestionBallotElection,
+  ballot: Uint8Array,
+  seat: number,
+  posting: Posting,
+): CastPostingRecordResult {
+  const verdict = castPostingSeatV3(election, ballot, seat, posting);
+  if (!verdict.ok) return verdict;
+  const record = decodeBallot(ballot, 3);
+  return {
+    ok: true,
+    record: encodeSharePosting({
+      definition_hash: record.definition_hash,
+      ballot_hash: ballotHashV3(
+        { definitionHash: record.definition_hash, cell: record.cell, nullifier: record.nullifier },
+        record.committed_vote,
+      ),
+      seat,
+      m: posting.m,
+      // Decoded strictly by the check that passed, so this decodes too.
+      ciphertext: decode(SHARE_CIPHERTEXT, posting.ciphertext),
+    }),
+  };
 }
 
 /**

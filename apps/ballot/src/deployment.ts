@@ -64,6 +64,22 @@ export interface Deployment {
       }
     | undefined;
   /**
+   * The board this build reads a posting's outcome from, or `undefined`
+   * while none is deployed, and then no posting is offered: its address
+   * (`0x` and 40 lowercase hex digits), the block it was deployed in, before
+   * which it logged nothing, and the contract-event version its logs are
+   * read under. A posting counts as recorded only by the board's own
+   * `SharePosted` event read here, never by the relay's word
+   * ([[posting-relay]], Outcome; T-25).
+   */
+  readonly board:
+    | {
+        readonly address: string;
+        readonly deployedAt: bigint;
+        readonly eventVersion: ContractEventVersion;
+      }
+    | undefined;
+  /**
    * The deployment's published Tier 0 groups, signed and self-paid, each
    * with its region code (a u32), in strictly ascending `group_id`, from
    * the deployment record ([[registration]], Groups): the regions a voter
@@ -139,6 +155,8 @@ export const STAGING: Deployment = {
   // with the others), so a staging build finds no voter's cell.
   registrars: undefined,
   groupRegistry: undefined,
+  // Nor a board, so a staging build offers no posting.
+  board: undefined,
   // Nor any Tier 0 group, so a staging build registers no one.
   tier0Groups: [],
   // Where staging serves the client (P2-8, decided 2026-10-17): a Railway

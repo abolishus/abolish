@@ -157,17 +157,20 @@ export interface ElectionSource {
    */
   posting(ballot: Uint8Array, share: PostingShare): Promise<PostingResult>;
   /**
-   * Posts each of `shares`, the kept shares of the recorded cast whose bytes
-   * are `ballot`, through the contract path, the only path a posting
-   * delivers by ([[delivery]], Direct submit), answering `recorded` only once
-   * every one is recorded by the contract; absent while the build has no
-   * contract path (part 3c-1b-2b-2b-2d-2b-2), and then no posting is
-   * offered.
+   * Posts each of `postings`, the posting records the worker made from the
+   * kept shares of the recorded cast whose bytes are `ballot`, through the
+   * contract path, the only path a posting delivers by ([[delivery]],
+   * Direct submit), answering `recorded` only once every one is recorded by
+   * the contract, and by `cutoff`, the poll's `c_D` in seconds, at the
+   * latest ([[posting-relay]], Outcome); absent while the build has no
+   * contract path, and then no posting is offered. The caller zeroes the
+   * records once this settles.
    */
   readonly post?: (
     electionId: Uint8Array,
     ballot: Uint8Array,
-    shares: readonly PostingShare[],
+    postings: readonly Uint8Array[],
+    cutoff: bigint,
   ) => Promise<PostAnswer>;
   /**
    * Erases the unreceipted seats' `ct_i` and `m_i` of the recorded cast
@@ -603,6 +606,10 @@ export function Ballot({
   const definitionHash = fromHex(election.definitionHash);
   const electionId = fromHex(election.electionId);
 
+  /** The poll's posting cutoff `c_D`, in seconds ([[delivery]], Client rule 4). */
+  const cutoff = () =>
+    postingCutoff(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
+
   function again() {
     setStep({ kind: "answering" });
     setRound(round + 1);
@@ -639,23 +646,19 @@ export function Ballot({
    * offered ([[delivery]], Client rule 4).
    */
   async function resume(): Promise<Step> {
-    const cutoff = postingCutoff(
-      election.closesAt,
-      election.l1InclusionBound,
-      source.forcedInclusion,
-    );
+    const c = cutoff();
     // The chain's time, read at most once, and only for a tier that keeps a
     // share past the cutoff by this device's clock: most visits read nothing.
     let chain: Promise<LoadedChainTime> | undefined;
     for (const tier of election.tiers) {
       let held = await source.casts(electionId, tier);
       if (held.kind === "unreadable") continue;
-      if (keepsShares(held.casts) && passedOnDevice(cutoff, source.now())) {
+      if (keepsShares(held.casts) && passedOnDevice(c, source.now())) {
         chain ??= source.chainTime();
         const time = await chain;
         // An RPC that fails or answers wrongly leaves the shares kept: erasing
         // on its word alone could lose a posting still in time (T-25).
-        if (time.ok && postingLapsed(cutoff, time.timestamp, source.now())) {
+        if (time.ok && postingLapsed(c, time.timestamp, source.now())) {
           await source.eraseShares(electionId, tier);
           held = await source.casts(electionId, tier);
           if (held.kind === "unreadable") continue;
@@ -1053,19 +1056,20 @@ export function Ballot({
   }
 
   /**
-   * The kept share of each of `sending`'s unreceipted seats, read back from
-   * this device's record and passed by the worker's posting check against
-   * the ballot it cast on this page, the only ballot a posting may name
-   * ([[delivery]], Client rule 4; `castPostingSeatV3`), with `sending` less
-   * any seat receipted since (another tab), which is never posted (Client
-   * rule 2). So a posting is offered or made only for an `m_i` that would
-   * deliver its seat, never one storage altered after the voter gave up the
-   * seat's everlasting privacy for it (T-18, T-15): a share that fails is an
-   * unreadable record. The caller zeroes the shares' `m` once done.
+   * The posting record of each of `sending`'s unreceipted seats, made by the
+   * worker from the share read back from this device's record once it
+   * passes the posting check against the ballot cast on this page, the only
+   * ballot a posting may name ([[delivery]], Client rule 4;
+   * `castPostingRecordV3`), with `sending` less any seat receipted since
+   * (another tab), which is never posted (Client rule 2). So a posting is
+   * offered or made only for an `m_i` that would deliver its seat, never one
+   * storage altered after the voter gave up the seat's everlasting privacy
+   * for it (T-18, T-15): a share that fails is an unreadable record. The
+   * caller zeroes the records, which hold each `m_i`, once done.
    */
   async function postable(
     sending: Sending,
-  ): Promise<{ readonly sending: Sending; readonly shares: readonly PostingShare[] } | Step> {
+  ): Promise<{ readonly sending: Sending; readonly postings: readonly Uint8Array[] } | Step> {
     const { ballot, tier, undelivered } = sending;
     const read = await source.casts(electionId, tier);
     if (read.kind === "unreadable") return stopped("casts-unreadable");
@@ -1073,6 +1077,7 @@ export function Ballot({
     // Recorded before delivery: a store without it now was changed elsewhere.
     if (cast === undefined) return stopped("cast-faulty");
     const shares: PostingShare[] = [];
+    const postings: Uint8Array[] = [];
     const left: Sending["undelivered"][number][] = [];
     let passed = false;
     try {
@@ -1098,14 +1103,16 @@ export function Ballot({
         // A worker that no longer holds the poll checks nothing.
         if (!verdict.ok)
           return stopped(verdict.problem === "unknown" ? "cast-failed" : "casts-unreadable");
+        postings.push(verdict.record);
       }
       passed = true;
-      return { sending: { ...sending, undelivered: left }, shares };
+      return { sending: { ...sending, undelivered: left }, postings };
     } finally {
-      // Every other `m` this read handed out goes now; the shares' go once used.
-      const used = new Set(passed ? shares.map(({ m }) => m) : []);
+      // Every `m` this read handed out goes now: the records carry the ones
+      // posted, and go once used, or now if any failed.
       for (const { shares: kept } of read.casts)
-        for (const share of kept) if ("m" in share && !used.has(share.m)) share.m.fill(0);
+        for (const share of kept) if ("m" in share) share.m.fill(0);
+      if (!passed) for (const record of postings) record.fill(0);
     }
   }
 
@@ -1120,7 +1127,7 @@ export function Ballot({
     if (current()) setStep({ kind: "checking-posting" });
     const checked = await postable(sending);
     if ("kind" in checked) return checked;
-    for (const { m } of checked.shares) m.fill(0);
+    for (const record of checked.postings) record.fill(0);
     if (checked.sending.undelivered.length === 0) {
       if (current()) setStep({ kind: "sending" });
       return send(checked.sending);
@@ -1148,13 +1155,13 @@ export function Ballot({
         let answer: PostAnswer;
         try {
           answer =
-            checked.shares.length === 0
+            checked.postings.length === 0
               ? "recorded"
-              : await posting(electionId, sending.ballot, checked.shares).catch(
+              : await posting(electionId, sending.ballot, checked.postings, cutoff()).catch(
                   (): PostAnswer => "unreachable",
                 );
         } finally {
-          for (const { m } of checked.shares) m.fill(0);
+          for (const record of checked.postings) record.fill(0);
         }
         if (answer !== "recorded") return { kind: "offer", sending: checked.sending, failed: true };
         if (current()) setStep({ kind: "sending" });

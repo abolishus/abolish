@@ -515,10 +515,11 @@ describe("author-registration.json", () => {
     );
   });
 
-  test("no one-byte change to a registration approves another key set or header", () => {
+  test("no one-byte change to a registration approves another key set or header, or fails the check", () => {
     const ctx = approvalContext("author-honest-3");
     const all = registrationOf("all");
-    const seatsEnd = 97 + 97 * 3;
+    const approvalsAt = 97 + 97 * 3 + 1;
+    const missing = { ok: false, code: "author-approvals-missing", seats: [] };
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: all.length - 1 }),
@@ -527,20 +528,19 @@ describe("author-registration.json", () => {
           const changed = Uint8Array.from(all);
           changed[at] = (changed[at] as number) ^ flip;
           const r = checkAuthorApprovals(ctx, [], [changed]);
-          if (at < 97 || at === seatsEnd)
-            // The header or a count: another run's, or no record at all.
-            expect(r).toEqual({ ok: false, code: "author-approvals-missing", seats: [] });
-          else if (at < seatsEnd)
-            // A seat: another key set, or no record at all (T-37).
-            expect(["key-set-mismatch", "author-approvals-missing"]).toContain(
-              r.ok ? "ok" : r.code,
-            );
+          if (at < approvalsAt)
+            // The header, a seat or a count: the approvals no longer sign
+            // what the registration says, so no quorum registered it and it
+            // carries nothing, never `key-set-mismatch` (T-37, T-53).
+            expect(r).toEqual(missing);
           else {
-            // An approval: at most its own seat stops counting.
-            expect(r.ok ? "ok" : r.code).not.toBe("key-set-mismatch");
-            const seats = r.ok ? r.seats : (r.seats ?? []);
-            for (const seat of seats) expect([1, 2, 3]).toContain(seat);
-            expect(seats.length).toBeGreaterThanOrEqual(r.ok ? 2 : 0);
+            // An approval: at most its own seat stops counting, and two of
+            // three still make the quorum, unless the record no longer decodes.
+            const seat = Math.floor((at - approvalsAt) / 65) + 1;
+            if (!r.ok) expect(r).toEqual(missing);
+            else
+              for (const other of [1, 2, 3].filter((x) => x !== seat))
+                expect(r.seats).toContain(other);
           }
         },
       ),

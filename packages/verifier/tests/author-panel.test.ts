@@ -774,11 +774,12 @@ describe("authorRunOf", () => {
     readonly vectors: readonly {
       readonly id: string;
       readonly encoding: string;
+      readonly hash?: string;
       readonly authorStubHash?: string;
     }[];
   };
 
-  test("binds the definition's author panel, transcript hash and the spec's author stub hash", () => {
+  test("binds the definition's author panel, transcript hash, hash and the spec's author stub hash", () => {
     let seen = 0;
     for (const v of v6.vectors) {
       if (v.authorStubHash === undefined) continue;
@@ -797,6 +798,8 @@ describe("authorRunOf", () => {
       seen++;
       if (run === undefined) throw new Error(`${v.id}: no author run`);
       expect(Buffer.from(run.stubHash).toString("hex"), v.id).toBe(v.authorStubHash);
+      // The hash its `AuthorPanelRegistered` names (3.1).
+      expect(Buffer.from(run.definitionHash).toString("hex"), v.id).toBe(v.hash);
       expect(run.transcriptHash, v.id).toEqual(record.value.author_transcript_hash);
       expect(run.panel, v.id).toEqual({
         threshold: record.value.author_threshold,

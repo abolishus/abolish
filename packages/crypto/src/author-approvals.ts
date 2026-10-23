@@ -165,7 +165,13 @@ function decoded(bytes: Uint8Array): AuthorApprovals | DecodeError {
 
 // The seats whose approvals in one record count, or null when the record's
 // seats aren't strictly increasing within 1 to n_A, which spoils all of it.
-function counting(p: Prepared, record: AuthorApprovals): number[] | null {
+// `keySet` is the key set hash the approvals sign: the checker's own, but
+// for a registration's quorum, the registration's (`fromRegistration`).
+function counting(
+  p: Prepared,
+  record: AuthorApprovals,
+  keySet: Uint8Array = p.keySet,
+): number[] | null {
   let previous = 0;
   for (const { index } of record.approvals) {
     if (index <= previous || index > p.n) return null;
@@ -182,7 +188,7 @@ function counting(p: Prepared, record: AuthorApprovals): number[] | null {
           index,
           stubHash: authorStubHash,
           ceremonyTranscriptHash: authorTranscriptHash,
-          keySetHash: p.keySet,
+          keySetHash: keySet,
         },
         signature,
       ),
@@ -192,14 +198,15 @@ function counting(p: Prepared, record: AuthorApprovals): number[] | null {
 
 /**
  * An `AuthorPanelRegistered` registration read as an approvals record naming
- * the transcript, when its header is this run's (`author_panel_id`,
- * `author_stub_hash`, `author_transcript_hash`) and its key set the
- * checker's own; `key-set-mismatch` when its header is this run's and its
- * key set isn't, since the board takes the author seats' keys from that
- * set (T-37, T-14); undefined when it doesn't decode, has a seat above
- * `n_A` or names another panel, stub or transcript, which the election
- * registry never emits for this definition (contracts.md, Author panel
- * registration, checks 2 to 9).
+ * the transcript, when it is one of this run's: its header is this run's
+ * (`author_panel_id`, `author_stub_hash`, `author_transcript_hash`) and at
+ * least `q_A` distinct seats' approvals in it verify over its own key set,
+ * as the election registry requires before it emits one; then
+ * `key-set-mismatch` when that key set isn't the checker's own, since the
+ * board takes the author seats' keys from it (T-37, T-14). Undefined for
+ * anything else, which the registry never emits for this definition
+ * (contracts.md, Author panel registration, checks 2 to 9), so bytes no
+ * quorum signed can't fail the check (T-53).
  */
 function fromRegistration(
   p: Prepared,
@@ -222,11 +229,13 @@ function fromRegistration(
     !equalBytes(r.ceremonyTranscriptHash, p.ctx.authorTranscriptHash)
   )
     return undefined;
-  if (!equalBytes(keySetHash(r.keySet), p.keySet)) return "key-set-mismatch";
-  return {
+  const record: AuthorApprovals = {
     transcript_hash: r.ceremonyTranscriptHash,
     approvals: r.approvals.map((a) => ({ index: a.index, signature: a.signature })),
   };
+  const own = keySetHash(r.keySet);
+  if ((counting(p, record, own) ?? []).length < p.quorum) return undefined;
+  return equalBytes(own, p.keySet) ? record : "key-set-mismatch";
 }
 
 /**
@@ -235,8 +244,9 @@ function fromRegistration(
  * refused whatever they hold (`ceremony-participation`). `registrations`
  * are the `registration` of every `AuthorPanelRegistered` whose
  * `definitionHash` is the registered definition's, which only the caller
- * can match (The registration's approvals): one naming this run whose key
- * set isn't the checker's fails the check (`key-set-mismatch`). Otherwise
+ * can match (The registration's approvals): one of this run's, `q_A` seats
+ * approving its key set, fails the check when that set isn't the checker's
+ * (`key-set-mismatch`). Otherwise
  * every record that decodes strictly and names the transcript, and every
  * registration of this run, is counted, each seat once however many valid
  * signatures it has; it approves with at least `q_A` seats. With none

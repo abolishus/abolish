@@ -57,10 +57,10 @@ export function decodeDefinition(bytes: Uint8Array): VerifiedDefinition {
 
 /**
  * The definition's author panel and what its run binds: version 6's
- * `author_threshold`, `author_keys`, `author_transcript_hash` and its
- * `author_stub_hash` and the definition's hash, recomputed here; undefined when it has no author
- * panel, as under every earlier version, which has none
- * (docs/spec/election-definition.md, Author panel; T-37).
+ * `author_threshold`, `author_keys` and `author_transcript_hash`, with its
+ * `author_stub_hash` and the definition's hash, recomputed here; undefined
+ * when it has no author panel, as under every earlier version, which has
+ * none (docs/spec/election-definition.md, Author panel; T-37).
  */
 export function authorRunOf(record: VerifiedDefinition): AuthorRun | undefined {
   if (record.version !== 6 || record.value.author_keys.length === 0) return undefined;

@@ -107,8 +107,9 @@ def decode_registration(b):
 
 def check(panel, transcript, records, registrations):
     """The approvals records and registrations of this definition, decided as Author panel, Check, and The
-    registration's approvals say: participation first, then any registration of this run whose key set isn't
-    the checker's, then the seats counted across both."""
+    registration's approvals say: participation first, then any registration of this run (this run's header and
+    q_A seats approving its own key set, as the registry requires) whose key set isn't the checker's, then the
+    seats counted across both."""
     q = max(panel["k"], len(panel["keys"]) - 1)
     if len(transcript["registered"]) < q:
         return {"ok": False, "code": "ceremony-participation"}
@@ -128,7 +129,10 @@ def check(panel, transcript, records, registrations):
             continue
         if (reg["panelId"], reg["stubHash"], reg["transcriptHash"]) != (ac.panel_id(panel), ELECTION["authorStubHash"], thash):
             continue
-        if ks.key_set_hash(reg["seats"]) != ksh:
+        own = ks.key_set_hash(reg["seats"])
+        if len(ac.counting(panel, {"approvals": reg["approvals"]}, thash, own) or []) < q:
+            continue
+        if own != ksh:
             return {"ok": False, "code": "key-set-mismatch"}
         named.append({"transcriptHash": thash, "approvals": reg["approvals"]})
     counted = set()
@@ -192,6 +196,8 @@ def main(root):
         entries = t["entries"] if entries is None else entries
         thash = thash or t["hash"]
         ksh = ks.key_set_hash(entries)
+        # `approving` lists seats, or (seat, signing seat) pairs signing that other seat's statement; `signer`
+        # signs seat 2's statement with another seat's key.
         approvals = []
         for a in approving:
             index, sign_as = a if isinstance(a, tuple) else (a, a)
@@ -234,6 +240,15 @@ def main(root):
     event("other-key-set", "Every seat approves a key set of seats 1 and 2 only, which isn't the transcript's.",
           reg("other-key-set", "Seats 1 and 2 of author-honest-3's key set, approved by all three seats over that set.",
               T, [1, 2, 3], entries=e3[:2]))
+    event("other-key-set-unsigned", "A key set of seats 1 and 2 only with no approval: no quorum signed it, so it "
+          "carries nothing.", reg("other-key-set-unsigned", "Seats 1 and 2 of author-honest-3's key set with no approval.",
+                                  T, [], entries=e3[:2]))
+    event("other-key-set-short", "A key set of seats 1 and 2 only approved by seat 1 alone, short of q_A: it carries "
+          "nothing.", reg("other-key-set-short", "Seats 1 and 2 of author-honest-3's key set, approved by seat 1 over "
+                          "that set.", T, [1], entries=e3[:2]))
+    event("other-signer-quorum", "Seats 1, 2 and 3, seat 2's slot carrying seat 3's signature: seats 1 and 3 still "
+          "make the quorum.", reg("other-signer-quorum", "author-honest-3's key set, seat 2's approval signed by seat "
+                                  "3's key.", T, [1, 2, 3], signer=3))
     other = det("other-transcript")
     event("seat-above-n", "A key set whose last seat is 4, above n_A = 3, every seat approving: no registration of "
           "this run (the registry's check 6), so it carries nothing.",
@@ -268,8 +283,11 @@ def main(root):
           "such event: it fails the event check (unknown-event), so carries nothing.",
           bytes.fromhex(registrations["all"]["registration"]), contract="trustee-registry")
     s = transcripts["author-short"]
-    event("short", "Both qualified seats of author-short approve its key set.",
-          reg("short", "author-short's key set, approved by its two qualified seats.", "author-short", [1, 2]))
+    event("short", "Seats 1 to 3 of author-short's panel approve its key set of two qualified seats.",
+          reg("short", "author-short's key set, approved by seats 1 to 3.", "author-short", [1, 2, 3]))
+    event("short-other-key-set", "Seats 1 to 3 of author-short's panel approve a key set of its seat 1 alone.",
+          reg("short-other-key-set", "Seat 1 of author-short's key set, approved by seats 1 to 3 over that set.",
+              "author-short", [1, 2, 3], entries=transcripts["author-short"]["entries"][:1]))
     assert decode_registration(bytes.fromhex(registrations["not-a-point"]["registration"])) is None
     assert cev9.registration_layout_ok(bytes.fromhex(registrations["not-a-point"]["registration"]))
     assert s["registered"] and len(s["registered"]) == 2
@@ -287,29 +305,37 @@ def main(root):
     case("all", "Only the registration, every seat approving: 3.1's author part holds without any approvals record.",
          T, [], ["all"], [1, 2, 3])
     case("quorum", "Only the registration, the quorum approving.", T, [], ["quorum"], [1, 3])
-    case("with-record", "Seat 1's approvals record and seat 2's registration: seats count across both.",
-         T, ["seat-1"], ["seat-2"], [1, 2])
-    case("across-registrations", "Two registrations of one seat each.", T, [], ["seat-1", "seat-2"], [1, 2])
-    case("seat-counts-once", "Seat 1 in a record and a registration: it counts once.", T, ["seat-1"], ["seat-1"],
-         "author-approvals")
-    case("below-quorum", "One seat of the two needed.", T, [], ["seat-1"], "author-approvals")
-    case("no-approvals", "A registration of this run with no approval names the transcript and counts no one.",
-         T, [], ["no-approvals"], "author-approvals")
+    case("with-record", "The quorum's registration beside every seat's approvals record: seats count across both.",
+         T, ["all"], ["quorum"], [1, 2, 3])
+    case("below-quorum", "A registration short of q_A is none the registry emits: it carries nothing.", T, [],
+         ["seat-1"], "author-approvals-missing")
+    case("below-quorum-beside-record", "Beside seat 1's approvals record, which names the transcript: one seat of two.",
+         T, ["seat-1"], ["seat-2"], "author-approvals")
+    case("across-registrations", "Two registrations of one seat each aren't pooled: neither is the registry's.", T, [],
+         ["seat-1", "seat-2"], "author-approvals-missing")
+    case("no-approvals", "A registration with no approval carries nothing.", T, [], ["no-approvals"],
+         "author-approvals-missing")
     case("no-approvals-and-record", "Beside the quorum's approvals record it changes nothing.", T, ["quorum"],
          ["no-approvals"], [1, 3])
-    case("other-key-set", "A registration of this run whose key set isn't the transcript's fails, whatever approves.",
-         T, ["all"], ["all", "other-key-set"], "key-set-mismatch")
+    case("other-key-set", "A registration of this run whose key set q_A seats approved isn't the transcript's: it fails, "
+         "whatever approves.", T, ["all"], ["all", "other-key-set"], "key-set-mismatch")
     case("other-key-set-alone", "The same registration alone.", T, [], ["other-key-set"], "key-set-mismatch")
-    case("seat-above-n", "A key set with a seat above n_A is none of this run's.", T, [], ["seat-above-n"],
-         "author-approvals-missing")
+    case("other-key-set-unsigned", "Another key set no one approved, beside every seat's record: it carries nothing, so "
+         "it can't fail the check (T-53).", T, ["all"], ["other-key-set-unsigned"], [1, 2, 3])
+    case("other-key-set-short", "Another key set one seat approved, beside every seat's record: it carries nothing.", T,
+         ["all"], ["other-key-set-short"], [1, 2, 3])
     case("other-transcript", "A registration naming another transcript is none of this run's.", T, [],
          ["other-transcript"], "author-approvals-missing")
     case("default-stub", "Over the default stub: none of this run's.", T, [], ["default-stub"], "author-approvals-missing")
     case("default-panel-id", "Under the default-panel identifier: none of this run's.", T, [], ["default-panel-id"],
          "author-approvals-missing")
-    case("other-signer", "Another seat's key signing for seat 2 counts for no one.", T, [], ["other-signer"],
-         "author-approvals")
-    case("seat-4", "A seat beyond n_A spoils the whole registration.", T, [], ["seat-4"], "author-approvals")
+    case("other-signer", "Another seat's key signing for seat 2 counts for no one, leaving one seat: it carries nothing.",
+         T, [], ["other-signer"], "author-approvals-missing")
+    case("other-signer-quorum", "The same beside seat 3's valid approval: seats 1 and 3 count, seat 2 doesn't.", T, [],
+         ["other-signer-quorum"], [1, 3])
+    case("seat-4", "A seat beyond n_A spoils the whole registration.", T, [], ["seat-4"], "author-approvals-missing")
+    case("seat-above-n", "A key set with a seat above n_A is none of this run's.", T, [], ["seat-above-n"],
+         "author-approvals-missing")
     case("not-a-point", "A registration that doesn't decode carries nothing.", T, [], ["not-a-point"],
          "author-approvals-missing")
     case("not-a-point-and-record", "Beside the quorum's approvals record the record approves.", T, ["quorum"],
@@ -320,6 +346,8 @@ def main(root):
          "author-approvals-missing")
     case("short", "Two qualified seats where rule 7 needs three: refused whatever the registration.", "author-short", [],
          ["short"], "ceremony-participation")
+    case("short-other-key-set", "Participation is decided before a registration's key set.", "author-short", [],
+         ["short-other-key-set"], "ceremony-participation")
 
     doc = {
         "format": "abolish-author-registration-vectors/1",

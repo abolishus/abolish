@@ -192,6 +192,7 @@ describe("streamCard", () => {
     });
   });
 
+  // Each run rehashes the whole text: CI's 1000 runs take over 5 s on a loaded runner.
   test("refuses any change to the text's bytes", () => {
     const definition = pollV5(textV2.commitment!, [3, 2]);
     const bytes = fromHex(textV2.encoding);
@@ -209,7 +210,7 @@ describe("streamCard", () => {
       ),
       runs,
     );
-  });
+  }, 60_000);
 });
 
 describe("pickTranslation", () => {

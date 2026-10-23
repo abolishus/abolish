@@ -490,6 +490,7 @@ describe("the seats' tally over the source", () => {
           store: s.stores[i] as SeatStore,
           summing: AVAILABLE,
           counted: countedSource(options()),
+          board: async () => ({ state: "unread" }),
           peers: wire,
         }),
     );
@@ -519,6 +520,7 @@ describe("the seats' tally over the source", () => {
       store: s.stores[0] as SeatStore,
       summing: AVAILABLE,
       counted: countedSource(options({ logs: registrationLogs() })),
+      board: async () => ({ state: "unread" }),
       peers: { send: async (r) => void sent.push(r) },
     });
     expect(await duty.step()).toEqual({

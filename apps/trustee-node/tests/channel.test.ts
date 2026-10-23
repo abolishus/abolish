@@ -408,6 +408,7 @@ describe("three tally duties over the channel", () => {
           store: s.stores[i]!,
           summing: AVAILABLE,
           counted: async () => ({ state: "fixed", cells: [ballots.map((b) => b.bytes)] }),
+          board: async () => ({ state: "unread" }),
           peers: httpPeers({
             peers: new Map(endpoints.map((e, j) => [j + 1, e.url])),
             timeoutMs: 5000,

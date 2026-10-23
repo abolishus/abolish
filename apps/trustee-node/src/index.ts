@@ -34,6 +34,12 @@ export {
   type ReceiptPath,
 } from "./delivery.ts";
 export {
+  type BoardOpening,
+  type BoardOpenings,
+  boardOpenings,
+  type BoardOpeningsOptions,
+} from "./openings.ts";
+export {
   type CellStatus,
   type CountedSet,
   type SummedSharePeers,
@@ -97,7 +103,14 @@ export {
   type ViewOptions,
   type ViewRefusal,
 } from "./view.ts";
-export { L1AnchorError, type L1AnchorOptions, type L1AnchorRefusal, l1BoardAnchors } from "./l1.ts";
+export {
+  L1AnchorError,
+  type L1AnchorOptions,
+  type L1AnchorRefusal,
+  l1BoardAnchors,
+  type ReaderExtent,
+  tallySegment,
+} from "./l1.ts";
 export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
 export { type ServedBlocks, servedBlocks } from "./served.ts";
 export {

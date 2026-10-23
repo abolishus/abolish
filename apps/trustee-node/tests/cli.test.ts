@@ -15,6 +15,7 @@ import {
 } from "@abolishus/crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli, dutyWiring } from "../src/cli.ts";
+import { L1AnchorError } from "../src/l1.ts";
 import { encodeDelivery } from "../src/endpoint.ts";
 import { parseConfig } from "../src/config.ts";
 import { servedBlocks } from "../src/served.ts";
@@ -715,6 +716,58 @@ describe("run with the availability duty", () => {
       }),
     ).rejects.toThrow("not asked");
     expect(asked.length).toBeGreaterThan(0);
+  });
+
+  test("reads the board's openings back through the seat's own nodes from the first read, refusing a node on another chain", async () => {
+    const parsed = parseConfig(
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, "openings-store"),
+        availability: availability(),
+      }),
+    );
+    const a = parsed.availability;
+    if (a === undefined) return expect.fail("no availability");
+    const servedDir = join(dir, "openings-blocks");
+    await mkdir(servedDir);
+    const asked: string[] = [];
+    const node = {
+      call: async (method: string) => {
+        asked.push(method);
+        return "0x1";
+      },
+    };
+    const w = dutyWiring(parsed, a, {
+      l1: node,
+      l2: node,
+      contract: { send: async () => {}, recorded: async () => undefined },
+      receipts: { send: async () => {}, recorded: async () => [] },
+      complaints: {
+        postings: async () => ({ finalizedAt: 0n, postings: [] }),
+        send: async () => {},
+        recorded: async () => [],
+      },
+      served: await servedBlocks(servedDir),
+      gateways: async () => [],
+      store: new MemoryStore(),
+      clock: () => 7n,
+    });
+    const read = w.openings({
+      index: 1,
+      stubHash: new Uint8Array(32),
+      definitionHash: new Uint8Array(32),
+      electionId: new Uint8Array(32),
+      opensAt: 0n,
+      closesAt: 0n,
+      l1InclusionBound: 0n,
+      members: 0n,
+      signingSecret: new Uint8Array(32),
+      kemKeyPair: kemKeygen(),
+    });
+    // Nothing is asked until the first read.
+    expect(asked).toEqual([]);
+    await expect(read()).rejects.toThrow(L1AnchorError);
+    expect(asked).toEqual(["eth_chainId"]);
   });
 
   test("refuses an account key others can read", async () => {

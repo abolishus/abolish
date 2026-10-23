@@ -15,6 +15,7 @@ import {
   checkOpening,
   decodeBallot,
   decodeTallyOpening,
+  encodeTallyOpening,
   type ElectionDefinitionV5,
   encodeBallotV3,
   finishSealV3,
@@ -33,6 +34,7 @@ import { type MembershipProverArtifacts, proveMembership } from "@abolishus/memb
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { IntakeSeat, type SeatStore } from "../src/index.ts";
+import type { BoardOpenings } from "../src/openings.ts";
 import { MemoryStore } from "../src/store.ts";
 import {
   type CountedSet,
@@ -235,6 +237,7 @@ interface Options {
   counted?: CountedSet;
   definition?: TallyDefinition;
   stores?: readonly SeatStore[];
+  board?: () => Promise<BoardOpenings>;
 }
 
 function duties(wire: Wire, o: Options = {}): TallyDuty[] {
@@ -252,6 +255,7 @@ function duties(wire: Wire, o: Options = {}): TallyDuty[] {
         store: own[i] as SeatStore,
         summing: AVAILABLE,
         counted: async () => o.counted ?? fixed(byCell()),
+        board: o.board ?? (async () => ({ state: "unread" })),
         peers: wire,
       }),
   );
@@ -300,6 +304,7 @@ describe("the tally duty under definition version 5", () => {
     expect(first[0]).toEqual({
       state: "tallying",
       cells: [0, 1, 2].map(() => ({ state: "combining", held: 1, sent: 2 })),
+      board: "unread",
     });
     expect(first.slice(1).map(states)).toEqual([
       ["opened", "opened", "opened"],
@@ -315,6 +320,39 @@ describe("the tally duty under definition version 5", () => {
     for (const store of own)
       for (const key of written.get(store)!.keys())
         expect(key).toMatch(/^tally\/[0-9a-f]{64}\/(aggregates|openings)\/[0-2]$/);
+  });
+
+  test("each cell is published on its own once the board carries a passing opening of it", async () => {
+    const wire = new Wire();
+    let board: BoardOpenings = { state: "unread" };
+    const d = duties(wire, { board: async () => board });
+    await prime(wire);
+    for (const duty of d) await duty.step();
+    const openings = await d[1]!.openings();
+    // Cells 0 and 2 on the board, cell 1's opening moved to cell 0 (over
+    // another aggregate there, so it passes for neither).
+    const o1 = decodeTallyOpening(openings.get(1) as Uint8Array, 1);
+    board = {
+      state: "read",
+      checkpoint: new Uint8Array(32),
+      openings: [
+        { payload: encodeTallyOpening({ ...o1, cell: 0 }), segment: 139 },
+        { payload: openings.get(2) as Uint8Array, segment: 140 },
+        { payload: openings.get(0) as Uint8Array, segment: 141 },
+      ],
+    };
+    wire.sent.length = 0;
+    const status = await d[0]!.step();
+    expect(status).toMatchObject({
+      cells: [
+        { state: "published", segment: 141 },
+        { state: "combining" },
+        { state: "published", segment: 140 },
+      ],
+      board: "read",
+    });
+    // Seat 1 still sends its sums of cell 1 alone.
+    expect(wire.sent).toHaveLength(2);
   });
 
   test("an empty cell opens to zero counts", async () => {
@@ -390,6 +428,7 @@ describe("what the duty refuses to sum over under version 5", () => {
         { state: "combining", held: 1, sent: 2 },
         { state: "combining", held: 1, sent: 2 },
       ],
+      board: "unread",
     });
   });
 

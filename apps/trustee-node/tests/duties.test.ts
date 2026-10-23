@@ -658,6 +658,7 @@ describe("the tally duties", () => {
   type TallyScript = (TallyDutyStatus | Error)[];
   const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n };
   const opened = { state: "opened" } as const;
+  const published = { state: "published", segment: 140 } as const;
   const combining = { state: "combining", held: 1, sent: 2 } as const;
 
   function tally(scripts: Map<number, TallyScript>, clock = () => 0n) {
@@ -694,32 +695,65 @@ describe("the tally duties", () => {
     return { duties, events, stepped, received };
   }
 
-  test("step each election until every cell is opened, the election is unavailable or its counted set refused", async () => {
+  test("step each election until the board carries a passing opening of every cell, the election is unavailable or its counted set refused", async () => {
     const h = tally(
       new Map<number, TallyScript>([
         [
           1,
           [
             { state: "waiting" },
-            { state: "tallying", cells: [combining, opened] },
-            { state: "tallying", cells: [opened, opened] },
+            { state: "tallying", cells: [combining, opened], board: "unread" },
+            // Opened by the seat is not yet on the board: it is stepped on.
+            { state: "tallying", cells: [opened, opened], board: "read" },
+            { state: "tallying", cells: [published, published], board: "read" },
           ],
         ],
         [2, [{ state: "unavailable" }]],
         [3, [{ state: "refused", reason: "the seat holds no counted extent" }]],
-        [4, [{ state: "tallying", cells: [{ state: "missing-shares", missing: 1, held: 0 }] }]],
+        [
+          4,
+          [
+            {
+              state: "tallying",
+              cells: [{ state: "missing-shares", missing: 1, held: 0 }],
+              board: "unread",
+            },
+          ],
+        ],
+        // A board failing its checks counts no opening, so nothing settles it before t_D.
+        [5, [{ state: "tallying", cells: [opened], board: "checkpoint-equivocation" }]],
       ]),
     );
-    for (let i = 0; i < 5; i++) await h.duties.step();
-    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
+    for (let i = 0; i < 6; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(4);
     expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
     expect(h.stepped.filter((s) => s === name(3))).toHaveLength(1);
     // A seat lacking shares still combines the others' sums: it is stepped on.
-    expect(h.stepped.filter((s) => s === name(4))).toHaveLength(5);
+    expect(h.stepped.filter((s) => s === name(4))).toHaveLength(6);
+    expect(h.stepped.filter((s) => s === name(5))).toHaveLength(6);
     expect(h.events.filter((e) => e.stubHash === name(1))).toEqual([
       { event: "tally", stubHash: name(1), state: "waiting" },
-      { event: "tally", stubHash: name(1), state: "tallying", cells: [combining, opened] },
-      { event: "tally", stubHash: name(1), state: "tallying", cells: [opened, opened] },
+      {
+        event: "tally",
+        stubHash: name(1),
+        state: "tallying",
+        cells: [combining, opened],
+        board: "unread",
+      },
+      {
+        event: "tally",
+        stubHash: name(1),
+        state: "tallying",
+        cells: [opened, opened],
+        board: "read",
+      },
+      {
+        event: "tally",
+        stubHash: name(1),
+        state: "tallying",
+        cells: [published, published],
+        board: "read",
+      },
     ]);
   });
 
@@ -728,7 +762,7 @@ describe("the tally duties", () => {
     const h = tally(
       new Map<number, TallyScript>([
         [1, [new RpcError("eth_getLogs: status 503"), { state: "waiting" }]],
-        [2, [{ state: "tallying", cells: [combining] }]],
+        [2, [{ state: "tallying", cells: [combining], board: "unread" }]],
       ]),
       () => wall,
     );
@@ -780,9 +814,9 @@ describe("the tally duties", () => {
   test("hand each summed-share message to every duty built and not settled, and to no other", async () => {
     const h = tally(
       new Map<number, TallyScript>([
-        [1, [{ state: "tallying", cells: [combining] }]],
+        [1, [{ state: "tallying", cells: [combining], board: "unread" }]],
         [2, [{ state: "unavailable" }]],
-        [3, [{ state: "tallying", cells: [combining] }]],
+        [3, [{ state: "tallying", cells: [combining], board: "unread" }]],
       ]),
     );
     // Before any step no duty is built, so a message reaches none.

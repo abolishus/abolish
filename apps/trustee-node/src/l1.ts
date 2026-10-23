@@ -25,8 +25,10 @@ import {
   BOARD_ENTRY,
   countedExtent,
   type BoardEntryVersion,
+  type DeadlineClock,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  PARAMETERS,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -96,7 +98,7 @@ export type L1AnchorRefusal =
   | "clock"
   /** The creation's L1 origin isn't the finalized L1 block of its number: another hash or time. */
   | "origin"
-  /** The creation's L1 origin is before the anchor's epoch, or `f` or the point's segment past a `u32`. */
+  /** The creation's L1 origin is before the anchor's epoch, or `f` or the extent's last segment past a `u32`. */
   | "outside-clock";
 
 export class L1AnchorError extends Error {
@@ -109,6 +111,25 @@ export class L1AnchorError extends Error {
 }
 
 const U32_MAX = 0xffffffffn;
+
+/**
+ * What a reader reads up to: an availability point's segment (`s_A`, `s_S`),
+ * or `tally`, through `s_T`, the anchoring period containing the tally
+ * window's end, for the openings the board holds (docs/spec/tally.md,
+ * Destruction, When).
+ */
+export type ReaderExtent = AvailabilityPoint | "tally";
+
+/**
+ * `s_T`: the anchoring period containing `t_S + TALLY_WINDOW`, the tally
+ * window's end, under the pinned clock (docs/spec/tally.md, Destruction,
+ * When). A close before the clock's epoch has no `t_S`; the callers refuse
+ * it first.
+ */
+export function tallySegment(clock: DeadlineClock, closesAt: bigint, bound: bigint): bigint {
+  const end = countedExtent(clock, closesAt, bound).due + BigInt(PARAMETERS.TALLY_WINDOW);
+  return (end - clock.epoch) / clock.period;
+}
 const isBoardVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
 const bytesToHex = (b: Uint8Array) =>
@@ -128,17 +149,17 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * refusal, the node package's `L2Error` when the creation or registration is
  * missing or repeated, and `RpcError` when a node's answer can't be read.
  *
- * The clock's `lastSegment` is the point's segment (`s_A` for the ballot
- * extent, the default, or `s_S` for the counted extent), not the seal: no
- * seal is derived from a definition yet ([[election-definition]], The seal),
- * every seal is at or after `s_S ≥ s_A`, and the duty judges nothing past
- * the point's checkpoint, whose segment is at most the point's. So each read
- * proves the words of segments `f` to that segment only.
+ * The clock's `lastSegment` is the extent's last segment (`s_A` for the
+ * ballot extent, the default, `s_S` for the counted extent, or `s_T` for the
+ * tally's openings), not the seal: no seal is derived from a definition yet
+ * ([[election-definition]], The seal), every seal is at or after
+ * `s_T ≥ s_S ≥ s_A`, and no duty judges anything past its extent. So each
+ * read proves the words of segments `f` to that segment only.
  */
 export async function l1BoardAnchors(
   options: L1AnchorOptions,
   election: ApprovedElection,
-  point: AvailabilityPoint = AVAILABILITY_POINTS.ballotExtent,
+  extent: ReaderExtent = AVAILABILITY_POINTS.ballotExtent,
 ): Promise<FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion }> {
   const { l1, l2, anchor } = options;
   if ((await chainId(l1)) !== options.l1ChainId || (await chainId(l2)) !== options.l2ChainId)
@@ -217,10 +238,13 @@ export async function l1BoardAnchors(
   const origin = created.timestamp;
   if (origin < timing.epoch || d.closes_at < origin) throw new L1AnchorError("outside-clock");
   const f = (origin - timing.epoch) / timing.period;
+  const bound = BigInt(d.l1_inclusion_bound);
   const extentEnd =
-    point === AVAILABILITY_POINTS.ballotExtent
+    extent === AVAILABILITY_POINTS.ballotExtent
       ? (d.closes_at - timing.epoch) / timing.period + 1n
-      : countedExtent(timing, d.closes_at, BigInt(d.l1_inclusion_bound)).segment;
+      : extent === "tally"
+        ? tallySegment(timing, d.closes_at, bound)
+        : countedExtent(timing, d.closes_at, bound).segment;
   if (extentEnd > U32_MAX) throw new L1AnchorError("outside-clock");
   const clock: AnchorClock = { ...timing, lastSegment: Number(extentEnd) };
 

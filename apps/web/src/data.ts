@@ -5,7 +5,7 @@ import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-topics";
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
-import { BOARD_PAGE, LIST_PAGE } from "./page-sizes.ts";
+import { BOARD_PAGE } from "./page-sizes.ts";
 import {
   loadBoardPage,
   loadModerationLog,
@@ -14,6 +14,7 @@ import {
   loadProfile,
   loadStream,
   resolveShortLink,
+  STREAM_PAGE,
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { LOCALE } from "./messages.ts";
@@ -76,24 +77,15 @@ export const fetchPollList = createServerFn({ method: "GET" })
   })
   .handler(({ data }) => opaque(() => loadPollList(api(), data)));
 
-/** The first `limit` listed polls, for the home page. */
-export const fetchFirstPolls = createServerFn({ method: "GET" })
-  .inputValidator((limit: unknown) => {
-    // Bounded by a page of the list, so a caller can't make one request fetch more definitions.
-    if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > LIST_PAGE)
-      throw new TypeError("expected a page size from 1 to 20");
-    return limit as number;
-  })
-  .handler(({ data }) => opaque(() => loadPollList(api(), "", data)));
-
 /**
  * A page of the stream, with the ballot client's address (`BALLOT_URL`)
  * its cards link to, or `null` if none is set, where the cards link only to
- * each poll's page.
+ * each poll's page. `limit`, if given, shortens the page (the home page's
+ * newest questions).
  */
 export const fetchStream = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { sort, after, q, topic, place } = (input ?? {}) as Record<string, unknown>;
+    const { sort, after, q, topic, place, limit } = (input ?? {}) as Record<string, unknown>;
     if (!STREAM_SORTS.some((s) => s === sort)) throw new TypeError("expected a stream order");
     // `""` starts the stream, as for the register.
     if (after !== "" && !isElectionId(after))
@@ -106,12 +98,19 @@ export const fetchStream = createServerFn({ method: "GET" })
       throw new TypeError("expected a topic or an empty string");
     if (place !== "" && (typeof place !== "string" || !isStreamPlace(place)))
       throw new TypeError("expected a place or an empty string");
+    // Bounded by a page, so a caller can't make one request fetch more definitions and texts.
+    if (
+      limit !== undefined &&
+      (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > STREAM_PAGE)
+    )
+      throw new TypeError("expected a page size from 1 to 10");
     return {
       sort: sort as StreamSort,
       after,
       q,
       topic: topic as PollTopic | "",
       place,
+      limit: (limit as number | undefined) ?? STREAM_PAGE,
     };
   })
   .handler(({ data, context }) =>
@@ -127,6 +126,7 @@ export const fetchStream = createServerFn({ method: "GET" })
         },
         LOCALE,
         context.readAskedBy,
+        data.limit,
       ),
       ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
     })),

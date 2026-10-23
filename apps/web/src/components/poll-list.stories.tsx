@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
 import type { PollView } from "../poll.ts";
-import { PollList } from "./poll-list.tsx";
+import { PollRows } from "./poll-list.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
@@ -22,37 +22,33 @@ const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView =
 const FIRST = "10".repeat(32);
 const SECOND = "20".repeat(32);
 const THIRD = "30".repeat(32);
-const FOURTH = "40".repeat(32);
 
 const meta = {
-  component: PollList,
+  component: PollRows,
   args: {
-    list: {
-      polls: [
-        { kind: "poll", poll: poll(FIRST) },
-        {
-          kind: "poll",
-          poll: poll(SECOND, {
-            counting: "approval",
-            illFormed: { rule: "timing", question: undefined },
-            closesAt: { seconds: "18446744073709551615", iso: undefined },
-          }),
-        },
-        { kind: "unavailable", electionId: THIRD, problem: "undecodable" },
-      ],
-      next: FOURTH,
-      asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
-    },
+    label: "Listed polls",
+    polls: [
+      { kind: "poll", poll: poll(FIRST) },
+      {
+        kind: "poll",
+        poll: poll(SECOND, {
+          counting: "approval",
+          illFormed: { rule: "timing", question: undefined },
+          closesAt: { seconds: "18446744073709551615", iso: undefined },
+        }),
+      },
+      { kind: "unavailable", electionId: THIRD, problem: "undecodable" },
+    ],
+    asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
   },
-} satisfies Meta<typeof PollList>;
+} satisfies Meta<typeof PollRows>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
-  await expect(canvas.getByRole("heading", { name: "Listed polls" })).toBeVisible();
-  const items = canvas.getAllByRole("listitem");
+  const items = within(canvas.getByRole("list", { name: "Listed polls" })).getAllByRole("listitem");
   await expect(items).toHaveLength(3);
   await expect(within(items[0]!).getByRole("link")).toHaveAttribute("href", `/polls/${FIRST}`);
   await expect(within(items[0]!).getByText("One choice")).toBeVisible();
@@ -67,22 +63,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // A definition that doesn't decode is still linked, with nothing shown from it.
   await expect(within(items[2]!).getByRole("link")).toHaveAttribute("href", `/polls/${THIRD}`);
   await expect(within(items[2]!).getByText(/doesn't decode/)).toBeVisible();
-  await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
-    "href",
-    `/polls?after=${FOURTH}`,
-  );
 };
 
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
-
-export const Empty: Story = {
-  args: { list: { polls: [], next: undefined, asOf: meta.args.list.asOf } },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText("No polls listed.")).toBeVisible();
-    await expect(canvas.queryByRole("list")).toBeNull();
-    await expect(canvas.queryByRole("link", { name: "More polls" })).toBeNull();
-  },
-};

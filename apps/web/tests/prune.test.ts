@@ -3,10 +3,13 @@
 // stays, as do the last two hours' reaction counts and not earlier ones,
 // phone-hash chains are extended to the current key where the phone service
 // is configured, a Tier 0 token record whose key stopped redeeming is marked
-// dead, and a failed run is logged by kind and retried on the next tick.
+// dead, the moderation notices due are sent where the e-mail service is
+// configured, and a failed run is logged by kind and retried on the next tick.
 
 import {
+  type EmailMessage,
   emailKeys,
+  MAX_NOTICE_BATCH,
   newAccountId,
   parseKeyring,
   requestEmailCode,
@@ -20,7 +23,7 @@ import { randomBytes } from "node:crypto";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 
-import { startAccountPrune } from "../src/node/prune.ts";
+import { NOTICE_BATCHES, startAccountPrune } from "../src/node/prune.ts";
 
 let db: TestDb;
 let sql: Sql;
@@ -238,4 +241,139 @@ test("re-hashes and re-seals verified addresses under the current e-mail keys, o
   // Rows other tests made under other keys are only ever reported missing.
   expect((await run(two)).filter((l) => l.error !== "EmailKeyMissing")).toEqual([]);
   expect(await keysOf()).toEqual({ hash_key: "e2", box_key: "f2" });
+});
+
+/** An account whose address `address` is verified under `keys`. */
+async function verifiedAt(address: string, at: Date): Promise<string> {
+  const account = await newAccount();
+  const codes: string[] = [];
+  await requestEmailCode(sql, account, address, {
+    keys,
+    sender: {
+      send: async (m) => {
+        if (m.kind === "email-code") codes.push(m.code);
+        return "sent";
+      },
+    },
+    turnstile: { verify: async () => "passed" },
+    token: "t",
+    now: at,
+  });
+  await verifyEmailCode(sql, account, codes[0]!, { keys, now: at });
+  return account;
+}
+
+const notify = async (account: string, due: Date) => {
+  await sql`INSERT INTO account_notices (user_id, not_before) VALUES (${account}, ${due.toISOString()})`;
+};
+
+const notices = async () =>
+  new Map(
+    (await sql`SELECT user_id, tries FROM account_notices`).map((r) => [
+      r["user_id"] as string,
+      r["tries"] as number,
+    ]),
+  );
+
+test("sends the notices due to verified addresses, only where configured", async () => {
+  const now = new Date("2026-10-23T00:05:00Z");
+  const due = await verifiedAt("due@example.org", now);
+  const later = await verifiedAt("later@example.org", now);
+  await notify(due, new Date("2026-10-23T00:00:00Z"));
+  await notify(later, new Date("2026-10-24T00:00:00Z"));
+  const sent: EmailMessage[] = [];
+  const run = async (noticeSender?: { send: (m: EmailMessage) => Promise<"sent"> }) => {
+    const lines: { error: string }[] = [];
+    const prune = startAccountPrune({
+      sql,
+      log: (l) => lines.push(l),
+      emailKeys: keys,
+      ...(noticeSender === undefined ? {} : { noticeSender }),
+      now: () => now,
+    });
+    await prune.stop();
+    // Rows other tests made under other keys are only ever reported missing.
+    return lines.filter((l) => l.error !== "EmailKeyMissing");
+  };
+  // Keys without a sender: nothing is sent.
+  expect(await run()).toEqual([]);
+  expect((await notices()).get(due)).toBe(0);
+  expect(
+    await run({
+      send: async (m) => {
+        sent.push(m);
+        return "sent";
+      },
+    }),
+  ).toEqual([]);
+  expect(sent).toEqual([{ kind: "notice", to: "due@example.org" }]);
+  expect((await notices()).has(due)).toBe(false);
+  expect((await notices()).get(later)).toBe(0);
+  await sql`DELETE FROM account_notices`;
+});
+
+test("logs a refusal by kind only and keeps the notice for its next try", async () => {
+  const now = new Date("2026-10-23T00:05:00Z");
+  const account = await verifiedAt("refused@example.org", now);
+  await notify(account, new Date("2026-10-23T00:00:00Z"));
+  const lines: { error: string }[] = [];
+  const prune = startAccountPrune({
+    sql,
+    log: (l) => lines.push(l),
+    emailKeys: keys,
+    noticeSender: { send: async () => "unavailable" },
+    now: () => now,
+  });
+  await prune.stop();
+  expect(lines.filter((l) => l.error !== "EmailKeyMissing")).toEqual([
+    { error: "AccountNoticeRefused" },
+  ]);
+  expect((await notices()).get(account)).toBe(1);
+  await sql`DELETE FROM account_notices`;
+});
+
+test("logs a sender that throws by kind only, and keeps the run's other work", async () => {
+  const now = new Date("2026-10-23T00:05:00Z");
+  const account = await verifiedAt("throws@example.org", now);
+  await notify(account, new Date("2026-10-23T00:00:00Z"));
+  const lines: { error: string }[] = [];
+  const prune = startAccountPrune({
+    sql,
+    log: (l) => lines.push(l),
+    emailKeys: keys,
+    noticeSender: {
+      send: async () => {
+        throw new Error("provider gone for throws@example.org");
+      },
+    },
+    now: () => now,
+  });
+  await prune.stop();
+  expect(lines.filter((l) => l.error !== "EmailKeyMissing")).toEqual([
+    { error: "AccountNoticeSendFailed" },
+  ]);
+  // Claimed with its first try; a later run tries again once its lease ends.
+  expect((await notices()).get(account)).toBe(1);
+  await sql`DELETE FROM account_notices`;
+});
+
+test("drains a backlog larger than one batch in a single run", async () => {
+  expect(NOTICE_BATCHES).toBeGreaterThan(1);
+  const now = new Date("2026-10-23T00:05:00Z");
+  // Accounts with no verified address: each notice is claimed and dropped.
+  const accounts = await Promise.all(
+    Array.from({ length: MAX_NOTICE_BATCH + 50 }, () => newAccount()),
+  );
+  for (const account of accounts) await notify(account, new Date("2026-10-23T00:00:00Z"));
+  const lines: { error: string }[] = [];
+  const prune = startAccountPrune({
+    sql,
+    log: (l) => lines.push(l),
+    emailKeys: keys,
+    noticeSender: { send: async () => "sent" },
+    now: () => now,
+  });
+  await prune.stop();
+  expect(lines.filter((l) => l.error !== "EmailKeyMissing")).toEqual([]);
+  expect((await notices()).size).toBe(0);
 });

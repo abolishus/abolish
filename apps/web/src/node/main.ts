@@ -435,7 +435,11 @@ const prune = startAccountPrune({
   sql,
   log: write,
   ...(phoneProvider === undefined ? {} : { phoneKeys: phoneProvider.keys }),
-  ...(emailVerification === undefined ? {} : { emailKeys: emailVerification.keys }),
+  // The plain Postmark sender, never the /email routes' wrapper, which
+  // answers `sent` for every message: a refused notice is tried again.
+  ...(emailVerification === undefined
+    ? {}
+    : { emailKeys: emailVerification.keys, noticeSender: emailVerification.sender }),
 });
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined

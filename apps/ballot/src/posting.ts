@@ -114,8 +114,11 @@ export async function sendPosting(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ posting: toHex(posting), ballot: toHex(ballot) }),
     });
-  } catch {
-    return { kind: "unreachable", reached: false };
+  } catch (e) {
+    // Cut off by `timedFetch` after the request went: the relay may have
+    // read it, so count it as had (T-15).
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    return { kind: "unreachable", reached: timedOut };
   }
   const garbled: RelayAnswer = { kind: "unreachable", reached: true };
   const answer = await readJson(response, MAX_ANSWER);

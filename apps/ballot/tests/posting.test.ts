@@ -127,7 +127,7 @@ describe("sendPosting", () => {
     });
   });
 
-  test("a relay that holds the request or its body open is cut off, as unreachable", async () => {
+  test("a relay that holds the request or its body open is cut off, as unreachable after it had the request", async () => {
     // A server that answers nothing until the request is aborted.
     const held: Fetch = (_, init) =>
       new Promise((_resolve, reject) =>
@@ -135,7 +135,7 @@ describe("sendPosting", () => {
       );
     expect(await sendPosting(STAGING, POSTING, BALLOT, timedFetch(held, 20))).toEqual({
       kind: "unreachable",
-      reached: false,
+      reached: true,
     });
     // One that sends its status, then trickles a body it never ends.
     const trickled: Fetch = (_, init) =>

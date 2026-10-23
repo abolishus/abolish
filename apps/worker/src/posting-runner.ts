@@ -1,11 +1,13 @@
 // The posting worker's loop (docs/spec/posting-relay.md, Queue, Sending, In
 // flight and Pruning; P2-8 part 3c-1b-2b-2b-2d-2b-2b-2b-2b-2b-2): every
 // `POSTING_TICK_MS`, the queue's tick, then the ledger's tend with the L2
-// node's latest block, and every `POSTING_PRUNE_EVERY_MS` the ledger's prune
-// with its finalized one. One round at a time, the next timed from the end
-// of the last, so no two steps share the posting key's nonce at once within
-// this process; the ledger's lock serialises them against a deploy's
-// overlap.
+// node's latest block, every `POSTING_DEPOSIT_EVERY_MS` the forced path's
+// tend with the L1 node's latest and finalized blocks (Forced through L1,
+// Depositing; part 2b-2b-2b-2b-3b-2), and every `POSTING_PRUNE_EVERY_MS` the
+// ledger's prune with the L2's finalized one. One round at a time, the next
+// timed from the end of the last, so no two steps share the posting key's
+// nonce at once within this process; the ledger's lock serialises them
+// against a deploy's overlap.
 //
 // Not BullMQ: a scheduled job's ID and times stay in its queue's events
 // stream, and the queue is drained in place, never a job per request (Queue;
@@ -16,7 +18,9 @@
 
 import {
   POSTING_TICK_MS,
+  type PostingDepositReport,
   type PostingHead,
+  type PostingL1Head,
   type PostingPruneReport,
   type PostingTendReport,
   type PostingTickReport,
@@ -29,6 +33,13 @@ import type { Log, PostingStep } from "./log.ts";
  */
 export const POSTING_PRUNE_EVERY_MS = 60_000;
 
+/**
+ * An L1 slot: a deposit waits for an L1 block anyway, and its rebroadcast,
+ * replacement and cancellation are timed in minutes (`POSTING_RESEND`,
+ * `POSTING_DEPOSIT_PATIENCE`), so tending more often only spends the node.
+ */
+export const POSTING_DEPOSIT_EVERY_MS = 12_000;
+
 export interface PostingRunnerOptions {
   readonly worker: { tick(): Promise<PostingTickReport | null> };
   readonly ledger: {
@@ -37,11 +48,21 @@ export interface PostingRunnerOptions {
   };
   /** The posting key's node, as `ViemPostingChain` reads it. */
   readonly chain: { latest(): Promise<PostingHead>; finalized(): Promise<PostingHead> };
+  /** The forced path's deposits and the L1 node they read, as `ViemPostingL1` does. */
+  readonly deposits: {
+    tend(heads: {
+      readonly latest: PostingL1Head;
+      readonly finalized: PostingL1Head;
+    }): Promise<PostingDepositReport>;
+  };
+  readonly l1: { latest(): Promise<PostingL1Head>; finalized(): Promise<PostingL1Head> };
   readonly log: Log;
   /** Milliseconds between rounds; `POSTING_TICK_MS` unless a test says otherwise. */
   readonly tickMs?: number;
   /** Milliseconds between prunes; `POSTING_PRUNE_EVERY_MS` unless a test says otherwise. */
   readonly pruneEveryMs?: number;
+  /** Milliseconds between the deposits' tends; `POSTING_DEPOSIT_EVERY_MS` unless a test says otherwise. */
+  readonly depositEveryMs?: number;
 }
 
 export interface RunningPostingRunner {
@@ -54,7 +75,7 @@ const anything = (counts: Readonly<Record<string, number>>) =>
 
 /** Starts the loop: its first round at once. */
 export function startPostingRunner(options: PostingRunnerOptions): RunningPostingRunner {
-  const { worker, ledger, chain } = options;
+  const { worker, ledger, chain, deposits, l1 } = options;
   // A line that can't be written is dropped: it never fails a step or stops
   // the loop.
   const log: Log = (line) => {
@@ -70,7 +91,11 @@ export function startPostingRunner(options: PostingRunnerOptions): RunningPostin
     throw new RangeError("tickMs must be an integer > 0");
   if (!Number.isSafeInteger(pruneEveryMs) || pruneEveryMs < tickMs)
     throw new RangeError("pruneEveryMs must be an integer ≥ tickMs");
+  const depositEveryMs = options.depositEveryMs ?? POSTING_DEPOSIT_EVERY_MS;
+  if (!Number.isSafeInteger(depositEveryMs) || depositEveryMs < tickMs)
+    throw new RangeError("depositEveryMs must be an integer ≥ tickMs");
   const pruneEvery = Math.ceil(pruneEveryMs / tickMs);
+  const depositEvery = Math.ceil(depositEveryMs / tickMs);
   const failing = new Set<PostingStep>();
   const outcome = (step: PostingStep, ok: boolean) => {
     if (ok === !failing.has(step)) return;
@@ -104,6 +129,15 @@ export function startPostingRunner(options: PostingRunnerOptions): RunningPostin
       if (anything({ ...report })) log({ queue: "{posting}", step: "tend", ...report });
       return report.failed === 0;
     });
+    if (n % depositEvery === 0)
+      await step("deposit", async () => {
+        const [latest, finalized] = await Promise.all([l1.latest(), l1.finalized()]);
+        const report = await deposits.tend({ latest, finalized });
+        if (anything({ ...report })) log({ queue: "{posting}", step: "deposit", ...report });
+        // T-54: postings left unforced because an election's times can't be
+        // read stay the operator's to fix, so the step reports failing.
+        return report.errors === 0 && report.unjudged === 0;
+      });
     if (n % pruneEvery === 0)
       await step("prune", async () => {
         const report = await ledger.prune(await chain.finalized());

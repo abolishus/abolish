@@ -10,6 +10,8 @@ import {
   POSTING_GAS_LIMIT_MAX,
   postingCalldataLength,
   postingGasLimit,
+  PostgresPostingDeposits,
+  PostgresPostingElections,
   PostgresPostingLedger,
   postingKey,
   postingKeys,
@@ -36,6 +38,7 @@ import {
   type PublicClient,
   recoverTransactionAddress,
   toBytes,
+  toFunctionSelector,
   toHex,
 } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
@@ -43,9 +46,13 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   checkPostingDeployment,
   type LogLine,
+  postingDepositChain,
   PostingChainError,
+  type PostingChainOptions,
   startPostingRunner,
   ViemPostingChain,
+  ViemPostingL1,
+  ViemPostingRegistry,
 } from "../src/index.ts";
 
 // The posting relay's chain adapter against a real chain (P2-8 part
@@ -218,7 +225,13 @@ async function newKey(wei = 10n ** 18n): Promise<Uint8Array> {
 }
 
 async function adapter(
-  options: { code?: Hex; client?: PublicClient; logRange?: bigint; lookback?: bigint } = {},
+  options: {
+    code?: Hex;
+    client?: PublicClient;
+    logRange?: bigint;
+    lookback?: bigint;
+    deposits?: PostingChainOptions["deposits"];
+  } = {},
 ) {
   const { address, fromBlock } = await board(options.code);
   const key = await newKey();
@@ -230,6 +243,7 @@ async function adapter(
     key,
     ...(options.logRange !== undefined && { logRange: options.logRange }),
     ...(options.lookback !== undefined && { lookback: options.lookback }),
+    ...(options.deposits !== undefined && { deposits: options.deposits }),
   });
   return { chain: posting, board: address, fromBlock, key };
 }
@@ -445,6 +459,37 @@ describe("costs and receipts", () => {
     await expect(c.costs(freshPosting(), BALLOT, 100_000n)).rejects.toThrow(PostingChainError);
   });
 
+  test("counts a deposit's reserve as the forced path prices it, and fails with it", async () => {
+    const asked: bigint[] = [];
+    let fail = false;
+    const { chain: c } = await adapter({
+      deposits: {
+        reserve: async (_posting, _ballot, gasLimit) => {
+          asked.push(gasLimit);
+          if (fail) throw new Error("the L1 node is down");
+          return 12_345n;
+        },
+      },
+    });
+    expect(await c.costs(freshPosting(), BALLOT, 100_000n)).toEqual({
+      l1DataFee: 0n,
+      deposit: 12_345n,
+    });
+    await rpc("anvil_setCode", [GAS_PRICE_ORACLE, ORACLE_CODE]);
+    try {
+      expect(await c.costs(freshPosting(), BALLOT, 100_000n)).toEqual({
+        l1DataFee: ORACLE_FEE,
+        deposit: 12_345n,
+      });
+    } finally {
+      await rpc("anvil_setCode", [GAS_PRICE_ORACLE, "0x"]);
+    }
+    expect(asked).toEqual([100_000n, 100_000n]);
+    // An L1 node that fails fails the send (Depositing, step 2).
+    fail = true;
+    await expect(c.costs(freshPosting(), BALLOT, 100_000n)).rejects.toThrow(PostingChainError);
+  });
+
   test("finds a transaction once it is in a block, with the gas it used at its price", async () => {
     const { chain: c } = await adapter();
     await automine(false);
@@ -611,13 +656,102 @@ describe("the posting's event", () => {
 /** Code that answers every call with `word`, an address as a 32-byte word. */
 const answering = (word: Address) =>
   `0x7f${word.slice(2).toLowerCase().padStart(64, "0")}5f5260205ff3` as Hex;
+/** Code that answers a call with the word its storage holds at the call's selector. */
+const BY_SELECTOR = "0x5f3560e01c545f5260205ff3" as Hex;
+/** Sets what `BY_SELECTOR` code at `address` answers to `signature`. */
+const answer = (address: Address, signature: string, word: bigint | Address) =>
+  rpc("anvil_setStorageAt", [
+    address,
+    toHex(BigInt(toFunctionSelector(signature)), { size: 32 }),
+    toHex(typeof word === "bigint" ? word : BigInt(word), { size: 32 }),
+  ]);
+const L1_CHAIN_ID = 11_155_111n;
+const L1_RELAY = getAddress(toHex(0x1e1a7, { size: 20 }));
+
+describe("the safe head", () => {
+  // Anvil with one slot an epoch: the safe block is the latest but one, the
+  // finalized the latest but two.
+
+  /** Sends `posting` and mines it in exactly the latest block: automine may otherwise mine a block of its own first. */
+  async function landAtHead(c: ViemPostingChain, posting: Uint8Array): Promise<Uint8Array> {
+    await automine(false);
+    try {
+      const s = await c.sign(posting, BALLOT, {
+        nonce: await c.nonce(),
+        gasLimit: 1_000_000n,
+        feeCap: CAP,
+      });
+      expect(await c.broadcast(s.tx)).toBe("sent");
+      await mine(1);
+      return s.hash;
+    } finally {
+      await automine(true);
+    }
+  }
+  test("holds a transaction once its block is at the safe head", async () => {
+    const { chain: c } = await adapter();
+    expect(await c.includedSafe(new Uint8Array(32).fill(9))).toBe(false);
+    const hash = await landAtHead(c, freshPosting());
+    expect(await c.includedSafe(hash)).toBe(false);
+    await mine(1);
+    const safe = await client.getBlock({ blockTag: "safe" });
+    const r = await client.getTransactionReceipt({ hash: bytesToHex(hash) });
+    expect(r.blockNumber).toBeLessThanOrEqual(safe.number);
+    expect(await c.includedSafe(hash)).toBe(true);
+  });
+
+  test("never takes a receipt whose block the safe chain doesn't hold, or that names another transaction", async () => {
+    let lie: "block" | "other" = "block";
+    const lying = nodeClient(async (method, _params, forward) => {
+      const answer = await forward();
+      if (method !== "eth_getTransactionReceipt" || answer === null) return answer;
+      return lie === "block"
+        ? { ...(answer as object), blockHash: bytesToHex(new Uint8Array(32).fill(3)) }
+        : { ...(answer as object), transactionHash: bytesToHex(new Uint8Array(32).fill(7)) };
+    });
+    const { chain: c } = await adapter({ client: lying });
+    const hash = await land(c, freshPosting());
+    await mine(FINALITY_DEPTH);
+    expect(await c.includedSafe(hash)).toBe(false);
+    lie = "other";
+    await expect(c.includedSafe(hash)).rejects.toThrow(PostingChainError);
+  });
+
+  test("finds the posting's event once its block is at the safe head, and only this posting's", async () => {
+    const { chain: c } = await adapter();
+    const posting = freshPosting();
+    expect(await c.postedSafe(posting)).toBe(false);
+    await landAtHead(c, posting);
+    expect(await c.posted(posting)).toBe(true);
+    expect(await c.postedSafe(posting)).toBe(false);
+    await mine(1);
+    expect(await c.postedSafe(posting)).toBe(true);
+    expect(await c.postedFinal(posting)).toBe(false);
+    await mine(1);
+    expect(await c.postedSafe(posting)).toBe(true);
+    expect(await c.postedSafe(freshPosting())).toBe(false);
+  });
+
+  test("refuses a node whose finalized block is past its safe one", async () => {
+    const lying = nodeClient(async (method, params, forward) => {
+      const answer = await forward();
+      if (method !== "eth_getBlockByNumber" || params[0] !== "finalized") return answer;
+      return { ...(answer as object), number: "0xffffffff" };
+    });
+    const { chain: c } = await adapter({ client: lying });
+    await expect(c.postedSafe(freshPosting())).rejects.toThrow(PostingChainError);
+  });
+});
 
 describe("the startup check", () => {
   /** A board naming a registry that names the board back, as a deployment's pair. */
   async function deployment() {
     const registry = getAddress(toHex(0xe1e0000 + ++boards, { size: 20 }));
     const { address, fromBlock } = await board(answering(registry));
-    await rpc("anvil_setCode", [registry, answering(address)]);
+    await rpc("anvil_setCode", [registry, BY_SELECTOR]);
+    await answer(registry, "board()", address);
+    await answer(registry, "l1ChainId()", L1_CHAIN_ID);
+    await answer(registry, "l1Relay()", L1_RELAY);
     await mine(FINALITY_DEPTH + 1);
     const key = await newKey();
     const c = new ViemPostingChain({
@@ -639,9 +773,13 @@ describe("the startup check", () => {
       (e: unknown) => (e as Error).message,
     );
 
-  test("passes a board whose election registry names it back, and a key with no code", async () => {
-    const { deployment: d } = await deployment();
-    await expect(checkPostingDeployment(client, d)).resolves.toBeUndefined();
+  test("passes a board whose election registry names it back, and a key with no code, reading what the registry names on L1", async () => {
+    const { registry, deployment: d } = await deployment();
+    await expect(checkPostingDeployment(client, d)).resolves.toEqual({
+      registry,
+      l1ChainId: L1_CHAIN_ID,
+      l1Relay: L1_RELAY,
+    });
   });
 
   test("refuses another chain, a deployment block past the finalized head, and an address that isn't a board", async () => {
@@ -668,7 +806,8 @@ describe("the startup check", () => {
     await rpc("anvil_setCode", [registry, "0x00"]);
     await mine(FINALITY_DEPTH + 1);
     expect(await refusal(d)).toBe("the address isn't a board's election registry");
-    await rpc("anvil_setCode", [registry, answering(accounts[0] as Address)]);
+    await rpc("anvil_setCode", [registry, BY_SELECTOR]);
+    await answer(registry, "board()", accounts[0] as Address);
     await mine(FINALITY_DEPTH + 1);
     expect(await refusal(d)).toBe("the board's election registry names another board");
   });
@@ -692,10 +831,11 @@ describe("the startup check", () => {
 
   test("reads the registry's answer at the finalized head, not the latest", async () => {
     const { registry, deployment: d } = await deployment();
-    await rpc("anvil_setCode", [registry, answering(accounts[0] as Address)]);
+    await answer(registry, "board()", accounts[0] as Address);
+    await answer(registry, "l1Relay()", accounts[0] as Address);
     await mine(1);
-    // The change isn't final yet.
-    await expect(checkPostingDeployment(client, d)).resolves.toBeUndefined();
+    // The changes aren't final yet.
+    await expect(checkPostingDeployment(client, d)).resolves.toMatchObject({ l1Relay: L1_RELAY });
   });
 
   test("refuses a posting key whose account holds code (an EIP-7702 delegation, say)", async () => {
@@ -735,15 +875,47 @@ describe("the posting worker's deployment", () => {
     await db.close();
   });
 
-  test("ticks the queue against the node, answering its pairs and keeping the route's index, and tends and prunes without a failure", async () => {
-    const { chain: c } = await adapter();
+  test("ticks the queue against the node, answering its pairs and keeping the route's index, and tends, deposits and prunes without a failure", async () => {
     const sql = await db.as("abolish_app");
     const now = () => Math.floor(Date.now() / 1000);
+    // This node stands in for L1 too, with a portal that takes any deposit
+    // (posting-l1.test.ts runs the forced path across two chains).
+    const portal = getAddress(toHex(0x9047a1 + ++boards, { size: 20 }));
+    await rpc("anvil_setCode", [portal, "0x00"]);
+    const { board: to, fromBlock, key } = await adapter();
+    const l1 = new ViemPostingL1({
+      client,
+      chainId: BigInt(chainId),
+      portal,
+      board: to,
+      key,
+      l1FeeCap: CAP,
+    });
+    const c = new ViemPostingChain({
+      client,
+      chainId: BigInt(chainId),
+      board: to,
+      fromBlock,
+      key,
+      deposits: l1,
+    });
     const ledger = new PostgresPostingLedger({
       sql,
       chain: c,
       budget: 10n ** 16n,
       feeCap: CAP,
+      now,
+    });
+    const deposits = new PostgresPostingDeposits({
+      sql,
+      chain: postingDepositChain(c, l1),
+      elections: new PostgresPostingElections({
+        sql,
+        registry: new ViemPostingRegistry({ client, registry: portal, fromBlock }),
+        now,
+      }),
+      budget: 10n ** 16n,
+      l1FeeCap: CAP,
       now,
     });
     const keys = postingKeys(prefix);
@@ -767,9 +939,12 @@ describe("the posting worker's deployment", () => {
       }),
       ledger,
       chain: c,
+      deposits,
+      l1,
       log: (line) => lines.push(line),
       tickMs: 20,
       pruneEveryMs: 20,
+      depositEveryMs: 20,
     });
     const end = Date.now() + 10_000;
     while ((await redis.get(keys.index)) === null || (await redis.hlen(keys.queue)) > 0) {
@@ -816,6 +991,8 @@ describe("errors", () => {
       () => c.receipt(new Uint8Array(32)),
       () => c.posted(freshPosting()),
       () => c.postedFinal(freshPosting()),
+      () => c.includedSafe(new Uint8Array(32)),
+      () => c.postedSafe(freshPosting()),
     ];
     for (const call of calls) {
       const error = await call().then(

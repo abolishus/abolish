@@ -663,6 +663,14 @@ export {
   type PostingRegisteredElections,
 } from "./posting-deposits.ts";
 export {
+  POSTING_INDEX_LAG,
+  type PostgresPostingElectionsOptions,
+  PostgresPostingElections,
+  postingIndexLagFits,
+  type PostingRegistration,
+  type PostingRegistryLog,
+} from "./posting-elections.ts";
+export {
   POSTING_GAS_HEADROOM,
   POSTING_GAS_LIMIT_MAX,
   POSTING_HEAD_AGE,

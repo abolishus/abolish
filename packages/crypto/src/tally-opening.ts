@@ -489,6 +489,88 @@ export function checkTally(
   return { ok: false, failure, cells: checked, stray, rejected };
 }
 
+/**
+ * Why the board operator refuses a tally opening (docs/spec/tally.md,
+ * Opening record, Boarding), in that rule's order, with Opening record's
+ * codes: `decode` for a payload that doesn't decode under the pinned version,
+ * `tally-stray` for another definition or a cell the partition doesn't have,
+ * `tally-missing` for another number of entries than options,
+ * `tally-aggregate` for an opening over another counted set,
+ * `tally-opening` for one not opening `option`, `tally-unattributed`, and
+ * `tally-second` or `tally-repeat` for a second opening of the cell by the
+ * same seat (over another signed message, or the same one) found at `of`.
+ */
+export type TallyBoarding =
+  | { readonly ok: true; readonly cell: number; readonly signer: number }
+  | { readonly ok: false; readonly code: "decode"; readonly error: DecodeErrorCode }
+  | {
+      readonly ok: false;
+      readonly code: "tally-stray" | "tally-missing" | "tally-aggregate" | "tally-unattributed";
+    }
+  | { readonly ok: false; readonly code: "tally-opening"; readonly option: number }
+  | { readonly ok: false; readonly code: "tally-second" | "tally-repeat"; readonly of: number };
+
+/**
+ * The board operator's Boarding rule for one tally opening under version 1 or
+ * 2 (docs/spec/tally.md, Opening record, Boarding): `payload` is boarded only
+ * if it names this election's definition and a cell of the registered
+ * partition, its `aggregate_hash` is that cell's over the anchored counted
+ * set, it opens every option of that aggregate, its signature attributes it
+ * to a registered seat, and no opening of that cell by that seat is among
+ * `boarded`, the tally-opening payloads already on the board in board order
+ * (`at` positions in it). `aggregates` holds each cell's aggregate over the
+ * anchored counted set (`aggregateCell`), in partition order, so a caller
+ * judging many openings sums each cell's ballots once.
+ *
+ * Every opening it passes is fixed by its cell's aggregate (binding), so the
+ * board carries no chosen bytes beyond a registered seat's signature nonce,
+ * at most one per seat and cell, and no summed shares disguised as a failing
+ * opening (T-15, T-17). It judges the opening alone, never the cell: a
+ * passing opening still fails `tally-range` if the counted set is wrong,
+ * which only the verifier's checks over the sealed board decide.
+ */
+export function tallyOpeningBoarding(
+  election: TallyElection,
+  aggregates: readonly CellAggregate[],
+  boarded: readonly Uint8Array[],
+  payload: Uint8Array,
+  pinned: WholeOpeningVersion,
+): TallyBoarding {
+  if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
+    throw new RangeError("tallyOpeningBoarding: definitionHash must be 32 bytes");
+  if (aggregates.length < 1 || aggregates.length > MAX_CELLS)
+    throw new RangeError("tallyOpeningBoarding: from 1 to 256 cells");
+  const m = election.rules.optionCount;
+  if (aggregates.some((a) => a.length !== m))
+    throw new RangeError("tallyOpeningBoarding: an aggregate doesn't match the election's shape");
+  const [sorted] = sortTallyOpenings(election, aggregates.length, [payload], pinned);
+  if (sorted === undefined) throw new Error("tallyOpeningBoarding: sorted no opening");
+  if ("error" in sorted) return { ok: false, code: "decode", error: sorted.error };
+  const { cell, signer, opening } = sorted;
+  if (cell === null) return { ok: false, code: "tally-stray" };
+  if (opening.opening.length !== m) return { ok: false, code: "tally-missing" };
+  const aggregate = aggregates[cell] as CellAggregate;
+  if (!sameBytes(opening.aggregate_hash, aggregateHash(aggregate)))
+    return { ok: false, code: "tally-aggregate" };
+  const option = firstUnopened(aggregate, opening.opening);
+  if (option !== null) return { ok: false, code: "tally-opening", option };
+  if (signer === null) return { ok: false, code: "tally-unattributed" };
+  // An earlier opening is the seat's only when its signature attributes it
+  // there: anyone can write an unattributed one naming the seat, which must
+  // never keep the seat's own off the board (T-29, T-54).
+  const signed = tallyOpeningStatement(opening);
+  for (const earlier of sortTallyOpenings(election, aggregates.length, boarded, pinned)) {
+    if ("error" in earlier || earlier.cell !== cell || earlier.signer !== signer) continue;
+    // Anyone can replay a signed record, so a repeat is refused like a
+    // second, though only a second is evidence against the seat (T-29).
+    const code = sameBytes(tallyOpeningStatement(earlier.opening), signed)
+      ? "tally-repeat"
+      : "tally-second";
+    return { ok: false, code, of: earlier.at };
+  }
+  return { ok: true, cell, signer };
+}
+
 // --- Version 3: partial openings under an author panel -------------------------
 
 type Registered = readonly { readonly index: number; readonly signingKey: Uint8Array }[];

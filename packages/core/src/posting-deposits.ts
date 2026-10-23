@@ -205,7 +205,8 @@ export function postingCapacityIntervals(
 /** Whether the landing span `[T, T + POSTING_DEPOSIT_SPAN)` meets none of `intervals`. */
 export function postingLandingClear(T: bigint, intervals: readonly PostingInterval[]): boolean {
   const end = T + POSTING_DEPOSIT_SPAN;
-  return intervals.every((i) => !(T < i.to && i.from < end));
+  // An empty interval takes no time, so it meets nothing.
+  return intervals.every((i) => !(i.from < i.to && T < i.to && i.from < end));
 }
 
 /** A deposit's L1 gas limit for an estimate: the estimate times `POSTING_GAS_HEADROOM`, rounded up (Depositing, step 1). */

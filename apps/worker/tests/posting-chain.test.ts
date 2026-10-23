@@ -657,6 +657,10 @@ describe("the startup check", () => {
     const { address: silent } = await board();
     await mine(FINALITY_DEPTH + 1);
     expect(await refusal({ ...d, board: silent })).toBe("the address isn't a board");
+    // One byte, too short for an address: no board either, not a node failing.
+    const { address: short } = await board("0x60016000f3");
+    await mine(FINALITY_DEPTH + 1);
+    expect(await refusal({ ...d, board: short })).toBe("the address isn't a board");
   });
 
   test("refuses a board whose registry isn't one, or names another board", async () => {

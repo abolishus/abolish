@@ -1,18 +1,21 @@
 import { I18nProvider } from "@abolishus/ui";
 import type { Decorator, Preview } from "@storybook/react-vite";
 
+import { isLocale } from "../src/locales.ts";
 import "../src/styles.css";
 
 // As in @abolishus/ui: every story renders inside a provider and on the
 // theme's ground, so axe's colour-contrast rule judges the real pairing.
-// `parameters.theme` picks the dark palette.
+// `parameters.theme` picks the dark palette, `parameters.locale` the
+// language (English unless a story names another of ours).
 const withProviders: Decorator = (Story, { parameters }) => {
   const theme = parameters["theme"] === "dark" ? "dark" : "light";
+  const locale = isLocale(parameters["locale"]) ? parameters["locale"] : "en-US";
   // On the root too, so popups portalled to <body> share the story's theme.
   document.documentElement.dataset["theme"] = theme;
   return (
-    <I18nProvider locale="en-US">
-      <div data-theme={theme} lang="en-US" className="bg-background font-sans text-foreground">
+    <I18nProvider locale={locale}>
+      <div data-theme={theme} lang={locale} className="bg-background font-sans text-foreground">
         <Story />
       </div>
     </I18nProvider>

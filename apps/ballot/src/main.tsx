@@ -4,7 +4,7 @@
 import "./worker-policy.ts";
 
 import { newIdentitySecret } from "@abolishus/crypto";
-import { I18nProvider } from "@abolishus/ui";
+import { formatMessage, I18nProvider } from "@abolishus/ui";
 import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -33,8 +33,17 @@ import {
   saveBackupCredential,
 } from "./identity.ts";
 import { deliverShare } from "./intake.ts";
+import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
 import { loadBoard, loadChainTime, loadElection, loadGroupRegistry } from "./load.ts";
+import {
+  keepChosenLocale,
+  type Locale,
+  pickLocale,
+  pollLanguages,
+  readChosenLocale,
+} from "./locales.ts";
+import { catalogs } from "./messages.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
 import type { Recoverer } from "./recover.tsx";
@@ -49,9 +58,6 @@ import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
 import "./styles.css";
-
-// Matches <html lang> in index.html; the locale picker comes with the ballot screens.
-const locale = "en-US";
 
 // The worker is spawned only once a link names an election, and a stopped
 // one (crashed, timed out) is replaced on the next check, so "Try again" can
@@ -332,10 +338,58 @@ const subscribe = (onChange: () => void) => {
   listeners.add(onChange);
   return () => void listeners.delete(onChange);
 };
-function Client() {
+// The screen's language (P2-28 part 4b; locales.ts): the voter's choice from
+// the frame's switch, kept on this device, else the browser's. On a shared
+// gateway path this origin's storage is other sites' too, so a choice is
+// neither read from it nor kept there, and the refusal offers no switch (T-43).
+const shared = onSharedGatewayPath(location.pathname);
+interface Language {
+  readonly locale: Locale;
+  /** What a poll's own text is picked by (`pollLanguages`). */
+  readonly languages: readonly string[];
+}
+const languageOf = (chosen: Locale | undefined): Language => ({
+  locale: pickLocale(chosen, navigator.languages),
+  languages: pollLanguages(chosen, navigator.languages),
+});
+let language = languageOf(shared ? undefined : readChosenLocale(() => localStorage));
+const languageListeners = new Set<() => void>();
+// The document says what the screen is in: its `lang` for assistive
+// technology and the browser's translation offer, its title for the tab.
+function showLanguage() {
+  document.documentElement.lang = language.locale;
+  document.title = formatMessage(language.locale, catalogs[language.locale].name);
+}
+showLanguage();
+function chooseLocale(locale: Locale) {
+  keepChosenLocale(() => localStorage, locale);
+  language = languageOf(locale);
+  showLanguage();
+  for (const listener of languageListeners) listener();
+}
+const subscribeLanguage = (onChange: () => void) => {
+  languageListeners.add(onChange);
+  return () => void languageListeners.delete(onChange);
+};
+
+function Client({ languages }: { languages: readonly string[] }) {
   const current = useSyncExternalStore(subscribe, () => link);
+  return <App link={current} source={source} origin={location.origin} languages={languages} />;
+}
+
+function Root() {
+  const { locale, languages } = useSyncExternalStore(subscribeLanguage, () => language);
   return (
-    <App link={current} source={source} origin={location.origin} languages={navigator.languages} />
+    <I18nProvider locale={locale}>
+      {shared ? (
+        // Without the query or fragment, which a ballot link may use to carry the poll.
+        <SharedOrigin address={location.origin + location.pathname} />
+      ) : (
+        <LocaleChoice value={chooseLocale}>
+          <Client languages={languages} />
+        </LocaleChoice>
+      )}
+    </I18nProvider>
   );
 }
 
@@ -343,13 +397,6 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root");
 createRoot(root).render(
   <StrictMode>
-    <I18nProvider locale={locale}>
-      {onSharedGatewayPath(location.pathname) ? (
-        // Without the query or fragment, which a ballot link may use to carry the poll.
-        <SharedOrigin address={location.origin + location.pathname} />
-      ) : (
-        <Client />
-      )}
-    </I18nProvider>
+    <Root />
   </StrictMode>,
 );

@@ -2286,6 +2286,33 @@ export const InTheReadersLanguage: Story = {
   },
 };
 
+// The ballot in Spanish (P2-28 part 4b): the frame and the screens in the
+// voter's language, and the poll's own text in its Spanish translation.
+export const InSpanish: Story = {
+  name: "In Spanish",
+  args: { languages: ["es-US", "es-MX", "en-US"] },
+  parameters: { layout: "fullscreen", locale: "es-US" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "¿Qué mejora le importa más?" }),
+    ).toBeVisible();
+    await expect(canvas.getByText("Esta es la encuesta real, comprobada")).toBeVisible();
+    await expect(
+      canvas.getAllByRole("img", { name: "Sello de esta encuesta, 3f8a 0c51" })[0],
+    ).toBeVisible();
+    await expect(canvas.getByText("Elección 3f8a 0c51")).toBeVisible();
+    await userEvent.click(canvas.getByText("Doscientos árboles nuevos"));
+    await userEvent.click(canvas.getByRole("button", { name: "Revisar tus respuestas" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Sellar mis respuestas" }));
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Esta boleta todavía no puede sellar respuestas para esta encuesta",
+    );
+    await expect(canvas.getByText(/un tipo anterior/)).toBeVisible();
+    await expect(canvas.queryByText(/Check your answers|This ballot can't/)).toBeNull();
+  },
+};
+
 export const RefusedByTheCheck: Story = {
   name: "Refused by the worker's check",
   args: {

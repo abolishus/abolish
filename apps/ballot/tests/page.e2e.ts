@@ -333,3 +333,71 @@ describe("the served ballot client", () => {
     expect(consoleErrors).toEqual([]);
   });
 });
+
+// The ballot in Spanish (P2-28 part 4b; src/locales.ts): by the browser's
+// languages, or the voter's choice from the frame's switch, kept on this
+// device and nowhere else.
+describe("the ballot's language", () => {
+  test("follows the browser's languages: the screen, the document's lang and its title", async () => {
+    const context = await browser.newContext({ locale: "es-MX" });
+    try {
+      const spanish = await context.newPage();
+      await spanish.goto(`${origin}/`);
+      await expect(spanish.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+        "Boleta de Abolish",
+      );
+      await expect(spanish.evaluate(() => document.documentElement.lang)).resolves.toBe("es-US");
+      await expect(spanish.title()).resolves.toBe("Boleta de Abolish");
+      await expect(
+        spanish
+          .getByRole("navigation", { name: "Idioma" })
+          .getByText("Español")
+          .getAttribute("aria-current"),
+      ).resolves.toBe("true");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("switches in place, keeps the choice for the next visit, and keeps nothing but it", async () => {
+    await expect(page.evaluate(() => document.documentElement.lang)).resolves.toBe("en-US");
+    await page.getByRole("button", { name: "Español" }).click();
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+      "Boleta de Abolish",
+    );
+    await expect(page.evaluate(() => document.documentElement.lang)).resolves.toBe("es-US");
+    await expect(page.title()).resolves.toBe("Boleta de Abolish");
+    await expect(
+      page.evaluate(() => Object.fromEntries(Object.entries(localStorage))),
+    ).resolves.toEqual({ lang: "es-US" });
+    // A new visit in an English browser keeps the voter's choice.
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+      "Boleta de Abolish",
+    );
+    await page.getByRole("button", { name: "English" }).click();
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+      "Abolish ballot",
+    );
+    await expect(
+      page.evaluate(() => Object.fromEntries(Object.entries(localStorage))),
+    ).resolves.toEqual({ lang: "en-US" });
+    expect(foreignRequests).toEqual([]);
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("on a path gateway, neither reads a kept choice nor offers a switch", async () => {
+    const url = gateway.resolvedUrls?.local[0];
+    if (url === undefined) throw new Error("the gateway server has no local URL");
+    // Another site on the gateway's shared origin set the key.
+    await page.goto(url);
+    await page.evaluate(() => localStorage.setItem("lang", "es-US"));
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+      "This address isn't safe for voting",
+    );
+    await expect(page.getByRole("navigation").count()).resolves.toBe(0);
+    expect(violations).toEqual([]);
+  });
+});

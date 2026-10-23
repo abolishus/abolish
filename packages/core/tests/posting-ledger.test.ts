@@ -11,12 +11,15 @@ import {
   POSTING_FINALITY,
   POSTING_FORCE_AFTER,
   POSTING_GAS_LIMIT_MAX,
+  POSTING_RESEND,
+  POSTING_SEND_MARGIN,
   postingBallots,
   type PostingCosts,
   postingInFlight,
   type PostingKeyChain,
   PostingLedgerError,
   postingMostCost,
+  type PostingReceipt,
   postingSent,
   type PostingSigned,
   postingSpend,
@@ -71,14 +74,30 @@ beforeEach(async () => {
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const bytes32 = () => new Uint8Array(randomBytes(32));
 
+type SignOptions = {
+  nonce: bigint;
+  gasLimit: bigint;
+  feeCap: bigint;
+  fees?: { maxFee: bigint; priorityFee: bigint };
+};
+
 /** A fake posting key: records what it was asked, and can be told to fail. */
 class FakeKey implements PostingKeyChain {
   count = 0n;
   costsOf: PostingCosts = COSTS;
   fees = { maxFee: FEE_CAP, priorityFee: 1_000n };
-  signed: { nonce: bigint; gasLimit: bigint; feeCap: bigint }[] = [];
+  signed: SignOptions[] = [];
+  /** Each signed transaction's hash, by its bytes in hex. */
+  hashes = new Map<string, Uint8Array>();
   broadcasts: Uint8Array[] = [];
-  fail: Partial<Record<"nonce" | "costs" | "sign" | "broadcast", Error>> = {};
+  /** Receipts at the latest head, by transaction hash in hex. */
+  receipts = new Map<string, PostingReceipt>();
+  /** Postings, in hex, in a `SharePosted` event at the latest head. */
+  onBoard = new Set<string>();
+  fail: Partial<Record<"nonce" | "costs" | "sign" | "broadcast" | "receipt" | "posted", Error>> =
+    {};
+  /** Fees a replacement is signed with, if not the ones asked for. */
+  otherFees: { maxFee: bigint; priorityFee: bigint } | undefined;
   answer: "sent" | "refused" = "sent";
   onBroadcast: (() => Promise<void>) | undefined;
 
@@ -90,15 +109,22 @@ class FakeKey implements PostingKeyChain {
     if (this.fail.costs) throw this.fail.costs;
     return this.costsOf;
   }
-  async sign(
-    _posting: Uint8Array,
-    _ballot: Uint8Array,
-    o: { nonce: bigint; gasLimit: bigint; feeCap: bigint },
-  ): Promise<PostingSigned> {
+  async sign(_posting: Uint8Array, _ballot: Uint8Array, o: SignOptions): Promise<PostingSigned> {
     if (this.fail.sign) throw this.fail.sign;
     this.signed.push(o);
     const tx = new Uint8Array(randomBytes(120));
-    return { tx, hash: bytes32(), ...this.fees };
+    const hash = bytes32();
+    this.hashes.set(hex(tx), hash);
+    const fees = o.fees === undefined ? this.fees : (this.otherFees ?? o.fees);
+    return { tx, hash, ...fees };
+  }
+  async receipt(hash: Uint8Array) {
+    if (this.fail.receipt) throw this.fail.receipt;
+    return this.receipts.get(hex(hash));
+  }
+  async posted(posting: Uint8Array) {
+    if (this.fail.posted) throw this.fail.posted;
+    return this.onBoard.has(hex(posting));
   }
   async broadcast(tx: Uint8Array) {
     await this.onBroadcast?.();
@@ -110,14 +136,21 @@ class FakeKey implements PostingKeyChain {
 
 function ledger(
   chain: PostingKeyChain,
-  o: { budget?: bigint; now?: number; sql?: Sql; chainTimeoutMs?: number } = {},
+  o: {
+    budget?: bigint;
+    now?: number | (() => number);
+    sql?: Sql;
+    chainTimeoutMs?: number;
+    feeCap?: bigint;
+  } = {},
 ) {
+  const now = o.now;
   return new PostgresPostingLedger({
     sql: o.sql ?? app,
     chain,
     budget: o.budget ?? 10n ** 18n,
-    feeCap: FEE_CAP,
-    now: () => o.now ?? NOW,
+    feeCap: o.feeCap ?? FEE_CAP,
+    now: typeof now === "function" ? now : () => now ?? NOW,
     ...(o.chainTimeoutMs === undefined ? {} : { chainTimeoutMs: o.chainTimeoutMs }),
   });
 }
@@ -191,7 +224,8 @@ describe("schema", () => {
     await expect(
       db.admin`INSERT INTO posting_in_flight
         SELECT ${bytes32()}, posting, ballot, election_id, intake_cutoff, contract_cutoff,
-          delivery_ends, first_sent, nonce, gas_limit, max_fee, priority_fee, cost, signed, transactions
+          delivery_ends, first_sent, nonce, gas_limit, max_fee, priority_fee, cost, signed, transactions,
+          signed_at, broadcast_at, deposit, landed_in, paid
         FROM posting_in_flight`,
     ).rejects.toThrow(/posting_in_flight_nonce/);
   });
@@ -260,6 +294,11 @@ describe("send", () => {
       max_fee: String(FEE_CAP),
       priority_fee: "1000",
       cost: String(MOST),
+      deposit: String(COSTS.deposit),
+      signed_at: String(NOW),
+      broadcast_at: String(NOW),
+      landed_in: null,
+      paid: null,
     });
     expect(new Uint8Array(row!["posting"])).toEqual(p.posting);
     expect(new Uint8Array(row!["ballot"])).toEqual(p.ballot);
@@ -376,7 +415,7 @@ describe("send", () => {
       await db.admin`INSERT INTO posting_in_flight
         SELECT ${bytes32()}, posting, ballot, election_id, intake_cutoff, contract_cutoff,
           delivery_ends, first_sent, ${o.nonce.toString()}, gas_limit, max_fee, priority_fee,
-          cost, signed, transactions
+          cost, signed, transactions, signed_at, broadcast_at, deposit, landed_in, paid
         FROM posting_in_flight LIMIT 1`;
       return sign(posting, ballot, o);
     };
@@ -535,6 +574,13 @@ describe("caps", () => {
     const b = bytes32();
     await ledger(new FakeKey(), { now: edge + 1 }).send(toSend({ electionId: b }));
     expect(await spentOf(b)).toBe(MOST - COSTS.deposit);
+    // The entry keeps its deposit's reserve apart, for the tend.
+    const reserves = await db.admin`
+      SELECT election_id, deposit::text FROM posting_in_flight ORDER BY deposit DESC`;
+    expect(reserves.map((r) => [new Uint8Array(r["election_id"]), r["deposit"]])).toEqual([
+      [a, String(COSTS.deposit)],
+      [b, "0"],
+    ]);
   });
 
   test("a refused cap writes nothing", async () => {
@@ -566,4 +612,356 @@ describe("caps", () => {
     expect(outcomes.filter((o) => o.sent)).toHaveLength(POSTING_BALLOT_CAP);
     expect(outcomes.filter((o) => !o.sent)).toEqual([{ sent: false, code: "ballot-cap" }]);
   });
+});
+
+// Tending what is in flight (docs/spec/posting-relay.md, Sending, after step
+// 6): a pending transaction rebroadcast identical every POSTING_RESEND and
+// replaced at its nonce with both fees raised by an eighth once pending
+// twice as long, while the fee cap allows; the spend reduced to a receipt
+// and restored if its block leaves the latest head; a nonce another
+// transaction consumed judged by the posting's event (T-52).
+describe("tend", () => {
+  const HEAD = { number: 1n, timestamp: BigInt(NOW) };
+  const RESEND = Number(POSTING_RESEND);
+  const RECEIPT: PostingReceipt = { gasUsed: 300_000n, effectiveGasPrice: 2n, l1Fee: 5_000n };
+  const RECEIPT_COST = 605_000n;
+  const LOW_FEES = { maxFee: 800_000n, priorityFee: 1_000n };
+
+  /** A ledger whose clock the test moves, with one posting sent at NOW. */
+  async function sentOne(o: { chain?: FakeKey; budget?: bigint } = {}) {
+    const chain = o.chain ?? new FakeKey();
+    let t = NOW;
+    const l = ledger(chain, {
+      now: () => t,
+      ...(o.budget === undefined ? {} : { budget: o.budget }),
+    });
+    const p = toSend();
+    const outcome = await l.send(p);
+    if (!outcome.sent) throw new Error("not sent");
+    return {
+      chain,
+      l,
+      p,
+      first: outcome.transaction,
+      at: (s: number) => {
+        t = NOW + s;
+      },
+    };
+  }
+  const row = async () => {
+    const [r] = await db.admin`SELECT * FROM posting_in_flight`;
+    return r!;
+  };
+  const report = (over: Partial<Record<string, number>> = {}) => ({
+    landed: 0,
+    unlanded: 0,
+    posted: 0,
+    rebroadcast: 0,
+    replaced: 0,
+    resent: 0,
+    held: 0,
+    failed: 0,
+    ...over,
+  });
+
+  test("a pending transaction is rebroadcast, identical, every POSTING_RESEND", async () => {
+    const { chain, l, at } = await sentOne();
+    const signed = chain.broadcasts[0]!;
+    at(RESEND - 1);
+    expect(await l.tend(HEAD)).toEqual(report());
+    at(RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+    expect(chain.broadcasts).toEqual([signed, signed]);
+    at(2 * RESEND - 1);
+    expect(await l.tend(HEAD)).toEqual(report());
+    // The fee cap leaves no room to replace it: rebroadcast again instead.
+    at(2 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+    expect(chain.broadcasts).toEqual([signed, signed, signed]);
+    expect(chain.signed).toHaveLength(1);
+    expect((await row())["broadcast_at"]).toBe(String(NOW + 2 * RESEND));
+  });
+
+  test("one pending twice as long is replaced at its nonce, both fees raised by an eighth", async () => {
+    const chain = new FakeKey();
+    chain.fees = { maxFee: 800_000n, priorityFee: 9n };
+    chain.count = 4n;
+    const { l, p, first, at } = await sentOne({ chain });
+    at(2 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ replaced: 1 }));
+    expect(chain.signed[1]).toEqual({
+      nonce: 4n,
+      gasLimit: GAS,
+      feeCap: FEE_CAP,
+      fees: { maxFee: 900_000n, priorityFee: 11n },
+    });
+    const replacement = chain.broadcasts[1]!;
+    const hash = chain.hashes.get(hex(replacement))!;
+    const r = await row();
+    expect(r).toMatchObject({
+      nonce: "4",
+      max_fee: "900000",
+      priority_fee: "11",
+      signed_at: String(NOW + 2 * RESEND),
+      broadcast_at: String(NOW + 2 * RESEND),
+      cost: String(MOST),
+    });
+    expect(new Uint8Array(r["signed"])).toEqual(replacement);
+    expect(new Uint8Array(r["transactions"])).toEqual(Uint8Array.from([...first, ...hash]));
+    // The answer for a repeat names the replacement; the spend is unchanged,
+    // the most cost being at the fee cap.
+    expect(await l.sent(p.key)).toEqual({ transaction: hash, layer: "l2" });
+    expect(await spentOf(ELECTION)).toBe(MOST);
+    // The next raise would pass the fee cap: from then on it is rebroadcast.
+    at(4 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+    expect(chain.broadcasts[2]).toEqual(replacement);
+    expect(chain.signed).toHaveLength(2);
+  });
+
+  test("a replacement signed with other fees is never recorded or broadcast", async () => {
+    const chain = new FakeKey();
+    chain.fees = LOW_FEES;
+    const { l, at } = await sentOne({ chain });
+    chain.otherFees = { maxFee: 900_000n, priorityFee: 1_000n };
+    const before = await row();
+    at(2 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ failed: 1 }));
+    expect(chain.broadcasts).toHaveLength(1);
+    expect(await row()).toEqual(before);
+  });
+
+  test("once landed, the spend is reduced to the receipt, and restored if its block leaves the head", async () => {
+    const chain = new FakeKey();
+    chain.fees = LOW_FEES;
+    const { l, p, first, at } = await sentOne({ chain });
+    at(2 * RESEND);
+    await l.tend(HEAD);
+    // The first transaction, not its replacement, is the one in a block.
+    chain.receipts.set(hex(first), RECEIPT);
+    at(3 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
+    // The deposit's reserve stays counted until the deposit is settled.
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + COSTS.deposit);
+    expect(await l.sent(p.key)).toEqual({ transaction: first, layer: "l2" });
+    const r = await row();
+    expect(new Uint8Array(r["landed_in"])).toEqual(first);
+    expect(r["paid"]).toBe(String(RECEIPT_COST));
+    // Landed: nothing more is sent, however long it stays in flight.
+    at(10 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report());
+    expect(chain.broadcasts).toHaveLength(2);
+    // A reorganisation drops it: counted at its most cost again, then
+    // tended as pending.
+    chain.receipts.clear();
+    expect(await l.tend(HEAD)).toEqual(report({ unlanded: 1 }));
+    expect(await spentOf(ELECTION)).toBe(MOST);
+    expect(await row()).toMatchObject({ landed_in: null, paid: null });
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+  });
+
+  test("a nonce another transaction consumed, with the posting on the board, sends nothing more", async () => {
+    const { chain, l, p, at } = await sentOne();
+    chain.count = 1n;
+    chain.onBoard.add(hex(p.posting));
+    at(RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ posted: 1 }));
+    // Nothing of it ran on L2; a deposit's reserve stays counted.
+    expect(await spentOf(ELECTION)).toBe(COSTS.deposit);
+    expect(await row()).toMatchObject({ landed_in: null, paid: "0" });
+    at(10 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report());
+    expect(chain.signed).toHaveLength(1);
+    expect(chain.broadcasts).toHaveLength(1);
+  });
+
+  test("a nonce another transaction consumed, without the posting, is signed again at the next nonce", async () => {
+    const { chain, l, p, at } = await sentOne();
+    // Another posting in flight at nonce 1; the chain has taken nonce 0.
+    await l.send(toSend());
+    chain.count = 1n;
+    at(5);
+    expect(await l.tend(HEAD)).toEqual(report({ resent: 1 }));
+    expect(chain.signed.map((s) => s.nonce)).toEqual([0n, 1n, 2n]);
+    const again = chain.broadcasts[2]!;
+    const hash = chain.hashes.get(hex(again))!;
+    const extra = GAS * FEE_CAP + COSTS.l1DataFee;
+    expect(await spentOf(ELECTION)).toBe(2n * MOST + extra);
+    expect(await l.sent(p.key)).toEqual({ transaction: hash, layer: "l2" });
+    const [r] = await db.admin`
+      SELECT nonce, cost::text, signed_at, transactions FROM posting_in_flight
+      WHERE posting_key = ${Buffer.from(p.key, "hex")}`;
+    expect(r).toMatchObject({
+      nonce: "2",
+      cost: String(MOST + extra),
+      signed_at: String(NOW + 5),
+    });
+    expect(new Uint8Array(r!["transactions"]).subarray(32)).toEqual(hash);
+  });
+
+  test("a resend and the transaction it followed both landing are both counted", async () => {
+    const { chain, l, p, first, at } = await sentOne();
+    chain.count = 1n;
+    at(5);
+    expect(await l.tend(HEAD)).toEqual(report({ resent: 1 }));
+    const again = chain.hashes.get(hex(chain.broadcasts[1]!))!;
+    // The resend lands, and so, on a view that had lost it, did the first.
+    chain.receipts.set(hex(again), RECEIPT);
+    expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + COSTS.deposit);
+    chain.receipts.set(hex(first), { ...RECEIPT, l1Fee: 1n });
+    expect(await l.tend(HEAD)).toEqual(report({ landed: 1 }));
+    expect(await spentOf(ELECTION)).toBe(RECEIPT_COST + 600_001n + COSTS.deposit);
+    const r = await row();
+    expect(new Uint8Array(r["landed_in"])).toEqual(Uint8Array.from([...first, ...again]));
+    expect(await l.sent(p.key)).toEqual({ transaction: again, layer: "l2" });
+    expect(await l.tend(HEAD)).toEqual(report());
+  });
+
+  test("a count that moves while the receipts and the event are read sends nothing", async () => {
+    const { chain, l, p } = await sentOne();
+    let reads = 0;
+    chain.nonce = async () => (++reads === 1 ? 1n : 2n);
+    expect(await l.tend(HEAD)).toEqual(report());
+    chain.onBoard.add(hex(p.posting));
+    reads = 0;
+    expect(await l.tend(HEAD)).toEqual(report());
+    expect(chain.signed).toHaveLength(1);
+    expect(await spentOf(ELECTION)).toBe(MOST);
+    expect(await row()).toMatchObject({ paid: null });
+  });
+
+  test("past the send cutoff, or past the budget, a consumed nonce sends nothing new", async () => {
+    const late = await sentOne();
+    late.chain.count = 1n;
+    const cutoff = C_D - POSTING_SEND_MARGIN;
+    expect(await late.l.tend({ number: 1n, timestamp: cutoff + 1n })).toEqual(report());
+    expect(late.chain.signed).toHaveLength(1);
+    // At the cutoff itself it may still be sent.
+    expect(await late.l.tend({ number: 1n, timestamp: cutoff })).toEqual(report({ resent: 1 }));
+
+    await db.admin`DELETE FROM posting_in_flight`;
+    await db.admin`DELETE FROM posting_spend`;
+    const poor = await sentOne({ budget: MOST });
+    poor.chain.count = 1n;
+    expect(await poor.l.tend(HEAD)).toEqual(report({ held: 1 }));
+    expect(poor.chain.signed).toHaveLength(1);
+    expect(await spentOf(ELECTION)).toBe(MOST);
+  });
+
+  test("a failing node leaves an entry as it was, quoting nothing, and goes on to the next", async () => {
+    for (const which of ["nonce", "receipt", "posted", "costs", "sign"] as const) {
+      await db.admin`DELETE FROM posting_in_flight`;
+      await db.admin`DELETE FROM posting_spend`;
+      const { chain, l, at } = await sentOne();
+      chain.fees = LOW_FEES;
+      if (which === "posted" || which === "costs" || which === "sign") chain.count = 1n;
+      at(2 * RESEND);
+      chain.fail[which] = new Error("node at https://key@example down");
+      const before = await db.admin`SELECT * FROM posting_in_flight`;
+      expect(await l.tend(HEAD)).toEqual(report({ failed: 1 }));
+      expect(await db.admin`SELECT * FROM posting_in_flight`).toEqual(before);
+      expect(await spentOf(ELECTION)).toBe(MOST);
+      expect(chain.broadcasts).toHaveLength(1);
+    }
+  });
+
+  test("a receipt or nonce out of form leaves the entry as it was", async () => {
+    const { chain, l, first, at } = await sentOne();
+    at(RESEND);
+    chain.receipts.set(hex(first), { ...RECEIPT, gasUsed: -1n });
+    expect(await l.tend(HEAD)).toEqual(report({ failed: 1 }));
+    chain.receipts.clear();
+    chain.count = -1n;
+    expect(await l.tend(HEAD)).toEqual(report({ failed: 1 }));
+    expect(await spentOf(ELECTION)).toBe(MOST);
+    expect(chain.broadcasts).toHaveLength(1);
+  });
+
+  test("a broadcast that fails is kept and tried again after POSTING_RESEND", async () => {
+    const { chain, l, at } = await sentOne();
+    chain.fail.broadcast = new Error("down");
+    at(RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+    delete chain.fail.broadcast;
+    at(RESEND + 1);
+    expect(await l.tend(HEAD)).toEqual(report());
+    at(2 * RESEND);
+    expect(await l.tend(HEAD)).toEqual(report({ rebroadcast: 1 }));
+    expect(chain.broadcasts).toHaveLength(3);
+  });
+
+  test("two ledgers tending at once replace a transaction once", async () => {
+    const chain = new FakeKey();
+    chain.fees = LOW_FEES;
+    const { l, at } = await sentOne({ chain });
+    at(2 * RESEND);
+    const other = await db.as("abolish_app");
+    const second = ledger(chain, { sql: other, now: NOW + 2 * RESEND });
+    const [x, y] = await Promise.all([l.tend(HEAD), second.tend(HEAD)]);
+    expect(x.replaced + y.replaced).toBe(1);
+    expect(x.rebroadcast + y.rebroadcast).toBe(0);
+    expect(chain.signed).toHaveLength(2);
+  });
+
+  test("a store failure listing what is in flight rejects quoting nothing", async () => {
+    const { chain } = await sentOne();
+    const broken = await db.as("abolish_app");
+    await broken.end();
+    const err = await ledger(chain, { sql: broken })
+      .tend(HEAD)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PostingLedgerError);
+  });
+
+  test("refuses a head out of range", async () => {
+    await expect(ledger(new FakeKey()).tend({ number: 1n, timestamp: -1n })).rejects.toThrow(
+      RangeError,
+    );
+  });
+
+  test("whatever lands, leaves or is consumed, the spend is what each entry is counted at", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            pick: fc.nat({ max: 2 }),
+            event: fc.constantFrom("land", "land-last", "drop", "consume", "board", "wait"),
+          }),
+          { minLength: 1, maxLength: 12 },
+        ),
+        async (steps) => {
+          await db.admin`DELETE FROM posting_in_flight`;
+          await db.admin`DELETE FROM posting_spend`;
+          const chain = new FakeKey();
+          chain.fees = LOW_FEES;
+          let t = NOW;
+          const l = ledger(chain, { now: () => t });
+          const sent = [toSend(), toSend(), toSend()];
+          for (const p of sent) await l.send(p);
+          for (const { pick, event } of steps) {
+            const p = sent[pick]!;
+            const r = await db.admin`
+              SELECT nonce, transactions FROM posting_in_flight
+              WHERE posting_key = ${Buffer.from(p.key, "hex")}`;
+            const hashes = new Uint8Array(r[0]!["transactions"]);
+            if (event === "land") chain.receipts.set(hex(hashes.subarray(0, 32)), RECEIPT);
+            if (event === "land-last") chain.receipts.set(hex(hashes.subarray(-32)), RECEIPT);
+            if (event === "drop") chain.receipts.clear();
+            if (event === "consume") chain.count = BigInt(r[0]!["nonce"] as string) + 1n;
+            if (event === "board") chain.onBoard.add(hex(p.posting));
+            t += RESEND;
+            await l.tend(HEAD);
+            const [sum] = await db.admin`
+              SELECT coalesce(sum(coalesce(paid + deposit, cost)), 0)::text AS s
+              FROM posting_in_flight`;
+            expect(await spentOf(ELECTION)).toBe(BigInt(sum!["s"] as string));
+          }
+        },
+      ),
+      { numRuns: Math.min(numRuns, 30) },
+    );
+    // Each run sends three postings and tends up to twelve times against
+    // the database: past the default 5 s on a busy runner.
+  }, 120_000);
 });

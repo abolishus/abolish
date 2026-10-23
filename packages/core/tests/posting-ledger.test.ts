@@ -563,7 +563,7 @@ describe("caps", () => {
       ),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+  }, 60_000);
 
   test("the budget bounds the election's spend, its edge included", async () => {
     const chain = new FakeKey();

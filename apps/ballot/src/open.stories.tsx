@@ -2338,6 +2338,8 @@ export const SwitchedMidBallot: Story = {
     await expect(await canvas.findByRole("heading", { level: 1, name: QUESTION })).toBeVisible();
     await userEvent.click(canvas.getByText("Two hundred new street trees"));
     await userEvent.click(canvas.getByRole("button", { name: "Español" }));
+    // Focus stays at the switch, on the language now current.
+    await expect(canvas.getByText("Español")).toHaveFocus();
     // The poll's own Spanish, with the same option still chosen.
     await expect(
       canvas.getByRole("heading", { level: 1, name: "¿Qué mejora le importa más?" }),

@@ -50,6 +50,7 @@ export const RECORD_TYPES = Object.freeze({
   nullifierReply: 0x0023,
   identityChain: 0x0024,
   contractEventEvidence: 0x0025,
+  contractEventRun: 0x0026,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

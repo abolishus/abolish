@@ -2,7 +2,8 @@
 // archive manifest (record type 0x0021) that lists archived objects with the
 // Arweave transactions holding their CARs and links the manifests before it,
 // from version 2 with the contract-event evidence (record type 0x0025) it
-// lists, the board anchor's locators naming the latest confirmed manifest,
+// lists and from version 3 the contract-event runs (record type 0x0026)
+// holding our contracts' events, the board anchor's locators naming the latest confirmed manifest,
 // and the reader of an object from a transaction's data. Nothing found
 // through the archive is trusted beyond being the bytes its CID names: the
 // board checks judge it against L1's checkpoints (T-49, T-51, T-24).
@@ -18,6 +19,7 @@ import {
   Writer,
 } from "./codec.ts";
 import { type BlockSource, CHUNK_SIZE, objectCar, readObjectWithin } from "./content-addressing.ts";
+import { type ContractEventRecord, MAX_EVENT_DATA, MAX_EVENT_TOPICS } from "./contract-event.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 
 /** `MAX_MANIFEST_OBJECTS`: the most objects one version-1 manifest lists. */
@@ -29,7 +31,16 @@ export const MAX_MANIFEST_LINKS = 1024;
 /** `MAX_MANIFEST_EVIDENCE`: the most evidence records one version-2 manifest lists. */
 export const MAX_MANIFEST_EVIDENCE = 1024;
 
-/** A version-1 locator's length: `u16(1)`, the manifest's CID and the transaction ID. Version 2's is the same. */
+/** `MAX_MANIFEST_RUNS`: the most contract-event runs one version-3 manifest lists. */
+export const MAX_MANIFEST_RUNS = 1024;
+
+/** `MAX_RUN_EVENTS`: the most events one contract-event run holds. */
+export const MAX_RUN_EVENTS = 65_536;
+
+/** `MAX_CONTRACT_EVENT_RUN`: a run's longest encoding, the bound a reader reads it within. */
+export const MAX_CONTRACT_EVENT_RUN = 1 << 24;
+
+/** A version-1 locator's length: `u16(1)`, the manifest's CID and the transaction ID. Versions 2 and 3 have the same. */
 export const LOCATOR_V1_LENGTH = 70;
 
 /** `MAX_EVIDENCE_HEADER`: the longest L2 header a contract-event evidence record carries. */
@@ -83,6 +94,20 @@ export interface ArchiveManifestV2 extends ArchiveManifest {
   readonly evidence: readonly EvidenceRef[];
 }
 
+/** One contract-event run a version-3 manifest lists: whose events and which, its CID and the transaction holding it. */
+export interface RunRef {
+  readonly contract: Uint8Array;
+  readonly first: bigint;
+  readonly count: number;
+  readonly cid: Uint8Array;
+  readonly transaction: Uint8Array;
+}
+
+/** Archive manifest, version 3 (docs/spec/archive.md, Layout (version 3)): version 2 and the runs. */
+export interface ArchiveManifestV3 extends ArchiveManifestV2 {
+  readonly runs: readonly RunRef[];
+}
+
 function framedCid(c: Uint8Array, rawOnly: boolean): boolean {
   return (
     c.length === 36 &&
@@ -109,6 +134,21 @@ function compareRefs(a: EvidenceRef, b: EvidenceRef): number {
   if (a.l2_block !== b.l2_block) return a.l2_block < b.l2_block ? -1 : 1;
   return compare(a.cid, b.cid);
 }
+
+// A run reference's order: contract, then first index, then CID (Layout (version 3)).
+function compareRunRefs(a: RunRef, b: RunRef): number {
+  const c = compare(a.contract, b.contract);
+  if (c !== 0) return c;
+  if (a.first !== b.first) return a.first < b.first ? -1 : 1;
+  return compare(a.cid, b.cid);
+}
+
+const TWO_64 = 1n << 64n;
+
+// A run of `n` events from `first` holds at least one and at most
+// MAX_RUN_EVENTS, and its last index is a u64.
+const runSpan = (first: bigint, n: number) =>
+  n >= 1 && n <= MAX_RUN_EVENTS && first + BigInt(n) <= TWO_64;
 
 function count(r: Reader, max: number): number {
   const at = r.offset;
@@ -205,6 +245,43 @@ const manifestV1: Codec<ArchiveManifest> = {
   },
 };
 
+function writeEvidence(w: Writer, value: ArchiveManifestV2): void {
+  const evidence = list<EvidenceRef>(value.evidence, MAX_MANIFEST_EVIDENCE, "evidence");
+  w.uint(4, evidence.length);
+  let previous: EvidenceRef | undefined;
+  for (const e of evidence) {
+    const ref = { ...e, cid: Uint8Array.from(e.cid), contract: Uint8Array.from(e.contract) };
+    if (!framedCid(ref.cid, true))
+      throw new EncodeError("archive manifest: an evidence record's CID isn't raw");
+    if (previous !== undefined && compareRefs(previous, ref) >= 0)
+      throw new EncodeError("archive manifest: evidence not in ascending order");
+    address.write(w, ref.contract);
+    u64.write(w, ref.l2_block);
+    cid36.write(w, ref.cid);
+    id32.write(w, ref.transaction);
+    previous = ref;
+  }
+}
+
+function readEvidence(r: Reader): EvidenceRef[] {
+  const evidence: EvidenceRef[] = [];
+  for (let i = 0, n = count(r, MAX_MANIFEST_EVIDENCE); i < n; i++) {
+    const at = r.offset;
+    const contract = address.read(r);
+    const l2_block = u64.read(r);
+    const cidAt = r.offset;
+    const cid = cid36.read(r);
+    if (!framedCid(cid, true)) throw new DecodeError("non-canonical", cidAt);
+    const ref = { contract, l2_block, cid, transaction: id32.read(r) };
+    // The order is judged once the whole reference is read, at the reference's offset.
+    const before = evidence[i - 1];
+    if (before !== undefined && compareRefs(before, ref) >= 0)
+      throw new DecodeError("non-canonical", at);
+    evidence.push(ref);
+  }
+  return evidence;
+}
+
 const manifestV2: Codec<ArchiveManifestV2> = {
   minLength: 8 + 20 + 8 + 4 + 4 + 4,
   write(w, value) {
@@ -214,16 +291,40 @@ const manifestV2: Codec<ArchiveManifestV2> = {
     if (objects.length === 0 && links.length === 0 && evidence.length === 0)
       throw new EncodeError("archive manifest: names nothing");
     writeBody(w, value);
-    w.uint(4, evidence.length);
-    let previous: EvidenceRef | undefined;
-    for (const e of evidence) {
-      const ref = { ...e, cid: Uint8Array.from(e.cid), contract: Uint8Array.from(e.contract) };
-      if (!framedCid(ref.cid, true))
-        throw new EncodeError("archive manifest: an evidence record's CID isn't raw");
-      if (previous !== undefined && compareRefs(previous, ref) >= 0)
-        throw new EncodeError("archive manifest: evidence not in ascending order");
+    writeEvidence(w, value);
+  },
+  read(r) {
+    const { manifest, objectsAt } = readBody(r);
+    const evidence = readEvidence(r);
+    if (manifest.objects.length === 0 && manifest.links.length === 0 && evidence.length === 0)
+      throw new DecodeError("non-canonical", objectsAt);
+    return { ...manifest, evidence };
+  },
+};
+
+const manifestV3: Codec<ArchiveManifestV3> = {
+  minLength: 8 + 20 + 8 + 4 + 4 + 4 + 4,
+  write(w, value) {
+    const objects = list<ArchivedObject>(value.objects, MAX_MANIFEST_OBJECTS, "objects");
+    const links = list<ManifestLink>(value.links, MAX_MANIFEST_LINKS, "links");
+    const evidence = list<EvidenceRef>(value.evidence, MAX_MANIFEST_EVIDENCE, "evidence");
+    const runs = list<RunRef>(value.runs, MAX_MANIFEST_RUNS, "runs");
+    if (objects.length === 0 && links.length === 0 && evidence.length === 0 && runs.length === 0)
+      throw new EncodeError("archive manifest: names nothing");
+    writeBody(w, value);
+    writeEvidence(w, value);
+    w.uint(4, runs.length);
+    let previous: RunRef | undefined;
+    for (const x of runs) {
+      const ref = { ...x, cid: Uint8Array.from(x.cid), contract: Uint8Array.from(x.contract) };
       address.write(w, ref.contract);
-      u64.write(w, ref.l2_block);
+      u64.write(w, ref.first);
+      if (!Number.isSafeInteger(ref.count) || !runSpan(ref.first, ref.count))
+        throw new EncodeError("archive manifest: a run's count");
+      w.uint(4, ref.count);
+      if (!framedCid(ref.cid, false)) throw new EncodeError("archive manifest: a run's CID");
+      if (previous !== undefined && compareRunRefs(previous, ref) >= 0)
+        throw new EncodeError("archive manifest: runs not in ascending order");
       cid36.write(w, ref.cid);
       id32.write(w, ref.transaction);
       previous = ref;
@@ -231,24 +332,32 @@ const manifestV2: Codec<ArchiveManifestV2> = {
   },
   read(r) {
     const { manifest, objectsAt } = readBody(r);
-    const evidence: EvidenceRef[] = [];
-    for (let i = 0, n = count(r, MAX_MANIFEST_EVIDENCE); i < n; i++) {
+    const evidence = readEvidence(r);
+    const runs: RunRef[] = [];
+    for (let i = 0, n = count(r, MAX_MANIFEST_RUNS); i < n; i++) {
       const at = r.offset;
       const contract = address.read(r);
-      const l2_block = u64.read(r);
+      const first = u64.read(r);
+      const countAt = r.offset;
+      const events = r.uint(4);
+      if (!runSpan(first, events)) throw new DecodeError("non-canonical", countAt);
       const cidAt = r.offset;
       const cid = cid36.read(r);
-      if (!framedCid(cid, true)) throw new DecodeError("non-canonical", cidAt);
-      const ref = { contract, l2_block, cid, transaction: id32.read(r) };
-      // The order is judged once the whole reference is read, at the reference's offset.
-      const before = evidence[i - 1];
-      if (before !== undefined && compareRefs(before, ref) >= 0)
+      if (!framedCid(cid, false)) throw new DecodeError("non-canonical", cidAt);
+      const ref = { contract, first, count: events, cid, transaction: id32.read(r) };
+      const before = runs[i - 1];
+      if (before !== undefined && compareRunRefs(before, ref) >= 0)
         throw new DecodeError("non-canonical", at);
-      evidence.push(ref);
+      runs.push(ref);
     }
-    if (manifest.objects.length === 0 && manifest.links.length === 0 && evidence.length === 0)
+    if (
+      manifest.objects.length === 0 &&
+      manifest.links.length === 0 &&
+      evidence.length === 0 &&
+      runs.length === 0
+    )
       throw new DecodeError("non-canonical", objectsAt);
-    return { ...manifest, evidence };
+    return { ...manifest, evidence, runs };
   },
 };
 
@@ -256,6 +365,7 @@ const manifestV2: Codec<ArchiveManifestV2> = {
 export const ARCHIVE_MANIFEST = recordType(RECORD_TYPES.archiveManifest, {
   1: manifestV1,
   2: manifestV2,
+  3: manifestV3,
 });
 
 /**
@@ -349,19 +459,92 @@ export const CONTRACT_EVENT_EVIDENCE = recordType(RECORD_TYPES.contractEventEvid
   1: evidenceV1,
 });
 
-const SCHEMA = new RecordSchema([ARCHIVE_MANIFEST, CONTRACT_EVENT_EVIDENCE]);
+/**
+ * A contract-event run's event (docs/spec/archive.md, Contract-event run):
+ * the fields of its contract-event record that the run doesn't share or imply.
+ */
+export interface RunEvent {
+  readonly l2_block: bigint;
+  readonly l2_timestamp: bigint;
+  readonly topics: readonly Uint8Array[];
+  readonly data: Uint8Array;
+}
 
-/** Encodes a manifest of version 1 (the default) or 2. */
+/**
+ * Contract-event run, version 1 (docs/spec/archive.md, Contract-event run):
+ * one contract's consecutive events, event `i` at index `first + i`.
+ */
+export interface ContractEventRun {
+  readonly l2_chain_id: bigint;
+  readonly contract: Uint8Array;
+  readonly first: bigint;
+  readonly events: readonly RunEvent[];
+}
+
+const topic = bytesFixed(32);
+const eventData = bytesVar(MAX_EVENT_DATA);
+
+// Only the form is judged here: that the events are the contract's history is
+// the replay's against evidence, and that each is one of its contract's is the
+// event check's (T-53).
+const runV1: Codec<ContractEventRun> = {
+  minLength: 8 + 20 + 8 + 4,
+  write(w, value) {
+    u64.write(w, value.l2_chain_id);
+    address.write(w, value.contract);
+    u64.write(w, value.first);
+    const events = list<RunEvent>(value.events, MAX_RUN_EVENTS, "events");
+    if (!runSpan(value.first, events.length))
+      throw new EncodeError("contract-event run: no events, or an index past 2^64 - 1");
+    w.uint(4, events.length);
+    for (const e of events) {
+      u64.write(w, e.l2_block);
+      u64.write(w, e.l2_timestamp);
+      const topics = list<Uint8Array>(e.topics, MAX_EVENT_TOPICS, "topics");
+      w.uint(4, topics.length);
+      for (const t of topics) topic.write(w, t);
+      eventData.write(w, e.data);
+    }
+  },
+  read(r) {
+    const l2_chain_id = u64.read(r);
+    const contract = address.read(r);
+    const first = u64.read(r);
+    const eventsAt = r.offset;
+    const n = count(r, MAX_RUN_EVENTS);
+    if (!runSpan(first, n)) throw new DecodeError("non-canonical", eventsAt);
+    const events: RunEvent[] = [];
+    for (let i = 0; i < n; i++) {
+      const l2_block = u64.read(r);
+      const l2_timestamp = u64.read(r);
+      const topics: Uint8Array[] = [];
+      for (let j = 0, k = count(r, MAX_EVENT_TOPICS); j < k; j++) topics.push(topic.read(r));
+      events.push({ l2_block, l2_timestamp, topics, data: eventData.read(r) });
+    }
+    return { l2_chain_id, contract, first, events };
+  },
+};
+
+/** Record type `0x0026`. No profile pins it: the manifest version that lists it fixes its version. */
+export const CONTRACT_EVENT_RUN = recordType(RECORD_TYPES.contractEventRun, { 1: runV1 });
+
+const SCHEMA = new RecordSchema([ARCHIVE_MANIFEST, CONTRACT_EVENT_EVIDENCE, CONTRACT_EVENT_RUN]);
+
+/** Encodes a manifest of version 1 (the default), 2 or 3. */
 export function encodeArchiveManifest(manifest: ArchiveManifest, version?: 1): Uint8Array;
 export function encodeArchiveManifest(manifest: ArchiveManifestV2, version: 2): Uint8Array;
+export function encodeArchiveManifest(manifest: ArchiveManifestV3, version: 3): Uint8Array;
 export function encodeArchiveManifest(
-  manifest: ArchiveManifest | ArchiveManifestV2,
-  version: 1 | 2 = 1,
+  manifest: ArchiveManifest | ArchiveManifestV2 | ArchiveManifestV3,
+  version: 1 | 2 | 3 = 1,
 ): Uint8Array {
+  if (version === 3) return SCHEMA.encode(ARCHIVE_MANIFEST, 3, manifest as ArchiveManifestV3);
+  // A later version's value is an earlier one's to the type checker: encoding
+  // it under the earlier version would drop its lists without a word.
+  if (Object.hasOwn(manifest, "runs"))
+    throw new EncodeError("archive manifest: runs need version 3");
   if (version === 2) return SCHEMA.encode(ARCHIVE_MANIFEST, 2, manifest as ArchiveManifestV2);
-  if (version !== 1) throw new EncodeError("archive manifest: version 1 or 2");
-  // A version-2 value is a version-1 one to the type checker: encoding it as
-  // version 1 would drop its evidence without a word.
+  if (version !== 1) throw new EncodeError("archive manifest: version 1, 2 or 3");
   if (Object.hasOwn(manifest, "evidence"))
     throw new EncodeError("archive manifest: evidence needs version 2");
   return SCHEMA.encode(ARCHIVE_MANIFEST, 1, manifest);
@@ -370,11 +553,47 @@ export function encodeArchiveManifest(
 /** Strictly decodes a manifest under the version its locator fixes. */
 export function decodeArchiveManifest(bytes: Uint8Array, pinned: 1): ArchiveManifest;
 export function decodeArchiveManifest(bytes: Uint8Array, pinned: 2): ArchiveManifestV2;
+export function decodeArchiveManifest(bytes: Uint8Array, pinned: 3): ArchiveManifestV3;
 export function decodeArchiveManifest(
   bytes: Uint8Array,
-  pinned: 1 | 2,
-): ArchiveManifest | ArchiveManifestV2 {
+  pinned: 1 | 2 | 3,
+): ArchiveManifest | ArchiveManifestV2 | ArchiveManifestV3 {
   return SCHEMA.decode(ARCHIVE_MANIFEST, bytes, pinned).value;
+}
+
+/** Encodes a run, refusing one over `MAX_CONTRACT_EVENT_RUN` bytes, which no reader reads. */
+export function encodeContractEventRun(run: ContractEventRun): Uint8Array {
+  const bytes = SCHEMA.encode(CONTRACT_EVENT_RUN, 1, run);
+  if (bytes.length > MAX_CONTRACT_EVENT_RUN)
+    throw new EncodeError(`contract-event run: ${bytes.length} bytes is over 2^24`);
+  return bytes;
+}
+
+/**
+ * Strictly decodes a run under the version its manifest fixes (version 3
+ * lists version 1). `MAX_CONTRACT_EVENT_RUN` is the reader's bound (Archived
+ * objects), applied before the bytes are held, and the encoder's rule, never
+ * a decoding one: a longer run decodes here but no reader reads one.
+ */
+export function decodeContractEventRun(bytes: Uint8Array, pinned: 1): ContractEventRun {
+  return SCHEMA.decode(CONTRACT_EVENT_RUN, bytes, pinned).value;
+}
+
+/**
+ * A run's events as contract-event records (0x0008), event `i` at index
+ * `first + i`, each to be framed under the contract-event version its
+ * election's profile pins and judged as a boarded record is: the layout is
+ * one for versions 1 to 9 (docs/spec/contracts.md, Layout (versions 1 to 9)).
+ */
+export function contractEventRunRecords(run: ContractEventRun): ContractEventRecord[] {
+  return run.events.map((e, i) => ({
+    contract: run.contract,
+    n: run.first + BigInt(i),
+    l2_block: e.l2_block,
+    l2_timestamp: e.l2_timestamp,
+    topics: e.topics,
+    data: e.data,
+  }));
 }
 
 export function encodeContractEventEvidence(evidence: ContractEventEvidence): Uint8Array {
@@ -386,11 +605,14 @@ export function decodeContractEventEvidence(bytes: Uint8Array, pinned: 1): Contr
   return SCHEMA.decode(CONTRACT_EVENT_EVIDENCE, bytes, pinned).value;
 }
 
-/** What a locator names (docs/spec/archive.md, Locator). */
-export type LocatorRead =
+/** The locator versions this package reads. */
+export type LocatorVersion = 1 | 2 | 3;
+
+/** What a locator names (docs/spec/archive.md, Locator), to a reader that knows the versions `V`. */
+export type LocatorRead<V extends LocatorVersion = LocatorVersion> =
   | {
       readonly kind: "manifest";
-      readonly version: 1 | 2;
+      readonly version: V;
       readonly manifest: Uint8Array;
       readonly transaction: Uint8Array;
     }
@@ -401,9 +623,10 @@ export type LocatorRead =
 export function encodeArchiveLocator(
   manifest: Uint8Array,
   transaction: Uint8Array,
-  version: 1 | 2 = 1,
+  version: LocatorVersion = 1,
 ): Uint8Array {
-  if (version !== 1 && version !== 2) throw new EncodeError("locator: version 1 or 2");
+  if (version !== 1 && version !== 2 && version !== 3)
+    throw new EncodeError("locator: version 1, 2 or 3");
   const cid = Uint8Array.from(manifest);
   if (!framedCid(cid, true)) throw new EncodeError("locator: the manifest's CID isn't raw");
   const w = new Writer();
@@ -420,26 +643,25 @@ export function encodeArchiveLocator(
  * reader doesn't know is `locator-version`, reported and never guessed
  * (T-31). None of these fails anything (docs/spec/archive.md, The chain from
  * a locator). `known` is the versions the caller reads chains of: version 1
- * alone by default, so a reader that can't walk a version-2 chain reports its
+ * alone by default, so a reader that can't walk a later chain reports its
  * locator as one it doesn't know.
  */
-export function decodeArchiveLocator(
+export function decodeArchiveLocator<V extends LocatorVersion = 1>(
   locator: Uint8Array,
-  known: readonly (1 | 2)[] = [1],
-): LocatorRead {
+  known: readonly V[] = [1 as V],
+): LocatorRead<V> {
   if (!(locator instanceof Uint8Array)) throw new TypeError("locator: expected bytes");
-  if (!Array.isArray(known) || known.some((v) => v !== 1 && v !== 2))
-    throw new TypeError("locator: known versions are 1 and 2");
+  if (!Array.isArray(known) || known.some((v) => v !== 1 && v !== 2 && v !== 3))
+    throw new TypeError("locator: known versions are 1, 2 and 3");
   const b = Uint8Array.from(locator);
   if (b.length < 3 || b.length > 128) return { kind: "locator-framing" };
   const version = ((b[0] as number) << 8) | (b[1] as number);
   if (version === 0) return { kind: "locator-framing" };
-  if ((version !== 1 && version !== 2) || !known.includes(version))
-    return { kind: "locator-version", version };
+  if (!(known as readonly number[]).includes(version)) return { kind: "locator-version", version };
   if (b.length !== LOCATOR_V1_LENGTH) return { kind: "locator-length" };
   const manifest = b.slice(2, 38);
   if (!framedCid(manifest, true)) return { kind: "locator-cid" };
-  return { kind: "manifest", version, manifest, transaction: b.slice(38) };
+  return { kind: "manifest", version: version as V, manifest, transaction: b.slice(38) };
 }
 
 /** What `readArchivedObject` found in a transaction's data. */

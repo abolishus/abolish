@@ -152,8 +152,9 @@ export async function l2RecordedAvailability(
  * The node is trusted for which logs exist, as for the seat's own slot: one
  * that hides attestations makes the seat find the election unavailable and
  * never sum (liveness), and one that shows attestations the board never
- * recorded, each signed by a registered seat, can make it sum over an
- * election that failed (T-53). Checks the node's chain once, here
+ * recorded, or recorded after `t_A'` under an earlier block's time, can
+ * make it sum over an election that failed, given `k` seats' signed
+ * attestations (T-53). Checks the node's chain once, here
  * (`RecordedError`); each read throws `RpcError` when the node's answer
  * can't be read or isn't in block order.
  */

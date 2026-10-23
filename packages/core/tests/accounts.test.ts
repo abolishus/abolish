@@ -208,6 +208,8 @@ describe("schema", () => {
       ["account_profile_polls", "DELETE,INSERT,SELECT"],
       // Plus UPDATE of the name, never the handle (profiles.test.ts).
       ["account_profiles", "DELETE,INSERT,SELECT"],
+      // A moved endpoint is deleted and inserted again (account-push.test.ts).
+      ["account_push_subscriptions", "DELETE,INSERT,SELECT"],
       ["account_reaction_hours", "DELETE,INSERT,SELECT,UPDATE"],
       // Set or taken back, never changed in place (reactions.test.ts).
       ["account_reactions", "DELETE,INSERT,SELECT"],

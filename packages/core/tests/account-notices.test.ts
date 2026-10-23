@@ -24,6 +24,8 @@ import {
   NOTICE_TRIES,
   NOTICE_WAIT_SECONDS,
   parseKeyring,
+  type PushOutcome,
+  type PushSender,
   queueNotice,
   REMOVAL_REASONS,
   renderEmail,
@@ -31,6 +33,7 @@ import {
   RESTORE_REASONS,
   sendNotices,
   storeDefinition,
+  subscribePush,
   verifyEmailCode,
 } from "../src/index.ts";
 import { addModerators, newAccount, type TestDb, testDb, typical } from "./db.ts";
@@ -363,6 +366,8 @@ describe("sending", () => {
       sent: 0,
       retrying: 0,
       dropped: 0,
+      pushed: 0,
+      pushFailed: 0,
     });
     expect(messages).toEqual([]);
     expect(await sendNotices(app, { sender, keys: KEYS, now: NOW })).toMatchObject({ sent: 1 });
@@ -392,6 +397,8 @@ describe("sending", () => {
         sent: 0,
         retrying: 1,
         dropped: 0,
+        pushed: 0,
+        pushFailed: 0,
       });
       const next = new Date(now.getTime() + NOTICE_WAIT_SECONDS[t - 1]! * SECOND);
       expect(await noticeOf(author)).toEqual({ notBefore: next, tries: t });
@@ -405,13 +412,17 @@ describe("sending", () => {
       sent: 0,
       retrying: 0,
       dropped: 1,
+      pushed: 0,
+      pushFailed: 0,
     });
     expect(messages).toHaveLength(NOTICE_TRIES);
     expect(await noticeOf(author)).toBeUndefined();
   });
 
-  test("each lease outlasts a batch at the sender's timeout", () => {
-    for (const wait of NOTICE_WAIT_SECONDS) expect(wait).toBeGreaterThan(MAX_NOTICE_BATCH * 10);
+  test("each lease outlasts a batch at the senders' timeouts", () => {
+    // Each notice's e-mail (10 s) after its account's pushes, side by side (5 s).
+    for (const wait of NOTICE_WAIT_SECONDS)
+      expect(wait).toBeGreaterThan(MAX_NOTICE_BATCH * (10 + 5));
   });
 
   test("a final try that never reported back is dropped once its lease ends", async () => {
@@ -422,11 +433,15 @@ describe("sending", () => {
     const early = new Date(NOW.getTime() - SECOND);
     expect(await sendNotices(app, { sender, keys: KEYS, now: early })).toMatchObject({
       dropped: 0,
+      pushed: 0,
+      pushFailed: 0,
     });
     expect(await sendNotices(app, { sender, keys: KEYS, now: NOW })).toEqual({
       sent: 0,
       retrying: 0,
       dropped: 1,
+      pushed: 0,
+      pushFailed: 0,
     });
     expect(messages).toEqual([]);
   });
@@ -463,6 +478,8 @@ describe("sending", () => {
       sent: 0,
       retrying: 1,
       dropped: 0,
+      pushed: 0,
+      pushFailed: 0,
     });
     expect(messages).toEqual([]);
   });
@@ -567,5 +584,159 @@ describe("rendering", () => {
       expect(words).not.toContain(word);
     expect(text).toContain("Sign in to Abolish");
     expect(text).toContain("whatever your notification settings");
+  });
+});
+
+describe("web push", () => {
+  let n = 0;
+  const endpoint = () => `https://updates.push.services.mozilla.com/wpush/v2/n${++n}`;
+
+  /** A push sender that records each endpoint and answers from `outcomes`, then `sent`. */
+  function pusher(outcomes: Record<string, PushOutcome | Error> = {}) {
+    const pushed: { endpoint: string; now: Date }[] = [];
+    const push: PushSender = {
+      send: async (endpoint, now) => {
+        pushed.push({ endpoint, now });
+        const o = outcomes[endpoint] ?? "sent";
+        if (o instanceof Error) throw o;
+        return o;
+      },
+    };
+    return { pushed, push };
+  }
+
+  // Postgres' C collation and JavaScript agree on these ASCII endpoints.
+  const byCode = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+  const subscriptions = async (account: string) =>
+    (
+      await db.admin`
+        SELECT endpoint FROM account_push_subscriptions WHERE user_id = ${account}
+        ORDER BY endpoint COLLATE "C"`
+    ).map((r) => r["endpoint"] as string);
+
+  test("a notice's first try wakes every browser the account subscribed, beside the e-mail", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const [e1, e2] = [endpoint(), endpoint()];
+    await subscribePush(app, author, e1, NOW);
+    await subscribePush(app, author, e2, NOW);
+    const other = await newAccount(app);
+    await subscribePush(app, other, endpoint(), NOW);
+    await insertNotice(author, NOW);
+    const { messages, sender } = recorder();
+    const { pushed, push } = pusher();
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: NOW })).toEqual({
+      sent: 1,
+      retrying: 0,
+      dropped: 0,
+      pushed: 2,
+      pushFailed: 0,
+    });
+    expect(messages).toEqual([{ kind: "notice", to: address }]);
+    expect(pushed.map((p) => p.endpoint).sort(byCode)).toEqual([e1, e2].sort(byCode));
+    expect(pushed.every((p) => p.now === NOW)).toBe(true);
+  });
+
+  test("an account with no verified address is still pushed to, once", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const e = endpoint();
+    await subscribePush(app, author, e, NOW);
+    await insertNotice(author, NOW);
+    const { messages, sender } = recorder();
+    const { pushed, push } = pusher();
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: NOW })).toEqual({
+      sent: 0,
+      retrying: 0,
+      dropped: 1,
+      pushed: 1,
+      pushFailed: 0,
+    });
+    expect(messages).toEqual([]);
+    expect(pushed.map((p) => p.endpoint)).toEqual([e]);
+  });
+
+  test("a refused e-mail's later tries push nothing again, and a renewal pushes once more", async () => {
+    await clear();
+    const author = await newAccount(app);
+    await verified(author);
+    const e = endpoint();
+    await subscribePush(app, author, e, NOW);
+    await insertNotice(author, NOW);
+    const { sender } = recorder("unavailable", "unavailable");
+    const { pushed, push } = pusher();
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: NOW })).toMatchObject({
+      retrying: 1,
+      pushed: 1,
+    });
+    const next = new Date(NOW.getTime() + NOTICE_WAIT_SECONDS[0] * SECOND);
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: next })).toMatchObject({
+      retrying: 1,
+      pushed: 0,
+    });
+    expect(pushed).toHaveLength(1);
+    // A decision renews the notice, its tries reset: the next try is a first one.
+    await queueNotice(drizzle({ client: app }), author, NOW);
+    const due = (await noticeOf(author))!.notBefore;
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: due })).toMatchObject({
+      sent: 1,
+      pushed: 1,
+    });
+    expect(pushed).toHaveLength(2);
+  });
+
+  test("a subscription its push service says has ended is deleted; one that fails is kept", async () => {
+    await clear();
+    const author = await newAccount(app);
+    await verified(author);
+    const [gone, gone2, failing, throwing, fine] = Array.from({ length: 5 }, endpoint);
+    for (const e of [gone, gone2, failing, throwing, fine])
+      await subscribePush(app, author, e!, NOW);
+    await insertNotice(author, NOW);
+    const { messages, sender } = recorder();
+    const { push } = pusher({
+      [gone!]: "gone",
+      [gone2!]: "gone",
+      [failing!]: "unavailable",
+      [throwing!]: new Error("boom"),
+    });
+    expect(await sendNotices(app, { sender, keys: KEYS, push, now: NOW })).toEqual({
+      sent: 1,
+      retrying: 0,
+      dropped: 0,
+      pushed: 1,
+      pushFailed: 2,
+    });
+    // The e-mail went whatever the pushes did.
+    expect(messages).toHaveLength(1);
+    expect(await subscriptions(author)).toEqual([failing!, throwing!, fine!].sort(byCode));
+  });
+
+  test("an ended subscription moved to another account meanwhile stays with it", async () => {
+    await clear();
+    const [author, other] = [await newAccount(app), await newAccount(app)];
+    const e = endpoint();
+    await subscribePush(app, author, e, NOW);
+    await insertNotice(author, NOW);
+    const push: PushSender = {
+      send: async () => {
+        await subscribePush(app2, other, e, NOW);
+        return "gone";
+      },
+    };
+    await sendNotices(app, { sender: recorder().sender, keys: KEYS, push, now: NOW });
+    expect(await subscriptions(other)).toEqual([e]);
+  });
+
+  test("without a push sender nothing is pushed and subscriptions stay", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const e = endpoint();
+    await subscribePush(app, author, e, NOW);
+    await insertNotice(author, NOW);
+    expect(await drain(recorder().sender)).toEqual({ sent: 0, retrying: 0, dropped: 1 });
+    expect(await subscriptions(author)).toEqual([e]);
   });
 });

@@ -159,7 +159,7 @@ export function FlyerSheet({ poll, asOf, code, url, title, paper, ink }: PollFly
       <ul
         aria-label={t("flyerTabs")}
         className={cn(
-          "m-0 grid shrink-0 list-none grid-cols-7 border-t-[0.25cqw] border-dashed border-zinc-500 p-0",
+          "m-0 grid shrink-0 list-none grid-cols-7 grid-rows-1 border-t-[0.25cqw] border-dashed border-zinc-500 p-0",
           SHEET[paper].tabs,
         )}
       >
@@ -168,7 +168,9 @@ export function FlyerSheet({ poll, asOf, code, url, title, paper, ink }: PollFly
             key={i}
             className="flex items-center justify-center border-zinc-500 not-last:border-e-[0.25cqw] not-last:border-dashed"
           >
-            <span className="text-[length:2cqw] leading-tight font-semibold [writing-mode:vertical-rl]">
+            {/* A host too long for the tab breaks onto another line rather than
+                running off its edge. */}
+            <span className="text-[length:2cqw] max-h-full leading-tight font-semibold wrap-anywhere [writing-mode:vertical-rl]">
               {host}/p/
               <br />
               {code}

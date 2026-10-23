@@ -1,5 +1,7 @@
 import { POLL_FAILURES } from "@abolishus/core/poll-failures";
 import { describe, expect, test } from "vite-plus/test";
+import type { Message } from "@abolishus/ui";
+
 import { catalogs, POLL_FAILURE_MESSAGES, tierMessage } from "../src/messages.ts";
 
 // A failed poll's reason in plain words (ADR 0032, rule 14; P2-22 part
@@ -65,5 +67,37 @@ describe("tierMessage", () => {
 
   test("names no tier a definition can't hold", () => {
     for (const tier of [-1, 3, 255, 0.5]) expect(tierMessage(tier, true)).toBeUndefined();
+  });
+});
+
+// The words in the voice the design sets ([[language]], Voice; P2-28 part
+// 3b-3): plain and calm, so no exclamation marks, hype or emoji, and text
+// that reads aloud as it shows.
+describe("every catalog's words", () => {
+  const words = (message: Message): string[] =>
+    typeof message === "string"
+      ? [message]
+      : Object.values(message).filter((form): form is string => typeof form === "string");
+  const all = Object.entries(catalogs).flatMap(([locale, catalog]) =>
+    Object.entries(catalog).flatMap(([key, message]) =>
+      words(message).map((text) => ({ at: `${locale} ${key}`, text })),
+    ),
+  );
+
+  test("hold no exclamation mark and no emoji", () => {
+    const loud = all.filter(({ text }) => /!|\p{Extended_Pictographic}/u.test(text));
+    expect(loud.map((w) => w.at)).toEqual([]);
+  });
+
+  test("hold no stray spacing and no three dots for an ellipsis, which a screen reader reads as dots", () => {
+    const untidy = all.filter(({ text }) => /^\s|\s$| {2}|\.\.\./.test(text));
+    expect(untidy.map((w) => w.at)).toEqual([]);
+  });
+
+  test("hold braces only as whole placeholders", () => {
+    const stray = all.filter(({ text }) =>
+      /[{}]/.test(text.replace(/\{[A-Za-z][A-Za-z0-9_]*\}/g, "")),
+    );
+    expect(stray.map((w) => w.at)).toEqual([]);
   });
 });

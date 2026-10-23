@@ -42,7 +42,9 @@ export function ScrollScene({ label, steps, graphic, side = "end", className }: 
     >
       <div
         className={cn(
-          "sticky top-0 z-0 flex h-[55svh] items-center justify-center bg-background lg:h-svh",
+          // A floor, not a height: text the reader has enlarged grows the
+          // graphic past it rather than spilling over the page (1.4.4).
+          "sticky top-0 z-0 flex min-h-[55svh] items-center justify-center bg-background lg:min-h-svh",
           side === "end" ? "lg:order-last" : "lg:order-first",
         )}
       >

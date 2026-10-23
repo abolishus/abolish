@@ -3,7 +3,22 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { boardAbi } from "@abolishus/contracts/abi";
 import { decodeSharePosting } from "@abolishus/crypto";
-import { POSTING_GAS_LIMIT_MAX, postingCalldataLength, postingGasLimit } from "@abolishus/core";
+import {
+  BallotAdmissions,
+  parsePostingIndex,
+  parsePostingOutcome,
+  POSTING_GAS_LIMIT_MAX,
+  postingCalldataLength,
+  postingGasLimit,
+  PostgresPostingLedger,
+  postingKey,
+  postingKeys,
+  postingPairValue,
+  PostingWorker,
+} from "@abolishus/core";
+import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { Redis } from "ioredis";
+import { randomBytes } from "node:crypto";
 import {
   type Address,
   bytesToHex,
@@ -24,7 +39,13 @@ import {
 } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { PostingChainError, ViemPostingChain } from "../src/index.ts";
+import {
+  checkPostingDeployment,
+  type LogLine,
+  PostingChainError,
+  startPostingRunner,
+  ViemPostingChain,
+} from "../src/index.ts";
 
 // The posting relay's chain adapter against a real chain (P2-8 part
 // 2b-2b-2b-2b-1; docs/spec/posting-relay.md, Sending, In flight and
@@ -88,6 +109,20 @@ function freshPosting(): Uint8Array {
   return p;
 }
 const BALLOT = Uint8Array.from({ length: 77 }, (_, i) => i);
+/** A panel the verifier's vectors pin, for the admission the worker judges by. */
+const PANEL = (() => {
+  const file = JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/verifier-ballots.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { panels: Record<string, { threshold: string; keys: string[] }> };
+  const p = file.panels["panel-4"] as { threshold: string; keys: string[] };
+  return {
+    threshold: Number(p.threshold),
+    keys: p.keys.map((k) => Uint8Array.from(Buffer.from(k, "hex"))),
+  };
+})();
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -572,6 +607,167 @@ describe("the posting's event", () => {
   });
 });
 
+/** Code that answers every call with `word`, an address as a 32-byte word. */
+const answering = (word: Address) =>
+  `0x7f${word.slice(2).toLowerCase().padStart(64, "0")}5f5260205ff3` as Hex;
+
+describe("the startup check", () => {
+  /** A board naming a registry that names the board back, as a deployment's pair. */
+  async function deployment() {
+    const registry = getAddress(toHex(0xe1e0000 + ++boards, { size: 20 }));
+    const { address, fromBlock } = await board(answering(registry));
+    await rpc("anvil_setCode", [registry, answering(address)]);
+    await mine(FINALITY_DEPTH + 1);
+    const key = await newKey();
+    const c = new ViemPostingChain({
+      client,
+      chainId: BigInt(chainId),
+      board: address,
+      fromBlock,
+      key,
+    });
+    return {
+      registry,
+      key,
+      deployment: { chainId: BigInt(chainId), board: address, fromBlock, address: c.address },
+    };
+  }
+  const refusal = (deployment: Parameters<typeof checkPostingDeployment>[1]) =>
+    checkPostingDeployment(client, deployment).then(
+      () => "accepted",
+      (e: unknown) => (e as Error).message,
+    );
+
+  test("passes a board whose election registry names it back, and a key with no code", async () => {
+    const { deployment: d } = await deployment();
+    await expect(checkPostingDeployment(client, d)).resolves.toBeUndefined();
+  });
+
+  test("refuses another chain, a deployment block past the finalized head, and an address that isn't a board", async () => {
+    const { deployment: d } = await deployment();
+    expect(await refusal({ ...d, chainId: d.chainId + 1n })).toBe(
+      "the L2 node is on another chain",
+    );
+    const finalized = (await client.getBlock({ blockTag: "finalized" })).number;
+    expect(await refusal({ ...d, fromBlock: finalized + 1n })).toBe(
+      "the board's deployment block is past the finalized head",
+    );
+    // The stand-in board of the tests above answers nothing.
+    const { address: silent } = await board();
+    await mine(FINALITY_DEPTH + 1);
+    expect(await refusal({ ...d, board: silent })).toBe("the address isn't a board");
+  });
+
+  test("refuses a board whose registry isn't one, or names another board", async () => {
+    const { registry, deployment: d } = await deployment();
+    await rpc("anvil_setCode", [registry, "0x00"]);
+    await mine(FINALITY_DEPTH + 1);
+    expect(await refusal(d)).toBe("the address isn't a board's election registry");
+    await rpc("anvil_setCode", [registry, answering(accounts[0] as Address)]);
+    await mine(FINALITY_DEPTH + 1);
+    expect(await refusal(d)).toBe("the board's election registry names another board");
+  });
+
+  test("reads the registry's answer at the finalized head, not the latest", async () => {
+    const { registry, deployment: d } = await deployment();
+    await rpc("anvil_setCode", [registry, answering(accounts[0] as Address)]);
+    await mine(1);
+    // The change isn't final yet.
+    await expect(checkPostingDeployment(client, d)).resolves.toBeUndefined();
+  });
+
+  test("refuses a posting key whose account holds code (an EIP-7702 delegation, say)", async () => {
+    const { deployment: d } = await deployment();
+    await rpc("anvil_setCode", [d.address, `0xef0100${(accounts[0] as Address).slice(2)}`]);
+    await mine(1);
+    expect(await refusal(d)).toBe("the posting key's account holds code");
+  });
+
+  test("the finalized head is the node's", async () => {
+    const { chain: c } = await adapter();
+    const finalized = await client.getBlock({ blockTag: "finalized" });
+    expect(await c.finalized()).toEqual({
+      number: finalized.number,
+      timestamp: finalized.timestamp,
+    });
+  });
+});
+
+describe("the posting worker's deployment", () => {
+  // As posting-main.ts composes it: the queue's worker and the ledger over the
+  // adapter, run by the loop, against Postgres as abolish_app and the relay's
+  // store under a prefix of this run's.
+  const redisUrl = process.env["REDIS_URL"];
+  let db: TestDb;
+  let redis: Redis;
+  const prefix = `abolish-test-${randomBytes(6).toString("hex")}`;
+  beforeAll(async () => {
+    if (!redisUrl) throw new Error("REDIS_URL is not set");
+    db = await testDb();
+    redis = new Redis(redisUrl, { maxRetriesPerRequest: 1 });
+  });
+  afterAll(async () => {
+    const keys = await redis.keys(`${prefix}:*`);
+    if (keys.length > 0) await redis.del(...keys);
+    await redis.quit();
+    await db.close();
+  });
+
+  test("ticks the queue against the node, answering its pairs and keeping the route's index, and tends and prunes without a failure", async () => {
+    const { chain: c } = await adapter();
+    const sql = await db.as("abolish_app");
+    const now = () => Math.floor(Date.now() / 1000);
+    const ledger = new PostgresPostingLedger({
+      sql,
+      chain: c,
+      budget: 10n ** 16n,
+      feeCap: CAP,
+      now,
+    });
+    const keys = postingKeys(prefix);
+    // Bytes no decoder takes: answered `malformed` before any node call.
+    const posting = Uint8Array.from(randomBytes(200));
+    await redis.hset(keys.queue, postingKey(posting), postingPairValue(posting, BALLOT));
+    await mine(1);
+    const lines: LogLine[] = [];
+    const runner = startPostingRunner({
+      worker: new PostingWorker({
+        sql,
+        redis,
+        chain: c,
+        ledger,
+        admissions: new BallotAdmissions({
+          panels: [PANEL],
+          clock: { epoch: 0n, period: 3_600n },
+        }),
+        now,
+        prefix,
+      }),
+      ledger,
+      chain: c,
+      log: (line) => lines.push(line),
+      tickMs: 20,
+      pruneEveryMs: 20,
+    });
+    const end = Date.now() + 10_000;
+    while ((await redis.get(keys.index)) === null || (await redis.hlen(keys.queue)) > 0) {
+      if (Date.now() > end) throw new Error("timed out");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await runner.close();
+    const head = await client.getBlock({ blockTag: "latest" });
+    expect(parsePostingIndex(await redis.get(keys.index))?.l2Time).toBe(head.timestamp);
+    expect(parsePostingOutcome(await redis.get(keys.outcome(postingKey(posting))))).toEqual({
+      sent: false,
+      code: "malformed",
+    });
+    expect(lines.filter((l) => "outcome" in l)).toEqual([]);
+    expect(lines).toContainEqual(
+      expect.objectContaining({ queue: "{posting}", step: "tick", kept: 0 }),
+    );
+  }, 30_000);
+});
+
 describe("errors", () => {
   test("name the step and never the node's URL", async () => {
     const port = await freePort();
@@ -589,6 +785,7 @@ describe("errors", () => {
     });
     const calls: (() => Promise<unknown>)[] = [
       () => c.latest(),
+      () => c.finalized(),
       () => c.simulate(freshPosting(), BALLOT),
       () => c.nonce(),
       () => c.costs(freshPosting(), BALLOT, 100_000n),

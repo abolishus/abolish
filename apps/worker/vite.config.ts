@@ -5,9 +5,14 @@ export default defineConfig({
   // dependency inlined, so the image holds Node and dist/ and nothing from
   // node_modules (Dockerfile). The worker never migrates, so core's
   // migrations stay out. `creation-key` is the poll-creation runbook's
-  // commands, run in the creation worker's service.
+  // commands, run in the creation worker's service; `posting` is the posting
+  // worker, a deployment of its own (docs/runbooks/posting-relay.md).
   pack: {
-    entry: { main: "src/main.ts", "creation-key": "src/creation-key-cli.ts" },
+    entry: {
+      main: "src/main.ts",
+      "creation-key": "src/creation-key-cli.ts",
+      posting: "src/posting-main.ts",
+    },
     platform: "node",
     dts: false,
     deps: { alwaysBundle: [/.*/] },

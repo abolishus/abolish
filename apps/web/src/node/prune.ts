@@ -10,13 +10,17 @@
 // keyrings' current keys: every phone-hash chain extended, every e-mail
 // address re-hashed and re-sealed, so a rotation is done within one tick of
 // the deploy that makes a new key current (packages/core, rotatePhoneHashes
-// and rotateEmailKeys; docs/runbooks/account-keys.md; T-73).
+// and rotateEmailKeys; docs/runbooks/account-keys.md; T-73). With the e-mail
+// service, it then sends the moderation notices due (packages/core,
+// sendNotices), after the rotation so every box opens under the keys held.
 // Every instance runs it; the deletes and rewrites are idempotent, so two at
 // once only repeat each other.
 
 import {
   type EmailKeys,
+  type EmailSender,
   type Keyring,
+  MAX_NOTICE_BATCH,
   markDeadTier0Tokens,
   pruneAccountEmails,
   pruneAccountPhones,
@@ -24,11 +28,18 @@ import {
   pruneReactionHours,
   rotateEmailKeys,
   rotatePhoneHashes,
+  sendNotices,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
 
 /** How often the account tables are pruned. */
 export const PRUNE_EVERY_MS = 10 * 60 * 1000;
+/**
+ * The most notice batches one run sends, so a backlog drains at up to
+ * this many full batches a tick while a provider that hangs on every send
+ * holds the timer for a bounded time only.
+ */
+export const NOTICE_BATCHES = 10;
 
 export interface AccountPruneOptions {
   readonly sql: Sql;
@@ -38,6 +49,12 @@ export interface AccountPruneOptions {
   readonly phoneKeys?: Keyring;
   /** The e-mail keyrings, if the e-mail service is configured: its rows are rotated each run. */
   readonly emailKeys?: EmailKeys;
+  /**
+   * The provider's own sender, with `emailKeys`: the notices due are sent
+   * each run. Never a wrapper that answers `sent` for every message, or a
+   * refusal is never tried again.
+   */
+  readonly noticeSender?: EmailSender;
   readonly everyMs?: number;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
@@ -49,6 +66,7 @@ export function startAccountPrune({
   log,
   phoneKeys,
   emailKeys,
+  noticeSender,
   everyMs = PRUNE_EVERY_MS,
   now = () => new Date(),
 }: AccountPruneOptions): { stop(): Promise<void> } {
@@ -90,6 +108,10 @@ export function startAccountPrune({
             },
             () => log({ error: "EmailKeyRotationFailed" }),
           );
+        if (emailKeys !== undefined && noticeSender !== undefined)
+          await sendDueNotices(sql, emailKeys, noticeSender, now, log).catch(() =>
+            log({ error: "AccountNoticeSendFailed" }),
+          );
         await markDeadTier0Tokens(sql, at).catch(() => log({ error: "Tier0TokenDeadMarkFailed" }));
       } catch {
         log({ error: "AccountPruneFailed" });
@@ -108,4 +130,24 @@ export function startAccountPrune({
       await running;
     },
   };
+}
+
+/**
+ * Sends the notices due, batch after batch while each is full, up to
+ * `NOTICE_BATCHES`. Each batch reads the clock afresh, so its leases run
+ * from when it claims. A refusal is logged by kind only: the notice is
+ * tried again after its wait.
+ */
+async function sendDueNotices(
+  sql: Sql,
+  keys: EmailKeys,
+  sender: EmailSender,
+  now: () => Date,
+  log: AccountPruneOptions["log"],
+): Promise<void> {
+  for (let batch = 0; batch < NOTICE_BATCHES; batch++) {
+    const { sent, retrying, dropped } = await sendNotices(sql, { sender, keys, now: now() });
+    if (retrying > 0) log({ error: "AccountNoticeRefused" });
+    if (sent + retrying + dropped < MAX_NOTICE_BATCH) return;
+  }
 }

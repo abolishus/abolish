@@ -207,6 +207,7 @@ Changed or new, for a rolling definition:
 - **2.1:** the electorate mode decodes; well-formedness adds `rolling-class` (rolling only in an everyday poll) and `rolling-tier` (a rolling tier has groups and no regions or cells; at least one group; groups strictly ascending; no group in two tiers).
 - **2.3:** `profile-combination`: a rolling definition pins a ballot version that carries a step, and only it does.
 - **2.4:** the listed groups are replayed, as today, through the last accepted step, not only to `root_l2_block`; the opening root and count are checked in the rolling tree's layout; each step a ballot names is recomputed. The board must carry the groups' events through close, not only to `root_l2_block` ([[contracts]], Election registry, The shared event sequence; 4.4).
+  - Amended by P2-17 part 2b-2a (agent, owner may veto): "through close" is every L2 block whose timestamp is at or before `closes_at`, for the replay, its `group-history` reach and the board alike, since growth reads events after the last accepted step's boundary ([[contracts]], Election registry, The shared event sequence, Rolling tiers).
 - **2.8:** the partition is one cell per rolling tier.
 - **5.1:** the root is the verifier's step root for the ballot's step. Admission adds `root-step-range` (a step the poll doesn't accept), `root-step-stale` and `root-step-future` (the window), and, for direct submission, `root-step-mismatch`.
 - **5.2:** the rolling scope.

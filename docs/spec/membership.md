@@ -267,7 +267,7 @@ Under a rolling electorate, 2.4 and the checks below change as Rolling checks (b
 
 Because the scope binds the tier, a proof made for one tier never verifies as another, even if the two tiers have the same root: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8).
 
-**Rolling checks.** Under a rolling electorate a verifier replays each tier's listed groups through the last accepted step (Rolling tier tree), and fails the definition if a tier's `root` or `group_size` differs from the root or member count of its rolling tier tree at `root_l2_block` ([[verifier]] 2.4). A rolling tier with no live member at opening states `Z_32` and a count of 0; it holds no ballot until a step has a member. Then, for each ballot of tier `t`, it:
+**Rolling checks.** Under a rolling electorate a verifier replays each tier's listed groups through close, the L2 blocks whose timestamp is at or before `closes_at`, which hold every accepted step's events and every event Reported counts reads (Rolling tier tree; [[verifier]] 2.4), and fails the definition if a tier's `root` or `group_size` differs from the root or member count of its rolling tier tree at `root_l2_block` ([[verifier]] 2.4). A rolling tier with no live member at opening states `Z_32` and a count of 0; it holds no ballot until a step has a member. Then, for each ballot of tier `t`, it:
 
 1. Recomputes `ŝ_t` from the definition (Scope, Rolling scope).
 2. Takes `ρ = ρ_n`, the step root it computed itself for the step `n` the ballot names, once that step is accepted (`root-step-range`, [[ballot-validity]], Admission (version 5)); never a root from the ballot, a relay or a submitter. The window is checked with the L1 reference, after admission ([[revoting]], Admission, step 5).

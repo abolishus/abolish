@@ -12,11 +12,14 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-function releaseSteps(canvasElement: HTMLElement) {
-  const scene = within(canvasElement).getByRole("region", {
+function releaseScene(canvasElement: HTMLElement) {
+  return within(canvasElement).getByRole("region", {
     name: "Releases of the first question’s results",
   });
-  return [...scene.querySelectorAll<HTMLElement>(":scope > ol > li")];
+}
+
+function releaseSteps(canvasElement: HTMLElement) {
+  return [...releaseScene(canvasElement).querySelectorAll<HTMLElement>(":scope > ol > li")];
 }
 
 export const Default: Story = {
@@ -52,14 +55,20 @@ export const Default: Story = {
     await expect(canvas.getByText(/at least 50 new people have answered/)).toBeVisible();
 
     // Scrolling steps through the three real releases; nothing in between.
-    const graphic = () => canvas.getByTestId("release-graphic");
+    // The sticky graphic, which follows the reader's step (drawn from `lg`;
+    // below it each step's card draws its own).
+    const graphic = () =>
+      within(releaseScene(canvasElement).querySelector<HTMLElement>(":scope > div")!).getByTestId(
+        "release-graphic",
+      );
     await expect(graphic()).toHaveAttribute("data-release", "0");
     const steps = releaseSteps(canvasElement);
     await expect(steps).toHaveLength(3);
     steps[1]!.scrollIntoView({ block: "center" });
     await waitFor(() => expect(graphic()).toHaveAttribute("data-release", "1"));
+    // The release's chart as drawn at this width: in the sticky graphic, or in its own card.
     await expect(
-      within(graphic()).getByRole("figure", {
+      within(releaseScene(canvasElement)).getByRole("figure", {
         name: "Among 1,306 people with an account · 4 Nov, 12:00 UTC",
       }),
     ).toBeVisible();

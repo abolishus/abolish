@@ -423,6 +423,8 @@ export {
   BallotSealError,
   type CastBallotV3,
   type CastShare,
+  castPostingRecordV3,
+  type CastPostingRecordResult,
   castPostingSeatV3,
   type CastPostingResult,
   castReceiptSeatV3,

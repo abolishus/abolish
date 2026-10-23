@@ -329,6 +329,9 @@ export const esUS: Messages = {
   postingFailedTitle: "La publicación no se completó",
   postingFailed:
     "No se publicó ni se envió nada al tablero. Intenta publicar otra vez en un minuto, o escoge otra forma.",
+  postingRelayedTitle: "La publicación todavía no está en el tablero",
+  postingRelayed:
+    "Nuestro servicio de publicación, operado por quien administra la encuesta, recibió las partes que faltan con la clave de su sello exterior, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Intenta publicar otra vez en un minuto: se envían las mismas partes, nunca otras nuevas.",
   declinedTitle: "Esta boleta no contará",
   declined:
     "Este dispositivo borró las partes que guardó para los custodios que no tomaron la suya. Responde otra vez mientras la encuesta esté abierta: tu nueva boleta reemplaza a esta, y a tu boleta anterior, dondequiera que lleguen al tablero.",

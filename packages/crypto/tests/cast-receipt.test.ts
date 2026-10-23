@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
 import {
+  castPostingRecordV3,
   castPostingSeatV3,
   castReceiptSeatV3,
   decodeElectionDefinitionV5,
@@ -218,6 +219,26 @@ describe("castPostingSeatV3", () => {
       ok: false,
       code: "posting-seat",
     });
+  });
+
+  test("makes no posting record for a posting that fails, answering the check's code", () => {
+    const election = electionOf(c.election, c.registered);
+    const without = electionOf(
+      c.election,
+      c.registered.filter((seat) => seat !== c.seat),
+    );
+    const cases = [
+      [election, c.seat, posting()],
+      [election, other.seat, posting()],
+      [election, c.seat, posting(new Uint8Array(31))],
+      [without, c.seat, posting()],
+    ] as const;
+    for (const [e, seat, p] of cases) {
+      const verdict = castPostingSeatV3(e, hex(c.record), seat, p);
+      expect(verdict.ok).toBe(false);
+      expect(castPostingRecordV3(e, hex(c.record), seat, p)).toEqual(verdict);
+    }
+    expect(() => castPostingRecordV3(election, hex(c.record), 0, posting())).toThrow(RangeError);
   });
 
   test("throws for a seat outside the panel, a ballot of another election or bytes that aren't a version-3 ballot", () => {

@@ -11,7 +11,7 @@
 
 import type {
   BallotV2Code,
-  CastPostingResult,
+  CastPostingRecordResult,
   CastShare,
   ContractEventVersion,
   MembershipProverErrorCode,
@@ -435,19 +435,21 @@ export type IntakeResult =
   | { readonly ok: false; readonly problem: "no-election" };
 
 /**
- * Whether a kept share would deliver its seat if posted, or why not: no
- * poll held, or a ballot that isn't a cast of it or a seat outside its panel
- * (`unknown`), or a posting that fails the public check (`refused`, with
+ * Whether a kept share would deliver its seat if posted, with the posting
+ * record that would (`castPostingRecordV3`), or why not: no poll held, or a
+ * ballot that isn't a cast of it or a seat outside its panel (`unknown`),
+ * or a posting that fails the public check (`refused`, with
  * `castPostingSeatV3`'s code), which the client treats as unreadable and
- * never offers (T-18, T-15).
+ * never offers (T-18, T-15). The record holds the seat's `m_i`: the page
+ * zeroes its copy once done with it, and the worker its own once posted.
  */
 export type PostingResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly record: Uint8Array }
   | { readonly ok: false; readonly problem: "unknown" }
   | {
       readonly ok: false;
       readonly problem: "refused";
-      readonly code: Extract<CastPostingResult, { ok: false }>["code"];
+      readonly code: Extract<CastPostingRecordResult, { ok: false }>["code"];
     };
 
 /**

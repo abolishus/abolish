@@ -12,6 +12,7 @@
 import { decodeContractEvent, MAX_EVENT_DATA, PARAMETERS } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 
 import type { Deployment } from "../src/deployment.ts";
@@ -24,6 +25,7 @@ import {
   loadChainTime,
   loadElection,
   loadGroupRegistry,
+  loadPostings,
 } from "../src/load.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -1117,5 +1119,260 @@ describe("the chain's time", () => {
       ok: false,
       problem: "unreachable",
     });
+  });
+});
+
+// A posting's outcome is read from the board's own `SharePosted` events
+// ([[posting-relay]], Outcome): the logs are docs/spec/vectors/
+// contract-event-v9.json's, made by an independent generator, never by the
+// code under test.
+describe("the board's postings", () => {
+  interface VectorRecord {
+    readonly id: string;
+    readonly fields: {
+      readonly contract: string;
+      readonly topics: string[];
+      readonly data: string;
+    };
+    readonly event?: { readonly record?: string };
+  }
+  const vectors = JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/contract-event-v9.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { readonly records: readonly VectorRecord[]; readonly contracts: Record<string, string> };
+  const vector = (id: string) => {
+    const r = vectors.records.find((v) => v.id === id);
+    if (r === undefined) throw new Error(`no vector ${id}`);
+    return r;
+  };
+  const BOARD = `0x${vectors.contracts["board"] as string}`;
+  const DEPLOYED_AT = 100n;
+  const HEAD = 140n;
+  const WITH_BOARD: Deployment = {
+    ...DEPLOYMENT,
+    board: { address: BOARD, deployedAt: DEPLOYED_AT, eventVersion: 9 },
+  };
+  const quantity = (n: bigint) => `0x${n.toString(16)}`;
+  const bytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
+
+  const posting = vector("delivery-v2-posting-default");
+  const other = vector("delivery-v2-posting-author");
+  const [, DEFINITION_TOPIC, BALLOT_TOPIC] = posting.fields.topics as [string, string, string];
+  // The record the event carries: its ABI encoding's one `bytes` tail.
+  const recordOf = (data: string) => {
+    const length = Number(BigInt(`0x${data.slice(64, 128)}`));
+    return bytes(data.slice(128, 128 + 2 * length));
+  };
+  const RECORD = recordOf(posting.fields.data);
+
+  interface Log {
+    readonly block: bigint;
+    readonly index: bigint;
+    readonly topics: readonly string[];
+    readonly data: string;
+    readonly address?: string;
+  }
+  const at = (block: bigint, index: bigint, v: VectorRecord, change: Partial<Log> = {}): Log => ({
+    block,
+    index,
+    topics: v.fields.topics,
+    data: v.fields.data,
+    ...change,
+  });
+
+  /** An L2 node holding `logs`, answering each `eth_getLogs` with those in its range and topics. */
+  function node(logs: readonly Log[], head = HEAD) {
+    const calls: { method: string; params: unknown[]; init: RequestInit }[] = [];
+    const fetchFn: Fetch = (url, init) => {
+      expect(url).toBe(WITH_BOARD.rpc);
+      const body = JSON.parse(init.body as string) as {
+        id: number;
+        method: string;
+        params: unknown[];
+      };
+      calls.push({ method: body.method, params: body.params, init });
+      const filter = body.params[0] as { fromBlock: string; toBlock: string; topics: unknown[] };
+      const result =
+        body.method === "eth_chainId"
+          ? "0x14a34"
+          : body.method === "eth_getBlockByNumber"
+            ? { number: quantity(head), timestamp: "0x68f00000", transactions: [] }
+            : logs
+                .filter(
+                  (l) => l.block >= BigInt(filter.fromBlock) && l.block <= BigInt(filter.toBlock),
+                )
+                .map((l) => ({
+                  address: l.address ?? BOARD,
+                  topics: l.topics.map((t) => `0x${t}`),
+                  data: `0x${l.data}`,
+                  blockNumber: quantity(l.block),
+                  logIndex: quantity(l.index),
+                  removed: false,
+                }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), { status: 200 }),
+      );
+    };
+    return { calls, fetchFn };
+  }
+
+  const load = (fetchFn: Fetch, head: "finalized" | "latest" = "finalized", from?: bigint) =>
+    loadPostings(WITH_BOARD, bytes(DEFINITION_TOPIC), bytes(BALLOT_TOPIC), fetchFn, head, from);
+
+  test("the ballot's postings come back from the head asked, read by its two hashes from the deployment on", async () => {
+    for (const head of ["finalized", "latest"] as const) {
+      const { calls, fetchFn } = node([at(120n, 0n, posting)]);
+      expect(await load(fetchFn, head)).toEqual({
+        ok: true,
+        block: HEAD,
+        timestamp: 0x68f00000n,
+        records: [RECORD],
+      });
+      expect(calls.find((c) => c.method === "eth_getBlockByNumber")?.params).toEqual([head, false]);
+      expect(calls.filter((c) => c.method === "eth_getLogs").map((c) => c.params)).toEqual([
+        [
+          {
+            address: BOARD,
+            topics: [null, `0x${DEFINITION_TOPIC}`, `0x${BALLOT_TOPIC}`],
+            fromBlock: quantity(DEPLOYED_AT),
+            toBlock: quantity(HEAD),
+          },
+        ],
+      ]);
+      for (const { init } of calls)
+        expect(init).toMatchObject({
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          redirect: "error",
+        });
+    }
+  });
+
+  test("a read from a later block starts there, in ranges of the size asked", async () => {
+    const { calls, fetchFn } = node([at(101n, 0n, posting), at(131n, 0n, posting)]);
+    const loaded = await loadPostings(
+      WITH_BOARD,
+      bytes(DEFINITION_TOPIC),
+      bytes(BALLOT_TOPIC),
+      fetchFn,
+      "finalized",
+      125n,
+      10n,
+    );
+    expect(loaded).toMatchObject({ ok: true, records: [RECORD] });
+    expect(
+      calls
+        .filter((c) => c.method === "eth_getLogs")
+        .map((c) => {
+          const f = c.params[0] as { fromBlock: string; toBlock: string };
+          return [f.fromBlock, f.toBlock];
+        }),
+    ).toEqual([
+      [quantity(125n), quantity(134n)],
+      [quantity(135n), quantity(HEAD)],
+    ]);
+  });
+
+  test("only a SharePosted the board frames, under the ballot's own hashes, is a posting", async () => {
+    // A log under another ballot's hash, served despite the filter, which
+    // its record disagrees with; the record under another event's topic 0;
+    // then two postings of the ballot (the vectors' are for two panels).
+    const receiptTopic = Buffer.from(
+      keccak_256(new TextEncoder().encode("ShareReceiptSubmitted(bytes32,bytes32,bytes)")),
+    ).toString("hex");
+    const [postedTopic] = posting.fields.topics as [string];
+    const { fetchFn } = node([
+      at(110n, 0n, posting, { topics: [postedTopic, DEFINITION_TOPIC, "ff".repeat(32)] }),
+      at(111n, 0n, posting, { topics: [receiptTopic, DEFINITION_TOPIC, BALLOT_TOPIC] }),
+      at(112n, 0n, other),
+      at(113n, 0n, posting),
+    ]);
+    expect(await load(fetchFn)).toMatchObject({
+      ok: true,
+      records: [recordOf(other.fields.data), RECORD],
+    });
+  });
+
+  test("a log of another address, outside the range or out of order is a bad answer", async () => {
+    for (const logs of [
+      [at(120n, 0n, posting, { address: REGISTRY })],
+      [at(HEAD + 1n, 0n, posting)],
+      [at(120n, 1n, posting), at(120n, 0n, posting)],
+    ]) {
+      const { fetchFn } = node(logs);
+      // The node serves every log it holds, whatever range was asked.
+      const loose: Fetch = (url, init) => {
+        const body = JSON.parse(init.body as string) as { params: { toBlock?: string }[] };
+        const filter = body.params[0];
+        if (filter?.toBlock !== undefined) filter.toBlock = quantity(HEAD + 1n);
+        return fetchFn(url, { ...init, body: JSON.stringify(body) });
+      };
+      expect(await load(loose)).toEqual({ ok: false, problem: "bad-answer" });
+    }
+  });
+
+  test("a node that claims a head far ahead, or serves logs without end, runs the read's budget out", async () => {
+    // Empty ranges up to a head 2^40 blocks on: charged per range.
+    const far = node([], 2n ** 40n);
+    expect(await load(far.fetchFn)).toEqual({ ok: false, problem: "bad-answer" });
+    // The range that runs it out is the last one asked for.
+    expect(far.calls.filter((c) => c.method === "eth_getLogs").length).toBeLessThanOrEqual(
+      16 * 1024 + 1,
+    );
+    // Logs the board frames, more than any ballot has: charged per log.
+    const many = Array.from({ length: 64 }, (_, i) => at(101n + BigInt(i), 0n, posting));
+    const flood = node(many);
+    expect(
+      await loadPostings(
+        WITH_BOARD,
+        bytes(DEFINITION_TOPIC),
+        bytes(BALLOT_TOPIC),
+        flood.fetchFn,
+        "finalized",
+        undefined,
+        undefined,
+        32 * 1024,
+      ),
+    ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("a read is given up before the next range once its caller says stop", async () => {
+    const { calls, fetchFn } = node([at(120n, 0n, posting)]);
+    let ranges = 0;
+    const counting: Fetch = (url, init) => {
+      if ((JSON.parse(init.body as string) as { method: string }).method === "eth_getLogs")
+        ranges++;
+      return fetchFn(url, init);
+    };
+    expect(
+      await loadPostings(
+        WITH_BOARD,
+        bytes(DEFINITION_TOPIC),
+        bytes(BALLOT_TOPIC),
+        counting,
+        "finalized",
+        undefined,
+        10n,
+        undefined,
+        () => ranges >= 2,
+      ),
+    ).toEqual({ ok: false, problem: "unreachable" });
+    expect(calls.filter((c) => c.method === "eth_getLogs")).toHaveLength(2);
+  });
+
+  test("a build that pins no board asks nothing of anyone", async () => {
+    const { calls, fetchFn } = node([]);
+    expect(
+      await loadPostings(
+        DEPLOYMENT,
+        bytes(DEFINITION_TOPIC),
+        bytes(BALLOT_TOPIC),
+        fetchFn,
+        "finalized",
+      ),
+    ).toEqual({ ok: false, problem: "no-registry" });
+    expect(calls).toHaveLength(0);
   });
 });

@@ -16,12 +16,19 @@
 // Residuals): its admission needs the ceremony transcript, which only the
 // board carries.
 import {
+  type AnchorClock,
+  availabilityWindows,
   BOARD_ENTRY,
   type BoardEntryVersion,
   checkContractEvent,
   CONTRACT_EVENT_SIGNATURES,
+  type ContractEventRecord,
   type ContractEventVersion,
+  countedExtent,
+  type DeadlineClock,
+  DecodeError,
   decodeBoardEntry,
+  decodeContractEvent,
   electionDefinitionHash,
   electionDefinitionV5Hash,
   type EventContracts,
@@ -44,19 +51,21 @@ import {
 } from "@abolishus/node";
 import {
   type BallotAdmission,
+  countedSet,
   decodeHeader,
   electionAdmission,
   type L1Header,
   RlpError,
 } from "@abolishus/verifier";
 import { keccak256, toBytes } from "viem";
-import type { HeldExtent } from "./availability.ts";
+import { countedDue, type HeldExtent } from "./availability.ts";
 import type { ApprovedElection } from "./ceremony.ts";
 import { heldIntake } from "./intake.ts";
 import { l2BlockTime } from "./recorded.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
+import type { CountedSet } from "./tally.ts";
 
 export interface ViewOptions {
   readonly store: SeatStore;
@@ -228,6 +237,156 @@ export function complaintBallots(
   };
 }
 
+export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent"> {
+  /**
+   * The counted extent the seat attested, if it did (`heldExtent` of its
+   * point-2 `AvailabilitySeat`): every board entry through `C_S`, read again
+   * from the blocks it pinned before attesting.
+   */
+  readonly extent: (election: ApprovedElection) => Promise<HeldExtent | undefined>;
+  /** The anchoring clock the deployment pins (`L1AnchorOptions.timing`), as the counted duty reads it. */
+  readonly counted: DeadlineClock;
+}
+
+/**
+ * The deployment's source of the counted set (`TallyDutyOptions.counted`):
+ * packages/verifier's `countedSet` over the counted extent the seat attested,
+ * the registered definition and finalized L1 from the seat's own nodes, with
+ * every contract-event record of the extent authenticated against its own
+ * L2 node's finalized history first, so the set is the one the verifier
+ * later recomputes from the anchored board, never a served value (T-14,
+ * T-16, T-29). Undecided only for want of a later input (a run reaching a
+ * ballot's L1 reference), it waits; undecided for a reason this release never
+ * resolves (relayed ballots, obligation roots, version-2 batches), or over an
+ * extent that isn't the board's, it refuses. Throws as `obligationView` does
+ * when the nodes or the registered definition aren't the seat's, and
+ * `L1AnchorError` `outside-clock` for a close before the clock's epoch.
+ */
+export function countedSource(
+  options: CountedSourceOptions,
+): (election: ApprovedElection) => Promise<CountedSet> {
+  return async (election) => {
+    const { definition, boardVersion, eventVersion, l2Head } = await registered(options, election);
+    // Only the seat's own attested extent is the counted extent: a copy it
+    // didn't check by `C_S`'s CIDs could hold any entries the operator chose.
+    const extent = await options.extent(election);
+    if (extent === undefined)
+      return { state: "refused", reason: "the seat holds no counted extent" };
+    const timing = options.counted;
+    const due = countedDue(election, timing);
+    const sS = countedExtent(timing, election.closesAt, election.l1InclusionBound).segment;
+    if (extent.boardSegment !== sS)
+      return { state: "refused", reason: "an extent other than the counted extent" };
+    // The clock the counted extent's L1 reader reads the anchors under.
+    const clock: AnchorClock = { ...timing, lastSegment: Number(sS) };
+    const windows = availabilityWindows(
+      election.closesAt,
+      election.l1InclusionBound,
+      due,
+      RELEASE_WINDOWS,
+    );
+    // Every event the extent archives was emitted before `C_S` was anchored,
+    // by `t_S < t_A'`: once the node's finalized history is past `t_A'` it
+    // shows each one, so a record it doesn't show is the operator's, never
+    // the contract's (T-35, T-71).
+    if ((await l2BlockTime(options.l2, l2Head)) <= windows.countedDeadline)
+      return { state: "waiting" };
+    const shown = await eventsShown(options, extent.entries, boardVersion, eventVersion, l2Head);
+    if (shown !== undefined) return { state: "refused", reason: shown };
+    const blocks = await l1Run(options, election);
+    let result;
+    try {
+      result = countedSet({
+        definition,
+        panel: options.panel,
+        entries: extent.entries,
+        clock,
+        blocks,
+        eventsAuthenticated: true,
+      });
+    } catch (e) {
+      // The entries aren't the counted extent the board checks passed.
+      if (e instanceof RangeError) return { state: "refused", reason: e.message };
+      throw e;
+    }
+    if (result.ok) return { state: "fixed", cells: result.cells };
+    if ("code" in result)
+      return { state: "refused", reason: `no ballot can be admitted: ${result.code}` };
+    // These wait on finalized L1 growing until it reaches every ballot's
+    // reference (5.8); every other code is this release's for good.
+    if (GROWS.has(result.outcome.code ?? "")) return { state: "waiting" };
+    return {
+      state: "refused",
+      reason: `the counted set is undecided at ${result.row}: ${result.outcome.code ?? "unknown"}`,
+    };
+  };
+}
+
+// The undecided codes a later read of finalized L1 can settle.
+const GROWS: ReadonlySet<string> = new Set(["l1-ref-pending", "l1-blocks-short", "not-reached"]);
+
+/**
+ * Whether every contract-event record among `entries` is its contract's own
+ * log as the seat's own L2 node shows its finalized history: the same
+ * topics and data in the block the record names, under that block's
+ * timestamp, each log carrying at most one record. Undefined if so, or why
+ * not. Records of any contract are checked, though the verifier reads only
+ * the definition's: stricter than it, so at worst a record it ignores makes
+ * the seat refuse. A record that doesn't decode carries nothing the verifier reads
+ * (4.4's to report) and is passed over, as `countedSet` passes it over.
+ */
+async function eventsShown(
+  options: Pick<ViewOptions, "l2">,
+  entries: readonly Uint8Array[],
+  boardVersion: BoardEntryVersion,
+  eventVersion: ContractEventVersion,
+  l2Head: bigint,
+): Promise<string | undefined> {
+  const { l2 } = options;
+  const logs = new Map<string, { readonly log: ContractEventRecord; used: boolean }[]>();
+  const times = new Map<bigint, bigint>();
+  for (const encoded of entries) {
+    let record;
+    try {
+      const { payload } = decodeBoardEntry(encoded, boardVersion);
+      if (
+        payload.length < 2 ||
+        (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent
+      )
+        continue;
+      record = decodeContractEvent(payload, eventVersion);
+    } catch (e) {
+      // `countedSet` refuses an entry that doesn't decode.
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+    if (record.l2_block > l2Head) return "a contract event past the L2 node's finalized history";
+    const key = `${hex(record.contract)}/${record.l2_block}`;
+    let inBlock = logs.get(key);
+    if (inBlock === undefined) {
+      const found = await contractLogs(l2, record.contract, [], record.l2_block, record.l2_block);
+      logs.set(key, (inBlock = found.map((log) => ({ log, used: false }))));
+    }
+    const match = inBlock.find(
+      (l) =>
+        !l.used &&
+        equal(l.log.data, record.data) &&
+        l.log.topics.length === record.topics.length &&
+        l.log.topics.every((t, i) => equal(t, record.topics[i] as Uint8Array)),
+    );
+    // Two records of one log would be two of the contract's events where it emitted one.
+    if (match === undefined) return "a contract event the seat's L2 node doesn't show";
+    match.used = true;
+    let time = times.get(record.l2_block);
+    if (time === undefined) {
+      time = await l2BlockTime(l2, record.l2_block);
+      times.set(record.l2_block, time);
+    }
+    if (time !== record.l2_timestamp) return "a contract event under another block's timestamp";
+  }
+  return undefined;
+}
+
 /**
  * The election's registered definition from the seat's own L2 node, with
  * the board-entry and contract-event versions it pins and the node's
@@ -236,7 +395,7 @@ export function complaintBallots(
  * one, isn't one this node reads or names another board.
  */
 async function registered(
-  options: ViewOptions,
+  options: Omit<ViewOptions, "store" | "extent">,
   election: ApprovedElection,
 ): Promise<{
   readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
@@ -304,6 +463,27 @@ async function finalizedL1(
   options: ViewOptions,
   election: ApprovedElection,
 ): Promise<{ readonly l1: FinalizedL1; readonly low: bigint }> {
+  const headers = await l1Run(options, election);
+  const first = headers[0] as L1Header;
+  const last = headers.at(-1) as L1Header;
+  return {
+    low: first.number,
+    l1: {
+      head: last.number,
+      block(n) {
+        const b = n >= first.number ? headers[Number(n - first.number)] : undefined;
+        if (b === undefined) throw new RangeError(`view: L1 block ${n} outside the run`);
+        return b;
+      },
+    },
+  };
+}
+
+/** `finalizedL1`'s run of headers, as 5.8 reads it (`CountedExtentInputs.blocks`). */
+async function l1Run(
+  options: Pick<ViewOptions, "l1" | "maxRunBytes">,
+  election: ApprovedElection,
+): Promise<L1Header[]> {
   const head = await finalizedBlock(options.l1);
   const before = election.opensAt > L1_REF_MARGIN ? election.opensAt - L1_REF_MARGIN : 0n;
   const run = await headerRun(
@@ -322,18 +502,7 @@ async function finalizedL1(
   const first = headers[0] as L1Header;
   // A run the budget cut starts inside the window, and `l1_ref_min` could lie below it.
   if (first.number !== 0n && first.timestamp >= before) throw new ViewError("l1-run-short");
-  const last = headers.at(-1) as L1Header;
-  return {
-    low: first.number,
-    l1: {
-      head: last.number,
-      block(n) {
-        const b = n >= first.number ? headers[Number(n - first.number)] : undefined;
-        if (b === undefined) throw new RangeError(`view: L1 block ${n} outside the run`);
-        return b;
-      },
-    },
-  };
+  return headers;
 }
 
 /**

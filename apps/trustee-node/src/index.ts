@@ -90,6 +90,8 @@ export {
 } from "./obligation.ts";
 export {
   complaintBallots,
+  countedSource,
+  type CountedSourceOptions,
   obligationView,
   ViewError,
   type ViewOptions,

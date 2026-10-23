@@ -101,6 +101,8 @@ export type {
   LogLine,
   RegistrySyncLine,
   PollCreationLine,
+  PostingLine,
+  PostingStep,
   Tier0BoundaryLine,
   Tier1BoundaryLine,
   WorkerErrorLine,
@@ -128,12 +130,21 @@ export {
 } from "./output-roots.ts";
 export { POLL_ROOT_ENV, type PollRootConfig, pollRootFromEnv } from "./poll-root-env.ts";
 export {
+  checkPostingDeployment,
   POSTING_LOG_RANGE,
   POSTING_LOOKBACK,
   PostingChainError,
   type PostingChainOptions,
+  type PostingDeployment,
   ViemPostingChain,
 } from "./posting-chain.ts";
+export { POSTING_ENV, type PostingConfig, postingFromEnv } from "./posting-env.ts";
+export {
+  POSTING_PRUNE_EVERY_MS,
+  type PostingRunnerOptions,
+  type RunningPostingRunner,
+  startPostingRunner,
+} from "./posting-runner.ts";
 export { PollRoots, type PollRootsOptions } from "./poll-roots.ts";
 export { type PollStubPins, pollStubDeployment } from "./poll-stub-chain.ts";
 export { POLL_STUB_ENV, type PollStubConfig, pollStubFromEnv } from "./poll-stub-env.ts";

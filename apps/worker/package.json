@@ -2,7 +2,7 @@
   "name": "@abolishus/worker",
   "version": "0.0.0",
   "private": true,
-  "description": "Background jobs on BullMQ: board audits, anchoring, identity-backup expiry, Tier 0 batches, the Tier 1 relay, ballot admission in batches and registrations from the index now; pinning and tally coordination to come. Source-only.",
+  "description": "Background jobs on BullMQ: board audits, anchoring, identity-backup expiry, Tier 0 batches, the Tier 1 relay, ballot admission in batches, registrations from the index and the posting relay's worker (posting.mjs) now; pinning and tally coordination to come. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -14,6 +14,7 @@
     "check": "vp check",
     "creation-key": "vp node src/creation-key-cli.ts",
     "start": "vp node src/main.ts",
+    "start:posting": "vp node src/posting-main.ts",
     "test": "vp run test:services"
   },
   "dependencies": {

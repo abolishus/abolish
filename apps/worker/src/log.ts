@@ -8,6 +8,9 @@ import type {
   CloseRoundsReport,
   OpenRunsReport,
   PollOpenReport,
+  PostingPruneReport,
+  PostingTendReport,
+  PostingTickReport,
   BoardAuditCode,
   DefinitionErrorCode,
   RegistrationErrorCode,
@@ -204,6 +207,30 @@ export interface PollOpenLine extends PollOpenReport {
   readonly queue: "{poll-open}";
 }
 
+/** A step of the posting worker's loop (posting-runner.ts). */
+export type PostingStep = "tick" | "tend" | "prune";
+
+/**
+ * What a round of the posting worker did, in counts only, written only when
+ * something moved; or a step that began failing (its error isn't logged) or
+ * recovered. Never a posting, a ballot hash, a nullifier, a transaction or an
+ * address (docs/spec/posting-relay.md, Queue; T-10, T-11, T-18).
+ */
+export type PostingLine =
+  | {
+      readonly queue: "{posting}";
+      readonly step: "tick";
+      readonly answered: PostingTickReport["answered"];
+      readonly kept: number;
+    }
+  | ({ readonly queue: "{posting}"; readonly step: "tend" } & PostingTendReport)
+  | ({ readonly queue: "{posting}"; readonly step: "prune" } & PostingPruneReport)
+  | {
+      readonly queue: "{posting}";
+      readonly step: PostingStep;
+      readonly outcome: "failing" | "recovered";
+    };
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -235,5 +262,6 @@ export type LogLine =
   | PollStubLine
   | CeremonyCoordinateLine
   | PollOpenLine
+  | PostingLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

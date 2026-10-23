@@ -21,7 +21,7 @@
 // key, and the request, which can carry `m_i` before the chain holds it or
 // the signed transaction (T-10, T-15, T-18, T-69).
 
-import { boardAbi } from "@abolishus/contracts/abi";
+import { boardAbi, electionRegistryAbi } from "@abolishus/contracts/abi";
 import { decodeSharePosting } from "@abolishus/crypto";
 import {
   POSTING_GAS_LIMIT_MAX,
@@ -37,6 +37,7 @@ import {
   type Address,
   BaseError,
   bytesToHex,
+  ContractFunctionExecutionError,
   encodeAbiParameters,
   encodeFunctionData,
   ExecutionRevertedError,
@@ -92,6 +93,67 @@ export interface PostingChainOptions {
   readonly logRange?: bigint;
   /** Blocks behind the head a posting's first search starts at; `POSTING_LOOKBACK` by default. */
   readonly lookback?: bigint;
+}
+
+export interface PostingDeployment {
+  readonly chainId: bigint;
+  readonly board: Address;
+  /** The board's deployment block. */
+  readonly fromBlock: bigint;
+  /** The posting key's address, as `ViemPostingChain.address` gives it. */
+  readonly address: Address;
+}
+
+/**
+ * The posting worker's startup check: throws, naming what differs and
+ * nothing secret, unless the node is on `chainId`, the finalized head is at
+ * or past the board's deployment block, the address is a board whose
+ * election registry (at the finalized block) names it back, and the posting
+ * key's account holds no code. The board check stops a misconfigured worker
+ * from simulating against a contract no election is on, which would refuse
+ * every pair `simulation`; the key's, from paying from an account that an
+ * EIP-7702 delegation lets other code spend, which isn't the externally
+ * owned account a deposit's sender must be (docs/spec/posting-relay.md,
+ * Roles; T-50, T-52). The node is trusted for none of it beyond startup:
+ * every posting is judged again by the board itself.
+ */
+export async function checkPostingDeployment(
+  client: PublicClient,
+  deployment: PostingDeployment,
+): Promise<void> {
+  const chainId = BigInt(await client.getChainId());
+  if (chainId !== deployment.chainId) throw new Error("the L2 node is on another chain");
+  const blockNumber = (await client.getBlock({ blockTag: "finalized" })).number;
+  if (blockNumber === null || blockNumber < deployment.fromBlock)
+    throw new Error("the board's deployment block is past the finalized head");
+  const read = async <T>(what: string, call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (e) {
+      if (e instanceof ContractFunctionExecutionError) throw new Error(`the address isn't ${what}`);
+      throw e;
+    }
+  };
+  const registry = await read("a board", () =>
+    client.readContract({
+      address: deployment.board,
+      abi: boardAbi,
+      functionName: "electionRegistry",
+      blockNumber,
+    }),
+  );
+  const named = await read("a board's election registry", () =>
+    client.readContract({
+      address: registry,
+      abi: electionRegistryAbi,
+      functionName: "board",
+      blockNumber,
+    }),
+  );
+  if (getAddress(named) !== getAddress(deployment.board))
+    throw new Error("the board's election registry names another board");
+  const code = await client.getCode({ address: deployment.address, blockTag: "latest" });
+  if (code !== undefined && code !== "0x") throw new Error("the posting key's account holds code");
 }
 
 /** A call to the node failed, or it answered something it can't have. Names the step only. */
@@ -157,6 +219,15 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
   latest(): Promise<PostingHead> {
     return guard("latest block", async () => {
       const block = await this.#client.getBlock({ blockTag: "latest" });
+      if (block.number === null) throw new Error("a pending block");
+      return { number: block.number, timestamp: block.timestamp };
+    });
+  }
+
+  /** The L2's finalized head, which the ledger prunes against. */
+  finalized(): Promise<PostingHead> {
+    return guard("finalized block", async () => {
+      const block = await this.#client.getBlock({ blockTag: "finalized" });
       if (block.number === null) throw new Error("a pending block");
       return { number: block.number, timestamp: block.timestamp };
     });

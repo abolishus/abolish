@@ -27,6 +27,17 @@ const CREATION = {
   CREATE_PANEL_KEYS: `02${"11".repeat(32)},03${"22".repeat(32)}`,
 };
 
+const POSTING = {
+  POSTING_REDIS_URL: "redis://:store-password@127.0.0.1:1",
+  POSTING_L2_RPC_URL: "https://l2.example/v2/provider-api-key",
+  POSTING_CHAIN_ID: "84532",
+  POSTING_BOARD: "0x00000000000000000000000000000000000000b0",
+  POSTING_BOARD_BLOCK: "0",
+  POSTING_KEY: KEY,
+  POSTING_FEE_CAP: "1000000000",
+  POSTING_ELECTION_BUDGET: "1000000000000000",
+};
+
 let dir: string;
 
 beforeAll(() => {
@@ -75,6 +86,57 @@ describe("the bundle", () => {
       expect(output).not.toContain("provider-api-key");
     }
   }, 60_000);
+
+  test("main.mjs refuses the posting worker's variables, never quoting the key", async () => {
+    const { code, output } = await run(["main.mjs"], { ...NOWHERE, ...POSTING });
+    expect(code).not.toBe(0);
+    expect(output).toContain("the posting worker's variables belong to posting.mjs alone");
+    expect(output).not.toContain(KEY);
+    expect(output).not.toContain("provider-api-key");
+  }, 30_000);
+
+  test("posting.mjs needs every one of its variables", async () => {
+    const { code, output } = await run(["posting.mjs"], {});
+    expect(code).not.toBe(0);
+    expect(output).toContain("the posting worker needs every one of POSTING_REDIS_URL");
+  }, 30_000);
+
+  test("posting.mjs refuses the posting key beside any other job's variable, never quoting it", async () => {
+    for (const other of [
+      { REDIS_URL: NOWHERE.REDIS_URL },
+      { CREATE_KEY: KEY },
+      { TIER1_RELAY_KEY: KEY },
+      { REGISTRY_SYNC_CHAIN_ID: "84532" },
+      { ANCHOR_EXECUTOR_KEY: KEY },
+      { BALLOT_L1_CHAIN_ID: "11155111" },
+    ]) {
+      const { code, output } = await run(["posting.mjs"], {
+        DATABASE_URL: NOWHERE.DATABASE_URL,
+        ...POSTING,
+        ...other,
+      });
+      expect(code).not.toBe(0);
+      expect(output).toContain("the posting worker runs nothing else");
+      expect(output).not.toContain(KEY);
+      expect(output).not.toContain("provider-api-key");
+      expect(output).not.toContain("store-password");
+    }
+  }, 60_000);
+
+  test("posting.mjs reports an unreachable node by step, never quoting its URL", async () => {
+    const { code, output } = await run(["posting.mjs"], {
+      DATABASE_URL: NOWHERE.DATABASE_URL,
+      ...POSTING,
+      POSTING_L2_RPC_URL: "http://127.0.0.1:1/v2/provider-api-key",
+      BALLOT_PINNED_PANELS: JSON.stringify([{ threshold: 1, keys: [`02${"11".repeat(32)}`] }]),
+      BALLOT_ANCHOR_EPOCH: "0",
+      BALLOT_ANCHOR_PERIOD: "3600",
+    });
+    expect(code).not.toBe(0);
+    expect(output).toContain("the posting worker's startup check couldn't reach the L2 node");
+    expect(output).not.toContain(KEY);
+    expect(output).not.toContain("provider-api-key");
+  }, 30_000);
 
   test("creation-key.mjs needs the creation step's variables", async () => {
     const { code, output } = await run(["creation-key.mjs", "status"], {});

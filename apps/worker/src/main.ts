@@ -10,6 +10,7 @@ import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { ANCHOR_ENV, ANCHOR_EVERY_ENV, anchorFromEnv } from "./anchor-env.ts";
+import { pinnedPanels } from "./ballot-env.ts";
 import { connectAnchorRunner } from "./anchor-runner.ts";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
@@ -18,6 +19,7 @@ import { POLL_ROOT_ENV, pollRootFromEnv } from "./poll-root-env.ts";
 import { PollRoots } from "./poll-roots.ts";
 import { pollStubDeployment } from "./poll-stub-chain.ts";
 import { POLL_STUB_ENV, pollStubFromEnv } from "./poll-stub-env.ts";
+import { POSTING_ENV } from "./posting-env.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
 import { checkCreationAnchorsDeployment, ViemCreationAnchors } from "./creation-anchors.ts";
@@ -71,14 +73,10 @@ const Env = z.strictObject({
     .optional(),
 });
 
-const Panels = z
-  .array(
-    z.strictObject({
-      threshold: z.number().int().min(1),
-      keys: z.array(z.string().regex(/^(?:[0-9a-f]{2})+$/)).min(1),
-    }),
-  )
-  .min(1);
+// The posting key runs in a deployment of its own, beside nothing else
+// (posting-main.ts; docs/spec/posting-relay.md, Roles).
+if (POSTING_ENV.some((name) => process.env[name] !== undefined && process.env[name] !== ""))
+  throw new Error("the posting worker's variables belong to posting.mjs alone");
 
 const env = Env.parse({
   DATABASE_URL: process.env["DATABASE_URL"],
@@ -164,10 +162,7 @@ if (ballotEnv.some((v) => v !== undefined)) {
   }
   ballots = {
     admissions: new BallotAdmissions({
-      panels: Panels.parse(JSON.parse(env.BALLOT_PINNED_PANELS)).map((p) => ({
-        threshold: p.threshold,
-        keys: p.keys.map((k) => new Uint8Array(Buffer.from(k, "hex"))),
-      })),
+      panels: pinnedPanels(env.BALLOT_PINNED_PANELS),
       clock: { epoch: BigInt(env.BALLOT_ANCHOR_EPOCH), period: BigInt(env.BALLOT_ANCHOR_PERIOD) },
       ...(l1 !== undefined && { l1 }),
     }),

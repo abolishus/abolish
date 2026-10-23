@@ -446,6 +446,8 @@ contract BoardTest is TestBase {
             // pairing the mock skips.
             board = new Board(address(elections), address(trustees), RELAY);
             vm.cool(address(board.ballotCheck()));
+            vm.cool(address(elections));
+            vm.cool(address(trustees));
             _acceptsWithin(data, limit - pairing);
         }
         // Measured at most about 5.7 million, the pairing's 183,000

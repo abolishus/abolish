@@ -418,9 +418,9 @@ contract BoardTest is TestBase {
             bytes memory ciphertext = _largestCiphertext();
             bytes32 shareHash = sha256(bytes.concat(_ds("abolish/v1/share-ciphertext"), ciphertext));
             bytes memory record = _largestV4(dh, panel, shareHash);
-            // Version 3's largest, and the author half's two counts, 64 row
-            // counts, 64 · 16 elements and 16 share hashes.
-            assertEq(record.length, 48_380 + 8 + 33_536, "the largest record");
+            // Version 3's largest and the author half at its largest
+            // (ballot-validity.md, Ballot record (version 4), Sizes).
+            assertEq(record.length, 48_380 + 33_544, "the largest record");
             bytes memory pair = abi.encodePacked(
                 uint16(0x000d),
                 uint8(2),
@@ -448,10 +448,13 @@ contract BoardTest is TestBase {
             vm.cool(address(board.ballotCheck()));
             _acceptsWithin(data, limit - pairing);
         }
-        // Measured about 5.6 million, the pairing's 183,000 included, so the
-        // limit is about 7.1 million: the calldata, the ballot hash over
-        // 82 KB, the framing and the event with its accumulator step, cold.
-        assertTrue(most < 6_000_000, string.concat("the largest pair: ", vm.toString(most)));
+        // Measured at most about 5.7 million, the pairing's 183,000
+        // included, so the limit is at most about 7.1 million. Measured from
+        // this contract, which copies the 87 KB itself into a memory already
+        // grown large, so it reads a few hundred thousand above the board's
+        // own call (about 5.4 million as a transaction); the bound leaves
+        // room for that to grow with the test.
+        assertTrue(most < 6_500_000, string.concat("the largest pair: ", vm.toString(most)));
     }
 
     /// `qualified` is the key set the trustee registry recorded for the

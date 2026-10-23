@@ -23,7 +23,7 @@ import {
 } from "../src/index.ts";
 import type { IntakeSecrets } from "../src/ceremony.ts";
 import { cast, seatsOf, setup } from "./ballots.ts";
-import { L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
+import { AVAILABLE, L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const MESSAGE = new Uint8Array(1406).fill(7);
 
@@ -406,6 +406,7 @@ describe("three tally duties over the channel", () => {
           definition: s.definition,
           transcript: s.transcript,
           store: s.stores[i]!,
+          summing: AVAILABLE,
           counted: async () => ({ state: "fixed", cells: [ballots.map((b) => b.bytes)] }),
           peers: httpPeers({
             peers: new Map(endpoints.map((e, j) => [j + 1, e.url])),

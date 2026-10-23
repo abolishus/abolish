@@ -8,10 +8,13 @@
 // the opening is written once before it is handed out, so a crash or a later
 // message never makes it sign a second (T-29, T-14, T-15, T-37).
 //
-// The counted set is the deployment's to read, from the anchored counted
-// extent through packages/verifier, once the availability attestations
-// allow (docs/spec/availability.md, What a seat does); the channel between
-// nodes is the deployment's too. This duty never chooses a set: it sums over
+// The duty reads the counted set only once the summed-share rule allows:
+// past `t_A' + R`, with each point's quorum of attestations read from the
+// seat's own nodes (`summingRule`; docs/spec/availability.md, What a seat
+// does), and never if the election failed `unavailable` (T-54, T-24). The
+// counted set is the deployment's to read, from the anchored counted extent
+// through packages/verifier; the channel between nodes is the deployment's
+// too. This duty never chooses a set: it sums over
 // exactly what the source fixes, only for the cells of the registered
 // partition, and refuses to go on if the source ever gives another set
 // (T-14, T-16, T-29).
@@ -56,6 +59,7 @@ import {
 import type { ApprovedElection, IntakeSecrets } from "./ceremony.ts";
 import { heldShares } from "./intake.ts";
 import type { SeatStore } from "./store.ts";
+import type { SummingRule } from "./summing.ts";
 import type { Pins } from "./stub.ts";
 
 /**
@@ -71,7 +75,7 @@ export type TallyDefinition =
 
 /** What the deployment reads of the counted set, from the anchored counted extent. */
 export type CountedSet =
-  /** The counted extent isn't anchored yet, or the attestations aren't all read: nothing is fixed. */
+  /** The counted extent isn't read yet: nothing is fixed. */
   | { readonly state: "waiting" }
   /**
    * A panel's threshold didn't attest the ballot extent or the counted
@@ -118,6 +122,13 @@ export interface TallyDutyOptions extends Pins {
   readonly definition: TallyDefinition;
   readonly transcript: Uint8Array;
   readonly store: SeatStore;
+  /**
+   * The summed-share rule (`summingRule` over the seat's own nodes), asked
+   * before the counted set is read, with the panel the approved key set
+   * gives: nothing is read or sent until it finds both points available.
+   */
+  readonly summing: SummingRule;
+  /** Read only once `summing` allows. */
   readonly counted: (election: ApprovedElection) => Promise<CountedSet>;
   readonly peers: SummedSharePeers;
 }
@@ -141,13 +152,17 @@ export type CellStatus =
 
 /** Where the tally duty stands after a step. */
 export type TallyDutyStatus =
+  /** The summed-share rule doesn't allow summing yet, or the counted set isn't read. */
   | { readonly state: "waiting" }
+  /** A point lacks a panel's quorum of attestations in time: no summed share is ever sent. */
   | { readonly state: "unavailable" }
   /**
    * The source gave a counted set the seat can't sum over: a ballot of
    * another election or cell, one that doesn't decode or match the
    * election's shape, a voter counted twice, another number of cells, or a
-   * set other than the one it gave before. The seat sends nothing for the
+   * set other than the one it gave before; or the definition or transcript
+   * isn't the approved one, or an attestation that counts names a root
+   * whose leaf object the seat doesn't hold. The seat sends nothing for the
    * election. An alarm for the node's operator.
    */
   | { readonly state: "refused"; readonly reason: string }
@@ -321,10 +336,22 @@ export class TallyDuty {
   /** The election's definition, key set and counted cells, once the source fixes them. */
   async #fix(): Promise<Fixed | Exclude<TallyDutyStatus, { state: "tallying" }>> {
     if (this.#fixed !== undefined) return this.#fixed;
-    const counted = await this.#o.counted(this.#o.election);
-    if (counted.state !== "fixed") return counted;
     try {
-      this.#fixed = await this.#cells(counted.cells);
+      const checked = this.#checked();
+      // Nothing about the counted set is read before the rule allows it, so
+      // no seat's sums exist while an attestation could still be withheld
+      // or a failed point still be summed over (T-54).
+      const allowed = await this.#o.summing.check({
+        threshold: tallyRules(checked.definition).threshold,
+        registered: checked.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
+      });
+      if (allowed.state === "waiting") return { state: "waiting" };
+      if (allowed.state === "unavailable") return { state: "unavailable" };
+      if (allowed.state === "unheld-roots")
+        throw new Refused("an attested root whose leaf object the seat doesn't hold");
+      const counted = await this.#o.counted(this.#o.election);
+      if (counted.state !== "fixed") return counted;
+      this.#fixed = await this.#cells(checked, counted.cells);
     } catch (e) {
       if (e instanceof Refused) return { state: "refused", reason: e.message };
       throw e;
@@ -332,9 +359,11 @@ export class TallyDuty {
     return this.#fixed;
   }
 
-  async #cells(counted: readonly (readonly Uint8Array[])[]): Promise<Fixed> {
+  async #cells(
+    { definition, registered }: { definition: Definition; registered: readonly RegisteredKeys[] },
+    counted: readonly (readonly Uint8Array[])[],
+  ): Promise<Fixed> {
     const { election, store } = this.#o;
-    const { definition, registered } = this.#checked();
     const rules = tallyRules(definition);
     // The partition's cells, each with its tier: under version 1 one per
     // `electorate` entry, under version 5 every tier's cells numbered across

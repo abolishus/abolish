@@ -18,6 +18,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { hex, padded, word } from "../../node/tests/anvil.ts";
 import type { AvailabilityKind } from "../src/availability.ts";
 import {
+  l2AvailabilityRecords,
   l2Postings,
   l2RecordedAvailability,
   l2RecordedComplaintBatches,
@@ -331,6 +332,105 @@ describe("l2RecordedAvailability", () => {
         },
       ),
       { numRuns },
+    );
+  });
+});
+
+describe("l2AvailabilityRecords", () => {
+  // The summed-share rule's read (P2-13 part 5b-2b-2a): every attestation
+  // and complaint the board emitted for the definition, any seat, panel or
+  // point, in event order with each block's timestamp, and the finalized
+  // block's, as the seat's own L2 node shows finalized history.
+  const records = (rpc: Rpc) =>
+    l2AvailabilityRecords({ l2: rpc, l2ChainId: L2_CHAIN_ID, board: BOARD, l2FromBlock: 7n });
+  const counted = { ...ballot, point: AVAILABILITY_POINTS.countedExtent } as const;
+  const complaint = { ...ballot, kind: "complaint", seat: 3 } as const;
+  const author = { ...ballot, panel: SEAT_PANELS.author, seat: 1 } as const;
+
+  test("gives every record of the definition in block order with its block's time, asking once for both events", async () => {
+    const [a, b, c, d] = [
+      recordOf(ballot),
+      recordOf(complaint),
+      recordOf(counted),
+      recordOf(author),
+    ];
+    const { rpc, asked, blocks } = l2Node([
+      logOf(ballot, a, 20n),
+      logOf(complaint, b, 20n),
+      logOf(counted, c, 50n),
+      logOf(author, d, FINALIZED),
+    ]);
+    expect(await (await records(rpc))(D)).toEqual({
+      finalizedAt: blockTime(FINALIZED),
+      events: [
+        { payload: a, submittedAt: blockTime(20n) },
+        { payload: b, submittedAt: blockTime(20n) },
+        { payload: c, submittedAt: blockTime(50n) },
+        { payload: d, submittedAt: blockTime(FINALIZED) },
+      ],
+    });
+    expect(asked).toEqual([
+      {
+        address: hex(BOARD),
+        fromBlock: "0x7",
+        toBlock: `0x${FINALIZED.toString(16)}`,
+        topics: [[TOPICS.attestation, TOPICS.complaint], hex(D)],
+      },
+    ]);
+    // Each block's time is asked once.
+    expect(blocks.filter((n) => n === 20n)).toHaveLength(1);
+  });
+
+  test("passes over another definition's record, a log failing the event check, and one not final", async () => {
+    const own = recordOf(ballot);
+    const good = logOf(ballot, own);
+    const other = { ...ballot, definitionHash: new Uint8Array(32).fill(0xd2) };
+    const logs = [
+      logOf(other, recordOf(other)),
+      // The topic's definition hash isn't the record's.
+      { ...good, topics: [TOPICS.attestation, hex(new Uint8Array(32)), good.topics[2] as string] },
+      // An attestation under the complaint's event.
+      { ...good, topics: [TOPICS.complaint, ...good.topics.slice(1)] },
+      { ...good, data: good.data.slice(0, -64) },
+      { ...good, removed: true },
+      logOf(ballot, own, FINALIZED, new Uint8Array(20).fill(0xb1)),
+      logOf(ballot, own, FINALIZED + 1n),
+      logOf(ballot, own, 6n),
+    ];
+    const { rpc } = l2Node(logs, { honest: false });
+    expect(await (await records(rpc))(D)).toEqual({
+      finalizedAt: blockTime(FINALIZED),
+      events: [],
+    });
+  });
+
+  test("a node finalized below the deployment block gives its time and no record, unasked for logs", async () => {
+    const { rpc, asked } = l2Node([logOf(ballot, recordOf(ballot), 3n)], { finalized: 6n });
+    expect(await (await records(rpc))(D)).toEqual({ finalizedAt: blockTime(6n), events: [] });
+    expect(asked).toEqual([]);
+  });
+
+  test("a node on another chain is refused at setup; logs out of block order or times going back are RpcErrors", async () => {
+    await expect(records(l2Node([], { chain: L2_CHAIN_ID + 1n }).rpc)).rejects.toEqual(
+      new RecordedError("chain"),
+    );
+    const [a, c] = [recordOf(ballot), recordOf(counted)];
+    const backwards = l2Node([logOf(counted, c, 50n), logOf(ballot, a, 20n)]);
+    await expect((await records(backwards.rpc))(D)).rejects.toEqual(
+      new RpcError("eth_getLogs: not in block order"),
+    );
+    const { rpc } = l2Node([logOf(ballot, a, 20n), logOf(counted, c, 50n)]);
+    const lying: Rpc = {
+      call: async (method, params) => {
+        const answer = await rpc.call(method, params);
+        // Block 50 stamped before block 20.
+        return method === "eth_getBlockByNumber" && (params as string[])[0] === "0x32"
+          ? { ...(answer as object), timestamp: "0x1" }
+          : answer;
+      },
+    };
+    await expect((await records(lying))(D)).rejects.toEqual(
+      new RpcError("eth_getBlockByNumber: timestamps out of order"),
     );
   });
 });

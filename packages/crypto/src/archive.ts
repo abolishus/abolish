@@ -571,8 +571,9 @@ export function encodeContractEventRun(run: ContractEventRun): Uint8Array {
 
 /**
  * Strictly decodes a run under the version its manifest fixes (version 3
- * lists version 1). Its length is the reader's bound (Archived objects),
- * applied before the bytes are held.
+ * lists version 1). `MAX_CONTRACT_EVENT_RUN` is the reader's bound (Archived
+ * objects), applied before the bytes are held, and the encoder's rule, never
+ * a decoding one: a longer run decodes here but no reader reads one.
  */
 export function decodeContractEventRun(bytes: Uint8Array, pinned: 1): ContractEventRun {
   return SCHEMA.decode(CONTRACT_EVENT_RUN, bytes, pinned).value;

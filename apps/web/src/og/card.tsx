@@ -13,6 +13,7 @@ import {
   PREVIEW_SIZE,
   shortLink,
 } from "./model.ts";
+import { titles } from "../titles.ts";
 import {
   answersCounted,
   answersSoFar,
@@ -184,6 +185,7 @@ function unreleased(model: PollPreview, t: (typeof TYPE)[PreviewFormat]): ReactE
 
 function EverydayCard({ model, format }: { model: EverydayPreview; format: PreviewFormat }) {
   const t = TYPE[format];
+  const { text } = titles(model.locale);
   const many = model.questionCount > 1;
   const results = model.results;
   let block: ReactElement;
@@ -199,13 +201,16 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
         model.answers === undefined
           ? undefined
           : results.state === "closed"
-            ? `Final count · ${answersCounted(model.answers)}`
-            : `${answersSoFar(model.answers)} · updated ${dayOf(results.releasedAt)}`;
+            ? text("ogFinalCount", { answers: answersCounted(model, model.answers) })
+            : text("ogUpdated", {
+                answers: answersSoFar(model, model.answers),
+                day: dayOf(model.locale, results.releasedAt),
+              });
       block = (
         <div style={column({ gap: 12 })}>
           {many ? (
             <div style={row({ fontSize: t.small, color: PALETTE.mutedForeground })}>
-              {`Question 1 of ${model.questionCount}`}
+              {text("ogQuestionOne", { count: model.questionCount })}
             </div>
           ) : null}
           <div style={row({ fontSize: t.lead, fontWeight: 600 })}>{results.lead.sentence}</div>
@@ -247,7 +252,7 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
               color: PALETTE.foreground,
             })}
           >
-            {`${model.questionCount} questions`}
+            {text("ogQuestions", { count: model.questionCount })}
           </div>
         ) : null}
       </div>
@@ -288,6 +293,7 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
 
 function CivicCard({ model, format }: { model: CivicPreview; format: PreviewFormat }) {
   const square = format === "square";
+  const { text } = titles(model.locale);
   const label: CSSProperties = {
     display: "flex",
     fontFamily: "JetBrains Mono",
@@ -334,7 +340,7 @@ function CivicCard({ model, format }: { model: CivicPreview; format: PreviewForm
                 >
                   <span>{tier.name}</span>
                   <span style={{ fontFamily: "JetBrains Mono", color: PALETTE.mutedForeground }}>
-                    {countOf(tier.ballots)}
+                    {countOf(model.locale, tier.ballots)}
                   </span>
                 </div>
                 <div style={row({ fontSize: square ? 44 : 34, fontWeight: 600 })}>
@@ -349,10 +355,10 @@ function CivicCard({ model, format }: { model: CivicPreview; format: PreviewForm
   }
   const scope =
     results.state === "closed"
-      ? "Each tier is counted on its own."
+      ? text("ogTiers")
       : results.state === "live"
-        ? `Released ${longDayOf(results.releasedAt)}. Each tier is counted on its own.`
-        : "Each tier will be counted on its own.";
+        ? text("ogTiersReleased", { day: longDayOf(model.locale, results.releasedAt) })
+        : text("ogTiersWill");
   return (
     <div
       style={column({
@@ -366,7 +372,7 @@ function CivicCard({ model, format }: { model: CivicPreview; format: PreviewForm
     >
       <div style={row({ alignItems: "flex-start", justifyContent: "space-between", gap: 24 })}>
         <div style={column({ flex: 1, gap: 12 })}>
-          <div style={label}>{`Civic record · ${model.kind}`}</div>
+          <div style={label}>{text("ogCivic", { kind: model.kind })}</div>
           <div
             style={{
               display: "block",
@@ -399,7 +405,7 @@ function CivicCard({ model, format }: { model: CivicPreview; format: PreviewForm
         <div style={row({ fontFamily: "JetBrains Mono", fontSize: square ? 32 : 26 })}>
           {shortLink(model)}
         </div>
-        <div style={label}>Anyone can recount it</div>
+        <div style={label}>{text("ogRecount")}</div>
       </div>
     </div>
   );

@@ -6,10 +6,15 @@
 // good; anything else is answered with the current image, briefly cacheable
 // and revalidated by its ETag, so a chat that kept an old URL still gets
 // what is true now.
+//
+// `?lang=` names the image's language, any of ours but the default
+// (src/og/poll.ts, `previewLocale`): a chat fetching it sends none of the
+// reader's, so the address alone decides, the same for every request.
 
 import { createFileRoute } from "@tanstack/react-router";
 
-import { pollPreview, previewVersion } from "../og/poll.ts";
+import { loadCatalog } from "../messages.ts";
+import { pollPreview, previewLocale, previewVersion } from "../og/poll.ts";
 import { api } from "../server/api.ts";
 import { loadPoll } from "../server/load.ts";
 import { isElectionId } from "../values.ts";
@@ -28,13 +33,16 @@ export const Route = createFileRoute("/polls/$electionId/preview.png")({
         const url = new URL(request.url);
         const format = url.searchParams.get("format");
         const version = url.searchParams.get("v");
-        if ([...url.searchParams.keys()].some((k) => k !== "format" && k !== "v"))
+        if ([...url.searchParams.keys()].some((k) => k !== "format" && k !== "v" && k !== "lang"))
           return plain(400);
         if (format !== null && format !== "square") return plain(400);
+        const locale = previewLocale(url.searchParams.get("lang"));
+        if (locale === undefined) return plain(400);
         const page = await loadPoll(api(), params.electionId);
         if (page.kind !== "poll") return plain(404);
         const shape = format === "square" ? "square" : "landscape";
-        const model = pollPreview(page.poll, page.code, url.host, Date.now());
+        await loadCatalog(locale);
+        const model = pollPreview(page.poll, page.code, url.host, Date.now(), locale);
         const current = await previewVersion(model, shape);
         const etag = `"${current}"`;
         const headers = {

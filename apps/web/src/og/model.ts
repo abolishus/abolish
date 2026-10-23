@@ -4,6 +4,8 @@
 // card or description drawn from it can show a result (T-67).
 
 import { shortCode } from "@abolishus/core/short-codes";
+
+import { isLocale, type Locale } from "../locales.ts";
 import { fromHex } from "../values.ts";
 
 /** The latest released lead of the first question, as a sentence and its share (0–1). */
@@ -52,6 +54,8 @@ export type CivicResults =
   | { readonly state: "closed"; readonly tiers: readonly TierResult[] };
 
 interface PreviewBase {
+  /** The language its words are drawn in: the site's, never the poll's own (P2-28 part 4c-2). */
+  readonly locale: Locale;
   /** The poll's definition hash (64 lowercase hex): its seal. */
   readonly seal: string;
   /**
@@ -106,6 +110,7 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
  * carry anything else.
  */
 export function checkPreview(model: PollPreview): void {
+  if (!isLocale(model.locale)) throw new RangeError("locale must be one of the site's");
   if (!/^[0-9a-f]{64}$/.test(model.seal)) throw new RangeError("seal must be 64 lowercase hex");
   if (model.code !== undefined && shortCode(fromHex(model.seal), model.code.length) !== model.code)
     throw new RangeError("code must be a short code of the seal");

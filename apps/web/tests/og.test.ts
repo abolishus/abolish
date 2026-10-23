@@ -6,10 +6,12 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 import { shortCode } from "@abolishus/core/short-codes";
 
+import { DEFAULT_LOCALE, LOCALES } from "../src/locales.ts";
+import { loadCatalog } from "../src/messages.ts";
 import { PALETTE, PreviewCard } from "../src/og/card.tsx";
 import {
   checkPreview,
@@ -18,18 +20,22 @@ import {
   PREVIEW_SIZE,
   shortLink,
 } from "../src/og/model.ts";
-import { pollPreview, previewVersion } from "../src/og/poll.ts";
+import { pollPreview, previewLocale, previewPath, previewVersion } from "../src/og/poll.ts";
 import { renderPreview } from "../src/og/render.ts";
 import { previewText } from "../src/og/text.ts";
 import type { PollView } from "../src/poll.ts";
 import { fromHex } from "../src/values.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
+
+// A card draws in its model's locale, whose catalog a page has loaded.
+beforeAll(() => Promise.all(LOCALES.map(loadCatalog)));
 const FORMATS: readonly PreviewFormat[] = ["landscape", "square"];
 const SEAL = "1c8a56f03dbcedea6909b56ab69cbec253c423da046f482587a01f1ebec1614f";
 const CODE = shortCode(fromHex(SEAL));
 
 const base = {
+  locale: "en-US",
   seal: SEAL,
   code: CODE,
   host: "abolish.us",
@@ -113,11 +119,13 @@ describe("renderPreview", () => {
 
 describe("a poll without released results", () => {
   // Words only a released result puts on a card or in its description.
-  const RESULT = /%|\bleads\b|came first|Final count|\byes\b|updated|Question 1 of/;
+  const RESULT =
+    /%|\bleads\b|came first|Final count|\byes\b|updated|Question 1 of|Conteo final|\bsí\b|actualizado|Pregunta 1 de/;
 
   const text = fc.string({ minLength: 1, maxLength: 60 }).filter((s) => !RESULT.test(s));
   const unreleased = fc
     .record({
+      locale: fc.constantFrom(...LOCALES),
       seal: fc
         .uint8Array({ minLength: 32, maxLength: 32 })
         .map((b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")),
@@ -230,6 +238,89 @@ describe("the short code", () => {
   });
 });
 
+// The second language (P2-28 part 4c-2): a preview's words are its model's
+// locale's, and its image's address names that locale, so a chat that
+// fetches it with no headers of the reader's still gets that language.
+describe("a preview in Spanish", () => {
+  const es = (model: PollPreview): PollPreview => ({ ...model, locale: "es-US" });
+
+  test("draws the card's and the text's words from the Spanish catalog", () => {
+    const sealed = es(VARIANTS["sealed"]!);
+    const text = cardText(sealed, "landscape");
+    expect(text).toContain("Resultados cuando cierre el 15 nov");
+    expect(text).toContain("2,418 respuestas hasta ahora");
+    expect(text).toContain("Pregunta de Riverside Residents' Association · Riverside");
+    expect(text).not.toMatch(/Results|answers|Asked/);
+    expect(previewText(sealed).description).toBe(
+      "Pregunta de Riverside Residents' Association en Riverside. 2,418 respuestas hasta ahora. " +
+        "Los resultados quedan sellados hasta que cierre el 15 nov. Cualquiera puede comprobar el conteo.",
+    );
+    const open = es(VARIANTS["open"]!);
+    expect(previewText(open)).toEqual({
+      title: `Encuesta ${CODE}`,
+      description: "Abierta hasta que cierre el 15 nov. Cualquiera puede comprobar el conteo.",
+    });
+    expect(previewText({ ...open, code: undefined }).title).toBe("Una encuesta en abolish.us");
+    const civic = cardText(es(VARIANTS["civic"]!), "square");
+    expect(civic).toContain("Registro cívico · Referendum");
+    expect(civic).toContain("Cualquiera puede volver a contarlo");
+    expect(civic).not.toMatch(/Civic record|recount/);
+  });
+
+  test("words a single answer and a single question as one", () => {
+    const one = es({ ...VARIANTS["sealed"]!, answers: 1 });
+    expect(cardText(one, "landscape")).toContain("1 respuesta hasta ahora.");
+    expect(cardText({ ...VARIANTS["sealed"]!, answers: 1 }, "landscape")).toContain(
+      "1 answer so far.",
+    );
+  });
+
+  test("renders as PNGs of both sizes", async () => {
+    for (const format of FORMATS)
+      expect(pngSize(await renderPreview(es(VARIANTS["live"]!), format))).toEqual(
+        PREVIEW_SIZE[format],
+      );
+  });
+
+  test("refuses a model in no locale of ours", () => {
+    for (const locale of ["fr-FR", "es", "en-us", ""])
+      expect(() =>
+        checkPreview({ ...VARIANTS["open"]!, locale } as unknown as PollPreview),
+      ).toThrow(RangeError);
+  });
+
+  test("names its language in the image's address, and the default's address is unchanged", () => {
+    const id = "ab".repeat(32);
+    expect(previewPath(id, "landscape", DEFAULT_LOCALE)).toBe(`/polls/${id}/preview.png`);
+    expect(previewPath(id, "square", DEFAULT_LOCALE, "v1")).toBe(
+      `/polls/${id}/preview.png?format=square&v=v1`,
+    );
+    expect(previewPath(id, "landscape", "es-US", "v1")).toBe(
+      `/polls/${id}/preview.png?lang=es-US&v=v1`,
+    );
+    // Every address a path names reads back as its locale.
+    for (const locale of LOCALES) {
+      const url = new URL(previewPath(id, "square", locale), "https://abolish.us");
+      expect(previewLocale(url.searchParams.get("lang"))).toBe(locale);
+    }
+  });
+
+  test("an image's lang is exactly one of our other locales, or none", () => {
+    expect(previewLocale(null)).toBe(DEFAULT_LOCALE);
+    expect(previewLocale("es-US")).toBe("es-US");
+    fc.assert(
+      fc.property(
+        fc.oneof(fc.string(), fc.constantFrom("en-US", "es", "es-us", "ES-US", " es-US", "")),
+        (lang) => {
+          fc.pre(lang !== "es-US");
+          expect(previewLocale(lang)).toBeUndefined();
+        },
+      ),
+      { numRuns },
+    );
+  });
+});
+
 describe("a poll page's preview today", () => {
   const poll: PollView = {
     electionId: "ab".repeat(32),
@@ -247,36 +338,47 @@ describe("a poll page's preview today", () => {
   const closes = Date.parse("2026-11-15T20:00:00.000Z");
 
   test("is open until it closes, then counting, and never a result", () => {
-    expect(pollPreview(poll, CODE, "abolish.us", closes - 1).results).toEqual({ state: "open" });
-    expect(pollPreview(poll, CODE, "abolish.us", closes).results).toEqual({ state: "counting" });
+    expect(pollPreview(poll, CODE, "abolish.us", closes - 1, "en-US").results).toEqual({
+      state: "open",
+    });
+    expect(pollPreview(poll, CODE, "abolish.us", closes, "en-US").results).toEqual({
+      state: "counting",
+    });
   });
 
   test("counts a version-5 poll's questions, and draws one for a poll with none", () => {
     const q = poll.questions[0]!; // the fixture has one
-    expect(pollPreview(poll, CODE, "abolish.us", 0).questionCount).toBe(1);
+    expect(pollPreview(poll, CODE, "abolish.us", 0, "en-US").questionCount).toBe(1);
     expect(
-      pollPreview({ ...poll, questions: [q, q, q] }, CODE, "abolish.us", 0).questionCount,
+      pollPreview({ ...poll, questions: [q, q, q] }, CODE, "abolish.us", 0, "en-US").questionCount,
     ).toBe(3);
     // An ill-formed definition (`questions`) still gets a card the model accepts.
-    const none = pollPreview({ ...poll, questions: [] }, CODE, "abolish.us", 0);
+    const none = pollPreview({ ...poll, questions: [] }, CODE, "abolish.us", 0, "en-US");
     expect(none.questionCount).toBe(1);
     expect(() => checkPreview(none)).not.toThrow();
   });
 
   test("gets a new version when what it draws changes, and only then", async () => {
-    const open = pollPreview(poll, CODE, "abolish.us", closes - 1);
+    const open = pollPreview(poll, CODE, "abolish.us", closes - 1, "en-US");
     const version = await previewVersion(open, "landscape");
     expect(version).toMatch(/^[0-9a-f]{24}$/);
-    expect(await previewVersion(pollPreview(poll, CODE, "abolish.us", 0), "landscape")).toBe(
-      version,
-    );
     expect(
-      await previewVersion(pollPreview(poll, CODE, "abolish.us", closes), "landscape"),
+      await previewVersion(pollPreview(poll, CODE, "abolish.us", 0, "en-US"), "landscape"),
+    ).toBe(version);
+    expect(
+      await previewVersion(pollPreview(poll, CODE, "abolish.us", closes, "en-US"), "landscape"),
     ).not.toBe(version);
     expect(await previewVersion(open, "square")).not.toBe(version);
     // A registration recorded, or a longer code, is a new image.
     expect(
-      await previewVersion(pollPreview(poll, undefined, "abolish.us", closes - 1), "landscape"),
+      await previewVersion(
+        pollPreview(poll, undefined, "abolish.us", closes - 1, "en-US"),
+        "landscape",
+      ),
+    ).not.toBe(version);
+    // So is another language.
+    expect(
+      await previewVersion(pollPreview(poll, CODE, "abolish.us", closes - 1, "es-US"), "landscape"),
     ).not.toBe(version);
     expect(await previewVersion({ ...VARIANTS["live"]!, answers: 2419 }, "landscape")).not.toBe(
       await previewVersion(VARIANTS["live"]!, "landscape"),

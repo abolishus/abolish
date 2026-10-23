@@ -28,7 +28,7 @@ export const Route = createFileRoute("/p/$code_/flyer")({
     const ink = searchText(search["ink"]);
     return { paper: PAPERS.find((p) => p === paper), ink: INKS.find((i) => i === ink) };
   },
-  loader: async ({ params }) => {
+  loader: async ({ context: { locale }, params }) => {
     const code = parseShortCode(params.code);
     if (code === undefined) throw notFound();
     const link = await fetchShortLink({ data: code });
@@ -44,7 +44,7 @@ export const Route = createFileRoute("/p/$code_/flyer")({
       code,
       url: `${origin}/p/${code}`,
       // The link preview's headline, so the flyer and a chat name the poll alike.
-      title: headline(pollPreview(page.poll, code, new URL(origin).host, Date.now())),
+      title: headline(pollPreview(page.poll, code, new URL(origin).host, Date.now(), locale)),
       // A hidden poll's text was withheld by moderation, so we print nothing
       // to spread it (docs/moderation-policy.md); a delisted one keeps its flyer.
       hidden: page.moderation.state === "hidden",

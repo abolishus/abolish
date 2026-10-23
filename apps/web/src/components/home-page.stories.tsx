@@ -112,6 +112,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     "/discover",
   );
+  // What choosing an answer does is said once, above the cards; a card of
+  // several questions says only which one its answers are for.
+  await expect(main.getAllByText(/Nothing is sent until you cast your ballot/)).toHaveLength(1);
+  await expect(main.getByText(/The newest open questions\. Choose an answer/)).toBeVisible();
+  await expect(newest.getByText("These answers are for question 1 of 2.")).toBeVisible();
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);
@@ -138,6 +143,15 @@ export const Phone: Story = {
       await expect(
         main.getByRole("link", { name }).getBoundingClientRect().bottom,
       ).toBeLessThanOrEqual(568);
+    // Where the cards stack, the first follows the lede with nothing between,
+    // and "See all questions" comes after the last, where iteration 3 put it
+    // between the lede and the first card.
+    const lede = main.getByText(/^The newest open questions\./).getBoundingClientRect();
+    const cards = main.getAllByRole("article").map((card) => card.getBoundingClientRect());
+    await expect(cards[0]?.top).toBeLessThanOrEqual(lede.bottom + 32);
+    await expect(
+      main.getByRole("link", { name: "See all questions" }).getBoundingClientRect().top,
+    ).toBeGreaterThan(cards.at(-1)?.bottom ?? Infinity);
   },
 };
 
@@ -147,6 +161,8 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
     await expect(main.getByText(/No questions are open just now/)).toBeVisible();
+    // With no card to answer from, the lede says nothing about answering.
+    await expect(main.queryByText(/Choose an answer/)).toBeNull();
     await expect(main.queryByRole("list", { name: "What people are asking" })).toBeNull();
     await expect(main.getByRole("link", { name: "Ask a question" })).toBeVisible();
   },

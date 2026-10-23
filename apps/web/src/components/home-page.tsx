@@ -21,6 +21,8 @@ export interface Newest {
  */
 export function HomePage({ newest }: { newest: Newest | undefined }) {
   const t = useTranslate(catalogs);
+  const answerable =
+    newest !== undefined && newest.ballot !== null && newest.cards.some((c) => c.kind === "poll");
   return (
     <div className="grid gap-16">
       <section className="grid gap-4 sm:gap-8 sm:pt-2 md:pt-10 lg:grid-cols-12 lg:gap-x-10">
@@ -54,9 +56,20 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
             >
               {t("homeStreamTitle")}
             </h2>
-            <p className="m-0 max-w-prose text-lg text-pretty">{t("homeStreamLede")}</p>
+            {/* Said once here rather than on each card, which on a phone
+                read the same two sentences three times down the page. */}
+            <p className="m-0 max-w-prose text-lg text-pretty">
+              {t("homeStreamLede")}
+              {answerable ? <> {t("homeStreamPick")}</> : null}
+            </p>
           </div>
-          <a href="/discover" className={cn(buttonVariants({ variant: "outline" }), "gap-2")}>
+          {/* Beside the title only where the cards share a row: where they
+              stack, it follows them, so the first card comes straight after
+              the lede and the way on is where the list ends. */}
+          <a
+            href="/discover"
+            className={cn(buttonVariants({ variant: "outline" }), "hidden gap-2 lg:inline-flex")}
+          >
             {t("homeStreamAll")}
             <ArrowRight aria-hidden="true" />
           </a>
@@ -77,11 +90,21 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
                 key={card.kind === "poll" ? card.poll.electionId : card.electionId}
                 className="grid"
               >
-                <StreamCard card={card} ballot={newest.ballot} />
+                <StreamCard card={card} ballot={newest.ballot} explained />
               </li>
             ))}
           </ol>
         )}
+        <a
+          href="/discover"
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "gap-2 justify-self-start lg:hidden",
+          )}
+        >
+          {t("homeStreamAll")}
+          <ArrowRight aria-hidden="true" />
+        </a>
       </section>
       <TrustScene />
     </div>

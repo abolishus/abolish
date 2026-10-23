@@ -1528,6 +1528,8 @@ describe("home", () => {
     expect(html).toMatch(/<a href="\/account\?next=new-poll"[^>]*>Ask a question</);
     expect(html).toMatch(/<a href="\/discover"[^>]*>Browse questions</);
     expect(html).toMatch(/<a href="\/discover"[^>]*>See all questions/);
+    // What choosing an answer does is said once, above the cards, not on each.
+    expect(html.match(/Nothing is sent until you cast your ballot there/g)).toHaveLength(1);
     // The ID lookup is the register's, not the front page's.
     expect(html).not.toContain('name="id"');
     expect(html).toContain("Why you can trust a casual poll");

@@ -15,7 +15,9 @@ export const esUS: Messages = {
     "Pregunta lo que sea. Cualquiera puede responder. Cualquiera puede revisar el conteo.",
   homeNonBinding: "No vinculante y a cargo de la ciudadanía.",
   homeStreamTitle: "Lo que la gente pregunta",
-  homeStreamLede: "Las preguntas abiertas más recientes. Responde cualquiera desde aquí.",
+  homeStreamLede: "Las preguntas abiertas más recientes.",
+  homeStreamPick:
+    "Elige una respuesta en cualquier tarjeta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
   homeStreamAll: "Ver todas las preguntas",
   homeStreamEmpty:
     "No hay preguntas abiertas en este momento. Cuando alguien haga una, aparecerá aquí.",
@@ -277,6 +279,7 @@ export const esUS: Messages = {
     other:
       "Elige una respuesta a la pregunta 1 de {count} para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
   },
+  streamPickFirst: "Estas respuestas son para la pregunta 1 de {count}.",
   streamNoBallot: "Responder desde esta página todavía no está disponible en este sitio.",
   streamText:
     "El texto de esta encuesta no se puede mostrar aquí. Su página tiene lo que este servidor guarda.",

@@ -93,17 +93,21 @@ function TrustGraphic({ step }: { step: number }) {
       ) : null}
       {step === 2 ? (
         <Panel label={t("graphicOpen")}>
-          <span className="flex flex-wrap items-center gap-2">
-            <Lock className="me-2 size-8" />
-            {Array.from({ length: SEATS }, (_, seat) => (
-              <KeyRound
-                key={seat}
-                className={cn(
-                  "size-6",
-                  seat < THRESHOLD ? "text-primary" : "text-muted-foreground",
-                )}
-              />
-            ))}
+          {/* The keys wrap as one row: one at a time, a phone's card left
+              the seventh alone under the lock, which reads as a lone seat. */}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Lock className="size-8" />
+            <span data-testid="trust-keys" className="flex items-center gap-1 sm:gap-2">
+              {Array.from({ length: SEATS }, (_, seat) => (
+                <KeyRound
+                  key={seat}
+                  className={cn(
+                    "size-6",
+                    seat < THRESHOLD ? "text-primary" : "text-muted-foreground",
+                  )}
+                />
+              ))}
+            </span>
           </span>
           <span className="text-base">
             {t("graphicSeats", { threshold: THRESHOLD, seats: SEATS })}

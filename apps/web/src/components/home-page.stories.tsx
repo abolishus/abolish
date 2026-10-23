@@ -152,6 +152,19 @@ export const Phone: Story = {
     await expect(
       main.getByRole("link", { name: "See all questions" }).getBoundingClientRect().top,
     ).toBeGreaterThan(cards.at(-1)?.bottom ?? Infinity);
+    // In the frame, step 3's seven keys share one row beside the lock, where
+    // iteration 5's wrapped one at a time and left the seventh on a line of
+    // its own.
+    const steps = within(main.getByRole("region", { name: "What happens to an answer" }));
+    const step3 = steps.getAllByRole("listitem")[2];
+    if (step3 === undefined) throw new Error("no step 3");
+    const keys = within(step3).getByTestId("trust-keys");
+    const tops = [...keys.querySelectorAll("svg")].map((key) => key.getBoundingClientRect().top);
+    await expect(tops).toHaveLength(7);
+    await expect(new Set(tops).size).toBe(1);
+    const lock = keys.previousElementSibling?.getBoundingClientRect();
+    await expect(lock?.right).toBeLessThan(keys.getBoundingClientRect().left);
+    await expect(lock?.bottom).toBeGreaterThan(tops[0] ?? Infinity);
   },
 };
 

@@ -12,7 +12,7 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 function manager() {
   const requests: { name: string; options: LockOptions }[] = [];
   const locks: Pick<LockManager, "request"> = {
-    request: ((name: string, options: LockOptions, callback: LockGrantedCallback) => {
+    request: ((name: string, options: LockOptions, callback: LockGrantedCallback<unknown>) => {
       requests.push({ name, options });
       return Promise.resolve().then(() => callback(null));
     }) as LockManager["request"],

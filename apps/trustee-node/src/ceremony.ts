@@ -31,6 +31,7 @@ import {
   challengesMessage,
   checkCeremonyTranscript,
   ceremonyKeygen,
+  ceremonyTranscriptHash,
   decode,
   decodeCeremonyTranscript,
   DecodeError,
@@ -436,6 +437,10 @@ export class CeremonySeat {
     );
     if (!equal(decode(APPROVED_RUN, approvedRun.value).run_id, t.run_id))
       return refuse("approved-other");
+    // The tally checks its key set against the transcript it signed for, and
+    // the board is the operator's: the seat keeps its own copy (T-37).
+    const kept = await config.store.putOnce(`transcripts/${hex(checked.stubHash)}`, transcript);
+    if (!equal(ceremonyTranscriptHash(kept.value), result.hash)) return refuse("approved-other");
     const signature = signCeremonyRegistration(config.identitySecret, config.panel, registration);
     const stored = await config.store.putOnce(
       approvalKey,
@@ -521,6 +526,18 @@ export class CeremonySeat {
       },
       signingSecret: Uint8Array.from(run.seat.signingSecret),
     };
+  }
+
+  /**
+   * The ceremony transcript the seat's approval of the stub signed for, as
+   * it was approved; undefined unless this seat approved the stub, or
+   * approved it before the seat kept its own copy.
+   */
+  async approvedTranscript(stubHash: Uint8Array): Promise<Uint8Array | undefined> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
+    const name = hex(stubHash);
+    if ((await this.#durable(`approvals/${name}`)) === undefined) return undefined;
+    return this.#durable(`transcripts/${name}`);
   }
 
   /** Whether the seat holds an approval for the stub these bytes decode to. */

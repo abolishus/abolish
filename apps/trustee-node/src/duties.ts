@@ -1,15 +1,22 @@
 // A seat's duties in a deployment: for each election the seat approved, one
 // duty, built once its sources can be set up and stepped on a schedule until
-// it settles. Four kinds run so: the availability duty at each point
+// it settles. Five kinds run so: the availability duty at each point
 // (`AvailabilitySeat`, docs/spec/availability.md, What a seat does; T-24,
 // T-54), the receipt duty
-// (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52) and
-// the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29).
+// (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52),
+// the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29),
+// and the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
+// which also takes the summed-share messages the channel hands it.
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
 import { setTimeout as sleep } from "node:timers/promises";
-import { availabilityWindows, type DeadlineClock, deliveryDeadlines } from "@abolishus/crypto";
+import {
+  availabilityWindows,
+  type DeadlineClock,
+  deliveryDeadlines,
+  PARAMETERS,
+} from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import { type AvailabilitySeat, type AvailabilityStatus, countedDue } from "./availability.ts";
@@ -19,6 +26,7 @@ import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
 import { L1AnchorError } from "./l1.ts";
 import { SendError } from "./send.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
+import type { TallyDuty, TallyDutyStatus } from "./tally.ts";
 import { ViewError } from "./view.ts";
 
 /**
@@ -46,12 +54,14 @@ export type AvailabilityEvent = KindEvent<"availability", AvailabilityStatus>;
 export type CountedAvailabilityEvent = KindEvent<"counted-availability", AvailabilityStatus>;
 export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
 export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
+export type TallyEvent = KindEvent<"tally", TallyDutyStatus>;
 /** What the duties report. */
 export type DutyEvent =
   | AvailabilityEvent
   | CountedAvailabilityEvent
   | ReceiptEvent
-  | ComplaintEvent;
+  | ComplaintEvent
+  | TallyEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -92,6 +102,11 @@ export type Duty = Pick<AvailabilitySeat, "step" | "deadline">;
 export type ReceiptStep = Pick<ReceiptDuty, "step" | "deadline">;
 /** What the schedule needs of an election's complaint duty: `ComplaintDuty`. */
 export type ComplaintStep = Pick<ComplaintDuty, "step" | "deadline">;
+/**
+ * What the schedule needs of an election's tally duty: `TallyDuty`'s step
+ * and receive, with the deadline its builder reads (`tallyDeadline`).
+ */
+export type TallyStep = Pick<TallyDuty, "step" | "receive"> & { readonly deadline: bigint };
 
 /** What the schedule needs of any duty. */
 interface Stepped<S> {
@@ -107,23 +122,34 @@ interface Kind<K extends string, S> {
   readonly deadline: (election: ApprovedElection) => bigint;
   /** Whether `status`, from a step begun at `wall`, ends the duty. */
   readonly settles: (status: S, wall: bigint, deadline: bigint) => boolean;
+  /**
+   * Whether a step begun past the deadline is never taken, rather than
+   * taken once more: the tally's, since past `t_D` the seat may combine
+   * nothing and send no sum (docs/spec/tally.md, Destruction).
+   */
+  readonly noStepPast?: boolean;
 }
 
 /** One kind of duty for every election the seat approved, each built once and stepped until it settles. */
-class ElectionDuties<K extends string, S extends object> {
+class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = Stepped<S>> {
   readonly #kind: Kind<K, S>;
-  readonly #o: DutyOptions<Stepped<S>, KindEvent<K, S>>;
+  readonly #o: DutyOptions<D, KindEvent<K, S>>;
   // Each built duty, with its deadline read once.
-  readonly #duties = new Map<string, { readonly seat: Stepped<S>; readonly deadline: bigint }>();
+  readonly #duties = new Map<string, { readonly seat: D; readonly deadline: bigint }>();
   // Elections whose duty is over, or that can never be read: never stepped again.
   readonly #settled = new Set<string>();
   // The last line logged per election, so a status or a failure that repeats
   // every step is reported once.
   readonly #last = new Map<string, string>();
 
-  constructor(kind: Kind<K, S>, options: DutyOptions<Stepped<S>, KindEvent<K, S>>) {
+  constructor(kind: Kind<K, S>, options: DutyOptions<D, KindEvent<K, S>>) {
     this.#kind = kind;
     this.#o = options;
+  }
+
+  /** Every duty built and not yet settled. */
+  protected active(): D[] {
+    return [...this.#duties.values()].map((d) => d.seat);
   }
 
   /**
@@ -152,6 +178,7 @@ class ElectionDuties<K extends string, S extends object> {
         duty = await this.#build(stubHash, name, wall);
         if (duty === undefined) return;
       }
+      if (this.#kind.noStepPast && wall > duty.deadline) return this.#settle(name);
       const status = await duty.seat.step();
       this.#report(name, status);
       if (this.#kind.settles(status, wall, duty.deadline)) this.#settle(name);
@@ -180,10 +207,17 @@ class ElectionDuties<K extends string, S extends object> {
     stubHash: Uint8Array,
     name: string,
     wall: bigint,
-  ): Promise<{ readonly seat: Stepped<S>; readonly deadline: bigint } | undefined> {
+  ): Promise<{ readonly seat: D; readonly deadline: bigint } | undefined> {
     const election = await this.#o.seat.approvedElection(stubHash);
     // Listed as approved, so its records exist; approvedElection throws if they don't.
     if (election === undefined) throw new Error(`trustee node: approval ${name} has no election`);
+    // Not even set up past it: building reads the counted set's sources, and
+    // a node restarted past `t_D` steps nothing.
+    if (this.#kind.noStepPast && wall > this.#kind.deadline(election)) {
+      this.#settle(name);
+      this.#o.log({ event: `${this.#kind.name}-abandoned`, stubHash: name } as KindEvent<K, S>);
+      return undefined;
+    }
     let seat;
     try {
       seat = await this.#o.build(election);
@@ -342,5 +376,62 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
       },
       options,
     );
+  }
+}
+
+/**
+ * `t_D` (docs/spec/tally.md, Destruction): the later of the tally window's
+ * end, `t_S + TALLY_WINDOW`, and the anchoring deadline of segment `s_T − 1`,
+ * `s_T` the period containing the window's end, under the pinned clock.
+ * Throws `L1AnchorError` `outside-clock` for a close before its epoch.
+ */
+export function tallyDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
+  const end = countedDue(election, clock) + BigInt(PARAMETERS.TALLY_WINDOW);
+  const sT = (end - clock.epoch) / clock.period;
+  const anchored = clock.epoch + sT * clock.period + clock.deadline;
+  return anchored > end ? anchored : end;
+}
+
+/**
+ * The tally duty of every election the seat approved: each one's
+ * `TallyDuty`, stepped from the approval (it reads nothing before the
+ * summed-share rule allows) until every cell is opened, the election is
+ * unavailable, the seat refuses its counted set (for good: a refusal is the
+ * operator's to look into, and stepping on could only sum over a set the
+ * seat already refused once; T-54), or `t_D` has passed, when the seat may
+ * combine nothing more (Destruction): no step begins past `t_D`, nor is a
+ * duty set up, so a node restarted then signs and sends nothing. `t_D` is
+ * read on the node's clock, not finalized L1's, which destruction will
+ * need. `receive` hands a
+ * summed-share message to every election's duty built and not settled;
+ * each runs crypto's checks, and one of another election fails at its
+ * context (T-39).
+ */
+export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyStep> {
+  constructor(options: DutyOptions<TallyStep, TallyEvent>, clock: DeadlineClock) {
+    super(
+      {
+        name: "tally",
+        deadline: (e) => tallyDeadline(e, clock),
+        noStepPast: true,
+        settles: (status, wall, deadline) => {
+          switch (status.state) {
+            case "unavailable":
+            case "refused":
+              return true;
+            case "tallying":
+              return status.cells.every((c) => c.state === "opened") || wall > deadline;
+            default:
+              return wall > deadline;
+          }
+        },
+      },
+      options,
+    );
+  }
+
+  /** Hands a summed-share message to every election's duty; never throws for the message's sake. */
+  async receive(message: Uint8Array): Promise<void> {
+    for (const duty of this.active()) await duty.receive(message);
   }
 }

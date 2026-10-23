@@ -29,6 +29,7 @@ import {
   DecodeError,
   decodeBoardEntry,
   decodeContractEvent,
+  type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionV5Hash,
   type EventContracts,
@@ -65,7 +66,7 @@ import { l2BlockTime } from "./recorded.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
-import type { CountedSet } from "./tally.ts";
+import type { CountedSet, TallyDefinition } from "./tally.ts";
 
 export interface ViewOptions {
   readonly store: SeatStore;
@@ -102,7 +103,9 @@ export type ViewRefusal =
   /** Finalized L1 from an hour before `opens_at` to past `closes_at` is longer than `maxRunBytes`. */
   | "l1-run-short"
   /** The blocks the seat pinned before attesting no longer hold the ballot extent it attested. */
-  | "extent-lost";
+  | "extent-lost"
+  /** The seat holds no copy of the transcript it approved: it approved before it kept one. */
+  | "transcript";
 
 export class ViewError extends Error {
   override readonly name = "ViewError";
@@ -235,6 +238,19 @@ export function complaintBallots(
     for (const c of recorded.copies) ballots.push(c.record);
     return ballots;
   };
+}
+
+/**
+ * The registered definition, as the tally duty takes it, from the seat's own
+ * L2 node: the approved one, of version 1 or 5 and naming the deployment's
+ * board, or `ViewError`, as `obligationView` reads it. The duty checks it
+ * against the approval again (T-37).
+ */
+export async function tallyDefinition(
+  options: Omit<ViewOptions, "store" | "extent">,
+  election: ApprovedElection,
+): Promise<TallyDefinition> {
+  return (await registered(options, election)).decoded;
 }
 
 export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent"> {
@@ -399,6 +415,7 @@ async function registered(
   election: ApprovedElection,
 ): Promise<{
   readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
+  readonly decoded: Exclude<TallyDefinition, ElectionDefinition>;
   readonly boardVersion: BoardEntryVersion;
   readonly eventVersion: ContractEventVersion;
   readonly l2Head: bigint;
@@ -435,7 +452,7 @@ async function registered(
     !equal(d.board, options.board)
   )
     throw new ViewError("definition");
-  return { definition: reg.definition, boardVersion, eventVersion, l2Head };
+  return { definition: reg.definition, decoded, boardVersion, eventVersion, l2Head };
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {

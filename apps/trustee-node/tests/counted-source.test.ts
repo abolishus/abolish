@@ -36,8 +36,13 @@ import type { HeldExtent } from "../src/availability.ts";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import type { SeatStore } from "../src/store.ts";
-import { type SummedSharePeers, TallyDuty } from "../src/tally.ts";
-import { countedSource, type CountedSourceOptions, ViewError } from "../src/view.ts";
+import { type SummedSharePeers, type TallyDefinition, TallyDuty } from "../src/tally.ts";
+import {
+  countedSource,
+  type CountedSourceOptions,
+  tallyDefinition,
+  ViewError,
+} from "../src/view.ts";
 import { anvil, type Node } from "./anvil.ts";
 import { type Cast, cast, castAgain, type L1Ref, seatsOf, type Setup, setup } from "./ballots.ts";
 import { AVAILABLE, L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
@@ -446,6 +451,16 @@ describe("the counted set from the attested counted extent", () => {
     const logs = registrationLogs({ ...s.definition, closes_at: s.definition.closes_at + 1n });
     await expect(read(options({ logs }))).rejects.toThrow(ViewError);
   });
+
+  test("gives the tally duty the registered definition the seat approved, under its version, and throws for another", async () => {
+    const election = approved[0] as ApprovedElection;
+    expect(await tallyDefinition(options(), election)).toEqual({
+      version: 1,
+      value: s.definition,
+    });
+    const logs = registrationLogs({ ...s.definition, closes_at: s.definition.closes_at + 1n });
+    await expect(tallyDefinition(options({ logs }), election)).rejects.toThrow(ViewError);
+  });
 });
 
 /** A channel handing each message to the recipient's duty once `deliver` is set. */
@@ -460,6 +475,7 @@ class Wire implements SummedSharePeers {
 describe("the seats' tally over the source", () => {
   test("opens the counted set to the votes it holds", async () => {
     const wire = new Wire();
+    const definitions = await Promise.all(approved.map((e) => tallyDefinition(options(), e)));
     wire.duties = approved.map(
       (election, i) =>
         new TallyDuty({
@@ -468,7 +484,8 @@ describe("the seats' tally over the source", () => {
           trusteeRegistry: TRUSTEE_REGISTRY,
           election,
           secrets: secrets[i] as IntakeSecrets,
-          definition: s.definition,
+          // As `run` builds it: the definition read from the L2 node.
+          definition: definitions[i] as TallyDefinition,
           transcript: s.transcript,
           store: s.stores[i] as SeatStore,
           summing: AVAILABLE,

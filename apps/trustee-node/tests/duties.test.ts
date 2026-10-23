@@ -4,7 +4,9 @@
 // anything the node can't get past ending the loop; and the receipt duty's
 // on the same schedule (P2-13 part 4b-2b-2b), settling once its batches are
 // recorded or can't be, and giving up a view no retry can read; and the
-// complaint duty's (P2-13 part 4b-3b), the same until `t_K`.
+// complaint duty's (P2-13 part 4b-3b), the same until `t_K`; and the tally
+// duty's (P2-13 part 5b-2b-3a), until every cell is opened or `t_D`, with
+// the channel's messages handed to every duty still stepped.
 import { deliveryDeadlines, kemKeygen } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
@@ -22,9 +24,13 @@ import {
   type DutyEvent,
   ReceiptDuties,
   type ReceiptEvent,
+  TallyDuties,
+  tallyDeadline,
+  type TallyEvent,
 } from "../src/duties.ts";
 import { L1AnchorError } from "../src/l1.ts";
 import { SendError } from "../src/send.ts";
+import type { TallyDutyStatus } from "../src/tally.ts";
 import { MemoryStore } from "../src/store.ts";
 import { ViewError } from "../src/view.ts";
 import { election, runCeremony, value } from "./fixture.ts";
@@ -645,5 +651,158 @@ describe("the complaint duties", () => {
       },
       { event: "complaints-abandoned", stubHash: name(1) },
     ]);
+  });
+});
+
+describe("the tally duties", () => {
+  type TallyScript = (TallyDutyStatus | Error)[];
+  const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n };
+  const opened = { state: "opened" } as const;
+  const combining = { state: "combining", held: 1, sent: 2 } as const;
+
+  function tally(scripts: Map<number, TallyScript>, clock = () => 0n) {
+    const events: TallyEvent[] = [];
+    const stepped: string[] = [];
+    const received: string[] = [];
+    const duties = new TallyDuties(
+      {
+        seat: {
+          approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+          approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+        },
+        build: async (e) => {
+          const n = e.stubHash[0] as number;
+          return {
+            deadline: DEADLINE,
+            step: async () => {
+              stepped.push(name(n));
+              const script = scripts.get(n) as TallyScript;
+              const next = (script.length > 1 ? script.shift() : script[0]) as
+                | TallyDutyStatus
+                | Error;
+              if (next instanceof Error) throw next;
+              return next;
+            },
+            receive: async (m) => void received.push(`${name(n)}:${hex(m)}`),
+          };
+        },
+        clock,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    return { duties, events, stepped, received };
+  }
+
+  test("step each election until every cell is opened, the election is unavailable or its counted set refused", async () => {
+    const h = tally(
+      new Map<number, TallyScript>([
+        [
+          1,
+          [
+            { state: "waiting" },
+            { state: "tallying", cells: [combining, opened] },
+            { state: "tallying", cells: [opened, opened] },
+          ],
+        ],
+        [2, [{ state: "unavailable" }]],
+        [3, [{ state: "refused", reason: "the seat holds no counted extent" }]],
+        [4, [{ state: "tallying", cells: [{ state: "missing-shares", missing: 1, held: 0 }] }]],
+      ]),
+    );
+    for (let i = 0; i < 5; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(3))).toHaveLength(1);
+    // A seat lacking shares still combines the others' sums: it is stepped on.
+    expect(h.stepped.filter((s) => s === name(4))).toHaveLength(5);
+    expect(h.events.filter((e) => e.stubHash === name(1))).toEqual([
+      { event: "tally", stubHash: name(1), state: "waiting" },
+      { event: "tally", stubHash: name(1), state: "tallying", cells: [combining, opened] },
+      { event: "tally", stubHash: name(1), state: "tallying", cells: [opened, opened] },
+    ]);
+  });
+
+  test("take no step past its deadline whatever the status, and retry a node's failures until then", async () => {
+    let wall = DEADLINE - 1n;
+    const h = tally(
+      new Map<number, TallyScript>([
+        [1, [new RpcError("eth_getLogs: status 503"), { state: "waiting" }]],
+        [2, [{ state: "tallying", cells: [combining] }]],
+      ]),
+      () => wall,
+    );
+    await h.duties.step();
+    wall = DEADLINE;
+    await h.duties.step();
+    // Past t_D the seat combines nothing and sends no sum: no step begins.
+    wall = DEADLINE + 1n;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(2);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(2);
+    expect(h.events[0]).toEqual({
+      event: "tally-error",
+      stubHash: name(1),
+      error: "RpcError",
+      message: "eth_getLogs: status 503",
+    });
+  });
+
+  test("set nothing up for an election once t_D has passed, so a node restarted then steps nothing", async () => {
+    const events: TallyEvent[] = [];
+    let built = 0;
+    const duties = new TallyDuties(
+      {
+        seat: {
+          approvedStubs: async () => [approvedOf(1).stubHash],
+          approvedElection: async () => approvedOf(1),
+        },
+        build: async () => {
+          built++;
+          return {
+            deadline: 0n,
+            step: async () => ({ state: "waiting" }),
+            receive: async () => {},
+          };
+        },
+        clock: () => tallyDeadline(approvedOf(1), CLOCK) + 1n,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    await duties.step();
+    await duties.step();
+    expect(built).toBe(0);
+    expect(events).toEqual([{ event: "tally-abandoned", stubHash: name(1) }]);
+  });
+
+  test("hand each summed-share message to every duty built and not settled, and to no other", async () => {
+    const h = tally(
+      new Map<number, TallyScript>([
+        [1, [{ state: "tallying", cells: [combining] }]],
+        [2, [{ state: "unavailable" }]],
+        [3, [{ state: "tallying", cells: [combining] }]],
+      ]),
+    );
+    // Before any step no duty is built, so a message reaches none.
+    await h.duties.receive(Uint8Array.of(0));
+    await h.duties.step();
+    await h.duties.receive(Uint8Array.of(1));
+    await h.duties.receive(Uint8Array.of(2));
+    expect(h.received.sort()).toEqual(
+      [`${name(1)}:01`, `${name(1)}:02`, `${name(3)}:01`, `${name(3)}:02`].sort(),
+    );
+  });
+
+  test("t_D is the later of the tally window's end and the anchoring deadline of the segment before s_T", () => {
+    const e = approvedOf(1);
+    // t_S = 529,200 (s_S = 134); the window ends at 1,134,000, the start of
+    // s_T = 315, whose previous segment's anchoring deadline is 43,200 later.
+    expect(tallyDeadline(e, CLOCK)).toBe(1_177_200n);
+    // t_S = 483,100 (s_S = 68); the window ends at 1,087,900, inside
+    // s_T = 155, and segment 154's deadline is 1,085,100, earlier.
+    expect(tallyDeadline(e, { epoch: 0n, period: 7000n, deadline: 100n })).toBe(1_087_900n);
+    expect(() => tallyDeadline(e, { ...CLOCK, epoch: 1n })).toThrow(L1AnchorError);
   });
 });

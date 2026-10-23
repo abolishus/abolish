@@ -2,12 +2,12 @@
 
 How a trustee runs `apps/trustee-node` for its seat ([[0006-trustees]], Consequences; [[P2-13]]). The node holds the seat's identity key and, during an election, its per-election keys, so whoever controls the node's host or its software reaches the seat's share of every ballot (T-14, T-61). The app's README has the transport and configuration; this page is what the trustee must do around them.
 
-Status: not deployable yet. Until the node checks the electorate against finalized L2 state ([[verifier]] 2.4, P2-13 part 3), `run` refuses every stub with `stub-electorate`, and intake, the tally and destruction are later parts. `local-ceremony` runs a whole ceremony on one machine to try it. The node's image (`ghcr.io/abolishus/abolish-trustee-node`, built and signed by the deploy workflow) runs staging's launch-panel seats on Railway (Staging on Railway, below).
+Status: not deployable yet. Until the node checks the electorate against finalized L2 state ([[verifier]] 2.4, P2-13 part 3), `run` refuses every stub with `stub-electorate`; boarding the tally's openings and destruction are later parts. `local-ceremony` runs a whole ceremony on one machine to try it. The node's image (`ghcr.io/abolishus/abolish-trustee-node`, built and signed by the deploy workflow) runs staging's launch-panel seats on Railway (Staging on Railway, below).
 
 ## Host
 
 - One host per seat, under the trustee's own control, at the hosting provider the panel lists for the seat ([[0006-trustees]]), with full-disk encryption and nothing else running on it.
-- Outbound HTTPS to the coordinator. Inbound, only the ports you configure: the intake endpoint's (below) and the availability duty's `serve` gateway. Open no other port.
+- Outbound HTTPS to the coordinator and, with the tally duty, to the other seats' summed-share channels. Inbound, only the ports you configure: the intake endpoint's (below), the availability duty's `serve` gateway and the tally's summed-share channel. Open no other port.
 - Keep the clock synchronized (NTP); deadlines are the coordinator's, but logs are only useful with a sane clock.
 
 ## Identity key
@@ -48,6 +48,15 @@ With an `availability` section the node also attests, or complains about, each a
 
 At start the node checks both nodes' chains and that the board and portal have code, and exits 2 on a mismatch or a `serve` address it can't listen on, or 1 when a node can't be read; a supervisor restarting it covers a node that was briefly down. Events: `serving` (the address it listens on), `availability` (each election's state when it changes: `waiting`, `fetching`, `sent`, `complained`, `recorded`, `past-cutoff`, and the alarms `board-failed`, `no-checkpoint`, `unrecorded`, `foreign-record`) `availability-error` (a node's failure, retried each poll, or a refusal for good) and `availability-abandoned` (`t_A` passed before the election could be read: it was never registered, or your nodes never showed it final). `unrecorded` means a record that can no longer count was never recorded, and `foreign-record` that the seat's per-election key signed bytes this node never stored: tell the panel at once.
 
+## Tally duty
+
+With `availability.tally` the node also runs the tally ([[tally]]; T-14, T-15, T-39, T-54): for each election it approved, once the summed-share rule allows, it reads the counted set from the counted extent it attested, sums its shares, exchanges summed shares with the other seats over the summed-share channel and signs each cell's opening. What it needs:
+
+- **The channel.** `host` and `port` where it takes the other seats' messages, over TLS on the node (`tlsCertFile`, `tlsKeyFile`: TLS 1.3 with `X25519MLKEM768` only, no classical fallback; hold the key as the identity key is), or on loopback behind a TLS proxy on the same host that holds to the same group. Publish its URL (`https://<host>:<port>/v1/summed-shares`) to the other seats. A summed share is private to the seats: never route the channel through a proxy that logs or keeps bodies (T-15).
+- **The other seats' channels**, `peers`, by seat index, as each published it, and `caFile` if their certificates chain to a CA the panel agreed rather than a public one. A seat you name no endpoint for gets nothing from you; the tally still opens with `k` seats that reach each other.
+
+Events: `summed-shares` (the channel's URL), `tally` (each election's state when it changes: `waiting`, `tallying` with each cell's `opened`, `combining` or `missing-shares`, and the alarms `unavailable`, where a point lacked its quorum and no summed share is ever sent, and `refused`, with the reason) and `tally-error`. `missing-shares` means intake holds no shares of some counted ballot: tell the panel. Openings are signed and kept in the store, but not yet sent to the board (README, Known-weak).
+
 ## Releases
 
 Rule 6 of [[0006-trustees]] applies in full (T-61):
@@ -58,7 +67,7 @@ Rule 6 of [[0006-trustees]] applies in full (T-61):
 
 ## Logs
 
-The node writes one JSON event per line to stdout: `started` (with the intake endpoint's URL when it serves one), `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`), `transport` failures, `intake-error` (an intake that threw, by the error's name only), and the availability duty's events above. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).
+The node writes one JSON event per line to stdout: `started` (with the intake endpoint's URL when it serves one), `sent` and `refused` (with the round, the refusal code, `stub_hash` and `run_id`), `transport` failures, `intake-error` (an intake that threw, by the error's name only), and the availability and tally duties' events above. They hold no secret. A refusal is the node doing its job; a run of `transport` events means the coordinator is unreachable, which only costs liveness (T-54).
 
 ## Staging on Railway
 

@@ -174,7 +174,9 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
     await expect(main.getByText(/No questions are open just now/)).toBeVisible();
-    // With no card to answer from, the lede says nothing about answering.
+    // With no card, there is no lede promising the newest questions above
+    // the note that says there are none.
+    await expect(main.queryByText("The newest open questions.", { exact: false })).toBeNull();
     await expect(main.queryByText(/Choose an answer/)).toBeNull();
     await expect(main.queryByRole("list", { name: "What people are asking" })).toBeNull();
     await expect(main.getByRole("link", { name: "Ask a question" })).toBeVisible();
@@ -187,6 +189,7 @@ export const Unavailable: Story = {
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
     await expect(main.getByText(/couldn't be loaded just now/)).toBeVisible();
+    await expect(main.queryByText("The newest open questions.", { exact: false })).toBeNull();
     await expect(main.queryByRole("article")).toBeNull();
     await expect(main.getByRole("link", { name: "See all questions" })).toBeVisible();
   },

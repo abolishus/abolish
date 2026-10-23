@@ -177,6 +177,8 @@ export interface DeliveryReportV2 {
     readonly missing: readonly { readonly panel: SeatPanel; readonly seat: number }[];
     readonly complaints: readonly {
       readonly entry: number;
+      /** For a share-complaint batch's entry, its index in the batch from 0. */
+      readonly pair?: number;
       readonly panel: SeatPanel;
       readonly seat: number;
       readonly signer: number | null;
@@ -185,12 +187,14 @@ export interface DeliveryReportV2 {
   /** Each record the check ignored or attributed, in copy order, with the panel and seat it names. */
   readonly records: readonly {
     readonly entry: number;
+    /** For a share-receipt or share-complaint batch's pair or entry, its index in the batch from 0. */
+    readonly pair?: number;
     readonly code: DeliveryRecordCode;
     readonly panel: SeatPanel;
     readonly seat: number;
     readonly signer?: number | null;
   }[];
-  /** Each record that doesn't decode under version 2 (every batch and root among them): a rejected entry (8.3). */
+  /** Each record that doesn't decode under version 2 (every version-1 batch and root among them): a rejected entry (8.3). */
   readonly rejected: readonly { readonly entry: number; readonly decodeError: DecodeErrorCode }[];
 }
 
@@ -327,13 +331,6 @@ const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptSubmitted",
   "SharePosted",
   "ShareComplaintSubmitted",
-  "ShareReceiptBatchSubmitted",
-  "ShareComplaintBatchSubmitted",
-  "ObligationRootSubmitted",
-]);
-
-// The events whose record is a batch or an obligation root.
-const BATCH_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptBatchSubmitted",
   "ShareComplaintBatchSubmitted",
   "ObligationRootSubmitted",
@@ -490,19 +487,21 @@ export function deliverSelected(
         continue;
       if (BigInt(segment) > floor)
         return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
-      // A version-2 batch or root of this election (contract-event version 9
-      // frames them) may deliver or exclude any ballot of its seat's panel,
-      // by its pairs or its leaves, which this release doesn't read into 5.9
-      // yet ([[P2-16]] part 5d-3c): the counted set is undecided while one is
-      // in the extent, never a guess either way (T-25, T-53). One naming
-      // another definition is stray, whatever it holds, so the check lists
-      // it and it holds nothing: another election's seat can't stall this
-      // one's rows from the board's shared sequence.
+      // A version-2 batch of this election (contract-event version 9 frames
+      // them) goes to the check as version 1's do, each pair or entry read as
+      // the record it states. A version-2 root may deliver or exclude any
+      // ballot of its seat's panel by its leaves, which, as version 1's,
+      // only the counted-extent attestations make available and this release
+      // doesn't read yet ([[P2-16]] part 5d-3c-2): the counted set is
+      // undecided while one is in the extent, never a guess either way
+      // (T-25, T-53). One naming another definition is stray, whatever it
+      // holds, so the check lists it and it holds nothing: another
+      // election's seat can't stall this one's rows from the board's shared
+      // sequence.
       if (
         definition.version === 6 &&
         fixed &&
-        BATCH_EVENTS.has(checked.event.event) &&
-        "definitionHash" in checked.event &&
+        checked.event.event === "ObligationRootSubmitted" &&
         equal(checked.event.definitionHash, definitionHash)
       )
         return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
@@ -864,6 +863,11 @@ function deliveryV1(
     records,
     1,
   );
+  // Every root of this definition left the rows undecided before the check,
+  // so none reaches it unread; one that did would leave \`ballots\` empty, and
+  // 5.9 would pass over an empty counted set (T-25, T-53).
+  if (delivered.unverifiable.length !== 0)
+    throw new Error("countedChecks: an obligation root reached the delivery check unread");
   const entryOf = (i: number) => recordAt[i] as number;
   return {
     ballots: delivered.ballots,
@@ -931,6 +935,11 @@ function deliveryV2(
     // the transcript check's, as it is for ballot versions 1 and 2.
     ...(d.author_keys.length !== 0 ? [d] : []),
   );
+  // Every root of this definition left the rows undecided before the check,
+  // so none reaches it unread; one that did would leave \`ballots\` empty, and
+  // 5.9 would pass over an empty counted set (T-25, T-53).
+  if (delivered.unverifiable.length !== 0)
+    throw new Error("countedChecks: an obligation root reached the delivery check unread");
   const entryOf = (i: number) => recordAt[i] as number;
   return {
     ballots: delivered.ballots,
@@ -942,11 +951,9 @@ function deliveryV2(
               {
                 entry: (inputs.selected[i] as CountedBallot).entry,
                 missing: b.missing.map(({ panel, seat }) => ({ panel, seat })),
-                // No batch reaches the check here (a version-2 one leaves
-                // the rows undecided, a version-1 one is a rejected entry),
-                // so no complaint is a batch's entry.
                 complaints: b.excludedBy.map((c) => ({
                   entry: entryOf(c.at),
+                  ...(c.pair !== undefined && { pair: c.pair }),
                   panel: c.panel,
                   seat: c.seat,
                   signer: c.signer,
@@ -956,6 +963,7 @@ function deliveryV2(
       ),
       records: delivered.records.map((r) => ({
         entry: entryOf(r.at),
+        ...(r.pair !== undefined && { pair: r.pair }),
         code: r.code,
         panel: r.panel,
         seat: r.seat,

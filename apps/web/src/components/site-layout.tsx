@@ -17,6 +17,11 @@ const NAV = [
   { href: "/moderation", label: "navModeration" },
 ] as const satisfies readonly { href: string; label: Key }[];
 
+// A phone's header keeps only the first two, the everyday ways in: all four
+// don't fit one row at 320px, and wrapped they made the header 177px tall.
+// The footer lists every one at every width.
+const PHONE_NAV = 2;
+
 /** The 12-column content frame every section sits in. */
 function Frame({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("mx-auto max-w-6xl px-4", className)}>{children}</div>;
@@ -42,7 +47,8 @@ export function SiteLayout({
   const wordmark = (
     <>
       <span className="font-heading text-2xl font-semibold tracking-tight">{t("siteName")}</span>
-      <span className="hidden text-sm text-muted-foreground md:inline">{t("siteTagline")}</span>
+      {/* From lg: at md it pushed Account onto a second row. */}
+      <span className="hidden text-sm text-muted-foreground lg:inline">{t("siteTagline")}</span>
     </>
   );
   return (
@@ -54,7 +60,9 @@ export function SiteLayout({
         {t("skipToContent")}
       </a>
       <header className="border-b border-border">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-1 px-4 py-3">
+        {/* One row at every width from 320px; it wraps only when the text is
+            enlarged. */}
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-2 px-4 py-3 min-[360px]:gap-x-4 md:gap-x-8">
           {links ? (
             <a href="/" className="flex items-baseline gap-3" aria-current={here("/")}>
               {wordmark}
@@ -67,13 +75,13 @@ export function SiteLayout({
           )}
           {links && (
             <>
-              <nav
-                aria-label={t("navSite")}
-                className="order-last w-full md:order-none md:ms-auto md:w-auto"
-              >
-                <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-1 p-0 text-base">
-                  {NAV.map((item) => (
-                    <li key={item.href}>
+              <nav aria-label={t("navSite")} className="ms-auto">
+                <ul className="m-0 flex list-none flex-wrap gap-x-2 p-0 text-base min-[360px]:gap-x-4 md:gap-x-6">
+                  {NAV.map((item, i) => (
+                    <li
+                      key={item.href}
+                      className={i < PHONE_NAV ? undefined : "hidden md:list-item"}
+                    >
                       <a
                         href={item.href}
                         aria-current={here(item.href)}
@@ -88,7 +96,7 @@ export function SiteLayout({
               <a
                 href="/account"
                 aria-current={here("/account")}
-                className="ms-auto inline-flex h-12 items-center px-2 text-base underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2 md:ms-0"
+                className="inline-flex h-12 items-center px-2 text-base underline-offset-8 hover:underline aria-[current=page]:underline aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
               >
                 {t("navAccount")}
               </a>

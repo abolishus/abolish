@@ -1560,6 +1560,7 @@ describe("the portal's deposits", () => {
       good + word(0n), // a trailing word
       good.slice(0, -2) + "01", // nonzero padding
       word(32n) + word(72n) + "00".repeat(96), // shorter than its head
+      word(32n), // shorter than an offset and a length
     ]) {
       const { fetchFn } = nodes([{ block, raw }]);
       expect(await load(fetchFn)).toMatchObject({ ok: true, landed: [undefined] });
@@ -1584,8 +1585,7 @@ describe("the portal's deposits", () => {
       [timeOf(L1_HEAD - 64n), L1_HEAD - 64n],
       [timeOf(L1_HEAD - 65n), L1_HEAD - 128n],
       [timeOf(L1_HEAD - 3_000n), L1_HEAD - 4_096n],
-      // Before every block looked up: from the chain's start.
-      [-1n, 0n],
+      [timeOf(L1_HEAD - 8_000n), L1_HEAD - 8_192n],
     ] as const) {
       const { calls, fetchFn } = nodes([]);
       expect(await loadDeposits(WITH_BOARD, [CALL], since, fetchFn)).toMatchObject({ ok: true });
@@ -1594,6 +1594,94 @@ describe("the portal's deposits", () => {
       };
       expect(first.fromBlock).toBe(quantity(from));
     }
+  });
+
+  test("a node whose every block is later than `since` can't send the read back past the lookback", async () => {
+    const { calls, fetchFn } = nodes([]);
+    expect(await loadDeposits(WITH_BOARD, [CALL], -1n, fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(calls.filter((c) => c.method === "eth_getLogs")).toHaveLength(0);
+    // A chain shorter than a step reads from its start.
+    const short = nodes([]);
+    const young: Fetch = async (url, init) => {
+      const body = JSON.parse(init.body as string) as { id: number; params: unknown[] };
+      if (url === WITH_BOARD.l1Rpc && body.params[0] === "latest")
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: { number: "0x20", timestamp: "0x180" },
+          }),
+        );
+      return short.fetchFn(url, init);
+    };
+    expect(await loadDeposits(WITH_BOARD, [CALL], -1n, young)).toMatchObject({ ok: true });
+    const first = short.calls.find((c) => c.method === "eth_getLogs")?.params[0] as {
+      fromBlock: string;
+    };
+    expect(first.fromBlock).toBe("0x0");
+  });
+
+  test("the requests to L1 are the same whether or not a deposit carries the client's call", async () => {
+    const l1Requests = async (data: Uint8Array) => {
+      const { calls, fetchFn } = nodes([
+        { block: L1_HEAD - 60n, data: OTHER_CALL },
+        { block: L1_HEAD - 50n, data },
+      ]);
+      await load(fetchFn);
+      return calls.filter((c) => c.url === WITH_BOARD.l1Rpc).map((c) => [c.method, c.params]);
+    };
+    const matched = await l1Requests(CALL);
+    expect(matched).toEqual(await l1Requests(Uint8Array.of(9, 9)));
+    // Each block holding a deposit to the board has its time read.
+    expect(matched.filter(([m]) => m === "eth_getBlockByNumber").map(([, p]) => p)).toEqual([
+      ["latest", false],
+      [quantity(L1_HEAD - 64n), false],
+      [quantity(L1_HEAD - 128n), false],
+      [quantity(L1_HEAD - 60n), false],
+      [quantity(L1_HEAD - 50n), false],
+    ]);
+  });
+
+  test("a deposit block answered as another block, or with a time past the head, is refused", async () => {
+    const block = L1_HEAD - 50n;
+    for (const result of [
+      { number: quantity(block + 1n), timestamp: quantity(timeOf(block)) },
+      { number: quantity(block), timestamp: quantity(timeOf(L1_HEAD) + 1n) },
+    ]) {
+      const { fetchFn } = nodes([{ block }]);
+      const lying: Fetch = async (url, init) => {
+        const body = JSON.parse(init.body as string) as { id: number; params: unknown[] };
+        if (url === WITH_BOARD.l1Rpc && body.params[0] === quantity(block))
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
+        return fetchFn(url, init);
+      };
+      expect(await load(lying)).toEqual({ ok: false, problem: "bad-answer" });
+    }
+  });
+
+  test("more blocks holding deposits than any run needs, or a removed log, is a bad answer", async () => {
+    const many = nodes(
+      Array.from({ length: 257 }, (_, i) => ({
+        block: L1_HEAD - 1n - BigInt(i),
+        data: OTHER_CALL,
+      })),
+    );
+    expect(await loadDeposits(WITH_BOARD, [CALL], timeOf(L1_HEAD - 1_000n), many.fetchFn)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    const { fetchFn } = nodes([{ block: L1_HEAD - 5n }]);
+    const removed: Fetch = async (url, init) => {
+      const response = await fetchFn(url, init);
+      const answer = (await response.json()) as { result: unknown };
+      if (Array.isArray(answer.result))
+        for (const log of answer.result as Record<string, unknown>[]) log["removed"] = true;
+      return new Response(JSON.stringify(answer));
+    };
+    expect(await load(removed)).toEqual({ ok: false, problem: "bad-answer" });
   });
 
   test("an L1 node on another chain, answering another block, or out of its forms is refused", async () => {

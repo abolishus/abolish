@@ -679,6 +679,12 @@ const MAX_DEPOSITS_BYTES = 64 * 1024 * 1024;
 // A deposit's `opaqueData`: `mint` and `value` (32 bytes each), `gasLimit`
 // (8) and `isCreation` (1), then the call's data.
 const OPAQUE_HEAD = 73;
+// The furthest back a deposits read starts, in L1 blocks (about 27 hours of
+// 12-second slots), and the most blocks holding deposits to the board whose
+// times it reads: room for any honest run, and a node claiming more only
+// brings the fallback sooner (T-52).
+const MAX_DEPOSIT_LOOKBACK = 8_192n;
+const MAX_DEPOSIT_BLOCKS = 256;
 
 /**
  * Looks on L1, through the deployment's own L1 endpoint, for a deposit that
@@ -690,7 +696,8 @@ const OPAQUE_HEAD = 73;
  * of the call through its L2 endpoint, so a deposit made to fail for want
  * of gas never holds the client (T-25). It reads the L1 head and every
  * deposit to the board from the newest block whose time is by `since`
- * (found by going back in doubling steps), and answers, for each call, the
+ * (found by going back in doubling steps, at most `MAX_DEPOSIT_LOOKBACK`
+ * blocks), with the time of each block holding one, and answers, for each call, the
  * time of its newest qualifying deposit's L1 block, which reaches L2 by
  * that time plus `F` ([[0004-l2-choice]], Forced inclusion).
  *
@@ -698,9 +705,10 @@ const OPAQUE_HEAD = 73;
  * so the L1 endpoint learns nothing of which ballot the client watches
  * (T-11, T-13). A call is estimated on L2 only once a deposit on L1 carries
  * its exact bytes, which are then public (T-18). Either endpoint is trusted
- * only to delay: a deposit the L1 one makes up keeps the client waiting, to
- * its deadline `c_P` at most, and one it hides, or an estimate the L2 one
- * fails or inflates, only brings the fallback sooner. As the board's reads,
+ * only to delay: a deposit the L1 one makes up, or an estimate the L2 one
+ * understates so that a deposit made to fail qualifies, keeps the client
+ * waiting, to its deadline `c_P` at most; one it hides, or an estimate
+ * failed or inflated, only brings the fallback sooner. As the board's reads,
  * it runs out a `maxBytes` budget, charged each block looked up, each range
  * and each log (T-52), and is given up, as `unreachable`, as soon as `stop`
  * says so before a request (T-25).
@@ -721,6 +729,8 @@ export async function loadDeposits(
   const topics = [`0x${DEPOSITED}`, null, `0x${boardTopic}`, `0x${"0".repeat(64)}`];
   // Each call's deposits, by gas limit and L1 block.
   const found: { gasLimit: bigint; block: bigint }[][] = calls.map(() => []);
+  // The blocks holding any deposit to the board, in order.
+  const blocks = new Set<bigint>();
   let budget = maxBytes;
   const charge = (cost: number) => {
     budget -= cost;
@@ -731,15 +741,17 @@ export async function loadDeposits(
   };
   try {
     const [, head] = await both(checkChain(l1, fetchFn), headBlock(l1, fetchFn, "latest"));
-    let start = 0n;
-    for (let back = 64n; head.block > back; back *= 2n) {
+    // Back in doubling steps to a block by `since`, at most
+    // MAX_DEPOSIT_LOOKBACK blocks: a run's read comes within about an hour
+    // of its start, and an endpoint whose every block is later than `since`
+    // can't send the read back to the chain's start (T-52).
+    let start: bigint | undefined;
+    for (let back = 64n; start === undefined; back *= 2n) {
+      if (back > MAX_DEPOSIT_LOOKBACK) throw new Stop("bad-answer");
       ask();
       charge(RANGE_COST);
-      const at = await blockTime(l1, fetchFn, head.block - back);
-      if (at <= since) {
-        start = head.block - back;
-        break;
-      }
+      const at = head.block > back ? head.block - back : 0n;
+      if (at === 0n || (await blockTime(l1, fetchFn, at)) <= since) start = at;
     }
     let id = 3;
     let last: readonly [bigint, bigint] | undefined;
@@ -769,31 +781,41 @@ export async function loadDeposits(
         charge(read.data.length + ENTRY_COST);
         const deposit = depositOf(read.topics, read.data, boardTopic);
         if (deposit === undefined) continue;
+        blocks.add(read.block);
         calls.forEach((call, i) => {
           if (equalBytes(deposit.data, call))
             found[i]?.push({ gasLimit: deposit.gasLimit, block: read.block });
         });
       }
     }
+    // The time of every block holding a deposit to the board, whichever
+    // call it carries, so the requests to L1 are the same whether or not
+    // one of the client's calls is among them (T-11, T-13).
+    if (blocks.size > MAX_DEPOSIT_BLOCKS) throw new Stop("bad-answer");
+    const times = new Map<bigint, bigint>();
+    for (const block of blocks) {
+      ask();
+      const time = await blockTime(l1, fetchFn, block);
+      // Never ahead of the head it was read under (T-25).
+      if (time > head.timestamp) throw new Stop("bad-answer");
+      times.set(block, time);
+    }
     const landed: (bigint | undefined)[] = [];
     for (const [i, call] of calls.entries()) {
       const deposits = found[i] ?? [];
-      if (deposits.length === 0) {
-        landed.push(undefined);
-        continue;
-      }
-      ask();
-      const needed = await estimate(deployment, fetchFn, board.address, call);
       let newest: bigint | undefined;
-      for (const { gasLimit, block } of deposits)
-        if (needed !== undefined && gasLimit >= needed && (newest === undefined || block > newest))
-          newest = block;
-      if (newest === undefined) {
-        landed.push(undefined);
-        continue;
+      if (deposits.length > 0) {
+        ask();
+        const needed = await estimate(deployment, fetchFn, board.address, call);
+        for (const { gasLimit, block } of deposits)
+          if (
+            needed !== undefined &&
+            gasLimit >= needed &&
+            (newest === undefined || block > newest)
+          )
+            newest = block;
       }
-      ask();
-      landed.push(await blockTime(l1, fetchFn, newest));
+      landed.push(newest === undefined ? undefined : times.get(newest));
     }
     return { ok: true, timestamp: head.timestamp, landed };
   } catch (error) {
@@ -814,12 +836,12 @@ function depositOf(
   data: Uint8Array,
   boardTopic: string,
 ): { gasLimit: bigint; data: Uint8Array } | undefined {
-  const [event, , to, version, ...rest] = topics;
+  // At most four topics, as `logOf` reads them.
+  const [event, , to, version] = topics;
   if (
     event === undefined ||
     to === undefined ||
     version === undefined ||
-    rest.length !== 0 ||
     toHex(event) !== DEPOSITED ||
     toHex(to) !== boardTopic ||
     version.some((b) => b !== 0) ||

@@ -35,6 +35,7 @@ import {
 import { deliverShare } from "./intake.ts";
 import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
+import { electionLock } from "./lock.ts";
 import {
   loadBoard,
   loadChainTime,
@@ -220,6 +221,8 @@ const registrar: Registrar | undefined =
         recovery: recoverer,
       };
 
+const ELECTION_LOCK = electionLock("locks" in navigator ? navigator.locks : undefined);
+
 const source: ElectionSource = {
   load: (electionId, signal) =>
     loadElection(STAGING, electionId, (url, init) => fetch(url, { ...init, signal })),
@@ -285,8 +288,16 @@ const source: ElectionSource = {
   record: async (electionId, tier, ballot, shares, asked) =>
     castAsAsked(ballot, asked) ? recordCast(electionId, tier, ballot, shares) : "not-asked",
   intake: (definitionHash) => withWorker((used) => used.intake(definitionHash)),
+  // Each request bounded, as a posting's are: delivery runs under the
+  // election's lock, so a relay that never answers would otherwise hold
+  // every tab's delivery, posting and decline (T-25, T-52).
   deliver: (seat, delivery) =>
-    deliverShare(STAGING, seat, delivery, (url, init) => fetch(url, init)),
+    deliverShare(
+      STAGING,
+      seat,
+      delivery,
+      timedFetch((url, init) => fetch(url, init)),
+    ),
   receipt: (ballot, receipt) => withWorker((used) => used.receipt(ballot, receipt)),
   posting: (ballot, share) => withWorker((used) => used.posting(ballot, share)),
   // A posting goes through the relay to the board this build pins; with no
@@ -336,6 +347,9 @@ const source: ElectionSource = {
           }
         },
       }),
+  // One lock per election across this origin's tabs; a browser without Web
+  // Locks gets none, and is offered no posting (Client rule 2).
+  ...(ELECTION_LOCK === undefined ? {} : { exclusive: ELECTION_LOCK }),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
   declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),

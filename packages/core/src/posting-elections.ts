@@ -11,7 +11,11 @@
 // doesn't hold means the index stopped, and nothing is judged until it
 // catches up. A younger one is harmless, since no registered election's
 // intervals start within `POSTING_INDEX_LAG + POSTING_DEPOSIT_SPAN` of its
-// registration (`postingIndexLagFits`).
+// registration (`postingIndexLagFits`). Nor can the check be passed by a
+// finalized head that stopped (a stalled or lying node, T-25): one more
+// than `F` behind the clock, or ahead of it, judges nothing, and a
+// registration above a head within `F` is younger than `F`, which the
+// windows leave room for too.
 //
 // T-11: nothing here names an election in a report; a refusal is one
 // undefined, which the deposits count as `unjudged`.
@@ -56,13 +60,21 @@ export interface PostingRegistration {
 
 /** The election registry's events from the L2 node. A call that can't reach the node rejects. */
 export interface PostingRegistryLog {
-  /** Every `DefinitionRegistered` of the registry in finalized L2 blocks numbered `from` or later. */
-  registered(from: bigint): Promise<readonly PostingRegistration[]>;
+  /**
+   * Every `DefinitionRegistered` of the registry in finalized L2 blocks
+   * numbered `from` or later, and the finalized head's timestamp they were
+   * read up to.
+   */
+  registered(from: bigint): Promise<{
+    readonly finalizedTime: bigint;
+    readonly events: readonly PostingRegistration[];
+  }>;
 }
 
 /**
- * Whether a registration `lag` seconds out of the index can't hide an
- * interval a landing span meets: a definition registers only before it
+ * Whether a registration `lag` seconds out of the index, or out of the
+ * finalized head the index is checked at, can't hide an interval a landing
+ * span meets: a definition registers only before it
  * opens (the registry's `AlreadyOpen`), so its receipt interval starts at
  * least `DELIVERY_WINDOW − F − R` after its L2 block, whose time is at most
  * `MAX_SEQUENCER_DRIFT` ahead of L1's, and a span signed now ends
@@ -102,14 +114,11 @@ export class PostgresPostingElections implements PostingRegisteredElections {
     const { forcedInclusion = PINNED_FORCED_INCLUSION, margin = PINNED_MARGIN } = options;
     if (typeof forcedInclusion !== "bigint" || typeof margin !== "bigint")
       throw new RangeError("forcedInclusion and margin must be bigints");
-    // T-54: a lag the windows don't cover would let a stopped index hide an
-    // interval a deposit lands in.
-    if (
-      forcedInclusion < 0n ||
-      margin < 0n ||
-      !postingIndexLagFits(POSTING_INDEX_LAG, { forcedInclusion, margin })
-    )
-      throw new RangeError("POSTING_INDEX_LAG doesn't fit these F and R");
+    // T-54: a lag the windows don't cover would let a stopped index, or a
+    // stopped finalized head, hide an interval a deposit lands in.
+    const fits = (lag: bigint) => postingIndexLagFits(lag, { forcedInclusion, margin });
+    if (forcedInclusion < 0n || margin < 0n || !fits(POSTING_INDEX_LAG) || !fits(forcedInclusion))
+      throw new RangeError("POSTING_INDEX_LAG or F doesn't fit these F and R");
     this.#sql = options.sql;
     this.#registry = options.registry;
     this.#now = options.now;
@@ -151,19 +160,28 @@ export class PostgresPostingElections implements PostingRegisteredElections {
     return times;
   }
 
-  /** Whether the index holds every registration older than `POSTING_INDEX_LAG` at the finalized head. */
+  /**
+   * Whether the index holds every registration older than
+   * `POSTING_INDEX_LAG` at a finalized head at most `F` behind the clock and
+   * never ahead of it: the OP Stack finalizes an L2 block within its
+   * sequencing window and L1's finality, which `F` bounds, so an honest
+   * node's head is never older.
+   */
   async #current(clock: bigint): Promise<boolean> {
     const latest = await latestRegistration(this.#sql);
     // From the latest recorded registration's block, which may hold later ones.
-    const seen = await this.#registry.registered(latest?.l2Block ?? 0n);
-    if (!Array.isArray(seen)) throw new TypeError("the registry's events are out of form");
-    for (const e of seen) {
+    const read = await this.#registry.registered(latest?.l2Block ?? 0n);
+    const head = read?.finalizedTime;
+    if (typeof head !== "bigint" || head < 0n || head > U64_MAX || !Array.isArray(read.events))
+      throw new TypeError("the registry's events are out of form");
+    if (head > clock || clock - head > this.#constants.forcedInclusion) return false;
+    for (const e of read.events) {
       if (
         !isBytes(e.definitionHash) ||
         e.definitionHash.length !== 32 ||
         typeof e.timestamp !== "bigint" ||
         e.timestamp < 0n ||
-        e.timestamp > U64_MAX
+        e.timestamp > head
       )
         throw new TypeError("the registry's events are out of form");
       if (clock - e.timestamp < POSTING_INDEX_LAG) continue;

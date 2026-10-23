@@ -601,10 +601,14 @@ describe("the registry's events", () => {
     const a = hash();
     const at = await register(address, a);
     // Not final yet.
-    expect(await r.registered(0n)).toEqual([]);
+    expect((await r.registered(0n)).events).toEqual([]);
     await l2.mine(FINALITY_DEPTH);
     const block = await l2.client.getBlock({ blockNumber: at });
-    expect(await r.registered(0n)).toEqual([
+    const finalized = await l2.client.getBlock({ blockTag: "finalized" });
+    const read = await r.registered(0n);
+    // The head's time comes with what was read up to it.
+    expect(read.finalizedTime).toBe(finalized.timestamp);
+    expect(read.events).toEqual([
       {
         definitionHash: Uint8Array.from(Buffer.from(a.slice(2), "hex")),
         l2Block: at,
@@ -612,7 +616,7 @@ describe("the registry's events", () => {
       },
     ]);
     // From a later block: none.
-    expect(await r.registered(at + 1n)).toEqual([]);
+    expect((await r.registered(at + 1n)).events).toEqual([]);
   });
 
   test("are found across log ranges, reading only the finalized blocks since the last ask, and again from further back", async () => {
@@ -631,16 +635,41 @@ describe("the registry's events", () => {
     const first = await register(address, hash());
     const second = await register(address, hash());
     await l2.mine(FINALITY_DEPTH + 3);
-    expect((await r.registered(0n)).map((e) => e.l2Block)).toEqual([first, second]);
+    expect((await r.registered(0n)).events.map((e) => e.l2Block)).toEqual([first, second]);
     reads = 0;
     await l2.mine(2);
-    expect((await r.registered(first)).map((e) => e.l2Block)).toEqual([first, second]);
+    expect((await r.registered(first)).events.map((e) => e.l2Block)).toEqual([first, second]);
     expect(reads).toBe(1);
-    expect((await r.registered(second)).map((e) => e.l2Block)).toEqual([second]);
+    expect((await r.registered(second)).events.map((e) => e.l2Block)).toEqual([second]);
     // Asked from further back than kept (an index wiped, say): read again.
     reads = 0;
-    expect((await r.registered(0n)).map((e) => e.l2Block)).toEqual([first, second]);
+    expect((await r.registered(0n)).events.map((e) => e.l2Block)).toEqual([first, second]);
     expect(reads).toBeGreaterThan(1);
+  });
+
+  test("reads one ask at a time, so an abandoned read and the next never race over the kept blocks", async () => {
+    let inLogs = 0;
+    let most = 0;
+    const slow = l2.lying(async (method, _params, forward) => {
+      if (method !== "eth_getLogs") return forward();
+      inLogs++;
+      most = Math.max(most, inLogs);
+      await new Promise((r) => setTimeout(r, 5));
+      try {
+        return await forward();
+      } finally {
+        inLogs--;
+      }
+    });
+    const { address, fromBlock } = await registry();
+    const r = new ViemPostingRegistry({ client: slow, registry: address, fromBlock, logRange: 1n });
+    const first = await register(address, hash());
+    await l2.mine(FINALITY_DEPTH + 3);
+    // A read from the latest block, then one from further back while it runs.
+    const [late, back] = await Promise.all([r.registered(first + 1n), r.registered(0n)]);
+    expect(late.events).toEqual([]);
+    expect(back.events.map((e) => e.l2Block)).toEqual([first]);
+    expect(most).toBe(1);
   });
 
   test("refuses a node whose logs stray from the filter", async () => {

@@ -671,10 +671,27 @@ const L1_RELAY = getAddress(toHex(0x1e1a7, { size: 20 }));
 describe("the safe head", () => {
   // Anvil with one slot an epoch: the safe block is the latest but one, the
   // finalized the latest but two.
+
+  /** Sends `posting` and mines it in exactly the latest block: automine may otherwise mine a block of its own first. */
+  async function landAtHead(c: ViemPostingChain, posting: Uint8Array): Promise<Uint8Array> {
+    await automine(false);
+    try {
+      const s = await c.sign(posting, BALLOT, {
+        nonce: await c.nonce(),
+        gasLimit: 1_000_000n,
+        feeCap: CAP,
+      });
+      expect(await c.broadcast(s.tx)).toBe("sent");
+      await mine(1);
+      return s.hash;
+    } finally {
+      await automine(true);
+    }
+  }
   test("holds a transaction once its block is at the safe head", async () => {
     const { chain: c } = await adapter();
     expect(await c.includedSafe(new Uint8Array(32).fill(9))).toBe(false);
-    const hash = await land(c, freshPosting());
+    const hash = await landAtHead(c, freshPosting());
     expect(await c.includedSafe(hash)).toBe(false);
     await mine(1);
     const safe = await client.getBlock({ blockTag: "safe" });
@@ -704,7 +721,7 @@ describe("the safe head", () => {
     const { chain: c } = await adapter();
     const posting = freshPosting();
     expect(await c.postedSafe(posting)).toBe(false);
-    await land(c, posting);
+    await landAtHead(c, posting);
     expect(await c.posted(posting)).toBe(true);
     expect(await c.postedSafe(posting)).toBe(false);
     await mine(1);

@@ -71,8 +71,8 @@ async function register(
   return { definitionHash, l2Block };
 }
 
-/** The registry's events as a node shows them, and the `from` each ask gave. */
-function registry(events: PostingRegistration[] = []) {
+/** The registry's events as a node shows them at a finalized head of time `finalizedTime`, and the `from` each ask gave. */
+function registry(events: PostingRegistration[] = [], finalizedTime = BigInt(NOW) - 60n) {
   const asked: bigint[] = [];
   return {
     events,
@@ -80,7 +80,7 @@ function registry(events: PostingRegistration[] = []) {
     log: {
       registered: async (from: bigint) => {
         asked.push(from);
-        return events.filter((e) => e.l2Block >= from);
+        return { finalizedTime, events: events.filter((e) => e.l2Block >= from) };
       },
     },
   };
@@ -130,7 +130,7 @@ describe("the lag", () => {
     );
   });
 
-  test("refuses F and R the lag doesn't fit", () => {
+  test("refuses F and R the lag, or a finalized head as old as F, doesn't fit", () => {
     const r = registry();
     expect(
       () =>
@@ -140,6 +140,20 @@ describe("the lag", () => {
           now: () => NOW,
           forcedInclusion: DELIVERY_WINDOW - POSTING_INDEX_LAG,
           margin: 0n,
+        }),
+    ).toThrow(RangeError); // An F the index's lag fits but a finalized head as old as F doesn't.
+    const F = 84_000n;
+    expect(
+      postingIndexLagFits(POSTING_INDEX_LAG, { forcedInclusion: F, margin: PINNED_MARGIN }),
+    ).toBe(true);
+    expect(
+      () =>
+        new PostgresPostingElections({
+          sql: {} as Sql,
+          registry: r.log,
+          now: () => NOW,
+          forcedInclusion: F,
+          margin: PINNED_MARGIN,
         }),
     ).toThrow(RangeError);
   });
@@ -239,6 +253,21 @@ describe("the index's progress", () => {
     expect(await elections(empty, r.log).times()).toBeUndefined();
   });
 
+  test("judges nothing on a finalized head more than F behind the clock, or ahead of it", async () => {
+    const app = await index();
+    await register(app, 1_900_100_000n);
+    const F = PINNED_FORCED_INCLUSION;
+    expect(await elections(app, registry([], BigInt(NOW) - F).log).times()).toHaveLength(1);
+    expect(await elections(app, registry([], BigInt(NOW) - F - 1n).log).times()).toBeUndefined();
+    expect(await elections(app, registry([], BigInt(NOW)).log).times()).toHaveLength(1);
+    expect(await elections(app, registry([], BigInt(NOW) + 1n).log).times()).toBeUndefined();
+  });
+
+  test("a registration above a finalized head within F can't hide an interval a span signed now meets", () => {
+    // The head's age bound fits the windows as the index's lag does.
+    expect(postingIndexLagFits(PINNED_FORCED_INCLUSION, CONSTANTS)).toBe(true);
+  });
+
   test("rejects when the node does, and refuses events out of form", async () => {
     const app = await index();
     const failing = {
@@ -247,13 +276,22 @@ describe("the index's progress", () => {
       },
     };
     await expect(elections(app, failing).times()).rejects.toThrow("unreachable");
+    const head = BigInt(NOW) - 60n;
     for (const bad of [
       { definitionHash: new Uint8Array(31), l2Block: 1n, timestamp: 1n },
       { definitionHash: b32(), l2Block: 1n, timestamp: -1n },
       { definitionHash: b32(), l2Block: 1n, timestamp: 1 },
+      // Dated past the head it was read at.
+      { definitionHash: b32(), l2Block: 1n, timestamp: head + 1n },
     ])
       await expect(
-        elections(app, { registered: async () => [bad as PostingRegistration] }).times(),
+        elections(app, registry([bad as PostingRegistration], head).log).times(),
+      ).rejects.toThrow(TypeError);
+    for (const finalizedTime of [-1n, 1, undefined])
+      await expect(
+        elections(app, {
+          registered: async () => ({ finalizedTime, events: [] }) as never,
+        }).times(),
       ).rejects.toThrow(TypeError);
   });
 });

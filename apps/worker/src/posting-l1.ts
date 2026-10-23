@@ -489,6 +489,10 @@ export class ViemPostingRegistry implements PostingRegistryLog {
   #start: bigint;
   #through: bigint;
   #found: PostingRegistration[] = [];
+  // The read under way: core gives up on a call past its timeout without
+  // stopping it, so the next one waits for it rather than racing it over
+  // the kept blocks, which could leave a range unread.
+  #last: Promise<unknown> = Promise.resolve();
 
   constructor(options: PostingRegistryOptions) {
     const range = options.logRange ?? POSTING_LOG_RANGE;
@@ -502,33 +506,46 @@ export class ViemPostingRegistry implements PostingRegistryLog {
     this.#through = options.fromBlock - 1n;
   }
 
-  registered(from: bigint): Promise<readonly PostingRegistration[]> {
-    return guard("registry events", async () => {
-      const start = from > this.#from ? from : this.#from;
-      if (start < this.#start) {
-        // Asked from further back than what is kept (the index wiped, say):
-        // read again from there.
-        this.#start = start;
-        this.#through = start - 1n;
-        this.#found = [];
-      } else if (start > this.#start) {
-        this.#start = start;
-        this.#found = this.#found.filter((e) => e.l2Block >= start);
-        if (this.#through < start - 1n) this.#through = start - 1n;
-      }
-      const finalized = await this.#client.getBlock({ blockTag: "finalized" });
-      if (finalized.number === null) throw new Error("a pending block");
-      // One range at a time, kept as it is read, so a node that fails
-      // midway costs only the range it failed on.
-      while (this.#through < finalized.number) {
-        const lo = this.#through + 1n;
-        const hi =
-          lo + this.#range - 1n < finalized.number ? lo + this.#range - 1n : finalized.number;
-        this.#found.push(...(await this.#read(lo, hi)));
-        this.#through = hi;
-      }
-      return this.#found.slice();
-    });
+  registered(from: bigint): Promise<{
+    readonly finalizedTime: bigint;
+    readonly events: readonly PostingRegistration[];
+  }> {
+    const read = this.#last.then(
+      () => this.#registered(from),
+      () => this.#registered(from),
+    );
+    this.#last = read.catch(() => undefined);
+    return guard("registry events", () => read);
+  }
+
+  async #registered(from: bigint): Promise<{
+    readonly finalizedTime: bigint;
+    readonly events: readonly PostingRegistration[];
+  }> {
+    const start = from > this.#from ? from : this.#from;
+    if (start < this.#start) {
+      // Asked from further back than what is kept (the index wiped, say):
+      // read again from there.
+      this.#start = start;
+      this.#through = start - 1n;
+      this.#found = [];
+    } else if (start > this.#start) {
+      this.#start = start;
+      this.#found = this.#found.filter((e) => e.l2Block >= start);
+      if (this.#through < start - 1n) this.#through = start - 1n;
+    }
+    const finalized = await this.#client.getBlock({ blockTag: "finalized" });
+    if (finalized.number === null) throw new Error("a pending block");
+    // One range at a time, kept as it is read, so a node that fails
+    // midway costs only the range it failed on.
+    while (this.#through < finalized.number) {
+      const lo = this.#through + 1n;
+      const hi =
+        lo + this.#range - 1n < finalized.number ? lo + this.#range - 1n : finalized.number;
+      this.#found.push(...(await this.#read(lo, hi)));
+      this.#through = hi;
+    }
+    return { finalizedTime: finalized.timestamp, events: this.#found.slice() };
   }
 
   async #read(lo: bigint, hi: bigint): Promise<PostingRegistration[]> {

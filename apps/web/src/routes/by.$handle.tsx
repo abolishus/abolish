@@ -3,7 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { ProfilePage } from "../components/profile-page.tsx";
 import { fetchProfile } from "../data.ts";
 import { reportProfile } from "../profile-report.ts";
-import { isolated, pageTitle, text } from "../titles.ts";
+import { isolated, titles } from "../titles.ts";
 import { isElectionId, PROFILE_HANDLE, searchText } from "../values.ts";
 
 // A creator's profile, `/by/<handle>` ([[0040-creator-profiles]]): its name
@@ -18,26 +18,29 @@ export const Route = createFileRoute("/by/$handle")({
     return { after: isElectionId(after) ? after : undefined };
   },
   loaderDeps: ({ search }) => ({ after: search.after ?? "" }),
-  loader: async ({ params, deps }) => {
+  loader: async ({ context: { locale }, params, deps }) => {
     // One spelling per profile: anything but a canonical handle isn't one.
     if (!PROFILE_HANDLE.test(params.handle)) throw notFound();
-    const page = await fetchProfile({ data: { handle: params.handle, after: deps.after } });
+    const page = await fetchProfile({ data: { handle: params.handle, after: deps.after, locale } });
     if (page.profile.kind === "not-found") throw notFound();
     return { ...page, profile: page.profile };
   },
   // Named as its heading names it: the author's name, or that it is hidden.
-  head: ({ loaderData }) => ({
-    meta: [
-      { name: "robots", content: "noindex" },
-      ...(loaderData === undefined
-        ? []
-        : [
-            loaderData.profile.kind === "hidden"
-              ? pageTitle(text("byHiddenTitle"))
-              : pageTitle(isolated(loaderData.profile.name), text("byEyebrow")),
-          ]),
-    ],
-  }),
+  head: ({ match, loaderData }) => {
+    const { pageTitle, text } = titles(match.context.locale);
+    return {
+      meta: [
+        { name: "robots", content: "noindex" },
+        ...(loaderData === undefined
+          ? []
+          : [
+              loaderData.profile.kind === "hidden"
+                ? pageTitle(text("byHiddenTitle"))
+                : pageTitle(isolated(loaderData.profile.name), text("byEyebrow")),
+            ]),
+      ],
+    };
+  },
   component: function By() {
     const { handle } = Route.useParams();
     const { after } = Route.useSearch();

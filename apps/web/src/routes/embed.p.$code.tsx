@@ -5,14 +5,15 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { EmbedCard, EmbedNotice, type EmbedTheme } from "../components/poll-embed.tsx";
-import { LOCALE } from "../messages.ts";
+import { type Locale, negotiateLocale } from "../locales.ts";
+import { loadCatalog } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { pollPreview } from "../og/poll.ts";
 import { headline } from "../og/text.ts";
 import { api } from "../server/api.ts";
 import { loadEmbed } from "../server/load.ts";
 import stylesheet from "../styles.css?url";
-import { isolated, pageTitle, text } from "../titles.ts";
+import { isolated, titles } from "../titles.ts";
 import { ballotBase } from "../values.ts";
 
 /**
@@ -21,22 +22,24 @@ import { ballotBase } from "../values.ts";
  * title rather than the frame's own (`embedSnippet`).
  */
 function EmbedDocument({
+  locale,
   theme,
   title,
   children,
 }: {
+  locale: Locale;
   theme: EmbedTheme;
   title: string;
   children: ReactNode;
 }) {
   return (
-    <html lang={LOCALE} data-theme={theme === "auto" ? undefined : theme}>
+    <html lang={locale} data-theme={theme === "auto" ? undefined : theme}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         {/* A card for other pages, not a page to find. */}
         <meta name="robots" content="noindex" />
-        <title>{pageTitle(title).title}</title>
+        <title>{titles(locale).pageTitle(title).title}</title>
         <link rel="stylesheet" href={stylesheet} />
       </head>
       <body className="bg-transparent">
@@ -47,16 +50,19 @@ function EmbedDocument({
   );
 }
 
-const page = (status: number, theme: EmbedTheme, title: string, body: ReactNode) =>
+const page = (status: number, locale: Locale, theme: EmbedTheme, title: string, body: ReactNode) =>
   new Response(
     `<!doctype html>${renderToStaticMarkup(
-      <I18nProvider locale={LOCALE}>
-        <EmbedDocument theme={theme} title={title}>
+      <I18nProvider locale={locale}>
+        <EmbedDocument locale={locale} theme={theme} title={title}>
           {body}
         </EmbedDocument>
       </I18nProvider>,
     )}`,
-    { status, headers: { "content-type": "text/html; charset=utf-8" } },
+    {
+      status,
+      headers: { "content-type": "text/html; charset=utf-8", "content-language": locale },
+    },
   );
 
 // A poll's embed, `/embed/p/<code>?theme=<light|dark>` (docs/design/sharing.md,
@@ -72,10 +78,22 @@ export const Route = createFileRoute("/embed/p/$code")({
       GET: async ({ params, request }) => {
         const query = new URL(request.url).searchParams.get("theme");
         const theme: EmbedTheme = query === "light" || query === "dark" ? query : "auto";
+        // In the reader's language, from their browser's `Accept-Language`
+        // alone: a frame on another site gets no cookie of ours, and a cached
+        // copy varies by that header only (src/security.ts, `embedHeaders`).
+        const locale = negotiateLocale(null, request.headers.get("accept-language"));
+        await loadCatalog(locale);
+        const { text } = titles(locale);
         const code = parseShortCode(params.code);
-        const embed = code === undefined ? undefined : await loadEmbed(api(), code, LOCALE);
+        const embed = code === undefined ? undefined : await loadEmbed(api(), code, locale);
         if (code === undefined || embed === undefined || embed.kind === "not-found")
-          return page(404, theme, text("embedNotFoundTitle"), <EmbedNotice kind="not-found" />);
+          return page(
+            404,
+            locale,
+            theme,
+            text("embedNotFoundTitle"),
+            <EmbedNotice kind="not-found" />,
+          );
         const origin = siteOrigin();
         const url = `${origin}/p/${code}`;
         // A hidden poll's text was withheld by moderation, so the card
@@ -83,6 +101,7 @@ export const Route = createFileRoute("/embed/p/$code")({
         if (embed.kind === "hidden")
           return page(
             200,
+            locale,
             theme,
             text("embedHiddenTitle"),
             <EmbedNotice kind="hidden" url={url} />,
@@ -90,6 +109,7 @@ export const Route = createFileRoute("/embed/p/$code")({
         const title = headline(pollPreview(embed.poll, code, new URL(origin).host, Date.now()));
         return page(
           200,
+          locale,
           theme,
           embed.text === undefined ? title : isolated(embed.text.heading),
           <EmbedCard

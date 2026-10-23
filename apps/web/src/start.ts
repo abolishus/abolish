@@ -12,6 +12,8 @@ import {
   workerHeaders,
 } from "./security.ts";
 import { WORKER_PATH } from "./app/offline.ts";
+import { negotiateLocale } from "./locales.ts";
+import { loadCatalog } from "./messages.ts";
 import type { ReadAskedBy, ReadProfile } from "./server/load.ts";
 
 /**
@@ -44,9 +46,17 @@ const csrf = createCsrfMiddleware({ filter: ({ handlerType }) => handlerType ===
 // Only the poll editor's pages may run Turnstile, and only a poll's embed
 // may be framed, with no script at all; the offline shell's page and worker
 // get theirs (src/security.ts).
+// The page's language is chosen here, once per request, from the footer's
+// cookie or the browser's `Accept-Language` (src/locales.ts), and reaches the
+// router as its context (src/router.tsx).
 const headers = createMiddleware().server(async ({ next, request }) => {
   const nonce = newNonce();
-  const result = await next({ context: { nonce } });
+  const locale = negotiateLocale(
+    request.headers.get("cookie"),
+    request.headers.get("accept-language"),
+  );
+  await loadCatalog(locale);
+  const result = await next({ context: { nonce, locale } });
   // A copy: a response's own headers can be immutable (redirects, fetches).
   const response = new Response(result.response.body, result.response);
   const image = response.headers.get("content-type") === "image/png";
@@ -71,6 +81,10 @@ const headers = createMiddleware().server(async ({ next, request }) => {
           : securityHeaders(nonce, { challenge }),
   ))
     response.headers.set(name, value);
+  // A page is in the language its request chose; the embed and the offline
+  // page say their own.
+  if (!image && !embed && !offline && response.headers.get("content-type")?.startsWith("text/html"))
+    response.headers.set("content-language", locale);
   if (redirectCaching !== null) response.headers.set("cache-control", redirectCaching);
   if (image || embed || offline) response.headers.delete("set-cookie");
   // Only an embed that drew its poll may be cached: a failure is retried.

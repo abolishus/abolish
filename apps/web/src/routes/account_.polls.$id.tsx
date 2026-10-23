@@ -6,7 +6,7 @@ import { draftsClient } from "../account/drafts.ts";
 import { profilesClient } from "../account/profiles.ts";
 import { PollFormPage } from "../components/poll-form.tsx";
 import { fetchChallengeKey, fetchPhoneVerification } from "../data.ts";
-import { pageTitle, text } from "../titles.ts";
+import { titles } from "../titles.ts";
 
 // An author's draft, `/account/polls/<id>`, and a new one, `/account/polls/new`
 // (a poll ID is 32 lower-case letters and digits, so never `new`). One route,
@@ -21,15 +21,18 @@ export const Route = createFileRoute("/account_/polls/$id")({
     siteKey: await fetchChallengeKey(),
     phoneVerification: await fetchPhoneVerification(),
   }),
-  head: ({ params }) => ({
-    meta: [
-      { name: "robots", content: "noindex" },
-      pageTitle(
-        text(params.id === "new" ? "pollFormNewTitle" : "pollFormEditTitle"),
-        text("navAccount"),
-      ),
-    ],
-  }),
+  head: ({ match, params }) => {
+    const { pageTitle, text } = titles(match.context.locale);
+    return {
+      meta: [
+        { name: "robots", content: "noindex" },
+        pageTitle(
+          text(params.id === "new" ? "pollFormNewTitle" : "pollFormEditTitle"),
+          text("navAccount"),
+        ),
+      ],
+    };
+  },
   component: function AccountPoll() {
     const { id } = Route.useParams();
     const { siteKey, phoneVerification } = Route.useLoaderData();

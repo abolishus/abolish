@@ -5,6 +5,7 @@ import type { PollTopic } from "@abolishus/core/poll-topics";
 import type { PollFailure } from "@abolishus/core/poll-failures";
 import type { Message } from "@abolishus/ui";
 
+import type { Locale } from "./locales.ts";
 import type { Tier } from "./poll.ts";
 
 const enUS = {
@@ -632,6 +633,7 @@ const enUS = {
   footerClaim: "Non-binding, run by citizens, and every count can be checked.",
   footerRecord: "Every poll here is on a public board that anyone can download and count again.",
   footerNav: "The record",
+  footerLanguage: "Language",
   otherPlaces: "Other places to go",
   notFoundCode: "404 · Not found",
   notFoundPageTitle: "Page not found",
@@ -1376,6 +1378,47 @@ export function tierMessage(tier: number, phoneVerification: boolean): keyof Mes
   return tier === 1 ? "tier1" : tier === 2 ? "tier2" : undefined;
 }
 
-export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };
+// The source catalog is in every page's script; each other one is a chunk of
+// its own, loaded only for a page in its language, so no visitor downloads a
+// language they aren't reading (P2-28 part 4; T-55, the budgets in
+// tests/ssr.test.ts). A locale without a loader here fails type-checking.
+const LOADERS: Readonly<Record<Exclude<Locale, "en-US">, () => Promise<Messages>>> = {
+  "es-US": async () => (await import("./messages.es-US.ts")).esUS,
+};
 
-export const LOCALE = "en-US";
+const loaded: Partial<Record<Locale, Messages>> = { "en-US": enUS };
+
+/**
+ * The catalogs as `useTranslate` reads them, by the I18nProvider's locale:
+ * the source's always, and another once `loadCatalog` has loaded it, which
+ * the server does before rendering a page (src/start.ts) and the browser
+ * before hydrating one (src/router.tsx).
+ */
+export const catalogs: Readonly<Record<string, Messages>> = loaded;
+
+/** Loads `locale`'s catalog, once; every later call answers from memory. */
+export async function loadCatalog(locale: Locale): Promise<Messages> {
+  const have = loaded[locale];
+  // Only the source's is there from the start, so `locale` here is another's.
+  if (have !== undefined) return have;
+  const catalog = await LOADERS[locale as Exclude<Locale, "en-US">]();
+  loaded[locale] = catalog;
+  return catalog;
+}
+
+/** `locale`'s catalog, which must already be loaded: a page's always is. */
+export function catalogFor(locale: Locale): Messages {
+  const catalog = loaded[locale];
+  if (catalog === undefined) throw new Error(`the catalog for "${locale}" isn't loaded`);
+  return catalog;
+}
+
+/**
+ * Each locale's name in its own language, for the footer's switch: a reader
+ * looks for the language they read, so it is never translated, and each is
+ * marked with its own `lang` where it shows (WCAG 3.1.2).
+ */
+export const LOCALE_NAMES: Readonly<Record<Locale, string>> = {
+  "en-US": "English",
+  "es-US": "Español",
+};

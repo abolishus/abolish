@@ -9,9 +9,9 @@ const HOME_STREAM = 3;
 export const Route = createFileRoute("/")({
   // The front page stays up when the API doesn't answer: only the newest
   // questions are left out, and the error says nothing (T-67).
-  loader: () =>
+  loader: ({ context: { locale } }) =>
     fetchStream({
-      data: { sort: "new", after: "", q: "", topic: "", place: "", limit: HOME_STREAM },
+      data: { sort: "new", after: "", q: "", topic: "", place: "", limit: HOME_STREAM, locale },
     }).then(
       ({ stream, ballot }) =>
         stream.kind === "stream" ? { cards: stream.cards, ballot } : undefined,

@@ -7,19 +7,23 @@
 
 import { formatMessage, type Params } from "@abolishus/ui";
 
-import { catalogs, LOCALE, type Messages } from "./messages.ts";
+import type { Locale } from "./locales.ts";
+import { catalogFor, type Messages } from "./messages.ts";
 
-// LOCALE's catalog is always present: it is the source catalog.
-const catalog = catalogs[LOCALE]!;
-
-/** A message in the page's locale, for a head, which renders outside the I18nProvider. */
-export const text = (key: keyof Messages, params?: Params) =>
-  formatMessage(LOCALE, catalog[key], params);
-
-/** The head's title for a page named by `parts`, most specific first; none names the home page. */
-export const pageTitle = (...parts: string[]) => ({
-  title: [...parts, text("siteName")].join(" · "),
-});
+/**
+ * A head's words in the page's locale (the router's context), since a head
+ * renders outside the I18nProvider: `text` for a message, `pageTitle` for
+ * the title of a page named by `parts`, most specific first (none names the
+ * home page).
+ */
+export function titles(locale: Locale) {
+  const text = (key: keyof Messages, params?: Params) =>
+    formatMessage(locale, catalogFor(locale)[key], params);
+  const pageTitle = (...parts: string[]) => ({
+    title: [...parts, text("siteName")].join(" · "),
+  });
+  return { text, pageTitle };
+}
 
 /**
  * Text an author wrote, isolated (U+2068 … U+2069) so a right-to-left name

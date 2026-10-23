@@ -5,7 +5,7 @@ import { StreamPage } from "../components/stream.tsx";
 import { fetchStream } from "../data.ts";
 import { POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { STREAM_SORTS, type StreamSort, streamPlace, streamQuery } from "../stream.ts";
-import { pageTitle, text } from "../titles.ts";
+import { titles } from "../titles.ts";
 import { isElectionId, searchText } from "../values.ts";
 
 // The stream: the polls open now, in one of the API's public orders, and
@@ -45,7 +45,7 @@ export const Route = createFileRoute("/discover")({
     place: streamPlace(search.place),
   }),
   // A query or place the API wouldn't take is refused here, without a request.
-  loader: ({ deps: { sort, after, query, topic, place } }) =>
+  loader: ({ context: { locale }, deps: { sort, after, query, topic, place } }) =>
     query.kind === "refused"
       ? { stream: { kind: "search-refused" as const }, ballot: null }
       : place.kind === "refused"
@@ -57,17 +57,22 @@ export const Route = createFileRoute("/discover")({
               q: query.kind === "search" ? query.q : "",
               topic,
               place: place.kind === "place" ? place.place : "",
+              locale,
             },
           }),
   // A topic's page is named by the topic, from the fixed list; a search or a
   // place is never in the title (T-67).
-  head: ({ match: { search } }) => ({
-    meta: [
-      search.topic === undefined
-        ? pageTitle(text("navDiscover"))
-        : pageTitle(text(POLL_TOPIC_MESSAGES[search.topic]), text("navDiscover")),
-    ],
-  }),
+  head: ({ match }) => {
+    const { search } = match;
+    const { pageTitle, text } = titles(match.context.locale);
+    return {
+      meta: [
+        search.topic === undefined
+          ? pageTitle(text("navDiscover"))
+          : pageTitle(text(POLL_TOPIC_MESSAGES[search.topic]), text("navDiscover")),
+      ],
+    };
+  },
   component: function Discover() {
     const { sort, q, topic, place } = Route.useSearch();
     const { stream, ballot } = Route.useLoaderData();

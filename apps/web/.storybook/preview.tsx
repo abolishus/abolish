@@ -1,22 +1,24 @@
 import { I18nProvider } from "@abolishus/ui";
 import type { Decorator, Preview } from "@storybook/react-vite";
 
-import { LOCALE } from "../src/messages.ts";
+import { DEFAULT_LOCALE, isLocale } from "../src/locales.ts";
+import { loadCatalog } from "../src/messages.ts";
 import "../src/styles.css";
 
 // As in @abolishus/ui: every story renders inside a provider and on the
 // theme's ground, so axe's colour-contrast rule judges the real pairing.
-// `parameters.theme` picks the dark palette.
+// `parameters.theme` picks the dark palette, `parameters.locale` a language.
 const withProviders: Decorator = (Story, { parameters }) => {
+  const locale = isLocale(parameters["locale"]) ? parameters["locale"] : DEFAULT_LOCALE;
   const theme = parameters["theme"] === "dark" ? "dark" : "light";
   // On the root too, so popups portalled to <body> share the story's theme.
   document.documentElement.dataset["theme"] = theme;
   const padding = parameters["layout"] === "fullscreen" ? "" : "p-6";
   return (
-    <I18nProvider locale={LOCALE}>
+    <I18nProvider locale={locale}>
       <div
         data-theme={theme}
-        lang={LOCALE}
+        lang={locale}
         className={`bg-background font-sans text-foreground ${padding}`}
       >
         <Story />
@@ -27,6 +29,13 @@ const withProviders: Decorator = (Story, { parameters }) => {
 
 const preview: Preview = {
   decorators: [withProviders],
+  // A story in another language needs its catalog, as a page does.
+  loaders: [
+    async ({ parameters }) => {
+      if (isLocale(parameters["locale"])) await loadCatalog(parameters["locale"]);
+      return {};
+    },
+  ],
   // No page scrolls sideways, at any width the tests run (the phone project
   // runs at 360px): long hashes wrap or truncate, tables reflow.
   afterEach: ({ canvasElement }) => {

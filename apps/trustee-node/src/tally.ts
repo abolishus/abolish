@@ -84,6 +84,14 @@ export type CountedSet =
    */
   | { readonly state: "unavailable" }
   /**
+   * The source can't give a set the verifier would recompute: the extent
+   * carries a contract event the seat's own L2 node doesn't show, a row is
+   * undecided for a reason no later input changes, or the seat holds no
+   * counted extent. The duty reports it as its own `refused` and sends
+   * nothing (T-14, T-16).
+   */
+  | { readonly state: "refused"; readonly reason: string }
+  /**
    * The counted set, fixed: for each cell of the registered partition, in
    * order, the ballot records of its counted ballots (version 1 under
    * definition version 1, version 3 under version 5), as the

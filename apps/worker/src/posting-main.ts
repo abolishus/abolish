@@ -7,15 +7,14 @@ import {
 } from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
-import { BaseError, bytesToHex, createPublicClient, http } from "viem";
-import { privateKeyToAddress } from "viem/accounts";
+import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { ANCHOR_ENV, ANCHOR_EVERY_ENV } from "./anchor-env.ts";
 import { pinnedPanels } from "./ballot-env.ts";
 import { POLL_CREATE_CEILING_ENV, POLL_CREATE_ENV } from "./poll-create-env.ts";
 import { POLL_ROOT_ENV } from "./poll-root-env.ts";
 import { POLL_STUB_ENV } from "./poll-stub-env.ts";
-import { checkPostingDeployment, ViemPostingChain } from "./posting-chain.ts";
+import { checkPostingDeployment, postingAccount, ViemPostingChain } from "./posting-chain.ts";
 import { POSTING_ENV, postingFromEnv } from "./posting-env.ts";
 import {
   checkPostingL1,
@@ -106,7 +105,9 @@ const checked = async <T>(node: "L1" | "L2", check: () => Promise<T>): Promise<T
     throw e;
   }
 };
-const address = privateKeyToAddress(bytesToHex(config.key));
+// Through the guard: viem's own error for a key out of secp256k1's range
+// quotes the key (T-69).
+const { address } = postingAccount(config.key);
 const deployment = await checked("L2", () =>
   checkPostingDeployment(client, {
     chainId: config.chainId,

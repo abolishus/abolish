@@ -140,6 +140,22 @@ describe("the bundle", () => {
     expect(output).not.toContain("provider-api-key");
   }, 30_000);
 
+  test("posting.mjs refuses a posting key out of secp256k1's range without quoting it", async () => {
+    for (const key of ["00".repeat(32), "ff".repeat(32)]) {
+      const { code, output } = await run(["posting.mjs"], {
+        DATABASE_URL: NOWHERE.DATABASE_URL,
+        ...POSTING,
+        POSTING_KEY: key,
+        BALLOT_PINNED_PANELS: JSON.stringify([{ threshold: 1, keys: [`02${"11".repeat(32)}`] }]),
+        BALLOT_ANCHOR_EPOCH: "0",
+        BALLOT_ANCHOR_PERIOD: "3600",
+      });
+      expect(code).not.toBe(0);
+      expect(output).toContain("the posting key isn't a secp256k1 key");
+      expect(output).not.toContain(key);
+    }
+  }, 30_000);
+
   test("creation-key.mjs needs the creation step's variables", async () => {
     const { code, output } = await run(["creation-key.mjs", "status"], {});
     expect(code).not.toBe(0);

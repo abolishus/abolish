@@ -1390,6 +1390,44 @@ describe("an account's e-mail address under /email", () => {
     expect(log).not.toContain(code);
   });
 
+  test("writes in the request's language, and keeps the verifying one for notices", async () => {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const account = await accounts.accountOf(
+      new Headers({ cookie: [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ") }),
+    );
+    const localeOf = async () =>
+      (await sql`SELECT locale FROM account_emails WHERE user_id = ${account!}`)[0]?.["locale"];
+    // A Spanish browser with no choice made: Accept-Language.
+    await browser.call(
+      "POST",
+      "/email/request",
+      { address: "lucia@example.org" },
+      { [TURNSTILE_HEADER]: "solved", "accept-language": "es-MX,es;q=0.9,en;q=0.5" },
+    );
+    expect(mailed.at(-1)).toMatchObject({ kind: "email-code", locale: "es-US" });
+    const { code } = mailed.at(-1) as { code: string };
+    // The footer's choice wins over the browser's languages.
+    browser.cookies.set("lang", "es-US");
+    expect(
+      (await browser.call("POST", "/email/verify", { code }, { "accept-language": "en-US" }))
+        .status,
+    ).toBe(200);
+    expect(await localeOf()).toBe("es-US");
+    // Anything unparsed or not ours reads English.
+    browser.cookies.delete("lang");
+    await browser.call(
+      "POST",
+      "/email/request",
+      { address: "lucia2@example.org" },
+      { [TURNSTILE_HEADER]: "solved", "accept-language": "fr-FR, *" },
+    );
+    expect(mailed.at(-1)).toMatchObject({ kind: "email-code", locale: "en-US" });
+    const again = (mailed.at(-1) as { code: string }).code;
+    expect((await browser.call("POST", "/email/verify", { code: again })).status).toBe(200);
+    expect(await localeOf()).toBe("en-US");
+  });
+
   test("a request for another account's address is answered as any other (T-11)", async () => {
     const first = await asked("held@example.org");
     const code = (mailed.at(-1) as { code: string }).code;
@@ -1398,7 +1436,7 @@ describe("an account's e-mail address under /email", () => {
     const second = await asked("HELD@example.org");
     expect(second.res.status).toBe(first.res.status);
     expect(await second.res.json()).toEqual({});
-    expect(mailed.at(-1)).toEqual({ kind: "email-held", to: "HELD@example.org" });
+    expect(mailed.at(-1)).toEqual({ kind: "email-held", to: "HELD@example.org", locale: "en-US" });
     // No code was sent, and any answer is just a wrong one.
     expect(await (await second.browser.call("POST", "/email/verify", { code })).json()).toEqual({
       code: "WRONG_CODE",

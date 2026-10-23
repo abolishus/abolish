@@ -11,6 +11,7 @@ import {
   decideProfileAppeal,
   type EmailKeys,
   emailKeys,
+  type EmailLocale,
   type EmailMessage,
   type EmailSender,
   fileAppeal,
@@ -78,7 +79,7 @@ function recorder(...outcomes: ("sent" | "unavailable")[]) {
 }
 
 /** Verifies a fresh address for `account` through the code, as the website does. */
-async function verified(account: string): Promise<string> {
+async function verified(account: string, locale: EmailLocale = "en-US"): Promise<string> {
   const address = `${newAccountId().toLowerCase()}@example.org`;
   const { messages, sender } = recorder();
   await requestEmailCode(app, account, address, {
@@ -86,11 +87,12 @@ async function verified(account: string): Promise<string> {
     sender,
     turnstile: { verify: async () => "passed" },
     token: "t",
+    locale: "en-US",
     now: NOW,
   });
   const [message] = messages;
   if (message?.kind !== "email-code") throw new Error("no code sent");
-  await verifyEmailCode(app, account, message.code, { keys: KEYS, now: NOW });
+  await verifyEmailCode(app, account, message.code, { keys: KEYS, locale, now: NOW });
   return address;
 }
 
@@ -350,9 +352,20 @@ describe("sending", () => {
     // Not before the next UTC midnight.
     expect(await drain(sender, new Date())).toEqual({ sent: 0, retrying: 0, dropped: 0 });
     expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
-    expect(messages).toEqual([{ kind: "notice", to: address }]);
+    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US" }]);
     expect(await noticeOf(author)).toBeUndefined();
     expect(await drain(sender)).toEqual({ sent: 0, retrying: 0, dropped: 0 });
+  });
+
+  test("writes a notice in the language its author verified the address in", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const address = await verified(author, "es-US");
+    const { electionId } = await poll(author);
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([{ kind: "notice", to: address, locale: "es-US" }]);
   });
 
   test("a notice waits until it is due", async () => {
@@ -563,7 +576,7 @@ describe("sending", () => {
 
 describe("rendering", () => {
   test("a notice says neither what was decided nor about what, and holds no link", () => {
-    const { subject, text } = renderEmail({ kind: "notice", to: "a@example.org" });
+    const { subject, text } = renderEmail({ kind: "notice", to: "a@example.org", locale: "en-US" });
     const words = `${subject}\n${text}`.toLowerCase();
     expect(subject).not.toMatch(/\n/);
     expect(words).not.toMatch(/https?:|www\.|@|\/p\/|\/by\//);
@@ -634,7 +647,7 @@ describe("web push", () => {
       pushed: 2,
       pushFailed: 0,
     });
-    expect(messages).toEqual([{ kind: "notice", to: address }]);
+    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US" }]);
     expect(pushed.map((p) => p.endpoint).sort(byCode)).toEqual([e1, e2].sort(byCode));
     expect(pushed.every((p) => p.now === NOW)).toBe(true);
   });

@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT,
   BUNDLE_FORMAT_DEFINITION,
+  BUNDLE_FORMAT_L1,
   type Bundle,
   BundleError,
   type CheckResult,
@@ -913,6 +914,26 @@ describe("the command line with --arweave", () => {
     expect(report.board.byCid).toEqual({});
   });
 
+  test("blocks.car is asked first, then the objects read, and a --gateway for neither's blocks only (T-11)", async () => {
+    hold(WHOLE);
+    const json = bundleJson({ ...logged, board: [], withCheckpoints: true });
+    const segment = objects[0] as Archived;
+    const viaGateway = (...files: string[]) =>
+      run("--arweave", `${origin}/ar`, "--gateway", `${origin}/ipfs-none`, ...files);
+    for (const car of [objectCar(segment.bytes), undefined]) {
+      requests.length = 0;
+      const d = dir(json);
+      if (car !== undefined) writeFileSync(join(d, "blocks.car"), car);
+      const report = JSON.parse((await viaGateway(d)).stdout) as Report;
+      for (const id of ["4.1", "4.2", "4.3"]) expect(row(report, id).status, id).toBe("pass");
+      expect(report.board.byCid).toEqual({
+        ...(car !== undefined && { storeBlocks: 1, storeUnreadableBytes: 0 }),
+        gateways: { requests: 0, blocks: 0 },
+      });
+      expect(requests.filter((r) => !r.startsWith("/ar/"))).toEqual([]);
+    }
+  });
+
   test("without --arweave nothing is read and 4.3 stays not-implemented", async () => {
     hold(WHOLE);
     const r = await run(dir(bundleJson(logged), copy));
@@ -977,22 +998,35 @@ describe("the command line with --arweave", () => {
     expect(requests).toEqual([]);
   });
 
-  test("a bundle of format 1 has no archive to read: rejected, nothing asked", async () => {
+  test("a bundle of format 1 or 2 has no archive to read: rejected, nothing asked", async () => {
     hold(WHOLE);
-    const format1 = JSON.stringify({
-      format: BUNDLE_FORMAT,
+    const common = {
       electionId: bytesToHex(definition.election_id),
       boardEntryVersion: 1,
       clock: honest?.clock,
-      now: "0",
-      anchors: [],
-    });
-    const r = await run("--arweave", `${origin}/ar`, dir(format1, []));
-    expect(r.code).toBe(EXIT_CODES.bundleRejected);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^bundle rejected: format: abolish-verifier-bundle\/1 names no deployment/u,
-    );
+    };
+    const format1 = { format: BUNDLE_FORMAT, ...common, now: "0", anchors: [] };
+    // Format 2: the same L1 evidence under the anchor it names.
+    const { l1 } = JSON.parse(bundleJson(logged)) as { l1: object };
+    const format2 = {
+      format: BUNDLE_FORMAT_L1,
+      ...common,
+      l1: { ...l1, anchor: bytesToHex(definition.l1_anchor), firstSegment: "0" },
+    };
+    for (const [format, json] of [
+      [BUNDLE_FORMAT, format1],
+      [BUNDLE_FORMAT_L1, format2],
+    ] as const) {
+      const d = dir(JSON.stringify(json), []);
+      // The bundle itself is one a run without the archive takes.
+      expect((await run(d)).code, format).not.toBe(EXIT_CODES.bundleRejected);
+      const r = await run("--arweave", `${origin}/ar`, d);
+      expect(r.code, format).toBe(EXIT_CODES.bundleRejected);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(
+        `bundle rejected: format: ${format} names no deployment, so it has no archive to read\n`,
+      );
+    }
     expect(requests).toEqual([]);
   });
 });

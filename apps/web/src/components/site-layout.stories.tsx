@@ -119,6 +119,10 @@ export const Error: Story = {
   },
 };
 
+// Its own dark story, so axe judges the error page's colours in both themes
+// as it does not found's and the offline page's.
+export const ErrorDark: Story = { ...Error, parameters: { theme: "dark" } };
+
 const offline: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("You're offline");

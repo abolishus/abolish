@@ -56,7 +56,13 @@ import {
   profileHandles,
 } from "./profiles.ts";
 import { pollTagActions, pollTags } from "./poll-tags.ts";
-import { postingBallots, postingInFlight, postingSent, postingSpend } from "./postings.ts";
+import {
+  postingBallots,
+  postingDeposits,
+  postingInFlight,
+  postingSent,
+  postingSpend,
+} from "./postings.ts";
 import { accountNotices } from "./notices.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
@@ -113,6 +119,7 @@ export {
   pollTagActions,
   pollTags,
   postingBallots,
+  postingDeposits,
   postingInFlight,
   postingSent,
   postingSpend,
@@ -188,6 +195,7 @@ export const TABLE_CLASSES = {
   identity: [
     "identity_backups",
     "posting_ballots",
+    "posting_deposits",
     "posting_in_flight",
     "posting_sent",
     "posting_spend",

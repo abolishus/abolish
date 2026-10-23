@@ -18,7 +18,9 @@ const enUS = {
   appDescription: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeNonBinding: "Non-binding, and run by citizens.",
   homeStreamTitle: "What people are asking",
-  homeStreamLede: "The newest open questions. Answer any of them from here.",
+  homeStreamLede: "The newest open questions.",
+  homeStreamPick:
+    "Choose an answer on any card to open it in the voting app. Nothing is sent until you cast your ballot there.",
   homeStreamAll: "See all questions",
   homeStreamEmpty: "No questions are open just now. When someone asks one, it shows up here.",
   homeListUnavailable:
@@ -277,6 +279,7 @@ const enUS = {
     other:
       "Choose an answer to question 1 of {count} to open it in the voting app. Nothing is sent until you cast your ballot there.",
   },
+  streamPickFirst: "These answers are for question 1 of {count}.",
   streamNoBallot: "Answering from this page isn't set up on this site yet.",
   streamText: "This poll's text can't be shown here. Its page has what this server holds.",
   streamEmpty: "No open questions just now",

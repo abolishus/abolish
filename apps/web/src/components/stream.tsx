@@ -179,9 +179,19 @@ function SearchForm({
  * its words, when it closes, where it's listed,
  * and its first question's answers, each a way into the ballot client, which
  * opens the poll with that answer chosen from the link's fragment. Text an
- * asker wrote carries its own language and direction.
+ * asker wrote carries its own language and direction. `explained` is for a
+ * page that says once, above its cards, what choosing an answer does: the
+ * card then says only which question a poll of several answers.
  */
-export function StreamCard({ card, ballot }: { card: Card; ballot: string | null }) {
+export function StreamCard({
+  card,
+  ballot,
+  explained = false,
+}: {
+  card: Card;
+  ballot: string | null;
+  explained?: boolean;
+}) {
   const t = useTranslate(catalogs);
   const titleId = useId();
   const questionId = useId();
@@ -254,9 +264,13 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
         <div className="grid gap-3">
-          <p className="m-0 text-sm text-pretty text-muted-foreground">
-            {t("streamPick", { count: questions })}
-          </p>
+          {explained && questions === 1 ? null : (
+            <p className="m-0 text-sm text-pretty text-muted-foreground">
+              {explained
+                ? t("streamPickFirst", { count: questions })
+                : t("streamPick", { count: questions })}
+            </p>
+          )}
           {/* Each answer is a plain link: the ballot client opens with it
               chosen, and sends nothing until the voter does ([[first-answer]]).
               The list is named by the question it answers, so a screen

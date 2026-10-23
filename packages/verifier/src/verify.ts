@@ -607,7 +607,8 @@ export interface ArchiveReadOptions {
   readonly maxReads?: number;
 }
 
-const DEFAULT_ARCHIVE_BYTES = 2 ** 30;
+/** The listed objects' byte budget when the caller sets none: 1 GiB, as a copy's (T-52). */
+export const DEFAULT_ARCHIVE_BYTES = 2 ** 30;
 
 /**
  * Reads the permanent archive for a format-3 to 6 bundle (docs/spec/

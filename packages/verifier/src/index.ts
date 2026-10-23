@@ -115,7 +115,7 @@ export {
   releaseTimesSlot,
 } from "./registry.ts";
 export { readBlockStore, type BlockStore } from "./blocks.ts";
-export { DEFAULT_MAX_BOARD_BYTES, loadBundle, readBundle } from "./files.ts";
+export { type ArchiveSources, DEFAULT_MAX_BOARD_BYTES, loadBundle, readBundle } from "./files.ts";
 export {
   DEFAULT_GATEWAY_TIMEOUT_MS,
   type GatewayOptions,
@@ -193,6 +193,7 @@ export {
   type Report,
   REPORT_FORMAT,
   type ArchiveReadOptions,
+  DEFAULT_ARCHIVE_BYTES,
   type Plain,
   readArchive,
   readBoardByCid,

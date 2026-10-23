@@ -46,7 +46,7 @@ const candidate = (
   segment: number,
   b: AdmittedBallot,
   path: CountedCandidate["path"] = "board",
-): CountedCandidate => ({ entry, segment, path, ballot: b });
+): CountedCandidate => ({ entry, segment, path, ballot: b, record: new Uint8Array(0) });
 
 const inputs = (over: Partial<SelectionInputs> = {}): SelectionInputs => ({
   admissionSettled: true,

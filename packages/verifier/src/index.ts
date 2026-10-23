@@ -50,6 +50,7 @@ export {
 } from "./availability.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
+export { type CountedExtentInputs, countedSet, type CountedSetResult } from "./counted-set.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export {
   type CellReport,

@@ -345,7 +345,7 @@ const readsEvents = (v: number | undefined): v is ContractEventVersion =>
 const U32_MAX = 0xffffffff;
 
 /** The election's entries in the anchored extent, by position, with their segment and payload. */
-function anchored(inputs: CountedInputs) {
+function anchored(inputs: DeliveryInputs) {
   const d = inputs.definition.value;
   const out: { readonly at: number; readonly segment: number; readonly payload: Uint8Array }[] = [];
   for (const [at, encoded] of inputs.entries.entries()) {
@@ -363,12 +363,41 @@ function anchored(inputs: CountedInputs) {
   return out;
 }
 
+/** What delivery (5.9) reads of `CountedInputs`. */
+export type DeliveryInputs = Pick<
+  CountedInputs,
+  | "definition"
+  | "definitionHash"
+  | "registered"
+  | "authorRegistered"
+  | "selected"
+  | "entries"
+  | "boardEntryVersion"
+  | "extent"
+  | "eventsPass"
+  | "clock"
+>;
+
 /**
- * 5.9, 7.1 to 7.3, 7.4's counted-set breaks and 8.5, over 6.1's selected
- * ballots (docs/spec/verifier.md, Counted set and tally). Call it only once
- * 6.1 passed; `countedRows` gives the rows otherwise.
+ * Steps 1 to 3 of docs/spec/verifier.md, Counted set and tally: the guards,
+ * the delivery records of the anchored extent and delivery (5.9) over the
+ * selected ballots, or the outcome that stops them. Every entry at or below
+ * the floor is in the counted extent: `s_G = max(s_F, s_K)` while `s_S` isn't
+ * known, or `counted`, `s_S` itself, for a copy holding the counted extent
+ * and nothing past it (Counted set from the counted extent).
  */
-export function countedChecks(inputs: CountedInputs): CountedResult {
+export function deliverSelected(
+  inputs: DeliveryInputs,
+  counted: bigint | undefined,
+):
+  | { readonly stop: CountedOutcome }
+  | {
+      readonly eventVersion: ContractEventVersion;
+      readonly own: ReturnType<typeof anchored>;
+      readonly floor: bigint;
+      readonly ballots: DeliveryCheck["ballots"] | DeliveryCheckV2["ballots"];
+      readonly delivery: DeliveryReport | DeliveryReportV2;
+    } {
   const { definition, definitionHash, registered, clock } = inputs;
   const d = definition.value;
   // Beside an author panel delivery (5.9) reads the author seats' key set,
@@ -376,30 +405,27 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // never with a key set taken on trust or the default panel's alone (T-37).
   const author = definition.version === 6 && definition.value.author_keys.length !== 0;
   if (author && inputs.authorRegistered === undefined)
-    return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
+    return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   // Ordinary ballots can't be found under a contract-event version this
   // release doesn't read, so 5.5 is unsupported, admission never settles and
   // 6.1 never passes there, whatever the copy holds; a caller that gets here
   // anyway reports it unsupported, never a counted set (T-36).
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
   if (!readsEvents(eventVersion))
-    return countedRows(
-      { status: "unverifiable", code: "unsupported-version", at: {} },
-      inputs.destruction,
-    );
+    return { stop: { status: "unverifiable", code: "unsupported-version", at: {} } };
   const closesAt = d.closes_at;
   const bound = BigInt(d.l1_inclusion_bound);
   // 2.6 fails a definition opening before the clock's epoch; a close plus
   // the inclusion bound before it leaves the windows nowhere on the clock.
   if (closesAt + bound < clock.epoch)
-    return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
+    return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   const segments = deliverySegments(clock, closesAt, bound);
   const deadlines = deliveryDeadlines(closesAt, bound);
   // `s_S` is at least `s_F` and at least `s_K` (tally.md, Tally window;
   // delivery.md, Windows), so every entry at or below this floor is in the
   // counted extent.
   const sF = countedFloor(closesAt, clock);
-  const floor = sF > segments.complaint ? sF : segments.complaint;
+  const floor = counted ?? (sF > segments.complaint ? sF : segments.complaint);
 
   const own = anchored(inputs);
   const contracts = {
@@ -436,10 +462,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       // authenticates: until then the operator could move it into or out of
       // its window (T-35, T-71).
       if (!inputs.eventsPass)
-        return countedRows(
-          { status: "unverifiable", code: "not-reached", at: { entry: at } },
-          inputs.destruction,
-        );
+        return { stop: { status: "unverifiable", code: "not-reached", at: { entry: at } } };
       // Boarded above the floor, it may or may not be in the counted extent,
       // unless it was sent after the complaint window's end (`t_K ≥ t_D`):
       // then it is late whatever `s_S` is, as a board-path record above the
@@ -466,10 +489,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       )
         continue;
       if (BigInt(segment) > floor)
-        return countedRows(
-          { status: "unverifiable", code: "not-implemented", at: { entry: at } },
-          inputs.destruction,
-        );
+        return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
       // A version-2 batch or root of this election (contract-event version 9
       // frames them) may deliver or exclude any ballot of its seat's panel,
       // by its pairs or its leaves, which this release doesn't read into 5.9
@@ -485,10 +505,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
         "definitionHash" in checked.event &&
         equal(checked.event.definitionHash, definitionHash)
       )
-        return countedRows(
-          { status: "unverifiable", code: "not-implemented", at: { entry: at } },
-          inputs.destruction,
-        );
+        return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
       // A root of another version is a rejected entry the delivery check
       // lists, whatever it names.
       if (checked.event.event === "ObligationRootSubmitted" && definition.version !== 6 && fixed) {
@@ -500,10 +517,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
         // naming another definition is stray, its first code, whatever its
         // leaves (delivery.md, Delivery check).
         if (equal(checked.event.definitionHash, definitionHash))
-          return countedRows(
-            { status: "unverifiable", code: "not-implemented", at: { entry: at } },
-            inputs.destruction,
-          );
+          return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
         strays.push(at);
         continue;
       }
@@ -521,7 +535,21 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     definition.version === 6
       ? deliveryV2(inputs, against, records, recordAt)
       : deliveryV1(inputs, against, records, recordAt, strays);
-  const { delivery } = delivered;
+  return { eventVersion, own, floor, ...delivered };
+}
+
+/**
+ * 5.9, 7.1 to 7.3, 7.4's counted-set breaks and 8.5, over 6.1's selected
+ * ballots (docs/spec/verifier.md, Counted set and tally). Call it only once
+ * 6.1 passed; `countedRows` gives the rows otherwise.
+ */
+export function countedChecks(inputs: CountedInputs): CountedResult {
+  const { definition, definitionHash, registered, clock } = inputs;
+  const d = definition.value;
+  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  const delivered = deliverSelected(inputs, undefined);
+  if ("stop" in delivered) return countedRows(delivered.stop, inputs.destruction);
+  const { eventVersion, own, floor, delivery } = delivered;
   // An exclusion is the rule's outcome, never a breach, and a failing record
   // is ignored: 5.9 has no failure of its own.
   const rows = new Map<string, CountedOutcome>([["5.9", { status: "pass" }]]);
@@ -824,7 +852,7 @@ function deliveryFields<K extends "delivery" | "deliveryV4">(
 
 /** 5.9 under ballot versions 1 and 2: delivery records version 1, over the default panel. */
 function deliveryV1(
-  inputs: CountedInputs,
+  inputs: DeliveryInputs,
   window: DeliveryWindow,
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],
@@ -880,7 +908,7 @@ function deliveryV1(
  * record naming an author seat is `delivery-seat` and delivers nothing.
  */
 function deliveryV2(
-  inputs: CountedInputs,
+  inputs: DeliveryInputs,
   window: DeliveryWindow,
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],

@@ -40,7 +40,7 @@ import {
 } from "../../node/tests/anvil.ts";
 import { AvailabilitySeat } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
-import { L1AnchorError, type L1AnchorOptions, l1BoardAnchors } from "../src/l1.ts";
+import { L1AnchorError, type L1AnchorOptions, l1BoardAnchors, tallySegment } from "../src/l1.ts";
 import { MemoryStore } from "../src/store.ts";
 
 // The availability duty's L1 reader (P4-3 part 2c-4b-1): the board anchor on
@@ -378,6 +378,31 @@ describe("l1BoardAnchors", () => {
     // The ballot extent's reader of the same election stops at s_A.
     const ballot = await (await l1BoardAnchors(options, election)).read(election.electionId);
     expect(ballot.anchors).toEqual(cps.slice(0, 2).map(anchored));
+  });
+
+  test("reads the tally's anchors through s_T, past s_S", async () => {
+    const { f, d, election, options } = await setup("tally", 600n);
+    const bound = BigInt(d.l1_inclusion_bound);
+    const sS = countedExtent(options.timing, d.closes_at, bound).segment;
+    const sT = tallySegment(options.timing, d.closes_at, bound);
+    // s_T is the period containing t_S + TALLY_WINDOW, the window 7 days.
+    expect(sT).toBe(period(countedExtent(options.timing, d.closes_at, bound).due + 604_800n));
+    expect(sT).toBeGreaterThan(sS);
+    const cps = [0n, sS - f, sT - f, sT - f + 1n].map((k) =>
+      checkpoint(election.electionId, f + k),
+    );
+    await advanceTo(end(f) + 60n);
+    await chain.anchorAll(anchor, cps.slice(0, 1));
+    await advanceTo(end(sS) + 60n);
+    await chain.anchorAll(anchor, cps.slice(1, 2));
+    await advanceTo(end(sT) + 60n);
+    await chain.anchorAll(anchor, cps.slice(2, 3));
+    await advanceTo(end(sT + 1n) + 60n);
+    await chain.anchorAll(anchor, cps.slice(3));
+    const read = await (await l1BoardAnchors(options, election, "tally")).read(election.electionId);
+    // Segment s_T + 1 is past the tally's extent.
+    expect(read.anchors).toEqual(cps.slice(0, 3).map(anchored));
+    expect(read.clock.lastSegment).toBe(Number(sT));
   });
 
   test("reads no anchor for a segment that ended before the creation's L1 origin", async () => {

@@ -23,7 +23,7 @@ import { type AvailabilitySeat, type AvailabilityStatus, countedDue } from "./av
 import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
-import { L1AnchorError } from "./l1.ts";
+import { L1AnchorError, tallySegment } from "./l1.ts";
 import { SendError } from "./send.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
 import type { TallyDuty, TallyDutyStatus } from "./tally.ts";
@@ -387,7 +387,7 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
  */
 export function tallyDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
   const end = countedDue(election, clock) + BigInt(PARAMETERS.TALLY_WINDOW);
-  const sT = (end - clock.epoch) / clock.period;
+  const sT = tallySegment(clock, election.closesAt, election.l1InclusionBound);
   const anchored = clock.epoch + sT * clock.period + clock.deadline;
   return anchored > end ? anchored : end;
 }
@@ -395,7 +395,8 @@ export function tallyDeadline(election: ApprovedElection, clock: DeadlineClock):
 /**
  * The tally duty of every election the seat approved: each one's
  * `TallyDuty`, stepped from the approval (it reads nothing before the
- * summed-share rule allows) until every cell is opened, the election is
+ * summed-share rule allows) until the anchored board carries a passing
+ * opening of every cell (docs/spec/tally.md, Destruction, When), the election is
  * unavailable, the seat refuses its counted set (for good: a refusal is the
  * operator's to look into, and stepping on could only sum over a set the
  * seat already refused once; T-54), or `t_D` has passed, when the seat may
@@ -420,7 +421,7 @@ export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyS
             case "refused":
               return true;
             case "tallying":
-              return status.cells.every((c) => c.state === "opened") || wall > deadline;
+              return status.cells.every((c) => c.state === "published") || wall > deadline;
             default:
               return wall > deadline;
           }

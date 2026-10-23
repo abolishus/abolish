@@ -245,6 +245,7 @@ describe("the seats' tally over it", () => {
           store: s.stores[i] as SeatStore,
           summing: AVAILABLE,
           counted: async () => counted,
+          board: async () => ({ state: "unread" }),
           peers: wire,
         }),
     );

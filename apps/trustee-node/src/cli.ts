@@ -73,6 +73,7 @@ import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
+import { type BoardOpenings, boardOpenings } from "./openings.ts";
 import { TallyDuty } from "./tally.ts";
 import {
   complaintBallots,
@@ -559,6 +560,7 @@ async function tallyDuties(
           summing: summingRule({ election, l1: reader, counted: a.anchorClock, records, clock }),
           counted: countedSource(wiring.counted),
           peers,
+          board: await wiring.openings(election),
         });
         return {
           step: () => duty.step(),
@@ -629,6 +631,7 @@ export function dutyWiring(
   readonly counted: CountedSourceOptions;
   readonly receipts: (election: ApprovedElection) => ReceiptDutyOptions;
   readonly complaints: (election: ApprovedElection) => ComplaintDutyOptions;
+  readonly openings: (election: ApprovedElection) => Promise<() => Promise<BoardOpenings>>;
 } {
   const { l2ChainId } = config;
   // The directory first: a block it holds costs no request and tells no
@@ -728,6 +731,16 @@ export function dutyWiring(
       ballots,
       now: s.clock,
     }),
+    // The board's openings through `s_T`, from the same blocks: the
+    // directory holds the extents the seat attested, so mostly the
+    // segments after `s_S` come from the gateways.
+    openings: async (election) =>
+      boardOpenings({
+        election,
+        l1: await l1BoardAnchors(anchors, election, "tally"),
+        blocks,
+        maxBytes: a.maxBoardBytes,
+      }),
   };
 }
 

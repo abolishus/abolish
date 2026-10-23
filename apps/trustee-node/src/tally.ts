@@ -27,11 +27,13 @@ import {
   aggregateHash,
   ballotHash,
   ballotHashV3,
+  type BoardErrorCode,
   bytesFixed,
   type CellAggregate,
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
   checkSummedShares,
+  checkTally,
   type CommittedVote,
   decodeBallot,
   DecodeError,
@@ -58,6 +60,7 @@ import {
 } from "@abolishus/crypto";
 import type { ApprovedElection, IntakeSecrets } from "./ceremony.ts";
 import { heldShares } from "./intake.ts";
+import type { BoardOpenings } from "./openings.ts";
 import type { SeatStore } from "./store.ts";
 import type { SummingRule } from "./summing.ts";
 import type { Pins } from "./stub.ts";
@@ -139,10 +142,25 @@ export interface TallyDutyOptions extends Pins {
   /** Read only once `summing` allows. */
   readonly counted: (election: ApprovedElection) => Promise<CountedSet>;
   readonly peers: SummedSharePeers;
+  /**
+   * The board's tally openings through the latest counted checkpoint the
+   * seat's own finalized L1 node shows (`boardOpenings`), read each step
+   * once the counted set is fixed (docs/spec/tally.md, Destruction, When).
+   */
+  readonly board: () => Promise<BoardOpenings>;
 }
 
 /** Where one cell stands after a step. */
 export type CellStatus =
+  /**
+   * The anchored board carries a passing opening of the cell, whoever
+   * combined it: one of `m` entries over the seat's own aggregate of the
+   * cell that opens every option (docs/spec/tally.md, Opening checks), the
+   * first such in board order in segment `segment`, whose counted
+   * checkpoint the seat read anchored on its own finalized L1 (Destruction,
+   * When). The seat sends nothing more for the cell.
+   */
+  | { readonly state: "published"; readonly segment: number }
   /** The seat signed the cell's opening; it is in `openings()`. */
   | { readonly state: "opened" }
   /**
@@ -174,7 +192,17 @@ export type TallyDutyStatus =
    * election. An alarm for the node's operator.
    */
   | { readonly state: "refused"; readonly reason: string }
-  | { readonly state: "tallying"; readonly cells: readonly CellStatus[] };
+  | {
+      readonly state: "tallying";
+      readonly cells: readonly CellStatus[];
+      /**
+       * The last read of the board's openings: `read`, `unread` (not from
+       * these sources yet, or nothing anchored), or the board check the
+       * board fails, when no opening on it counts: an alarm for the node's
+       * operator.
+       */
+      readonly board: "read" | "unread" | BoardErrorCode;
+    };
 
 interface Cell {
   readonly vss: readonly CommittedVote["vss"][];
@@ -216,6 +244,14 @@ export class TallyDuty {
   // Each cell's passing sums by sending seat, from messages received since
   // the node started: they are resent by their senders after a restart.
   readonly #received = new Map<number, Map<number, readonly Share[]>>();
+  // Each cell with a passing opening on the anchored board, and the segment
+  // of the first one in board order. Kept once seen: an anchored entry never
+  // leaves the board, so a node that later lags or hides an anchor never
+  // takes a cell back.
+  readonly #published = new Map<number, number>();
+  // The board read last checked, so a read through the same checkpoint
+  // isn't checked again.
+  #checkedRead: BoardOpenings | undefined;
 
   constructor(options: TallyDutyOptions) {
     this.#o = options;
@@ -226,8 +262,14 @@ export class TallyDuty {
     if (!("rules" in fixed)) return fixed;
     const { election, peers } = this.#o;
     const recipients = fixed.registered.map((k) => k.index).filter((i) => i !== election.index);
+    const board = await this.#readBack(fixed);
     const cells: CellStatus[] = [];
     for (const [c, cell] of fixed.cells.entries()) {
+      const segment = this.#published.get(c);
+      if (segment !== undefined) {
+        cells.push({ state: "published", segment });
+        continue;
+      }
       const held = this.#held(c, cell);
       let opened = await this.#opening(c);
       if (opened === undefined && held.size >= fixed.rules.threshold)
@@ -260,7 +302,40 @@ export class TallyDuty {
       }
       cells.push({ state: "combining", held: held.size, sent });
     }
-    return { state: "tallying", cells };
+    return { state: "tallying", cells, board };
+  }
+
+  /**
+   * Reads the board's openings and marks each cell that has a passing one,
+   * judged by crypto's opening checks against the seat's own aggregates of
+   * the counted set it fixed, never by the board's or a server's word
+   * (docs/spec/tally.md, Destruction, When; T-53). Only a passing opening
+   * counts, attributed or not: one over another set, or not opening every
+   * option, leaves the cell as it was (Opening checks).
+   */
+  async #readBack(fixed: Fixed): Promise<"read" | "unread" | BoardErrorCode> {
+    const read = await this.#o.board();
+    if (read.state === "unread") return "unread";
+    if (read.state === "board-failed") return read.code;
+    if (read === this.#checkedRead) return "read";
+    const checked = checkTally(
+      {
+        definitionHash: this.#o.election.definitionHash,
+        rules: fixed.rules,
+        registered: fixed.registered,
+      },
+      fixed.cells.map((cell) => cell.vss),
+      read.openings.map((o) => o.payload),
+      // The only version the seat's stub checks let it approve.
+      1,
+    );
+    for (const [c, cell] of checked.cells.entries()) {
+      const first = cell.passing[0];
+      if (first !== undefined && !this.#published.has(c))
+        this.#published.set(c, (read.openings[first.at] as (typeof read.openings)[number]).segment);
+    }
+    this.#checkedRead = read;
+    return "read";
   }
 
   /**

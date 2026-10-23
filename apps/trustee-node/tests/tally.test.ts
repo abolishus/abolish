@@ -14,6 +14,7 @@ import {
   decodeTallyOpening,
   type ElectionDefinition,
   encodeBallot,
+  encodeTallyOpening,
   identityKey,
   type RegisteredKeys,
   sealSummedShares,
@@ -26,6 +27,7 @@ import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection, IntakeSecrets } from "../src/ceremony.ts";
 import { heldShares } from "../src/intake.ts";
+import type { BoardOpening, BoardOpenings } from "../src/openings.ts";
 import type { SeatStore } from "../src/store.ts";
 import type { SummingPanel, SummingStatus } from "../src/summing.ts";
 import {
@@ -129,6 +131,7 @@ function duties(wire: Wire, o: Options = {}): TallyDuty[] {
         store: (o.stores ?? s.stores)[i] as SeatStore,
         summing: AVAILABLE,
         counted: async () => (o.counted ?? (() => all()))(i + 1),
+        board: async () => ({ state: "unread" }),
         peers: wire,
         ...o.change?.(i + 1),
       }),
@@ -198,6 +201,7 @@ describe("the tally duty", () => {
     expect(first[0]).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
     });
     expect(states(first.slice(1))).toEqual([["opened"], ["opened"]]);
     for (const [i, duty] of d.slice(1).entries()) {
@@ -309,6 +313,7 @@ describe("the tally duty", () => {
     expect(await d[1]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
     });
   });
 
@@ -348,6 +353,7 @@ describe("the tally duty", () => {
     expect(await d[2]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "missing-shares", missing: 1, held: 0 }],
+      board: "unread",
     });
     expect(wire.sent).toEqual([]);
     // Seats 1 and 2 each reach seat 3 alone, so neither opens first.
@@ -356,6 +362,7 @@ describe("the tally duty", () => {
     expect(await d[2]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "missing-shares", missing: 1, held: 1 }],
+      board: "unread",
     });
     wire.down = new Set([1]);
     await d[1]!.step();
@@ -378,6 +385,7 @@ describe("the tally duty", () => {
     expect(await d[0]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 1 }],
+      board: "unread",
     });
     expect(states([await d[2]!.step()])).toEqual([["opened"]]);
   });
@@ -414,6 +422,7 @@ describe("the tally duty", () => {
     expect(await d[1]!.step()).toEqual({
       state: "tallying",
       cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
     });
     await d[1]!.receive(toSeat2);
     expect(states([await d[1]!.step()])).toEqual([["opened"]]);
@@ -529,6 +538,166 @@ describe("what the duty refuses to sum over", () => {
       state: "refused",
       reason: "the seat's own sums fail the summed-share check",
     });
+  });
+});
+
+describe("the board's openings read back", () => {
+  /** A board read of these openings, through a checkpoint named by `n`. */
+  const read = (n: number, openings: readonly BoardOpening[]): BoardOpenings => ({
+    state: "read",
+    checkpoint: new Uint8Array(32).fill(n),
+    openings,
+  });
+  /** An opening re-encoded with some of its fields changed: its signature no longer attributes it. */
+  const changed = (
+    bytes: Uint8Array,
+    change: (o: ReturnType<typeof decodeTallyOpening>) => object,
+  ) =>
+    encodeTallyOpening({
+      ...decodeTallyOpening(bytes, 1),
+      ...change(decodeTallyOpening(bytes, 1)),
+    });
+
+  /** Every seat stepped until seats 2 and 3 have signed their openings; seat 1 holds only its own sums. */
+  async function opened(board: { current: BoardOpenings; reads: number }) {
+    const wire = new Wire();
+    const d = duties(wire, {
+      stores: fresh(),
+      change: () => ({
+        board: async () => {
+          board.reads++;
+          return board.current;
+        },
+      }),
+    });
+    await prime(wire);
+    for (const duty of d) await duty.step();
+    const openings = [
+      (await d[1]!.openings()).get(0) as Uint8Array,
+      (await d[2]!.openings()).get(0) as Uint8Array,
+    ];
+    wire.sent.length = 0;
+    return { wire, d, openings };
+  }
+
+  test("a cell is published once the anchored board carries a passing opening of it, whoever signed it, and the seat sends nothing more for it", async () => {
+    const board = { current: { state: "unread" } as BoardOpenings, reads: 0 };
+    const { wire, d, openings } = await opened(board);
+    expect(await d[0]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
+    });
+    wire.sent.length = 0;
+    // Seat 2's opening, on the board in segment 140: seat 1, which signed
+    // none, and seat 2 both see the cell published.
+    board.current = read(1, [{ payload: openings[0]!, segment: 140 }]);
+    for (const duty of [d[0]!, d[1]!])
+      expect(await duty.step()).toEqual({
+        state: "tallying",
+        cells: [{ state: "published", segment: 140 }],
+        board: "read",
+      });
+    expect(wire.sent).toEqual([]);
+    // Seat 1 signs nothing for a published cell.
+    expect((await d[0]!.openings()).size).toBe(0);
+  });
+
+  test("an unattributed opening that passes counts as well", async () => {
+    const board = { current: { state: "unread" } as BoardOpenings, reads: 0 };
+    const { d, openings } = await opened(board);
+    // Signed by no registered seat: a passing opening is correct whoever computed it.
+    board.current = read(1, [
+      { payload: changed(openings[0]!, () => ({ signer: 9 })), segment: 141 },
+    ]);
+    expect(states([await d[0]!.step()])).toEqual([["published"]]);
+  });
+
+  test("only a passing opening counts, the first in board order giving the segment", async () => {
+    const board = { current: { state: "unread" } as BoardOpenings, reads: 0 };
+    const { d, openings } = await opened(board);
+    const honest = openings[0]!;
+    const failing = [
+      // Not opening an option.
+      changed(honest, (o) => ({
+        opening: o.opening.map((x, j) => (j === 0 ? { v: x.v + 1n, r: x.r } : x)),
+      })),
+      // Over another counted set.
+      changed(honest, () => ({ aggregate_hash: new Uint8Array(32).fill(1) })),
+      // Another number of entries than options.
+      changed(honest, (o) => ({ opening: o.opening.slice(1) })),
+      // Another definition: stray.
+      changed(honest, () => ({ definition_hash: new Uint8Array(32).fill(2) })),
+      // A cell the partition doesn't have: stray.
+      changed(honest, () => ({ cell: 1 })),
+      // Doesn't decode.
+      Uint8Array.of(0x00, 0x06, 0x01, 0xff),
+    ].map((payload, i) => ({ payload, segment: 140 + i }));
+    board.current = read(1, failing);
+    expect(await d[0]!.step()).toMatchObject({ cells: [{ state: "combining" }], board: "read" });
+    board.current = read(2, [
+      ...failing,
+      { payload: openings[1]!, segment: 150 },
+      { payload: honest, segment: 151 },
+    ]);
+    expect(await d[0]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "published", segment: 150 }],
+      board: "read",
+    });
+  });
+
+  test("a published cell stays published whatever a later read says, and the board's failure is reported", async () => {
+    const board = { current: { state: "unread" } as BoardOpenings, reads: 0 };
+    const { d, openings } = await opened(board);
+    board.current = read(1, [{ payload: openings[0]!, segment: 140 }]);
+    await d[0]!.step();
+    for (const [current, reported] of [
+      [{ state: "unread" }, "unread"],
+      [{ state: "board-failed", code: "checkpoint-equivocation" }, "checkpoint-equivocation"],
+      [read(2, []), "read"],
+    ] as const) {
+      board.current = current;
+      expect(await d[0]!.step()).toEqual({
+        state: "tallying",
+        cells: [{ state: "published", segment: 140 }],
+        board: reported,
+      });
+    }
+  });
+
+  test("a failed board publishes nothing, even with a passing opening read before", async () => {
+    const board = {
+      current: { state: "board-failed", code: "wrong-index" } as BoardOpenings,
+      reads: 0,
+    };
+    const { d } = await opened(board);
+    expect(await d[1]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "opened" }],
+      board: "wrong-index",
+    });
+  });
+
+  test("the board is read only once the counted set is fixed", async () => {
+    const board = { current: { state: "unread" } as BoardOpenings, reads: 0 };
+    let counted: CountedSet = { state: "waiting" };
+    const wire = new Wire();
+    const d = duties(wire, {
+      stores: fresh(),
+      counted: () => counted,
+      change: () => ({
+        board: async () => {
+          board.reads++;
+          return board.current;
+        },
+      }),
+    });
+    expect(await d[0]!.step()).toEqual({ state: "waiting" });
+    expect(board.reads).toBe(0);
+    counted = all();
+    await d[0]!.step();
+    expect(board.reads).toBe(1);
   });
 });
 

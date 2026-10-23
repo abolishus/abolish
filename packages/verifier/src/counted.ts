@@ -863,6 +863,11 @@ function deliveryV1(
     records,
     1,
   );
+  // Every root of this definition left the rows undecided before the check,
+  // so none reaches it unread; one that did would leave \`ballots\` empty, and
+  // 5.9 would pass over an empty counted set (T-25, T-53).
+  if (delivered.unverifiable.length !== 0)
+    throw new Error("countedChecks: an obligation root reached the delivery check unread");
   const entryOf = (i: number) => recordAt[i] as number;
   return {
     ballots: delivered.ballots,
@@ -930,6 +935,11 @@ function deliveryV2(
     // the transcript check's, as it is for ballot versions 1 and 2.
     ...(d.author_keys.length !== 0 ? [d] : []),
   );
+  // Every root of this definition left the rows undecided before the check,
+  // so none reaches it unread; one that did would leave \`ballots\` empty, and
+  // 5.9 would pass over an empty counted set (T-25, T-53).
+  if (delivered.unverifiable.length !== 0)
+    throw new Error("countedChecks: an obligation root reached the delivery check unread");
   const entryOf = (i: number) => recordAt[i] as number;
   return {
     ballots: delivered.ballots,

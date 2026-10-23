@@ -21,7 +21,7 @@
 // (5.8) is judged against it before repeats, as docs/spec/revoting.md's
 // Selection takes the ballots that passed every admission check; selection
 // (6.1) is decided over the admitted ballots by selection.ts. Under
-// contract-event versions 3 to 8 a ballot can also come by the relayed path, as
+// contract-event versions 3 to 9 a ballot can also come by the relayed path, as
 // the board's `RelayedBallotSubmitted` event, judged by its relay call's
 // stamp; only 4.5's match with the call the L1 relay recorded makes that
 // stamp the relay's rather than the event's word, and 4.5 isn't built
@@ -251,9 +251,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 
 // The contract-event versions this verifier reads; under version 1 the board
 // emits no event, so every ballot is a board-path one, and only versions 3
-// to 8 have the relayed path.
+// to 9 have the relayed path.
 export const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6 || v === 7 || v === 8;
+  v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6 || v === 7 || v === 8 || v === 9;
 
 /** Where one ballot copy came from: its own path decides its window (5.5). */
 type Path =
@@ -373,8 +373,8 @@ export function ballotChecks(
     // Every path's copy, the relayed one's too: a member's ballot 5.4
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
-    // window (T-45, T-71). No event frames a version-4 ballot yet, so under
-    // definition version 6 only board-path copies reach this.
+    // window (T-45, T-71). A version-4 ballot's ordinary and relayed copies
+    // come framed by contract-event version 9, which 2.3 requires beside it.
     live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {
       rejected.push({

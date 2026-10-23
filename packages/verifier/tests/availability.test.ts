@@ -130,7 +130,7 @@ function recordOf(s: Sent): Uint8Array {
 /** The board's events, one per L2 block (number = timestamp − T_A + 1,000), proven at `proven`. */
 function board(
   sent: readonly Sent[],
-  proven: { readonly timestamp: bigint; readonly cut?: number },
+  proven: { readonly timestamp: bigint; readonly cut?: number; readonly version?: 8 | 9 },
 ) {
   const logs = sent.map((s, n) => {
     const payload = recordOf(s);
@@ -172,7 +172,9 @@ function board(
     block,
     proven.timestamp,
   );
-  const events = logs.slice(0, proven.cut ?? logs.length).map((l) => encodeContractEvent(l, 8));
+  const events = logs
+    .slice(0, proven.cut ?? logs.length)
+    .map((l) => encodeContractEvent(l, proven.version ?? 8));
   return { events, proof: state.evidence };
 }
 
@@ -406,6 +408,32 @@ describe("the ballot extent", { timeout: 120_000 }, () => {
   });
 });
 
+describe("contract-event version 9", { timeout: 120_000 }, () => {
+  // Version 9 names the availability events as version 8 does, so 4.6
+  // judges the same records alike under either pin ([[contracts]], Event
+  // tables (version 9); T-36).
+  const under9 = (sent: readonly Sent[]) =>
+    availabilityChecks(
+      inputs(sent, { eventVersion: 9, l2: board(sent, { timestamp: T_A + 10n, version: 9 }) }),
+    );
+
+  test("a panel holding its threshold is judged as under version 8", () => {
+    const sent = [attest(1), complain(3), attest(2, T_A)];
+    const r = under9(sent);
+    expect(r).toEqual(availabilityChecks(inputs(sent)));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
+
+  test("one attestation short of the threshold fails unavailable, as under version 8", () => {
+    const sent = [attest(1), complain(2)];
+    expect(under9(sent).row).toEqual({
+      status: "fail",
+      code: "unavailable",
+      at: { point: 1, panel: 1 },
+    });
+  });
+});
+
 describe("evidence that isn't held is unverifiable, never a failure", () => {
   test("before s_A's anchoring deadline on finalized L1", () => {
     const r = availabilityChecks(inputs([], { now: S_A_DUE - 1n }));
@@ -489,11 +517,30 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
       status: "unverifiable",
       code: "not-reached",
     });
-    expect(availabilityChecks(inputs([], { eventVersion: 9 })).row).toEqual({
+    expect(availabilityChecks(inputs([], { eventVersion: 10 })).row).toEqual({
       status: "unverifiable",
       code: "unsupported-version",
       at: {},
     });
+  });
+
+  test("a version-8 archive under a version-9 pin doesn't decode, nor a version-9 one under version 8", () => {
+    for (const [pinned, archived] of [
+      [9, 8],
+      [8, 9],
+    ] as const)
+      expect(
+        availabilityChecks(
+          inputs([attest(1)], {
+            eventVersion: pinned,
+            l2: board([attest(1)], { timestamp: T_A + 10n, version: archived }),
+          }),
+        ).row,
+      ).toEqual({
+        status: "unverifiable",
+        code: "decode",
+        at: { event: 0, decodeError: "profile-mismatch" },
+      });
   });
 
   test("anchors that fail the board checks from L1 alone", () => {

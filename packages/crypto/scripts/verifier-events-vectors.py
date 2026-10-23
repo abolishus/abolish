@@ -20,9 +20,9 @@ The verifier's tests show the `fail` status over l1-anchor.json's anchored
 boards, whose entry 1 is a placeholder of type 0x0008 that doesn't decode.
 
 The records and their verdicts are contract-event.json's,
-contract-event-v2.json's to contract-event-v8.json's
+contract-event-v2.json's to contract-event-v9.json's
 (contract-event-vectors.py and contract-event-v2-vectors.py to
-contract-event-v8-vectors.py, independent Python implementations): a record
+contract-event-v9-vectors.py, independent Python implementations): a record
 of `records` passes, one of `eventFailures` fails with its `error`, and one
 of `decodeErrors` doesn't decode, with its `error`, each under its own file's
 version and against its own file's contracts. The only verdict computed here
@@ -95,7 +95,8 @@ V5 = load_events("contract-event-v5.json", 5)
 V6 = load_events("contract-event-v6.json", 6)
 V7 = load_events("contract-event-v7.json", 7)
 V8 = load_events("contract-event-v8.json", 8)
-FILES = {1: V1, 2: V2, 3: V3, 4: V4, 5: V5, 6: V6, 7: V7, 8: V8}
+V9 = load_events("contract-event-v9.json", 9)
+FILES = {1: V1, 2: V2, 3: V3, 4: V4, 5: V5, 6: V6, 7: V7, 8: V8, 9: V9}
 
 
 def pins_of(d):
@@ -187,7 +188,9 @@ def main(out_dir):
         return f["verdicts"][id_][0]
 
     def honest(f):
-        """An honest record to open a failure case with, and how it reads: version 3's and version 8's files have only the board's records, and version 7's names its signed group creation apart from its self-paid one."""
+        """An honest record to open a failure case with, and how it reads: version 3's and version 8's files have only the board's records, version 7's names its signed group creation apart from its self-paid one, and version 9's names its ballots by their version."""
+        if "ballot-submitted-v1" in f["verdicts"]:
+            return ("ballot-submitted-v1", "an honest version-1 ballot submission")
         if "group-created" in f["verdicts"]:
             return ("group-created", "an honest group creation")
         if "group-created-signed" in f["verdicts"]:
@@ -204,6 +207,7 @@ def main(out_dir):
     d6_v4 = definition(d4.TYPICAL, 6, V6, board_version=4)
     d7_v4 = definition(d4.TYPICAL, 7, V7, board_version=4)
     d8_v4 = definition(d4.TYPICAL, 8, V8, board_version=4)
+    d9_v4 = definition(d4.TYPICAL, 9, V9, board_version=4)
     honest1 = [rec(V1, i) for i in V1["records"]]
     honest2 = [rec(V2, i) for i in V2["records"]]
     honest3 = [rec(V3, i) for i in V3["records"]]
@@ -212,6 +216,7 @@ def main(out_dir):
     honest6 = [rec(V6, i) for i in V6["records"]]
     honest7 = [rec(V7, i) for i in V7["records"]]
     honest8 = [rec(V8, i) for i in V8["records"]]
+    honest9 = [rec(V9, i) for i in V9["records"]]
 
     case("v1-records", "Definition version 1 pinning contract-event version 1: every honest record of contract-event.json, in its order, each passing the event check. 4.4 stays unverifiable (not-implemented): the required entries and the accumulator's replay wait on L2 reads and the archive.", d1, honest1, NOT_IMPLEMENTED)
     case("v2-records", "Definition version 4 pinning board-entry version 4 and contract-event version 2: every honest record of contract-event-v2.json, the board's events included, each passing. 4.4 is not-implemented.", d2, honest2, NOT_IMPLEMENTED)
@@ -222,6 +227,7 @@ def main(out_dir):
     case("events-v6-records", "Definition version 4 pinning board-entry version 4 and contract-event version 6: every honest record of contract-event-v6.json, a group creation and the group registry's Tier 1 additions, those the counting rule refuses included, each passing, since version 6 checks an addition's form, not whether it counts (contracts.md, Event tables (version 6)). 4.4 is not-implemented.", d6_v4, honest6, NOT_IMPLEMENTED)
     case("events-v7-records", "Definition version 4 pinning board-entry version 4 and contract-event version 7: every honest record of contract-event-v7.json, a signed group creation, the group registry's self-paid group creations and additions (an addition naming another group in its record or an index beyond the count included: those are 2.4's replay, never the event check's) and a signed addition, each passing. 4.4 is not-implemented.", d7_v4, honest7, NOT_IMPLEMENTED)
     case("events-v8-records", "Definition version 4 pinning board-entry version 4 and contract-event version 8: every honest record of contract-event-v8.json, a ballot, an obligation root and the board's availability attestations and complaints (of the author panel, of seat 255, naming a definition no election has and signed by another seat's key included: those are the availability check's, never the event check's), each passing. 4.4 is not-implemented.", d8_v4, honest8, NOT_IMPLEMENTED)
+    case("events-v9-records", "Definition version 4 pinning board-entry version 4 and contract-event version 9: every honest record of contract-event-v9.json, the election registry's author panel registrations, the board's version-1 and version-4 ballots, relayed ballots and every delivery record, batch and root of versions 1 and 2 (those whose elements frame but aren't points included: they are the verifier's later checks, never the event check's), each passing. 4.4 is not-implemented.", d9_v4, honest9, NOT_IMPLEMENTED)
     case("none", "No contract-event record on the copy: 4.4 is not-implemented, never a pass, since which events must be boarded isn't known yet.", d1, [], NOT_IMPLEMENTED)
 
     case(
@@ -240,6 +246,7 @@ def main(out_dir):
         (V6, d6_v4, ["unknown-event-tier1-from-board", "event-topics-tier1-group-topic", "event-data-tier1-offset", "event-data-tier1-count-says-four", "event-data-tier1-root-r", "event-data-tier1-b-outside-subgroup", "event-data-members-added-carrying-tier1"]),
         (V7, d7_v4, ["unknown-event-created-from-board", "unknown-event-added-from-board", "event-topics-created-no-group", "event-data-created-with-data", "event-topics-added-index-above-u64", "event-data-added-short", "event-data-added-forbidden-r", "event-data-added-carrying-members-added", "event-data-members-added-carrying-self-paid"]),
         (V8, d8_v4, ["unknown-event-attestation-from-election-registry", "unknown-event-complaint-bytes32-seat", "event-topics-attestation-seat-high", "event-topics-complaint-four", "event-data-attestation-definition-topic", "event-data-complaint-seat-topic", "event-data-attestation-carrying-complaint", "event-data-availability-signature-high-s", "event-data-root-carrying-attestation"]),
+        (V9, d9_v4, ["unknown-event-author-panel-from-board", "event-topics-author-panel-two", "event-data-author-panel-topic", "event-data-ballot-v5", "event-data-ballot-v4-hash-topic", "event-data-ballot-v4-author-element-zero", "event-data-receipt-v2-panel-0", "event-data-receipt-v2-ballot-topic"]),
     ]:
         for id_ in ids:
             error = f["verdicts"][id_][1]
@@ -259,6 +266,7 @@ def main(out_dir):
         (V6, d6_v4, ["version-five", "version-seven"]),
         (V7, d7_v4, ["version-six", "version-eight", "truncated-data", "trailing-bytes"]),
         (V8, d8_v4, ["version-seven", "version-nine", "truncated-data", "trailing-bytes"]),
+        (V9, d9_v4, ["version-eight", "version-ten", "truncated-data", "trailing-bytes"]),
     ]:
         for id_ in ids:
             code = f["verdicts"][f"decode/{id_}"][1][1]
@@ -314,7 +322,7 @@ def main(out_dir):
         NOT_IMPLEMENTED,
         entry_version=3,
     )
-    for events in (9, 255):
+    for events in (10, 255):
         case(
             f"events-v{events}",
             f"The profile pins contract-event version {events}, unknown here: 4.4 is unverifiable (unsupported-version) whatever the copy holds, failing records included (T-36).",

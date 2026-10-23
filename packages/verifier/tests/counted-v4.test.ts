@@ -12,11 +12,13 @@ import {
   decodeBoardEntry,
   decodeContractEvent,
   decodeShareComplaint,
+  deliveryDeadlines,
   deliverySegments,
   encodeBoardEntry,
   encodeCloseStatement,
   encodeContractEvent,
   encodeDestructionStatement,
+  encodeElectionDefinitionV6,
   encodeShareComplaintV2,
   encodeShareReceipt,
   encodeShareReceiptV2,
@@ -25,6 +27,8 @@ import {
   KEM_PUBLIC_KEY,
   openCell,
   PARAMETERS,
+  pinnedVersion,
+  profileCombinationRule,
   proveValidityV4,
   type QuestionRules,
   RECORD_TYPES,
@@ -210,8 +214,15 @@ function cast(cell: number, votes: readonly (0 | 1)[]): Cast {
   };
 }
 
+/** The definition a copy is of, and its hash. */
+interface Fixture {
+  readonly definition: VerifiedDefinition;
+  readonly hash: Uint8Array;
+}
+
 /** One copy of the election: the board the test fills, and what `countedChecks` takes. */
-function election() {
+function election(f: Fixture = { definition, hash }) {
+  const { hash } = f;
   const entries: Uint8Array[] = [];
   const board = (segment: number, payload: Uint8Array) => {
     entries.push(
@@ -291,7 +302,7 @@ function election() {
   const selected = (ballots: readonly Cast[]): CountedBallot[] =>
     ballots.map((b) => ({ entry: b.entry, tally: tallyOf(b) }));
   const inputs = (ballots: readonly Cast[], over: Partial<CountedInputs> = {}): CountedInputs => ({
-    definition,
+    definition: f.definition,
     definitionHash: hash,
     registered: REGISTERED,
     selected: selected(ballots),
@@ -640,6 +651,184 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
       records: [],
       rejected: [{ entry: at, decodeError: "profile-mismatch" }],
     });
+  });
+});
+
+describe("contract-path records under contract-event version 9, once 4.4 passes", () => {
+  // Version 9 frames the version-2 delivery records ballot version 4 fixes,
+  // so a single one through the contract path delivers or excludes as a
+  // board-path one does, judged by its L2 timestamp; a version-2 batch or
+  // root may deliver or exclude any ballot of its panel, which 5.9 doesn't
+  // read yet, so it leaves the rows undecided (docs/spec/verifier.md, Counted
+  // set and tally, step 2; P2-16 part 5d-3c; T-25, T-53).
+  const pins9 = d.profile.pins.map((p) =>
+    p.record_type === RECORD_TYPES.contractEvent ? { ...p, version: 9 } : p,
+  );
+  const definition9 = decodeDefinition(
+    encodeElectionDefinitionV6({ ...d, profile: { ...d.profile, pins: pins9 } }),
+  );
+  const f9 = { definition: definition9, hash: readDefinition(definition9).hash };
+  const { delivery: T_D, complaint: T_K } = deliveryDeadlines(
+    d.closes_at,
+    BigInt(d.l1_inclusion_bound),
+  );
+  // The `admitted` case's ballots, hashed under this definition: delivery
+  // reads their hashes, never their proofs.
+  const under9 = (b: Cast): Cast => ({
+    ...b,
+    hash: ballotHashV4({ definitionHash: f9.hash, cell: b.cell, nullifier: b.nullifier }, b.vote),
+  });
+  const alice = under9(ALICE);
+  const contracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  const topic0 = (name: string) => {
+    const signature = CONTRACT_EVENT_SIGNATURES[9].board.find((x) => x.startsWith(`${name}(`));
+    if (signature === undefined) throw new Error(`no board event ${name}`);
+    return keccak_256(text(signature));
+  };
+  const abiBytes = (record: Uint8Array) => {
+    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+    out[31] = 0x20;
+    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+    out.set(record, 64);
+    return out;
+  };
+  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+  /** The board's event `name` carrying `record` under version 9, emitted in an L2 block at `t`. */
+  const event = (name: string, topics: readonly Uint8Array[], record: Uint8Array, t: bigint) => {
+    const payload = encodeContractEvent(
+      {
+        contract: d.board,
+        n: 0n,
+        l2_block: 1n,
+        l2_timestamp: t,
+        topics: [topic0(name), ...topics],
+        data: abiBytes(record),
+      },
+      9,
+    );
+    const checked = checkContractEvent(decodeContractEvent(payload, 9), contracts, 9);
+    if (!checked.ok || checked.event.event !== name) throw new Error(`fixture: ${name} fails`);
+    return payload;
+  };
+  const receiptEvent = (e: ReturnType<typeof election>, seat: number, t: bigint) =>
+    event("ShareReceiptSubmitted", [f9.hash, alice.hash], e.receipt(alice, seat), t);
+  const batches = read("delivery-batch-v2.json") as {
+    readonly records: readonly { readonly id: string; readonly encoding: string }[];
+  };
+  /** delivery-batch-v2.json's record `id` renamed to this definition, under its event. */
+  const batch = (id: string, name: string, t: bigint) => {
+    const r = batches.records.find((x) => x.id === id);
+    if (r === undefined) throw new Error(`no record ${id}`);
+    const record = hex(r.encoding);
+    record.set(f9.hash, 3);
+    return event(name, [f9.hash, word(record[36] as number)], record, t);
+  };
+  const run = (e: ReturnType<typeof election>, eventsPass = true) =>
+    countedChecks(e.inputs([alice], { eventsPass, destruction: false }));
+  const undecided = (r: ReturnType<typeof countedChecks>, at: number) => {
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3"])
+      expect(r.rows.get(id), id).toEqual({
+        status: "unverifiable",
+        code: "not-implemented",
+        at: { entry: at },
+      });
+  };
+
+  test("the fixture pins contract-event version 9, and 2.3's combination lets it", () => {
+    expect(definition9.version).toBe(6);
+    expect(pinnedVersion(definition9.value, RECORD_TYPES.contractEvent)).toBe(9);
+    expect(profileCombinationRule(definition9.value as typeof d)).toBeUndefined();
+    expect(f9.hash).not.toEqual(hash);
+  });
+
+  test("a version-2 receipt through the contract path delivers, in time by its L2 timestamp", () => {
+    const e = election(f9);
+    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+    e.board(200, receiptEvent(e, 3, T_D));
+    const r = run(e);
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+  });
+
+  test("one sent after t_D is late, whatever segment boarded it, and excludes the ballot", () => {
+    const e = election(f9);
+    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+    const at = e.board(200, receiptEvent(e, 3, T_D + 1n));
+    expect(run(e).delivery).toEqual({
+      excluded: [{ entry: alice.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] }],
+      records: [{ entry: at, code: "delivery-late", panel: DEFAULT, seat: 3 }],
+      rejected: [],
+    });
+  });
+
+  test("a version-2 record waits on 4.4", () => {
+    const e = election(f9);
+    e.deliver([alice], 200);
+    const at = e.board(200, receiptEvent(e, 3, T_D));
+    for (const [id, o] of run(e, false).rows)
+      expect(o, id).toEqual({ status: "unverifiable", code: "not-reached", at: { entry: at } });
+  });
+
+  test("above the floor a version-2 record sent by t_K holds the rows open, one sent after it doesn't", () => {
+    const held = election(f9);
+    held.deliver([alice], 200);
+    const at = held.board(S_K + 1, receiptEvent(held, 3, T_K));
+    undecided(run(held), at);
+    const late = election(f9);
+    late.deliver([alice], 200);
+    late.board(S_K + 1, receiptEvent(late, 3, T_K + 1n));
+    expect(run(late).rows.get("5.9")).toEqual({ status: "pass" });
+    expect(run(late).delivery).toEqual({ excluded: [], records: [], rejected: [] });
+  });
+
+  test("above the floor a version-1 record isn't read: it delivers nothing wherever it sits", () => {
+    const e = election(f9);
+    e.deliver([alice], 200);
+    const shareHash = alice.vote.share_hashes[2] as Uint8Array;
+    const m = shareReceiptStatement({
+      definition_hash: f9.hash,
+      ballot_hash: alice.hash,
+      seat: 3,
+      share_hash: shareHash,
+    });
+    const v1 = encodeShareReceipt(
+      shareReceiptRecord(f9.hash, 3, {
+        ballotHash: alice.hash,
+        shareHash,
+        receipt: signStatement(secret(3), "abolish/v1/sig/share-receipt", m),
+      }),
+    );
+    e.board(S_K + 1, event("ShareReceiptSubmitted", [f9.hash, alice.hash], v1, T_D));
+    expect(run(e).rows.get("5.9")).toEqual({ status: "pass" });
+    expect(run(e).delivery).toEqual({ excluded: [], records: [], rejected: [] });
+  });
+
+  test("a version-2 batch or root leaves the rows undecided, whichever panel it names", () => {
+    for (const [id, name] of [
+      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+      ["receipt-batch-author", "ShareReceiptBatchSubmitted"],
+      ["complaint-batch-default", "ShareComplaintBatchSubmitted"],
+      ["receipt-root-author", "ObligationRootSubmitted"],
+    ] as const) {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const at = e.board(200, batch(id, name, T_D));
+      undecided(run(e), at);
+    }
+  });
+
+  test("under a version-8 pin, a version-9 record doesn't decode and carries nothing (4.4's to report)", () => {
+    const e = election();
+    e.deliver([ALICE], 200);
+    e.board(200, receiptEvent(election(f9), 3, T_D));
+    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
   });
 });
 

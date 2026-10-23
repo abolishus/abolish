@@ -8,6 +8,7 @@ import {
   type Anchor,
   type AnchorClock,
   type BoardCopyStop,
+  type ContractLog,
   DecodeError,
   decodeCheckpoint,
   MAX_TRUSTEES,
@@ -23,6 +24,7 @@ import {
   NodePool,
   RlpError,
 } from "./l1.ts";
+import type { AnchorLogsRule } from "./anchor-logs.ts";
 import type { ArchiveFinding, ListedFinding } from "./archive.ts";
 import type { L2BoardEvidence } from "./availability.ts";
 import type { GatewayStats } from "./gateways.ts";
@@ -50,6 +52,7 @@ export interface InputSources {
   readonly panel?: InputSource;
   readonly l1Blocks?: InputSource;
   readonly l2OutputRoot?: InputSource;
+  readonly anchorLogs?: InputSource;
 }
 
 /**
@@ -82,9 +85,12 @@ export interface CidRead {
 export type ArchiveRead =
   | { readonly stopped: "not-reached" | L1ErrorCode }
   | { readonly stopped: "locator-none"; readonly count: bigint }
+  | { readonly stopped: "anchor-logs"; readonly rule: AnchorLogsRule }
   | {
       /** Locators posted, from the anchor's state. */
       readonly count: bigint;
+      /** The earlier locators read from the anchor's logs, where the bundle carries them. */
+      readonly earlier?: number;
       readonly walk: {
         readonly latest: bigint | undefined;
         /** Manifests reached. */
@@ -145,6 +151,14 @@ export interface DefinitionBundle extends BundleCommon {
   readonly format: typeof BUNDLE_FORMAT_DEFINITION;
   readonly definition: Uint8Array;
   readonly l1: Omit<L1Evidence, "anchor">;
+  /**
+   * The board anchor's logs from its first, in order of `n`, where the
+   * bundle carries them: held only here, and proven against the anchor's
+   * event accumulator when the archive is read (docs/spec/verifier.md,
+   * Archive), so logs that don't hold up are reported there, never a
+   * rejected bundle.
+   */
+  readonly anchorLogs?: readonly ContractLog[];
 }
 
 /**
@@ -361,6 +375,25 @@ function parseBlocks(value: unknown, anchorHeader: L1Header): readonly L1Header[
 // Bytes only: decoding the events and the header, and proving the
 // accumulator, are 4.6's, so evidence that doesn't hold up is reported there,
 // never a rejected bundle.
+// Every log the anchor emits has data, so a log needs no empty hex.
+function parseAnchorLogs(value: unknown): ContractLog[] {
+  return array(value, "anchorLogs").map((v, i) => {
+    const what = `anchorLogs[${i}]`;
+    const l = object(v, ["block", "timestamp", "topics", "data"], what);
+    const topics = array(l["topics"], `${what}.topics`).map((t, j) =>
+      hex32(t, `${what}.topics[${j}]`),
+    );
+    if (topics.length < 1 || topics.length > 4)
+      throw new BundleError(`${what}.topics: expected 1 to 4 topics`);
+    return {
+      block: integer(l["block"], U64_MAX, `${what}.block`),
+      timestamp: integer(l["timestamp"], U64_MAX, `${what}.timestamp`),
+      topics,
+      data: hexBytes(l["data"], `${what}.data`),
+    };
+  });
+}
+
 function parseL2Board(value: unknown): L2BoardEvidence {
   const l = object(
     value,
@@ -473,7 +506,8 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     const l2 = format === BUNDLE_FORMAT_L2;
     const blocks = l2 || format === BUNDLE_FORMAT_BLOCKS;
     const ceremony = blocks || format === BUNDLE_FORMAT_CEREMONY;
-    const members = ["format", "definition", "clock", "l1"];
+    const logged = Object.hasOwn(value as object, "anchorLogs");
+    const members = ["format", "definition", "clock", "l1", ...(logged ? ["anchorLogs"] : [])];
     const b = object(
       value,
       l2
@@ -491,11 +525,13 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     const panel = ceremony ? parsePanel(b["panel"]) : undefined;
     const l1Blocks = blocks ? parseBlocks(b["l1Blocks"], l1.header) : undefined;
     const l2Board = l2 ? parseL2Board(b["l2Board"]) : undefined;
+    const anchorLogs = logged ? parseAnchorLogs(b["anchorLogs"]) : undefined;
     const split = splitEntries(board);
     const common = {
       definition,
       clock,
       l1,
+      ...(anchorLogs !== undefined && { anchorLogs }),
       entries: split.entries,
       unreadableBytes: split.unreadableBytes,
     };
@@ -509,6 +545,7 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
       anchorAddress: "definition",
       firstSegment: "local-file",
       definition: "local-file",
+      ...(anchorLogs !== undefined && { anchorLogs: "l1-state-proof" as const }),
     } as const;
     if (panel === undefined) return { format: BUNDLE_FORMAT_DEFINITION, ...common, sources };
     if (l1Blocks === undefined)

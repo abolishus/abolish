@@ -63,6 +63,7 @@ import {
   readsEvents,
   type WindowCode,
 } from "./ballots.ts";
+import { earlierLocators } from "./anchor-logs.ts";
 import { type DropOutcome, judgeDropRule } from "./drops.ts";
 import { type L1RefCode, referenceJudge } from "./references.ts";
 import type { BlockStore } from "./blocks.ts";
@@ -147,6 +148,8 @@ export type CheckCode =
   | ArchiveFinding["code"]
   | ListedFinding["code"]
   | "locator-none"
+  | "anchor-logs"
+  | "anchor-logs-missing"
   | "unavailable"
   | "decode"
   | "membership-key"
@@ -666,6 +669,21 @@ export async function readArchive(
     return done({ stopped: e.code });
   }
   if (state.kind === "none") return done({ stopped: "locator-none", count: state.count });
+  // The earlier locators, from the anchor's logs where the bundle carries
+  // them, proven against its accumulator at `B`, or nothing is read: an
+  // earlier locator taken from logs that don't hold up could be anyone's.
+  let earlier: readonly Uint8Array[] | undefined;
+  if (bundle.anchorLogs !== undefined && state.kind === "locator") {
+    let logged;
+    try {
+      logged = earlierLocators(definition.inputs.l1, d.l1_chain_id, bundle.anchorLogs, state);
+    } catch (e) {
+      if (!(e instanceof L1Error)) throw e;
+      return done({ stopped: e.code });
+    }
+    if ("rule" in logged) return done({ stopped: "anchor-logs", rule: logged.rule });
+    earlier = logged.locators;
+  }
   // The counted checkpoints name the objects; where the anchors or steps 1
   // and 2 stop the board checks, there are none to look for.
   let targets;
@@ -684,7 +702,11 @@ export async function readArchive(
           state.locator,
           { l1ChainId: d.l1_chain_id, anchor: d.l1_anchor },
           source,
-          { maxManifests, ...(targets !== undefined && { objects: targets.map((t) => t.cid) }) },
+          {
+            maxManifests,
+            ...(earlier !== undefined && { earlier }),
+            ...(targets !== undefined && { objects: targets.map((t) => t.cid) }),
+          },
         )
       : // A length word no locator has: reported as the anchor's framing
         // refuses it, and nothing is read (docs/spec/archive.md, step 1).
@@ -706,6 +728,7 @@ export async function readArchive(
   return done(
     {
       count: state.count,
+      ...(earlier !== undefined && { earlier: earlier.length }),
       walk: {
         latest: walk.latest,
         manifests: walk.manifests.length,
@@ -743,9 +766,10 @@ function archiveRow(read: ArchiveRead): Outcome {
   if (read.objects === undefined) return { status: "unverifiable", code: "not-reached", at: {} };
   // 4.3 also judges the earlier locators from the anchor's `ArchiveLocated`
   // logs, the only check that sees a seized authority's overwritten locator
-  // (T-69), and a bundle carries none yet: a whole chain from the latest is
-  // no pass until they are read (P4-3 part 3b-2b-2).
-  return NOT_IMPLEMENTED;
+  // (T-69): a whole chain from the latest is no pass without them.
+  if (read.earlier === undefined)
+    return { status: "unverifiable", code: "anchor-logs-missing", at: {} };
+  return PASS;
 }
 
 /**

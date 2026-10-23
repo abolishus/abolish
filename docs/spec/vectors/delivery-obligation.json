@@ -778,7 +778,7 @@
       "id": "lone-at-limit",
       "description": "Three seats at the largest electorate R of one hour fits",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -794,7 +794,7 @@
             "gas": "553500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1230000000"
           }
@@ -806,7 +806,7 @@
       "id": "lone-over-limit",
       "description": "One member more",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -822,7 +822,7 @@
             "gas": "567000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1245000000"
           }
@@ -834,7 +834,7 @@
       "id": "empty-electorate",
       "description": "No members: nothing to force",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -850,7 +850,7 @@
             "gas": "0"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "0"
           }
@@ -862,7 +862,7 @@
       "id": "one-seat",
       "description": "One seat, its limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -878,7 +878,7 @@
             "gas": "553500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1230000000"
           }
@@ -890,7 +890,7 @@
       "id": "sixteen-seats",
       "description": "Sixteen seats over the limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -906,7 +906,7 @@
             "gas": "576000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1200000000"
           }
@@ -918,7 +918,7 @@
       "id": "author-panel",
       "description": "A default panel of 3 and an author panel of 2: five seats share the target",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -934,7 +934,7 @@
             "gas": "540000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1200000000"
           }
@@ -946,25 +946,25 @@
       "id": "complaints-bind",
       "description": "With R of 21 hours the complaints bind: one member over their limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "75600"
       },
       "elections": [
         {
-          "members": "434689",
+          "members": "425217",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800051000",
             "end": "1800126600",
-            "gas": "11475000000"
+            "gas": "11218500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
-            "gas": "25485000000"
+            "gas": "24930000000"
           }
         }
       ],
@@ -974,25 +974,25 @@
       "id": "long-margin",
       "description": "R of 21 hours at its limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "75600"
       },
       "elections": [
         {
-          "members": "434688",
+          "members": "425216",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800051000",
             "end": "1800126600",
-            "gas": "11461500000"
+            "gas": "11218500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
-            "gas": "25470000000"
+            "gas": "24915000000"
           }
         }
       ],
@@ -1002,7 +1002,7 @@
       "id": "same-close-halves",
       "description": "With R of ten minutes, two elections closing together, each with half the limit in whole receipt calls",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "600"
       },
@@ -1018,7 +1018,7 @@
             "gas": "40500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "90000000"
           }
@@ -1034,7 +1034,7 @@
             "gas": "40500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "90000000"
           }
@@ -1046,7 +1046,7 @@
       "id": "same-close-over",
       "description": "With R of ten minutes, two elections closing together, each at the limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "600"
       },
@@ -1062,7 +1062,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "180000000"
           }
@@ -1078,7 +1078,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "180000000"
           }
@@ -1090,7 +1090,7 @@
       "id": "receipts-abut",
       "description": "With R of ten minutes, closing R apart: one's receipts end where the other's start",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "600"
       },
@@ -1106,7 +1106,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "180000000"
           }
@@ -1122,7 +1122,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220800",
+            "start": "1800224400",
             "end": "1800386400",
             "gas": "180000000"
           }
@@ -1134,7 +1134,7 @@
       "id": "receipts-overlap",
       "description": "With R of ten minutes, closing R less a second apart: the receipts overlap for one second",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "600"
       },
@@ -1150,7 +1150,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "180000000"
           }
@@ -1166,7 +1166,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220799",
+            "start": "1800224399",
             "end": "1800386399",
             "gas": "180000000"
           }
@@ -1178,7 +1178,7 @@
       "id": "receipts-in-complaints",
       "description": "With R of ten minutes, one election's receipts inside another's complaints, each at its limit",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "600"
       },
@@ -1194,7 +1194,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "180000000"
           }
@@ -1210,7 +1210,7 @@
             "gas": "81000000"
           },
           "complaints": {
-            "start": "1800364200",
+            "start": "1800367800",
             "end": "1800529800",
             "gas": "180000000"
           }
@@ -1222,7 +1222,7 @@
       "id": "complaints-overlap",
       "description": "With R of one hour, two elections at the limit closing an hour apart: their receipts abut and their complaints overlap, which batched complaints leave room for",
       "windows": {
-        "contractEventWindow": "46800",
+        "contractEventWindow": "50400",
         "forcedInclusion": "46800",
         "margin": "3600"
       },
@@ -1238,7 +1238,7 @@
             "gas": "553500000"
           },
           "complaints": {
-            "start": "1800220200",
+            "start": "1800223800",
             "end": "1800385800",
             "gas": "1230000000"
           }
@@ -1254,7 +1254,7 @@
             "gas": "553500000"
           },
           "complaints": {
-            "start": "1800223800",
+            "start": "1800227400",
             "end": "1800389400",
             "gas": "1230000000"
           }
@@ -1297,32 +1297,32 @@
     {
       "seats": 1,
       "margin": "75600",
-      "members": "1304320"
+      "members": "1275904"
     },
     {
       "seats": 3,
       "margin": "75600",
-      "members": "434688"
+      "members": "425216"
     },
     {
       "seats": 5,
       "margin": "75600",
-      "members": "260864"
+      "members": "254976"
     },
     {
       "seats": 7,
       "margin": "75600",
-      "members": "186112"
+      "members": "182272"
     },
     {
       "seats": 16,
       "margin": "75600",
-      "members": "81408"
+      "members": "79616"
     },
     {
       "seats": 32,
       "margin": "75600",
-      "members": "40704"
+      "members": "39680"
     }
   ]
 }

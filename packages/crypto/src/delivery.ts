@@ -90,6 +90,13 @@ export const DELIVERY_WINDOW = BigInt(PARAMETERS.DELIVERY_WINDOW);
 export const COMPLAINT_WINDOW = BigInt(PARAMETERS.COMPLAINT_WINDOW);
 
 /**
+ * `W_C`, `CONTRACT_EVENT_WINDOW`: seconds from a contract event's submission
+ * by which it is on the board, a constant of the election registry's bytecode
+ * (docs/spec/tally.md, Tally window; docs/spec/parameters.md).
+ */
+export const CONTRACT_EVENT_WINDOW = BigInt(PARAMETERS.CONTRACT_EVENT_WINDOW);
+
+/**
  * `A`, `BALLOT_FETCH_ALLOWANCE`: the least seconds the delivery window leaves
  * trustee seats between the ballot extent's last anchoring deadline and the
  * intake cutoff, by which they attest it (docs/spec/availability.md, Windows).
@@ -1198,6 +1205,49 @@ export function deliverySegments(
   };
 }
 
+/** The anchoring clock with its deadline (docs/spec/board.md, Timing). */
+export interface DeadlineClock extends PeriodClock {
+  readonly deadline: bigint;
+}
+
+/** `s_S`, the counted extent's last segment, and `t_S`, when its checkpoint is due. */
+export interface CountedExtent {
+  readonly segment: bigint;
+  readonly due: bigint;
+}
+
+/**
+ * The counted extent (docs/spec/tally.md, Tally window): `s_S = max(period(closes_at)
+ * + 1, period(closes_at + l1_inclusion_bound + W_S))` and `t_S = epoch + (s_S + 1) ·
+ * period + deadline`, where `W_S = COMPLAINT_WINDOW + W_C`, the latest window that
+ * must close before the counted set is fixed under every record version so
+ * far. A function of the definition and the anchor's immutable clock alone, so
+ * no operator or release chooses it for one election (T-34, T-25, T-54).
+ * Verifier 2.6 has already required `opens_at ≥ epoch`, so the close is too.
+ */
+export function countedExtent(
+  clock: DeadlineClock,
+  closesAt: bigint,
+  l1InclusionBound: bigint,
+): CountedExtent {
+  const { epoch, period, deadline } = clock;
+  if (typeof epoch !== "bigint" || epoch < 0n) throw new RangeError("epoch must be a bigint ≥ 0");
+  if (typeof period !== "bigint" || period < 1n)
+    throw new RangeError("period must be a bigint ≥ 1");
+  if (typeof deadline !== "bigint" || deadline < 0n)
+    throw new RangeError("deadline must be a bigint ≥ 0");
+  if (typeof closesAt !== "bigint" || typeof l1InclusionBound !== "bigint" || l1InclusionBound < 0n)
+    throw new RangeError("closesAt and l1InclusionBound must be bigints, the bound ≥ 0");
+  if (closesAt < epoch) throw new RangeError("the close is before the anchoring clock's epoch");
+  // The floor is board.md's client rule 1: a ballot cast in close's period may
+  // carry the next segment, so no receipted ballot falls outside the extent.
+  const floor = (closesAt - epoch) / period + 1n;
+  const last =
+    (closesAt + l1InclusionBound + COMPLAINT_WINDOW + CONTRACT_EVENT_WINDOW - epoch) / period;
+  const segment = last > floor ? last : floor;
+  return { segment, due: epoch + (segment + 1n) * period + deadline };
+}
+
 /**
  * The delivery deadline and the end of the complaint window, in seconds:
  * `closes_at + l1_inclusion_bound + DELIVERY_WINDOW` and likewise with
@@ -1243,8 +1293,8 @@ export function intakeCutoff(
 }
 
 /**
- * The bounds P4-1's anchoring clock and P1-18's contract-event window must
- * keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
+ * The bounds P4-1's anchoring clock and the contract-event window
+ * (`CONTRACT_EVENT_WINDOW`) must keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
  * `DELIVERY_WINDOW ≥ max(2 · period + deadline + A, W_C) + R + F`, so every
  * counted ballot's anchoring or contract recording is confirmable on finalized
  * L1 by the intake cutoff `c_I = t_D − F − R`, where a trustee node decides

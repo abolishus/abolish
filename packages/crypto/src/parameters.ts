@@ -38,6 +38,11 @@ export const PARAMETERS = Object.freeze({
   // (L1 blocks) and max_sequencer_drift (seconds) (docs/spec/contracts.md).
   MAX_SEQUENCING_WINDOW: 3600,
   MAX_SEQUENCER_DRIFT: 1800,
+  // Seconds; the contract-event window W_C, from a contract event's submission
+  // to the board, and its last term, the operator's boarding window: constants
+  // of the same deployment (docs/spec/tally.md, Tally window).
+  CONTRACT_EVENT_WINDOW: 50_400,
+  BOARDING_WINDOW: 1800,
   // Bytes; the longest record the L1 relay takes, so its deposit fits the
   // portal's 120,000-byte data cap (docs/spec/contracts.md, L1 relay).
   MAX_RELAY_RECORD: 119_776,

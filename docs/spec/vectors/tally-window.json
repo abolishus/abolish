@@ -1,0 +1,144 @@
+{
+  "format": "abolish-tally-window-vectors/1",
+  "title": "The counted extent: s_S and t_S",
+  "spec": "docs/spec/tally.md, Tally window; docs/spec/parameters.md",
+  "generator": "packages/crypto/scripts/tally-window-vectors.py: an independent Python implementation (each moment's period found by walking the clock, never by division)",
+  "windows": {
+    "complaint": "432000",
+    "contractEvent": "50400",
+    "boarding": "1800",
+    "counted": "482400"
+  },
+  "cases": [
+    {
+      "id": "deployed",
+      "description": "Hourly periods and a 12-hour deadline, a close on a period's start and the least bound",
+      "clock": {
+        "epoch": "1700000000",
+        "period": "3600",
+        "deadline": "43200"
+      },
+      "closesAt": "1799997200",
+      "l1InclusionBound": "600",
+      "segment": "27911",
+      "due": "1800526400"
+    },
+    {
+      "id": "deployed-mid-period",
+      "description": "The same clock, a close inside a period and the greatest bound",
+      "clock": {
+        "epoch": "1700000000",
+        "period": "3600",
+        "deadline": "43200"
+      },
+      "closesAt": "1800001234",
+      "l1InclusionBound": "3600",
+      "segment": "27913",
+      "due": "1800533600"
+    },
+    {
+      "id": "window-on-boundary",
+      "description": "closes_at + l1_inclusion_bound + W_S is a period's first second, so it is in that period",
+      "clock": {
+        "epoch": "1700000000",
+        "period": "3600",
+        "deadline": "43200"
+      },
+      "closesAt": "1703117000",
+      "l1InclusionBound": "600",
+      "segment": "1000",
+      "due": "1703646800"
+    },
+    {
+      "id": "window-before-boundary",
+      "description": "One second earlier: the period before",
+      "clock": {
+        "epoch": "1700000000",
+        "period": "3600",
+        "deadline": "43200"
+      },
+      "closesAt": "1703116999",
+      "l1InclusionBound": "600",
+      "segment": "999",
+      "due": "1703643200"
+    },
+    {
+      "id": "close-at-epoch",
+      "description": "A close at the epoch itself",
+      "clock": {
+        "epoch": "1700000000",
+        "period": "3600",
+        "deadline": "43200"
+      },
+      "closesAt": "1700000000",
+      "l1InclusionBound": "600",
+      "segment": "134",
+      "due": "1700529200"
+    },
+    {
+      "id": "floor-binds",
+      "description": "A period longer than W_S: the window ends in close's own period, so s_S is the floor period(closes_at) + 1",
+      "clock": {
+        "epoch": "0",
+        "period": "1000000",
+        "deadline": "0"
+      },
+      "closesAt": "2000000",
+      "l1InclusionBound": "0",
+      "segment": "3",
+      "due": "4000000"
+    },
+    {
+      "id": "floor-binds-at-edge",
+      "description": "The window's end on the last second of close's period: still the floor",
+      "clock": {
+        "epoch": "0",
+        "period": "1000000",
+        "deadline": "7"
+      },
+      "closesAt": "2517599",
+      "l1InclusionBound": "0",
+      "segment": "3",
+      "due": "4000007"
+    },
+    {
+      "id": "floor-equals-window",
+      "description": "The window's end in the period after close's, which the floor names too",
+      "clock": {
+        "epoch": "0",
+        "period": "1000000",
+        "deadline": "7"
+      },
+      "closesAt": "2517600",
+      "l1InclusionBound": "0",
+      "segment": "3",
+      "due": "4000007"
+    },
+    {
+      "id": "one-second-periods",
+      "description": "Periods of one second from epoch 0: s_S is closes_at + l1_inclusion_bound + W_S",
+      "clock": {
+        "epoch": "0",
+        "period": "1",
+        "deadline": "0"
+      },
+      "closesAt": "1234567",
+      "l1InclusionBound": "3600",
+      "segment": "1720567",
+      "due": "1720568"
+    },
+    {
+      "id": "large",
+      "description": "Values beyond 2^53, so an implementation using floating point gets them wrong",
+      "clock": {
+        "epoch": "1152921504606846976",
+        "period": "25213",
+        "deadline": "1099511627776"
+      },
+      "closesAt": "1441151880758571065",
+      "l1InclusionBound": "8589934592",
+      "segment": "11431816314684",
+      "due": "1441152988860627657"
+    }
+  ]
+}

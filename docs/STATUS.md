@@ -50,6 +50,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P1-17b]] Membership verification keys and Groth16 verification
 - [[P1-17c]] `packages/circuits` Noir scaffold
 - [[P1-18]] `packages/contracts` scaffold
+- [[P1-18b]] The contract-event window
 - [[P1-19]] `packages/verifier` CLI
 - [[P1-20]] Reference election fixture
 - [[P1-21]] Simulation surfaces in admin-cli and sdk

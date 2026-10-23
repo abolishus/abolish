@@ -7,6 +7,7 @@ import {
   checkDelivery,
   COMMITTED_VOTE,
   COMPLAINT_WINDOW,
+  CONTRACT_EVENT_WINDOW,
   decode,
   DecodeError,
   decodeBoardEntry,
@@ -365,12 +366,12 @@ describe("input checks", () => {
   test("the windows cover anchoring or forced inclusion, then a forced receipt or complaint", () => {
     const hour = 3600n;
     // Hourly periods, a 12-hour anchoring deadline, Base's 12-hour forced
-    // inclusion plus an hour of missed slots, a 13-hour contract-event window
+    // inclusion plus an hour of missed slots, the 14-hour contract-event window
     // and an hour for L1 finality and the node's reaction.
     const deployed = {
       period: hour,
       deadline: 12n * hour,
-      contractEventWindow: 13n * hour,
+      contractEventWindow: CONTRACT_EVENT_WINDOW,
       forcedInclusion: 13n * hour,
       margin: hour,
     };

@@ -127,6 +127,13 @@ export {
   ProvenRegistryAccumulator,
 } from "./output-roots.ts";
 export { POLL_ROOT_ENV, type PollRootConfig, pollRootFromEnv } from "./poll-root-env.ts";
+export {
+  POSTING_LOG_RANGE,
+  POSTING_LOOKBACK,
+  PostingChainError,
+  type PostingChainOptions,
+  ViemPostingChain,
+} from "./posting-chain.ts";
 export { PollRoots, type PollRootsOptions } from "./poll-roots.ts";
 export { type PollStubPins, pollStubDeployment } from "./poll-stub-chain.ts";
 export { POLL_STUB_ENV, type PollStubConfig, pollStubFromEnv } from "./poll-stub-env.ts";

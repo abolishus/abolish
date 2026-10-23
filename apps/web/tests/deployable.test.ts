@@ -542,7 +542,11 @@ describe("dist/node/main.mjs", () => {
       "PHONE_HASH_KEYS and the e-mail keyrings",
     ],
     ["a key SID that isn't one", { TWILIO_KEY_SID: `XX${"0".repeat(32)}` }, "keySid"],
-    ["a service SID that isn't one", { TWILIO_VERIFY_SERVICE_SID: "VAnotaserviceid" }, "verifyServiceSid"],
+    [
+      "a service SID that isn't one",
+      { TWILIO_VERIFY_SERVICE_SID: "VAnotaserviceid" },
+      "verifyServiceSid",
+    ],
   ])(
     "refuses %s, naming the variable and quoting none of it",
     async (_, change, name) => {

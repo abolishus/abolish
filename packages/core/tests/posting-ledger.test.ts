@@ -11,6 +11,7 @@ import {
   POSTING_FINALITY,
   POSTING_FORCE_AFTER,
   POSTING_GAS_LIMIT_MAX,
+  POSTING_HEAD_AGE,
   POSTING_RESEND,
   POSTING_SEND_MARGIN,
   postingBallots,
@@ -94,8 +95,13 @@ class FakeKey implements PostingKeyChain {
   receipts = new Map<string, PostingReceipt>();
   /** Postings, in hex, in a `SharePosted` event at the latest head. */
   onBoard = new Set<string>();
-  fail: Partial<Record<"nonce" | "costs" | "sign" | "broadcast" | "receipt" | "posted", Error>> =
-    {};
+  /** Postings, in hex, in a `SharePosted` event at the finalized head. */
+  onBoardFinal = new Set<string>();
+  /** Runs before `postedFinal` answers. */
+  onPostedFinal: (() => Promise<void>) | undefined;
+  fail: Partial<
+    Record<"nonce" | "costs" | "sign" | "broadcast" | "receipt" | "posted" | "postedFinal", Error>
+  > = {};
   /** Fees a replacement is signed with, if not the ones asked for. */
   otherFees: { maxFee: bigint; priorityFee: bigint } | undefined;
   answer: "sent" | "refused" = "sent";
@@ -125,6 +131,11 @@ class FakeKey implements PostingKeyChain {
   async posted(posting: Uint8Array) {
     if (this.fail.posted) throw this.fail.posted;
     return this.onBoard.has(hex(posting));
+  }
+  async postedFinal(posting: Uint8Array) {
+    await this.onPostedFinal?.();
+    if (this.fail.postedFinal) throw this.fail.postedFinal;
+    return this.onBoardFinal.has(hex(posting));
   }
   async broadcast(tx: Uint8Array) {
     await this.onBroadcast?.();
@@ -831,10 +842,21 @@ describe("tend", () => {
     expect(await row()).toMatchObject({ paid: null });
   });
 
+  test("a consumed nonce is signed again only on a head within POSTING_HEAD_AGE of the clock", async () => {
+    const { chain, l, at } = await sentOne();
+    chain.count = 1n;
+    at(POSTING_HEAD_AGE + 1);
+    expect(await l.tend(HEAD)).toEqual(report());
+    expect(chain.signed).toHaveLength(1);
+    at(POSTING_HEAD_AGE);
+    expect(await l.tend(HEAD)).toEqual(report({ resent: 1 }));
+  });
+
   test("past the send cutoff, or past the budget, a consumed nonce sends nothing new", async () => {
     const late = await sentOne();
     late.chain.count = 1n;
     const cutoff = C_D - POSTING_SEND_MARGIN;
+    late.at(Number(cutoff) - NOW);
     expect(await late.l.tend({ number: 1n, timestamp: cutoff + 1n })).toEqual(report());
     expect(late.chain.signed).toHaveLength(1);
     // At the cutoff itself it may still be sent.
@@ -859,7 +881,9 @@ describe("tend", () => {
       at(2 * RESEND);
       chain.fail[which] = new Error("node at https://key@example down");
       const before = await db.admin`SELECT * FROM posting_in_flight`;
-      expect(await l.tend(HEAD)).toEqual(report({ failed: 1 }));
+      // A head as new as the clock, so a resend gets as far as the node.
+      const head = { number: 1n, timestamp: BigInt(NOW + 2 * RESEND) };
+      expect(await l.tend(head)).toEqual(report({ failed: 1 }));
       expect(await db.admin`SELECT * FROM posting_in_flight`).toEqual(before);
       expect(await spentOf(ELECTION)).toBe(MOST);
       expect(chain.broadcasts).toHaveLength(1);
@@ -963,5 +987,203 @@ describe("tend", () => {
     );
     // Each run sends three postings and tends up to twelve times against
     // the database: past the default 5 s on a busy runner.
+  }, 120_000);
+});
+
+// Pruning what is final (docs/spec/posting-relay.md, In flight and Caps): an
+// entry whose exact bytes are on the board at the finalized head leaves once
+// the key's count is past its nonce, its caps kept; everything of an
+// election whose `t_D` the finalized head passed leaves, `m_i` with it (T-18).
+describe("prune", () => {
+  const report = (over: Partial<Record<string, number>> = {}) => ({
+    final: 0,
+    expired: 0,
+    elections: 0,
+    failed: 0,
+    ...over,
+  });
+  const before = { number: 1n, timestamp: T_D };
+  const inFlight = async () =>
+    (await db.admin`SELECT posting_key FROM posting_in_flight ORDER BY nonce`).map((r) =>
+      hex(new Uint8Array(r["posting_key"])),
+    );
+
+  test("an entry final on the board leaves once its nonce is consumed; its caps stay", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    const q = toSend();
+    const first = await l.send(p);
+    if (!first.sent) throw new Error("not sent");
+    await l.send(q);
+    chain.onBoardFinal.add(hex(p.posting));
+    chain.onBoardFinal.add(hex(q.posting));
+    // Neither nonce consumed: a transaction at each may still be pending.
+    expect(await l.prune(before)).toEqual(report());
+    expect(await inFlight()).toEqual([p.key, q.key]);
+    chain.count = 1n;
+    expect(await l.prune(before)).toEqual(report({ final: 1 }));
+    expect(await inFlight()).toEqual([q.key]);
+    // Its bytes are still never paid for again, nor its ballot's cap freed.
+    expect(await l.sent(p.key)).toEqual({ transaction: first.transaction, layer: "l2" });
+    expect(await counts()).toMatchObject({ sent: 2, ballots: 2, spend: 1, in_flight: 1 });
+    expect(await spentOf(ELECTION)).toBe(2n * MOST);
+  });
+
+  test("an entry on the board only at the latest head stays", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    await l.send(p);
+    chain.count = 1n;
+    chain.onBoard.add(hex(p.posting));
+    expect(await l.prune(before)).toEqual(report());
+    expect(await inFlight()).toEqual([p.key]);
+  });
+
+  test("once the finalized head passes t_D, the election's entries and caps all leave", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    await l.send(p);
+    await l.send(toSend());
+    const later = bytes32();
+    const kept = toSend({ electionId: later, closesAt: CLOSES_AT + 1n });
+    await l.send(kept);
+    // At t_D itself a posting can still be in time.
+    expect(await l.prune({ number: 1n, timestamp: T_D })).toEqual(report());
+    expect(await counts()).toMatchObject({ sent: 3, ballots: 3, spend: 2, in_flight: 3 });
+    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
+      report({ expired: 2, elections: 1 }),
+    );
+    expect(await counts()).toEqual({ sent: 1, ballots: 1, spend: 1, in_flight: 1 });
+    expect(await inFlight()).toEqual([kept.key]);
+    expect(await spentOf(ELECTION)).toBeUndefined();
+    expect(await spentOf(later)).toBe(MOST);
+    expect(await l.sent(p.key)).toBeUndefined();
+    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(report());
+  });
+
+  test("an entry signed again at another nonce while its event was read stays", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    await l.send(p);
+    chain.count = 1n;
+    chain.onBoardFinal.add(hex(p.posting));
+    chain.onPostedFinal = async () => {
+      await db.admin`UPDATE posting_in_flight SET nonce = 1`;
+    };
+    expect(await l.prune(before)).toEqual(report());
+    expect(await inFlight()).toEqual([p.key]);
+    chain.onPostedFinal = undefined;
+    chain.count = 2n;
+    expect(await l.prune(before)).toEqual(report({ final: 1 }));
+  });
+
+  test("a failing node leaves entries as they were and goes on to the next", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    const p = toSend();
+    const q = toSend();
+    await l.send(p);
+    await l.send(q);
+    chain.count = 2n;
+    chain.onBoardFinal.add(hex(q.posting));
+    let calls = 0;
+    chain.onPostedFinal = async () => {
+      if (++calls === 1) throw new Error("node at https://key@example down");
+    };
+    expect(await l.prune(before)).toEqual(report({ final: 1, failed: 1 }));
+    expect(await inFlight()).toEqual([p.key]);
+    chain.onPostedFinal = undefined;
+    chain.fail.nonce = new Error("down");
+    expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+    delete chain.fail.nonce;
+    for (const count of [-1n, 1n << 64n]) {
+      chain.count = count;
+      expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+    }
+    chain.count = 2n;
+    chain.postedFinal = async () => "yes" as unknown as boolean;
+    expect(await l.prune(before)).toEqual(report({ failed: 1 }));
+    expect(await inFlight()).toEqual([p.key]);
+  });
+
+  test("expires even when the node can't be reached", async () => {
+    const chain = new FakeKey();
+    const l = ledger(chain);
+    await l.send(toSend());
+    chain.fail.nonce = new Error("down");
+    expect(await l.prune({ number: 1n, timestamp: T_D + 1n })).toEqual(
+      report({ expired: 1, elections: 1 }),
+    );
+    expect(await counts()).toEqual({ sent: 0, ballots: 0, spend: 0, in_flight: 0 });
+  });
+
+  test("a store failure rejects quoting nothing", async () => {
+    const broken = await db.as("abolish_app");
+    await broken.end();
+    const err = await ledger(new FakeKey(), { sql: broken })
+      .prune(before)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PostingLedgerError);
+  });
+
+  test("refuses a head out of range", async () => {
+    for (const timestamp of [-1n, 1n << 64n, 5 as unknown as bigint])
+      await expect(ledger(new FakeKey()).prune({ number: 1n, timestamp })).rejects.toThrow(
+        RangeError,
+      );
+  });
+
+  test("whatever is final or expired, every entry left is unfinal or holds its nonce", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            pick: fc.nat({ max: 3 }),
+            event: fc.constantFrom("final", "consume", "prune", "late"),
+          }),
+          { minLength: 1, maxLength: 10 },
+        ),
+        async (steps) => {
+          await db.admin`DELETE FROM posting_in_flight`;
+          await db.admin`DELETE FROM posting_sent`;
+          await db.admin`DELETE FROM posting_ballots`;
+          await db.admin`DELETE FROM posting_spend`;
+          const chain = new FakeKey();
+          const l = ledger(chain);
+          const elections = [ELECTION, bytes32()];
+          const sent = [0, 1, 2, 3].map((i) =>
+            toSend({ electionId: elections[i % 2]!, closesAt: CLOSES_AT + BigInt(i % 2) * 100n }),
+          );
+          for (const p of sent) await l.send(p);
+          let head = T_D - 1n;
+          for (const { pick, event } of steps) {
+            if (event === "final") chain.onBoardFinal.add(hex(sent[pick]!.posting));
+            if (event === "consume") chain.count = BigInt(pick) + 1n;
+            if (event === "late") head += 60n;
+            await l.prune({ number: 1n, timestamp: head });
+            const rows = await db.admin`
+              SELECT posting, nonce, delivery_ends FROM posting_in_flight`;
+            for (const r of rows) {
+              const finalAndConsumed =
+                chain.onBoardFinal.has(hex(new Uint8Array(r["posting"]))) &&
+                BigInt(r["nonce"] as string) < chain.count;
+              expect(finalAndConsumed).toBe(false);
+              expect(BigInt(r["delivery_ends"] as string) >= head).toBe(true);
+            }
+            // Caps outlive no t_D the finalized head passed.
+            const [stale] = await db.admin`
+              SELECT (SELECT count(*) FROM posting_sent WHERE delivery_ends < ${String(head)})::int
+                + (SELECT count(*) FROM posting_ballots WHERE delivery_ends < ${String(head)})::int
+                + (SELECT count(*) FROM posting_spend WHERE delivery_ends < ${String(head)})::int AS n`;
+            expect(stale!["n"]).toBe(0);
+          }
+        },
+      ),
+      { numRuns: Math.min(numRuns, 30) },
+    );
   }, 120_000);
 });

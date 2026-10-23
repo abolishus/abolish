@@ -21,6 +21,7 @@ import {
   parsePostingIndex,
   parsePostingOutcome,
   POSTING_GAS_LIMIT_MAX,
+  POSTING_HEAD_AGE,
   POSTING_MAX_DATA,
   POSTING_SEND_MARGIN,
   POSTING_UNANSWERED_SPAN,
@@ -63,7 +64,6 @@ if (!redisUrl) throw new Error("REDIS_URL is not set");
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
-const NOW = 1_800_000_000;
 const clock = { epoch: definition.opens_at - 7_200n, period: 3_600n };
 const C_D =
   definition.closes_at +
@@ -71,6 +71,9 @@ const C_D =
   DELIVERY_WINDOW -
   PINNED_FORCED_INCLUSION;
 const LAST = C_D - POSTING_SEND_MARGIN;
+// A day before the send cutoff, so a head at the clock is in time however
+// far a test moves the clock.
+const NOW = Number(LAST) - 86_400;
 const TIER = 2;
 
 const first = postedBallot(ballots[0] as (typeof ballots)[number]);
@@ -183,8 +186,10 @@ const GAS_USED = 500_000n;
 
 function workerWith(o: WorkerOptions = {}) {
   const calls: Calls = { simulated: 0, sentLookups: 0, sends: [] };
+  const now = o.now ?? (() => NOW);
   const chain: PostingChain = {
-    latest: o.head ?? (async () => ({ number: 10n, timestamp: LAST })),
+    // By default the latest block is as new as the clock.
+    latest: o.head ?? (async () => ({ number: 10n, timestamp: BigInt(now()) })),
     simulate: async () => {
       calls.simulated++;
       return o.simulate === undefined ? { reverted: false, gasUsed: GAS_USED } : o.simulate();
@@ -206,7 +211,7 @@ function workerWith(o: WorkerOptions = {}) {
     chain,
     ledger,
     admissions: o.admissions ?? admitting(),
-    now: o.now ?? (() => NOW),
+    now,
     prefix,
   });
   return { worker, calls };
@@ -221,10 +226,56 @@ async function ticked(worker: PostingWorker) {
 
 describe("the index", { timeout: 60_000 }, () => {
   test("each tick writes when it read the L2's latest block, and that block's time", async () => {
-    const { worker } = workerWith({ head: async () => ({ number: 7n, timestamp: 1234n }) });
+    const timestamp = BigInt(NOW) - 5n;
+    const { worker } = workerWith({ head: async () => ({ number: 7n, timestamp }) });
     const report = await ticked(worker);
     expect(report.chain).toBe(true);
-    expect(parsePostingIndex(await redis.get(keys().index))).toEqual({ at: NOW, l2Time: 1234n });
+    expect(parsePostingIndex(await redis.get(keys().index))).toEqual({
+      at: NOW,
+      l2Time: timestamp,
+    });
+  });
+
+  test("a head older than POSTING_HEAD_AGE judges nothing and leaves the index unwritten", async () => {
+    const key = await queue(pairOf());
+    for (const [age, chain] of [
+      [POSTING_HEAD_AGE + 1, false],
+      [POSTING_HEAD_AGE, true],
+    ] as const) {
+      const { worker, calls } = workerWith({
+        head: async () => ({ number: 7n, timestamp: BigInt(NOW - age) }),
+      });
+      const report = await ticked(worker);
+      expect(report.chain).toBe(chain);
+      const index = await redis.get(keys().index);
+      if (chain)
+        expect(parsePostingIndex(index)).toEqual({
+          at: NOW,
+          l2Time: BigInt(NOW - POSTING_HEAD_AGE),
+        });
+      else expect(index).toBeNull();
+      expect(calls.sends).toHaveLength(chain ? 1 : 0);
+      expect(calls.sentLookups).toBe(chain ? 1 : 0);
+    }
+    expect(await outcomeOf(key)).toEqual({ sent: true, transaction: TX, layer: "l2" });
+  });
+
+  test("a pair the tick reaches past POSTING_HEAD_AGE is kept for the next tick", async () => {
+    const key = await queue(pairOf());
+    let now = NOW;
+    const { worker, calls } = workerWith({
+      head: async () => ({ number: 7n, timestamp: BigInt(NOW) }),
+      now: () => now,
+      // The simulation outlasts the head's age.
+      simulate: async () => {
+        now += POSTING_HEAD_AGE + 1;
+        return { reverted: false, gasUsed: GAS_USED };
+      },
+    });
+    const report = await ticked(worker);
+    expect(report.kept).toBe(1);
+    expect(calls.sends).toHaveLength(0);
+    expect(await redis.hkeys(keys().queue)).toEqual([key]);
   });
 
   test("a node that can't be read leaves the index and the queue as they were", async () => {

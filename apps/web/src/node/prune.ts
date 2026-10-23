@@ -12,7 +12,9 @@
 // the deploy that makes a new key current (packages/core, rotatePhoneHashes
 // and rotateEmailKeys; docs/runbooks/account-keys.md; T-73). With the e-mail
 // service, it then sends the moderation notices due (packages/core,
-// sendNotices), after the rotation so every box opens under the keys held.
+// sendNotices), after the rotation so every box opens under the keys held,
+// and, with web push configured, wakes each account's subscribed browsers
+// beside a notice's first e-mail (T-76).
 // Every instance runs it; the deletes and rewrites are idempotent, so two at
 // once only repeat each other.
 
@@ -22,6 +24,7 @@ import {
   type Keyring,
   MAX_NOTICE_BATCH,
   markDeadTier0Tokens,
+  type PushSender,
   pruneAccountEmails,
   pruneAccountPhones,
   pruneAccountVerifications,
@@ -55,6 +58,8 @@ export interface AccountPruneOptions {
    * refusal is never tried again.
    */
   readonly noticeSender?: EmailSender;
+  /** With `noticeSender`, wakes each account's subscribed browsers beside its notices. */
+  readonly pushSender?: PushSender;
   readonly everyMs?: number;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
@@ -67,6 +72,7 @@ export function startAccountPrune({
   phoneKeys,
   emailKeys,
   noticeSender,
+  pushSender,
   everyMs = PRUNE_EVERY_MS,
   now = () => new Date(),
 }: AccountPruneOptions): { stop(): Promise<void> } {
@@ -109,7 +115,7 @@ export function startAccountPrune({
             () => log({ error: "EmailKeyRotationFailed" }),
           );
         if (emailKeys !== undefined && noticeSender !== undefined)
-          await sendDueNotices(sql, emailKeys, noticeSender, now, log).catch(() =>
+          await sendDueNotices(sql, emailKeys, noticeSender, pushSender, now, log).catch(() =>
             log({ error: "AccountNoticeSendFailed" }),
           );
         await markDeadTier0Tokens(sql, at).catch(() => log({ error: "Tier0TokenDeadMarkFailed" }));
@@ -136,18 +142,26 @@ export function startAccountPrune({
  * Sends the notices due, batch after batch while each is full, up to
  * `NOTICE_BATCHES`. Each batch reads the clock afresh, so its leases run
  * from when it claims. A refusal is logged by kind only: the notice is
- * tried again after its wait.
+ * tried again after its wait, though its pushes are not (packages/core,
+ * sendNotices).
  */
 async function sendDueNotices(
   sql: Sql,
   keys: EmailKeys,
   sender: EmailSender,
+  push: PushSender | undefined,
   now: () => Date,
   log: AccountPruneOptions["log"],
 ): Promise<void> {
   for (let batch = 0; batch < NOTICE_BATCHES; batch++) {
-    const { sent, retrying, dropped } = await sendNotices(sql, { sender, keys, now: now() });
+    const { sent, retrying, dropped, pushFailed } = await sendNotices(sql, {
+      sender,
+      keys,
+      ...(push === undefined ? {} : { push }),
+      now: now(),
+    });
     if (retrying > 0) log({ error: "AccountNoticeRefused" });
+    if (pushFailed > 0) log({ error: "AccountPushRefused" });
     if (sent + retrying + dropped < MAX_NOTICE_BATCH) return;
   }
 }

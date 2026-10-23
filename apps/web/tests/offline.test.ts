@@ -36,10 +36,17 @@ const CSS = [
   `.c{background:url(/assets/../secret.woff2)}`,
 ].join("");
 const PAGE = "<!doctype html><title>You're offline</title>";
+const NOTICE = {
+  title: "A moderation decision",
+  body: "Open your account page to see it.",
+  icon: "/icons/icon-192.png",
+  open: "/account",
+};
 const CONFIG: OfflineWorkerConfig = {
   cache: `${CACHE_PREFIX}00112233445566778899aabbccddeeff`,
   offline: OFFLINE_PATH,
   stylesheet: STYLESHEET,
+  notice: NOTICE,
 };
 
 type Listener = (event: never) => void;
@@ -85,8 +92,11 @@ function scope(site: Record<string, string> = {}) {
       delete: async (name: string) => caches.delete(name),
       has: async (name: string) => caches.has(name),
     },
-    registration: { navigationPreload: { enable: vi.fn(async () => {}) } },
-    clients: { claim: vi.fn(async () => {}) },
+    registration: {
+      navigationPreload: { enable: vi.fn(async () => {}) },
+      showNotification: vi.fn(async (_title: string, _options: object) => {}),
+    },
+    clients: { claim: vi.fn(async () => {}), openWindow: vi.fn(async (_url: string) => null) },
     fetch: network,
     skipWaiting: vi.fn(async () => {}),
     addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
@@ -95,9 +105,9 @@ function scope(site: Record<string, string> = {}) {
   runInNewContext(offlineWorkerSource(CONFIG), { self, URL, Response });
 
   /** Dispatches an extendable event and waits for the work it hands over. */
-  async function extend(type: "install" | "activate") {
+  async function extend(type: "install" | "activate" | "push" | "notificationclick", extra = {}) {
     let work: Promise<unknown> = Promise.resolve();
-    listeners.get(type)!({ waitUntil: (p: Promise<unknown>) => (work = p) } as never);
+    listeners.get(type)!({ ...extra, waitUntil: (p: Promise<unknown>) => (work = p) } as never);
     await work;
   }
 
@@ -291,19 +301,45 @@ describe("the offline shell's worker", () => {
   });
 });
 
+describe("web push's notice", () => {
+  test("a push shows the one fixed notice, whatever it carries, and fetches nothing", async () => {
+    const s = await installed();
+    // A push from anyone holding the VAPID key could carry data: it is never read (T-76).
+    const data = { text: () => "Your poll was removed", json: () => ({ title: "x" }) };
+    await s.extend("push", { data });
+    await s.extend("push", { data: null });
+    expect(s.self.registration.showNotification.mock.calls).toEqual([
+      [NOTICE.title, { body: NOTICE.body, icon: NOTICE.icon, tag: "notice" }],
+      [NOTICE.title, { body: NOTICE.body, icon: NOTICE.icon, tag: "notice" }],
+    ]);
+    expect(s.fetched).toEqual([]);
+  });
+
+  test("a click closes the notice and opens the account page", async () => {
+    const s = await installed();
+    const close = vi.fn();
+    await s.extend("notificationclick", { notification: { close } });
+    expect(close).toHaveBeenCalledOnce();
+    expect(s.self.clients.openWindow.mock.calls).toEqual([["/account"]]);
+  });
+});
+
 describe("the worker's configuration", () => {
   test("names its cache by the offline page's hash, so a changed page installs again", async () => {
-    const a = await offlineWorkerConfig(PAGE, STYLESHEET);
+    const a = await offlineWorkerConfig(PAGE, STYLESHEET, NOTICE);
     expect(a).toEqual({
       cache: expect.stringMatching(new RegExp(`^${CACHE_PREFIX}[0-9a-f]{32}$`)),
       offline: OFFLINE_PATH,
       stylesheet: STYLESHEET,
+      notice: NOTICE,
     });
-    expect(await offlineWorkerConfig(PAGE, STYLESHEET)).toEqual(a);
+    expect(await offlineWorkerConfig(PAGE, STYLESHEET, NOTICE)).toEqual(a);
     await fc.assert(
       fc.asyncProperty(fc.string(), async (extra) => {
         fc.pre(extra !== "");
-        expect((await offlineWorkerConfig(PAGE + extra, STYLESHEET)).cache).not.toBe(a.cache);
+        expect((await offlineWorkerConfig(PAGE + extra, STYLESHEET, NOTICE)).cache).not.toBe(
+          a.cache,
+        );
       }),
       runs,
     );

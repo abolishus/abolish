@@ -6,7 +6,8 @@
 // (src/node/token.ts), reactions on a poll under /reactions
 // (src/node/reactions.ts), a profile's reports and its author's appeals
 // under /profiles (src/node/profiles.ts), an account's own data under
-// /export (src/node/export.ts), and the client's hashed assets from disk, with
+// /export (src/node/export.ts), its web push subscriptions under /push
+// (src/node/push.ts), and the client's hashed assets from disk, with
 // the web app manifest and its icons (src/app/install.ts), and the offline
 // shell's page and worker, which Start renders (src/app/offline.ts).
 //
@@ -64,6 +65,9 @@ export type ProfilesHandler = (request: Request) => Promise<Response>;
 /** The export handler (`createExportHandler(...)` from src/node/export.ts). */
 export type ExportHandler = (request: Request) => Promise<Response>;
 
+/** The push handler (`createPushHandler(...)` from src/node/push.ts). */
+export type PushHandler = (request: Request) => Promise<Response>;
+
 /** What a request was, from a fixed list: never its path. */
 export type RouteClass =
   | "page"
@@ -76,6 +80,7 @@ export type RouteClass =
   | "reactions"
   | "profiles"
   | "export"
+  | "push"
   | "asset"
   | "offline"
   | "ingest"
@@ -127,6 +132,7 @@ export interface WebServerOptions {
   readonly reactions: ReactionsHandler;
   readonly profiles: ProfilesHandler;
   readonly accountExport: ExportHandler;
+  readonly push: PushHandler;
   /**
    * What every page and server function gets in its request context
    * (src/start.ts): readers of the account side's public records, by a
@@ -195,15 +201,21 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "reactions",
   "profiles",
   "export",
+  "push",
 ]);
 
 /**
  * Paths under an account route class that answer anyone alike and never get
  * the cookie: the poll page asks a poll's reaction counts for every visitor,
- * so the session and the poll it names never arrive together (T-11), and a
- * profile's report never names who sent it (T-10, T-11).
+ * so the session and the poll it names never arrive together (T-11), a
+ * profile's report never names who sent it (T-10, T-11), and the push key is
+ * the same for everyone.
  */
-const SESSION_FREE_PATHS: ReadonlySet<string> = new Set(["/reactions/counts", "/profiles/report"]);
+const SESSION_FREE_PATHS: ReadonlySet<string> = new Set([
+  "/reactions/counts",
+  "/profiles/report",
+  "/push/key",
+]);
 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
@@ -214,6 +226,7 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
   if (path === "/profiles" || path.startsWith("/profiles/")) return "profiles";
   if (path === "/export" || path.startsWith("/export/")) return "export";
+  if (path === "/push" || path.startsWith("/push/")) return "push";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
   if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (
@@ -293,6 +306,7 @@ export function createWebServer({
   reactions,
   profiles,
   accountExport,
+  push,
   context = {},
   clientDir,
   origin,
@@ -397,8 +411,8 @@ export function createWebServer({
     });
     if (!ACCOUNT_ROUTES.has(route))
       return send(res, await start.fetch(request, { context }), method === "HEAD");
-    // The account, drafts, e-mail, phone, token, reactions, profiles and export handlers answer
-    // JSON and set few headers of their own (src/security.ts covers pages). A
+    // The account, drafts, e-mail, phone, token, reactions, profiles, export and push handlers
+    // answer JSON and set few headers of their own (src/security.ts covers pages). A
     // copy: a response's own headers can be immutable.
     const handler =
       route === "auth"
@@ -415,7 +429,9 @@ export function createWebServer({
                   ? reactions
                   : route === "profiles"
                     ? profiles
-                    : accountExport;
+                    : route === "export"
+                      ? accountExport
+                      : push;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");

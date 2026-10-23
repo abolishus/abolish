@@ -797,6 +797,23 @@ const enUS = {
   noticesModerationHelp: "Always sent, so that you can appeal. It can't be turned off.",
   noticesWhen:
     "It comes the day after the decision and says only that there was one. What was decided, and why, is here on this page and in the public moderation log: we keep it out of the e-mail, so the service that delivers it learns as little as it can.",
+  pushLabel: "Also notify this browser",
+  pushHelp:
+    "A notification on this device when the e-mail goes out, saying only that there was a decision. Your browser's maker delivers it, so it learns that you use Abolish and the day it was sent.",
+  pushOn: "This browser will be notified.",
+  pushOff: "This browser won't be notified.",
+  pushUnsupported: "This browser can't show notifications from websites.",
+  pushUnavailable: "This site doesn't send browser notifications yet.",
+  pushDenied:
+    "This browser blocks notifications from this site. Allow them in the browser's settings, then come back to this page.",
+  pushFailure_signedOut: "You've been signed out. Sign in again to change notifications.",
+  pushFailure_denied: "Notifications weren't allowed, so this browser won't be notified.",
+  pushFailure_service:
+    "This browser's notification service isn't one we can send through, so it can't be notified.",
+  pushFailure_failed: "That didn't work. Try again.",
+  pushNoticeTitle: "A moderation decision",
+  pushNoticeBody:
+    "About one of your polls, your profile or an appeal. Open your account page to see it.",
   exportMark: "Your data",
   exportTitle: "Download your data",
   exportLede: "A copy of your account's data, as one JSON file you can open in any text editor.",

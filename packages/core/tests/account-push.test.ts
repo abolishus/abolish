@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   accountPushSubscriptions,
   MAX_PUSH_SUBSCRIPTIONS,
+  pushSubscribed,
   subscribePush,
   unsubscribePush,
 } from "../src/index.ts";
@@ -225,5 +226,21 @@ describe("unsubscribing", () => {
     expect(await unsubscribePush(app, a, ea)).toBe(true);
     expect(await unsubscribePush(app, a, ea)).toBe(false);
     expect(await endpointsOf(a)).toEqual([]);
+  });
+});
+
+describe("reading", () => {
+  test("an endpoint is subscribed only for the account that last subscribed it", async () => {
+    const [a, b] = [await newAccount(app), await newAccount(app)];
+    const e = endpoint();
+    expect(await pushSubscribed(app, a, e)).toBe(false);
+    await subscribePush(app, a, e, NOW);
+    expect(await pushSubscribed(app, a, e)).toBe(true);
+    expect(await pushSubscribed(app, b, e)).toBe(false);
+    await subscribePush(app, b, e, NOW);
+    expect(await pushSubscribed(app, a, e)).toBe(false);
+    expect(await pushSubscribed(app, b, e)).toBe(true);
+    await unsubscribePush(app, b, e);
+    expect(await pushSubscribed(app, b, e)).toBe(false);
   });
 });

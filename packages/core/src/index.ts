@@ -712,6 +712,7 @@ export {
 } from "./registry-sync.ts";
 export {
   MAX_PUSH_SUBSCRIPTIONS,
+  pushSubscribed,
   subscribePush,
   type SubscribePushResult,
   unsubscribePush,

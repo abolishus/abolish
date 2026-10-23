@@ -10,6 +10,7 @@ import {
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
 import type { ExportClient } from "../account/export.ts";
+import type { PushClient } from "../account/push.ts";
 import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
@@ -114,6 +115,8 @@ export interface AccountPanelProps {
   readonly verify: VerifyClient;
   /** The signed-in account's own data, to download. */
   readonly accountExport: ExportClient;
+  /** This browser's web push subscription. */
+  readonly push: PushClient;
   /** Whether this deployment verifies a phone before an account votes. */
   readonly phone: boolean;
 }
@@ -130,6 +133,7 @@ export function AccountPanel({
   profiles,
   verify,
   accountExport,
+  push,
   phone,
 }: AccountPanelProps) {
   const t = useTranslate(catalogs);
@@ -286,7 +290,7 @@ export function AccountPanel({
             revision={profileRevision}
             onChanged={() => setPollsRevision((n) => n + 1)}
           />
-          <AccountNotices index="04" />
+          <AccountNotices push={push} index="04" onSignedOut={signedOut} />
           <Section
             index="05"
             mark={t("passkeysTitle")}

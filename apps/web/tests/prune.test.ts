@@ -4,7 +4,8 @@
 // phone-hash chains are extended to the current key where the phone service
 // is configured, a Tier 0 token record whose key stopped redeeming is marked
 // dead, the moderation notices due are sent where the e-mail service is
-// configured, and a failed run is logged by kind and retried on the next tick.
+// configured, with a push to the account's browsers where web push is, and a
+// failed run is logged by kind and retried on the next tick.
 
 import {
   type EmailMessage,
@@ -12,7 +13,9 @@ import {
   MAX_NOTICE_BATCH,
   newAccountId,
   parseKeyring,
+  type PushOutcome,
   requestEmailCode,
+  subscribePush,
   requestPhoneCode,
   verifyEmailCode,
   verifyPhoneCode,
@@ -376,4 +379,39 @@ test("drains a backlog larger than one batch in a single run", async () => {
   await prune.stop();
   expect(lines.filter((l) => l.error !== "EmailKeyMissing")).toEqual([]);
   expect((await notices()).size).toBe(0);
+});
+
+test("pushes to the account's browsers beside a notice's e-mail, logging a refused push by kind only", async () => {
+  const now = new Date("2026-10-23T00:05:00Z");
+  const account = await verifiedAt("pushed@example.org", now);
+  const [ok, refused] = [
+    "https://fcm.googleapis.com/fcm/send/prune-ok",
+    "https://updates.push.services.mozilla.com/wpush/v2/prune-refused",
+  ];
+  await subscribePush(sql, account, ok, now);
+  await subscribePush(sql, account, refused, now);
+  await notify(account, new Date("2026-10-23T00:00:00Z"));
+  const pushed: string[] = [];
+  const lines: { error: string }[] = [];
+  const prune = startAccountPrune({
+    sql,
+    log: (l) => lines.push(l),
+    emailKeys: keys,
+    noticeSender: { send: async () => "sent" },
+    pushSender: {
+      send: async (endpoint): Promise<PushOutcome> => {
+        pushed.push(endpoint);
+        return endpoint === ok ? "sent" : "unavailable";
+      },
+    },
+    now: () => now,
+  });
+  await prune.stop();
+  expect(pushed.sort()).toEqual([ok, refused].sort());
+  // T-76: the log names the kind, never the endpoint or the account.
+  expect(lines.filter((l) => l.error !== "EmailKeyMissing")).toEqual([
+    { error: "AccountPushRefused" },
+  ]);
+  expect((await notices()).has(account)).toBe(false);
+  await sql`DELETE FROM account_push_subscriptions WHERE user_id = ${account}`;
 });

@@ -149,6 +149,7 @@ const meta = {
     profiles: noProfile,
     verify: fakeVerify(),
     accountExport: { download: async () => {} },
+    push: { state: async () => "off", enable: async () => {}, disable: async () => {} },
     phone: true,
   },
 } satisfies Meta<typeof AccountPanel>;

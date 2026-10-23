@@ -94,6 +94,20 @@ Each key's check value (`account_phone_key_checks`, `account_email_key_checks`) 
 
 After an exposure, the same limits as the phone hash apply: older backups, dead row versions until `VACUUM FULL` on `account_emails`, `account_email_codes` and `account_email_recipients`, and the provider's recovery log. An exposed box key opens every address sealed under it in those; an exposed hash key lets a guessed address be confirmed, and, in the live `account_email_holds` too, for up to 90 days after the rotation, since a hold stays under its key until it ends.
 
+## The web push key
+
+`VAPID_SECRET_KEY` signs every push our server sends (RFC 8292; [[T-76]]), and `VAPID_SUBJECT` is the contact the push services may reach us at (`mailto:` an address we read, or an `https` page). Both live in `apps/web`'s environment only, set only with the e-mail service (the website refuses to start otherwise), and without them `/push` answers 503 and the account page offers no push.
+
+Make the key on a machine you trust: 32 random bytes as unpadded base64url, `openssl rand 32 | basenc --base64url | tr -d =` (the website refuses to start on anything that isn't a P-256 secret key, naming the variable and never the value). It is not one of the keyrings above: it hashes and seals nothing stored, so it has one value, not a list.
+
+A browser subscribes under one public key, and its push service refuses a push signed by any other, so a new key ends every subscription at once:
+
+1. **Set the new key** and deploy. Each push to an old subscription is refused from then on (counted as `AccountPushRefused` in the log), until its account unsubscribes or subscribes five newer browsers; an e-mail still goes with every notice.
+2. **Each browser subscribes again** when its account next opens the account page: the switch shows a subscription under the old key as off, and turning it on deletes that one's row and ends it with its push service before subscribing anew. Nothing does this unasked, and nothing tells the account its push stopped: say so wherever the rotation is announced.
+3. **Clear the old subscriptions** that now only fail (those whose accounts haven't come back), a day after the deploy, as the app owner: `DELETE FROM account_push_subscriptions WHERE created_at < '<deploy time>';` Their accounts lose nothing but the wake that no longer worked.
+
+Rotate it after any suspected exposure of the environment or a host: whoever holds the key can wake our subscribers' browsers, though only to show our own fixed notice, since our service worker shows nothing else.
+
 ## Verify service settings
 
 The bound on guessing a phone code (T-01) rests on the Twilio Verify service keeping its defaults, which nothing reads back: codes of 6 digits or more (the adapter refuses to check shorter ones), a 10-minute lifetime, and 5 checks per verification. Check them in Twilio's console whenever the service is created or changed, and after any change of account owner.

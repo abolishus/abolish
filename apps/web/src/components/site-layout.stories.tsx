@@ -202,3 +202,17 @@ export const HeaderPhone: Story = {
     );
   },
 };
+
+/** On a phone the footer follows a short page without a screen's worth of blank. */
+export const FooterPhone: Story = {
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const ways = within(canvasElement).getByRole("navigation", { name: "Other places to go" });
+    const footer = canvasElement.querySelector("footer");
+    // The page's padding and the footer's margin: it was 136px, a fifth of the screen.
+    await expect(
+      (footer?.getBoundingClientRect().top ?? 0) - ways.getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(88);
+  },
+};

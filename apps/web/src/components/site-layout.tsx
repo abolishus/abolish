@@ -107,7 +107,7 @@ export function SiteLayout({
       <main id="main">
         <Frame className="py-10">{children}</Frame>
       </main>
-      <footer className="mt-24 border-t border-border bg-background">
+      <footer className="mt-12 border-t border-border bg-background sm:mt-24">
         <Frame className="grid gap-10 py-12 md:grid-cols-12 md:gap-x-6">
           <div className="grid content-start gap-3 md:col-span-7">
             <p className="m-0 font-heading text-xl font-semibold">{t("footerClaim")}</p>

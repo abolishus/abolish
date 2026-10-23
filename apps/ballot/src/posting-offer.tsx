@@ -29,8 +29,8 @@ const WALLET_NOTES = {
   { readonly title: keyof Messages; readonly detail: keyof Messages }
 >;
 
-// The wallet's notes that themselves say the parts were given or posted.
-const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["sent", "refused", "failed"]);
+// The wallet's notes that themselves say the parts may still reach the board.
+const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["sent"]);
 
 /**
  * The offer, asked as soon as delivery failed so a voter who leaves the

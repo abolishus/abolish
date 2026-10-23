@@ -42,6 +42,14 @@ export const WALLET_REQUEST_MS = 300_000;
 export const WALLET_WAIT = POSTING_SEEN + POSTING_FINALITY;
 
 /**
+ * Seconds before `c_D` at which a latest-head sighting stops holding a
+ * posting back: two requests' time for the wallet's account and chain
+ * before the send. The latest head is the untrusted endpoint's word, so it
+ * may delay the voter's own send but never push it past `c_D` (T-25, T-50).
+ */
+export const WALLET_HOLD_MARGIN = BigInt((2 * WALLET_REQUEST_MS) / 1000);
+
+/**
  * A wallet run's outcome ([[posting-relay]], Own wallet):
  *
  * - `recorded`: every posting is recorded at the finalized head;
@@ -340,7 +348,8 @@ export async function postFromWallet(
           p.seenAt = time();
     }
     for (const p of left) {
-      if (p.sentAt !== undefined || holds(p.seenAt)) continue;
+      if (p.sentAt !== undefined || (holds(p.seenAt) && time() + WALLET_HOLD_MARGIN < cutoff))
+        continue;
       if (time() > cutoff) return sent ? "sent" : "late";
       try {
         await io.send(p.call, () => time() > cutoff);

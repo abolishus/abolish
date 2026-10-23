@@ -147,6 +147,17 @@ export const WalletRelayedThenRejected: Story = {
   },
 };
 
+export const WalletRefusedAfterSending: Story = {
+  name: "A refusal after an earlier run sent the parts still says they may reach the board",
+  args: { failed: true, handed: true, onWallet: fn(), wallet: "refused" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("The board won't take this posting")).toBeVisible();
+    // The earlier run's parts may still land (T-15).
+    await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
+  },
+};
+
 export const WalletProblems: Story = {
   name: "Each thing the wallet can meet has its own words",
   args: { failed: true, onWallet: fn() },

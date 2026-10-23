@@ -163,16 +163,17 @@ Each request is given up after `WALLET_REQUEST`, so a wallet that never answers 
 
 **The outcome** is judged as through the relay (Outcome): a posting is **recorded** only once the board's `SharePosted` event carries its exact bytes at the L2's finalized head, read through the build's own L2 endpoint, never the wallet's, and only then is the ballot sent. Each round reads the finalized head, then the latest:
 
-- a posting the latest head shows, from the relay, its deposit or anyone, isn't sent from the wallet but waited on for `WALLET_WAIT` from that sighting, so the voter's address isn't put beside a posting already landing (T-13); past that with no record it is sent like any other;
+- a posting the latest head shows, from the relay, its deposit or anyone, isn't sent from the wallet but waited on for `WALLET_WAIT` from that sighting, so the voter's address isn't put beside a posting already landing (T-13); past that with no record it is sent like any other. The latest head is the untrusted endpoint's word, so a sighting holds a posting back only until `c_D − WALLET_HOLD_MARGIN`: it may delay the voter's own send, never cancel it (T-25, T-50);
 - every other unrecorded posting is sent once, and only while neither the device's clock nor any head's time read is past `c_D`, so that its submission time is in time ([[delivery]], Client rule 4);
 - the run ends `recorded`, or once every unrecorded posting was sent at least `WALLET_WAIT` ago, as sent: it may still land, and sending again first reads both heads, so a posting that landed is never paid for twice. Each read is given up once every wait is over.
 
 **What the offer says.** Once a run may have handed the parts out (the relay answered anything but a transport error, or the wallet was asked for an estimate), every later offer says they may still reach the public record, whatever later runs meet, and never that nothing was posted (T-15).
 
-| Name             | Value | Meaning                                                                                                |
-| ---------------- | ----- | ------------------------------------------------------------------------------------------------------ |
-| `WALLET_REQUEST` | 300   | Seconds the client waits on one wallet request, the voter's confirmation included                      |
-| `WALLET_WAIT`    | 2,400 | Seconds, `POSTING_SEEN + POSTING_FINALITY`, the client waits after a send or a sighting for the record |
+| Name                 | Value | Meaning                                                                                                                                   |
+| -------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `WALLET_REQUEST`     | 300   | Seconds the client waits on one wallet request, the voter's confirmation included                                                         |
+| `WALLET_HOLD_MARGIN` | 600   | Seconds before `c_D` at which a latest-head sighting stops holding a posting back: two requests for the account and chain before the send |
+| `WALLET_WAIT`        | 2,400 | Seconds, `POSTING_SEEN + POSTING_FINALITY`, the client waits after a send or a sighting for the record                                    |
 
 `WALLET_REQUEST` is long enough to read a confirmation and short against `POSTING_CLIENT_MARGIN`. `WALLET_WAIT` is the relay's allowance for a sighting and for finality: a transaction a live sequencer includes in seconds reaches the finalized head well within it.
 
@@ -197,7 +198,7 @@ Each request is given up after `WALLET_REQUEST`, so a wallet that never answers 
 - **Our proxy and hosting see each request whole** (T-11, T-69): the voter's network address beside the ballot, as the ballot route sees it when the same client sends that ballot. Nothing of ours keeps it by design.
 - **The relay can refuse or delay** (T-25): it is indistinguishable from one whose checks failed. The voter's own wallet is the answer (Own wallet), for a voter who has one and funds it.
 - **The voter's wallet isn't forced through L1** (T-25, T-50): its posting goes to the sequencer alone, so a censoring sequencer leaves it unrecorded and the voter told it may still land. A deposit from the voter's own L1 account through the portal pinned by the release is [[P2-8]] part 3c-1b-2b-2b-2d-2b-2d-2.
-- **The wallet sees the postings first** (T-18): the wallet, its node and anything that reads its requests have each `m_i` from the estimate on, before the chain does, and the account that pays is linked to the ballot for good (T-11, T-13); the offer says both.
+- **The wallet sees the postings first** (T-18): the wallet, its node and anything that reads its requests have each `m_i` from the estimate on, before the chain does, and the account that pays is linked to the ballot for good (T-11, T-13); the offer says both. The calldata handed to the wallet is a hex string, which the client can't erase: it lives in memory until collected, as the wallet's own copies do.
 - **A wallet that ignores the transaction's `chainId`** (T-18, T-34): one that switches chains between the check and the send sends the posting where the election isn't read, making `m_i` public for nothing; the client never reads it as recorded.
 - **One wallet, the browser's**: the client asks only `window.ethereum`, so where several wallets are installed the one that took that name answers; EIP-6963 discovery is later.
 - **A wallet's estimate is trusted only to refuse sooner** (T-25): a node that answers a revert for a call the board would take keeps the voter from sending through that wallet, never from trying again or posting through the relay; one that understates the gas lets the call revert, which the board's event, never seen, then shows.

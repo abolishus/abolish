@@ -14,6 +14,7 @@ import {
   type Eip1193,
   injectedWallet,
   postFromWallet,
+  WALLET_HOLD_MARGIN,
   WALLET_WAIT,
   type WalletAnswer,
   type WalletIo,
@@ -354,6 +355,15 @@ describe("postFromWallet", () => {
     });
     expect(await postFromWallet(w.io, [A], [A], CUTOFF)).toBe("recorded");
     expect(w.sends).toEqual([]);
+  });
+
+  test("lets a sighting near the cutoff delay the wallet's send, never cancel it (T-25)", async () => {
+    // The untrusted endpoint shows it at the latest head and never finalizes it.
+    const w = world({ latest: () => [A] });
+    const cutoff = START + WALLET_HOLD_MARGIN + 3n * POLL;
+    expect(await postFromWallet(w.io, [A], [A], cutoff)).toBe("sent");
+    expect(w.sends).toHaveLength(1);
+    expect(START + (w.sends[0]?.at ?? 0n)).toBeLessThanOrEqual(cutoff - WALLET_HOLD_MARGIN + POLL);
   });
 
   test("sends a posting the latest head showed once its wait passes with no record", async () => {

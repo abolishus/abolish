@@ -338,7 +338,7 @@ export const esUS: Messages = {
   postingWalletPost: "Publicar desde mi billetera y enviar",
   postingHandedTitle: "Las partes que faltan todavía pueden llegar al tablero",
   postingHanded:
-    "Un intento anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
+    "Este intento o uno anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
   walletSentTitle: "La publicación de tu billetera todavía no está en el tablero",
   walletSent:
     "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",

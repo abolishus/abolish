@@ -322,7 +322,7 @@ const enUS = {
   listUndecodable: "The server's definition doesn't decode.",
   listMismatch: "The server sent another poll's definition.",
   listOpens: "Opens",
-  listClosed: "Closed",
+  listClosed: "On",
   listPoll: "Poll",
   listCounting: "Counting",
   listStatus: "Status",
@@ -634,6 +634,7 @@ const enUS = {
   footerNav: "The record",
   otherPlaces: "Other places to go",
   notFoundCode: "404 · Not found",
+  notFoundPageTitle: "Page not found",
   notFoundTitle: "There is no page at this address",
   notFound:
     "The link may be mistyped or cut short. Polls and their results are never deleted, so a poll's own link keeps working.",
@@ -645,6 +646,7 @@ const enUS = {
   definitionMismatch:
     "The server sent the definition of another poll for this ID, so this page won't show it.",
   errorTitle: "Something went wrong on our side",
+  errorPageTitle: "Something went wrong",
   error: "This page couldn't be shown. Try again in a moment, or go somewhere else below.",
   errorBallot:
     "This website never handles ballots: if you were voting, your ballot and receipt are safe in the ballot app on your device.",

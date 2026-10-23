@@ -10,6 +10,7 @@ import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { previewMeta } from "../og/poll.ts";
 import { PREVIEW_SIZE } from "../og/model.ts";
+import { pageTitle, text } from "../titles.ts";
 import { isElectionId } from "../values.ts";
 
 export const Route = createFileRoute("/polls/$electionId")({
@@ -45,6 +46,17 @@ export const Route = createFileRoute("/polls/$electionId")({
     const preview = loaderData?.preview;
     return {
       meta: [
+        // A poll's page is named as its heading names it; one that isn't
+        // there has the root's not-found title.
+        ...(page === undefined
+          ? []
+          : [
+              pageTitle(
+                page.kind === "poll"
+                  ? text("pollHeading", { prefix: page.poll.electionId.slice(0, 16) })
+                  : text("unavailableTitle"),
+              ),
+            ]),
         // A delisted or hidden poll stays reachable by link, but out of search
         // engines too (docs/moderation-policy.md).
         ...(page?.kind === "poll" && page.moderation.state !== "visible"

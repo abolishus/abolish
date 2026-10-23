@@ -80,9 +80,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(rows[0]).toHaveTextContent(/Closes January 8, 2026/);
   await expect(within(rows[1]!).getByText("Scheduled")).toBeVisible();
   await expect(rows[1]).toHaveTextContent(/Opens January 15, 2026/);
-  // The status, then when it closed.
-  await expect(within(rows[2]!).getAllByText("Closed")).toHaveLength(2);
-  await expect(rows[2]).toHaveTextContent(/Closed January 4, 2026/);
+  // The status, then when it closed, without saying "Closed" twice.
+  await expect(within(rows[2]!).getByText("Closed")).toBeVisible();
+  await expect(rows[2]).toHaveTextContent(/On January 4, 2026/);
   await expect(within(rows[3]!).getByText(/another poll's definition/)).toBeVisible();
   await expect(canvas.getByText(/clock \(January 5, 2026/)).toBeVisible();
   // Each group at All, and each option counting the page's polls it matches.

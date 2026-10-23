@@ -794,8 +794,10 @@ describe("embed", () => {
     expect(html).toContain('<meta name="robots" content="noindex"');
     // The reader's own setting by default.
     expect(html).toMatch(/<html lang="en-US">/);
-    // The poll's own words, not the preview's headline.
+    // The poll's own words, not the preview's headline, in the heading and
+    // the title, which isolates them from the site's name (T-75).
     expect(html).not.toContain(`Poll ${OPEN_ONE_CODE}`);
+    expect(html).toMatch(/<title>\u2068[^<]+\u2069 · Abolish<\/title>/);
     expect(html).toMatch(/<h1 id="[^"]+" lang="[a-z-]+" dir="auto"/);
     // Each answer carries the poll and the pick in the fragment, which no server sees.
     for (const pick of [0, 1, 2])

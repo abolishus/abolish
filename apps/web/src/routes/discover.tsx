@@ -3,7 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { StreamPage } from "../components/stream.tsx";
 import { fetchStream } from "../data.ts";
+import { POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { STREAM_SORTS, type StreamSort, streamPlace, streamQuery } from "../stream.ts";
+import { pageTitle, text } from "../titles.ts";
 import { isElectionId, searchText } from "../values.ts";
 
 // The stream: the polls open now, in one of the API's public orders, and
@@ -57,6 +59,15 @@ export const Route = createFileRoute("/discover")({
               place: place.kind === "place" ? place.place : "",
             },
           }),
+  // A topic's page is named by the topic, from the fixed list; a search or a
+  // place is never in the title (T-67).
+  head: ({ match: { search } }) => ({
+    meta: [
+      search.topic === undefined
+        ? pageTitle(text("navDiscover"))
+        : pageTitle(text(POLL_TOPIC_MESSAGES[search.topic]), text("navDiscover")),
+    ],
+  }),
   component: function Discover() {
     const { sort, q, topic, place } = Route.useSearch();
     const { stream, ballot } = Route.useLoaderData();

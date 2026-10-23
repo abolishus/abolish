@@ -214,7 +214,9 @@ describe("the offline shell", () => {
     );
 
     // The footer's switch: the next page registers the English worker, which
-    // replaces the Spanish one and drops its cache.
+    // replaces the Spanish one and drops its cache. The page's controller
+    // changes when that worker activates, before its `activate` handler has
+    // deleted the old cache, so the cache check waits as long as the switch.
     await up();
     await page.goto(`${origin}/how-it-works`);
     await page.getByRole("button", { name: "English" }).click();
@@ -224,7 +226,9 @@ describe("the offline shell", () => {
       { timeout: 30_000 },
     );
     await expect
-      .poll(async () => Object.values(await kept()).map((paths) => paths.includes(OFFLINE_PATH)))
+      .poll(async () => Object.values(await kept()).map((paths) => paths.includes(OFFLINE_PATH)), {
+        timeout: 30_000,
+      })
       .toEqual([true]);
     await down();
     await page.goto(`${origin}/polls`);

@@ -10,7 +10,7 @@ import {
 } from "../src/index.ts";
 import { newAccount, type TestDb, testDb } from "./db.ts";
 
-// Push subscriptions (migrations/0041_account_push_subscriptions.sql,
+// Push subscriptions (migrations/0043_account_push_subscriptions.sql,
 // src/account-push.ts; P2-27 part 4): only a known push service's endpoint
 // is kept, one account holds an endpoint at a time, an account holds at most
 // `MAX_PUSH_SUBSCRIPTIONS`, and a row names nothing but the account, the

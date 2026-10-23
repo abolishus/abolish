@@ -1,5 +1,5 @@
 // The browsers an account asked to be told by web push ([[P2-27]] part 4;
-// migrations/0041_account_push_subscriptions.sql). The account page
+// migrations/0043_account_push_subscriptions.sql). The account page
 // subscribes a browser with its push service and hands us the endpoint;
 // `sendNotices` (src/account-notices.ts) wakes each one when a moderation
 // notice goes out, beside the e-mail, and `src/web-push.ts` sends it.

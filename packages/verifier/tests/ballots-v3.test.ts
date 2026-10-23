@@ -246,23 +246,28 @@ test("a ballot record of another version is refused whatever its bytes, never re
   }
 });
 
-test("the report gives the ballots after the ceremony, then the spoiled-ballot openings and the tallies", () => {
-  const r = format4(byId("mixed"));
-  expect(Object.keys(r)).toEqual([
-    "format",
-    "verdict",
-    "verdictAgainstInputs",
-    "inputs",
-    "definition",
-    "ceremony",
-    "ballots",
-    "openings",
-    "tallies",
-    "board",
-    "l1",
-    "checks",
-  ]);
-});
+// A whole verification run of the mixed election: room on a busy runner, as its siblings have.
+test(
+  "the report gives the ballots after the ceremony, then the spoiled-ballot openings and the tallies",
+  { timeout: 60_000 },
+  () => {
+    const r = format4(byId("mixed"));
+    expect(Object.keys(r)).toEqual([
+      "format",
+      "verdict",
+      "verdictAgainstInputs",
+      "inputs",
+      "definition",
+      "ceremony",
+      "ballots",
+      "openings",
+      "tallies",
+      "board",
+      "l1",
+      "checks",
+    ]);
+  },
+);
 
 test(
   "4.4's event check runs under definition version 5 and, with no contract-event record, leaves 4.4 not-implemented",

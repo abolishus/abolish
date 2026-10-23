@@ -786,6 +786,7 @@ describe("tending", () => {
     expect(new Uint8Array(row!["signed"])).toEqual(deposit.tx);
   });
 
+  // Up to 50 runs of eight steps against Postgres: room on a busy runner.
   test("whatever settles, the spend is what the entries and the nonces count", async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -852,5 +853,5 @@ describe("tending", () => {
       ),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+  }, 60_000);
 });

@@ -8,7 +8,10 @@ import { type ReactNode, useRef } from "react";
  *
  * Below `lg` there is no column beside the cards, and a sticky graphic above
  * them sat under the step it drew whenever that step was active, so there
- * each card carries its own graphic instead and nothing is sticky.
+ * each card carries its own graphic instead and nothing is sticky. The active
+ * card's emerald border is drawn only from `lg`, where it ties the card to
+ * the graphic beside it: below, it tied the card to nothing and put a second
+ * emerald mark beside the one its own graphic draws ([[language]], Colour).
  */
 export function StepScene({
   label,
@@ -38,7 +41,7 @@ export function StepScene({
             data-active={index === active ? "" : undefined}
             className="lg:flex lg:min-h-[70svh] lg:items-center lg:py-10"
           >
-            <div className="grid w-full gap-6 border border-border bg-background p-6 transition-colors duration-300 in-data-active:border-primary motion-reduce:transition-none">
+            <div className="grid w-full gap-6 border border-border bg-background p-6 transition-colors duration-300 lg:in-data-active:border-primary motion-reduce:transition-none">
               {step}
               <div className="lg:hidden">{graphic(index)}</div>
             </div>

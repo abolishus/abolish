@@ -7,10 +7,14 @@
 // against L1's checkpoints, like a copy from any other source, so a manifest
 // can only send a reader to bytes that fail them or to nothing (T-53). What
 // is reported says where the archive path is short, and a reader's budget
-// bounds what the authority can make it read (T-52).
+// bounds what the authority can make it read (T-52). Chains of manifest
+// versions 1 and 2 are read; a version-2 manifest also lists contract-event
+// evidence, whose references the walk keeps for the contracts asked about
+// (`evidence.ts` reads and checks them).
 
 import {
   type ArchiveManifest,
+  type ArchiveManifestV2,
   type AsyncBlockSource,
   CHUNK_SIZE,
   type Checkpoint,
@@ -98,6 +102,9 @@ export type ArchiveFinding =
   // Reached only through earlier locators, not from the latest's chain alone.
   | { readonly code: "earlier-only"; readonly first: bigint; readonly last: bigint }
   | { readonly code: "over-budget"; readonly budget: number }
+  // More evidence listings than the caller keeps: the walk keeps no more,
+  // so what it found of the evidence is partial for this reader.
+  | { readonly code: "evidence-over-budget"; readonly budget: number }
   | {
       readonly code: "locator-mismatch";
       readonly locator: number;
@@ -113,6 +120,20 @@ export interface ReachedManifest {
   readonly cid: Uint8Array;
 }
 
+/**
+ * One contract-event evidence record that reached manifests list, for a
+ * contract the caller asked about: the reference's claim of what it proves
+ * (`contract` and `l2Block`), its CID, and every distinct transaction
+ * listing it, in walk order. Nothing in it is checked yet: the record is
+ * read by its CID and the evidence check holds it to the claim.
+ */
+export interface EvidenceListing {
+  readonly contract: Uint8Array;
+  readonly l2Block: bigint;
+  readonly cid: Uint8Array;
+  readonly transactions: readonly Uint8Array[];
+}
+
 export interface ArchiveWalk {
   /** The latest locator's manifest's sequence, if it was read and is this deployment's. */
   readonly latest: bigint | undefined;
@@ -120,6 +141,12 @@ export interface ArchiveWalk {
   readonly manifests: readonly ReachedManifest[];
   /** For each CID the caller asked about, every transaction a reached manifest lists it under, in walk order. */
   readonly listings: ReadonlyMap<string, readonly Uint8Array[]>;
+  /**
+   * The evidence listings of the contracts the caller asked about, each
+   * reference (contract, block and CID) once, in the order the walk first
+   * reached it.
+   */
+  readonly evidence: readonly EvidenceListing[];
   readonly findings: readonly ArchiveFinding[];
   /** Manifest reads made, each one transaction asked of the sources. */
   readonly reads: number;
@@ -136,7 +163,22 @@ export interface ArchiveWalkOptions {
   readonly objects?: readonly Uint8Array[];
   /** How many manifest reads the walk may make; default `DEFAULT_MANIFEST_BUDGET`. */
   readonly maxManifests?: number;
+  /** The L2 contracts (20 bytes each) whose evidence listings to keep. */
+  readonly contracts?: readonly Uint8Array[];
+  /**
+   * How many (reference, transaction) pairs the walk keeps; default
+   * `DEFAULT_EVIDENCE_BUDGET`. Every manifest may list 1,024 references, so
+   * the authority would otherwise choose what a walk holds (T-52).
+   */
+  readonly maxEvidence?: number;
 }
+
+/**
+ * How many evidence listings a walk keeps when its caller sets nothing:
+ * one record per contract and anchored period, so a deployment's five
+ * contracts' records for about 18 months of hourly periods.
+ */
+export const DEFAULT_EVIDENCE_BUDGET = 65_536;
 
 /** The deployment a reader is verifying: its L1 and its board anchor. */
 export interface ArchiveDeployment {
@@ -147,17 +189,29 @@ export interface ArchiveDeployment {
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
+type Manifest = ArchiveManifest | ArchiveManifestV2;
+
 type Read =
-  | { readonly kind: "manifest"; readonly manifest: ArchiveManifest }
+  | { readonly kind: "manifest"; readonly manifest: Manifest }
   | { readonly kind: "unavailable" | "malformed" };
 
+// How a manifest is decoded: exactly as the locator naming it fixes, or, for
+// a link, under the version its header names where that is at most the
+// version the chain's locator fixes (a version-2 chain may link version 1).
+interface Decoding {
+  readonly fixed: 1 | 2;
+  readonly link: boolean;
+}
+
 // What the walk knows of a sequence: the CID the first link to it named,
-// whether a manifest was reached there, and every transaction queued or
-// read for it. `done` is set once the sequence can't be reached under that
-// CID (its bytes aren't a manifest of this deployment at this sequence), so
-// nothing retries it.
+// the manifest version the locator it was reached from fixes, whether a
+// manifest was reached there, and every transaction queued or read for it.
+// `done` is set once the sequence can't be reached under that CID (its bytes
+// aren't a manifest of this deployment at this sequence), so nothing
+// retries it.
 interface Slot {
   readonly cid: Uint8Array;
+  readonly fixed: 1 | 2;
   reached: boolean;
   done: boolean;
   conflict: boolean;
@@ -219,11 +273,25 @@ export async function walkArchive(
   const budget = options.maxManifests ?? DEFAULT_MANIFEST_BUDGET;
   if (!Number.isSafeInteger(budget) || budget < 1)
     throw new RangeError("maxManifests must be a positive integer");
+  const evidenceBudget = options.maxEvidence ?? DEFAULT_EVIDENCE_BUDGET;
+  if (!Number.isSafeInteger(evidenceBudget) || evidenceBudget < 1)
+    throw new RangeError("maxEvidence must be a positive integer");
   if (deployment.anchor.length !== 20) throw new RangeError("an anchor address is 20 bytes");
+  const contracts = new Set<string>();
+  for (const c of options.contracts ?? []) {
+    if (!(c instanceof Uint8Array) || c.length !== 20)
+      throw new RangeError("a contract address is 20 bytes");
+    contracts.add(bytesToHex(c));
+  }
   const findings: ArchiveFinding[] = [];
   const wanted = new Map<string, Uint8Array[]>(
     (options.objects ?? []).map((c) => [bytesToHex(c), []]),
   );
+  // Keyed by contract, block and CID: one reference, however many
+  // manifests list it, with each distinct transaction once.
+  const evidence = new Map<string, EvidenceListing & { readonly transactions: Uint8Array[] }>();
+  let evidenceKept = 0;
+  let evidenceOver = false;
   const slots = new Map<bigint, Slot>();
   const byCid = new Map<string, bigint>();
   const queue: Pending[] = [];
@@ -231,7 +299,11 @@ export async function walkArchive(
   let reads = 0;
   let overBudget = false;
 
-  const read = async (cid: Uint8Array, transaction: Uint8Array): Promise<Read> => {
+  const read = async (
+    cid: Uint8Array,
+    transaction: Uint8Array,
+    decoding: Decoding,
+  ): Promise<Read> => {
     reads++;
     for await (const data of await source(transaction, MANIFEST_DATA_LIMIT)) {
       // A source past the limit is that source's failure, never parsed (T-52).
@@ -239,8 +311,19 @@ export async function walkArchive(
       const got = readArchivedObject(data, cid, MANIFEST_BOUND);
       // Data that doesn't read as the CID is that source's failure.
       if (!got.ok) continue;
+      // A record's version is its third byte (notation.md, Records). A
+      // header naming a version above the fixed one, or none known, is
+      // decoded under the fixed version, which refuses it as malformed.
+      const named = got.bytes[2];
+      const version = decoding.link && named === 1 ? 1 : decoding.fixed;
       try {
-        return { kind: "manifest", manifest: decodeArchiveManifest(got.bytes, 1) };
+        return {
+          kind: "manifest",
+          manifest:
+            version === 2
+              ? decodeArchiveManifest(got.bytes, 2)
+              : decodeArchiveManifest(got.bytes, 1),
+        };
       } catch (e) {
         // The CID fixes the bytes, so no other source can do better.
         if (e instanceof DecodeError) return { kind: "malformed" };
@@ -256,8 +339,9 @@ export async function walkArchive(
     from: ManifestOrigin,
     cid: Uint8Array,
     transaction: Uint8Array,
-  ): Promise<ArchiveManifest | "unavailable" | undefined> => {
-    const got = await read(cid, transaction);
+    decoding: Decoding,
+  ): Promise<Manifest | "unavailable" | undefined> => {
+    const got = await read(cid, transaction, decoding);
     if (got.kind !== "manifest") {
       if (got.kind !== "malformed") return got.kind;
       findings.push({ code: "manifest-malformed", from, cid });
@@ -277,9 +361,34 @@ export async function walkArchive(
     return m;
   };
 
-  const claim = (sequence: bigint, cid: Uint8Array): Slot => {
+  // Keeps a reached manifest's references to the contracts asked about,
+  // each distinct transaction once, until the budget is spent.
+  const keep = (refs: ArchiveManifestV2["evidence"]) => {
+    for (const ref of refs) {
+      if (!contracts.has(bytesToHex(ref.contract))) continue;
+      const key = `${bytesToHex(ref.contract)}:${ref.l2_block}:${bytesToHex(ref.cid)}`;
+      const known = evidence.get(key);
+      if (known?.transactions.some((t) => equal(t, ref.transaction)) === true) continue;
+      if (evidenceKept === evidenceBudget) {
+        evidenceOver = true;
+        return;
+      }
+      evidenceKept++;
+      if (known !== undefined) known.transactions.push(ref.transaction);
+      else
+        evidence.set(key, {
+          contract: ref.contract,
+          l2Block: ref.l2_block,
+          cid: ref.cid,
+          transactions: [ref.transaction],
+        });
+    }
+  };
+
+  const claim = (sequence: bigint, cid: Uint8Array, fixed: 1 | 2): Slot => {
     const slot: Slot = {
       cid,
+      fixed,
       reached: false,
       done: false,
       conflict: false,
@@ -293,10 +402,11 @@ export async function walkArchive(
 
   // Settles a reached manifest's links in order, queueing the reads they
   // need; false once the budget can't cover them.
-  const reach = (slot: Slot, m: ArchiveManifest): boolean => {
+  const reach = (slot: Slot, m: Manifest): boolean => {
     slot.reached = true;
     slot.done = true;
     for (const o of m.objects) wanted.get(bytesToHex(o.cid))?.push(o.transaction);
+    if ("evidence" in m) keep(m.evidence);
     for (const link of m.links) {
       const known = slots.get(link.sequence);
       if (known !== undefined && !equal(known.cid, link.cid)) {
@@ -313,7 +423,7 @@ export async function walkArchive(
       if (known?.done === true || known?.tried.some((t) => equal(t, link.transaction)) === true)
         continue;
       if (reads + queue.length - head >= budget) return false;
-      (known ?? claim(link.sequence, link.cid)).tried.push(link.transaction);
+      (known ?? claim(link.sequence, link.cid, slot.fixed)).tried.push(link.transaction);
       queue.push({ sequence: link.sequence, transaction: link.transaction });
     }
     return true;
@@ -327,7 +437,7 @@ export async function walkArchive(
     transaction: Uint8Array,
     from: ManifestOrigin,
   ): Promise<boolean> => {
-    const m = await fetch(from, slot.cid, transaction);
+    const m = await fetch(from, slot.cid, transaction, { fixed: slot.fixed, link: true });
     if (m === "unavailable") {
       slot.unavailable.push({ transaction, from });
       return true;
@@ -363,11 +473,14 @@ export async function walkArchive(
   // What the latest locator's chain reaches on its own: whatever only an
   // earlier locator reached is gone once the logs that carried it expire.
   const alone = new Set<bigint>();
-  const named = decodeArchiveLocator(locator);
+  const named = decodeArchiveLocator(locator, [1, 2]);
   unknown("latest", named);
   if (named.kind === "manifest") {
     const from = { locator: "latest" as const };
-    const m = await fetch(from, named.manifest, named.transaction);
+    const m = await fetch(from, named.manifest, named.transaction, {
+      fixed: named.version,
+      link: false,
+    });
     if (m === "unavailable")
       findings.push({
         code: "unavailable",
@@ -377,7 +490,7 @@ export async function walkArchive(
       });
     else if (m !== undefined) {
       latest = m.sequence;
-      const slot = claim(m.sequence, named.manifest);
+      const slot = claim(m.sequence, named.manifest, named.version);
       slot.tried.push(named.transaction);
       overBudget = !reach(slot, m) || !(await drain());
       for (const [sequence, slot] of slots) if (slot.reached) alone.add(sequence);
@@ -386,15 +499,25 @@ export async function walkArchive(
 
   if (!overBudget && latest !== undefined) {
     const seen = new Set<string>();
-    const earlier: { locator: number; manifest: Uint8Array; transaction: Uint8Array }[] = [];
+    const earlier: {
+      locator: number;
+      version: 1 | 2;
+      manifest: Uint8Array;
+      transaction: Uint8Array;
+    }[] = [];
     for (const [i, bytes] of (options.earlier ?? []).entries()) {
       const key = bytesToHex(bytes);
       if (seen.has(key)) continue;
       seen.add(key);
-      const l = decodeArchiveLocator(bytes);
+      const l = decodeArchiveLocator(bytes, [1, 2]);
       unknown(i, l);
       if (l.kind === "manifest")
-        earlier.push({ locator: i, manifest: l.manifest, transaction: l.transaction });
+        earlier.push({
+          locator: i,
+          version: l.version,
+          manifest: l.manifest,
+          transaction: l.transaction,
+        });
     }
 
     // First the chain alone: an earlier locator naming a CID the chain's
@@ -440,7 +563,7 @@ export async function walkArchive(
         break;
       }
       const from = { locator: e.locator };
-      const m = await fetch(from, e.manifest, e.transaction);
+      const m = await fetch(from, e.manifest, e.transaction, { fixed: e.version, link: false });
       if (m === "unavailable")
         findings.push({ code: "unavailable", from, cid: e.manifest, transaction: e.transaction });
       if (m === "unavailable" || m === undefined) continue;
@@ -456,7 +579,7 @@ export async function walkArchive(
       }
       // Another earlier locator already followed a manifest there.
       if (slots.has(m.sequence)) continue;
-      const slot = claim(m.sequence, e.manifest);
+      const slot = claim(m.sequence, e.manifest, e.version);
       slot.tried.push(e.transaction);
       if (!reach(slot, m) || !(await drain())) overBudget = true;
     }
@@ -467,6 +590,7 @@ export async function walkArchive(
     .map(([sequence, s]) => ({ sequence, cid: s.cid }))
     .sort((a, b) => (a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0));
 
+  if (evidenceOver) findings.push({ code: "evidence-over-budget", budget: evidenceBudget });
   if (overBudget) findings.push({ code: "over-budget", budget });
   else if (latest !== undefined) {
     // Every transaction no source served, even where another reached its
@@ -495,7 +619,14 @@ export async function walkArchive(
     if (run !== undefined) findings.push({ code: "earlier-only", ...run });
   }
 
-  return { latest, manifests: reached, listings: wanted, findings, reads };
+  return {
+    latest,
+    manifests: reached,
+    listings: wanted,
+    evidence: [...evidence.values()],
+    findings,
+    reads,
+  };
 }
 
 // The longest a board entry encodes (docs/spec/board.md, A copy from L1's

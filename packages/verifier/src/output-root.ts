@@ -102,12 +102,15 @@ export interface StorageAtOutputRoot {
  * neither can be chosen apart from the root; the block's number and
  * timestamp come from that header. An absent slot reads as zero; an account
  * that is absent or has no code is `l2-contract-absent` (docs/spec/contracts.md,
- * Event accumulator, Verification and Output root).
+ * Event accumulator, Verification and Output root). `pool` holds
+ * `evidence.nodes` where the caller asks afterwards which nodes the walks
+ * used.
  */
 export function storageAtOutputRoot(
   evidence: OutputRootEvidence,
   address: Uint8Array,
   slots: readonly Uint8Array[],
+  pool?: NodePool,
 ): StorageAtOutputRoot {
   if (!(address instanceof Uint8Array) || address.length !== 20)
     throw new RangeError("address must be 20 bytes");
@@ -130,7 +133,7 @@ export function storageAtOutputRoot(
   const claimed = outputRootV0(block.stateRoot, mp, block.hash);
   if (!equal(claimed, evidence.outputRoot)) throw new OutputRootError("output-root");
   try {
-    const nodes = new NodePool(evidence.nodes);
+    const nodes = pool ?? new NodePool(evidence.nodes);
     const root = contractStorageRoot(nodes, block.stateRoot, address);
     if (root === undefined) throw new OutputRootError("l2-contract-absent");
     return { block, words: slots.map((slot) => storageWord(nodes.get(root, keccak_256(slot)))) };
@@ -158,11 +161,14 @@ export interface OutputRootAccumulator extends ProvenEventAccumulator {
 export function accumulatorAtOutputRoot(
   evidence: OutputRootEvidence,
   address: Uint8Array,
+  pool?: NodePool,
 ): OutputRootAccumulator {
-  const { block, words } = storageAtOutputRoot(evidence, address, [
-    word(ACCUMULATOR_SLOT),
-    word(ACCUMULATOR_SLOT + 1n),
-  ]);
+  const { block, words } = storageAtOutputRoot(
+    evidence,
+    address,
+    [word(ACCUMULATOR_SLOT), word(ACCUMULATOR_SLOT + 1n)],
+    pool,
+  );
   const [accumulator, countWord] = words as [Uint8Array, Uint8Array];
   if (countWord.subarray(0, 24).some((x) => x !== 0)) throw new OutputRootError("l2-count");
   let count = 0n;

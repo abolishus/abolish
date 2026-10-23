@@ -103,7 +103,9 @@ export type ViewRefusal =
   /** Finalized L1 from an hour before `opens_at` to past `closes_at` is longer than `maxRunBytes`. */
   | "l1-run-short"
   /** The blocks the seat pinned before attesting no longer hold the ballot extent it attested. */
-  | "extent-lost";
+  | "extent-lost"
+  /** The seat holds no copy of the transcript it approved: it approved before it kept one. */
+  | "transcript";
 
 export class ViewError extends Error {
   override readonly name = "ViewError";

@@ -122,6 +122,12 @@ interface Kind<K extends string, S> {
   readonly deadline: (election: ApprovedElection) => bigint;
   /** Whether `status`, from a step begun at `wall`, ends the duty. */
   readonly settles: (status: S, wall: bigint, deadline: bigint) => boolean;
+  /**
+   * Whether a step begun past the deadline is never taken, rather than
+   * taken once more: the tally's, since past `t_D` the seat may combine
+   * nothing and send no sum (docs/spec/tally.md, Destruction).
+   */
+  readonly noStepPast?: boolean;
 }
 
 /** One kind of duty for every election the seat approved, each built once and stepped until it settles. */
@@ -172,6 +178,7 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
         duty = await this.#build(stubHash, name, wall);
         if (duty === undefined) return;
       }
+      if (this.#kind.noStepPast && wall > duty.deadline) return this.#settle(name);
       const status = await duty.seat.step();
       this.#report(name, status);
       if (this.#kind.settles(status, wall, duty.deadline)) this.#settle(name);
@@ -204,6 +211,13 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
     const election = await this.#o.seat.approvedElection(stubHash);
     // Listed as approved, so its records exist; approvedElection throws if they don't.
     if (election === undefined) throw new Error(`trustee node: approval ${name} has no election`);
+    // Not even set up past it: building reads the counted set's sources, and
+    // a node restarted past `t_D` steps nothing.
+    if (this.#kind.noStepPast && wall > this.#kind.deadline(election)) {
+      this.#settle(name);
+      this.#o.log({ event: `${this.#kind.name}-abandoned`, stubHash: name } as KindEvent<K, S>);
+      return undefined;
+    }
     let seat;
     try {
       seat = await this.#o.build(election);
@@ -382,8 +396,13 @@ export function tallyDeadline(election: ApprovedElection, clock: DeadlineClock):
  * The tally duty of every election the seat approved: each one's
  * `TallyDuty`, stepped from the approval (it reads nothing before the
  * summed-share rule allows) until every cell is opened, the election is
- * unavailable, the seat refuses its counted set, or `t_D` has passed, when
- * the seat may combine nothing more (Destruction). `receive` hands a
+ * unavailable, the seat refuses its counted set (for good: a refusal is the
+ * operator's to look into, and stepping on could only sum over a set the
+ * seat already refused once; T-54), or `t_D` has passed, when the seat may
+ * combine nothing more (Destruction): no step begins past `t_D`, nor is a
+ * duty set up, so a node restarted then signs and sends nothing. `t_D` is
+ * read on the node's clock, not finalized L1's, which destruction will
+ * need. `receive` hands a
  * summed-share message to every election's duty built and not settled;
  * each runs crypto's checks, and one of another election fails at its
  * context (T-39).
@@ -394,6 +413,7 @@ export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyS
       {
         name: "tally",
         deadline: (e) => tallyDeadline(e, clock),
+        noStepPast: true,
         settles: (status, wall, deadline) => {
           switch (status.state) {
             case "unavailable":

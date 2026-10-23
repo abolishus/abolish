@@ -696,6 +696,25 @@ describe("run with the availability duty", () => {
       }),
     ).toBeUndefined();
     expect(asked).toEqual([]);
+    // With the counted extent's attestation stored, it reads the extent
+    // again through the seat's own L1 node.
+    const counted = new Uint8Array(32).fill(3);
+    await store.putOnce(`availability/${hex(counted)}/counted/attestation`, Uint8Array.of(1));
+    await expect(
+      w.counted.extent({
+        index: 1,
+        stubHash: new Uint8Array(32),
+        definitionHash: counted,
+        electionId: new Uint8Array(32),
+        opensAt: 0n,
+        closesAt: 0n,
+        l1InclusionBound: 0n,
+        members: 0n,
+        signingSecret: new Uint8Array(32),
+        kemKeyPair: kemKeygen(),
+      }),
+    ).rejects.toThrow("not asked");
+    expect(asked.length).toBeGreaterThan(0);
   });
 
   test("refuses an account key others can read", async () => {

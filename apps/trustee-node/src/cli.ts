@@ -80,6 +80,7 @@ import {
   type CountedSourceOptions,
   obligationView,
   tallyDefinition,
+  ViewError,
   type ViewOptions,
 } from "./view.ts";
 
@@ -207,7 +208,14 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
     io.err({ error: `availability: ${e.message}` });
     return 1;
   }
-  const endpoint = await intakeEndpoint(config, seat, store, io);
+  let endpoint;
+  try {
+    endpoint = await intakeEndpoint(config, seat, store, io);
+  } catch (e) {
+    // Nothing runs, so nothing may stay listening.
+    if (availability !== undefined) await closeDuties(availability);
+    throw e;
+  }
   io.out({
     event: "started",
     seat: config.seat,
@@ -237,16 +245,18 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
     }),
   );
   const outcomes = await Promise.allSettled(loops);
-  if (availability !== undefined) {
-    const { server } = availability;
-    server.close();
-    server.closeAllConnections();
-    await once(server, "close");
-    await availability.channel?.close();
-  }
+  if (availability !== undefined) await closeDuties(availability);
   await endpoint?.close();
   for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
   return 0;
+}
+
+/** Closes the gateway and the summed-share channel. */
+async function closeDuties({ server, channel }: Duties): Promise<void> {
+  server.close();
+  server.closeAllConnections();
+  await once(server, "close");
+  await channel?.close();
 }
 
 /**
@@ -525,10 +535,12 @@ async function tallyDuties(
       log: (e: DutyEvent) => io.out(e),
       build: async (election) => {
         const secrets = await seat.intakeSecrets(election.stubHash);
+        // Listed as approved, so its secrets exist; intakeSecrets throws if they don't.
+        if (secrets === undefined) throw new Error("trustee node: an approval without its secrets");
+        // An approval from before the seat kept its copy gives this election
+        // up, reported, rather than stopping the node.
         const transcript = await seat.approvedTranscript(election.stubHash);
-        // Listed as approved, so both exist; each throws if its records don't.
-        if (secrets === undefined || transcript === undefined)
-          throw new Error("trustee node: an approval without its secrets or transcript");
+        if (transcript === undefined) throw new ViewError("transcript");
         const definition = await tallyDefinition(wiring.view, election);
         const reader = await l1BoardAnchors(
           wiring.anchors,

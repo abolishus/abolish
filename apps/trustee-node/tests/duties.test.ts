@@ -723,8 +723,8 @@ describe("the tally duties", () => {
     ]);
   });
 
-  test("stop stepping past its deadline whatever the status, and retry a node's failures until then", async () => {
-    let wall = DEADLINE;
+  test("take no step past its deadline whatever the status, and retry a node's failures until then", async () => {
+    let wall = DEADLINE - 1n;
     const h = tally(
       new Map<number, TallyScript>([
         [1, [new RpcError("eth_getLogs: status 503"), { state: "waiting" }]],
@@ -733,12 +733,14 @@ describe("the tally duties", () => {
       () => wall,
     );
     await h.duties.step();
+    wall = DEADLINE;
     await h.duties.step();
+    // Past t_D the seat combines nothing and sends no sum: no step begins.
     wall = DEADLINE + 1n;
     await h.duties.step();
     await h.duties.step();
-    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
-    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(3);
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(2);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(2);
     expect(h.events[0]).toEqual({
       event: "tally-error",
       stubHash: name(1),
@@ -747,18 +749,50 @@ describe("the tally duties", () => {
     });
   });
 
+  test("set nothing up for an election once t_D has passed, so a node restarted then steps nothing", async () => {
+    const events: TallyEvent[] = [];
+    let built = 0;
+    const duties = new TallyDuties(
+      {
+        seat: {
+          approvedStubs: async () => [approvedOf(1).stubHash],
+          approvedElection: async () => approvedOf(1),
+        },
+        build: async () => {
+          built++;
+          return {
+            deadline: 0n,
+            step: async () => ({ state: "waiting" }),
+            receive: async () => {},
+          };
+        },
+        clock: () => tallyDeadline(approvedOf(1), CLOCK) + 1n,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    await duties.step();
+    await duties.step();
+    expect(built).toBe(0);
+    expect(events).toEqual([{ event: "tally-abandoned", stubHash: name(1) }]);
+  });
+
   test("hand each summed-share message to every duty built and not settled, and to no other", async () => {
     const h = tally(
       new Map<number, TallyScript>([
         [1, [{ state: "tallying", cells: [combining] }]],
         [2, [{ state: "unavailable" }]],
+        [3, [{ state: "tallying", cells: [combining] }]],
       ]),
     );
     // Before any step no duty is built, so a message reaches none.
     await h.duties.receive(Uint8Array.of(0));
     await h.duties.step();
     await h.duties.receive(Uint8Array.of(1));
-    expect(h.received).toEqual([`${name(1)}:01`]);
+    await h.duties.receive(Uint8Array.of(2));
+    expect(h.received.sort()).toEqual(
+      [`${name(1)}:01`, `${name(1)}:02`, `${name(3)}:01`, `${name(3)}:02`].sort(),
+    );
   });
 
   test("t_D is the later of the tally window's end and the anchoring deadline of the segment before s_T", () => {

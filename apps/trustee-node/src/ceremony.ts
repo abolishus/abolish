@@ -530,16 +530,14 @@ export class CeremonySeat {
 
   /**
    * The ceremony transcript the seat's approval of the stub signed for, as
-   * it was approved; undefined unless this seat approved the stub.
+   * it was approved; undefined unless this seat approved the stub, or
+   * approved it before the seat kept its own copy.
    */
   async approvedTranscript(stubHash: Uint8Array): Promise<Uint8Array | undefined> {
     if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
     const name = hex(stubHash);
     if ((await this.#durable(`approvals/${name}`)) === undefined) return undefined;
-    const transcript = await this.#durable(`transcripts/${name}`);
-    if (transcript === undefined)
-      throw new Error(`trustee node: approval of ${name} without its transcript`);
-    return transcript;
+    return this.#durable(`transcripts/${name}`);
   }
 
   /** Whether the seat holds an approval for the stub these bytes decode to. */

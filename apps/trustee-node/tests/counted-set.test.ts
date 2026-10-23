@@ -165,11 +165,13 @@ describe("the counted set from the counted extent", () => {
   test("leaves out a ballot whose receipt was boarded after the delivery window", () => {
     const entries = extent([
       { segment: 3, payload: second.bytes },
-      ...(receipts.get(second) as Uint8Array[]).map((payload, i) => ({
-        // Seat 2's receipt is one segment late.
-        segment: i === 1 ? sD + 1 : sD,
-        payload,
-      })),
+      ...(receipts.get(second) as Uint8Array[])
+        .map((payload, i) => ({
+          // Seat 2's receipt is one segment late, boarded after the others.
+          segment: i === 1 ? sD + 1 : sD,
+          payload,
+        }))
+        .sort((a, b) => a.segment - b.segment),
     ]);
     expect(countedSet(inputs(entries))).toEqual({
       ok: true,

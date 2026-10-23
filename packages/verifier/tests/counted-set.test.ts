@@ -217,8 +217,20 @@ describe("the counted set from the counted extent", { timeout: 60_000 }, () => {
     expect(() => countedSet({ ...base, entries: [...base.entries, past] })).toThrow(RangeError);
     const atS = encodeBoardEntry({ ...last, index: last.index + 1n, segment: sS }, version);
     expect(countedSet({ ...base, entries: [...base.entries, atS] }).ok).toBe(true);
-    const other = encodeBoardEntry({ ...last, election_id: new Uint8Array(32).fill(1) }, version);
+    const other = encodeBoardEntry(
+      { ...last, index: last.index + 1n, election_id: new Uint8Array(32).fill(1) },
+      version,
+    );
     expect(() => countedSet({ ...base, entries: [...base.entries, other] })).toThrow(RangeError);
+    // Out of the board's order: a skipped index, or a segment going back.
+    const skipped = encodeBoardEntry({ ...last, index: last.index + 2n }, version);
+    expect(() => countedSet({ ...base, entries: [...base.entries, skipped] })).toThrow(RangeError);
+    const later = encodeBoardEntry({ ...last, index: last.index + 1n, segment: 2 }, version);
+    const back = encodeBoardEntry({ ...last, index: last.index + 2n, segment: 1 }, version);
+    expect(countedSet({ ...base, entries: [...base.entries, later] }).ok).toBe(true);
+    expect(() => countedSet({ ...base, entries: [...base.entries, later, back] })).toThrow(
+      RangeError,
+    );
     expect(() => countedSet({ ...base, entries: [...base.entries, Uint8Array.of(0)] })).toThrow(
       RangeError,
     );

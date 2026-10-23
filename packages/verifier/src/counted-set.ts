@@ -112,7 +112,8 @@ export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
       outcome: { status: "unverifiable", code: "not-reached", at: {} },
     };
   const sS = countedExtent(clock, d.closes_at, BigInt(d.l1_inclusion_bound)).segment;
-  for (const encoded of entries) {
+  let previous = 0;
+  for (const [at, encoded] of entries.entries()) {
     let entry;
     try {
       entry = decodeBoardEntry(encoded, boardEntryVersion);
@@ -124,6 +125,12 @@ export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
     if (!equal(entry.election_id, d.election_id))
       throw new RangeError("countedSet: an entry of another election");
     if (BigInt(entry.segment) > sS) throw new RangeError("countedSet: an entry past s_S");
+    // A board is indexed from 0 in order, its segments never decreasing
+    // (docs/spec/board.md, Board checks): selection reads each ballot's
+    // position as its index, so a copy out of order isn't the board's.
+    if (entry.index !== BigInt(at) || entry.segment < previous)
+      throw new RangeError("countedSet: entries out of the board's order");
+    previous = entry.segment;
   }
   // Every admission row settled (Selection, condition 1): one that can't be
   // evaluated may yet admit or reject a ballot.

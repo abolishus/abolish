@@ -8,6 +8,7 @@ import type {
   CloseRoundsReport,
   OpenRunsReport,
   PollOpenReport,
+  PostingDepositReport,
   PostingPruneReport,
   PostingTendReport,
   PostingTickReport,
@@ -208,7 +209,7 @@ export interface PollOpenLine extends PollOpenReport {
 }
 
 /** A step of the posting worker's loop (posting-runner.ts). */
-export type PostingStep = "tick" | "tend" | "prune";
+export type PostingStep = "tick" | "tend" | "deposit" | "prune";
 
 /**
  * What a round of the posting worker did, in counts only, written only when
@@ -225,6 +226,7 @@ export type PostingLine =
     }
   | ({ readonly queue: "{posting}"; readonly step: "tend" } & PostingTendReport)
   | ({ readonly queue: "{posting}"; readonly step: "prune" } & PostingPruneReport)
+  | ({ readonly queue: "{posting}"; readonly step: "deposit" } & PostingDepositReport)
   | {
       readonly queue: "{posting}";
       readonly step: PostingStep;

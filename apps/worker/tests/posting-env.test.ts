@@ -17,6 +17,8 @@ const full = {
   POSTING_KEY: `0x${POSTING_KEY}`,
   POSTING_FEE_CAP: "1000000000",
   POSTING_ELECTION_BUDGET: "50000000000000000",
+  POSTING_L1_RPC_URL: "https://l1.example/v2/provider-api-key",
+  POSTING_L1_FEE_CAP: "30000000000",
 };
 
 const refusal = (env: Record<string, string>) => {
@@ -44,6 +46,8 @@ describe("the posting worker's configuration", () => {
       boardBlock: 1234n,
       feeCap: 1_000_000_000n,
       budget: 50_000_000_000_000_000n,
+      l1RpcUrl: full.POSTING_L1_RPC_URL,
+      l1FeeCap: 30_000_000_000n,
     });
     expect(Buffer.from(c?.key ?? []).toString("hex")).toBe(POSTING_KEY);
     expect(Buffer.from(postingFromEnv({ ...full, POSTING_KEY })?.key ?? []).toString("hex")).toBe(
@@ -84,6 +88,13 @@ describe("the posting worker's configuration", () => {
       [{ POSTING_ELECTION_BUDGET: "-1" }, "malformed POSTING_ELECTION_BUDGET"],
       [{ POSTING_ELECTION_BUDGET: "0.05" }, "malformed POSTING_ELECTION_BUDGET"],
       [{ POSTING_ELECTION_BUDGET: (2n ** 128n).toString() }, "malformed POSTING_ELECTION_BUDGET"],
+      [
+        { POSTING_L1_RPC_URL: "ws://l1.example/v2/provider-api-key" },
+        "malformed POSTING_L1_RPC_URL",
+      ],
+      [{ POSTING_L1_FEE_CAP: "0" }, "malformed POSTING_L1_FEE_CAP"],
+      // A cancellation pays up to twice it, which must stay within a u128.
+      [{ POSTING_L1_FEE_CAP: (2n ** 127n).toString() }, "malformed POSTING_L1_FEE_CAP"],
     ];
     for (const [change, message] of cases) {
       const got = refusal({ ...full, ...change });

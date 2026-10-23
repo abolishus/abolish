@@ -26,8 +26,12 @@ export interface PostingConfig {
   readonly key: Uint8Array;
   /** The fee cap: the most wei per L2 gas any relayed call is signed to pay. */
   readonly feeCap: bigint;
-  /** The election budget: the most wei the relay spends on one election's postings. */
+  /** The election budget: the most wei the relay spends on one election's postings, deposits included. */
   readonly budget: bigint;
+  /** The L1 node the forced path reads, estimates against and sends its deposits to. */
+  readonly l1RpcUrl: string;
+  /** The L1 fee cap: the most wei per L1 gas any deposit is signed to pay. */
+  readonly l1FeeCap: bigint;
 }
 
 export const POSTING_ENV = [
@@ -39,6 +43,8 @@ export const POSTING_ENV = [
   "POSTING_KEY",
   "POSTING_FEE_CAP",
   "POSTING_ELECTION_BUDGET",
+  "POSTING_L1_RPC_URL",
+  "POSTING_L1_FEE_CAP",
 ] as const;
 
 type PostingEnv = Partial<Record<(typeof POSTING_ENV)[number], string>>;
@@ -62,6 +68,9 @@ const Public = z.strictObject({
   POSTING_BOARD_BLOCK: Uint(2n ** 64n - 1n),
   POSTING_FEE_CAP: Uint(2n ** 128n - 1n).refine((v) => v > 0n),
   POSTING_ELECTION_BUDGET: Uint(2n ** 128n - 1n),
+  POSTING_L1_RPC_URL: z.url({ protocol: /^https?$/ }),
+  // Twice it bounds a cancellation's fee, which must stay within a u128.
+  POSTING_L1_FEE_CAP: Uint(2n ** 127n - 1n).refine((v) => v > 0n),
 });
 
 /**
@@ -96,5 +105,7 @@ export function postingFromEnv(env: PostingEnv): PostingConfig | undefined {
     key: Uint8Array.from(Buffer.from(hex, "hex")),
     feeCap: p.POSTING_FEE_CAP,
     budget: p.POSTING_ELECTION_BUDGET,
+    l1RpcUrl: p.POSTING_L1_RPC_URL,
+    l1FeeCap: p.POSTING_L1_FEE_CAP,
   };
 }

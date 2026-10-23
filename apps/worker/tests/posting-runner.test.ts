@@ -1,5 +1,7 @@
 import type {
+  PostingDepositReport,
   PostingHead,
+  PostingL1Head,
   PostingPruneReport,
   PostingTendReport,
   PostingTickReport,
@@ -8,10 +10,11 @@ import { describe, expect, test } from "vite-plus/test";
 import { type LogLine, type PostingRunnerOptions, startPostingRunner } from "../src/index.ts";
 
 // The posting worker's loop (P2-8 part 2b-2b-2b-2b-2; docs/spec/posting-relay.md,
-// Queue, In flight and Pruning): each round ticks the queue, then tends what is
-// in flight at the latest head, and every so many rounds prunes at the
-// finalized head; one round at a time, each step's failure its own, and a log
-// of counts and steps only (T-10, T-18).
+// Queue, In flight, Pruning and Depositing): each round ticks the queue, then
+// tends what is in flight at the latest head, every so many rounds tends the
+// deposits at the L1's latest and finalized heads (part 2b-2b-2b-2b-3b-2), and
+// every so many prunes at the finalized head; one round at a time, each
+// step's failure its own, and a log of counts and steps only (T-10, T-18).
 
 const LATEST: PostingHead = { number: 100n, timestamp: 1_000n };
 const FINALIZED: PostingHead = { number: 90n, timestamp: 980n };
@@ -38,6 +41,24 @@ const TEND: PostingTendReport = {
   failed: 0,
 };
 const PRUNE: PostingPruneReport = { final: 0, expired: 0, elections: 0, failed: 0 };
+const L1_LATEST: PostingL1Head = { number: 7n, timestamp: 990n };
+const L1_FINALIZED: PostingL1Head = { number: 5n, timestamp: 966n };
+const DEPOSIT: PostingDepositReport = {
+  deposited: 0,
+  held: 0,
+  rebroadcast: 0,
+  replaced: 0,
+  cancelled: 0,
+  landed: 0,
+  failed: 0,
+  unsettled: 0,
+  final: 0,
+  unseen: 0,
+  consumed: 0,
+  released: 0,
+  unjudged: 0,
+  errors: 0,
+};
 
 /** Resolves once `done` holds, checking every millisecond for up to two seconds. */
 async function until(done: () => boolean): Promise<void> {
@@ -54,6 +75,7 @@ function fakes(
     tick?: (round: number) => Promise<PostingTickReport | null>;
     tend?: (round: number) => Promise<PostingTendReport>;
     prune?: (round: number) => Promise<PostingPruneReport>;
+    deposit?: (round: number) => Promise<PostingDepositReport>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -61,6 +83,7 @@ function fakes(
   let ticks = 0;
   let tends = 0;
   let prunes = 0;
+  let deposits = 0;
   const options: PostingRunnerOptions = {
     worker: {
       tick: () => {
@@ -82,30 +105,46 @@ function fakes(
       latest: () => Promise.resolve(LATEST),
       finalized: () => Promise.resolve(FINALIZED),
     },
+    deposits: {
+      tend: (heads) => {
+        calls.push(`deposit ${heads.latest.number} ${heads.finalized.number}`);
+        return answers.deposit?.(deposits++) ?? Promise.resolve(DEPOSIT);
+      },
+    },
+    l1: {
+      latest: () => Promise.resolve(L1_LATEST),
+      finalized: () => Promise.resolve(L1_FINALIZED),
+    },
     log: (line) => lines.push(line),
     tickMs: 1,
     pruneEveryMs: 3,
+    depositEveryMs: 2,
   };
   return { options, calls, lines, rounds: () => calls.filter((c) => c === "tick").length };
 }
 
 describe("the posting worker's loop", () => {
-  test("ticks, then tends at the latest head each round, and prunes at the finalized head every few", async () => {
+  test("ticks, then tends at the latest head each round, deposits at the L1's heads and prunes at the finalized head every few", async () => {
     const f = fakes();
     const runner = startPostingRunner(f.options);
-    await until(() => f.rounds() >= 7);
+    await until(() => f.rounds() >= 8);
     await runner.close();
     const round = ["tick", "tend 100"];
-    expect(f.calls.slice(0, 18)).toEqual([
+    const deposit = "deposit 7 5";
+    expect(f.calls.slice(0, 21)).toEqual([
       ...round,
+      deposit,
       "prune 90",
       ...round,
       ...round,
+      deposit,
       ...round,
       "prune 90",
       ...round,
+      deposit,
       ...round,
       ...round,
+      deposit,
       "prune 90",
     ]);
     // Nothing moved, so nothing is logged.
@@ -118,6 +157,7 @@ describe("the posting worker's loop", () => {
         n === 1 ? { ...TICK, answered: { ...ANSWERED, sent: 2 }, kept: 1 } : TICK,
       tend: async (n) => (n === 2 ? { ...TEND, landed: 1 } : TEND),
       prune: async (n) => (n === 1 ? { ...PRUNE, expired: 3, elections: 1 } : PRUNE),
+      deposit: async (n) => (n === 1 ? { ...DEPOSIT, deposited: 1, held: 2 } : DEPOSIT),
     });
     const runner = startPostingRunner(f.options);
     await until(() => f.rounds() >= 5);
@@ -125,6 +165,7 @@ describe("the posting worker's loop", () => {
     expect(f.lines).toEqual([
       { queue: "{posting}", step: "tick", answered: { ...ANSWERED, sent: 2 }, kept: 1 },
       { queue: "{posting}", step: "tend", ...TEND, landed: 1 },
+      { queue: "{posting}", step: "deposit", ...DEPOSIT, deposited: 1, held: 2 },
       { queue: "{posting}", step: "prune", ...PRUNE, expired: 3, elections: 1 },
     ]);
   });
@@ -148,6 +189,8 @@ describe("the posting worker's loop", () => {
         if (n === 0) throw new Error("the finalized head is ahead of the clock");
         return PRUNE;
       },
+      // A due posting no election's times let it judge, then a good tend.
+      deposit: async (n) => (n === 0 ? { ...DEPOSIT, unjudged: 1 } : DEPOSIT),
     });
     const runner = startPostingRunner(f.options);
     await until(() => f.rounds() >= 5);
@@ -156,9 +199,12 @@ describe("the posting worker's loop", () => {
       { queue: "{posting}", step: "tick", outcome: "failing" },
       { queue: "{posting}", step: "tend", ...TEND, failed: 1 },
       { queue: "{posting}", step: "tend", outcome: "failing" },
+      { queue: "{posting}", step: "deposit", ...DEPOSIT, unjudged: 1 },
+      { queue: "{posting}", step: "deposit", outcome: "failing" },
       { queue: "{posting}", step: "prune", outcome: "failing" },
       { queue: "{posting}", step: "tick", outcome: "recovered" },
       { queue: "{posting}", step: "tend", outcome: "recovered" },
+      { queue: "{posting}", step: "deposit", outcome: "recovered" },
       { queue: "{posting}", step: "prune", outcome: "recovered" },
     ]);
     const text = JSON.stringify(f.lines);
@@ -170,18 +216,21 @@ describe("the posting worker's loop", () => {
     const f = fakes({
       tick: () => Promise.reject(new Error("Redis is down")),
       tend: () => Promise.reject(new Error("Postgres is down")),
+      deposit: () => Promise.reject(new Error("the L1 node is down")),
     });
     const runner = startPostingRunner(f.options);
     await until(() => f.rounds() >= 4);
     await runner.close();
-    expect(f.calls.slice(0, 7)).toEqual([
+    expect(f.calls.slice(0, 9)).toEqual([
       "tick",
       "tend 100",
+      "deposit 7 5",
       "prune 90",
       "tick",
       "tend 100",
       "tick",
       "tend 100",
+      "deposit 7 5",
     ]);
   });
 
@@ -232,9 +281,9 @@ describe("the posting worker's loop", () => {
     await closing;
     const after = f.calls.length;
     await new Promise((r) => setTimeout(r, 10));
-    // The held round finished its tend; no round started after it.
+    // The held round finished its tend and deposits; no round started after it.
     expect(f.calls.length).toBe(after);
-    expect(f.calls.at(-1)).toBe("tend 100");
+    expect(f.calls.slice(-2)).toEqual(["tend 100", "deposit 7 5"]);
     expect(f.rounds()).toBe(3);
     expect(most).toBe(1);
   });
@@ -244,6 +293,9 @@ describe("the posting worker's loop", () => {
     expect(() => startPostingRunner({ ...options, tickMs: 0 })).toThrow(RangeError);
     expect(() => startPostingRunner({ ...options, tickMs: 1.5 })).toThrow(RangeError);
     expect(() => startPostingRunner({ ...options, tickMs: 10, pruneEveryMs: 5 })).toThrow(
+      RangeError,
+    );
+    expect(() => startPostingRunner({ ...options, tickMs: 10, depositEveryMs: 5 })).toThrow(
       RangeError,
     );
   });

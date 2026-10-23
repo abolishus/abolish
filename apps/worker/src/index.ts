@@ -136,10 +136,21 @@ export {
   PostingChainError,
   type PostingChainOptions,
   type PostingDeployment,
+  type PostingDeploymentRead,
   ViemPostingChain,
 } from "./posting-chain.ts";
+export {
+  checkPostingL1,
+  type PostingL1Deployment,
+  type PostingL1Options,
+  postingDepositChain,
+  type PostingRegistryOptions,
+  ViemPostingL1,
+  ViemPostingRegistry,
+} from "./posting-l1.ts";
 export { POSTING_ENV, type PostingConfig, postingFromEnv } from "./posting-env.ts";
 export {
+  POSTING_DEPOSIT_EVERY_MS,
   POSTING_PRUNE_EVERY_MS,
   type PostingRunnerOptions,
   type RunningPostingRunner,

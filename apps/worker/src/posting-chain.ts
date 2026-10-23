@@ -80,8 +80,8 @@ const gasPriceOracleAbi = parseAbi(["function getL1Fee(bytes) view returns (uint
 const SHARE_POSTED = keccak256(toBytes("SharePosted(bytes32,bytes32,bytes)"));
 
 const U64_MAX = (1n << 64n) - 1n;
-const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/;
-const HASH = /^0x[0-9a-f]{64}$/;
+export const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/;
+export const HASH = /^0x[0-9a-f]{64}$/;
 
 export interface PostingChainOptions {
   /** One L2 node; its HTTP transport should time out well within core's `POSTING_CHAIN_TIMEOUT_MS`. */
@@ -96,6 +96,14 @@ export interface PostingChainOptions {
   readonly logRange?: bigint;
   /** Blocks behind the head a posting's first search starts at; `POSTING_LOOKBACK` by default. */
   readonly lookback?: bigint;
+  /**
+   * Prices a deposit of the call on L1 for the reserve a first send counts
+   * (docs/spec/posting-relay.md, Depositing, step 2), as `ViemPostingL1`
+   * does; without it every reserve is 0, as on a chain with no forced path.
+   */
+  readonly deposits?: {
+    reserve(posting: Uint8Array, ballot: Uint8Array, gasLimit: bigint): Promise<bigint>;
+  };
 }
 
 export interface PostingDeployment {
@@ -105,6 +113,15 @@ export interface PostingDeployment {
   readonly fromBlock: bigint;
   /** The posting key's address, as `ViemPostingChain.address` gives it. */
   readonly address: Address;
+}
+
+/** What the startup check read of the board's deployment at the L2's finalized head. */
+export interface PostingDeploymentRead {
+  /** The board's election registry, whose `DefinitionRegistered` events the forced path weighs. */
+  readonly registry: Address;
+  /** The L1 the registry names, and its L1 relay, which names the portal deposits go through. */
+  readonly l1ChainId: bigint;
+  readonly l1Relay: Address;
 }
 
 /**
@@ -118,12 +135,13 @@ export interface PostingDeployment {
  * EIP-7702 delegation lets other code spend, which isn't the externally
  * owned account a deposit's sender must be (docs/spec/posting-relay.md,
  * Roles; T-50, T-52). The node is trusted for none of it beyond startup:
- * every posting is judged again by the board itself.
+ * every posting is judged again by the board itself. Returns the registry
+ * and what it names on L1, for the forced path's check (`checkPostingL1`).
  */
 export async function checkPostingDeployment(
   client: PublicClient,
   deployment: PostingDeployment,
-): Promise<void> {
+): Promise<PostingDeploymentRead> {
   const chainId = BigInt(await client.getChainId());
   if (chainId !== deployment.chainId) throw new Error("the L2 node is on another chain");
   const blockNumber = (await client.getBlock({ blockTag: "finalized" })).number;
@@ -168,15 +186,34 @@ export async function checkPostingDeployment(
   );
   if (getAddress(named) !== getAddress(deployment.board))
     throw new Error("the board's election registry names another board");
+  const [l1ChainId, l1Relay] = await Promise.all([
+    client.readContract({
+      address: registry,
+      abi: electionRegistryAbi,
+      functionName: "l1ChainId",
+      blockNumber,
+    }),
+    client.readContract({
+      address: registry,
+      abi: electionRegistryAbi,
+      functionName: "l1Relay",
+      blockNumber,
+    }),
+  ]);
   const code = await client.getCode({ address: deployment.address, blockTag: "latest" });
   if (code !== undefined && code !== "0x") throw new Error("the posting key's account holds code");
+  return {
+    registry: getAddress(registry),
+    l1ChainId: BigInt(l1ChainId),
+    l1Relay: getAddress(l1Relay),
+  };
 }
 
-/** A call to the node failed, or it answered something it can't have. Names the step only. */
+/** A call to a node failed, or it answered something it can't have. Names the node and the step only. */
 export class PostingChainError extends Error {
   override readonly name = "PostingChainError";
-  constructor(step: string) {
-    super(`the posting relay's L2 node: ${step}`);
+  constructor(step: string, node: "L1" | "L2" = "L2") {
+    super(`the posting relay's ${node} node: ${step}`);
   }
 }
 
@@ -204,6 +241,7 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
   readonly #range: bigint;
   readonly #lookback: bigint;
   readonly #searches = new Map<Hex, Search>();
+  readonly #deposits: PostingChainOptions["deposits"];
   // Whether the chain prices L1 data, once seen: an OP Stack chain's oracle
   // is a predeploy that never goes away, so a receipt without its L1 fee is
   // refused there rather than counted at nothing.
@@ -225,6 +263,7 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
     this.#account = postingAccount(options.key);
     this.#range = range;
     this.#lookback = lookback;
+    this.#deposits = options.deposits;
   }
 
   /** The posting key's address, which pays for every call. */
@@ -300,12 +339,16 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
   costs(posting: Uint8Array, ballot: Uint8Array, gasLimit: bigint): Promise<PostingCosts> {
     return guard("costs", async () => {
       checkGasLimit(gasLimit);
+      // The reserve of a deposit priced as one would be now; an L1 node that
+      // fails fails the send (Depositing, step 2).
+      const deposit =
+        this.#deposits === undefined ? 0n : await this.#deposits.reserve(posting, ballot, gasLimit);
       const code = await this.#client.getCode({ address: GAS_PRICE_ORACLE });
       if (code === undefined || code === "0x") {
         // A chain with no oracle (a local Anvil) charges no L1 fee; one
         // that had it doesn't lose it.
         if (this.#oracle) throw new Error("the fee oracle went away");
-        return { l1DataFee: 0n, deposit: 0n };
+        return { l1DataFee: 0n, deposit };
       }
       this.#oracle = true;
       // Priced at the widest nonce and fees, so the signed call's bytes are
@@ -327,9 +370,7 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
         functionName: "getL1Fee",
         args: [unsigned],
       });
-      // No deposit yet: the forced path (part 2b-2b-2b-2b-3) sends none, so
-      // there is nothing on L1 to reserve for.
-      return { l1DataFee, deposit: 0n };
+      return { l1DataFee, deposit };
     });
   }
 
@@ -457,6 +498,62 @@ export class ViemPostingChain implements PostingChain, PostingKeyChain {
     });
   }
 
+  /**
+   * Whether the transaction `hash` names is in an L2 block at the L2's safe
+   * head, the head derived from L1 data, which a sequencer can't withhold
+   * from L1 and still claim (Depositing; T-50): its receipt's block at or
+   * below the safe block, and that block's hash the receipt's.
+   */
+  includedSafe(hash: Uint8Array): Promise<boolean> {
+    return guard("safe inclusion", async () => {
+      if (hash.length !== 32) throw new Error("a hash out of form");
+      const wanted = bytesToHex(hash);
+      const r = (await this.#client.request({
+        method: "eth_getTransactionReceipt",
+        params: [wanted],
+      } as never)) as Record<string, unknown> | null;
+      if (r === null) return false;
+      if (typeof r !== "object") throw new Error("a malformed receipt");
+      const { transactionHash, blockNumber, blockHash } = r;
+      if (typeof transactionHash !== "string" || transactionHash.toLowerCase() !== wanted)
+        throw new Error("another receipt");
+      if (
+        typeof blockNumber !== "string" ||
+        !QUANTITY.test(blockNumber.toLowerCase()) ||
+        typeof blockHash !== "string" ||
+        !HASH.test(blockHash.toLowerCase())
+      )
+        throw new Error("a malformed receipt");
+      const safe = await this.#client.getBlock({ blockTag: "safe" });
+      if (safe.number === null) throw new Error("a pending block");
+      const number = BigInt(blockNumber);
+      if (number > safe.number) return false;
+      // The receipt is of the node's latest view; a block it names that the
+      // safe chain doesn't hold at that height isn't safe.
+      const block = await this.#client.getBlock({ blockNumber: number });
+      return block.hash !== null && block.hash.toLowerCase() === blockHash.toLowerCase();
+    });
+  }
+
+  /** Whether a `SharePosted` event of the board at the L2's safe head has exactly `posting` as its record (Depositing). */
+  postedSafe(posting: Uint8Array): Promise<boolean> {
+    return guard("safe posting event", async () => {
+      const event = postingEvent(posting);
+      const [safe, finalized] = await Promise.all([
+        this.#client.getBlock({ blockTag: "safe" }),
+        this.#client.getBlock({ blockTag: "finalized" }),
+      ]);
+      if (safe.number === null || finalized.number === null) throw new Error("a pending block");
+      if (finalized.number > safe.number) throw new Error("a finalized block past the safe one");
+      const search = this.#search(event.key, safe.number);
+      if (await this.#advance(search, event, finalized.number)) return true;
+      // Above the finalized block, as `posted`, read again on every ask.
+      const lo =
+        search.through + 1n > finalized.number + 1n ? search.through + 1n : finalized.number + 1n;
+      return lo <= safe.number && (await this.#found(event, lo, safe.number));
+    });
+  }
+
   #calldata(posting: Uint8Array, ballot: Uint8Array): Hex {
     return encodeFunctionData({
       abi: boardAbi,
@@ -578,7 +675,7 @@ function checkGasLimit(gasLimit: bigint): void {
 }
 
 /** The node's own words for an error, wherever viem wrapped them. */
-function nodeMessage(e: unknown): string {
+export function nodeMessage(e: unknown): string {
   if (!(e instanceof BaseError)) return e instanceof Error ? e.message : "";
   const parts: string[] = [];
   e.walk((c) => {
@@ -590,7 +687,7 @@ function nodeMessage(e: unknown): string {
 }
 
 /** viem read the node's answer as a revert (code 3). */
-function reverted(e: unknown): boolean {
+export function reverted(e: unknown): boolean {
   return (
     e instanceof BaseError &&
     e.walk(
@@ -602,23 +699,27 @@ function reverted(e: unknown): boolean {
 }
 
 /** The node answered with a JSON-RPC error, rather than failing to answer. */
-function answered(e: unknown): boolean {
+export function answered(e: unknown): boolean {
   return (
     e instanceof BaseError &&
     e.walk((c) => c instanceof RpcRequestError || c instanceof RpcError) !== null
   );
 }
 
-async function guard<T>(step: string, run: () => Promise<T>): Promise<T> {
+export async function guard<T>(
+  step: string,
+  run: () => Promise<T>,
+  node: "L1" | "L2" = "L2",
+): Promise<T> {
   try {
     return await run();
   } catch {
-    throw new PostingChainError(step);
+    throw new PostingChainError(step, node);
   }
 }
 
 /** The account a 32-byte key controls; a key out of secp256k1's range is refused without quoting it. */
-function postingAccount(key: Uint8Array) {
+export function postingAccount(key: Uint8Array) {
   if (key.length !== 32) throw new RangeError("the posting key must be 32 bytes");
   try {
     return privateKeyToAccount(bytesToHex(key));

@@ -36,6 +36,8 @@ const POSTING = {
   POSTING_KEY: KEY,
   POSTING_FEE_CAP: "1000000000",
   POSTING_ELECTION_BUDGET: "1000000000000000",
+  POSTING_L1_RPC_URL: "https://l1.example/v2/provider-api-key",
+  POSTING_L1_FEE_CAP: "30000000000",
 };
 
 let dir: string;

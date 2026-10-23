@@ -11,10 +11,12 @@
 // `duplicate-key` reads the author keys (T-14), and 3.1 and 3.2 hold per
 // panel: the author panel's transcript, found by `author_transcript_hash`,
 // is checked under its own context, quorum and participation, and its
-// registration, which no contract records, is the author approvals records
-// on the board (docs/spec/ceremony.md, Author panel; T-37, T-54, T-17).
-// The L2 side (the trustee registry's registration and its approvals) isn't
-// read yet, so 3.1 and 2.5 never pass here.
+// approvals are counted from the author approvals records on the board and,
+// under contract-event version 9, from the election registry's
+// `AuthorPanelRegistered` records there (docs/spec/ceremony.md, Author
+// panel; T-37, T-54, T-17). The default panel's L2 side (the trustee
+// registry's registration and its approvals) isn't read yet, so 3.1 and 2.5
+// never pass here.
 
 import {
   type AuthorApprovalsCode,
@@ -23,9 +25,11 @@ import {
   ceremonyTranscriptHash,
   checkAuthorApprovals,
   checkCeremonyTranscript,
+  checkContractEvent,
   DecodeError,
   type DecodeErrorCode,
   decodeBoardEntry,
+  decodeContractEvent,
   type ElectionDefinition,
   type ElectionDefinitionV6,
   type Panel,
@@ -88,6 +92,8 @@ export interface AuthorRun {
   readonly stubHash: Uint8Array;
   /** `author_transcript_hash`. */
   readonly transcriptHash: Uint8Array;
+  /** The definition's hash, which its `AuthorPanelRegistered` names. */
+  readonly definitionHash: Uint8Array;
 }
 
 type Status = "pass" | "fail" | "unverifiable";
@@ -125,15 +131,19 @@ const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
 ]);
 
 /**
- * The fields the ceremony checks read, the same in every definition version,
- * and version 6's `poll_class`, which 2.5's `panel-kind` reads.
+ * The fields the ceremony checks read, the same in every definition version
+ * (the L2 addresses for the author panel's registration), and version 6's
+ * `poll_class`, which 2.5's `panel-kind` reads.
  */
 type CeremonyDefinition = Pick<
   ElectionDefinition,
   | "profile"
   | "election_id"
   | "l2_chain_id"
+  | "election_registry"
   | "trustee_registry"
+  | "group_registry"
+  | "board"
   | "panel_id"
   | "threshold"
   | "panel_size"
@@ -184,6 +194,50 @@ function* ownPayloads(
 }
 
 const typeOf = (payload: Uint8Array) => ((payload[0] as number) << 8) | (payload[1] as number);
+
+/**
+ * The `registration` of every contract-event record of this election in the
+ * copy, wherever it sits, that decodes under contract-event version 9 and
+ * passes its event check as the definition's election registry's
+ * `AuthorPanelRegistered` naming `definitionHash` (Key ceremony, step 5).
+ * An approval is a seat's signed statement whoever boarded it, so, like an
+ * approvals record, it counts outside the anchored extent too; a record
+ * that doesn't decode or fails the check carries nothing here and is 4.4's
+ * to report. No earlier version names the event (T-53).
+ */
+function authorRegistrations(
+  d: CeremonyDefinition,
+  definitionHash: Uint8Array,
+  entries: readonly Uint8Array[],
+  boardEntryVersion: BoardEntryVersion,
+): Uint8Array[] {
+  if (pinnedVersion(d, RECORD_TYPES.contractEvent) !== 9) return [];
+  const contracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  const out: Uint8Array[] = [];
+  for (const [, payload] of ownPayloads(d.election_id, entries, boardEntryVersion)) {
+    if (typeOf(payload) !== RECORD_TYPES.contractEvent) continue;
+    let record;
+    try {
+      record = decodeContractEvent(payload, 9);
+    } catch (e) {
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+    const checked = checkContractEvent(record, contracts, 9);
+    if (
+      checked.ok &&
+      checked.event.event === "AuthorPanelRegistered" &&
+      equal(checked.event.definitionHash, definitionHash)
+    )
+      out.push(checked.event.registration);
+  }
+  return out;
+}
 
 type RunOutcome =
   | { readonly checked: false; readonly r31: CeremonyOutcome; readonly r32: CeremonyOutcome }
@@ -400,11 +454,13 @@ export function ceremonyChecks(
     boardEntryVersion,
     tag,
   );
-  // Its registration, which no contract records, is the approvals records
-  // on the board: every one of this election, wherever it sits, since an
-  // approval is a seat's signed statement whoever boarded it, checked
-  // against the key set this verifier's own check returned (ceremony.md,
-  // Author panel, Check and Boarding; T-37, T-17).
+  // Its approvals are the approvals records on the board and the election
+  // registry's registrations of this definition there: every one of this
+  // election, wherever it sits, since an approval is a seat's signed
+  // statement whoever boarded it, checked against the key set this
+  // verifier's own check returned, and a registration of another key set
+  // fails (ceremony.md, Author panel, Check, The registration's approvals
+  // and Boarding; T-37, T-17).
   let approvals: CeremonyOutcome = NOT_REACHED;
   let approving: readonly number[] | undefined;
   if (theirs.checked && theirs.registered !== undefined) {
@@ -421,6 +477,7 @@ export function ceremonyChecks(
         registered: theirs.registered,
       },
       records,
+      authorRegistrations(d, author.definitionHash, entries, boardEntryVersion),
     );
     approving = approved.seats ?? [];
     // `ceremony-participation` can't come back: the run met it above. A copy
@@ -430,7 +487,9 @@ export function ceremonyChecks(
       ? PASS
       : approved.code === "author-approvals-missing"
         ? { status: "unverifiable", code: "author-approvals-missing", at: tag }
-        : { status: "fail", code: "author-approvals", at: tag };
+        : approved.code === "key-set-mismatch"
+          ? { status: "fail", code: "key-set-mismatch", at: tag }
+          : { status: "fail", code: "author-approvals", at: tag };
   }
   const r32 = combine(own.r32, theirs.r32);
   return {

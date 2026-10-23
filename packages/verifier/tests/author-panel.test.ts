@@ -59,6 +59,33 @@ const file = read("author-ceremony.json") as {
       | { readonly ok: false; readonly code: string; readonly seats?: readonly number[] };
   }[];
 };
+// The same election's author panel registered on L2: the election registry's
+// `AuthorPanelRegistered` under contract-event version 9, with the
+// definition's L2 contracts and hash (docs/spec/vectors/author-registration.json,
+// packages/crypto/scripts/author-registration-vectors.py, an independent
+// implementation; ceremony.md, Author panel, The registration's approvals).
+const registrations = read("author-registration.json") as {
+  readonly election: {
+    readonly definitionHash: string;
+    readonly contracts: Readonly<
+      Record<"election-registry" | "trustee-registry" | "group-registry" | "board", string>
+    >;
+  };
+  readonly events: readonly {
+    readonly id: string;
+    readonly record: string;
+    readonly read: boolean;
+  }[];
+  readonly cases: readonly {
+    readonly id: string;
+    readonly transcript: string;
+    readonly records: readonly string[];
+    readonly events: readonly string[];
+    readonly result:
+      | { readonly ok: true; readonly seats: readonly number[] }
+      | { readonly ok: false; readonly code: string; readonly seats?: readonly number[] };
+  }[];
+};
 const definitions = read("election-definition.json") as {
   readonly vectors: readonly { readonly id: string; readonly encoding: string }[];
 };
@@ -92,19 +119,23 @@ const authorRun = (id: string): AuthorRun => {
     panel: panelOf(t.panel),
     stubHash: hex(election.authorStubHash),
     transcriptHash: hex(t.result.hash),
+    definitionHash: hex(registrations.election.definitionHash),
   };
 };
 
 // The fields the ceremony checks read, the same in every definition version:
 // the typical version-1 profile (transcript version 1) and the vector's
-// election, its default panel and its transcript's hash.
+// election, its L2 contracts, its default panel and its transcript's hash.
 const typical = definitions.vectors.find((v) => v.id === "definition-typical");
 if (typical === undefined) throw new Error("no typical definition");
 const d = {
   profile: decodeElectionDefinition(hex(typical.encoding)).profile,
   election_id: hex(election.electionId),
   l2_chain_id: BigInt(election.l2ChainId),
+  election_registry: hex(registrations.election.contracts["election-registry"]),
   trustee_registry: hex(election.trusteeRegistry),
+  group_registry: hex(registrations.election.contracts["group-registry"]),
+  board: hex(registrations.election.contracts.board),
   panel_id: panelId(defaultPanel),
   threshold: defaultPanel.threshold,
   panel_size: defaultPanel.keys.length,
@@ -478,6 +509,154 @@ describe("the author panel's run", () => {
 // The same through a format-4 bundle and the API's admission, under a
 // version-6 definition naming the vector's default panel: its transcript was
 // made for another stub, so only what precedes the transcript is decided.
+describe("the author panel's registration on L2", () => {
+  // The definition under a profile pinning contract-event version 9, the
+  // first whose tables name `AuthorPanelRegistered`.
+  const pinning = (version: number) => ({
+    ...d,
+    profile: {
+      ...d.profile,
+      pins: d.profile.pins.map((p) =>
+        p.record_type === RECORD_TYPES.contractEvent ? { ...p, version } : p,
+      ),
+    },
+  });
+  const d9 = pinning(9);
+  const eventOf = (id: string) => {
+    const e = registrations.events.find((x) => x.id === id);
+    if (e === undefined) throw new Error(`no event ${id}`);
+    return hex(e.record);
+  };
+  const copyOf = (c: (typeof registrations.cases)[number]) =>
+    board(
+      defaultTranscript,
+      hex(transcriptOf(c.transcript).transcript),
+      ...c.records.map(recordOf),
+      ...c.events.map(eventOf),
+    );
+
+  test("every registration vector decides 3.1's author part as the spec's check does", () => {
+    for (const c of registrations.cases) {
+      const r = ceremonyChecks(
+        d9,
+        hex(election.stubHash),
+        defaultPanel,
+        authorRun(c.transcript),
+        copyOf(c),
+        7,
+      );
+      const r31 = r.rows.get("3.1");
+      if (c.result.ok) {
+        expect(r31, c.id).toEqual({ status: "unverifiable", code: "not-implemented" });
+        // The author key set is registered only when they approve (T-37).
+        expect(r.authorRegistered, c.id).toBeDefined();
+      } else if (c.result.code === "ceremony-participation") {
+        expect(r.rows.get("3.2"), c.id).toMatchObject({
+          status: "fail",
+          code: "ceremony-participation",
+          at: { panel: "author" },
+        });
+        expect(r31, c.id).toEqual({ status: "unverifiable", code: "not-reached" });
+        expect(r.registered, c.id).toBeUndefined();
+        continue;
+      } else {
+        expect(r31, c.id).toEqual(
+          c.result.code === "author-approvals-missing"
+            ? { status: "unverifiable", code: c.result.code, at: { panel: "author" } }
+            : { status: "fail", code: c.result.code, at: { panel: "author" } },
+        );
+        // No key set is registered for the checks below (T-37).
+        expect(r.registered, c.id).toBeUndefined();
+        expect(r.authorRegistered, c.id).toBeUndefined();
+      }
+      expect(r.report?.author?.approvals, c.id).toEqual(c.result.seats ?? []);
+    }
+  }, 120_000);
+
+  test("under contract-event version 8, which names no such event, no registration is read", () => {
+    for (const c of registrations.cases.filter(
+      (x) => x.records.length === 0 && x.transcript === "author-honest-3",
+    )) {
+      const r = ceremonyChecks(
+        pinning(8),
+        hex(election.stubHash),
+        defaultPanel,
+        authorRun(c.transcript),
+        copyOf(c),
+        7,
+      );
+      expect(r.rows.get("3.1"), c.id).toEqual({
+        status: "unverifiable",
+        code: "author-approvals-missing",
+        at: { panel: "author" },
+      });
+    }
+  });
+
+  test("a registration counts wherever it sits, and another election's entry doesn't", () => {
+    const all = eventOf("all");
+    const first = ceremonyChecks(
+      d9,
+      hex(election.stubHash),
+      defaultPanel,
+      honest,
+      board(all, defaultTranscript, honestTranscript),
+      7,
+    );
+    expect(first.report?.author?.approvals).toEqual([1, 2, 3]);
+    expect(first.authorRegistered).toHaveLength(3);
+    const elsewhere = [
+      ...board(defaultTranscript, honestTranscript),
+      encodeBoardEntry(
+        { election_id: new Uint8Array(32).fill(9), index: 2n, segment: 0, payload: all },
+        7,
+      ),
+    ];
+    expect(
+      ceremonyChecks(d9, hex(election.stubHash), defaultPanel, honest, elsewhere, 7).rows.get(
+        "3.1",
+      ),
+    ).toEqual({
+      status: "unverifiable",
+      code: "author-approvals-missing",
+      at: { panel: "author" },
+    });
+  });
+
+  test("a registration names its own definition: another definition's hash isn't read", () => {
+    const r = ceremonyChecks(
+      d9,
+      hex(election.stubHash),
+      defaultPanel,
+      { ...honest, definitionHash: new Uint8Array(32).fill(1) },
+      board(defaultTranscript, honestTranscript, eventOf("all")),
+      7,
+    );
+    expect(r.rows.get("3.1")).toEqual({
+      status: "unverifiable",
+      code: "author-approvals-missing",
+      at: { panel: "author" },
+    });
+  });
+
+  test("a registration of another key set fails 3.1 beside approvals that approve", () => {
+    const r = ceremonyChecks(
+      d9,
+      hex(election.stubHash),
+      defaultPanel,
+      honest,
+      board(defaultTranscript, honestTranscript, recordOf("all"), eventOf("other-key-set")),
+      7,
+    );
+    expect(r.rows.get("3.1")).toEqual({
+      status: "fail",
+      code: "key-set-mismatch",
+      at: { panel: "author" },
+    });
+    expect(r.authorRegistered).toBeUndefined();
+  });
+});
+
 describe("a version-6 definition beside the default panel", () => {
   const l1File = read("l1-anchor.json") as {
     readonly clock: Readonly<Record<string, string>>;

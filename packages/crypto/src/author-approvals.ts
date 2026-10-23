@@ -4,7 +4,10 @@
 // definition and its own transcript check. The check stands in for the
 // trustee registry's quorum: a default seat runs it before lending its keys
 // (Stub checks, step 5), every seat before intake, the ballot client before
-// any share and the verifier in 3.1 (T-17, T-37, T-54).
+// any share and the verifier in 3.1 (T-17, T-37, T-54). Once the election
+// registry has registered the definition, its `AuthorPanelRegistered`
+// carries the approvals it counted, which every reader of the election's
+// events counts beside the records (The registration's approvals).
 
 import {
   bytesFixed,
@@ -15,7 +18,13 @@ import {
   struct,
   u8,
 } from "./codec.ts";
-import { checkedTranscriptHash, keySetEntry, keySetHash, type RegisteredKeys } from "./ceremony.ts";
+import {
+  checkedTranscriptHash,
+  decodeCeremonyRegistration,
+  keySetEntry,
+  keySetHash,
+  type RegisteredKeys,
+} from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { authorPanelId, type Panel, p256Sig, verifyAuthorCeremonyRegistration } from "./trustee.ts";
@@ -80,6 +89,7 @@ export interface AuthorApprovalContext {
 /** Why a set of approvals records doesn't approve the author transcript. */
 export type AuthorApprovalsCode =
   | "ceremony-participation"
+  | "key-set-mismatch"
   | "author-approvals"
   | "author-approvals-missing";
 
@@ -181,35 +191,90 @@ function counting(p: Prepared, record: AuthorApprovals): number[] | null {
 }
 
 /**
- * Author panel, Check: whether `records` approve the author transcript. A
- * transcript with fewer than `q_A` qualified seats is refused whatever the
- * records (`ceremony-participation`). Otherwise every record that decodes
- * strictly and names the transcript is counted, each seat once however
- * many valid signatures it has; it approves with at least `q_A` seats. With
- * none naming the transcript the check is `author-approvals-missing` (the
- * copy may lack them); with some that fall short, `author-approvals`.
+ * An `AuthorPanelRegistered` registration read as an approvals record naming
+ * the transcript, when its header is this run's (`author_panel_id`,
+ * `author_stub_hash`, `author_transcript_hash`) and its key set the
+ * checker's own; `key-set-mismatch` when its header is this run's and its
+ * key set isn't, since the board takes the author seats' keys from that
+ * set (T-37, T-14); undefined when it doesn't decode, has a seat above
+ * `n_A` or names another panel, stub or transcript, which the election
+ * registry never emits for this definition (contracts.md, Author panel
+ * registration, checks 2 to 9).
+ */
+function fromRegistration(
+  p: Prepared,
+  bytes: Uint8Array,
+): AuthorApprovals | "key-set-mismatch" | undefined {
+  let r;
+  try {
+    r = decodeCeremonyRegistration(bytes);
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  // The registry's check 6 bounds the seats by `n_A` (and the decoder made
+  // them strictly increasing from 1), so a seat above it is no registration
+  // of this run either, and a key set of one never reaches `keySetHash`.
+  if (
+    r.keySet.some((e) => e.index > p.n) ||
+    !equalBytes(r.panelId, p.panelId) ||
+    !equalBytes(r.stubHash, p.ctx.authorStubHash) ||
+    !equalBytes(r.ceremonyTranscriptHash, p.ctx.authorTranscriptHash)
+  )
+    return undefined;
+  if (!equalBytes(keySetHash(r.keySet), p.keySet)) return "key-set-mismatch";
+  return {
+    transcript_hash: r.ceremonyTranscriptHash,
+    approvals: r.approvals.map((a) => ({ index: a.index, signature: a.signature })),
+  };
+}
+
+/**
+ * Author panel, Check: whether `records` and `registrations` approve the
+ * author transcript. A transcript with fewer than `q_A` qualified seats is
+ * refused whatever they hold (`ceremony-participation`). `registrations`
+ * are the `registration` of every `AuthorPanelRegistered` whose
+ * `definitionHash` is the registered definition's, which only the caller
+ * can match (The registration's approvals): one naming this run whose key
+ * set isn't the checker's fails the check (`key-set-mismatch`). Otherwise
+ * every record that decodes strictly and names the transcript, and every
+ * registration of this run, is counted, each seat once however many valid
+ * signatures it has; it approves with at least `q_A` seats. With none
+ * naming the transcript the check is `author-approvals-missing` (the copy
+ * may lack them); with some that fall short, `author-approvals`.
  */
 export function checkAuthorApprovals(
   context: AuthorApprovalContext,
   records: readonly Uint8Array[],
+  registrations: readonly Uint8Array[] = [],
 ): AuthorApprovalsCheck {
   const p = prepare(context);
+  if (!Array.isArray(registrations))
+    throw new TypeError("author approvals: expected the registrations as an array");
   if (p.ctx.registered.length < p.quorum) return { ok: false, code: "ceremony-participation" };
-  let named = false;
-  const counted = new Set<number>();
+  const named: AuthorApprovals[] = [];
   for (const bytes of records) {
     const record = decoded(bytes);
     if (record instanceof DecodeError) continue;
-    if (!equalBytes(record.transcript_hash, p.ctx.authorTranscriptHash)) continue;
-    named = true;
-    for (const seat of counting(p, record) ?? []) counted.add(seat);
+    if (equalBytes(record.transcript_hash, p.ctx.authorTranscriptHash)) named.push(record);
   }
+  for (const bytes of registrations) {
+    const record = fromRegistration(p, bytes);
+    if (record === "key-set-mismatch") return { ok: false, code: record };
+    if (record !== undefined) named.push(record);
+  }
+  const counted = new Set<number>();
+  for (const record of named) for (const seat of counting(p, record) ?? []) counted.add(seat);
   const seats = [...counted].sort((a, b) => a - b);
   if (seats.length >= p.quorum) {
     approve(p);
     return { ok: true, seats };
   }
-  return { ok: false, code: named ? "author-approvals" : "author-approvals-missing", seats };
+  return {
+    ok: false,
+    code: named.length > 0 ? "author-approvals" : "author-approvals-missing",
+    seats,
+  };
 }
 
 /**

@@ -341,7 +341,7 @@ export const esUS: Messages = {
     "Este intento o uno anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
   walletSentTitle: "La publicación de tu billetera todavía no está en el tablero",
   walletSent:
-    "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",
+    "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Rechaza cualquier solicitud que siga abierta en tu billetera, espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",
   walletRejectedTitle: "Tu billetera no envió nada",
   walletRejected:
     "Se rechazó una solicitud en tu billetera, así que no se envió nada más desde ella. Si tu billetera ya te había mostrado la publicación, ella y su nodo vieron las partes que faltan. Escoge otra vez abajo.",
@@ -359,7 +359,7 @@ export const esUS: Messages = {
     "Ya pasó el límite para publicar de la encuesta, así que esta vez no se envió nada desde tu billetera y ya no se puede publicar nada más para esta boleta.",
   walletFailedTitle: "Tu billetera no respondió",
   walletFailed:
-    "Tu billetera o su nodo no respondió a tiempo, o respondió con un error. Puede que haya recibido las partes que faltan, así que cuéntalas como entregadas. Intenta otra vez en un minuto.",
+    "Tu billetera o su nodo no respondió a tiempo, o respondió con un error. Puede que haya recibido las partes que faltan, así que cuéntalas como entregadas. Rechaza cualquier solicitud que siga abierta en tu billetera y luego intenta otra vez en un minuto.",
   declinedTitle: "Esta boleta no contará",
   declined:
     "Este dispositivo borró las partes que guardó para los custodios que no tomaron la suya. Responde otra vez mientras la encuesta esté abierta: tu nueva boleta reemplaza a esta, y a tu boleta anterior, dondequiera que lleguen al tablero.",

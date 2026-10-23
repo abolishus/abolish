@@ -315,6 +315,12 @@ export async function postFromWallet(
   let chainTime = 0n;
   let sent = false;
   const time = () => (seconds() > chainTime ? seconds() : chainTime);
+  // A head's time counts toward the cutoff only within `WALLET_HOLD_MARGIN`
+  // of this device's clock: the endpoint is untrusted, and one answering a
+  // far-future head would otherwise refuse every send (T-25, T-50).
+  const heard = (timestamp: bigint) => {
+    if (timestamp > chainTime && timestamp <= seconds() + WALLET_HOLD_MARGIN) chainTime = timestamp;
+  };
   const started = seconds();
   // The run ends once every wait has: a read past it is given up.
   const horizon = () =>
@@ -331,7 +337,7 @@ export async function postFromWallet(
     const final = await find("finalized");
     if (final.ok) {
       from = final.block + 1n;
-      if (final.timestamp > chainTime) chainTime = final.timestamp;
+      heard(final.timestamp);
       for (const p of pending)
         if (final.records.some((record) => equalBytes(record, p.posting))) recorded.add(p);
     }
@@ -339,7 +345,7 @@ export async function postFromWallet(
     if (left.length === 0) return "recorded";
     const latest = await find("latest");
     if (latest.ok) {
-      if (latest.timestamp > chainTime) chainTime = latest.timestamp;
+      heard(latest.timestamp);
       for (const p of left)
         if (
           p.seenAt === undefined &&

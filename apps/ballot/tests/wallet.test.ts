@@ -396,6 +396,12 @@ describe("postFromWallet", () => {
     expect(byChain.sends).toEqual([]);
   });
 
+  test("ignores a head's time far past the device's clock, which could refuse every send (T-25)", async () => {
+    const forged = world({ chainAhead: WALLET_HOLD_MARGIN + 1n });
+    expect(await postFromWallet(forged.io, [A], [A], START + 100n)).toBe("sent");
+    expect(forged.sends).toHaveLength(1);
+  });
+
   test("answers what stopped the first send, and sent once one went", async () => {
     for (const answer of ["rejected", "refused", "wrong-chain", "failed"]) {
       const w = world({ answer: () => refusal(answer) });

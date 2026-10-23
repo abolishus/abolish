@@ -338,7 +338,7 @@ const enUS = {
     "This try or an earlier one gave the missing parts to our posting relay or to your wallet, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back.",
   walletSentTitle: "Your wallet's posting isn't on the board yet",
   walletSent:
-    "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
+    "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Decline any request still open in your wallet, wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
   walletRejectedTitle: "Your wallet didn't send anything",
   walletRejected:
     "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts. Choose again below.",
@@ -356,7 +356,7 @@ const enUS = {
     "The poll's posting cutoff has passed, so nothing was sent from your wallet this time and nothing more can be posted for this ballot.",
   walletFailedTitle: "Your wallet didn't answer",
   walletFailed:
-    "Your wallet or its node didn't answer in time, or answered with an error. It may have been given the missing parts, so count them as given. Try again in a minute.",
+    "Your wallet or its node didn't answer in time, or answered with an error. It may have been given the missing parts, so count them as given. Decline any request still open in your wallet, then try again in a minute.",
   declinedTitle: "This ballot won't count",
   declined:
     "This device erased the parts it kept for the trustees that didn't take theirs. Answer again while the poll is open: your new ballot replaces this one, and your earlier one, wherever they reach the board.",

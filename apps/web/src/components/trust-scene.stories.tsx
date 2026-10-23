@@ -37,7 +37,8 @@ export const Dark: Story = { parameters: { theme: "dark" }, play };
 /**
  * On a phone each step's card draws its own diagram, under its words, and
  * nothing is sticky: the sticky diagram above the cards sat under the card
- * of the step it drew whenever that step was active.
+ * of the step it drew whenever that step was active. Nor is any card drawn
+ * as the active one.
  */
 export const Phone: Story = {
   globals: { viewport: { value: "phone", isRotated: false } },
@@ -54,5 +55,14 @@ export const Phone: Story = {
       const heading = within(step).getByRole("heading").getBoundingClientRect();
       await expect(graphic.getBoundingClientRect().top).toBeGreaterThan(heading.bottom);
     }
+    // No card is marked as the active step: with no diagram beside them the
+    // emerald border tied a card to nothing, beside its own diagram's emerald.
+    const borders = steps.map((step) => {
+      const card = step.querySelector(":scope > div");
+      if (card === null) throw new Error("no step card");
+      return getComputedStyle(card).borderTopColor;
+    });
+    await expect(scene.querySelector("[data-active]")).not.toBeNull();
+    await expect(new Set(borders).size).toBe(1);
   },
 };

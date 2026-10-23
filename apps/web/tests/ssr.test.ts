@@ -1650,28 +1650,36 @@ describe("offline shell", () => {
     expect(await (await get("/offline")).text()).toBe(html);
   });
 
-  test("the worker is a script naming the offline page's hash and stylesheet, and runs as served", async () => {
-    const response = await get("/sw.js");
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-    expect(response.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; connect-src 'self'",
-    );
-    expect(response.headers.get("cache-control")).toBe("no-cache");
-    expect(response.headers.get("set-cookie")).toBeNull();
-    const source = await response.text();
-    const html = await (await get("/offline")).text();
-    const stylesheet = /<link rel="stylesheet" href="([^"]+)"/.exec(html)?.[1] ?? "";
-    expect(source).toContain(
-      JSON.stringify(await offlineWorkerConfig(html, stylesheet, pushNotice())),
-    );
-    // The built server's copy of the worker uses nothing outside itself.
-    const listened: string[] = [];
-    runInNewContext(source, {
-      self: { addEventListener: (type: string) => listened.push(type) },
-    });
-    expect(listened).toEqual(["install", "activate", "fetch", "push", "notificationclick"]);
-  });
+  test.each([
+    ["en-US", "/sw.js", "/offline"],
+    ["es-US", "/sw.js?lang=es-US", "/offline?lang=es-US"],
+  ] as const)(
+    "%s's worker is a script naming its offline page's hash and stylesheet, and its notice, and runs as served",
+    async (locale, worker, offline) => {
+      await loadCatalog(locale);
+      const response = await get(worker);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+      expect(response.headers.get("content-security-policy")).toBe(
+        "default-src 'none'; connect-src 'self'",
+      );
+      expect(response.headers.get("cache-control")).toBe("no-cache");
+      expect(response.headers.get("set-cookie")).toBeNull();
+      const source = await response.text();
+      const html = await (await get(offline)).text();
+      const stylesheet = /<link rel="stylesheet" href="([^"]+)"/.exec(html)?.[1] ?? "";
+      const config = await offlineWorkerConfig(locale, html, stylesheet, pushNotice(locale));
+      expect(config.offline).toBe(offline);
+      expect(config.notice.title).toBe(titles(locale).text("pushNoticeTitle"));
+      expect(source).toContain(JSON.stringify(config));
+      // The built server's copy of the worker uses nothing outside itself.
+      const listened: string[] = [];
+      runInNewContext(source, {
+        self: { addEventListener: (type: string) => listened.push(type) },
+      });
+      expect(listened).toEqual(["install", "activate", "fetch", "push", "notificationclick"]);
+    },
+  );
 
   test("every page lets the worker start, from our own origin only", async () => {
     for (const path of ["/", "/discover", `/polls/${ID}`])
@@ -1922,10 +1930,36 @@ describe("the page's language", () => {
     expect(lang(await (await get(`/embed/p/${OPEN_ONE_CODE}`)).text())).toBe("en-US");
   });
 
-  test("the offline page is one document for everyone, in English", async () => {
+  test("the offline page and its worker are their address's language, whatever the request asks", async () => {
     const english = await (await get("/offline")).text();
-    const asked = await (await get("/offline", { ...SPANISH, cookie: "lang=es-US" })).text();
-    expect(lang(asked)).toBe("en-US");
-    expect(asked).toBe(english);
+    const spanish = await (await get("/offline?lang=es-US")).text();
+    expect([lang(english), lang(spanish)]).toEqual(["en-US", "es-US"]);
+    expect(spanish).toContain(`<title>${es("offlineTitle")} · ${es("siteName")}</title>`);
+    expect(spanish).toContain(es("offlineRetry"));
+    expect(spanish).not.toContain("Try again");
+    // One address is one document for everyone (the worker's cache is named by its hash).
+    for (const [path, html] of [
+      ["/offline", english],
+      ["/offline?lang=es-US", spanish],
+    ] as const)
+      for (const headers of [{}, SPANISH, { cookie: "lang=es-US" }, { cookie: "lang=en-US" }]) {
+        const response = await get(path, headers);
+        expect(await response.text()).toBe(html);
+        expect(response.headers.get("content-language")).toBeNull();
+      }
+    expect(await (await get("/sw.js", SPANISH)).text()).toBe(await (await get("/sw.js")).text());
+    // Any other query is no shell of ours.
+    for (const query of ["?lang=en-US", "?lang=es", "?lang=fr-FR", "?lang=es-US&x=1", "?v=1"]) {
+      expect((await get(`/offline${query}`)).status, query).toBe(404);
+      expect((await get(`/sw.js${query}`)).status, query).toBe(404);
+    }
+  });
+
+  test("a page links its own language's manifest", async () => {
+    const manifest = (html: string) => /<link rel="manifest" href="([^"]+)"/.exec(html)?.[1];
+    expect(manifest(await (await get("/discover")).text())).toBe("/manifest.webmanifest");
+    expect(manifest(await (await get("/discover", SPANISH)).text())).toBe(
+      "/manifest.es-US.webmanifest",
+    );
   });
 });

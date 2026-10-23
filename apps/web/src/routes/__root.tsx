@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 
-import { ICON_SVG_PATH, MANIFEST_PATH } from "../app/install.ts";
+import { ICON_SVG_PATH, manifestPath } from "../app/install.ts";
 import { registerOfflineShell } from "../app/offline.ts";
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
 import { reportErrors } from "../error-reports.ts";
@@ -19,10 +19,11 @@ import { titles } from "../titles.ts";
 function Document({ children }: { children: ReactNode }) {
   // Error tracking, in the browser only (src/error-reports.ts).
   useEffect(() => reportErrors(window), []);
-  // The offline shell (P2-28 part 1b): a page that can't load shows /offline.
-  useEffect(() => registerOfflineShell(navigator), []);
   const path = useRouterState({ select: (s) => s.location.pathname });
   const { locale } = Route.useRouteContext();
+  // The offline shell (P2-28 part 1b): a page that can't load shows /offline,
+  // in this page's language (part 4c).
+  useEffect(() => registerOfflineShell(navigator, locale), [locale]);
   return (
     <html lang={locale}>
       <head>
@@ -56,8 +57,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       ],
       links: [
         { rel: "stylesheet", href: stylesheet },
-        // Installable (P2-28 part 1a): src/app/install.ts.
-        { rel: "manifest", href: MANIFEST_PATH },
+        // Installable (P2-28 part 1a), named in the page's language (part 4c):
+        // src/app/install.ts.
+        { rel: "manifest", href: manifestPath(match.context.locale) },
         { rel: "icon", href: ICON_SVG_PATH, type: "image/svg+xml" },
         { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
       ],

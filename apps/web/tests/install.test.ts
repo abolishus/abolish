@@ -10,10 +10,11 @@ import {
   ICON_SVG_PATH,
   MANIFEST_PATH,
   manifestFile,
+  manifestPath,
   webManifest,
 } from "../src/app/install.ts";
-import { DEFAULT_LOCALE as LOCALE } from "../src/locales.ts";
-import { catalogFor } from "../src/messages.ts";
+import { DEFAULT_LOCALE, LOCALES } from "../src/locales.ts";
+import { loadCatalog } from "../src/messages.ts";
 import { rasterise } from "../src/og/render.ts";
 
 // The installable website's files: that what `public/` ships is exactly what
@@ -23,7 +24,7 @@ import { rasterise } from "../src/og/render.ts";
 
 const PUBLIC = join(import.meta.dirname, "..", "public");
 const update = process.env["UPDATE_APP_FILES"] === "1";
-const messages = catalogFor(LOCALE);
+const catalogs = await Promise.all(LOCALES.map(loadCatalog));
 
 /** `want` as the committed file at `path`, or written there when updating. */
 function committed(path: string, want: Uint8Array | string) {
@@ -40,22 +41,37 @@ const pngSize = (png: Uint8Array) => {
 };
 
 describe("the installable website's files", () => {
-  test("ship the manifest the catalog words", () => {
-    const want = manifestFile(LOCALE, messages);
-    expect(committed(MANIFEST_PATH, want).toString("utf8")).toBe(want);
-    const manifest = webManifest(LOCALE, messages);
-    expect(manifest).toMatchObject({
-      name: "Abolish",
-      start_url: "/",
-      scope: "/",
-      display: "standalone",
-      theme_color: APP_COLORS.background,
-    });
-    // T-67: where it starts carries nothing that would follow a visitor.
-    expect(manifest.start_url).not.toMatch(/[?#]/);
-    // Every icon it names is one the server serves, as the type it says.
-    for (const icon of manifest.icons) expect(APP_FILES[icon.src]).toBe(icon.type);
-    expect(manifest.icons.map((i) => i.purpose)).toContain("maskable");
+  test.each(LOCALES.map((locale, i) => [locale, catalogs[i]!] as const))(
+    "ship %s's manifest in its catalog's words",
+    (locale, messages) => {
+      const want = manifestFile(locale, messages);
+      expect(committed(manifestPath(locale), want).toString("utf8")).toBe(want);
+      const manifest = webManifest(locale, messages);
+      expect(manifest).toMatchObject({
+        id: "/",
+        name: "Abolish",
+        description: messages.appDescription,
+        lang: locale,
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        theme_color: APP_COLORS.background,
+      });
+      // T-67: where it starts carries nothing that would follow a visitor.
+      expect(manifest.start_url).not.toMatch(/[?#]/);
+      // Every icon it names is one the server serves, as the type it says.
+      for (const icon of manifest.icons) expect(APP_FILES[icon.src]).toBe(icon.type);
+      expect(manifest.icons.map((i) => i.purpose)).toContain("maskable");
+    },
+  );
+
+  test("give each locale a manifest of its own, the default's where it always was", () => {
+    expect(manifestPath(DEFAULT_LOCALE)).toBe(MANIFEST_PATH);
+    expect(new Set(LOCALES.map(manifestPath)).size).toBe(LOCALES.length);
+    // The same app whichever language installed it, described in that language.
+    const manifests = LOCALES.map((locale, i) => webManifest(locale, catalogs[i]!));
+    expect(new Set(manifests.map((m) => m.id)).size).toBe(1);
+    expect(new Set(manifests.map((m) => m.description)).size).toBe(LOCALES.length);
   });
 
   test("ship the icon's source as its SVG", () => {
@@ -75,7 +91,7 @@ describe("the installable website's files", () => {
 
   test("serve nothing but what the install names", () => {
     expect(Object.keys(APP_FILES).sort()).toEqual(
-      [MANIFEST_PATH, ICON_SVG_PATH, ...ICON_PNGS.map((i) => i.path)].sort(),
+      [...LOCALES.map(manifestPath), ICON_SVG_PATH, ...ICON_PNGS.map((i) => i.path)].sort(),
     );
   });
 });

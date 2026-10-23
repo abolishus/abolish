@@ -8,10 +8,14 @@ import {
   OFFLINE_PATH,
   type OfflineWorkerConfig,
   offlineWorkerConfig,
+  offlinePath,
   offlineWorkerSource,
   registerOfflineShell,
+  shellLocale,
   WORKER_PATH,
+  workerPath,
 } from "../src/app/offline.ts";
+import { DEFAULT_LOCALE, LOCALES } from "../src/locales.ts";
 
 // The offline shell's worker (src/app/offline.ts), run as the text `/sw.js`
 // serves, in a context of its own with a stand-in for its global scope: that
@@ -66,7 +70,7 @@ class FakeCache {
 }
 
 /** A worker's scope: its listeners, its caches, and a network that answers from `site`. */
-function scope(site: Record<string, string> = {}) {
+function scope(site: Record<string, string> = {}, config: OfflineWorkerConfig = CONFIG) {
   const listeners = new Map<string, Listener>();
   const fetched: string[] = [];
   let online = true;
@@ -102,7 +106,7 @@ function scope(site: Record<string, string> = {}) {
     addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
   };
   // As a browser runs it: the served text in a context with nothing of ours.
-  runInNewContext(offlineWorkerSource(CONFIG), { self, URL, Response });
+  runInNewContext(offlineWorkerSource(config), { self, URL, Response });
 
   /** Dispatches an extendable event and waits for the work it hands over. */
   async function extend(type: "install" | "activate" | "push" | "notificationclick", extra = {}) {
@@ -224,6 +228,19 @@ describe("the offline shell's worker", () => {
     expect(answer.type).toBe("error");
   });
 
+  test("another locale's worker keeps and shows that locale's page, at its own address", async () => {
+    const spanish = { ...CONFIG, offline: offlinePath("es-US") };
+    const s = scope({ ...SITE, "/discover": "<p>discover</p>" }, spanish);
+    await s.extend("install");
+    expect([...s.caches.get(CONFIG.cache)!.entries.keys()].sort()).toEqual(
+      ["/offline?lang=es-US", STYLESHEET, ...FONTS].sort(),
+    );
+    expect(s.fetched).not.toContain(OFFLINE_PATH);
+    await s.extend("activate");
+    s.online(false);
+    expect(await (await s.page("/discover"))!.text()).toBe(PAGE);
+  });
+
   test("leaves frames, posts, other origins and every other file to the browser", async () => {
     const s = await installed();
     s.online(false);
@@ -326,20 +343,64 @@ describe("web push's notice", () => {
 
 describe("the worker's configuration", () => {
   test("names its cache by the offline page's hash, so a changed page installs again", async () => {
-    const a = await offlineWorkerConfig(PAGE, STYLESHEET, NOTICE);
+    const a = await offlineWorkerConfig(DEFAULT_LOCALE, PAGE, STYLESHEET, NOTICE);
     expect(a).toEqual({
       cache: expect.stringMatching(new RegExp(`^${CACHE_PREFIX}[0-9a-f]{32}$`)),
       offline: OFFLINE_PATH,
       stylesheet: STYLESHEET,
       notice: NOTICE,
     });
-    expect(await offlineWorkerConfig(PAGE, STYLESHEET, NOTICE)).toEqual(a);
+    expect(await offlineWorkerConfig(DEFAULT_LOCALE, PAGE, STYLESHEET, NOTICE)).toEqual(a);
     await fc.assert(
       fc.asyncProperty(fc.string(), async (extra) => {
         fc.pre(extra !== "");
-        expect((await offlineWorkerConfig(PAGE + extra, STYLESHEET, NOTICE)).cache).not.toBe(
-          a.cache,
-        );
+        const changed = await offlineWorkerConfig(DEFAULT_LOCALE, PAGE + extra, STYLESHEET, NOTICE);
+        expect(changed.cache).not.toBe(a.cache);
+      }),
+      runs,
+    );
+  });
+
+  test("points another locale's worker at that locale's page", async () => {
+    const config = await offlineWorkerConfig("es-US", PAGE, STYLESHEET, NOTICE);
+    expect(config.offline).toBe("/offline?lang=es-US");
+  });
+});
+
+describe("the shell's languages", () => {
+  test("the default's addresses are the plain ones; every other locale names itself", () => {
+    expect([workerPath(DEFAULT_LOCALE), offlinePath(DEFAULT_LOCALE)]).toEqual([
+      WORKER_PATH,
+      OFFLINE_PATH,
+    ]);
+    expect([workerPath("es-US"), offlinePath("es-US")]).toEqual([
+      "/sw.js?lang=es-US",
+      "/offline?lang=es-US",
+    ]);
+    // Each address names its locale back, and no two locales share one.
+    for (const locale of LOCALES)
+      expect(shellLocale(new URL(workerPath(locale), "https://x.test").search)).toBe(locale);
+    expect(new Set(LOCALES.map(workerPath)).size).toBe(LOCALES.length);
+  });
+
+  test("a query that isn't exactly one of ours is no shell, so one address is one worker", () => {
+    for (const search of [
+      "?lang=en-US",
+      "?lang=es-us",
+      "?lang=es",
+      "?lang=fr-FR",
+      "?lang=",
+      "?lang=es-US&x=1",
+      "?x=1&lang=es-US",
+      "?lang=es-US&lang=es-US",
+      "?",
+      "?v=1",
+    ])
+      expect(shellLocale(search), search).toBe(undefined);
+    fc.assert(
+      fc.property(fc.string(), (search) => {
+        const locale = shellLocale(search);
+        if (locale !== undefined) expect(workerPath(locale)).toBe(`${WORKER_PATH}${search}`);
       }),
       runs,
     );
@@ -347,16 +408,24 @@ describe("the worker's configuration", () => {
 });
 
 describe("registering the worker", () => {
-  test("registers /sw.js for the whole site, always asking the server for it afresh", () => {
-    const register = vi.fn(async () => ({}));
-    registerOfflineShell({ serviceWorker: { register } } as unknown as Navigator);
-    expect(register).toHaveBeenCalledWith(WORKER_PATH, { scope: "/", updateViaCache: "none" });
+  test("registers the page's locale's worker for the whole site, always asking the server for it afresh", () => {
+    for (const locale of LOCALES) {
+      const register = vi.fn(async () => ({}));
+      registerOfflineShell({ serviceWorker: { register } } as unknown as Navigator, locale);
+      expect(register).toHaveBeenCalledWith(workerPath(locale), {
+        scope: "/",
+        updateViaCache: "none",
+      });
+    }
   });
 
   test("leaves the site as it is where a browser has no workers or refuses one", async () => {
-    expect(() => registerOfflineShell({} as Navigator)).not.toThrow();
+    expect(() => registerOfflineShell({} as Navigator, DEFAULT_LOCALE)).not.toThrow();
     const refused = Promise.reject(new DOMException("denied", "SecurityError"));
-    registerOfflineShell({ serviceWorker: { register: () => refused } } as unknown as Navigator);
+    registerOfflineShell(
+      { serviceWorker: { register: () => refused } } as unknown as Navigator,
+      DEFAULT_LOCALE,
+    );
     await expect(refused).rejects.toThrow();
   });
 });

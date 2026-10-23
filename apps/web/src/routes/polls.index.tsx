@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PollRegister, type RegisterFilters } from "../components/poll-register.tsx";
 import { fetchPollList } from "../data.ts";
 import { COUNTINGS, POLL_STATUSES } from "../poll.ts";
+import { pageTitle, text } from "../titles.ts";
 import { isElectionId, normalizeElectionId, searchText } from "../values.ts";
 
 /** A filter's value if it is `"all"` or in `allowed`; anything else, a repeat included, is dropped. */
@@ -41,6 +42,7 @@ export const Route = createFileRoute("/polls/")({
   },
   loaderDeps: ({ search }) => ({ after: search.after ?? "" }),
   loader: ({ deps }) => fetchPollList({ data: deps.after }),
+  head: () => ({ meta: [pageTitle(text("navPolls"))] }),
   component: function Polls() {
     const { id, after, status, counting } = Route.useSearch();
     const list = Route.useLoaderData();

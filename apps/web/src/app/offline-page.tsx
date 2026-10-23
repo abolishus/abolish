@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { Offline, SiteLayout } from "../components/site-layout.tsx";
 import { catalogs, LOCALE } from "../messages.ts";
+import { pageTitle } from "../titles.ts";
 import { ICON_SVG_PATH } from "./install.ts";
 
 function OfflineDocument({ stylesheet }: { stylesheet: string }) {
@@ -14,7 +15,7 @@ function OfflineDocument({ stylesheet }: { stylesheet: string }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         {/* Shown in place of a page that couldn't load, never a page to find. */}
         <meta name="robots" content="noindex" />
-        <title>{t("offlineTitle")}</title>
+        <title>{pageTitle(t("offlineTitle")).title}</title>
         <link rel="stylesheet" href={stylesheet} />
         <link rel="icon" href={ICON_SVG_PATH} type="image/svg+xml" />
       </head>

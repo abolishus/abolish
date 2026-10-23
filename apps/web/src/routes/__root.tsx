@@ -1,4 +1,4 @@
-import { formatMessage, I18nProvider } from "@abolishus/ui";
+import { I18nProvider } from "@abolishus/ui";
 import {
   createRootRoute,
   HeadContent,
@@ -12,11 +12,9 @@ import { ICON_SVG_PATH, MANIFEST_PATH } from "../app/install.ts";
 import { registerOfflineShell } from "../app/offline.ts";
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
 import { reportErrors } from "../error-reports.ts";
-import { catalogs, LOCALE } from "../messages.ts";
+import { LOCALE } from "../messages.ts";
 import stylesheet from "../styles.css?url";
-
-// LOCALE's catalog is always present: it is the source catalog.
-const siteName = catalogs[LOCALE]!.siteName;
+import { pageTitle, text } from "../titles.ts";
 
 function Document({ children }: { children: ReactNode }) {
   // Error tracking, in the browser only (src/error-reports.ts).
@@ -40,11 +38,18 @@ function Document({ children }: { children: ReactNode }) {
 }
 
 export const Route = createRootRoute({
-  head: () => ({
+  // The site's name, which the home page keeps and every other page's own
+  // head replaces (src/titles.ts). A page that isn't there or failed has no
+  // head of its own to run, so the not-found and error pages are named here.
+  head: ({ matches }) => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: formatMessage(LOCALE, siteName) },
+      matches.some((m) => m.status === "notFound" || m._notFound === true)
+        ? pageTitle(text("notFoundPageTitle"))
+        : matches.some((m) => m.status === "error")
+          ? pageTitle(text("errorPageTitle"))
+          : pageTitle(),
     ],
     links: [
       { rel: "stylesheet", href: stylesheet },

@@ -10,6 +10,7 @@ import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { pollPreview } from "../og/poll.ts";
 import { headline } from "../og/text.ts";
+import { pageTitle, text } from "../titles.ts";
 import { searchText } from "../values.ts";
 
 // A poll's printable flyer, `/p/<code>/flyer?paper=<a4|letter>&ink=<color|mono>`
@@ -50,7 +51,18 @@ export const Route = createFileRoute("/p/$code_/flyer")({
     };
   },
   // A sheet to print, not a page to find.
-  head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
+  head: ({ loaderData }) => ({
+    meta: [
+      { name: "robots", content: "noindex" },
+      ...(loaderData === undefined
+        ? []
+        : [
+            loaderData.hidden
+              ? pageTitle(text("flyerTitle"))
+              : pageTitle(text("flyerTitle"), loaderData.title),
+          ]),
+    ],
+  }),
   component: function Flyer() {
     const t = useTranslate(catalogs);
     const { hidden, ...flyer } = Route.useLoaderData();

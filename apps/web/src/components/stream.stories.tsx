@@ -115,9 +115,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
 
   // Each answer opens the ballot client with it chosen, the poll and the
   // pick in the fragment only ([[first-answer]], step 1).
-  const [libraryList] = list.getAllByRole("list", { name: /^Choose an answer to open/ });
-  if (libraryList === undefined) throw new Error("no answers on the library's card");
-  const libraryAnswers = within(libraryList);
+  // Each list of answers is named by the question it answers.
+  const libraryAnswers = within(
+    list.getByRole("list", { name: "When should the main library open on Sundays?" }),
+  );
   const answers = libraryAnswers.getAllByRole("link");
   await expect(answers.map((a) => a.getAttribute("href"))).toEqual([
     `${BALLOT}#election=${LIBRARY}&pick=0`,
@@ -127,8 +128,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(answers[0]).toHaveAccessibleName("At 10");
   await expect(answers[0]).toHaveAccessibleDescription("Library hours");
   // A poll of several questions offers its first question's answers, and says so.
+  await expect(list.getByText(/^Choose an answer to question 1 of 3/)).toBeVisible();
   const riverside = within(
-    list.getByRole("list", { name: /^Choose an answer to question 1 of 3/ }),
+    list.getByRole("list", { name: "Which one improvement matters most to you?" }),
   );
   await expect(riverside.getAllByRole("link")).toHaveLength(4);
   await expect(riverside.getAllByRole("link")[3]).toHaveAttribute(

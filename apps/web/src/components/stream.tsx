@@ -184,7 +184,7 @@ function SearchForm({
 export function StreamCard({ card, ballot }: { card: Card; ballot: string | null }) {
   const t = useTranslate(catalogs);
   const titleId = useId();
-  const answersId = useId();
+  const questionId = useId();
   if (card.kind === "unavailable") {
     return (
       <article
@@ -238,7 +238,12 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
           </a>
         </h3>
         {text.question === undefined ? null : (
-          <p lang={text.language} dir="auto" className="m-0 text-lg text-pretty break-words">
+          <p
+            id={questionId}
+            lang={text.language}
+            dir="auto"
+            className="m-0 text-lg text-pretty break-words"
+          >
             {text.question}
           </p>
         )}
@@ -249,12 +254,18 @@ export function StreamCard({ card, ballot }: { card: Card; ballot: string | null
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
         <div className="grid gap-3">
-          <p id={answersId} className="m-0 text-sm text-pretty text-muted-foreground">
+          <p className="m-0 text-sm text-pretty text-muted-foreground">
             {t("streamPick", { count: questions })}
           </p>
           {/* Each answer is a plain link: the ballot client opens with it
-              chosen, and sends nothing until the voter does ([[first-answer]]). */}
-          <ul aria-labelledby={answersId} className="m-0 grid list-none gap-2 p-0">
+              chosen, and sends nothing until the voter does ([[first-answer]]).
+              The list is named by the question it answers, so a screen
+              reader entering it hears what it is choosing for, rather than
+              the line above read a second time. */}
+          <ul
+            aria-labelledby={text.question === undefined ? titleId : questionId}
+            className="m-0 grid list-none gap-2 p-0"
+          >
             {text.options.map((label, option) => (
               <li key={option}>
                 <a

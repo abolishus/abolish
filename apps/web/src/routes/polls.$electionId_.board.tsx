@@ -6,6 +6,7 @@ import { Notice } from "../components/site-layout.tsx";
 import { fetchBoardPage } from "../data.ts";
 import { catalogs } from "../messages.ts";
 import { BOARD_PAGE } from "../page-sizes.ts";
+import { pageTitle, text } from "../titles.ts";
 import { isCanonicalU64, isElectionId, searchText } from "../values.ts";
 
 // A poll's board, `/polls/<id>/board?from=<entry>`: not nested in the poll
@@ -28,6 +29,17 @@ export const Route = createFileRoute("/polls/$electionId_/board")({
     if (page.kind === "not-found") throw notFound();
     return page;
   },
+  head: ({ loaderData, params }) => ({
+    meta:
+      loaderData === undefined
+        ? []
+        : [
+            pageTitle(
+              text(loaderData.kind === "unavailable" ? "unavailableTitle" : "boardPageTitle"),
+              text("pollHeading", { prefix: params.electionId.slice(0, 16) }),
+            ),
+          ],
+  }),
   component: function Board() {
     const t = useTranslate(catalogs);
     const page = Route.useLoaderData();

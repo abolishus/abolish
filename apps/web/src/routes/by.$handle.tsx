@@ -3,6 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { ProfilePage } from "../components/profile-page.tsx";
 import { fetchProfile } from "../data.ts";
 import { reportProfile } from "../profile-report.ts";
+import { isolated, pageTitle, text } from "../titles.ts";
 import { isElectionId, PROFILE_HANDLE, searchText } from "../values.ts";
 
 // A creator's profile, `/by/<handle>` ([[0040-creator-profiles]]): its name
@@ -24,7 +25,19 @@ export const Route = createFileRoute("/by/$handle")({
     if (page.profile.kind === "not-found") throw notFound();
     return { ...page, profile: page.profile };
   },
-  head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
+  // Named as its heading names it: the author's name, or that it is hidden.
+  head: ({ loaderData }) => ({
+    meta: [
+      { name: "robots", content: "noindex" },
+      ...(loaderData === undefined
+        ? []
+        : [
+            loaderData.profile.kind === "hidden"
+              ? pageTitle(text("byHiddenTitle"))
+              : pageTitle(isolated(loaderData.profile.name), text("byEyebrow")),
+          ]),
+    ],
+  }),
   component: function By() {
     const { handle } = Route.useParams();
     const { after } = Route.useSearch();

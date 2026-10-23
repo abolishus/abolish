@@ -10,8 +10,12 @@
 // doesn't fit is simply cut off. The keyboard's part of the manual pass
 // (part 3b-1) runs on the same pages: Tab through each, checking order, traps,
 // what covers the focused control and whether its focus can be seen, and the
-// share sheet's hold on focus. A screen reader's reading and whether the text
-// says what it should are the rest of part 3b.
+// share sheet's hold on focus. A screen reader's part (part 3b-2) reads each
+// page's accessibility tree, what Chromium hands a screen reader: every page
+// has a title of its own, nothing is read twice in a row, every control's
+// name holds the words it shows, and links of one name lead to one place
+// unless what is around them tells them apart. Whether the text says what it
+// should is part 3b-3.
 
 import type { Server } from "node:http";
 import { type AddressInfo, createServer } from "node:net";
@@ -33,6 +37,8 @@ import {
   QUESTIONS_ID,
   STREAM_V5,
   stubApi,
+  SWAPPED_ID,
+  UNKNOWN_ID,
 } from "./stub-api.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -538,5 +544,291 @@ describe("the keyboard in the share sheet", () => {
     } finally {
       await context.close();
     }
+  });
+});
+
+/**
+ * A node of the page's accessibility tree, as Chromium gives it to a screen
+ * reader, with the nodes it ignores (a layout `div`, anything `aria-hidden`
+ * and what isn't drawn) left out and their children kept in their place.
+ */
+type Read = {
+  role: string;
+  name: string;
+  description: string;
+  url: string | undefined;
+  children: Read[];
+};
+
+async function readTree(page: Page): Promise<Read> {
+  const debug = await page.context().newCDPSession(page);
+  const { nodes } = await debug.send("Accessibility.getFullAXTree");
+  await debug.detach();
+  const byId = new Map(nodes.map((n) => [n.nodeId, n]));
+  const value = (v: { value?: unknown } | undefined) =>
+    typeof v?.value === "string" ? v.value : "";
+  const flatten = (id: string): Read[] => {
+    const node = byId.get(id);
+    if (node === undefined) return [];
+    const children = (node.childIds ?? []).flatMap(flatten);
+    if (node.ignored === true) return children;
+    const url = node.properties?.find((p) => p.name === "url")?.value.value;
+    return [
+      {
+        role: value(node.role),
+        name: value(node.name),
+        description: value(node.description),
+        url: typeof url === "string" ? url : undefined,
+        children,
+      },
+    ];
+  };
+  const root = nodes.find((n) => n.parentId === undefined);
+  if (root === undefined) throw new Error("no accessibility tree");
+  const [tree] = flatten(root.nodeId);
+  if (tree === undefined) throw new Error("the whole page is ignored");
+  return tree;
+}
+
+/** Words as a screen reader compares them: case and spacing aside. */
+const plain = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** The text `node` holds, in order, as its static text nodes give it. */
+function texts(node: Read): string[] {
+  if (node.role === "StaticText") return [node.name];
+  // A list's bullet or number is the browser's, not the page's words.
+  if (node.role === "ListMarker") return [];
+  return node.children.flatMap(texts);
+}
+
+/**
+ * Roles a screen reader reads as a line or a part of their own, saying the
+ * role or pausing between them: the same words in two of them (two list
+ * items, a cell and the next) are two things, not one said twice.
+ */
+const BLOCKS = new Set([
+  "banner",
+  "main",
+  "contentinfo",
+  "navigation",
+  "complementary",
+  "search",
+  "form",
+  "region",
+  "article",
+  "dialog",
+  "group",
+  "figure",
+  "list",
+  "listitem",
+  "table",
+  "caption",
+  "row",
+  "cell",
+  "columnheader",
+  "rowheader",
+  "heading",
+  "paragraph",
+  "term",
+  "definition",
+  "link",
+  "button",
+]);
+
+/**
+ * What isn't words: a code or hash, which can repeat a part of itself, and
+ * a field's own parts, which are the browser's (a date field's blanks).
+ */
+const NOT_WORDS = new Set([
+  "code",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "listbox",
+  "spinbutton",
+  "slider",
+  "date",
+  "time",
+  "DateTime",
+  "InputTime",
+]);
+
+/** The words `node` reads, in order, with `null` wherever a screen reader starts a new part. */
+function runs(node: Read): (string | null)[] {
+  if (node.role === "StaticText") return [plain(node.name)];
+  if (node.role === "ListMarker" || NOT_WORDS.has(node.role)) return [null];
+  const inner = node.children.flatMap(runs);
+  return BLOCKS.has(node.role) ? [null, ...inner, null] : inner;
+}
+
+/** Roles a person activates or sets, whose name a screen reader announces with them. */
+const NAMED_BY_CONTENT = new Set([
+  "link",
+  "button",
+  "checkbox",
+  "radio",
+  "switch",
+  "tab",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+]);
+
+/**
+ * Containers whose name a screen reader says on entering them, and so the
+ * context a link's purpose can be told from (2.4.4: "together with its
+ * programmatically determined link context").
+ */
+const CONTEXTS = new Set([
+  "article",
+  "list",
+  "region",
+  "navigation",
+  "group",
+  "complementary",
+  "form",
+  "search",
+  "dialog",
+  "row",
+]);
+
+/**
+ * What a screen reader's pass over `page` finds wrong, as lines:
+ * - the same words read twice in a row within one part of the page (a
+ *   status beside a line that repeats it);
+ * - a control whose name doesn't hold the text it shows (2.5.3 Label in
+ *   Name), so a voice user saying what they see misses it, and a screen
+ *   reader says something other than what is on the screen;
+ * - links of one name leading to different places with nothing to tell them
+ *   apart: not their description, not the nearest named container around
+ *   them (2.4.4 Link Purpose, In Context).
+ */
+async function hear(page: Page): Promise<string[]> {
+  const tree = await readTree(page);
+  const problems: string[] = [];
+  const read = runs(tree).filter((t) => t !== "");
+  read.forEach((t, i) => {
+    if (t !== null && read[i - 1] === t) problems.push(`read twice: "${t}"`);
+  });
+  const links = new Map<string, Set<string>>();
+  const walk = (node: Read, context: string) => {
+    if (NAMED_BY_CONTENT.has(node.role)) {
+      const shown = texts(node).join("").replace(/\s+/g, "").toLowerCase();
+      const name = node.name.replace(/\s+/g, "").toLowerCase();
+      if (!name.includes(shown))
+        problems.push(
+          `${node.role} "${node.name}" doesn't hold its text "${texts(node).join("")}"`,
+        );
+    }
+    if (node.role === "link" && node.url !== undefined) {
+      const key = `${plain(node.name)}|${plain(node.description)}|${context}`;
+      links.set(key, (links.get(key) ?? new Set()).add(node.url));
+    }
+    const inner =
+      CONTEXTS.has(node.role) && node.name !== "" ? `${node.role} "${plain(node.name)}"` : context;
+    for (const child of node.children) walk(child, inner);
+  };
+  walk(tree, "the page");
+  for (const [key, urls] of links)
+    if (urls.size > 1) {
+      const [name, , context] = key.split("|");
+      problems.push(`links "${name}" in ${context} lead to ${[...urls].join(", ")}`);
+    }
+  return problems;
+}
+
+describe.each(VIEWS)("a screen reader at $name width", ({ viewport }) => {
+  test.each(PAGES)(
+    "%s: nothing read twice, every control named with its text, every link's purpose told",
+    async (path) => {
+      const { context, page } = await open(path, { viewport });
+      try {
+        expect(await hear(page)).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    },
+  );
+});
+
+describe("a screen reader's reading itself", () => {
+  test("finds what it checks for: words read twice, a name hiding its text, two links alike", async () => {
+    const { context, page } = await open("/how-it-works", VIEWS[0]);
+    try {
+      await page.evaluate(() => {
+        const main = document.querySelector("main");
+        if (main === null) throw new Error("no main");
+        const twice = document.createElement("p");
+        const [a, b] = [document.createElement("span"), document.createElement("span")];
+        a.textContent = "Closed";
+        b.textContent = "Closed";
+        twice.append(a, document.createElement("br"), b);
+        const hidden = document.createElement("button");
+        hidden.textContent = "Send";
+        hidden.setAttribute("aria-label", "Submit the form");
+        const link = (href: string) => {
+          const l = document.createElement("a");
+          l.href = href;
+          l.textContent = "Read more";
+          return l;
+        };
+        main.prepend(twice, hidden, link("/polls"), link("/moderation"));
+      });
+      expect(await hear(page)).toEqual(
+        expect.arrayContaining([
+          'read twice: "closed"',
+          'button "Submit the form" doesn\'t hold its text "Send"',
+          expect.stringMatching(
+            /^links "read more" in the page lead to .*\/polls, .*\/moderation$/,
+          ),
+        ]),
+      );
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+describe("each page's title", () => {
+  test("names the page, before the site's name, with no two pages alike and nothing typed into the address", async () => {
+    // The pages, a topic's page, a place, a poll that isn't there and one
+    // whose server sent another poll's definition.
+    const paths = [
+      ...PAGES,
+      "/discover?topic=housing",
+      "/discover?place=Old%20Town",
+      `/polls/${UNKNOWN_ID}`,
+      `/polls/${SWAPPED_ID}`,
+    ];
+    const titles = new Map<string, string>();
+    for (const path of paths) {
+      const { context, page } = await open(path, VIEWS[0]);
+      try {
+        titles.set(path, await page.title());
+      } finally {
+        await context.close();
+      }
+    }
+    // The home page is the site's name alone; every other page leads with its own.
+    expect(titles.get("/")).toBe("Abolish");
+    for (const [path, title] of titles)
+      if (path !== "/") expect(title, path).toMatch(/^\S.* · Abolish$/);
+    expect(titles.get("/nowhere")).toBe("Page not found · Abolish");
+    expect(titles.get(`/polls/${UNKNOWN_ID}`)).toBe("Page not found · Abolish");
+    expect(titles.get(`/polls/${SWAPPED_ID}`)).toBe("Poll unavailable · Abolish");
+    expect(titles.get("/discover?topic=housing")).toBe("Housing · Discover · Abolish");
+    expect(titles.get(`/polls/${ID}`)).toBe(`Poll ${ID.slice(0, 16)}… · Abolish`);
+    // A search or a place narrows the stream without naming it (T-67).
+    for (const path of ["/discover?q=park", "/discover?place=Old%20Town"])
+      expect(titles.get(path), path).toBe(titles.get("/discover"));
+    // Every other page's title is its own.
+    const alike = new Map<string, string[]>();
+    for (const [path, title] of titles)
+      if (!path.startsWith("/discover?q=") && !path.startsWith("/discover?place="))
+        alike.set(title, [...(alike.get(title) ?? []), path]);
+    expect([...alike.values()].filter((p) => p.length > 1)).toEqual([
+      // A poll that isn't there is the site's 404.
+      ["/nowhere", `/polls/${UNKNOWN_ID}`],
+    ]);
   });
 });

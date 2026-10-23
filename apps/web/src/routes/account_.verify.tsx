@@ -5,6 +5,7 @@ import { turnstileChallenge } from "../account/challenge.ts";
 import { verifyClient } from "../account/verify.ts";
 import { VerifyPage } from "../components/account-verify.tsx";
 import { fetchChallengeKey, fetchPhoneVerification } from "../data.ts";
+import { pageTitle, text } from "../titles.ts";
 
 // Verifying the account's e-mail, and its phone where this deployment turns
 // phone verification on, `/account/verify` (P2-31 parts 4 and 6a).
@@ -16,7 +17,15 @@ export const Route = createFileRoute("/account_/verify")({
     siteKey: await fetchChallengeKey(),
     phone: await fetchPhoneVerification(),
   }),
-  head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
+  head: ({ loaderData }) => ({
+    meta: [
+      { name: "robots", content: "noindex" },
+      pageTitle(
+        text(loaderData?.phone === true ? "verifyPageTitle_phone" : "verifyPageTitle_email"),
+        text("navAccount"),
+      ),
+    ],
+  }),
   component: function AccountVerify() {
     const { siteKey, phone } = Route.useLoaderData();
     const challenge = useMemo(

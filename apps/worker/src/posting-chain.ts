@@ -38,6 +38,8 @@ import {
   BaseError,
   bytesToHex,
   ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
   encodeAbiParameters,
   encodeFunctionData,
   ExecutionRevertedError,
@@ -130,7 +132,18 @@ export async function checkPostingDeployment(
     try {
       return await call();
     } catch (e) {
-      if (e instanceof ContractFunctionExecutionError) throw new Error(`the address isn't ${what}`);
+      // Only a revert or an empty answer says what the address is: viem wraps
+      // a node that fails mid-call the same way, and that is rethrown for
+      // the caller to report as unreachable.
+      if (
+        e instanceof ContractFunctionExecutionError &&
+        e.walk(
+          (c) =>
+            c instanceof ContractFunctionRevertedError ||
+            c instanceof ContractFunctionZeroDataError,
+        ) !== null
+      )
+        throw new Error(`the address isn't ${what}`);
       throw e;
     }
   };

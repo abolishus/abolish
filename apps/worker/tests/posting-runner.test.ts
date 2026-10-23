@@ -185,6 +185,22 @@ describe("the posting worker's loop", () => {
     ]);
   });
 
+  test("a log that can't be written never fails a step or stops the loop", async () => {
+    const f = fakes({ tend: async () => ({ ...TEND, landed: 1 }) });
+    let tried = 0;
+    const runner = startPostingRunner({
+      ...f.options,
+      log: () => {
+        tried++;
+        throw new Error("stdout is closed");
+      },
+    });
+    await until(() => f.rounds() >= 3);
+    await runner.close();
+    // Only the tend's counts were written: no step was counted as failing.
+    expect(tried).toBe(f.calls.filter((c) => c.startsWith("tend")).length);
+  });
+
   test("a tick another tick holds is a round done, not a failure", async () => {
     const f = fakes({ tick: async () => null });
     const runner = startPostingRunner(f.options);

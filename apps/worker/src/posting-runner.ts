@@ -54,7 +54,16 @@ const anything = (counts: Readonly<Record<string, number>>) =>
 
 /** Starts the loop: its first round at once. */
 export function startPostingRunner(options: PostingRunnerOptions): RunningPostingRunner {
-  const { worker, ledger, chain, log } = options;
+  const { worker, ledger, chain } = options;
+  // A line that can't be written is dropped: it never fails a step or stops
+  // the loop.
+  const log: Log = (line) => {
+    try {
+      options.log(line);
+    } catch {
+      // Dropped.
+    }
+  };
   const tickMs = options.tickMs ?? POSTING_TICK_MS;
   const pruneEveryMs = options.pruneEveryMs ?? POSTING_PRUNE_EVERY_MS;
   if (!Number.isSafeInteger(tickMs) || tickMs <= 0)
@@ -107,7 +116,7 @@ export function startPostingRunner(options: PostingRunnerOptions): RunningPostin
   let timer: ReturnType<typeof setTimeout> | undefined;
   let current: Promise<void> = Promise.resolve();
   const next = (n: number) => {
-    // `round` never rejects: every step catches its own failure.
+    // `round` never rejects: every step catches its own failure, and `log` its own.
     current = round(n).then(() => {
       if (!closed) timer = setTimeout(() => next(n + 1), tickMs);
     });

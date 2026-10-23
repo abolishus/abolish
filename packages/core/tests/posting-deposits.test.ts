@@ -145,6 +145,12 @@ class FakeL1 implements PostingDepositChain {
     if (this.fail.nonce) throw this.fail.nonce;
     return this.count;
   }
+  /** The key's count at the finalized head, whatever block is asked for. */
+  finalCount = 0n;
+  async nonceAt() {
+    if (this.fail.nonce) throw this.fail.nonce;
+    return this.finalCount;
+  }
   async estimate() {
     this.estimates++;
     if (this.fail.estimate) throw this.fail.estimate;
@@ -227,7 +233,7 @@ function deposits(
 
 /** Fresh L1 heads at `at`. */
 const heads = (at: number | bigint, finalized = 0n) => ({
-  latest: { number: 100n, timestamp: BigInt(at) },
+  latest: { number: 1_000n, timestamp: BigInt(at) },
   finalized: { number: finalized, timestamp: 0n },
 });
 
@@ -241,6 +247,7 @@ const report = (over: Partial<PostingDepositReport> = {}): PostingDepositReport 
   failed: 0,
   unsettled: 0,
   final: 0,
+  unseen: 0,
   consumed: 0,
   released: 0,
   unjudged: 0,
@@ -411,6 +418,20 @@ describe("depositing", () => {
     expect(await deposits(chain, { now: after, times: [other] }).tend(heads(after))).toEqual(
       report({ deposited: 1 }),
     );
+  });
+
+  test("a posting due inside an election's complaint interval waits too", async () => {
+    await sent();
+    const chain = new FakeL1();
+    const T = DUE;
+    // An election whose complaint interval holds T.
+    const { delivery } = deliveryDeadlines(0n, BOUND);
+    const closesAt = BigInt(T) - delivery - CONTRACT_EVENT_WINDOW - 1n;
+    const other = { closesAt, l1InclusionBound: BOUND };
+    const [, complaints] = postingCapacityIntervals(other, CONSTANTS);
+    expect(complaints.from < BigInt(T) && BigInt(T) < complaints.to).toBe(true);
+    expect(await deposits(chain, { times: [other] }).tend(heads(T))).toEqual(report());
+    expect(chain.deposits).toHaveLength(0);
   });
 
   test("an election whose times can't be read stops every deposit", async () => {
@@ -635,13 +656,80 @@ describe("tending", () => {
     expect(await at(chain, DUE + 6, 90n)).toEqual(report());
   });
 
-  test("a nonce another transaction took settles with nothing paid, its reserve released", async () => {
-    const { p, l2Hash, chain } = await deposited();
+  test("a nonce the count passed with no receipt seen stays pending until the finalized count passes it, then counts as landed", async () => {
+    const { p, chain, deposit } = await deposited();
     chain.count = 1n;
-    const late = Number(C_F);
-    expect(await at(chain, late)).toEqual(report({ consumed: 1 }));
-    expect(await spent()).toBe(MOST - COSTS.deposit);
-    expect(await record(p)).toEqual({ transaction: l2Hash, layer: "l2" });
+    const late = Number(C_F) - 1_000;
+    // Its receipt may only lag: nothing released, cancelled or deposited again.
+    expect(await at(chain, late, 10n)).toEqual(report({ unseen: 1 }));
+    expect(await at(chain, late + 1, 10n)).toEqual(report({ unseen: 1 }));
+    expect(chain.deposits).toHaveLength(1);
+    expect(chain.cancels).toHaveLength(0);
+    expect(await spent()).toBe(MOST - COSTS.deposit + RESERVE);
+    expect(await record(p)).toEqual({ transaction: deposit.hash, layer: "l1" });
+    // Past it at the finalized head too: settled as landed, its reserve
+    // kept as what it cost, and never deposited again.
+    chain.finalCount = 1n;
+    expect(await at(chain, late + 2, 10n)).toEqual(report({ consumed: 1 }));
+    expect(await spent()).toBe(MOST - COSTS.deposit + RESERVE);
+    expect(await entryOf(p)).toEqual({ cost: String(MOST - COSTS.deposit), deposit: "0" });
+    expect(await at(chain, late + 3, 10n)).toEqual(report());
+    expect(chain.deposits).toHaveLength(1);
+    expect(await record(p)).toEqual({ transaction: deposit.hash, layer: "l1" });
+  });
+
+  test("nothing is made final on a finalized head past the latest or ahead of the clock", async () => {
+    const { chain, deposit } = await deposited();
+    chain.receipts.set(hex(deposit.hash), {
+      success: true,
+      gasUsed: 900_000n,
+      effectiveGasPrice: 30n,
+      block: 90n,
+    });
+    chain.count = 1n;
+    await at(chain, DUE + 1);
+    const t = DUE + 2;
+    const past = {
+      latest: { number: 95n, timestamp: BigInt(t) },
+      finalized: { number: 96n, timestamp: 0n },
+    };
+    expect(await deposits(chain, { now: t }).tend(past)).toEqual(report());
+    const future = {
+      latest: { number: 95n, timestamp: BigInt(t) },
+      finalized: { number: 90n, timestamp: BigInt(t + 1) },
+    };
+    expect(await deposits(chain, { now: t }).tend(future)).toEqual(report());
+    expect(await spent()).toBe(MOST - COSTS.deposit + RESERVE);
+    const fine = {
+      latest: { number: 95n, timestamp: BigInt(t) },
+      finalized: { number: 90n, timestamp: BigInt(t) },
+    };
+    expect(await deposits(chain, { now: t }).tend(fine)).toEqual(report({ final: 1 }));
+  });
+
+  test("a deposit is cancelled on a head past its patience even with the clock behind it", async () => {
+    const { chain } = await deposited();
+    const P = Number(POSTING_DEPOSIT_PATIENCE);
+    expect(await deposits(chain, { now: DUE + P - 1 }).tend(heads(DUE + P))).toEqual(
+      report({ cancelled: 1 }),
+    );
+  });
+
+  test("an expired election's pending deposit loses its signed bytes and is cancelled", async () => {
+    const { chain } = await deposited();
+    const LATE = Number(WINDOWS.delivery) + 10_000;
+    const key = new FakeKey();
+    const pruned = await ledger({ chain: key, now: LATE }).prune({
+      number: 1n,
+      timestamp: WINDOWS.delivery + 1n,
+    });
+    expect(pruned.expired).toBe(1);
+    const [row] = await rows();
+    expect(row!["signed"]).toBeNull();
+    expect(await deposits(chain, { now: LATE }).tend(heads(LATE))).toEqual(
+      report({ cancelled: 1 }),
+    );
+    expect(chain.broadcasts).toEqual([chain.cancels[0]!.tx]);
   });
 
   test("a reserve no deposit used is released once the L1 head passes c_F", async () => {
@@ -741,6 +829,7 @@ describe("tending", () => {
                   block: block++,
                 });
               if (step === "consume") chain.count++;
+              if (step === "final") chain.finalCount = chain.count;
             }
             if (step === "unsettle") chain.receipts.clear();
             if (step === "land" || step === "revert" || step === "cancel") chain.count++;

@@ -20,7 +20,7 @@
 
 import { CONTRACT_EVENT_WINDOW, deliveryDeadlines, intakeCutoff } from "@abolishus/crypto";
 import { PINNED_FORCED_INCLUSION, PINNED_MARGIN } from "@abolishus/verifier";
-import { and, asc, eq, lte, max, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, lte, max, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { postingDeposits, postingInFlight, postingSent, postingSpend } from "./db/schema/index.ts";
@@ -82,6 +82,8 @@ export interface PostingDepositChain {
   postedSafe(posting: Uint8Array): Promise<boolean>;
   /** The posting key's transaction count at the L1 node's latest block. */
   nonce(): Promise<bigint>;
+  /** The posting key's transaction count at the L1 block numbered `block`. */
+  nonceAt(block: bigint): Promise<bigint>;
   /**
    * The L1 node's gas estimate, at its latest block, for
    * `depositTransaction(board, 0, gasLimit, false, calldata)` on the portal
@@ -151,7 +153,9 @@ export interface PostingDepositReport {
   readonly unsettled: number;
   /** Settled nonces whose block reached the L1's finalized head, their reserve replaced by their receipt. */
   readonly final: number;
-  /** Nonces another transaction of the key consumed. */
+  /** Pending nonces the key's count is past at the latest L1 head with no receipt of theirs seen, left pending (Known-weak). */
+  readonly unseen: number;
+  /** Such nonces the count is past at the L1's finalized head too, settled as landed with their reserve kept (Known-weak). */
   readonly consumed: number;
   /** Postings whose counted reserve was released, as none of their deposits can be sent any more. */
   readonly released: number;
@@ -323,6 +327,7 @@ export class PostgresPostingDeposits {
       failed: 0,
       unsettled: 0,
       final: 0,
+      unseen: 0,
       consumed: 0,
       released: 0,
       unjudged: 0,
@@ -383,8 +388,10 @@ export class PostgresPostingDeposits {
   }
 
   /** The key's L1 count, in form. */
-  async #nonce(): Promise<bigint> {
-    const n = await this.#call(() => this.#chain.nonce());
+  async #nonce(block?: bigint): Promise<bigint> {
+    const n = await this.#call(() =>
+      block === undefined ? this.#chain.nonce() : this.#chain.nonceAt(block),
+    );
     if (!isWei(n) || n > U64_MAX)
       throw new PostingLedgerError("the L1 node answered a nonce out of form");
     return n;
@@ -424,6 +431,13 @@ export class PostgresPostingDeposits {
           .from(postingInFlight)
           .where(eq(postingInFlight.postingKey, row.postingKey));
         const reserve = BigInt(row.reserve);
+        // A finalized head past the latest, or ahead of the clock, is a
+        // faulty or lying node's: nothing is made final on it, since a final
+        // nonce is never judged again (T-25, T-52).
+        const finalized =
+          heads.finalized.number <= heads.latest.number && heads.finalized.timestamp <= now
+            ? heads.finalized.number
+            : undefined;
 
         if (row.final) {
           // Its posting's entry is gone: nothing of it is needed any more.
@@ -440,10 +454,10 @@ export class PostgresPostingDeposits {
               .update(postingDeposits)
               .set({ settledIn: null, landed: null, paid: null, settledBlock: null })
               .where(eq(postingDeposits.nonce, nonce));
-            await nameDeposit(tx, row);
+            await nameDeposit(tx, row.postingKey);
             return { kind: "unsettled" };
           }
-          if (r.block > heads.finalized.number) return NONE;
+          if (finalized === undefined || r.block > finalized) return NONE;
           // Final: the nonce's reserve is replaced by what its receipt shows.
           const paid = r.gasUsed * r.effectiveGasPrice;
           await settleSpend(tx, row, entry, paid - reserve);
@@ -484,18 +498,22 @@ export class PostgresPostingDeposits {
             return { kind: landed ? "landed" : "failed" };
           }
         if (count > nonce) {
-          // Another transaction of the key took the nonce (the key is used
-          // for nothing else, so a view of the chain that changed between
-          // the reads, or a use of it outside the relay): judged again if
-          // the count moved meanwhile, else settled with nothing paid.
-          if ((await this.#nonce()) !== count) return NONE;
-          await settleSpend(tx, row, entry, -reserve);
+          // The count is past the nonce, but no receipt of its transactions
+          // is seen: a lagging receipt index or an endpoint behind a
+          // balancer, since the key is used for nothing else. One of them
+          // may have landed, so the nonce stays pending, holding every other
+          // deposit back and its reserve counted, and is never cancelled or
+          // replaced. Only once the count is past it at the L1's finalized
+          // head too is it settled, as landed, so it is never deposited
+          // again, its reserve kept as what it cost (Known-weak).
+          if (finalized === undefined || (await this.#nonce(finalized)) <= nonce)
+            return { kind: "unseen" };
+          await settleSpend(tx, row, entry, 0n);
           await tx
             .update(postingDeposits)
-            .set({ landed: false, paid: "0", final: true })
+            .set({ landed: true, paid: reserve.toString(), final: true })
             .where(eq(postingDeposits.nonce, nonce));
           if (entry === undefined) await dropNonce(tx, nonce);
-          else await nameNewestL2(tx, entry);
           return { kind: "consumed" };
         }
 
@@ -626,14 +644,16 @@ export class PostgresPostingDeposits {
           const rows = await tx.select().from(d).where(eq(d.postingKey, entry.postingKey));
           // A landed deposit is never sent again (Known-weak).
           if (rows.some((r) => r.landed === true)) continue;
-          if (!(await this.#unsafe(entry))) continue;
+          // The pure checks before any node call under the lock: the
+          // elections' times are read once a tend, and a posting due inside
+          // an interval waits for its end.
           if (intervals === undefined) {
             const times = await this.#call(() => this.#elections.times());
             if (times === undefined) return "unjudged";
             intervals = times.flatMap((t) => [...this.#intervals(t)]);
           }
-          // A posting due inside an interval waits for its end.
           if (!postingLandingClear(T, intervals)) continue;
+          if (!(await this.#unsafe(entry))) continue;
 
           const posting = new Uint8Array(entry.posting);
           const ballot = new Uint8Array(entry.ballot);
@@ -834,11 +854,23 @@ async function namedL1(tx: Tx, key: Uint8Array, hash: Uint8Array): Promise<void>
     .where(eq(postingSent.postingKey, key));
 }
 
-/** Names a nonce's newest deposit again, once it may land again. */
-async function nameDeposit(tx: Tx, row: Row): Promise<void> {
-  const deposits = hashesOf(new Uint8Array(row.deposits));
-  const newest = deposits[deposits.length - 1];
-  if (newest !== undefined) await namedL1(tx, row.postingKey, newest);
+/** Names the posting's newest deposit that is pending or landed, once a nonce of it may land again. */
+async function nameDeposit(tx: Tx, key: Uint8Array): Promise<void> {
+  const d = postingDeposits;
+  const [row] = await tx
+    .select({ deposits: d.deposits })
+    .from(d)
+    .where(
+      and(
+        eq(d.postingKey, key),
+        or(and(q`${d.settledIn} IS NULL`, eq(d.final, false)), eq(d.landed, true)),
+      ),
+    )
+    .orderBy(desc(d.nonce))
+    .limit(1);
+  if (row === undefined) return;
+  const newest = hashesOf(new Uint8Array(row.deposits)).at(-1);
+  if (newest !== undefined) await namedL1(tx, key, newest);
 }
 
 /** Names the entry's newest L2 transaction: its newest in a block, else its newest signed. */

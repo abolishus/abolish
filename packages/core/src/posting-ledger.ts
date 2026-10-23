@@ -75,7 +75,13 @@ export interface PostingSigned {
 export interface PostingCosts {
   /** The L1 data fee the L2's fee oracle gives for the call's calldata. */
   readonly l1DataFee: bigint;
-  /** The most an L1 deposit of the call, with the same gas limit and calldata, costs on L1. */
+  /**
+   * The reserve of an L1 deposit of the call, with the same gas limit and
+   * calldata, priced as one would be now (Depositing, step 1):
+   * `postingDepositReserve` of `postingDepositGasLimit` of the L1 node's
+   * estimate at the L1 fee cap, or 0 if the estimate reverts or passes
+   * `POSTING_L1_GAS_LIMIT_MAX`.
+   */
   readonly deposit: bigint;
 }
 

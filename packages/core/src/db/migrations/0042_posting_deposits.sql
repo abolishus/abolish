@@ -29,9 +29,9 @@
 -- L1 head, `landed` whether it was a deposit whose receipt shows success,
 -- `paid` what its receipt shows it cost and `settled_block` its block;
 -- `final` once that block is at the L1's finalized head, when `paid` has
--- replaced `reserve` in the spend. A nonce another transaction of the key
--- consumed, with none of these in a block, is settled final with nothing
--- paid and no block.
+-- replaced `reserve` in the spend. A nonce the key's count is past at the
+-- L1's finalized head with no receipt of these seen is settled final as
+-- landed with `reserve` as what it paid, and no block.
 CREATE TABLE posting_deposits (
   nonce bigint PRIMARY KEY CHECK (nonce >= 0),
   posting_key bytea NOT NULL CHECK (octet_length(posting_key) = 32),
@@ -59,7 +59,7 @@ CREATE TABLE posting_deposits (
   CONSTRAINT posting_deposits_settled CHECK (
     (settled_in IS NULL AND landed IS NULL AND paid IS NULL AND settled_block IS NULL AND NOT final)
     OR (settled_in IS NOT NULL AND landed IS NOT NULL AND paid IS NOT NULL AND settled_block IS NOT NULL)
-    OR (settled_in IS NULL AND landed = false AND paid = 0 AND settled_block IS NULL AND final)
+    OR (settled_in IS NULL AND landed AND paid = reserve AND settled_block IS NULL AND final)
   )
 );
 CREATE INDEX posting_deposits_posting ON posting_deposits (posting_key);

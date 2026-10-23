@@ -780,7 +780,11 @@ describe("the counted extent", () => {
       election: w.election,
       boardVersion: 1,
       l1: {
-        read: async () => ({ anchors: w.anchors, clock: { ...w.clock, period: 1_800n }, now: w.l1Now }),
+        read: async () => ({
+          anchors: w.anchors,
+          clock: { ...w.clock, period: 1_800n },
+          now: w.l1Now,
+        }),
       },
       blocks: async () => [],
       pin: async () => undefined,

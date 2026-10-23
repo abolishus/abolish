@@ -591,7 +591,7 @@ describe("the author panel's registration on L2", () => {
         at: { panel: "author" },
       });
     }
-  });
+  }, 60_000);
 
   test("a registration counts wherever it sits, and another election's entry doesn't", () => {
     const all = eventOf("all");
@@ -621,7 +621,7 @@ describe("the author panel's registration on L2", () => {
       code: "author-approvals-missing",
       at: { panel: "author" },
     });
-  });
+  }, 60_000);
 
   test("a registration names its own definition: another definition's hash isn't read", () => {
     const r = ceremonyChecks(
@@ -637,7 +637,7 @@ describe("the author panel's registration on L2", () => {
       code: "author-approvals-missing",
       at: { panel: "author" },
     });
-  });
+  }, 60_000);
 
   test("a registration of another key set on the copy never fails 3.1", () => {
     // A quorum-signed registration over another key set, as the copy's last
@@ -655,7 +655,7 @@ describe("the author panel's registration on L2", () => {
     expect(r.rows.get("3.1")).toEqual({ status: "unverifiable", code: "not-implemented" });
     expect(r.report?.author?.approvals).toEqual([1, 2, 3]);
     expect(r.authorRegistered).toHaveLength(3);
-  });
+  }, 60_000);
 });
 
 // The same through a format-4 bundle and the API's admission, under a

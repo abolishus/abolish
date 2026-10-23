@@ -24,6 +24,7 @@ import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
 import type { IdentityRead, Membership } from "./identity.ts";
 import type { Delivery, IntakeAnswer } from "./intake.ts";
 import { passedOnDevice, postingCutoff, postingLapsed } from "./lapse.ts";
+import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { Declined, PostingOffer } from "./posting-offer.tsx";
@@ -172,6 +173,15 @@ export interface ElectionSource {
     postings: readonly Uint8Array[],
     cutoff: bigint,
   ) => Promise<PostAnswer>;
+  /**
+   * The election's lock across this origin's tabs (`electionLock`), held
+   * from a posting's check through its posting and by every delivery and
+   * decline of the election's casts, so no tab keeps a receipt for, or
+   * erases, a seat another is posting ([[delivery]], Client rule 2);
+   * absent where the browser has no Web Locks, and then no posting is
+   * offered, whatever `post` says.
+   */
+  readonly exclusive?: ElectionLock;
   /**
    * Erases the unreceipted seats' `ct_i` and `m_i` of the recorded cast
    * whose bytes are `ballot`, once the voter declined to post them
@@ -615,6 +625,13 @@ export function Ballot({
   const cutoff = () =>
     postingCutoff(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
 
+  /** Runs `steps` under the election's lock, where the build has one (`ElectionSource.exclusive`). */
+  const locked = <T,>(steps: () => Promise<T>): Promise<T> =>
+    source.exclusive === undefined ? steps() : source.exclusive(electionId, steps);
+  // A posting only under the lock: without it another tab could keep a
+  // receipt for a seat this one posts (Client rule 2; T-15).
+  const posting = source.exclusive === undefined ? undefined : source.post;
+
   function again() {
     setStep({ kind: "answering" });
     setRound(round + 1);
@@ -983,6 +1000,70 @@ export function Ballot({
   }
 
   /**
+   * Delivers each of `sending`'s unreceipted shares to its seat's intake and
+   * keeps every receipt that passes, answering the seats receipted, or the
+   * step that says why delivery stopped. The caller holds the election's
+   * lock, so no tab is posting a seat this one keeps a receipt for (Client
+   * rule 2).
+   */
+  async function deliverShares(
+    sending: Sending,
+  ): Promise<{ readonly receipted: ReadonlySet<number> } | Step> {
+    const { ballot, tier, undelivered } = sending;
+    let election: IntakeResult;
+    try {
+      election = await source.intake(definitionHash);
+    } catch {
+      election = { ok: false, problem: "no-election" };
+    }
+    // The worker no longer holds the poll it cast in (it stopped since),
+    // so it can check no receipt; this ballot was never sent.
+    if (!election.ok) return stopped("cast-failed");
+    const { stub, transcript } = election;
+    const answers: IntakeAnswer[] = [];
+    let next = 0;
+    const deliverer = async () => {
+      for (let at = next++; at < undelivered.length; at = next++) {
+        const { seat, ciphertext } = undelivered[at] as (typeof undelivered)[number];
+        answers[at] = await source
+          .deliver(seat, { stub, transcript, record: ballot, ciphertext })
+          .catch((): IntakeAnswer => ({ kind: "unreachable" }));
+      }
+    };
+    await Promise.all(Array.from({ length: DELIVERIES_AT_ONCE }, deliverer));
+    const receipted = new Set<number>();
+    for (const answer of answers) {
+      if (answer.kind !== "receipt") continue;
+      // An answer that doesn't pass for exactly this ballot is no receipt:
+      // its seat keeps `m_i` and stays undelivered (Client rule 1; T-25).
+      const checked = await source.receipt(ballot, answer.receipt).catch(() => undefined);
+      // The worker stopped: no later receipt can be checked either.
+      if (checked === undefined) return stopped("cast-failed");
+      if (!checked.ok) continue;
+      // Kept before anything is sent: the worker has erased the seat's
+      // `m_i` from its seal, so this record is the receipt's only copy
+      // (Client rules 2 and 3).
+      const kept = await source
+        .keepReceipt(electionId, tier, ballot, checked.checked)
+        .catch((): RecordReceiptOutcome => "unwritable");
+      switch (kept) {
+        case "recorded":
+          receipted.add(checked.checked.seat);
+          break;
+        case "unreadable":
+          return stopped("casts-unreadable");
+        case "unwritable":
+          return stopped("casts-unwritable");
+        // The cast was recorded before delivery: a store without it now
+        // was changed elsewhere, so nothing more is sent from it.
+        case "missing":
+          return stopped("cast-faulty");
+      }
+    }
+    return { receipted };
+  }
+
+  /**
    * Delivers each of a recorded cast's unreceipted shares to its seat's
    * intake, keeps every receipt that passes, and sends the ballot only once
    * every qualified seat is receipted ([[0002-everlasting-privacy]],
@@ -992,59 +1073,12 @@ export function Ballot({
    * the seats left (`offer`; Client rule 4) as soon as delivery failed.
    */
   async function deliverThenSend(sending: Sending, current: () => boolean): Promise<Step> {
-    const { ballot, tier, undelivered } = sending;
+    const { undelivered } = sending;
     if (undelivered.length > 0) {
       if (current()) setStep({ kind: "delivering" });
-      let election: IntakeResult;
-      try {
-        election = await source.intake(definitionHash);
-      } catch {
-        election = { ok: false, problem: "no-election" };
-      }
-      // The worker no longer holds the poll it cast in (it stopped since),
-      // so it can check no receipt; this ballot was never sent.
-      if (!election.ok) return stopped("cast-failed");
-      const { stub, transcript } = election;
-      const answers: IntakeAnswer[] = [];
-      let next = 0;
-      const deliverer = async () => {
-        for (let at = next++; at < undelivered.length; at = next++) {
-          const { seat, ciphertext } = undelivered[at] as (typeof undelivered)[number];
-          answers[at] = await source
-            .deliver(seat, { stub, transcript, record: ballot, ciphertext })
-            .catch((): IntakeAnswer => ({ kind: "unreachable" }));
-        }
-      };
-      await Promise.all(Array.from({ length: DELIVERIES_AT_ONCE }, deliverer));
-      const receipted = new Set<number>();
-      for (const answer of answers) {
-        if (answer.kind !== "receipt") continue;
-        // An answer that doesn't pass for exactly this ballot is no receipt:
-        // its seat keeps `m_i` and stays undelivered (Client rule 1; T-25).
-        const checked = await source.receipt(ballot, answer.receipt).catch(() => undefined);
-        // The worker stopped: no later receipt can be checked either.
-        if (checked === undefined) return stopped("cast-failed");
-        if (!checked.ok) continue;
-        // Kept before anything is sent: the worker has erased the seat's
-        // `m_i` from its seal, so this record is the receipt's only copy
-        // (Client rules 2 and 3).
-        const kept = await source
-          .keepReceipt(electionId, tier, ballot, checked.checked)
-          .catch((): RecordReceiptOutcome => "unwritable");
-        switch (kept) {
-          case "recorded":
-            receipted.add(checked.checked.seat);
-            break;
-          case "unreadable":
-            return stopped("casts-unreadable");
-          case "unwritable":
-            return stopped("casts-unwritable");
-          // The cast was recorded before delivery: a store without it now
-          // was changed elsewhere, so nothing more is sent from it.
-          case "missing":
-            return stopped("cast-faulty");
-        }
-      }
+      const delivered = await locked(() => deliverShares(sending));
+      if ("kind" in delivered) return delivered;
+      const { receipted } = delivered;
       const left = undelivered.filter(({ seat }) => !receipted.has(seat));
       if (left.length > 0) {
         const rest: Sending = { ...sending, undelivered: left };
@@ -1150,29 +1184,35 @@ export function Ballot({
    * doesn't go through returns to the offer.
    */
   function post(sending: Sending) {
-    const posting = source.post;
     if (posting === undefined) return;
     setStep({ kind: "posting" });
     run(
       async (current) => {
-        const checked = await postable(sending);
-        if ("kind" in checked) return checked;
-        let answer: PostAnswer;
-        try {
-          answer =
-            checked.postings.length === 0
-              ? "recorded"
-              : await posting(electionId, sending.ballot, checked.postings, cutoff()).catch(
-                  (): PostAnswer => "unreachable",
-                );
-        } finally {
-          for (const record of checked.postings) record.fill(0);
-        }
+        // From the check through the posting under the election's lock: a
+        // tab that keeps a receipt for a seat between them would have this
+        // one post a receipted seat (Client rule 2; T-15).
+        const posted = await locked(async () => {
+          const checked = await postable(sending);
+          if ("kind" in checked) return checked;
+          try {
+            const answer: PostAnswer =
+              checked.postings.length === 0
+                ? "recorded"
+                : await posting(electionId, sending.ballot, checked.postings, cutoff()).catch(
+                    (): PostAnswer => "unreachable",
+                  );
+            return { checked: checked.sending, answer };
+          } finally {
+            for (const record of checked.postings) record.fill(0);
+          }
+        });
+        if ("kind" in posted) return posted;
+        const { checked, answer } = posted;
         if (answer === "relayed")
-          return { kind: "offer", sending: checked.sending, failed: true, relayed: true };
-        if (answer !== "recorded") return { kind: "offer", sending: checked.sending, failed: true };
+          return { kind: "offer", sending: checked, failed: true, relayed: true };
+        if (answer !== "recorded") return { kind: "offer", sending: checked, failed: true };
         if (current()) setStep({ kind: "sending" });
-        return send({ ...checked.sending, undelivered: [] });
+        return send({ ...checked, undelivered: [] });
       },
       { kind: "offer", sending, failed: true },
     );
@@ -1190,10 +1230,14 @@ export function Ballot({
     const { ballot, tier } = sending;
     setStep({ kind: "declining" });
     run(async () => {
-      const erased = await source
-        .declinePosting(electionId, tier, ballot)
-        .catch((): DeclinePostingOutcome => "unwritable");
-      await source.declineSeal(ballot).catch(() => undefined);
+      // Under the election's lock, so no tab is posting a seat this erases.
+      const erased = await locked(async () => {
+        const outcome = await source
+          .declinePosting(electionId, tier, ballot)
+          .catch((): DeclinePostingOutcome => "unwritable");
+        await source.declineSeal(ballot).catch(() => undefined);
+        return outcome;
+      });
       switch (erased) {
         case "declined":
           return { kind: "declined" };
@@ -1259,7 +1303,7 @@ export function Ballot({
           relayed={step.relayed === true}
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
-          onPost={source.post === undefined ? undefined : () => post(sending)}
+          onPost={posting === undefined ? undefined : () => post(sending)}
         />
       );
     }

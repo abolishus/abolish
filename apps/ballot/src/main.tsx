@@ -35,6 +35,7 @@ import {
 import { deliverShare } from "./intake.ts";
 import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
+import { electionLock } from "./lock.ts";
 import {
   loadBoard,
   loadChainTime,
@@ -220,6 +221,8 @@ const registrar: Registrar | undefined =
         recovery: recoverer,
       };
 
+const ELECTION_LOCK = electionLock("locks" in navigator ? navigator.locks : undefined);
+
 const source: ElectionSource = {
   load: (electionId, signal) =>
     loadElection(STAGING, electionId, (url, init) => fetch(url, { ...init, signal })),
@@ -336,6 +339,9 @@ const source: ElectionSource = {
           }
         },
       }),
+  // One lock per election across this origin's tabs; a browser without Web
+  // Locks gets none, and is offered no posting (Client rule 2).
+  ...(ELECTION_LOCK === undefined ? {} : { exclusive: ELECTION_LOCK }),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
   declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),

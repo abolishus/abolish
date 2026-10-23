@@ -28,6 +28,7 @@ import type { IdentityRead } from "./identity.ts";
 import type { IntakeAnswer } from "./intake.ts";
 import { LocaleChoice } from "./language-switch.tsx";
 import { parseLink } from "./link.ts";
+import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadedRegistry } from "./load.ts";
 import { type Locale, pollLanguages } from "./locales.ts";
 import type { ProverArtifacts } from "./prover-artifacts.ts";
@@ -257,6 +258,8 @@ interface Voter {
   readonly declined: DeclinePostingOutcome;
   /** What the worker's erasure of its seals' shares answers. */
   readonly declinedSeal: DeclineResult | "fail";
+  /** Whether the build has the election's lock (`exclusive`), as a browser with Web Locks does. */
+  readonly locks: boolean;
 }
 
 /** Before every story poll's posting cutoff, by both clocks. */
@@ -287,8 +290,11 @@ const VOTER: Voter = {
   postings: () => ({ ok: true }),
   declined: "declined",
   declinedSeal: { ok: true },
+  locks: true,
 };
 
+/** `ElectionLock` with its type parameter fixed, as a mock records it. */
+type Lock = (electionId: Uint8Array, run: () => Promise<unknown>) => Promise<unknown>;
 type Mock<F extends (...args: never[]) => unknown> = F & ReturnType<typeof fn<F>>;
 
 /** The mocks behind a story's source, to assert on. */
@@ -317,6 +323,9 @@ const MOCKS = new WeakMap<
     readonly post: Mock<NonNullable<ElectionSource["post"]>>;
     readonly declinePosting: Mock<ElectionSource["declinePosting"]>;
     readonly declineSeal: Mock<ElectionSource["declineSeal"]>;
+    readonly exclusive: Mock<Lock>;
+    /** Each call to a step the lock guards, in order, and how many held the lock as it was made. */
+    readonly guarded: { readonly step: string; readonly holders: number }[];
     /** Each `m` the page handed the worker or the contract path, as given, and a copy taken when it was. */
     readonly ms: { readonly given: Uint8Array; readonly copy: Uint8Array }[];
     /** Each secret the page handed on, as given, and a copy taken when it was. */
@@ -375,6 +384,7 @@ function source(
     posted,
     declined,
     declinedSeal,
+    locks,
   } = {
     ...VOTER,
     ...voter,
@@ -426,9 +436,28 @@ function source(
     records++;
     return Promise.resolve(recorded);
   });
+  // One election lock, as Web Locks gives each name: a second request waits
+  // until the holder settles.
+  let holders = 0;
+  let queue: Promise<unknown> = Promise.resolve();
+  const guarded: { step: string; holders: number }[] = [];
+  const guard = (step: string) => guarded.push({ step, holders });
+  const exclusive = fn<Lock>((_, run) => {
+    const held = queue.then(async () => {
+      holders++;
+      try {
+        return await run();
+      } finally {
+        holders--;
+      }
+    });
+    queue = held.catch(() => undefined);
+    return held;
+  });
   const ms: { given: Uint8Array; copy: Uint8Array }[] = [];
   const checks = new Map<number, number>();
   const posting = fn<ElectionSource["posting"]>((_, share) => {
+    guard("posting");
     ms.push({ given: share.m, copy: share.m.slice() });
     const call = checks.get(share.seat) ?? 0;
     checks.set(share.seat, call + 1);
@@ -441,20 +470,31 @@ function source(
   });
   let posts = 0;
   const post = fn<NonNullable<ElectionSource["post"]>>((_, __, records) => {
+    guard("post");
     for (const record of records) ms.push({ given: record, copy: record.slice() });
     return answer((posted ?? ["fail"])[Math.min(posts++, (posted ?? []).length - 1)] ?? "fail");
   });
-  const declinePosting = fn<ElectionSource["declinePosting"]>(() => Promise.resolve(declined));
-  const declineSeal = fn<ElectionSource["declineSeal"]>(() => answer(declinedSeal));
+  const declinePosting = fn<ElectionSource["declinePosting"]>(() => {
+    guard("declinePosting");
+    return Promise.resolve(declined);
+  });
+  const declineSeal = fn<ElectionSource["declineSeal"]>(() => {
+    guard("declineSeal");
+    return answer(declinedSeal);
+  });
   const intake = fn<ElectionSource["intake"]>(() => answer(intakeResult));
   const deliveries = new Map<number, number>();
   const deliver = fn<ElectionSource["deliver"]>((seat) => {
+    guard("deliver");
     const call = deliveries.get(seat) ?? 0;
     deliveries.set(seat, call + 1);
     return answer(delivered(seat, call));
   });
   const receipt = fn<ElectionSource["receipt"]>((_, bytes) => answer(receipts(bytes)));
-  const keepReceipt = fn<ElectionSource["keepReceipt"]>(() => Promise.resolve(keptReceipt));
+  const keepReceipt = fn<ElectionSource["keepReceipt"]>(() => {
+    guard("keepReceipt");
+    return Promise.resolve(keptReceipt);
+  });
   const send = fn<ElectionSource["send"]>(() =>
     answer(answers[Math.min(sent++, answers.length - 1)] as SendAnswer | "fail"),
   );
@@ -504,6 +544,8 @@ function source(
     ...(posted === undefined ? {} : { post }),
     declinePosting,
     declineSeal,
+    // Each run answers what it was given, whatever its type, as Web Locks does.
+    ...(locks ? { exclusive: exclusive as ElectionLock } : {}),
     now: () => now,
     forcedInclusion: 46_800n,
     registrar,
@@ -532,6 +574,8 @@ function source(
     post,
     declinePosting,
     declineSeal,
+    exclusive,
+    guarded,
     ms,
     secrets,
     release: () => release(),
@@ -1677,6 +1721,107 @@ export const PostingDeclinedUnwritable: Story = {
     ).toBeVisible();
     await expect(of.declineSeal).toHaveBeenCalledOnce();
     await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingUnderTheLock: Story = {
+  name: "Delivery and a posting each hold the election's lock, from the posting's check through the posting",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    // Once for the delivery, once for the posting, each naming the election.
+    await expect(of.exclusive).toHaveBeenCalledTimes(2);
+    for (const [electionId] of of.exclusive.mock.calls)
+      await expect(electionId).toEqual(fromHex(ELECTION_ID));
+    // No tab keeps a receipt for a seat this one posts (Client rule 2; T-15):
+    // the deliveries, their receipts, the check before the posting and the
+    // posting itself all under the lock; only the offer's check, which posts
+    // nothing, outside it.
+    const at = (step: string) =>
+      of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);
+    await expect(at("deliver")).toEqual([1, 1]);
+    await expect(at("keepReceipt")).toEqual([1]);
+    await expect(at("posting")).toEqual([0, 1]);
+    await expect(at("post")).toEqual([1]);
+    await expect(of.guarded.map(({ step }) => step)).toEqual([
+      "deliver",
+      "deliver",
+      "keepReceipt",
+      "posting",
+      "posting",
+      "post",
+    ]);
+  },
+};
+
+export const PostingWaitsForTheLock: Story = {
+  name: "A posting waits while another tab holds the election's lock, and checks the record only once it has it",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    // Another tab of this origin delivering the same cast.
+    let release = () => {};
+    const other = of.exclusive(
+      fromHex(ELECTION_ID),
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(await canvas.findByRole("heading", { level: 1 })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Nothing checked or posted while the other holds it.
+    await expect(of.posting).toHaveBeenCalledOnce();
+    await expect(of.post).not.toHaveBeenCalled();
+    release();
+    await other;
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.posting).toHaveBeenCalledTimes(2);
+    await expect(of.post).toHaveBeenCalledOnce();
+  },
+};
+
+export const DeclineUnderTheLock: Story = {
+  name: "Leaving the ballot erases its shares under the election's lock",
+  args: { source: offerSource({ posted: ["recorded"] }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Leave this ballot" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "This ballot won't count" }),
+    ).toBeVisible();
+    // No tab is posting a seat this erases.
+    await expect(of.guarded.filter(({ step }) => step.startsWith("decline"))).toEqual([
+      { step: "declinePosting", holders: 1 },
+      { step: "declineSeal", holders: 1 },
+    ]);
+  },
+};
+
+export const PostingOfferWithoutALock: Story = {
+  name: "A build with a contract path but no Web Locks offers no posting, and delivers without a lock",
+  args: { source: offerSource({ posted: ["recorded"], locks: false }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    // Without the lock another tab could keep a receipt for a seat this one
+    // posts (Client rule 2), so nothing is posted from here.
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(canvas.getByRole("button", { name: "Try the trustees again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+    await expect(of.exclusive).not.toHaveBeenCalled();
+    await expect(of.post).not.toHaveBeenCalled();
   },
 };
 

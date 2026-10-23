@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-pl
 import {
   POSTING_BALLOT_CAP,
   POSTING_CLIENT_MARGIN,
+  POSTING_DEPOSIT_SPAN,
   POSTING_FINALITY,
   POSTING_FORCE_AFTER,
   POSTING_GAS_LIMIT_MAX,
@@ -16,6 +17,7 @@ import {
   POSTING_SEND_MARGIN,
   postingBallots,
   type PostingCosts,
+  postingDeposits,
   postingInFlight,
   type PostingKeyChain,
   PostingLedgerError,
@@ -200,7 +202,13 @@ const spentOf = async (election: Uint8Array) => {
 
 describe("schema", () => {
   test("the Drizzle tables match the migrated ones", async () => {
-    for (const table of [postingSent, postingBallots, postingSpend, postingInFlight]) {
+    for (const table of [
+      postingSent,
+      postingBallots,
+      postingSpend,
+      postingInFlight,
+      postingDeposits,
+    ]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
         SELECT column_name, data_type, is_nullable FROM information_schema.columns
@@ -222,10 +230,13 @@ describe("schema", () => {
       WHERE table_schema = ${db.schema} AND grantee = 'abolish_app' AND table_name LIKE 'posting_%'
       GROUP BY table_name ORDER BY table_name`;
     expect(grants.map((g) => [g["table_name"], g["p"]])).toEqual(
-      ["posting_ballots", "posting_in_flight", "posting_sent", "posting_spend"].map((t) => [
-        t,
-        "DELETE,INSERT,SELECT,UPDATE",
-      ]),
+      [
+        "posting_ballots",
+        "posting_deposits",
+        "posting_in_flight",
+        "posting_sent",
+        "posting_spend",
+      ].map((t) => [t, "DELETE,INSERT,SELECT,UPDATE"]),
     );
   });
 
@@ -577,8 +588,8 @@ describe("caps", () => {
     expect(chain.signed).toHaveLength(3);
   });
 
-  test("a deposit's cost counts while POSTING_FORCE_AFTER from now is by the deposit cutoff", async () => {
-    const edge = Number(C_F - POSTING_FORCE_AFTER);
+  test("a deposit's reserve counts while POSTING_FORCE_AFTER + POSTING_DEPOSIT_SPAN from now is by the deposit cutoff", async () => {
+    const edge = Number(C_F - POSTING_FORCE_AFTER - POSTING_DEPOSIT_SPAN);
     const a = bytes32();
     await ledger(new FakeKey(), { now: edge }).send(toSend({ electionId: a }));
     expect(await spentOf(a)).toBe(MOST);
@@ -1026,10 +1037,11 @@ describe("prune", () => {
     chain.count = 1n;
     expect(await ledger(chain, { now: LATE }).prune(before)).toEqual(report({ final: 1 }));
     expect(await inFlight()).toEqual([q.key]);
-    // Its bytes are still never paid for again, nor its ballot's cap freed.
+    // Its bytes are still never paid for again, nor its ballot's cap freed;
+    // its deposit's reserve, which no deposit can use now, is released.
     expect(await l.sent(p.key)).toEqual({ transaction: first.transaction, layer: "l2" });
     expect(await counts()).toMatchObject({ sent: 2, ballots: 2, spend: 1, in_flight: 1 });
-    expect(await spentOf(ELECTION)).toBe(2n * MOST);
+    expect(await spentOf(ELECTION)).toBe(2n * MOST - COSTS.deposit);
   });
 
   test("an entry on the board only at the latest head stays", async () => {

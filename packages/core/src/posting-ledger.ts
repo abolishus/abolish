@@ -20,10 +20,16 @@
 
 import { deliveryDeadlines, intakeCutoff } from "@abolishus/crypto";
 import { PINNED_FORCED_INCLUSION, PINNED_MARGIN } from "@abolishus/verifier";
-import { and, asc, eq, lt, max, ne, sql as q } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, max, ne, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
-import { postingBallots, postingInFlight, postingSent, postingSpend } from "./db/schema/index.ts";
+import {
+  postingBallots,
+  postingDeposits,
+  postingInFlight,
+  postingSent,
+  postingSpend,
+} from "./db/schema/index.ts";
 import { type PostingOutcome, type PostingSent, POSTING_SEND_MARGIN } from "./posting-relay.ts";
 import {
   POSTING_GAS_LIMIT_MAX,
@@ -43,6 +49,10 @@ export const POSTING_FINALITY = 1_800n;
 export const POSTING_FORCE_AFTER = 600n;
 /** Seconds between rebroadcasts of a pending transaction (Values); one pending twice as long is replaced. */
 export const POSTING_RESEND = 60n;
+/** Seconds of L1 time from the L1 head a deposit is signed on, within which it, or its cancellation, is meant to be mined (Values). */
+export const POSTING_DEPOSIT_SPAN = 600n;
+/** Seconds from that head after which a deposit not yet in an L1 block is cancelled (Values). */
+export const POSTING_DEPOSIT_PATIENCE = 300n;
 
 /** Milliseconds the ledger waits on any one call to the posting key's node before it gives up. */
 export const POSTING_CHAIN_TIMEOUT_MS = 10_000;
@@ -65,7 +75,13 @@ export interface PostingSigned {
 export interface PostingCosts {
   /** The L1 data fee the L2's fee oracle gives for the call's calldata. */
   readonly l1DataFee: bigint;
-  /** The most an L1 deposit of the call, with the same gas limit and calldata, costs on L1. */
+  /**
+   * The reserve of an L1 deposit of the call, with the same gas limit and
+   * calldata, priced as one would be now (Depositing, step 1):
+   * `postingDepositReserve` of `postingDepositGasLimit` of the L1 node's
+   * estimate at the L1 fee cap, or 0 if the estimate reverts or passes
+   * `POSTING_L1_GAS_LIMIT_MAX`.
+   */
   readonly deposit: bigint;
 }
 
@@ -188,8 +204,9 @@ export function postingWindows(
 
 /**
  * The most a call can cost (Caps, Spend): `g` at the fee cap, its L1 data
- * fee, and a deposit's L1 cost if it may yet be forced: if
- * `POSTING_FORCE_AFTER` from `now` is still by the deposit cutoff.
+ * fee, and a deposit's reserve if it may yet be forced: if
+ * `POSTING_FORCE_AFTER + POSTING_DEPOSIT_SPAN` from `now` is still by the
+ * deposit cutoff (Depositing, step 2).
  */
 export function postingMostCost(
   gasLimit: bigint,
@@ -200,9 +217,9 @@ export function postingMostCost(
   return gasLimit * feeCap + costs.l1DataFee + (forceable ? costs.deposit : 0n);
 }
 
-const isWei = (v: unknown): v is bigint => typeof v === "bigint" && v >= 0n;
+export const isWei = (v: unknown): v is bigint => typeof v === "bigint" && v >= 0n;
 
-function isHash(v: unknown): v is Uint8Array {
+export function isHash(v: unknown): v is Uint8Array {
   return v instanceof Uint8Array && v.length === 32;
 }
 
@@ -229,7 +246,7 @@ export class PostingLedgerError extends Error {
 }
 
 /** A call to the posting key's node, bounded in time, its error replaced. */
-async function call<T>(f: () => Promise<T>, timeoutMs: number): Promise<T> {
+export async function call<T>(f: () => Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -246,7 +263,7 @@ async function call<T>(f: () => Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 /** The ledger's own errors as they are; any other, the store's, replaced. */
-function scrubbed(e: unknown): PostingLedgerError {
+export function scrubbed(e: unknown): PostingLedgerError {
   return e instanceof PostingLedgerError
     ? e
     : new PostingLedgerError("the posting ledger's store failed");
@@ -254,7 +271,7 @@ function scrubbed(e: unknown): PostingLedgerError {
 
 // One lock for every send, so the nonce, the caps and the spend are read
 // and written by one send at a time, whichever worker runs it.
-const LOCK = q`SELECT pg_advisory_xact_lock(hashtextextended('posting_ledger', 0))`;
+export const LOCK = q`SELECT pg_advisory_xact_lock(hashtextextended('posting_ledger', 0))`;
 
 /** `PostingLedger` over Postgres and the posting key. */
 export class PostgresPostingLedger implements PostingLedger {
@@ -481,6 +498,10 @@ export class PostgresPostingLedger implements PostingLedger {
           .delete(postingInFlight)
           .where(lt(postingInFlight.deliveryEnds, at))
           .returning({ key: postingInFlight.postingKey });
+        await forgetDeposits(
+          tx,
+          entries.map((e) => e.key),
+        );
         await tx.delete(postingSent).where(lt(postingSent.deliveryEnds, at));
         await tx.delete(postingBallots).where(lt(postingBallots.deliveryEnds, at));
         const spends = await tx
@@ -511,7 +532,7 @@ export class PostgresPostingLedger implements PostingLedger {
       return await drizzle({ client: this.#sql }).transaction(
         async (tx) => {
           await tx.execute(LOCK);
-          const gone = await tx
+          const [gone] = await tx
             .delete(postingInFlight)
             .where(
               and(
@@ -519,8 +540,24 @@ export class PostgresPostingLedger implements PostingLedger {
                 eq(postingInFlight.nonce, entry.nonce),
               ),
             )
-            .returning({ key: postingInFlight.postingKey });
-          return gone.length === 1;
+            .returning({
+              electionId: postingInFlight.electionId,
+              deposit: postingInFlight.deposit,
+            });
+          if (gone === undefined) return false;
+          // No deposit of it can be sent any more (Depositing): what its
+          // deposits' nonces don't hold of its counted reserve is released,
+          // and what they hold is replaced by their receipts as they settle.
+          const [held] = await tx
+            .select({ reserve: q<string>`coalesce(sum(${postingDeposits.reserve}), 0)::text` })
+            .from(postingDeposits)
+            .where(
+              and(eq(postingDeposits.postingKey, entry.key), eq(postingDeposits.final, false)),
+            );
+          const unheld = BigInt(gone.deposit) - BigInt(held?.reserve ?? "0");
+          if (unheld > 0n) await moveSpend(tx, gone.electionId, -unheld);
+          await forgetDeposits(tx, [entry.key]);
+          return true;
         },
         { isolationLevel: "read committed" },
       );
@@ -549,11 +586,7 @@ export class PostgresPostingLedger implements PostingLedger {
         // cost, or what its receipts show on L2 with its deposit's reserve,
         // which only the deposit's own settling releases.
         const counted = paid === undefined ? cost : paid + deposit;
-        const sentTo = (hash: Uint8Array) =>
-          tx
-            .update(postingSent)
-            .set({ transaction: hash, layer: "l2" })
-            .where(eq(postingSent.postingKey, key));
+        const sentTo = (hash: Uint8Array) => namedL2(tx, key, hash);
 
         // The key's count before the receipts, so a transaction of this
         // entry that consumed its nonce is seen below on one view of the
@@ -738,10 +771,7 @@ export class PostgresPostingLedger implements PostingLedger {
         broadcastAt: now,
       })
       .where(eq(postingInFlight.postingKey, row.postingKey));
-    await tx
-      .update(postingSent)
-      .set({ transaction: s.hash, layer: "l2" })
-      .where(eq(postingSent.postingKey, row.postingKey));
+    await namedL2(tx, row.postingKey, s.hash);
     return { kind: "resent", broadcast: s.tx };
   }
 
@@ -787,7 +817,8 @@ export class PostgresPostingLedger implements PostingLedger {
 
         // Caps, Spend: the call's most cost against what is left of the
         // election's budget.
-        const forceable = BigInt(now) + POSTING_FORCE_AFTER <= windows.deposit;
+        const forceable =
+          BigInt(now) + POSTING_FORCE_AFTER + POSTING_DEPOSIT_SPAN <= windows.deposit;
         const cost = postingMostCost(p.gasLimit, this.#feeCap, costs, forceable);
         const [spend] = await tx
           .select({ spent: postingSpend.spent })
@@ -879,10 +910,10 @@ export class PostgresPostingLedger implements PostingLedger {
 }
 
 type Db = ReturnType<typeof drizzle>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** A signature the ledger may record: in form, its fees within the fee cap. */
-function checkSigned(s: PostingSigned, feeCap: bigint): void {
+export function checkSigned(s: PostingSigned, feeCap: bigint): void {
   if (
     !(s.tx instanceof Uint8Array) ||
     s.tx.length === 0 ||
@@ -896,22 +927,22 @@ function checkSigned(s: PostingSigned, feeCap: bigint): void {
 }
 
 /** A fee raised by an eighth, rounded up (Sending). */
-const raised = (fee: bigint) => fee + (fee + 7n) / 8n;
+export const raised = (fee: bigint) => fee + (fee + 7n) / 8n;
 
 /** The 32-byte hashes of every transaction that carried an entry, oldest first. */
-function hashesOf(transactions: Uint8Array): Uint8Array[] {
+export function hashesOf(transactions: Uint8Array): Uint8Array[] {
   const out: Uint8Array[] = [];
   for (let i = 0; i < transactions.length; i += 32)
     out.push(new Uint8Array(transactions.subarray(i, i + 32)));
   return out;
 }
 
-function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
 /** The election's spend moved by `delta` wei, either way. */
-async function moveSpend(tx: Tx, electionId: Uint8Array, delta: bigint): Promise<void> {
+export async function moveSpend(tx: Tx, electionId: Uint8Array, delta: bigint): Promise<void> {
   if (delta === 0n) return;
   const moved = await tx
     .update(postingSpend)
@@ -939,4 +970,43 @@ async function sentIn(db: Db | Tx, key: Uint8Array): Promise<PostingSent | undef
   if (row.layer !== "l1" && row.layer !== "l2")
     throw new Error("the ledger holds a layer out of form");
   return { transaction: new Uint8Array(row.transaction), layer: row.layer };
+}
+
+/**
+ * Names `hash`, an L2 transaction of the posting `key`, as its last, unless
+ * a deposit of it is pending or landed: the record names that deposit then
+ * (Depositing).
+ */
+async function namedL2(tx: Tx, key: Uint8Array, hash: Uint8Array): Promise<void> {
+  const d = postingDeposits;
+  const [deposit] = await tx
+    .select({ nonce: d.nonce })
+    .from(d)
+    .where(
+      and(
+        eq(d.postingKey, key),
+        or(and(q`${d.settledIn} IS NULL`, eq(d.final, false)), eq(d.landed, true)),
+      ),
+    )
+    .limit(1);
+  if (deposit !== undefined) return;
+  await tx
+    .update(postingSent)
+    .set({ transaction: hash, layer: "l2" })
+    .where(eq(postingSent.postingKey, key));
+}
+
+/**
+ * Once a posting's entry is deleted, its signed deposits go with it, since
+ * they carry its calldata, `m_i` included (Pruning; T-18): a pending one is
+ * cancelled on the next tend of the deposits, and a signed cancellation,
+ * which carries nothing of it, stays to be tended.
+ */
+async function forgetDeposits(tx: Tx, keys: readonly Uint8Array[]): Promise<void> {
+  if (keys.length === 0) return;
+  const d = postingDeposits;
+  await tx
+    .update(d)
+    .set({ signed: null })
+    .where(and(inArray(d.postingKey, [...keys]), q`octet_length(${d.cancels}) = 0`));
 }

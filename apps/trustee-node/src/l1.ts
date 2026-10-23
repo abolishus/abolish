@@ -20,7 +20,10 @@
 import {
   type Anchor,
   type AnchorClock,
+  AVAILABILITY_POINTS,
+  type AvailabilityPoint,
   BOARD_ENTRY,
+  countedExtent,
   type BoardEntryVersion,
   electionDefinitionHash,
   electionDefinitionV5Hash,
@@ -93,7 +96,7 @@ export type L1AnchorRefusal =
   | "clock"
   /** The creation's L1 origin isn't the finalized L1 block of its number: another hash or time. */
   | "origin"
-  /** The creation's L1 origin is before the anchor's epoch, or `f` or `s_A` past a `u32`. */
+  /** The creation's L1 origin is before the anchor's epoch, or `f` or the point's segment past a `u32`. */
   | "outside-clock";
 
 export class L1AnchorError extends Error {
@@ -125,14 +128,17 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * refusal, the node package's `L2Error` when the creation or registration is
  * missing or repeated, and `RpcError` when a node's answer can't be read.
  *
- * The clock's `lastSegment` is `s_A`, not the seal: no seal is derived from
- * a definition yet ([[election-definition]], The seal), every seal is at or
- * after `s_A`, and the duty judges nothing past `C_A`, whose segment is at
- * most `s_A`. So each read proves the words of segments `f` to `s_A` only.
+ * The clock's `lastSegment` is the point's segment (`s_A` for the ballot
+ * extent, the default, or `s_S` for the counted extent), not the seal: no
+ * seal is derived from a definition yet ([[election-definition]], The seal),
+ * every seal is at or after `s_S ≥ s_A`, and the duty judges nothing past
+ * the point's checkpoint, whose segment is at most the point's. So each read
+ * proves the words of segments `f` to that segment only.
  */
 export async function l1BoardAnchors(
   options: L1AnchorOptions,
   election: ApprovedElection,
+  point: AvailabilityPoint = AVAILABILITY_POINTS.ballotExtent,
 ): Promise<FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion }> {
   const { l1, l2, anchor } = options;
   if ((await chainId(l1)) !== options.l1ChainId || (await chainId(l2)) !== options.l2ChainId)
@@ -211,9 +217,12 @@ export async function l1BoardAnchors(
   const origin = created.timestamp;
   if (origin < timing.epoch || d.closes_at < origin) throw new L1AnchorError("outside-clock");
   const f = (origin - timing.epoch) / timing.period;
-  const sA = (d.closes_at - timing.epoch) / timing.period + 1n;
-  if (sA > U32_MAX) throw new L1AnchorError("outside-clock");
-  const clock: AnchorClock = { ...timing, lastSegment: Number(sA) };
+  const extentEnd =
+    point === AVAILABILITY_POINTS.ballotExtent
+      ? (d.closes_at - timing.epoch) / timing.period + 1n
+      : countedExtent(timing, d.closes_at, BigInt(d.l1_inclusion_bound)).segment;
+  if (extentEnd > U32_MAX) throw new L1AnchorError("outside-clock");
+  const clock: AnchorClock = { ...timing, lastSegment: Number(extentEnd) };
 
   return {
     boardVersion,
@@ -230,7 +239,7 @@ export async function l1BoardAnchors(
       const now = header.timestamp;
       const ended =
         now < clock.epoch + clock.period ? -1n : (now - clock.epoch) / clock.period - 1n;
-      const last = ended < sA ? ended : sA;
+      const last = ended < extentEnd ? ended : extentEnd;
       if (last - f + 1n > BigInt(MAX_SEGMENTS_READ)) throw new L1Error("l1-range-too-long");
       // Every slot the reader may walk: the lowest-segment word, then each
       // segment from `f`, since it starts at the larger of the two.

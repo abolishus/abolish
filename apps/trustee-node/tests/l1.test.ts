@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import {
+  AVAILABILITY_POINTS,
   type Checkpoint,
+  countedExtent,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
   decodeElectionDefinitionV6,
@@ -353,6 +355,29 @@ describe("l1BoardAnchors", () => {
     const read = await (await l1BoardAnchors(options, election)).read(election.electionId);
     expect(read.anchors).toEqual(cps.map(anchored));
     expect(read.clock.lastSegment).toBe(Number(f + 7n));
+  });
+
+  test("reads the counted extent's anchors for segments f to s_S, past s_A", async () => {
+    // Closing in period f + 1: s_A = f + 2, and s_S days later.
+    const { f, d, election, options } = await setup("counted", 600n);
+    const sS = countedExtent(options.timing, d.closes_at, BigInt(d.l1_inclusion_bound)).segment;
+    expect(sS).toBeGreaterThan(f + 2n);
+    // Each anchored within its segment's deadline, as the anchor requires.
+    const cps = [0n, 2n, 3n, sS - f, sS - f + 1n].map((k) =>
+      checkpoint(election.electionId, f + k),
+    );
+    await advanceTo(end(f + 3n) + 60n);
+    await chain.anchorAll(anchor, cps.slice(0, 3));
+    await advanceTo(end(sS + 1n) + 60n);
+    await chain.anchorAll(anchor, cps.slice(3));
+    const reader = await l1BoardAnchors(options, election, AVAILABILITY_POINTS.countedExtent);
+    const read = await reader.read(election.electionId);
+    // Segment s_S + 1 is past the counted extent.
+    expect(read.anchors).toEqual(cps.slice(0, 4).map(anchored));
+    expect(read.clock.lastSegment).toBe(Number(sS));
+    // The ballot extent's reader of the same election stops at s_A.
+    const ballot = await (await l1BoardAnchors(options, election)).read(election.electionId);
+    expect(ballot.anchors).toEqual(cps.slice(0, 2).map(anchored));
   });
 
   test("reads no anchor for a segment that ended before the creation's L1 origin", async () => {

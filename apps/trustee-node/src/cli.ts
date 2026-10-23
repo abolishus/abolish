@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type AsyncBlockSource,
+  AVAILABILITY_POINTS,
   type BoardEntryVersion,
   encodeElectionDefinition,
   identityKey,
@@ -41,7 +42,13 @@ import {
   readTlsKey,
 } from "./config.ts";
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
-import { AvailabilityDuties, ComplaintDuties, type DutyEvent, ReceiptDuties } from "./duties.ts";
+import {
+  AvailabilityDuties,
+  ComplaintDuties,
+  CountedAvailabilityDuties,
+  type DutyEvent,
+  ReceiptDuties,
+} from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
 import { seatFromEnv } from "./env-seat.ts";
 import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
@@ -202,6 +209,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
     ...(availability
       ? [
           availability.duties.run(signal, ms),
+          availability.counted.run(signal, ms),
           availability.receipts.run(signal, ms),
           availability.complaints.run(signal, ms),
         ]
@@ -279,14 +287,16 @@ async function intakeEndpoint(
 /** The duties `run` steps beside the ceremony, and the gateway serving what the seat attests. */
 interface Duties {
   readonly duties: AvailabilityDuties;
+  readonly counted: CountedAvailabilityDuties;
   readonly receipts: ReceiptDuties;
   readonly complaints: ComplaintDuties;
   readonly server: Server;
 }
 
 /**
- * The availability, receipt and complaint duties over the configured
- * nodes, contracts and sources (README, Availability duty, Receipt duty and
+ * The availability duties at both points, and the receipt and complaint
+ * duties, over the configured nodes, contracts and sources (README,
+ * Availability duty, Receipt duty and
  * Complaint duty), with the gateway serving the blocks directory and what
  * the availability duty pins into it, listening; or undefined when the
  * configuration has no `availability`. One sender for the one paying
@@ -376,6 +386,24 @@ async function availabilityDuties(
       return new AvailabilitySeat(wiring.seat(election, reader));
     },
   });
+  // The counted extent's reader proves the anchor's words through `s_S`,
+  // and the seat fixes `C_S` by the same pinned clock the reader checked.
+  const counted = new CountedAvailabilityDuties(
+    {
+      seat,
+      clock,
+      log: (e: DutyEvent) => io.out(e),
+      build: async (election) => {
+        const reader = await l1BoardAnchors(
+          wiring.anchors,
+          election,
+          AVAILABILITY_POINTS.countedExtent,
+        );
+        return new AvailabilitySeat({ ...wiring.seat(election, reader), counted: a.anchorClock });
+      },
+    },
+    a.anchorClock,
+  );
   const receipts = new ReceiptDuties({
     seat,
     clock,
@@ -401,7 +429,7 @@ async function availabilityDuties(
     io.err({ error: `serve: ${e.code ?? "failed"}` }),
   );
   io.out({ event: "serving", address: server.address() });
-  return { duties, receipts, complaints, server };
+  return { duties, counted, receipts, complaints, server };
 }
 
 /** What `run` builds the duty over, besides the configuration. */

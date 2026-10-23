@@ -1,8 +1,9 @@
-// The ballot-extent duty (docs/spec/availability.md, What a seat does): a seat
-// attests the board through `C_A` once it is fixed and its copy, read by the
-// anchored CIDs, passes the board checks; complains by `c_I` naming the run
-// it couldn't read; signs at most one of each, stored before sending; and
-// resends the stored bytes until the board contract records them.
+// The availability duty at both points (docs/spec/availability.md, What a
+// seat does): a seat attests the board through `C_A` (or `C_S`) once it is
+// fixed and its copy, read by the anchored CIDs, passes the board checks;
+// complains by `c_I` (or `c_A'`) naming the run it couldn't read; signs at
+// most one of each per point, stored before sending; and resends the stored
+// bytes until the board contract records them.
 import {
   type Anchor,
   type AnchorClock,
@@ -14,6 +15,7 @@ import {
   checkpointHash,
   contentDag,
   copyCheckpoints,
+  countedExtent,
   decodeAvailabilityAttestation,
   decodeAvailabilityComplaint,
   electionDefinitionHash,
@@ -25,6 +27,7 @@ import {
 import { RpcError } from "@abolishus/node";
 import fc from "fast-check";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
+import { attested } from "../src/availability.ts";
 import {
   type ApprovedElection,
   AvailabilitySeat,
@@ -32,6 +35,8 @@ import {
   CeremonySeat,
   type ContractPath,
 } from "../src/index.ts";
+import { CountedAvailabilityDuties } from "../src/duties.ts";
+import { L1AnchorError } from "../src/l1.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
 import { ViewError } from "../src/view.ts";
@@ -135,6 +140,8 @@ interface World {
   readonly board: ReturnType<typeof boardOf>;
   readonly fixedAt: bigint;
   readonly cutoff: bigint;
+  /** The point's segment, `s_A` or `s_S`. */
+  readonly segment: bigint;
 }
 
 // `closes_at` is 86,400 seconds after `opens_at` in the local stub, so with
@@ -144,7 +151,13 @@ const SEAL = 30;
 
 function world(
   seatIndex = 1,
-  options: { segments?: readonly number[]; lastSegment?: number; wrongIndexAt?: number } = {},
+  options: {
+    segments?: readonly number[];
+    lastSegment?: number;
+    wrongIndexAt?: number;
+    /** The counted-extent duty (point 2) rather than the ballot extent's. */
+    counted?: boolean;
+  } = {},
 ): World {
   const election = approved.elections[seatIndex - 1] as ApprovedElection;
   // A store of its own per world, so each test's duty starts unsigned.
@@ -162,8 +175,16 @@ function world(
     options.segments ?? SEGMENTS,
     options.wrongIndexAt,
   );
-  const sA = (election.closesAt - epoch) / PERIOD + 1n;
-  const fixedAt = epoch + (sA + 1n) * PERIOD + DEADLINE;
+  const timing = { epoch, period: PERIOD, deadline: DEADLINE };
+  const sS = countedExtent(timing, election.closesAt, election.l1InclusionBound);
+  const segment = options.counted ? sS.segment : (election.closesAt - epoch) / PERIOD + 1n;
+  const fixedAt = epoch + (segment + 1n) * PERIOD + DEADLINE;
+  const windows = availabilityWindows(
+    election.closesAt,
+    election.l1InclusionBound,
+    sS.due,
+    RELEASE_WINDOWS,
+  );
   const w: World = {
     seat: undefined as unknown as AvailabilitySeat,
     store: own,
@@ -180,12 +201,12 @@ function world(
     clock,
     board,
     fixedAt,
-    cutoff: availabilityWindows(election.closesAt, election.l1InclusionBound, 0n, RELEASE_WINDOWS)
-      .ballotCutoff,
+    cutoff: options.counted ? windows.countedCutoff : windows.ballotCutoff,
+    segment,
   };
   const contract: ContractPath = {
     send: async (record, cutoff) => {
-      // Every record is due by the ballot extent's cutoff, c_I.
+      // Every record is due by its point's cutoff, c_I or c_A'.
       expect(cutoff).toBe(w.cutoff);
       if (w.failSend) throw new Error("sequencer down and L1 unreachable");
       w.sent.push(Uint8Array.from(record));
@@ -195,7 +216,7 @@ function world(
         key(election.definitionHash),
         1,
         election.index,
-        1,
+        options.counted ? 2 : 1,
       ]);
       return w.recorded.get(kind);
     },
@@ -218,6 +239,7 @@ function world(
       w.pinned.push([key(cid), Uint8Array.from(object)]);
     },
     contract,
+    ...(options.counted ? { counted: timing } : {}),
     clock: () => w.wall,
     sendMargin: 600n,
     maxBytes: 1 << 20,
@@ -620,5 +642,326 @@ describe("the ballot extent", () => {
       ),
       { numRuns },
     );
+  });
+});
+
+describe("the counted extent", () => {
+  // `s_S` and its neighbours, from a world's own clock and definition.
+  const sS = () => Number(world(1, { counted: true }).segment);
+  const counted = (index = 1, segments?: readonly number[]) => {
+    const s = sS();
+    return world(index, {
+      counted: true,
+      segments: segments ?? [0, 3, 25, s - 1, s, s + 1],
+      lastSegment: s + 2,
+    });
+  };
+  const cS = (w: World) => w.board.checkpoints.get(Number(w.segment)) as Checkpoint;
+
+  test("s_S and t_S are the counted extent's, after the ballot extent's", () => {
+    const b = world();
+    const w = counted();
+    expect(w.segment).toBeGreaterThan(b.segment);
+    // `C_S` is fixed at `t_S`, its last segment's anchoring deadline.
+    expect(w.fixedAt).toBe(
+      countedExtent(
+        { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+        w.election.closesAt,
+        w.election.l1InclusionBound,
+      ).due,
+    );
+    expect(w.seat.cutoff).toBe(w.cutoff);
+    expect(w.seat.deadline).toBe(w.cutoff + RELEASE_WINDOWS.forcedInclusion);
+    expect(w.seat.cutoff).toBeGreaterThan(b.seat.deadline);
+  });
+
+  test("waits until C_S is fixed on finalized L1, then attests the board through it at point 2 with no roots", async () => {
+    const w = counted();
+    w.l1Now = w.fixedAt - 1n;
+    expect(await w.seat.step()).toEqual({ state: "waiting", until: w.fixedAt });
+    expect(w.sent).toEqual([]);
+    w.l1Now = w.fixedAt;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    const a = decodeAvailabilityAttestation(w.sent[0] as Uint8Array, 1);
+    expect([a.panel, a.seat, a.point]).toEqual([1, 1, 2]);
+    expect(key(a.definition_hash)).toBe(key(w.election.definitionHash));
+    // C_S is segment s_S's checkpoint, never the later one the seat also sees.
+    expect(key(a.checkpoint_hash)).toBe(key(checkpointHash(cS(w))));
+    expect(a.roots).toEqual([]);
+    // Stored under the point's own name, beside the ballot extent's.
+    const prefix = `availability/${key(w.election.definitionHash)}`;
+    expect(key((await w.store.get(`${prefix}/counted/attestation`)) as Uint8Array)).toBe(
+      key(w.sent[0] as Uint8Array),
+    );
+    expect(await w.store.get(`${prefix}/ballot/attestation`)).toBeUndefined();
+  });
+
+  test("a seat that attested the ballot extent signs its own record at the counted extent", async () => {
+    const s = sS();
+    const segments = [0, 3, 25, s - 1, s, s + 1];
+    const ballot = world(1, { segments, lastSegment: s + 2 });
+    expect(await ballot.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    // The counted duty over the same store and board.
+    const w = counted(1, segments);
+    const own = new AvailabilitySeat({
+      store: ballot.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: { read: async () => ({ anchors: w.anchors, clock: w.clock, now: w.l1Now }) },
+      blocks: async (cid) => {
+        for (const blocks of w.board.objects.values()) {
+          const b = blocks.get(key(cid));
+          if (b !== undefined) return [b];
+        }
+        return [];
+      },
+      pin: async () => undefined,
+      contract: { send: async (r) => void w.sent.push(r), recorded: async () => undefined },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    expect(await own.step()).toEqual({ state: "sent", kind: "attestation" });
+    const [first, second] = [ballot.sent[0], w.sent[0]].map((b) =>
+      decodeAvailabilityAttestation(b as Uint8Array, 1),
+    );
+    expect([first?.point, second?.point]).toEqual([1, 2]);
+    expect(key(first?.checkpoint_hash as Uint8Array)).toBe(
+      key(checkpointHash(ballot.board.checkpoints.get(25) as Checkpoint)),
+    );
+    expect(key(second?.checkpoint_hash as Uint8Array)).toBe(key(checkpointHash(cS(w))));
+    expect(await attested(ballot.store, w.election.definitionHash, 1)).toBe(true);
+    expect(await attested(ballot.store, w.election.definitionHash, 2)).toBe(true);
+    expect(await own.heldExtent()).toMatchObject({ boardSegment: w.segment });
+  });
+
+  test("pins every run through C_S, and reads nothing past it", async () => {
+    const w = counted();
+    const s = Number(w.segment);
+    w.withheld.add(s + 1);
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    expect(w.pinned.map(([cid]) => cid)).toEqual(
+      [0, 3, 25, s - 1, s].flatMap((seg) => {
+        const cp = w.board.checkpoints.get(seg) as Checkpoint;
+        return [key(cp.object_cid), key(cp.hashes_cid)];
+      }),
+    );
+  });
+
+  test("complains by c_A' naming a withheld run, and signs nothing new after it", async () => {
+    const w = counted();
+    const s = Number(w.segment);
+    w.withheld.add(s - 1);
+    expect(await w.seat.step()).toEqual({ state: "fetching" });
+    w.wall = w.cutoff - 600n;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "complaint" });
+    const c = decodeAvailabilityComplaint(w.sent[0] as Uint8Array, 1);
+    expect(c.point).toBe(2);
+    expect(key(c.cid)).toBe(key((w.board.checkpoints.get(s - 1) as Checkpoint).object_cid));
+    expect(key(c.checkpoint_hash)).toBe(key(checkpointHash(cS(w))));
+    const late = counted();
+    late.wall = late.cutoff + 1n;
+    expect(await late.seat.step()).toEqual({ state: "past-cutoff", complained: false });
+    expect(late.sent).toEqual([]);
+  });
+
+  test("names no checkpoint when none is counted at or before s_S", async () => {
+    const s = sS();
+    const w = counted(1, [s + 1]);
+    expect(await w.seat.step()).toEqual({ state: "no-checkpoint" });
+    expect(w.sent).toEqual([]);
+  });
+
+  test("refuses a reader whose clock isn't the pinned one, signing nothing", async () => {
+    const w = counted();
+    const seat = new AvailabilitySeat({
+      store: w.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: {
+        read: async () => ({
+          anchors: w.anchors,
+          clock: { ...w.clock, period: 1_800n },
+          now: w.l1Now,
+        }),
+      },
+      blocks: async () => [],
+      pin: async () => undefined,
+      contract: { send: async (r) => void w.sent.push(r), recorded: async () => undefined },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    await expect(seat.step()).rejects.toEqual(new L1AnchorError("clock"));
+    expect(w.sent).toEqual([]);
+  });
+
+  test("refuses a reader stopping before s_S, so C_A is never attested as point 2", async () => {
+    const w = counted();
+    // The ballot extent's reader: its clock's last segment is s_A.
+    w.l1Now = w.fixedAt;
+    const seat = new AvailabilitySeat({
+      store: w.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: {
+        read: async () => ({
+          anchors: w.anchors,
+          clock: { ...w.clock, lastSegment: 25 },
+          now: w.l1Now,
+        }),
+      },
+      blocks: async () => [],
+      pin: async () => undefined,
+      contract: { send: async (r) => void w.sent.push(r), recorded: async () => undefined },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    await expect(seat.step()).rejects.toEqual(new L1AnchorError("clock"));
+    expect(w.sent).toEqual([]);
+    expect(await attested(w.store, w.election.definitionHash, 2)).toBe(false);
+  });
+
+  test("a recorded ballot-extent attestation leaves the counted extent's to do", async () => {
+    const w = counted();
+    const recordedPoints: number[] = [];
+    const seat = new AvailabilitySeat({
+      store: w.store,
+      election: w.election,
+      boardVersion: 1,
+      l1: { read: async () => ({ anchors: w.anchors, clock: w.clock, now: w.l1Now }) },
+      blocks: async (cid) => {
+        for (const blocks of w.board.objects.values()) {
+          const b = blocks.get(key(cid));
+          if (b !== undefined) return [b];
+        }
+        return [];
+      },
+      pin: async () => undefined,
+      contract: {
+        send: async (r) => void w.sent.push(r),
+        // The contract holds the seat's point-1 attestation only.
+        recorded: async (_kind, _hash, _panel, _seat, point) => {
+          recordedPoints.push(point);
+          return point === 1 ? new Uint8Array(138) : undefined;
+        },
+      },
+      counted: { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+      clock: () => w.wall,
+      sendMargin: 600n,
+      maxBytes: 1 << 20,
+    });
+    expect(await seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    expect(recordedPoints).toEqual([2]);
+  });
+
+  test("raises an alarm when the contract holds another counted-extent attestation for the seat's slot", async () => {
+    const w = counted();
+    await w.seat.step();
+    const other = Uint8Array.from(w.sent[0] as Uint8Array);
+    other.set([(other.at(-1) as number) ^ 1], other.length - 1);
+    w.recorded.set("attestation", other);
+    expect(await w.seat.step()).toEqual({ state: "foreign-record", kind: "attestation" });
+  });
+
+  test("refuses an election closing before the pinned clock's epoch", () => {
+    const w = counted();
+    expect(
+      () =>
+        new AvailabilitySeat({
+          store: w.store,
+          election: w.election,
+          boardVersion: 1,
+          l1: { read: async () => ({ anchors: [], clock: w.clock, now: 0n }) },
+          blocks: async () => [],
+          pin: async () => undefined,
+          contract: { send: async () => undefined, recorded: async () => undefined },
+          counted: { epoch: w.election.closesAt + 1n, period: PERIOD, deadline: DEADLINE },
+          clock: () => 0n,
+          sendMargin: 600n,
+          maxBytes: 1 << 20,
+        }),
+    ).toThrow(new L1AnchorError("outside-clock"));
+  });
+
+  test("a threshold of seats' attestations makes the counted extent available", async () => {
+    const events = [];
+    for (const index of [1, 2, 3]) {
+      const w = counted(index);
+      await w.seat.step();
+      events.push({ payload: w.sent[0] as Uint8Array, submittedAt: w.wall });
+    }
+    const w = counted();
+    const report = checkAvailability(
+      {
+        definitionHash: w.election.definitionHash,
+        panels: [
+          {
+            panel: 1,
+            threshold: approved.threshold,
+            registered: [...approved.signingKeys].map(([index, signingKey]) => ({
+              index,
+              signingKey,
+            })),
+          },
+        ],
+        checkpoints: { ballot: null, counted: checkpointHash(cS(w)) },
+        deadlines: { ballot: 0n, counted: w.seat.deadline },
+      },
+      events,
+    );
+    expect(report.records.map((r) => r.code)).toEqual(["valid", "valid", "valid"]);
+    expect(report.points[1]?.panels[0]?.attested.map((a) => a.seat)).toEqual([1, 2, 3]);
+    expect(report.points[1]?.panels[0]?.holds).toBe(true);
+  });
+
+  test("resends the stored bytes until recorded, and stops once t_A' has passed", async () => {
+    const w = counted();
+    await w.seat.step();
+    w.wall = w.seat.deadline;
+    expect(await w.seat.step()).toEqual({ state: "sent", kind: "attestation" });
+    w.wall = w.seat.deadline + 1n;
+    expect(await w.seat.step()).toEqual({ state: "unrecorded", kind: "attestation" });
+    expect(new Set(w.sent.map(key)).size).toBe(1);
+    w.recorded.set("attestation", w.sent[0] as Uint8Array);
+    expect(await w.seat.step()).toEqual({ state: "recorded" });
+  });
+
+  test("the duties give an election up once t_A' passes before its reader can be set up", async () => {
+    const w = counted();
+    const events: unknown[] = [];
+    let wall = w.seat.deadline;
+    const duties = new CountedAvailabilityDuties(
+      {
+        seat: {
+          approvedStubs: async () => [w.election.stubHash],
+          approvedElection: async () => w.election,
+        },
+        build: async () => {
+          throw new RpcError("eth_chainId: TimeoutError");
+        },
+        clock: () => wall,
+        log: (e) => events.push(e),
+      },
+      { epoch: w.clock.epoch, period: PERIOD, deadline: DEADLINE },
+    );
+    await duties.step();
+    wall += 1n;
+    await duties.step();
+    await duties.step();
+    const stubHash = key(w.election.stubHash);
+    expect(events).toEqual([
+      {
+        event: "counted-availability-error",
+        stubHash,
+        error: "RpcError",
+        message: "eth_chainId: TimeoutError",
+      },
+      { event: "counted-availability-abandoned", stubHash },
+    ]);
   });
 });

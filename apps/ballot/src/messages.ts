@@ -328,7 +328,7 @@ const enUS = {
     "Nothing was posted or sent to the board. Try posting again in a minute, or choose another way.",
   postingRelayedTitle: "The posting isn't on the board yet",
   postingRelayed:
-    "We were given the missing parts with the key to their outer seal, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Try posting again in a minute: the same parts go again, never new ones.",
+    "Our posting relay, run by the poll's operator, was given the missing parts with the key to their outer seal, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Try posting again in a minute: the same parts go again, never new ones.",
   declinedTitle: "This ballot won't count",
   declined:
     "This device erased the parts it kept for the trustees that didn't take theirs. Answer again while the poll is open: your new ballot replaces this one, and your earlier one, wherever they reach the board.",

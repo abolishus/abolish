@@ -224,18 +224,21 @@ export async function postThroughRelay(
     }
     const left = pending.filter((p) => !recorded.has(p));
     if (left.length === 0) return "recorded";
-    const now = seconds() > chainTime ? seconds() : chainTime;
-    if (now > deadline) return unrecorded();
+    // Read again before each send, since a send can take a request's whole timeout.
+    const time = () => (seconds() > chainTime ? seconds() : chainTime);
+    if (time() > deadline) return unrecorded();
     for (const p of left) {
       if (p.sentAt !== undefined) continue;
-      if (now - started >= POSTING_PATIENCE || now > sendCutoff) return unrecorded();
+      const now = time();
+      if (now > deadline || now - started >= POSTING_PATIENCE || now > sendCutoff)
+        return unrecorded();
       const answer = await io.send(p.posting);
       if (answer.kind !== "unreachable" || answer.reached) read = true;
       if (answer.kind === "refused") return unrecorded();
       if (answer.kind === "sent") p.sentAt = seconds();
     }
     const waited = left.filter(
-      (p) => p.sentAt !== undefined && now - p.sentAt >= POSTING_FORCE_AFTER + POSTING_SEEN,
+      (p) => p.sentAt !== undefined && time() - p.sentAt >= POSTING_FORCE_AFTER + POSTING_SEEN,
     );
     if (waited.some((p) => !p.seen)) {
       // Looked for at the latest head only once its wait is over: a sighting

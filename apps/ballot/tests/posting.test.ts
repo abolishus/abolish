@@ -260,6 +260,22 @@ describe("postThroughRelay", () => {
     }
   });
 
+  test("each send checks the time again: a slow send ends the round's later ones past the cutoff", async () => {
+    const start = CUTOFF - POSTING_SEND_MARGIN - 10n;
+    const w = world({ relay: () => ({ kind: "busy" }), start });
+    // Every send takes the request's whole 30 seconds.
+    const slow = {
+      ...w.io,
+      send: async (posting: Uint8Array) => {
+        const answer = await w.io.send(posting);
+        await w.io.sleep(30_000);
+        return answer;
+      },
+    };
+    expect(await postThroughRelay(slow, [POSTING, OTHER, POSTING], CUTOFF)).toBe("relayed");
+    expect(w.sends).toHaveLength(1);
+  });
+
   test("nothing is sent past the relay's send cutoff", async () => {
     const start = CUTOFF - POSTING_SEND_MARGIN + 1n;
     const w = world({ relay: () => sent, start });

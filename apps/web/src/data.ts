@@ -17,7 +17,7 @@ import {
   STREAM_PAGE,
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
-import { LOCALE } from "./messages.ts";
+import { isLocale } from "./locales.ts";
 import {
   ballotBase,
   isCanonicalU64,
@@ -85,7 +85,10 @@ export const fetchPollList = createServerFn({ method: "GET" })
  */
 export const fetchStream = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { sort, after, q, topic, place, limit } = (input ?? {}) as Record<string, unknown>;
+    const { sort, after, q, topic, place, limit, locale } = (input ?? {}) as Record<
+      string,
+      unknown
+    >;
     if (!STREAM_SORTS.some((s) => s === sort)) throw new TypeError("expected a stream order");
     // `""` starts the stream, as for the register.
     if (after !== "" && !isElectionId(after))
@@ -104,7 +107,10 @@ export const fetchStream = createServerFn({ method: "GET" })
       (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > STREAM_PAGE)
     )
       throw new TypeError("expected a page size from 1 to 10");
+    // The page's language picks each card's translation; one of ours only.
+    if (!isLocale(locale)) throw new TypeError("expected a locale");
     return {
+      locale,
       sort: sort as StreamSort,
       after,
       q,
@@ -124,7 +130,7 @@ export const fetchStream = createServerFn({ method: "GET" })
           topic: data.topic === "" ? undefined : data.topic,
           place: data.place === "" ? undefined : data.place,
         },
-        LOCALE,
+        data.locale,
         context.readAskedBy,
         data.limit,
       ),
@@ -169,19 +175,20 @@ export const fetchPhoneVerification = createServerFn({ method: "GET" }).handler(
  */
 export const fetchProfile = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { handle, after } = (input ?? {}) as Record<string, unknown>;
+    const { handle, after, locale } = (input ?? {}) as Record<string, unknown>;
     if (typeof handle !== "string" || !PROFILE_HANDLE.test(handle))
       throw new TypeError("expected a profile handle");
     if (after !== "" && !isElectionId(after))
       throw new TypeError("expected an election ID or an empty string");
-    return { handle, after };
+    if (!isLocale(locale)) throw new TypeError("expected a locale");
+    return { handle, after, locale };
   })
   .handler(({ data, context }) =>
     opaque(async () => {
       const read = context.readProfile;
       if (read === undefined) throw new Error("no profile reader");
       return {
-        profile: await loadProfile(api(), read, data.handle, data.after, LOCALE),
+        profile: await loadProfile(api(), read, data.handle, data.after, data.locale),
         ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
       };
     }),

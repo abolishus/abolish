@@ -12,7 +12,8 @@ import {
   manifestFile,
   webManifest,
 } from "../src/app/install.ts";
-import { catalogs, LOCALE } from "../src/messages.ts";
+import { DEFAULT_LOCALE as LOCALE } from "../src/locales.ts";
+import { catalogFor } from "../src/messages.ts";
 import { rasterise } from "../src/og/render.ts";
 
 // The installable website's files: that what `public/` ships is exactly what
@@ -22,7 +23,7 @@ import { rasterise } from "../src/og/render.ts";
 
 const PUBLIC = join(import.meta.dirname, "..", "public");
 const update = process.env["UPDATE_APP_FILES"] === "1";
-const messages = catalogs[LOCALE]!;
+const messages = catalogFor(LOCALE);
 
 /** `want` as the committed file at `path`, or written there when updating. */
 function committed(path: string, want: Uint8Array | string) {

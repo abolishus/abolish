@@ -55,6 +55,33 @@ export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 
+/**
+ * The frame in Spanish (P2-28 part 4): its words, the footer's languages
+ * with Español the current one, and the longer words still in one header
+ * row on a phone (the phone project runs every story at 360px).
+ */
+export const Spanish: Story = {
+  parameters: { locale: "es-US" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const nav = canvas.getByRole("navigation", { name: "Sitio" });
+    await expect(within(nav).getByRole("link", { name: "Descubrir" })).toHaveAttribute(
+      "href",
+      "/discover",
+    );
+    await expect(canvas.getByRole("link", { name: "Saltar al contenido" })).toBeInTheDocument();
+    const languages = canvas.getByRole("navigation", { name: "Idioma" });
+    await expect(within(languages).getByText("Español")).toHaveAttribute("aria-current", "true");
+    await expect(within(languages).getByRole("button", { name: "English" })).toHaveAttribute(
+      "lang",
+      "en-US",
+    );
+    // One row is 72px (48px targets and 12px above and below); two would be 120.
+    const header = canvasElement.querySelector("header");
+    await expect(header?.getBoundingClientRect().height).toBeLessThanOrEqual(73);
+  },
+};
+
 export const Current: Story = {
   args: { current: "/polls" },
   play: async ({ canvasElement }) => {

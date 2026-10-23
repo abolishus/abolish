@@ -10,7 +10,7 @@ import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { previewMeta } from "../og/poll.ts";
 import { PREVIEW_SIZE } from "../og/model.ts";
-import { pageTitle, text } from "../titles.ts";
+import { titles } from "../titles.ts";
 import { isElectionId } from "../values.ts";
 
 export const Route = createFileRoute("/polls/$electionId")({
@@ -41,7 +41,8 @@ export const Route = createFileRoute("/polls/$electionId")({
         : undefined;
     return { page, preview, share, phoneVerification: await fetchPhoneVerification() };
   },
-  head: ({ loaderData }) => {
+  head: ({ match, loaderData }) => {
+    const { pageTitle, text } = titles(match.context.locale);
     const page = loaderData?.page;
     const preview = loaderData?.preview;
     return {

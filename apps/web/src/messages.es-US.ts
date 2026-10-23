@@ -1,0 +1,1352 @@
+// apps/web's strings in US Spanish (P2-28 part 4), with `en-US`'s keys
+// (src/messages.ts), addressing the reader as `tú` as the everyday register
+// does ([[language]], Voice).
+
+import type { Messages } from "./messages.ts";
+
+export const esUS: Messages = {
+  siteName: "Abolish",
+  homeTitle: "Pregunta lo que sea. Cualquiera puede responder. Cualquiera puede revisar el conteo.",
+  homeLede:
+    "Preguntas grandes y pequeñas, desde tu calle hasta tu condado. Responder toma un toque o dos, y cada conteo es público, así que nadie tiene que fiarse de la palabra de otro sobre un resultado.",
+  homeAsk: "Hacer una pregunta",
+  homeBrowse: "Ver preguntas",
+  appDescription:
+    "Pregunta lo que sea. Cualquiera puede responder. Cualquiera puede revisar el conteo.",
+  homeNonBinding: "No vinculante y a cargo de la ciudadanía.",
+  homeStreamTitle: "Lo que la gente pregunta",
+  homeStreamLede: "Las preguntas abiertas más recientes. Responde cualquiera desde aquí.",
+  homeStreamAll: "Ver todas las preguntas",
+  homeStreamEmpty:
+    "No hay preguntas abiertas en este momento. Cuando alguien haga una, aparecerá aquí.",
+  homeListUnavailable:
+    "No se pudieron cargar las preguntas más recientes en este momento. El enlace propio de cada encuesta sigue funcionando.",
+  trustTitle: "Por qué puedes confiar en una encuesta informal",
+  trustLede:
+    "Una pregunta sobre los árboles de la calle recibe el mismo cuidado que un referéndum. Esto es lo que pasa con una respuesta, en cuatro pasos.",
+  trustLabel: "Qué pasa con una respuesta",
+  trustStep: "Paso {step} de {total}",
+  trust1Title: "Sellada en tu dispositivo",
+  trust1Body:
+    "Cuando respondes, la app de votación la sella en tu propio dispositivo antes de que vaya a ninguna parte. Lo que viaja es una caja cerrada, no tu respuesta.",
+  trust1Detail:
+    "El detalle: se divide en partes, cada una cifrada para uno de los custodios de la encuesta.",
+  trust2Title: "Publicada en un tablero público",
+  trust2Body:
+    "Cada respuesta sellada va a un tablero público que cualquiera puede leer. Tú guardas un código de seguimiento, para encontrar la tuya ahí y ver que se contó.",
+  trust2Detail:
+    "El detalle: cada entrada extiende una cadena de hashes, así que quitar o cambiar una se nota.",
+  trust3Title: "Se abre solo después de que cierra la encuesta",
+  trust3Body:
+    "El conteo se desbloquea solo cuando suficientes custodios de la encuesta, cada uno con una parte de la clave, trabajan juntos después del cierre. Ningún puesto puede abrirlo por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas encuestas son privadas para todos excepto para nosotros. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
+  trust3Detail: "El detalle: se necesitan {threshold} de los {seats} puestos.",
+  trust4Title: "Cualquiera lo vuelve a contar",
+  trust4Body:
+    "Cualquiera puede tomar el tablero público y volver a contarlo con el verificador de código abierto. Si su conteo coincide con el nuestro, nadie tiene que fiarse de nuestra palabra.",
+  trust4Detail: "El detalle: el verificador revisa cada prueba además del conteo.",
+  graphicAnswer: "Tu respuesta",
+  graphicOption: "Sí",
+  graphicSealed: "Lo que sale de tu dispositivo",
+  graphicBoard: "El tablero público",
+  graphicYours: "La tuya",
+  graphicOpen: "Para abrir el conteo",
+  graphicSeats: "{threshold} de {seats} puestos",
+  graphicPublished: "Conteo publicado",
+  graphicRecount: "Recuento de cualquiera",
+  graphicMatch: "Coinciden.",
+  navHowItWorks: "Cómo funciona",
+  howEyebrow: "Cómo funciona · {count} secciones",
+  howTitle: "Cómo una boleta se mantiene secreta, queda registrada y se cuenta en público",
+  howLede:
+    "Abolish está hecho para que no tengas que confiar en él. Esta página sigue una boleta por cada etapa, dice qué prueba cada paso y qué no, y termina con las debilidades que no hemos resuelto. Abolish todavía está en construcción: donde un paso aún no funciona, lo dice.",
+  howContents: "En esta página",
+  howStep: "Paso {step}",
+  howSceneLabel: "{section}, paso a paso",
+  howTiersMark: "Quién puede votar",
+  howTiersTitle: "Quién se cuenta y qué tan seguros estamos",
+  howTiersIntro:
+    "Abolish no puede verificar a todos de la misma forma, así que cada resultado dice cómo se verificó a sus votantes, con un resultado por nivel. Los niveles nunca se suman.",
+  howTiers1Title: "Nivel 0: una llave de acceso",
+  howTiers1Body:
+    "Cualquiera puede crear una cuenta con una llave de acceso, y cualquiera puede crear varias. Un resultado de Nivel 0 cuenta cuentas, no personas, y lo dice. Las encuestas de hoy funcionan en el Nivel 0.",
+  howTiers2Title: "Nivel 1: con aval (planeado)",
+  howTiers2Body:
+    "Las personas ya verificadas podrán avalar a alguien, así que inventar un votante requiere cómplices dispuestos a poner en juego su propia reputación. Este nivel está en construcción.",
+  howTiers3Title: "Nivel 2: un documento oficial (planeado)",
+  howTiers3Body:
+    "Cada votante probará en su propio teléfono, con una prueba de conocimiento cero, que tiene un pasaporte o identificación firmados por un gobierno con un chip legible. La prueba no muestra ni el documento ni a la persona, solo que el mismo documento no se ha usado para unirse dos veces. Este nivel está en construcción.",
+  howTiers4Title: "Lado a lado, nunca sumados",
+  howTiers4Body:
+    "El resultado de cada nivel se informa por separado, con su número de boletas y quién podía votar. Una sola cifra mezclada reflejaría sobre todo a quien abriera más cuentas.",
+  howSecrecyMark: "Secreto del voto",
+  howSecrecyTitle: "Tu elección se sella en tu propio dispositivo",
+  howSecrecyIntro:
+    "El secreto no depende de que este sitio web se porte bien. La app de votación sella tu elección en el dispositivo que te la muestra, antes de enviar nada.",
+  howSecrecy1Title: "Eliges en la app de votación",
+  howSecrecy1Body:
+    "Las boletas se emiten solo en la app de votación, nunca en este sitio web. La app muestra la pregunta y las opciones exactamente como las fija la definición publicada de la encuesta, y tu elección se queda en la memoria de tu dispositivo.",
+  howSecrecy2Title: "Tu elección queda fijada en un compromiso",
+  howSecrecy2Body:
+    "La app convierte tu elección en un compromiso: un valor que fija la elección pero la oculta por completo, sin importar la potencia de cómputo que llegue después. El compromiso es lo que va al tablero público.",
+  howSecrecy3Title: "La clave se reparte entre custodios",
+  howSecrecy3Body:
+    "Los números que abren el compromiso se dividen en partes, una por cada puesto de custodio, y cada parte se cifra solo para su puesto, con un cifrado pensado para resistir tanto a las computadoras cuánticas futuras como a las actuales. Ningún puesto puede abrir una boleta por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas boletas son privadas para todos excepto para nosotros (sección 5).",
+  howSecrecy4Title: "Con pruebas de que es un voto válido",
+  howSecrecy4Body:
+    "La app adjunta pruebas de conocimiento cero de que el compromiso contiene una respuesta permitida, para que una boleta no pueda llevar cien votos ni uno negativo, y de que quien vota pertenece al electorado de la encuesta, sin decir qué respuesta ni qué miembro. Tu cuenta nunca forma parte de la boleta.",
+  howChallengeMark: "Emitida según tu intención",
+  howChallengeTitle: "Comprobar que la app selló lo que elegiste",
+  howChallengeIntro:
+    "Nadie puede ver dentro de una boleta sellada, ni siquiera tú. Una comprobación te deja abrir una y ver qué selló realmente la app, a cambio de esa boleta.",
+  howChallenge1Title: "La app sella primero y luego pregunta",
+  howChallenge1Body:
+    "Después de sellar tu elección, la app pregunta si emitir la boleta o comprobarla. Ya se comprometió con la boleta sellada antes de saber qué vas a escoger.",
+  howChallenge2Title: "Comprobar abre la boleta",
+  howChallenge2Body:
+    "Si la compruebas, la app revela la elección y cada número aleatorio que usó, para que la boleta sellada se pueda reconstruir con ellos y comparar. Una boleta comprobada nunca se cuenta.",
+  howChallenge3Title: "Luego vuelves a votar",
+  howChallenge3Body:
+    "La app sella tu elección de nuevo, con números aleatorios nuevos, y vuelve a preguntar. Puedes comprobar cuantas veces quieras antes de emitir.",
+  howChallenge4Title: "Por qué se descubre una app tramposa",
+  howChallenge4Body:
+    "Una app que cambiara votos no puede saber qué boletas se comprobarán, así que cada comprobación es una oportunidad de descubrirla. Pocos votantes comprueban, así que esta protección es estadística. Publicar la apertura de una boleta comprobada es decisión tuya, está desactivado de forma predeterminada y solo ocurre después de que cierra la encuesta.",
+  howRecordedMark: "Registrada tal como se emitió",
+  howRecordedTitle: "Encontrar tu boleta en el tablero público",
+  howRecordedIntro:
+    "Cada encuesta tiene un tablero público que solo crece. Tu comprobante indica la entrada que contiene tu boleta sellada, para que puedas verificar que está ahí y que sigue ahí.",
+  howRecorded1Title: "Cada boleta se vuelve una entrada",
+  howRecorded1Body:
+    "Cada boleta sellada se añade al tablero de la encuesta como una entrada numerada. Cada entrada extiende una cadena de hashes y un árbol de Merkle, así que cambiar o quitar una anterior se nota.",
+  howRecorded2Title: "Guardas un comprobante",
+  howRecorded2Body:
+    "Cuando se añade tu boleta, el operador del tablero firma un comprobante que indica su entrada y el tablero que la contiene. La app verifica que la entrada de verdad esté en ese tablero antes de decirte que se recibió la boleta, y guarda el comprobante.",
+  howRecorded3Title: "Prueba el registro, no tu elección",
+  howRecorded3Body:
+    "Con el comprobante y una breve prueba de inclusión, cualquiera puede verificar que un tablero posterior todavía contiene tu entrada. El comprobante no dice nada de cómo votaste, así que no es prueba de un voto. Aun así, guárdalo para ti: apunta a tu boleta en el tablero, así que quien lo vea puede detectar cualquier boleta posterior que emitas en la misma encuesta.",
+  howRecorded4Title: "Anclado en Ethereum (planeado)",
+  howRecorded4Body:
+    "Cada hora, la raíz del tablero se anclará en Ethereum. Una entrada con comprobante que falte en un tablero anclado posterior es evidencia de manipulación que cualquiera puede publicar. El anclaje por hora todavía no está en funcionamiento.",
+  howCountedMark: "Contada tal como se registró",
+  howCountedTitle: "Contar sin abrir una sola boleta",
+  howCountedIntro:
+    "El conteo es aritmética sobre boletas selladas. Los custodios abren solo los totales, y cada paso publica algo que cualquiera puede verificar.",
+  howCounted1Title: "Los compromisos se suman",
+  howCounted1Body:
+    "Los compromisos se pueden sumar sin abrirlos. Sumar el compromiso de cada boleta contada da un total sellado por cada nivel.",
+  howCounted2Title: "Cada puesto suma sus partes",
+  howCounted2Body:
+    "Después de que cierra la encuesta, cada puesto de custodio suma las partes que recibió y publica la suma. Cualquiera puede verificar cada suma con valores públicos que llevaban las boletas, así que un puesto no puede publicar una equivocada sin que se note.",
+  howCounted3Title: "{threshold} de {seats} puestos abren los totales",
+  howCounted3Body:
+    "Cuando {threshold} de los {seats} puestos han publicado, sus sumas abren el total de cada nivel, y solo los totales: no se abre ninguna boleta individual. Durante el lanzamiento, Abolish opera los {seats} puestos. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
+  howCounted4Title: "Cualquiera puede volver a contar",
+  howCounted4Body:
+    "El verificador de código abierto toma el tablero público y revisa cada prueba, cada suma y el conteo. Si su resultado coincide con el nuestro, nadie tiene que fiarse de nuestra palabra. Después, los puestos destruyen sus claves y partes, aunque nadie puede verificar que lo hicieron.",
+  howSurvivesMark: "Si tumban abolish.us",
+  howSurvivesTitle: "Lo que sobrevive sin nosotros",
+  howSurvivesIntro:
+    "Un registro que desaparece con quien lo publica no vale mucho como registro. Estas piezas buscan que la votación, el tablero y el conteo duren más que nuestro dominio, nuestros servidores y nosotros. La mayoría todavía está en construcción.",
+  howSurvives1Title: "Encuestas registradas en cadena (planeado)",
+  howSurvives1Body:
+    "El hash de la definición de cada encuesta y las claves de sus custodios se registrarán en una red de capa 2 de Ethereum, para que las reglas de una encuesta no se puedan cambiar después de que abre.",
+  howSurvives2Title: "Enviar sin nosotros (planeado)",
+  howSurvives2Body:
+    "Si nuestros servidores rechazan una boleta, la app de votación podrá enviarla directamente a los contratos, sin pasar por nosotros.",
+  howSurvives3Title: "Copias del tablero (planeado)",
+  howSurvives3Body:
+    "El tablero se replicará en IPFS y en un archivo permanente, con su raíz anclada en Ethereum, y cualquiera podrá operar un nodo ligero que lo sirva.",
+  howSurvives4Title: "Un verificador que no nos necesita (planeado)",
+  howSurvives4Body:
+    "El verificador funcionará solo con la cadena e IPFS, con nuestros servidores y dominio fuera de línea. Borrar nuestra base de datos no hace perder ningún resultado: todo lo que afecta a uno se puede reconstruir a partir de las copias públicas.",
+  howWeakMark: "Lo que sigue pendiente",
+  howWeakTitle: "Dónde es débil, dicho con claridad",
+  howWeakIntro:
+    "Ningún sistema de votación está a salvo de todo. Estos son los límites que conocemos hoy. Cuando un límite tiene una entrada en nuestro modelo de amenazas público, su número aparece al lado, y esta lista cambia cuando ellas cambian.",
+  howWeakLimit: "Qué lo limita:",
+  howWeakThreats: "Entradas del modelo de amenazas:",
+  howWeakPanelTitle: "Durante el lanzamiento, tenemos todos los puestos de custodio",
+  howWeakPanelMeans:
+    "Abolish opera todos los puestos del panel de lanzamiento, así que podríamos abrir cualquier boleta individual, y cualquiera que pueda obligarnos podría hacernos abrirla.",
+  howWeakPanelLimit:
+    "Una boleta abierta muestra qué respondió una identidad de votación anónima, no quién es, a menos que se vincule con la dirección de red de la que llegó la boleta (consulta el límite sobre direcciones más abajo). Custodios independientes tomarán el relevo antes de la primera votación cívica, pero las encuestas abiertas antes de eso se podrán seguir leyendo con nuestras partes hasta que las destruyamos, algo que nadie puede verificar.",
+  howWeakSybilTitle: "El Nivel 0 se puede falsificar a gran escala",
+  howWeakSybilMeans:
+    "Cualquiera puede crear muchas cuentas con llave de acceso. Un resultado de Nivel 0 describe lo que dijeron las cuentas, no lo que piensa la gente.",
+  howWeakSybilLimit:
+    "Siempre se informa por separado y se etiqueta como tal, nunca mezclado en un total.",
+  howWeakWatchTitle: "Alguien puede verte votar",
+  howWeakWatchMeans:
+    "Un comprobante prueba que tu boleta quedó registrada, no tu elección. Pero nada impide que alguien vigile tu pantalla o te exija tu comprobante.",
+  howWeakWatchLimit:
+    "Puedes volver a votar más tarde y solo cuenta tu última boleta, así que un voto que alguien vio no tiene por qué ser el definitivo. Pero quien haya visto tu comprobante puede ver que volviste a votar, y no se impide vender un voto en secreto. Es una defensa parcial, no una solución.",
+  howWeakColludeTitle: "Los custodios podrían coludirse",
+  howWeakColludeMeans:
+    "Cualquier grupo de puestos que alcance el umbral de una encuesta, actuando en conjunto, podría abrir boletas individuales, no solo totales.",
+  howWeakColludeLimit:
+    "Cada suma que publica un puesto es pública y se verifica, y la página de cada encuesta dice cuántos puestos se necesitan.",
+  howWeakDeviceTitle: "Un dispositivo comprometido",
+  howWeakDeviceMeans:
+    "Un malware en el dispositivo de un votante podría cambiar una elección antes de sellarla.",
+  howWeakDeviceLimit:
+    "Las comprobaciones descubren una app tramposa, pero solo si la gente las usa. La mayoría de los votantes no lo hará, así que la protección es estadística.",
+  howWeakAnchorTitle: "Antes de anclar el tablero",
+  howWeakAnchorMeans:
+    "Hasta que la raíz de un tablero se ancla en Ethereum, el tablero es solo nuestra palabra, y se podría descartar una entrada.",
+  howWeakAnchorLimit:
+    "Guarda tu comprobante: un tablero posterior que omita una entrada con comprobante es evidencia que cualquiera puede publicar. El anclaje por hora todavía no está en funcionamiento.",
+  howWeakNetworkTitle: "Vemos de dónde viene una boleta",
+  howWeakNetworkMeans:
+    "Nuestros servidores reciben cada boleta con la dirección de red desde la que se envió, lo que podría ayudar a vincular una boleta con una persona.",
+  howWeakNetworkLimit:
+    "Sin mitigar. El registro de solicitudes de nuestra propia API omite las direcciones en la ruta de las boletas, pero nuestro proveedor de hosting y el borde de red que está delante podrían verlas o registrarlas, y los puestos de custodio reciben cada boleta con su dirección. No puedes verificar lo que guardamos: una VPN o Tor oculta tu dirección de nosotros.",
+  howWeakTurnoutTitle: "La participación es autoseleccionada",
+  howWeakTurnoutMeans:
+    "Los votantes eligen participar, así que un resultado describe a quienes respondieron, no a todos. Los resultados son orientativos y no obligan a nadie.",
+  howWeakTurnoutLimit: "Cada resultado indica su nivel y cuántos podían votar.",
+  howSource:
+    "El protocolo, su modelo de amenazas (con cada entrada mencionada arriba) y el código fuente están publicados abiertamente en github.com/abolishus/abolish.",
+  dgTitle: "{section}: paso {step} de {total}",
+  dgFake: "Para falsificar uno",
+  dgFake0: "otra llave de acceso",
+  dgFake1: "personas dispuestas a avalar en falso",
+  dgFake2: "un documento oficial falsificado",
+  dgPlanned: "Planeado",
+  dgToday: "Hoy",
+  dgResult: "Su propio resultado",
+  dgNoTotal: "Sin fila de total.",
+  dgDevice: "Tu dispositivo",
+  dgLeaves: "Lo que sale de él",
+  dgChoice: "Tu elección",
+  dgCommitment: "Compromiso",
+  dgShares: "Una parte por puesto",
+  dgProofs: "Pruebas de validez",
+  dgToBoard: "Al tablero público",
+  dgToSeats: "Cada una a su puesto, cifrada",
+  dgSealed: "Boleta sellada",
+  dgCast: "Emitir",
+  dgCheck: "Comprobar",
+  dgOpened: "Abierta: elección y números aleatorios",
+  dgRebuilt: "Reconstruida y comparada",
+  dgNotCounted: "Nunca se cuenta",
+  dgSealedAgain: "Sellada de nuevo, con números aleatorios nuevos",
+  dgChecked: "Comprobada",
+  dgEntry: "Entrada {index}",
+  dgYours: "La tuya",
+  dgReceipt: "Tu comprobante",
+  dgReceiptEntry: "Entrada y tablero, firmados",
+  dgInclusion: "Prueba de inclusión",
+  dgStillThere: "Sigue en el tablero",
+  dgAnchor: "Raíz anclada en Ethereum",
+  dgSum: "Suma",
+  dgTotal: "Total sellado por nivel",
+  dgOurs: "Durante el lanzamiento, todos operados por Abolish",
+  dgDomain: "abolish.us",
+  dgServers: "Nuestros servidores",
+  dgRegistry: "Registro de encuestas en capa 2",
+  dgDirect: "Boletas enviadas directo a los contratos",
+  dgMirrors: "IPFS, archivo y nodos comunitarios",
+  dgAnchors: "Anclajes en Ethereum",
+  dgVerifier: "El verificador",
+  dgDown: "Fuera de línea",
+  lookupLabel: "ID de la encuesta",
+  lookupHint: "El ID de 64 caracteres de un enlace de encuesta o de un comprobante.",
+  lookupSubmit: "Abrir encuesta",
+  lookupInvalid: "Un ID de encuesta tiene 64 caracteres hexadecimales (0–9, a–f).",
+  navModeration: "Registro de moderación",
+  navPolls: "Encuestas",
+  navDiscover: "Descubrir",
+  discoverTitle: "Lo que la gente pregunta",
+  discoverLede:
+    "Preguntas abiertas de vecinos, grupos y escuelas. Responde cualquiera en la app de votación. Nada aquí se ordena por clics, por discusiones ni por nada sobre ti: cada orden de abajo es igual para todos.",
+  discoverTopicLede:
+    "Preguntas abiertas que sus autores clasificaron en este tema. Nada aquí se ordena por clics, por discusiones ni por nada sobre ti.",
+  discoverSorts: "Orden",
+  discoverTopics: "Temas",
+  topicAll: "Todos los temas",
+  sort_new: "Nuevas",
+  sort_closing: "Cierran pronto",
+  sort_answered: "Más respondidas esta semana",
+  sortNote_new: "Abiertas ahora, las más recientes primero.",
+  sortNote_closing: "Abiertas ahora, las que cierran antes primero.",
+  sortNote_answered:
+    "Abiertas ahora, según cuántas personas respondieron en los últimos siete días, cada persona una vez sin importar cuántas veces cambió su respuesta. Cualquiera puede volver a contarlo desde el tablero público.",
+  streamQuestions: "Preguntas",
+  streamCloses: "Cierra",
+  streamPick: {
+    one: "Elige una respuesta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
+    other:
+      "Elige una respuesta a la pregunta 1 de {count} para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
+  },
+  streamNoBallot: "Responder desde esta página todavía no está disponible en este sitio.",
+  streamText:
+    "El texto de esta encuesta no se puede mostrar aquí. Su página tiene lo que este servidor guarda.",
+  streamEmpty: "No hay preguntas abiertas en este momento",
+  streamEmptyLede: "Cuando alguien haga una, aparecerá aquí.",
+  streamMore: "Más preguntas",
+  streamSortUnavailableTitle: "Este orden no está disponible en este momento",
+  streamSortUnavailable:
+    "El servidor no puede contar las respuestas de esta semana en este momento. Los otros órdenes siguen funcionando.",
+  streamCursorLostTitle: "Esa página ya cambió",
+  streamCursorLost:
+    "La pregunta tras la que empezaba esta página ya no se puede ubicar en este orden.",
+  streamStart: "Empezar desde arriba",
+  streamSearchLabel: "Buscar en las preguntas",
+  streamSearchHint:
+    "Cada palabra que escribas debe aparecer en una pregunta o en su título, hasta {words} palabras. Los resultados mantienen el orden de arriba.",
+  streamSearchSubmit: "Buscar",
+  streamSearching: "Solo las preguntas que contienen todas las palabras que buscaste.",
+  streamSearchClear: "Borrar la búsqueda",
+  streamSearchEmpty: "Ninguna pregunta abierta coincide",
+  streamSearchEmptyLede:
+    "Prueba con menos palabras o más cortas: una pregunta coincide solo si las contiene todas.",
+  streamSearchRefusedTitle: "No se puede hacer esa búsqueda",
+  streamSearchRefused:
+    "Una búsqueda tiene de una a {words} palabras, en {characters} caracteres como máximo.",
+  listedUnder: "Dónde aparece",
+  streamTagsNote:
+    "Quienes preguntan eligen el tema y el lugar de su encuesta. No forman parte de la encuesta, y la moderación puede cambiarlos si no encajan.",
+  streamPlaceLabel: "Lugar",
+  streamPlaceHint:
+    "Un pueblo, barrio o escuela, tal como lo escriben quienes preguntan. No importan las mayúsculas ni los espacios, pero el nombre completo debe coincidir.",
+  streamPlaceFiltering: "Solo las preguntas clasificadas en el lugar que escribiste.",
+  streamPlaceClear: "Borrar el lugar",
+  streamFilterEmpty: "No hay preguntas abiertas clasificadas aquí",
+  streamFilterEmptyLede:
+    "Solo aparecen las encuestas cuyos autores eligieron este tema o lugar. Prueba sin uno de ellos.",
+  streamShowEverything: "Mostrar todo",
+  streamPlaceRefusedTitle: "No se puede buscar ese lugar",
+  streamPlaceRefused:
+    "Un lugar tiene de uno a {characters} caracteres, tal como lo escribiría quien pregunta.",
+  listTitle: "Encuestas en la lista",
+  listLede:
+    "Encuestas que este servidor incluye en la lista, en orden de sus ID. Las encuestas que la moderación retiró de la lista u ocultó no aparecen, pero siguen abiertas por ID, y el registro de elecciones en cadena nombra todas las encuestas, sin importar lo que muestre esta lista.",
+  listEmpty: "No hay encuestas en la lista.",
+  listCloses: "Cierra",
+  listIllFormed: "Incumple una regla del protocolo: el verificador la rechaza.",
+  listMore: "Más encuestas",
+  listUndecodable: "La definición del servidor no se puede decodificar.",
+  listMismatch: "El servidor envió la definición de otra encuesta.",
+  listOpens: "Abre",
+  listClosed: "Cerró",
+  listPoll: "Encuesta",
+  listCounting: "Conteo",
+  listStatus: "Estado",
+  fingerprintPoll: "Huella de la encuesta {prefix}",
+  status_open: "Abierta",
+  status_scheduled: "Programada",
+  status_closed: "Cerrada",
+  registerEyebrow: "Registro de encuestas",
+  registerTitle: "Todas las encuestas de la lista",
+  registerLookupTitle: "Abrir una encuesta por su ID",
+  registerFindTitle: "Buscar una encuesta",
+  registerFindLede:
+    "Filtra esta página de la lista por estado y regla de conteo. Deja un grupo en Todas para incluirlo completo.",
+  registerAsOf:
+    "Los estados salen de las horas de apertura y cierre que declara cada encuesta, comparadas con el reloj de este servidor ({time} UTC).",
+  filterAll: "Todas",
+  filterApply: "Mostrar encuestas que coinciden",
+  filterClear: "Borrar filtros",
+  registerMatches: "{shown} de {total} encuestas de esta página coinciden.",
+  registerNoMatchTitle: "Ninguna encuesta de esta página coincide",
+  registerNoMatch:
+    "Nada en esta página de la lista coincide con estos filtros. Una encuesta que moderación retiró de la lista no aparece aquí, pero se sigue abriendo por su ID, y el registro de elecciones en la cadena todavía la nombra.",
+  pollTitle: "Encuesta",
+  pollHeading: "Encuesta {prefix}…",
+  pollStatus_open: "Abierta a respuestas",
+  pollStatus_scheduled: "Todavía no abre",
+  pollStatus_closed: "Cerrada",
+  pollAnswerTitle: "Cómo responder",
+  pollAnswer:
+    "Las respuestas se emiten solo en la app de votación, nunca en este sitio web, y cada una se sella en el propio dispositivo de quien vota antes de enviar nada. La app de votación todavía no puede abrir una encuesta desde esta página.",
+  pollAnswerClosed:
+    "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",
+  reactionsTitle: "Reacciones",
+  reactionsLede:
+    "Reacciona a la encuesta en sí, la respondas o no. Una reacción no es una respuesta y no dice nada sobre si respondiste.",
+  reactionsLabel: "Reacciones a esta encuesta",
+  reaction_heart: "Corazón",
+  reaction_laugh: "Risa",
+  reaction_wow: "Asombro",
+  reaction_thinking: "Pensativo",
+  reaction_sad: "Triste",
+  reaction_clap: "Aplauso",
+  reactionCount: { one: "{name}: {count} persona", other: "{name}: {count} personas" },
+  reactionsLoading: "Cargando reacciones…",
+  reactionsPrivacy:
+    "Cualquiera puede ver los conteos. Solo tú puedes ver cuáles reacciones son tuyas.",
+  reactionsJoin: "Reacciona a esta encuesta",
+  reactionsSignIn: "Iniciar sesión",
+  reactionsSignedOut: "Para reaccionar necesitas iniciar sesión en una cuenta.",
+  reactionsVerify: "Verifica tu correo",
+  reactionsUnverified: "Para reaccionar necesitas un correo electrónico verificado.",
+  reactionsHidden: "Esta encuesta está oculta, así que sus reacciones también.",
+  reactionsTooManyThisHour:
+    "Ya cambiaste tus reacciones todas las veces posibles en esta hora. Inténtalo más tarde.",
+  reactionsFailed: "No se pudo completar. Inténtalo de nuevo en un momento.",
+  reactionsUnread: "No se pudieron cargar las reacciones en este momento.",
+  shareOpen: "Compartir esta encuesta",
+  shareNeverYourAnswer:
+    "Al compartir se envía este enlace, nunca tu respuesta. El enlace es el mismo para todos, así que no dice quién lo compartió ni si respondió.",
+  shareLinkLabel: "Enlace a esta encuesta",
+  shareCopy: "Copiar enlace",
+  shareCopied: "Enlace copiado",
+  shareCopiedStatus: "Enlace copiado. Pégalo donde quieras.",
+  shareCopyFailed: "No se pudo copiar. Selecciona el enlace de arriba y cópialo.",
+  shareMenu: "Compartir…",
+  shareNoMenu:
+    "Este navegador no tiene menú para compartir. Copia el enlace y pégalo donde quieras, o envíalo por correo.",
+  shareEmail: "Enviar el enlace por correo",
+  shareQrShow: "Mostrar un código QR",
+  shareQrLabel: "Código QR de {link}",
+  shareQrNote:
+    "Apunta la cámara de un teléfono hacia él para abrir esta encuesta. Contiene el mismo enlace, así que no dice nada sobre quién lo mostró.",
+  shareFlyer: "Imprimir un volante",
+  shareEmbed: "Insertar en tu sitio",
+  // The embed panel and the card (docs/design/sharing.md, Embed).
+  embedTitle: "Insertar en tu sitio",
+  embedDescription:
+    "Pon esta encuesta en una página de noticias o en un sitio comunitario. La tarjeta nunca recibe respuestas: cada respuesta abre Abolish en una pestaña nueva.",
+  embedKind: "Qué insertar",
+  embedKindCard: "La tarjeta de la encuesta",
+  embedKindCardNote:
+    "Muestra la pregunta y sus respuestas. Se carga desde {host} sin scripts ni cookies.",
+  embedKindLink: "Un enlace simple",
+  embedKindLinkNote:
+    "Solo la encuesta como enlace. No se carga nada desde {host} hasta que alguien hace clic.",
+  embedTheme: "Colores",
+  embedThemeAuto: "Según la configuración del lector",
+  embedThemeLight: "Claro",
+  embedThemeDark: "Oscuro",
+  embedCode: "Código para pegar en tu página",
+  embedCopy: "Copiar código",
+  embedCopied: "Código copiado",
+  embedCopyFailed: "No se pudo copiar. Selecciona el código de arriba y cópialo.",
+  embedCardNote:
+    "La tarjeta se carga desde {host} cada vez que alguien lee tu página, así que los navegadores de tus lectores contactan a {host}, sin cookies ni referente.",
+  embedLinkNote: "El enlace no lleva nada sobre ti, tu sitio ni tus lectores.",
+  embedLinkLine: "Responde en Abolish; cualquiera puede comprobar el conteo.",
+  embedPreview: "Abrir la tarjeta en una pestaña nueva",
+  embedBack: "Volver a compartir",
+  embedNewTab: "(se abre en una pestaña nueva)",
+  embedPick: {
+    one: "Elige una. Tu elección abre Abolish en una pestaña nueva, donde la revisas y la envías.",
+    other:
+      "Elige una respuesta a la pregunta 1 de {count}. Se abre Abolish en una pestaña nueva, donde respondes las demás y las envías.",
+  },
+  embedAnswer: { one: "Responder en Abolish", other: "Responder {count} preguntas en Abolish" },
+  embedSeePoll: "Ver la encuesta en {host}",
+  embedCloses: "Cierra",
+  embedClosed: "Cerrada",
+  embedOpens: "Abre",
+  embedNeverHere: "Las respuestas se reciben solo en Abolish, nunca en esta tarjeta.",
+  embedHiddenTitle: "Esta encuesta está oculta",
+  embedHidden: "Moderación ocultó el texto de esta encuesta, así que no se muestra aquí.",
+  embedHiddenLink: "Ver el motivo en su página",
+  embedNotFoundTitle: "No hay ninguna encuesta aquí",
+  embedNotFound: "El enlace de esta tarjeta no nombra ninguna encuesta.",
+  // The flyer (docs/design/sharing.md, Printable flyer).
+  flyerTitle: "Imprimir un volante",
+  flyerBack: "Volver a la encuesta",
+  flyerIntro:
+    "Para tableros de anuncios, vitrinas y reuniones. El código QR y el enlace son los mismos para todos, así que un volante no dice nada sobre quién lo colocó.",
+  flyerPaper: "Papel",
+  flyerPaperLetter: "Carta (EE. UU.)",
+  flyerPaperA4: "A4",
+  flyerInk: "Tinta",
+  flyerInkColor: "Color",
+  flyerInkMono: "Blanco y negro",
+  flyerPrint: "Imprimir este volante",
+  flyerPrintNote:
+    "Imprime a tamaño real. Solo se imprime el volante, de borde a borde, así que desactiva los encabezados y pies de página si tu navegador los agrega.",
+  flyerPreview: "El volante, tal como se imprime",
+  flyerKicker: "Una encuesta en {host}",
+  flyerQuestions: {
+    one: "{count} pregunta breve.",
+    other: "{count} preguntas breves, que se responden juntas.",
+  },
+  flyerScan: "Escanea para responder",
+  flyerScanClosed: "Escanea para ver la encuesta",
+  flyerOrType: "o escribe",
+  flyerCloses: "Cierra {time}",
+  flyerClosed: "Cerró {time}",
+  flyerOpens: "Abre {opens}, cierra {closes}",
+  flyerHowTitle: "Cómo responder",
+  flyerHow:
+    "Abre el enlace en un teléfono o una computadora y toca tu respuesta. Toma alrededor de un minuto, y puedes cambiarla hasta que la encuesta cierre.",
+  flyerClosedTitle: "Esta encuesta ya cerró",
+  flyerClosedBody: "Ya no recibe respuestas. Abre el enlace para ver cómo va el conteo.",
+  flyerCheckTitle: "Cualquiera puede comprobar el conteo",
+  flyerCheck:
+    "Cada respuesta se sella y se publica en un tablero público, sin el nombre de quien la envió, y cualquiera puede volver a contar el resultado. Durante el lanzamiento, solo Abolish tiene la clave de esta encuesta.",
+  flyerFoot: "No vinculante, hecha por ciudadanos.",
+  flyerTabs: "Tiras desprendibles con el enlace",
+  flyerHidden:
+    "Moderación ocultó el texto de esta encuesta, así que no hay volante para ella. Su página explica el motivo.",
+  // Why a poll couldn't be set up, one per failure code core writes
+  // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
+  // retried comes back as a draft; one whose election was registered stays.
+  pollFailure_closesTooSoon:
+    "La preparación tardó más de lo previsto, y tu encuesta habría cerrado muy poco después de abrir. Elige una hora de cierre más tarde y vuelve a enviarla.",
+  pollFailure_creationReverted:
+    "No se pudo crear tu encuesta en el registro público. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_creationReplaced:
+    "Algo salió mal de nuestro lado mientras se creaba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_creationTimeout:
+    "Crear tu encuesta en el registro público tomó demasiado tiempo. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_creationAnchored:
+    "Tu encuesta no pudo empezar limpiamente en el registro público tras tres intentos, así que sus respuestas no se podían proteger. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_tierUnavailable:
+    "Todavía no se pueden preparar encuestas para los votantes que elegiste. Tu pregunta no se publicó. Cambia quién puede responder y vuelve a enviarla.",
+  pollFailure_electorateEmpty:
+    "Nadie habría podido responder: cuando se preparó tu encuesta, todavía no había nadie en el grupo de votantes que elegiste. Tu pregunta no se publicó. Puedes intentarlo más tarde o descartarla.",
+  pollFailure_stubRefused:
+    "Algo salió mal de nuestro lado mientras se preparaba tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_registrationRefused:
+    "El trabajo de los custodios sobre tu encuesta no pasó nuestras comprobaciones, así que no la registramos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_registrationReverted:
+    "El registro público rechazó registrar tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_registrationReplaced:
+    "Algo salió mal de nuestro lado mientras se registraba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_registrationTimeout:
+    "Registrar tu encuesta tomó demasiado tiempo. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_registrationMismatch:
+    "Algo distinto de tu encuesta quedó registrado en su lugar del registro público, así que nos detuvimos antes de que abriera. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+  pollFailure_openMismatch:
+    "Lo que el registro público tiene de tu encuesta no es exactamente lo que escribiste, así que no la abrimos. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+  pollFailure_ceremonyTimeout:
+    "Los custodios de la encuesta no pudieron terminar de preparar sus claves tras cuatro intentos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+  pollFailure_openTimeout:
+    "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+  evidenceSummary: "¿Cómo sabemos que esto es real?",
+  evidenceFingerprintTitle: "La huella de esta encuesta",
+  evidenceFingerprint:
+    "Se dibuja a partir del hash de la definición de la encuesta, que fija sus reglas antes de la primera respuesta. Una definición con cualquier cambio dibuja una forma distinta.",
+  fingerprintDefinition: "Huella de la definición {prefix}",
+  evidenceDefinitionTitle: "A qué se compromete la encuesta",
+  pollId: "ID de la encuesta",
+  pollClaim:
+    "Todo lo que sigue es lo que nuestro servidor dice sobre esta encuesta. El verificador lo compara con la cadena; esta página no.",
+  definitionHash: "Hash de la definición, para comparar con el registro de elecciones en la cadena",
+  factType: "Conteo",
+  typePlurality: "Una opción",
+  typeApproval: "Aprobar las que quieras",
+  typeQuestions: "Pregunta por pregunta",
+  questionCount: { one: "{count} pregunta", other: "{count} preguntas" },
+  factQuestions: "Preguntas",
+  questionNumber: "Pregunta {number}",
+  questionLimits: "{instruction}, de {options}; de {min} a {max} selecciones",
+  instruction_one: "Elige una",
+  instruction_any: "Elige las que quieras",
+  instruction_upTo: "Elige hasta {max}",
+  instruction_exactly: "Elige exactamente {count}",
+  instruction_atLeast: "Elige al menos {min}",
+  instruction_between: "Elige de {min} a {max}",
+  factOptions: "Opciones",
+  factSelections: "Selecciones por boleta",
+  selectionsRange: "De {min} a {max}",
+  optionCount: { one: "{count} opción", other: "{count} opciones" },
+  factTrustees: "Custodios necesarios para descifrar el recuento",
+  trusteesOf: "{threshold} de {size}",
+  factOpens: "Abre",
+  factCloses: "Cierra",
+  factShortLink: "Enlace corto",
+  factElectorate: "Quién puede votar",
+  tier0: "Nivel 0 (llave de acceso)",
+  tier0_email: "Nivel 0 (correo verificado)",
+  tier0_phone: "Nivel 0 (correo y teléfono verificados)",
+  tier1: "Nivel 1 (con aval)",
+  tier2: "Nivel 2 (documento verificado)",
+  groupMembers: { one: "{count} miembro", other: "{count} miembros" },
+  boardTitle: "Tablero público",
+  boardEntries: "Entradas",
+  boardEmpty: "Todavía no hay entradas.",
+  boardHead: "Cabeza de la cadena",
+  boardRoot: "Raíz del árbol",
+  boardUnanchored:
+    "Hasta que un punto de control en L1 cubra estos valores, solo cuentan con la palabra de este servidor. Guárdalos: un tablero posterior que no los extienda es evidencia de manipulación.",
+  boardLink: "Leer el tablero, entrada por entrada",
+  boardPageEyebrow: "Encuesta {prefix}… · Tablero público",
+  boardPageTitle: "El tablero de la encuesta",
+  boardPageLede:
+    "Cada registro del tablero de esta encuesta, en el orden en que el tablero los recibió: la ceremonia de claves, los eventos de la cadena, las boletas selladas, las aperturas y el conteo. Las entradas solo se agregan al final, y ninguna muestra cómo votó nadie.",
+  boardPageBack: "Volver a la encuesta",
+  boardPageScope: "en este tablero al cargar esta página",
+  boardPageClaim:
+    "Estas entradas vienen de nuestro servidor. Esta página decodifica cada una, comprueba que nombra esta encuesta y que está en su lugar, y calcula su hash por su cuenta. Si cada entrada se encadena hasta la cabeza de arriba lo determina el verificador, que revisa el tablero completo.",
+  boardLedgerMark: "El libro de registro",
+  boardLedgerTitle: "Leer el tablero, entrada por entrada",
+  boardLedgerLede:
+    "Cada fila es una entrada: su número, el periodo de anclaje en que el tablero la agregó, lo que registra y su hash. La huella dibuja el hash, así que se pueden comparar dos copias sin leer hexadecimal.",
+  boardColumnEntry: "Entrada",
+  boardColumnPeriod: "Periodo",
+  boardColumnKind: "Tipo",
+  boardColumnHash: "Hash de la entrada",
+  boardCaption: "Entradas {first} a {last} de {count}",
+  boardEnd: "Aquí termina el tablero. Las entradas posteriores aparecerán aquí.",
+  boardBeyond:
+    "El tablero tiene {count} entradas, numeradas desde 0, así que todavía no existe la entrada {entry}.",
+  boardPages: "Páginas del tablero",
+  boardEarlier: "Entradas anteriores",
+  boardLater: "Entradas posteriores",
+  boardLatest: "Entradas más recientes",
+  boardOwnEntry:
+    "Esta página no busca la entrada de un comprobante: pedirle a nuestro servidor tu propia entrada le diría cuál es la tuya, y cada página aquí abarca 25 entradas para que navegar le revele menos. Para revisar tu comprobante, descarga el tablero completo y busca tu entrada ahí, donde nadie se entera de cuál buscaste.",
+  boardEntriesUndecodable:
+    "Nuestro servidor envió entradas del tablero de esta encuesta que no pasan la comprobación: una no se decodifica según la definición de la encuesta, nombra otra encuesta o está en otro lugar. Esta página no muestra ninguna en vez de mostrar un tablero que no puede leer. Su tablero no se ve afectado en ningún otro lugar donde esté copiado.",
+  fingerprintHead: "Huella de la cabeza de la cadena {prefix}",
+  fingerprintEntry: "Huella de la entrada {entry}",
+  entryKind_ballot: "Boleta sellada",
+  entryKind_spoiledOpening: "Boleta anulada, abierta",
+  entryKind_ceremony: "Ceremonia de claves",
+  entryKind_tallyOpening: "Conteo, abierto",
+  entryKind_contractEvent: "Evento de la cadena",
+  entryKind_shareReceipt: "Comprobante de custodio",
+  entryKind_shareComplaint: "Queja de custodio",
+  entryKind_destruction: "Clave destruida",
+  entryKind_closeStatement: "Declaración de cierre",
+  entryKind_runningOpening: "Conteo parcial, abierto",
+  entryKind_authorApprovals: "Aprobación de los custodios del autor",
+  illFormed:
+    "Esta definición rompe una regla del protocolo ({rule}), así que el verificador rechaza esta elección.",
+  illFormedQuestion:
+    "Esta definición rompe una regla del protocolo ({rule}) en la pregunta {number}, así que el verificador rechaza esta elección.",
+  "rule_protocol-major": "versión de protocolo no compatible",
+  "rule_profile-order": "versiones de registro fuera de orden",
+  "rule_profile-types": "tipos de registro incorrectos",
+  "rule_profile-version": "un registro en la versión 0",
+  "rule_option-count": "número de opciones",
+  rule_selections: "límites de selección",
+  rule_questions: "sin preguntas",
+  rule_electorate: "quién puede votar",
+  rule_cells: "grupos de resultados",
+  rule_panel: "panel de custodios",
+  rule_chain: "cadenas y contratos",
+  rule_timing: "horas de apertura y cierre",
+  "rule_receipt-keys": "claves de comprobante",
+  utcTime: "{time} UTC",
+  shortId: "{prefix}…",
+  moderationDelisted:
+    "Esta encuesta queda fuera de Descubrir y de la búsqueda ({reason}). Su tablero y su resultado no se ven afectados.",
+  moderationHidden:
+    "El texto de la pregunta y de las opciones de esta encuesta está retenido ({reason}). Su tablero y su resultado no se ven afectados y se muestran por número de opción.",
+  moderationLogLink: "Ver el registro de moderación",
+  siteTagline: "Pregunta lo que sea. Comprueba todo.",
+  skipToContent: "Saltar al contenido",
+  navSite: "Sitio",
+  navHome: "Inicio",
+  navDiscoverNote: "Busca las preguntas que la gente está haciendo",
+  navPollsNote: "Todas las encuestas de este sitio",
+  navModerationNote: "Por qué se ocultó una encuesta o se dejó fuera de la búsqueda",
+  navHomeNote: "Vuelve a empezar desde la portada",
+  footerClaim: "No vinculante, a cargo de la ciudadanía, y cada conteo se puede comprobar.",
+  footerRecord:
+    "Cada encuesta aquí está en un tablero público que cualquiera puede descargar y volver a contar.",
+  footerNav: "El registro",
+  otherPlaces: "Otros lugares a donde ir",
+  notFoundCode: "404 · No encontrada",
+  notFoundPageTitle: "Página no encontrada",
+  notFoundTitle: "No hay ninguna página en esta dirección",
+  notFound:
+    "Puede que el enlace esté mal escrito o incompleto. Las encuestas y sus resultados nunca se borran, así que el enlace propio de una encuesta sigue funcionando.",
+  notFoundPoll:
+    "¿Buscas una encuesta que alguien compartió? Pídele que te vuelva a enviar el enlace, o búscala abajo.",
+  unavailableTitle: "Encuesta no disponible",
+  definitionUndecodable:
+    "El servidor envió una definición que no se decodifica según el protocolo, así que esta página no la mostrará.",
+  definitionMismatch:
+    "El servidor envió la definición de otra encuesta para este ID, así que esta página no la mostrará.",
+  errorTitle: "Algo salió mal de nuestro lado",
+  errorPageTitle: "Algo salió mal",
+  error:
+    "No se pudo mostrar esta página. Inténtalo de nuevo en un momento, o ve a otro lugar abajo.",
+  errorBallot:
+    "Este sitio web nunca maneja boletas: si estabas votando, tu boleta y tu comprobante están a salvo en la app de votación de tu dispositivo.",
+  errorRetry: "Intentar de nuevo",
+  offlineTitle: "No tienes conexión",
+  offline:
+    "Este dispositivo no puede conectarse a Abolish en este momento, así que la página que abriste no pudo cargar. Se abrirá como de costumbre cuando vuelvas a tener conexión.",
+  offlineKept:
+    "Para momentos así, tu dispositivo guarda solo esta página y sus fuentes. No se guarda ninguna página de encuesta ni de cuenta que hayas abierto.",
+  offlineRetry: "Intentar de nuevo",
+  moderationEyebrow: "Moderación · Pública y solo de anexado",
+  moderationTitle:
+    "La moderación actúa sobre el texto de las encuestas, nunca sobre los resultados",
+  moderationLede:
+    "Cada decisión que tomamos sobre una encuesta o el perfil de un creador es una fila de este registro, en el orden en que la tomamos. Solo se agregan filas: una decisión se revierte con otra posterior, que queda junto a ella. El registro no nombra al moderador, a quien denunció ni la cuenta de nadie: un perfil aparece solo como su identificador público.",
+  moderationReach: "Hasta dónde llega la moderación",
+  moderationActsOn: "Actúa sobre",
+  moderationActsOn_text: "La pregunta, las opciones y la descripción de una encuesta",
+  moderationActsOn_listing: "Si nuestras páginas listan la encuesta, y bajo qué tema y lugar",
+  moderationActsOn_profile: "El perfil de un creador: su nombre y las encuestas que muestra",
+  moderationNeverActsOn: "Nunca actúa sobre",
+  moderationNeverActsOn_board: "Las boletas y el tablero",
+  moderationNeverActsOn_definition:
+    "La definición, el electorado o la hora de cierre de una encuesta",
+  moderationNeverActsOn_result: "El conteo y el resultado",
+  moderationResultsStay:
+    "Muestren lo que muestren nuestras páginas, el tablero de cada encuesta sigue siendo público, y cualquiera que lo descargue puede volver a contarlo.",
+  moderationLogMark: "El registro",
+  moderationLogTitle: "Decisiones, de la más antigua a la más reciente",
+  moderationLogLede:
+    "Las horas son las del reloj de la base de datos, en UTC, no las del moderador. Una fila contiene solo la encuesta o el perfil, la acción y su motivo, nunca texto libre, así que ni siquiera el nombre de un perfil o el lugar de una encuesta: una reclasificación solo dice si cambió o quitó el lugar. Nuestra API ofrece el mismo registro para que cualquiera lo copie:",
+  moderationEmpty: "Aún no hay decisiones.",
+  moderationSeq: "N.º",
+  moderationPoll: "Encuesta",
+  moderationProfile: "Perfil",
+  moderationSubject: "Encuesta o perfil",
+  moderationAction: "Acción",
+  moderationReason: "Motivo",
+  moderationDecided: "Hora",
+  moderationMore: "Decisiones posteriores",
+  moderationGroundsMark: "Motivos",
+  moderationGroundsTitle: "Los únicos siete motivos",
+  moderationGroundsLede:
+    "Cada retiro cita exactamente uno. Usamos la acción menos restrictiva: una encuesta se retira de la lista, a menos que mostrar su texto cause daño por sí mismo.",
+  ground_illegal:
+    "Contenido cuyo alojamiento o distribución es ilegal donde operamos, como material de abuso sexual infantil.",
+  "ground_personal-data":
+    "Datos personales de un particular: un domicilio, un número de teléfono, un número de identificación, datos de salud o financieros, o cualquier cosa que identifique a un votante.",
+  ground_threat:
+    "Una amenaza creíble de violencia, o la incitación a la violencia contra una persona o un grupo.",
+  ground_harassment: "Texto que ataca a un particular para hostigarlo.",
+  ground_spam: "Encuestas masivas o automatizadas, estafas, phishing o enlaces a malware.",
+  ground_impersonation:
+    "Una encuesta presentada como si viniera de una persona, organización o autoridad que no la creó.",
+  "ground_legal-notice": "Un aviso u orden que la ley nos obliga a atender.",
+  moderationNeverTitle: "Nunca son motivo, sea cual sea la presión",
+  moderationNever_viewpoint: "El punto de vista político o religioso de una encuesta",
+  moderationNever_controversy: "Que su tema sea polémico",
+  moderationNever_criticism:
+    "Las críticas a cualquier persona, gobierno u organización, incluidos nosotros",
+  moderationNever_publicFigure: "Que una figura pública objete una encuesta sobre su papel público",
+  moderationNever_reports: "Que una encuesta sea impopular o reciba muchas denuncias",
+  moderationNever_result: "El resultado o la participación de la encuesta, reales o previstos",
+  moderationRestoreTitle: "Motivos para restaurar una encuesta",
+  "ground_appeal-upheld": "El creador de la encuesta apeló, y la apelación prosperó.",
+  ground_error: "El retiro fue un error evidente.",
+  "ground_notice-withdrawn": "El aviso legal que lo motivó fue retirado o anulado.",
+  action_delist: "Retirada de la lista",
+  action_hide: "Texto oculto",
+  action_restore: "Restaurada",
+  profileAction_hide: "Perfil oculto",
+  action_refile: "Reclasificada",
+  refiledTopic: "Tema ahora: {topic}",
+  refiledTopicCleared: "Sin tema",
+  refiledPlaceChanged: "Lugar cambiado",
+  refiledPlaceCleared: "Sin lugar",
+  reason_misfiled: "Mal clasificada",
+  reason_illegal: "Contenido ilegal",
+  "reason_personal-data": "Datos personales",
+  reason_threat: "Amenaza",
+  reason_harassment: "Hostigamiento",
+  reason_spam: "Spam",
+  reason_impersonation: "Suplantación",
+  "reason_legal-notice": "Aviso legal",
+  "reason_appeal-upheld": "Apelación aceptada",
+  reason_error: "Error del moderador",
+  "reason_notice-withdrawn": "Aviso retirado",
+  navAccount: "Cuenta",
+  accountEyebrow: "Cuenta",
+  accountTitle: "Inicia sesión o crea una cuenta",
+  accountLede:
+    "Una cuenta te permite crear y administrar encuestas. No la necesitas para votar, y nunca emite un voto: las boletas se emiten en la app de votación, y nada de lo que hay aquí puede saber cómo votaste ni si votaste.",
+  accountEyebrowSignedIn: "Cuenta · Sesión iniciada con una llave de acceso",
+  accountTitleSignedIn: "Tu cuenta",
+  accountLedeSignedIn:
+    "Las llaves de acceso con las que inicias sesión en este sitio web. Tus votos no están aquí: viven en la app de votación de tu dispositivo.",
+  accountNeedsScript: "Las cuentas usan llaves de acceso, que necesitan el script de esta página.",
+  accountHaveOne: "Tengo una cuenta",
+  accountHaveOneLede:
+    "Tu dispositivo te pedirá tu huella digital, tu rostro o el bloqueo de pantalla. No hay contraseña.",
+  accountNew: "Soy nuevo aquí",
+  accountNewLede:
+    "Creamos una llave de acceso en este dispositivo y guardamos solo su clave pública. No hace falta un nombre. Luego verificas una dirección de correo electrónico, que se necesita para votar: una cuenta por dirección.",
+  accountSignUp: "Crear cuenta con llave de acceso",
+  accountSignIn: "Iniciar sesión con una llave de acceso",
+  accountSignOut: "Cerrar sesión",
+  accountSignOutOthers: "Cerrar sesión en todos los demás lugares",
+  signedIn: "Iniciaste sesión.",
+  signedOut: "Cerraste sesión.",
+  accountDeleted: "La cuenta se eliminó.",
+  passkeyRemoved: "Llave de acceso eliminada.",
+  signedOutOthers: "Se cerraron todas las demás sesiones de esta cuenta.",
+  separationMark: "Cuentas y votos",
+  separationTitle: "Tu cuenta no es tu voto",
+  separationLede:
+    "Las dos se mantienen separadas por diseño. Ninguna tabla ni registro de nuestros servidores vincula una cuenta con una boleta, y las rutas de las boletas rechazan cualquier solicitud que lleve la cookie de una cuenta. Las pruebas verifican ambas cosas en cada cambio.",
+  separationServer: "En nuestros servidores",
+  separationAccount: "Tu cuenta",
+  separationAccount_passkeys: "La clave pública de cada llave de acceso, y cuándo se agregó",
+  separationAccount_sessions: "Tus inicios de sesión en este sitio web",
+  separationAccount_email: "Tu dirección de correo electrónico, cifrada",
+  separationAccount_phone: "Una huella con clave de tu número de teléfono, nunca el número",
+  separationAccountNote:
+    "Quién eres para este sitio web. Puede crear y administrar encuestas. No puede votar.",
+  separationNeverJoined: "Nunca se vinculan",
+  separationDevice: "En tu dispositivo",
+  separationIdentity: "Tu identidad de votación",
+  separationIdentity_secret: "Un secreto que prueba que puedes votar, sin decir quién eres",
+  separationIdentity_receipts: "Los comprobantes de tus boletas",
+  separationIdentityNote:
+    "Nunca sale de tu dispositivo sin cifrar. Si guardas una copia de seguridad, nuestro servidor la almacena sellada con la propia llave de acceso de la identidad, y no puede abrirla.",
+  passkeysTitle: "Llaves de acceso",
+  passkeysHeading: "Cómo inicias sesión",
+  passkeysLede:
+    "Cualquiera de estas inicia sesión en esta cuenta. Tu identidad de votación tiene su propia llave de acceso, que no aparece aquí: nunca la vemos.",
+  passkeySynced: "Llave de acceso sincronizada",
+  passkeySyncedHelp:
+    "Tu proveedor de llaves de acceso la mantiene sincronizada en tus dispositivos",
+  passkeyDevice: "Llave de acceso del dispositivo",
+  passkeyDeviceHelp: "Solo en un dispositivo o llave de seguridad",
+  passkeyAddedAt: "Agregada el {created} UTC",
+  passkeyRemove: "Eliminar",
+  passkeyRemoveWhich: "la llave de acceso agregada el {created} UTC",
+  passkeyLast: "Tu última llave de acceso",
+  passkeyAdd: "Agregar una llave de acceso",
+  passkeyAdded: "Llave de acceso agregada.",
+  noticesMark: "Notificaciones",
+  noticesTitle: "Sobre qué te avisamos",
+  noticesLede:
+    "Por correo electrónico, a la dirección que verificaste arriba. Sin una, no se envía nada, y lo que te avisaríamos sigue estando aquí, en esta página.",
+  noticesModeration:
+    "Una decisión de moderación sobre una de tus encuestas, tu perfil o tu apelación",
+  noticesModerationHelp: "Siempre se envía, para que puedas apelar. No se puede desactivar.",
+  noticesWhen:
+    "Llega el día después de la decisión y solo dice que hubo una. Qué se decidió, y por qué, está aquí, en esta página, y en el registro público de moderación: lo dejamos fuera del correo para que el servicio que lo entrega sepa lo menos posible.",
+  pushLabel: "Avisar también a este navegador",
+  pushHelp:
+    "Una notificación en este dispositivo cuando sale el correo, que dice solo que hubo una decisión. La entrega la empresa que hace tu navegador, así que sabe que usas Abolish y el día en que se envió.",
+  pushOn: "Se avisará a este navegador.",
+  pushOff: "No se avisará a este navegador.",
+  pushUnsupported: "Este navegador no puede mostrar notificaciones de sitios web.",
+  pushUnavailable: "Este sitio todavía no envía notificaciones al navegador.",
+  pushDenied:
+    "Este navegador bloquea las notificaciones de este sitio. Permítelas en la configuración del navegador y luego vuelve a esta página.",
+  pushFailure_signedOut:
+    "Se cerró tu sesión. Vuelve a iniciar sesión para cambiar las notificaciones.",
+  pushFailure_denied:
+    "No se permitieron las notificaciones, así que no se avisará a este navegador.",
+  pushFailure_service:
+    "El servicio de notificaciones de este navegador no es uno por el que podamos enviar, así que no se le puede avisar.",
+  pushFailure_failed: "Eso no funcionó. Inténtalo de nuevo.",
+  pushNoticeTitle: "Una decisión de moderación",
+  pushNoticeBody:
+    "Sobre una de tus encuestas, tu perfil o una apelación. Abre la página de tu cuenta para verla.",
+  exportMark: "Tus datos",
+  exportTitle: "Descarga tus datos",
+  exportLede:
+    "Una copia de los datos de tu cuenta, en un archivo JSON que puedes abrir con cualquier editor de texto.",
+  exportHolds_account:
+    "Cuándo se creó la cuenta, sus llaves de acceso, inicios de sesión y sesiones, y su nombre de moderador si modera",
+  exportHolds_verification:
+    "Tu dirección de correo verificada, donde este sitio aún pueda leerla, y los días en que se verificaron tu correo y tu teléfono",
+  exportHolds_polls:
+    "Cada encuesta que escribiste, tal como la escribiste, qué pasó con ella, y tus apelaciones",
+  exportHolds_profile:
+    "Tu perfil público, las encuestas que muestra, sus apelaciones y el día en que le pusiste nombre por última vez",
+  exportHolds_reactions: "Tus reacciones a encuestas",
+  exportHolds_token:
+    "El grupo, la región y el periodo de clave de tu token de Nivel 0, nunca la identidad de votación a la que se entregó",
+  exportNever:
+    "Nunca contiene tus respuestas, comprobantes ni tu identidad de votación: esos se quedan en tu dispositivo, y nuestros servidores no pueden vincularlos con tu cuenta. No contiene secretos de inicio de sesión ni tu número de teléfono: solo guardamos una huella con clave de él, que no está en el archivo.",
+  exportCare:
+    "Guarda el archivo en un lugar seguro: muestra cuándo usaste el sitio, y cualquiera que lo tenga puede leerlo.",
+  exportDownload: "Descargar tus datos",
+  exportPreparing: "Preparando tu archivo…",
+  exportDone: "Tus datos se están descargando.",
+  exportFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para descargar tus datos.",
+  exportFailure_failed: "No se pudieron descargar tus datos. Inténtalo de nuevo.",
+  accountDeleteMark: "Eliminar",
+  accountDeleteTitle: "Eliminar tu cuenta",
+  accountDeleteLede:
+    "Esto elimina de nuestros servidores la cuenta, sus llaves de acceso, sus inicios de sesión y su perfil.",
+  accountDeleteStays:
+    "Las encuestas ya publicadas se quedan en el tablero público, y las decisiones de moderación sobre ellas se quedan en el registro público. Tu identidad de votación y tus comprobantes están en tu dispositivo y no se ven afectados.",
+  accountDelete: "Eliminar cuenta…",
+  accountDeleteQuestion: "¿Eliminar esta cuenta? No se puede deshacer.",
+  accountDeleteConfirm: "Eliminar la cuenta para siempre",
+  accountDeleteCancel: "Conservar la cuenta",
+  accountFailure_cancelled: "Se cerró la solicitud de la llave de acceso. No cambió nada.",
+  accountFailure_unsupported: "Este navegador no admite llaves de acceso.",
+  profileMark: "Perfil",
+  profileTitle: "Tu perfil público",
+  profileLede:
+    "Opcional. Un perfil pone un nombre que tú eliges junto a las encuestas que elijas, como “Pregunta de”. Muestra ese nombre y esas encuestas, nada más: ni tu cuenta, ni tu correo o teléfono, ni nada sobre las encuestas que respondes.",
+  profileNone:
+    "No tienes un perfil, así que tus encuestas no dicen quién las hizo. Puedes crear uno en cualquier momento, y eliminarlo en cualquier momento.",
+  profileNeedsPhoneHere:
+    "Un perfil necesita un número de teléfono verificado, y este sitio aún no verifica números de teléfono.",
+  profileNameLabel: "El nombre que muestra tu perfil",
+  profileNameHelp:
+    "Una persona, un grupo o un seudónimo, de hasta 60 caracteres. Los nombres no se verifican ni tienen que ser únicos, y el nombre puede cambiar una vez al día. Los moderadores pueden ocultar un perfil con las mismas reglas que una encuesta.",
+  profileMake: "Crear perfil",
+  profileName: "Nombre",
+  profileAddress: "Dirección",
+  profileAddressHelp:
+    "Elegida al azar, y nunca se le da a nadie más. Cualquiera que tenga la dirección ve el nombre y las encuestas que muestra el perfil.",
+  profilePolls: "Encuestas que muestra",
+  profilePollsNone:
+    "Ninguna todavía. Tú eliges, debajo de cada una de tus encuestas, arriba, cuáles muestra.",
+  profilePollsSome:
+    "{count}. Tú eliges, debajo de cada una de tus encuestas, arriba, cuáles muestra.",
+  profileRename: "Cambiar nombre",
+  profileRenameSave: "Guardar nombre",
+  profileRenameCancel: "Conservar el nombre",
+  profileRenameOn: "El nombre se fijó hoy. Puede volver a cambiar el {day} (UTC).",
+  profileRenameHidden: "El nombre no puede cambiar mientras el perfil está oculto.",
+  profileDelete: "Eliminar perfil…",
+  profileDeleteQuestion: "¿Eliminar tu perfil?",
+  profileDeleteMeans:
+    "Se eliminan su nombre y tu selección de encuestas, y su dirección se retira para siempre. Tus encuestas se quedan, sin “Pregunta de”. Pueden quedar copias que otros hicieron mientras se mostraba, como páginas guardadas.",
+  profileDeleteConfirm: "Eliminar perfil",
+  profileDeleteCancel: "Conservar perfil",
+  profileMade: "Tu perfil está creado. No muestra ninguna encuesta hasta que las elijas.",
+  profileRenamed: "El nombre cambió en tu perfil y en cada encuesta que muestra.",
+  profileSameName: "Ese ya es su nombre. No cambió nada.",
+  profileDeleted: "Tu perfil se eliminó.",
+  profileAppealed: "Tu apelación se presentó. La revisará otro moderador.",
+  profileMeans_visible: "Nuestras páginas vuelven a mostrar este perfil.",
+  profileMeans_hidden:
+    "Nuestras páginas muestran solo esta decisión en lugar del nombre y las encuestas del perfil, y tus encuestas no dicen quién las hizo. Las encuestas en sí no se ven afectadas.",
+  profileAppeal_upheld: "aceptada el {when} UTC, y el perfil restaurado",
+  profileAppeal_rejected: "rechazada el {when} UTC",
+  profileAppeal_superseded:
+    "cerrada el {when} UTC, porque una decisión posterior cambió antes el perfil",
+  profileVerifyPhone: "Verifica tu teléfono",
+  profileFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para ver tu perfil.",
+  profileFailure_phoneUnverified:
+    "Un perfil necesita primero que verifiques tu número de teléfono.",
+  profileFailure_invalidName:
+    "Un perfil no puede tener ese nombre. Usa de 1 a 60 letras, dígitos, espacios o signos de puntuación, sin caracteres invisibles.",
+  profileFailure_oneNameADay: "El nombre ya se fijó hoy. No cambió nada.",
+  profileFailure_hidden:
+    "El perfil está oculto, así que su nombre no puede cambiar. No cambió nada.",
+  profileFailure_changed:
+    "Tu perfil cambió desde que esta página lo leyó. Aquí se muestra cómo está ahora.",
+  profileFailure_failed: "No funcionó. No cambió nada; inténtalo de nuevo en un momento.",
+  profileFailure_unloaded: "No se pudo cargar tu perfil. Inténtalo de nuevo en un momento.",
+  profileFailure_moderationUnloaded:
+    "No se pudo cargar la moderación de este perfil. Inténtalo de nuevo en un momento.",
+  profileChoiceLabel: "Mostrar en tu perfil,",
+  profileChoiceHelp:
+    "Tu perfil lista esta encuesta, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Desmárcala cuando quieras.",
+  profileChoiceHelpUnsaved:
+    "Al guardar el borrador, se agrega a tu perfil. Tu perfil la lista, y su página dice que tu perfil la hizo, cuando la encuesta esté abierta y listada.",
+  profileChoiceShown: "Tu perfil muestra esta encuesta.",
+  profileChoiceUnshown: "Tu perfil no muestra esta encuesta.",
+  profileChoiceNone:
+    "Tus encuestas no dicen quién las hizo. Para poner un nombre junto a ellas, crea un perfil público.",
+  profileChoiceNoneLink: "Crea uno en la página de tu cuenta",
+  profileChoiceFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para elegir.",
+  profileChoiceFailure_changed:
+    "Tu perfil o esta encuesta cambiaron desde que la página los leyó. Aquí no cambió nada.",
+  profileChoiceFailure_failed: "No funcionó. No cambió nada; inténtalo de nuevo en un momento.",
+  profileChoiceFailure_unsaved:
+    "El borrador se guardó, pero tu perfil no lo muestra. Vuelve a marcar la casilla para mostrarlo.",
+  byEyebrow: "Perfil",
+  byLede:
+    "Las encuestas que muestra este perfil, de la más reciente a la más antigua. Su autor eligió el nombre: los nombres no se verifican ni tienen que ser únicos.",
+  byNote:
+    "Qué encuestas muestra un perfil es lo que su autor le dijo a este sitio web. No forma parte de ninguna encuesta, y nadie fuera de este sitio web puede verificarlo.",
+  byPolls: "Encuestas que hizo",
+  askedBy: "Pregunta de",
+  askedByNote:
+    "Quién hizo la pregunta es lo que el autor de la encuesta le dijo a este sitio web. No forma parte de la encuesta, y nadie fuera de este sitio web puede verificarlo.",
+  byEmpty: "No hay encuestas que mostrar",
+  byEmptyLede: "Este perfil no muestra ninguna encuesta listada en este momento.",
+  byMore: "Más encuestas",
+  byHiddenTitle: "Este perfil está oculto",
+  byHidden:
+    "Los moderadores lo ocultaron según la política de moderación, por {reason}. Su nombre y sus encuestas no se muestran aquí, y sus encuestas no dicen quién las hizo. Las encuestas en sí se moderan por separado.",
+  byHiddenLog: "Ver la decisión en el registro público de moderación",
+  byReportTitle: "¿Algo anda mal con este perfil?",
+  byReportHelp:
+    "Se cuentan las denuncias, nunca quién las envió, y un moderador evalúa el perfil según la política: el número de denuncias nunca decide nada.",
+  byReportPolicy: "Qué puede y qué no puede hacer la moderación",
+  byReport: "Denunciar este perfil",
+  byReportLegend: "¿Por qué debería revisarlo un moderador?",
+  byReportSend: "Enviar denuncia",
+  byReportCancel: "Cancelar",
+  byReportDone: "Denunciado. Un moderador lo revisará.",
+  byReportGone: "Este perfil ya no existe, así que no se denunció nada.",
+  byReportFailed: "No funcionó. No se denunció nada; inténtalo de nuevo en un momento.",
+  pollsMark: "Tus encuestas",
+  pollsTitle: "Encuestas que creaste",
+  pollsLede:
+    "Tus borradores, las encuestas en preparación y las que ya se abrieron. Solo tú ves esta lista: el registro público nunca dice quién creó una encuesta.",
+  pollsEmpty: "Aún no has creado ninguna encuesta.",
+  pollsUntitled: "Borrador sin título",
+  pollsState_drafted: "Borrador",
+  pollsState_setup: "En preparación",
+  pollsState_open: "Abierta",
+  pollsState_failed: "No se abrió",
+  pollsEdited: "Última edición: {when} UTC",
+  pollsSubmitted: "Enviada el {when} UTC",
+  pollsCloses: "Cierra el {when} UTC",
+  pollsSetupHelp:
+    "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. Puedes salir de esta página, o seguir la preparación paso a paso.",
+  pollsFollowSetup: "Seguir la preparación",
+  pollsPage: "Ir a su página",
+  pollsDelete: "Eliminar borrador…",
+  pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
+  pollsDeleteConfirm: "Eliminar el borrador para siempre",
+  pollsRetry: "Intentar de nuevo",
+  pollsDiscard: "Descartar…",
+  pollsDiscardQuestion: "¿Descartar esta encuesta y su borrador? No se puede deshacer.",
+  pollsDiscardConfirm: "Descartar para siempre",
+  pollsKeep: "Conservarla",
+  pollsRemoved: "El borrador se eliminó.",
+  pollsRetried: "Tu encuesta vuelve a ser un borrador, tal como la escribiste.",
+  pollsDiscarded: "La encuesta se descartó.",
+  pollsFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para ver tus encuestas.",
+  pollsFailure_gone: "Esa encuesta ya no está aquí. La lista ya está actualizada.",
+  pollsFailure_changed:
+    "Esa encuesta cambió desde que se mostró la lista. La lista ya está actualizada.",
+  pollsFailure_registered: "Esa encuesta está registrada en el registro público, así que se queda.",
+  pollsFailure_tooManyDrafts:
+    "Tienes tantos borradores como admite una cuenta. Elimina uno e inténtalo de nuevo.",
+  pollsFailure_failed: "No funcionó. No cambió nada; inténtalo de nuevo en un momento.",
+  pollsFailure_unlisted: "No se pudieron cargar tus encuestas. Inténtalo de nuevo en un momento.",
+  pollsFailure_refused:
+    "El servidor encontró un problema con ese borrador, así que no se guardó. Revísalo e inténtalo de nuevo.",
+  moderationOfPoll: "Moderación",
+  moderationDecision: "{action}: {reason}, {when} UTC",
+  moderationMeans_visible: "Nuestras páginas vuelven a listar y mostrar esta encuesta.",
+  moderationMeans_delisted:
+    "Nuestras páginas no listan esta encuesta, pero sigue abierta en su dirección. El tablero, el conteo y el resultado no se ven afectados.",
+  moderationMeans_hidden:
+    "Nuestras páginas no muestran el texto de esta encuesta. El tablero, el conteo y el resultado no se ven afectados.",
+  moderationAppealed: "Apelaste la decisión N.º {seq} el {when} UTC: {outcome}.",
+  moderationAppealPending: "en espera de un moderador distinto del que decidió",
+  moderationAppeal_upheld: "aceptada el {when} UTC, y la encuesta restaurada",
+  moderationAppeal_rejected: "rechazada el {when} UTC",
+  moderationAppeal_superseded:
+    "cerrada el {when} UTC, porque una decisión posterior cambió antes la encuesta",
+  moderationAppeal: "Apelar esta decisión…",
+  moderationAppealQuestion:
+    "¿Apelar esta decisión? La revisa un moderador distinto del que decidió. Solo puedes apelar una decisión una vez.",
+  moderationAppealConfirm: "Enviar apelación",
+  moderationAppealCancel: "Ahora no",
+  moderationAppealFiled: "Tu apelación se presentó. La revisará otro moderador.",
+  moderationFailure_signedOut:
+    "Se cerró tu sesión. Vuelve a iniciar sesión para ver la moderación de esta encuesta.",
+  moderationFailure_gone: "Esa encuesta ya no está aquí.",
+  moderationFailure_changed:
+    "Esa decisión cambió o ya se apeló desde que esta página la leyó. Aquí ves cómo está ahora.",
+  moderationFailure_failed:
+    "La apelación no se envió. No cambió nada; inténtalo de nuevo en un rato.",
+  moderationFailure_unloaded:
+    "No se pudo cargar la moderación de esta encuesta. Inténtalo de nuevo en un rato.",
+  pollsFailure_tooManyInSetup:
+    "Tienes tantas encuestas en preparación como una cuenta puede tener a la vez. Envía esta cuando una de ellas se haya abierto.",
+  pollsFailure_tooManyToday:
+    "Enviaste tantas encuestas en las últimas 24 horas como una cuenta puede. Inténtalo de nuevo más tarde.",
+  pollsFailure_challengeRefused:
+    "La verificación de que eres una persona no se superó, así que no se envió nada. Envía de nuevo para hacer otra.",
+  pollsFailure_challengeUnavailable:
+    "La verificación de que eres una persona no pudo hacerse en este momento, así que no se envió nada. Inténtalo de nuevo en un rato.",
+  pollsCreate: "Crear una encuesta",
+  pollsEdit: "Editar borrador",
+  pollFormEyebrow: "Tus encuestas",
+  pollFormNewTitle: "Crear una encuesta",
+  pollFormEditTitle: "Edita tu encuesta",
+  pollFormLede:
+    "Escribe tu pregunta y sus respuestas, elige cuándo cierra y guárdala como borrador. Solo tú puedes ver un borrador. Puedes cambiarlo cuantas veces quieras hasta que lo envíes.",
+  pollFormBack: "Volver a tus encuestas",
+  pollFormNeedsScript: "Para guardar un borrador se necesita el script de esta página.",
+  pollFormLoading: "Cargando tu borrador…",
+  pollFormSignedOut:
+    "Se cerró tu sesión. Inicia sesión en la página de tu cuenta y luego vuelve a este borrador.",
+  pollFormGone: "Ese borrador ya no está aquí. Puede que se haya eliminado en otra pestaña.",
+  pollFormNotDraft:
+    "Esta encuesta se envió para su preparación, así que ya no se puede cambiar. Tu lista de encuestas muestra cómo va.",
+  pollFormUnloaded: "No se pudo cargar tu borrador. Inténtalo de nuevo en un rato.",
+  setupEyebrow: "Tus encuestas",
+  setupTitle: "Preparando tu encuesta",
+  setupLede:
+    "Antes de que alguien pueda responder, tu encuesta pasa al registro público, se cuenta a las personas que pueden responder y sus custodios crean la clave que sella cada respuesta. Esto puede tardar hasta media hora, casi todo esperando a que el registro público se asiente.",
+  setupBack: "Volver a tus encuestas",
+  setupNeedsScript:
+    "Para seguir la preparación se necesita el script de esta página. Tu lista de encuestas en la página de tu cuenta muestra cómo va.",
+  setupLoading: "Cargando tu encuesta…",
+  setupSignedOut:
+    "Se cerró tu sesión. Inicia sesión en la página de tu cuenta para ver cómo va tu encuesta.",
+  setupGone: "Esa encuesta ya no está aquí. Puede que se haya descartado en otra pestaña.",
+  setupUnloaded:
+    "No se pudo cargar tu encuesta. Esta página lo intentará de nuevo en unos segundos.",
+  setupStepsLabel: "Preparación, paso a paso",
+  setupStep_submitted: "Enviada",
+  setupStep_created: "Pasa al registro público",
+  setupStep_rooted: "Se cuenta a quienes pueden responder",
+  setupStep_keyed: "Los custodios crean la clave que sella las respuestas",
+  setupStep_opened: "Revisada y abierta a respuestas",
+  setupWhere_done: "listo",
+  setupWhere_now: "en curso",
+  setupWhere_later: "pendiente",
+  setupNow: "Ahora: {step}.",
+  setupLeave:
+    "Esta página vuelve a revisar cada pocos segundos. Puedes salir: la preparación continúa y tu lista de encuestas muestra cómo va.",
+  setupStale:
+    "Esta página no pudo revisar en este momento. Lo intentará de nuevo en unos segundos.",
+  setupOpen: "Tu encuesta está abierta.",
+  setupOpenUntil: "Se puede responder hasta el {when} UTC.",
+  setupPollPage: "Ir a la página de tu encuesta",
+  setupDraft: "Esta encuesta no se ha enviado, así que no se está preparando nada.",
+  setupFailed: "Tu encuesta no se abrió.",
+  setupFailedNext: "Volver a tus encuestas para intentarlo de nuevo o descartarla",
+  pollFormAboutMark: "La encuesta",
+  pollFormAboutTitle: "¿De qué trata?",
+  pollFormTitleLabel: "Título",
+  pollFormTitleHelp: "Lo primero que se ve, en las listas y en la página de la encuesta.",
+  pollFormDescriptionLabel: "Descripción",
+  pollFormOptional: "(opcional)",
+  pollFormDescriptionHelp: "El contexto que hace falta para responder con justicia.",
+  pollFormPlaceLabel: "Lugar",
+  pollFormPlaceHelp:
+    "Una ciudad, un barrio, una escuela. Cualquiera puede verlo, así que indica un lugar público y no tu propia dirección.",
+  pollFormTopicLabel: "Tema",
+  pollFormTopicHelp: "Ayuda a que encuentren tu encuesta.",
+  pollFormTopicNone: "Sin tema",
+  pollFormTagsNote:
+    "El lugar y el tema solo deciden dónde aparece tu encuesta. No forman parte de la encuesta en sí, y la moderación puede cambiarlos si no encajan.",
+  pollFormQuestionsMark: "Preguntas",
+  pollFormQuestionsTitle: "¿Qué preguntas?",
+  pollFormQuestionsLede:
+    "Cada pregunta tiene sus opciones y una regla de cuántas elige una respuesta. Cada respuesta a tu encuesta responde a todas sus preguntas.",
+  pollFormQuestion: "Pregunta {n}",
+  pollFormQuestionLabel: "¿Qué quieres preguntar?",
+  pollFormQuestionDescriptionLabel: "Explicación",
+  pollFormQuestionDescriptionHelp: "Una o dos líneas bajo la pregunta.",
+  pollFormRuleLegend: "¿Cuántas opciones elige una respuesta?",
+  pollFormRule_one: "Una",
+  pollFormRule_any: "Cualquier cantidad",
+  pollFormRule_upTo: "Hasta cierta cantidad",
+  pollFormRule_exactly: "Una cantidad exacta",
+  pollFormRule_between: "Entre dos cantidades",
+  pollFormMinLabel: "Al menos",
+  pollFormMaxLabel_upTo: "Hasta",
+  pollFormMaxLabel_exactly: "Exactamente",
+  pollFormMaxLabel_between: "Como máximo",
+  pollFormOptionalLabel: "Se puede dejar esta pregunta en blanco",
+  pollFormOptionsLegend: "Opciones",
+  pollFormOption: "Opción {n}",
+  pollFormOptionDescriptionLabel: "Detalles de la opción {n}",
+  pollFormAddOption: "Agregar una opción",
+  pollFormAddOptionTo: "a la pregunta {n}",
+  pollFormAddQuestion: "Agregar una pregunta",
+  pollFormMoveUp: "Subir {what}",
+  pollFormMoveDown: "Bajar {what}",
+  pollFormRemove: "Quitar {what}",
+  pollFormWhatQuestion: "la pregunta {n}",
+  pollFormWhatOption: "la opción {n} de la pregunta {q}",
+  pollFormWhoMark: "Quién puede responder",
+  pollFormWhoTitle: "¿Quién puede responder?",
+  pollFormWhoLede:
+    "Las encuestas de hoy funcionan en Nivel 0: cualquiera con una identidad de votación en su dispositivo puede responder, y cualquiera puede crear varias. Su resultado cuenta identidades, no personas, y así lo indica. Se están creando niveles más estrictos.",
+  pollFormWhenMark: "Cuándo cierra",
+  pollFormWhenTitle: "¿Cuándo cierra?",
+  pollFormWhenLede:
+    "Las horas están en UTC, el reloj que usan todas las encuestas. Tu encuesta se abre una media hora después de que la envíes, cuando ya está preparada, y luego debe seguir abierta al menos una hora, así que elige una hora al menos 90 minutos a partir de ahora y no más de un año después.",
+  pollFormDateLabel: "Fecha de cierre (UTC)",
+  pollFormTimeLabel: "Hora de cierre (UTC)",
+  pollFormLocal: "Donde estás, eso es el {when}.",
+  pollFormPreviewMark: "Vista previa",
+  pollFormPreviewTitle: "Lo que se verá",
+  pollFormPreviewEmpty: "El título de tu encuesta",
+  pollFormPreviewQuestionEmpty: "Tu pregunta",
+  pollFormPreviewOptionEmpty: "Una opción",
+  pollFormPreviewCloses: "Cierra el {when} UTC",
+  pollFormPreviewRule_one: "Elige una.",
+  pollFormPreviewRule_any: "Elige las que quieras.",
+  pollFormPreviewRule_upTo: "Elige hasta {count}.",
+  pollFormPreviewRule_exactly: "Elige exactamente {count}.",
+  pollFormPreviewRule_between: "Elige de {min} a {max}.",
+  pollFormPreviewOptional: "Puedes dejar esta pregunta en blanco.",
+  pollFormPreviewListed: "Dónde aparece",
+  pollFormPreviewNotListed: "No aparece bajo ningún tema ni lugar.",
+  pollFormReviewTitle: "Revísala",
+  pollFormReviewLede:
+    "Esto es lo que vas a enviar. Cambia lo que quieras en esta página y guarda antes de enviar.",
+  pollFormReviewPermanent: "Registrado para siempre",
+  pollFormReviewPermanentLede:
+    "Esto pasa al registro público cuando envías. Nadie puede cambiarlo después, ni tú ni nosotros.",
+  pollFormReviewListing: "Dónde aparece",
+  pollFormReviewListingLede:
+    "Esto no forma parte de la encuesta. Decide dónde la encuentran, y la moderación puede cambiarlo.",
+  pollFormReviewTitleRow: "Título",
+  pollFormReviewQuestions: "Preguntas",
+  pollFormReviewQuestionCount: { one: "{count} pregunta", other: "{count} preguntas" },
+  pollFormReviewWho: "Quién puede responder",
+  pollFormReviewCloses: "Cierra",
+  pollFormReviewPlace: "Lugar",
+  pollFormReviewTopic: "Tema",
+  pollFormReviewNone: "Ninguno",
+  pollFormReviewNotSet: "Sin definir",
+  pollFormReviewClosesAt: "{when} UTC",
+  pollFormReviewUntitled: "Aún sin título",
+  pollFormReviewChange: "Cambiar",
+  pollFormSave: "Guardar borrador",
+  pollFormSaved: "Tu borrador está guardado.",
+  pollFormSubmitMark: "Enviar",
+  pollFormSubmitTitle: "¿Listo para preguntar?",
+  pollFormSubmitLede:
+    "Al enviarla, tu encuesta se prepara en el registro público y se abre a respuestas cuando eso termina. No puedes cambiarla después de enviarla.",
+  pollFormSubmitCloudflare:
+    "Antes de enviarla, una verificación de Cloudflare confirma que eres una persona. Cloudflare ve la dirección de tu navegador mientras se ejecuta.",
+  pollFormSubmit: "Enviar encuesta",
+  pollFormSubmitCheckLabel: "Verifica que eres una persona",
+  pollFormSubmitChecking: "Completa la verificación para enviar tu encuesta.",
+  pollFormSubmitting: "Enviando tu encuesta…",
+  pollFormSubmitted: "Tu encuesta se envió. Te llevamos a su preparación…",
+  pollFormSubmitSaveFirst: "Primero guarda tu borrador: solo se puede enviar un borrador guardado.",
+  pollFormSubmitUnavailable: "En este momento no se pueden enviar encuestas en este sitio.",
+  pollFormSubmitRefused:
+    "El servidor encontró un problema con este borrador, así que no se envió. Revisa cuándo cierra, guárdalo e inténtalo de nuevo.",
+  pollFormErrorsTitle: "Tu borrador no se guardó",
+  pollFormSubmitErrorsTitle: "Tu encuesta no se envió",
+  pollFormErrorsLede: "Corrige esto y vuelve a guardar:",
+  pollFormInQuestion: "Pregunta {n}: {problem}",
+  pollForm_titleMissing: "Ponle un título a tu encuesta.",
+  pollForm_tooLong: "Esto es demasiado largo.",
+  pollForm_unstorable: "Esto contiene un carácter que no se puede guardar. Vuelve a escribirlo.",
+  pollForm_placeTooLong: "Un lugar puede tener hasta 80 letras.",
+  pollForm_placeRefused:
+    "Esto contiene un carácter oculto o una marca de dirección de texto que un lugar no puede tener. Vuelve a escribirlo.",
+  pollForm_questionMissing: "Escribe la pregunta.",
+  pollForm_questionRepeated:
+    "Otra pregunta ya pregunta esto. Cada pregunta necesita sus propias palabras.",
+  pollForm_labelMissing: "Escribe el texto de esta opción o quítala.",
+  pollForm_labelRepeated: "Otra opción de esta pregunta dice lo mismo. No se podrían distinguir.",
+  pollForm_tooFewOptions: "Una pregunta necesita al menos dos opciones.",
+  pollForm_tooManyOptions: "Una encuesta puede tener 64 opciones entre todas sus preguntas.",
+  pollForm_tooManyQuestions: "Una encuesta puede tener 32 preguntas.",
+  pollForm_rangeInvalid:
+    "Estos números no encajan con las opciones: una respuesta debe poder elegir al menos una, y no más de las que hay.",
+  pollForm_closesMissing: "Elige una fecha y hora de cierre.",
+  pollForm_closesTooSoon: "Elige una hora al menos 90 minutos a partir de ahora.",
+  pollForm_closesTooLate: "Elige una hora dentro del próximo año como máximo.",
+  pollForm_draftTooLong:
+    "Tu encuesta es demasiado larga en total. Acorta el texto o quita una pregunta.",
+  pollForm_draftRefused:
+    "Tu encuesta incumple una regla que el formulario no pudo señalar. Revísala.",
+  pollTopic_community: "Comunidad",
+  pollTopic_culture: "Cultura",
+  pollTopic_economy: "Economía",
+  pollTopic_education: "Educación",
+  pollTopic_environment: "Medio ambiente",
+  pollTopic_food: "Comida",
+  pollTopic_government: "Gobierno",
+  pollTopic_health: "Salud",
+  pollTopic_housing: "Vivienda",
+  pollTopic_safety: "Seguridad",
+  pollTopic_science: "Ciencia",
+  pollTopic_sport: "Deporte",
+  pollTopic_technology: "Tecnología",
+  pollTopic_transport: "Transporte",
+  verifyEyebrow: "Cuenta · Verificación",
+  verifyPageTitle_email: "Verifica tu correo electrónico",
+  verifyPageTitle_phone: "Verifica tu correo y tu teléfono",
+  verifyPageLede_email:
+    "Para votar se necesita una cuenta verificada con un correo electrónico, y cada dirección verifica una sola cuenta. Nunca llega a una encuesta, a una boleta ni al registro público.",
+  verifyPageLede_phone:
+    "Para votar se necesita una cuenta verificada con un correo electrónico y un número de teléfono, y cada número verifica una sola cuenta. Así una persona no puede crear muchas cuentas con la misma facilidad que muchas llaves de acceso. Te pedimos el número la primera vez que votas, o puedes verificarlo ahora. Ninguno de los dos llega nunca a una encuesta, a una boleta ni al registro público.",
+  verifyBack: "Volver a tu cuenta",
+  verifyNeedsScript: "Para verificar se necesita el script de esta página.",
+  verifyCloudflare:
+    "Antes de enviar un código, una verificación de Cloudflare confirma que eres una persona. Cloudflare ve la dirección de tu navegador mientras se ejecuta.",
+  verifyMark_email: "Correo",
+  verifyMark_phone: "Teléfono",
+  verifyHeading_email: "Tu correo electrónico",
+  verifyHeading_phone: "Tu número de teléfono",
+  verifyLede_email:
+    "Guardamos tu dirección cifrada, para enviarte códigos y, más adelante, los avisos que pidas. Nunca se le muestra a nadie más.",
+  verifyLede_phone:
+    "Nunca guardamos tu número: solo una huella con clave, para que no pueda verificar una segunda cuenta. Un celular recibe un mensaje de texto; un teléfono fijo, una llamada. El proveedor que envía el código ve el número.",
+  verifyLoading: "Cargando…",
+  verifyVerified_email: "Verificado: {address}, el {date} UTC.",
+  verifyVerified_phone:
+    "Verificado el {date}. No guardamos el número, así que no podemos mostrarlo.",
+  verifyNone_email: "Aún no hay ninguna dirección verificada.",
+  verifyNone_phone: "Aún no hay ningún número de teléfono verificado.",
+  verifyChange_email: "Usar otra dirección",
+  verifyChange_phone: "Usar otro número",
+  verifyLabel_email: "Correo electrónico",
+  verifyLabel_phone: "Número de teléfono",
+  verifyHelp_email: "Te enviamos un código de 8 dígitos.",
+  verifyHelp_phone:
+    "Un número de EE. UU. o Canadá, con o sin +1. No se pueden usar números de internet ni virtuales.",
+  verifySend: "Enviar un código",
+  verifyCheckLabel: "Verifica que eres una persona",
+  verifyChecking: "Completa la verificación para enviar tu código.",
+  verifySending: "Enviando tu código…",
+  verifySent_email:
+    "Enviamos un mensaje a {address}. Ingresa el código que contiene; sirve durante 15 minutos. ¿No llegó nada? Revisa la dirección y envía otro.",
+  verifySent_phone:
+    "Si {number} puede recibir un código, ya va en camino, por mensaje de texto a un celular o por llamada a un teléfono fijo. Sirve durante 10 minutos. ¿No llegó nada? Revisa el número y envía otro.",
+  verifyCodeLabel: "Código",
+  verifyCodeSubmit: "Verificar",
+  verifyStartOver: "Empezar de nuevo",
+  verifyCancel: "Cancelar",
+  verifyChecked_email: "Tu correo electrónico está verificado.",
+  verifyChecked_phone: "Tu número de teléfono está verificado.",
+  verifyNoTarget_email: "Ingresa tu correo electrónico.",
+  verifyNoTarget_phone: "Ingresa tu número de teléfono.",
+  verifyNoCode: "Ingresa el código que te enviamos.",
+  verifyFailure_signedOut:
+    "Se cerró tu sesión. Inicia sesión en la página de tu cuenta y luego vuelve.",
+  verifyFailure_unavailable: "Este sitio aún no puede verificar esto.",
+  verifyFailure_invalidAddress:
+    "Ese no es un correo electrónico al que podamos enviar. Revísalo e inténtalo de nuevo.",
+  verifyFailure_invalidNumber: "Ese no es un número de teléfono. Revísalo e inténtalo de nuevo.",
+  verifyFailure_unsupportedCountry:
+    "Por ahora solo podemos verificar números de EE. UU. y Canadá. Lo sentimos: sin uno, todavía no puedes verificar una cuenta.",
+  verifyFailure_virtualNumber:
+    "Parece un número de internet o virtual. Usa un celular o un teléfono fijo.",
+  verifyFailure_tooManyThisHour:
+    "Ya pediste todos los códigos que puedes en esta hora. Inténtalo de nuevo en una hora.",
+  verifyFailure_tooManyToday:
+    "Ya pediste todos los códigos que puedes hoy. Inténtalo de nuevo mañana.",
+  verifyFailure_serviceBusy:
+    "Hoy ya enviamos todos los códigos por teléfono que podemos. Inténtalo de nuevo mañana.",
+  verifyFailure_challengeRefused:
+    "La verificación de que eres una persona no se completó. Envía el código de nuevo para hacer otra.",
+  verifyFailure_challengeUnavailable:
+    "La verificación de que eres una persona no pudo cargarse. Inténtalo de nuevo en un rato.",
+  verifyFailure_lookupUnavailable:
+    "No pudimos revisar ese número en este momento. Inténtalo de nuevo en un rato.",
+  verifyFailure_noCode: "No hay ningún código pendiente para esto. Envía uno nuevo.",
+  verifyFailure_expired: "Ese código venció. Envía uno nuevo.",
+  verifyFailure_wrongCode: "Ese código no es correcto. Revísalo e inténtalo de nuevo.",
+  verifyFailure_wrongCodeTries:
+    "Ese código no es correcto. Intentos restantes para este código: {count}.",
+  verifyFailure_tooManyTries: "Ese código tuvo demasiados intentos fallidos. Envía uno nuevo.",
+  verifyFailure_checkUnavailable:
+    "No pudimos revisar el código en este momento. No se gastó ningún intento: inténtalo de nuevo en un rato.",
+  verifyFailure_addressTaken:
+    "Esta dirección no puede verificar esta cuenta: otra cuenta ya la verificó, o una la liberó hace menos de 90 días.",
+  verifyFailure_numberHeld:
+    "Este número no puede verificar esta cuenta: otra cuenta lo tiene, o una lo liberó hace menos de 90 días.",
+  verifyFailure_failed: "Eso no funcionó. No cambió nada; inténtalo de nuevo en un rato.",
+  verificationMark: "Verificación",
+  verificationTitle_email: "Correo",
+  verificationTitle_phone: "Correo y teléfono",
+  verificationLede_email:
+    "Para votar se necesita un correo electrónico verificado: una cuenta por dirección.",
+  verificationLede_phone:
+    "Para votar se necesitan un correo electrónico y un número de teléfono verificados: una cuenta por número. Te pedimos el número la primera vez que votas.",
+  verificationPhoneLater: "Se pide la primera vez que votas",
+  verificationEmail: "Correo",
+  verificationPhone: "Teléfono",
+  verificationEmailDone: "Verificado: {address}",
+  verificationPhoneDone: "Verificado el {date}",
+  verificationNotYet: "Aún no verificado",
+  verificationUnavailable: "Aún no disponible en este sitio",
+  verificationUnread: "No se pudo cargar",
+  verificationGo: "Verifica tu correo electrónico",
+  verificationManage_email: "Cambia tu correo",
+  verificationManage_phone: "Administra tu correo y tu teléfono",
+  accountFailure_failedSignedOut: "Eso no funcionó. No cambió nada; inténtalo de nuevo en un rato.",
+  accountFailure_failed:
+    "Eso no funcionó. Para agregar una llave de acceso o eliminar la cuenta se necesita haber iniciado sesión en el último día: cierra sesión, vuelve a iniciarla e inténtalo de nuevo.",
+  footerLanguage: "Idioma",
+};

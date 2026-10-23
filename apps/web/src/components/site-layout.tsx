@@ -1,10 +1,12 @@
-import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
+import { Button, buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { ArrowRight, RotateCw } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 
 import { reportCaught } from "../error-reports.ts";
 
+import { DEFAULT_LOCALE, isLocale, type Locale } from "../locales.ts";
 import { catalogs, type Messages } from "../messages.ts";
+import { LanguageSwitch } from "./language-switch.tsx";
 
 type Key = keyof Messages;
 
@@ -17,10 +19,11 @@ const NAV = [
   { href: "/moderation", label: "navModeration" },
 ] as const satisfies readonly { href: string; label: Key }[];
 
-// A phone's header keeps only the first two, the everyday ways in: all four
-// don't fit one row at 320px, and wrapped they made the header 177px tall.
+// A phone's header keeps only the first of them, the everyday ways in, as
+// many as fit one row: in English two, at 320px; in Spanish, whose words are
+// longer, one, since two wrapped the header to 121px at 360px.
 // The footer lists every one at every width.
-const PHONE_NAV = 2;
+const PHONE_NAV: Readonly<Record<Locale, number>> = { "en-US": 2, "es-US": 1 };
 
 /** The 12-column content frame every section sits in. */
 function Frame({ children, className }: { children: ReactNode; className?: string }) {
@@ -43,6 +46,8 @@ export function SiteLayout({
   children: ReactNode;
 }) {
   const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const phoneNav = PHONE_NAV[isLocale(locale) ? locale : DEFAULT_LOCALE];
   const here = (href: string) => (current === href ? "page" : undefined);
   const wordmark = (
     <>
@@ -80,7 +85,7 @@ export function SiteLayout({
                   {NAV.map((item, i) => (
                     <li
                       key={item.href}
-                      className={i < PHONE_NAV ? undefined : "hidden md:list-item"}
+                      className={i < phoneNav ? undefined : "hidden md:list-item"}
                     >
                       <a
                         href={item.href}
@@ -117,24 +122,28 @@ export function SiteLayout({
               here once the server has them to show (P4-4); until then the
               footer leaves them out rather than showing samples. */}
           {links && (
-            <nav aria-label={t("footerNav")} className="md:col-span-5">
-              <ul className="m-0 grid list-none gap-1 p-0 text-sm">
-                {NAV.map((item) => (
-                  <li key={item.href}>
-                    {/* Marked here too: below 768px How it works and the
+            <div className="grid content-start gap-6 md:col-span-5">
+              <nav aria-label={t("footerNav")}>
+                <ul className="m-0 grid list-none gap-1 p-0 text-sm">
+                  {NAV.map((item) => (
+                    <li key={item.href}>
+                      {/* Marked here too: below 768px How it works and the
                         moderation log are only in the footer, so this is
                         the one place a phone shows which page it is on. */}
-                    <a
-                      className="inline-flex min-h-8 items-center underline underline-offset-4 aria-[current=page]:font-semibold aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
-                      href={item.href}
-                      aria-current={here(item.href)}
-                    >
-                      {t(item.label)}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
+                      <a
+                        className="inline-flex min-h-8 items-center underline underline-offset-4 aria-[current=page]:font-semibold aria-[current=page]:decoration-primary aria-[current=page]:decoration-2"
+                        href={item.href}
+                        aria-current={here(item.href)}
+                      >
+                        {t(item.label)}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+              {/* Not on the offline page: switching reloads, which fails there. */}
+              <LanguageSwitch />
+            </div>
           )}
         </Frame>
       </footer>

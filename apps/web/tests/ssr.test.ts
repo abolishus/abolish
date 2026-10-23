@@ -19,6 +19,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { offlineWorkerConfig } from "../src/app/offline.ts";
 import { pushNotice } from "../src/app/offline-page.tsx";
+import { loadCatalog } from "../src/messages.ts";
+import { titles } from "../src/titles.ts";
 import type { AskedBy } from "../src/poll.ts";
 import type { ProfileRecord } from "../src/server/load.ts";
 import type { StartRequestContext } from "../src/start.ts";
@@ -1729,7 +1731,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
   "/account": { html: 6, js: 191, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 243, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 245, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 165, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
@@ -1823,5 +1825,94 @@ describe("link preview", () => {
     expect(response.status).toBe(status);
     expect(response.headers.get("content-type")).not.toBe("image/png");
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+// The second language (P2-28 part 4): each page is in the language its
+// request chose, the footer's cookie first, then `Accept-Language`, then
+// English (src/locales.ts), its head and its words alike.
+describe("the page's language", () => {
+  // This process's copy of the catalogs, for the words the pages should show.
+  beforeAll(() => loadCatalog("es-US"));
+  const es = titles("es-US").text;
+  const SPANISH = { "accept-language": "es-MX,es;q=0.9,en;q=0.5" };
+  const lang = (html: string) => /<html lang="([^"]+)"/.exec(html)?.[1];
+
+  test("is English for a request that asks for no language of ours", async () => {
+    for (const headers of [
+      {},
+      { "accept-language": "fr-CA,de;q=0.8" },
+      { "accept-language": "*" },
+    ]) {
+      const response = await get("/how-it-works", headers);
+      expect(lang(await response.text())).toBe("en-US");
+      expect(response.headers.get("content-language")).toBe("en-US");
+    }
+  });
+
+  test("follows Accept-Language: the document, its title and its words", async () => {
+    const response = await get("/how-it-works", SPANISH);
+    expect(response.headers.get("content-language")).toBe("es-US");
+    const html = await response.text();
+    expect(lang(html)).toBe("es-US");
+    expect(html).toContain(`<title>${es("navHowItWorks")} · ${es("siteName")}</title>`);
+    expect(html).toContain(es("howTitle"));
+    expect(html).not.toContain("How a ballot stays secret");
+  });
+
+  test("shows each card's translation in the page's language, where the poll has one", async () => {
+    const html = await (await get("/discover", SPANISH)).text();
+    expect(html).toContain(es("homeStreamTitle"));
+    // Both polls' texts have an `es-419` translation beside their `en`, each marked as such.
+    expect(html).toMatch(
+      /<h3[^>]*lang="es-419"[^>]*><a href="\/polls\/c1c1[0-9a-f]{60}"[^>]*>Parque y biblioteca</,
+    );
+    expect(html).toContain(">¿Debe el parque abrir hasta tarde?<");
+    expect(html).not.toContain("Park and library");
+  });
+
+  test("keeps the footer's choice over Accept-Language, and ignores a cookie that names none of ours", async () => {
+    const chosen = await get("/how-it-works", { ...SPANISH, cookie: "theme=x; lang=en-US" });
+    expect(lang(await chosen.text())).toBe("en-US");
+    const own = await get("/how-it-works", { cookie: "lang=es-US" });
+    expect(lang(await own.text())).toBe("es-US");
+    for (const cookie of ["lang=fr-FR", "lang=es-us", "lang=es-US; lang=en-US", "lang="]) {
+      const response = await get("/how-it-works", { ...SPANISH, cookie });
+      expect(lang(await response.text())).toBe("es-US");
+    }
+    // A page sets no cookie of its own: only the switch writes it.
+    expect(chosen.headers.get("set-cookie")).toBeNull();
+  });
+
+  test("the footer names each language in itself, the page's own marked and the other a button", async () => {
+    for (const [headers, current, other] of [
+      [{}, "English", "Español"],
+      [SPANISH, "Español", "English"],
+    ] as const) {
+      const html = await (await get("/polls", headers)).text();
+      const nav = /<nav aria-label="(?:Language|Idioma)">([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "";
+      expect(nav).toMatch(
+        new RegExp(`<span lang="[a-z]{2}-US" aria-current="true"[^>]*>${current}</span>`),
+      );
+      expect(nav).toMatch(
+        new RegExp(`<button type="button" lang="[a-z]{2}-US"[^>]*>${other}</button>`),
+      );
+    }
+  });
+
+  test("an embed follows its reader's Accept-Language alone, and says it varies by it", async () => {
+    const response = await get(`/embed/p/${OPEN_ONE_CODE}`, { ...SPANISH, cookie: "lang=en-US" });
+    expect(response.headers.get("vary")).toBe("Accept-Language");
+    expect(response.headers.get("content-language")).toBe("es-US");
+    const html = await response.text();
+    expect(lang(html)).toBe("es-US");
+    expect(lang(await (await get(`/embed/p/${OPEN_ONE_CODE}`)).text())).toBe("en-US");
+  });
+
+  test("the offline page is one document for everyone, in English", async () => {
+    const english = await (await get("/offline")).text();
+    const asked = await (await get("/offline", { ...SPANISH, cookie: "lang=es-US" })).text();
+    expect(lang(asked)).toBe("en-US");
+    expect(asked).toBe(english);
   });
 });

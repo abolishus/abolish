@@ -174,6 +174,8 @@ export function embedHeaders(): Readonly<Record<string, string>> {
     // A host that isolates itself (COEP) can still frame it.
     "cross-origin-resource-policy": "cross-origin",
     "cache-control": "public, max-age=60",
+    // Its language follows the reader's `Accept-Language` (P2-28 part 4).
+    vary: "Accept-Language",
     "strict-transport-security": "max-age=31536000",
     "permissions-policy": PERMISSIONS_POLICY,
   };

@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { type ClientError, ERROR_NAME, pageOf, parseClientError } from "../analytics.ts";
 import { APP_FILES } from "../app/install.ts";
 import { OFFLINE_PATH, WORKER_PATH } from "../app/offline.ts";
+import { localeCookieOnly } from "../locales.ts";
 import { appFileHeaders } from "../security.ts";
 import type { StartRequestContext } from "../start.ts";
 import { type Analytics, noAnalytics } from "./analytics.ts";
@@ -399,8 +400,15 @@ export function createWebServer({
       if (value === undefined || name === "host") continue;
       // Pages and server functions never get the account cookie: nothing
       // they render can join a session to the poll it shows (T-10, T-67).
-      if (name === "cookie" && (!ACCOUNT_ROUTES.has(route) || SESSION_FREE_PATHS.has(url.pathname)))
+      // They get the footer's language alone, which names no one.
+      if (
+        name === "cookie" &&
+        (!ACCOUNT_ROUTES.has(route) || SESSION_FREE_PATHS.has(url.pathname))
+      ) {
+        const language = localeCookieOnly(Array.isArray(value) ? value.join("; ") : value);
+        if (language !== undefined) headers.append("cookie", language);
         continue;
+      }
       for (const v of Array.isArray(value) ? value : [value]) headers.append(name, v);
     }
     headers.set("host", base.host);

@@ -29,7 +29,9 @@ import { type Browser, type BrowserContextOptions, chromium, type Page } from "p
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
-import { LOCALE } from "../src/messages.ts";
+import { DEFAULT_LOCALE, LOCALES } from "../src/locales.ts";
+import { loadCatalog } from "../src/messages.ts";
+import { titles } from "../src/titles.ts";
 import { createWebServer, type StartHandler } from "../src/node/serve.ts";
 import {
   BALLOT,
@@ -87,6 +89,14 @@ const VIEWS = [
   { name: "phone", viewport: { width: 360, height: 780 } },
 ] as const;
 const SCHEMES = ["light", "dark"] as const;
+
+/**
+ * Each page in every language the site has (P2-28 part 4), chosen as a
+ * visitor's browser chooses it, by `Accept-Language`: another language's
+ * words are longer or shorter, and its labels are translated apart from
+ * the text they name.
+ */
+const IN_LOCALES = LOCALES.map((locale) => ({ locale }));
 
 let api: Server;
 let site: Server;
@@ -218,11 +228,21 @@ function pastTheEdge(page: Page) {
 }
 
 describe.each(VIEWS)("at $name width", ({ name, viewport }) => {
-  describe.each(SCHEMES)("in %s", (colorScheme) => {
+  describe.each(
+    // Every language in light, and the source one in dark too: the palette
+    // doesn't change with the words.
+    [
+      ...LOCALES.map((locale) => ({ colorScheme: "light" as const, locale })),
+      ...SCHEMES.filter((scheme) => scheme !== "light").map((colorScheme) => ({
+        colorScheme,
+        locale: DEFAULT_LOCALE,
+      })),
+    ],
+  )("in $colorScheme, in $locale", ({ colorScheme, locale }) => {
     test.each(PAGES)(
       "%s passes WCAG 2.2 AA's automated rules and axe's best practices",
       async (path) => {
-        const { context, page } = await open(path, { viewport, colorScheme });
+        const { context, page } = await open(path, { viewport, colorScheme, locale });
         try {
           expect(await audit(page)).toEqual([]);
           if (name === "phone") expect(await pastTheEdge(page)).toEqual([]);
@@ -748,17 +768,19 @@ async function hear(page: Page): Promise<string[]> {
 }
 
 describe.each(VIEWS)("a screen reader at $name width", ({ viewport }) => {
-  test.each(PAGES)(
-    "%s: nothing read twice, every control named with its text, every link's purpose told",
-    async (path) => {
-      const { context, page } = await open(path, { viewport });
-      try {
-        expect(await hear(page)).toEqual([]);
-      } finally {
-        await context.close();
-      }
-    },
-  );
+  describe.each(IN_LOCALES)("in $locale", ({ locale }) => {
+    test.each(PAGES)(
+      "%s: nothing read twice, every control named with its text, every link's purpose told",
+      async (path) => {
+        const { context, page } = await open(path, { viewport, locale });
+        try {
+          expect(await hear(page)).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      },
+    );
+  });
 });
 
 describe("a screen reader's reading itself", () => {
@@ -942,34 +964,39 @@ async function doubleText(page: Page) {
 const SHEET = "[data-flyer]";
 
 describe.each(VIEWS)("the text at $name width", ({ viewport }) => {
-  test.each(PAGES)(
-    "%s: nothing cut off or drawn over other text, as it is and with WCAG's text spacing",
-    async (path) => {
-      const { context, page } = await open(path, { viewport });
-      try {
-        // 3.1.1 Language of Page: the catalog's language, which axe checks
-        // is valid but not that it is the right one.
-        expect(await page.locator("html").getAttribute("lang")).toBe(LOCALE);
-        expect(await textCut(page)).toEqual([]);
-        // 1.4.12 Text Spacing.
-        await spaceText(page);
-        expect(await textCut(page, SHEET)).toEqual([]);
-      } finally {
-        await context.close();
-      }
-    },
-  );
+  describe.each(IN_LOCALES)("in $locale", ({ locale }) => {
+    test.each(PAGES)(
+      "%s: nothing cut off or drawn over other text, as it is and with WCAG's text spacing",
+      async (path) => {
+        const { context, page } = await open(path, { viewport, locale });
+        try {
+          // 3.1.1 Language of Page: the catalog's language, which axe checks
+          // is valid but not that it is the right one. The offline page is
+          // the same bytes for everyone, in the source language.
+          expect(await page.locator("html").getAttribute("lang")).toBe(
+            path === "/offline" ? DEFAULT_LOCALE : locale,
+          );
+          expect(await textCut(page)).toEqual([]);
+          // 1.4.12 Text Spacing.
+          await spaceText(page);
+          expect(await textCut(page, SHEET)).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      },
+    );
+  });
 });
 
 // At twice the text's size a desktop's 1280 px holds 40 of the larger rem,
 // a tablet's layout, which is what 1.4.4 asks to work. At the phone's
 // width it would be a screen 180 px wide, which no criterion asks for
 // (1.4.10 Reflow is 320 px at 400% zoom, the phone test above).
-describe("the text at twice its size", () => {
+describe.each(IN_LOCALES)("the text at twice its size, in $locale", ({ locale }) => {
   test.each(PAGES)(
     "%s: grows, and nothing is cut off, drawn over other text or past the edge",
     async (path) => {
-      const { context, page } = await open(path, VIEWS[0], doubleText);
+      const { context, page } = await open(path, { ...VIEWS[0], locale }, doubleText);
       try {
         expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(
           "32px",
@@ -1016,6 +1043,68 @@ describe("the text's check itself", () => {
         ]),
       );
       expect(found.join("\n")).not.toContain("Only for screen readers");
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+// The second language end to end (P2-28 part 4): a browser that asks for
+// Spanish gets it, the footer's switch keeps a visitor's own choice over
+// what their browser asks for, and every later page keeps it.
+describe("the page's language", () => {
+  // This process's copy of the catalogs, for the words the pages should show.
+  beforeAll(() => loadCatalog("es-US"));
+  const es = titles("es-US").text;
+  const en = titles("en-US").text;
+
+  test("follows the browser's Accept-Language, head and all", async () => {
+    const { context, page } = await open("/how-it-works", { ...VIEWS[0], locale: "es-MX" });
+    try {
+      expect(await page.locator("html").getAttribute("lang")).toBe("es-US");
+      expect(await page.title()).toBe(`${es("navHowItWorks")} · ${es("siteName")}`);
+      await expect
+        .poll(() => page.getByRole("heading", { level: 1 }).textContent())
+        .toBe(es("howTitle"));
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("changes with the footer's switch, which outlasts the browser's choice and every page after", async () => {
+    const { context, page } = await open("/", { ...VIEWS[0], locale: "en-US" });
+    try {
+      const switcher = page.getByRole("navigation", { name: en("footerLanguage") });
+      await expect
+        .poll(() => switcher.locator('[aria-current="true"]').textContent())
+        .toBe("English");
+      await Promise.all([
+        page.waitForEvent("load"),
+        switcher.getByRole("button", { name: "Español" }).click(),
+      ]);
+      expect(await page.locator("html").getAttribute("lang")).toBe("es-US");
+      expect(await page.getByRole("heading", { level: 1 }).textContent()).toBe(es("homeTitle"));
+      // A link followed inside the app keeps the language without the server.
+      await page
+        .getByRole("navigation", { name: es("navSite") })
+        .getByRole("link", { name: es("navDiscover") })
+        .click();
+      await page.waitForURL(`${origin}/discover`);
+      await expect.poll(() => page.title()).toBe(`${es("navDiscover")} · ${es("siteName")}`);
+      // A new visit asks the server, which reads the cookie before the header.
+      await page.goto(`${origin}/how-it-works`);
+      expect(await page.locator("html").getAttribute("lang")).toBe("es-US");
+      const cookies = await context.cookies(origin);
+      expect(cookies.map(({ name, value }) => `${name}=${value}`)).toEqual(["lang=es-US"]);
+      // And back.
+      await Promise.all([
+        page.waitForEvent("load"),
+        page
+          .getByRole("navigation", { name: es("footerLanguage") })
+          .getByRole("button", { name: "English" })
+          .click(),
+      ]);
+      expect(await page.locator("html").getAttribute("lang")).toBe("en-US");
     } finally {
       await context.close();
     }

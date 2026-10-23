@@ -2,10 +2,17 @@ import { I18nProvider, useTranslate } from "@abolishus/ui";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { Offline, SiteLayout } from "../components/site-layout.tsx";
-import { catalogs, LOCALE } from "../messages.ts";
-import { pageTitle, text } from "../titles.ts";
+import { DEFAULT_LOCALE } from "../locales.ts";
+import { catalogs } from "../messages.ts";
+import { titles } from "../titles.ts";
 import { ICON_PNGS, ICON_SVG_PATH } from "./install.ts";
 import type { PushNotice } from "./offline.ts";
+
+// One language for every visitor: the page is the same bytes for everyone,
+// so the worker's cache can be named by its hash, and the worker's push
+// notice is fixed in its text.
+const LOCALE = DEFAULT_LOCALE;
+const { pageTitle, text } = titles(LOCALE);
 
 function OfflineDocument({ stylesheet }: { stylesheet: string }) {
   const t = useTranslate(catalogs);

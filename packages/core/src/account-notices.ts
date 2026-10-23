@@ -24,6 +24,14 @@
 // A sender that dies after the provider took a notice sends it again once
 // its lease ends.
 //
+// Web push (part 4): the first try of each notice also wakes every browser
+// the account subscribed (src/account-push.ts), once and whether or not an
+// address takes the e-mail, and a push service's answer that a subscription
+// has ended deletes it. A push carries no payload, and goes when the e-mail
+// does, so the push service learns no more than the e-mail provider: that
+// the account was moderated that day (T-73, T-76). Later tries are the
+// e-mail's alone, so a refused e-mail never wakes a browser twice.
+//
 // T-10: account-side only; nothing here reads the board or a ballot, and a
 // notice keeps nothing to join the log on but its day. T-52: only a
 // moderator's decision queues one, so no one else can make us mail an
@@ -33,8 +41,9 @@ import { and, asc, eq, lt, lte, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { type EmailKeys, type EmailSender, unsealEmailAddress } from "./account-emails.ts";
-import { accountEmails, accountNotices } from "./db/schema/index.ts";
+import { accountEmails, accountNotices, accountPushSubscriptions } from "./db/schema/index.ts";
 import type { ModerationTx } from "./moderation.ts";
+import type { PushOutcome, PushSender } from "./web-push.ts";
 
 /** Tries a notice gets, the first included, before it is dropped. */
 export const NOTICE_TRIES = 5;
@@ -42,8 +51,9 @@ export const NOTICE_TRIES = 5;
  * Seconds a claimed notice waits before its next try: after each refused
  * try, and after the last one, how long it may take before a later run
  * drops it. Each is longer than a batch can take (`MAX_NOTICE_BATCH` sends
- * at the Postmark sender's 10-second timeout), so no run claims a notice
- * another run is still sending.
+ * at the Postmark sender's 10-second timeout, each after its account's
+ * pushes, sent side by side at the push sender's 5-second timeout), so no
+ * run claims a notice another run is still sending.
  */
 export const NOTICE_WAIT_SECONDS = [
   30 * 60,
@@ -89,12 +99,18 @@ export interface NoticeRun {
   readonly retrying: number;
   /** Deleted unsent: no verified address, no try left, or a final try that never finished. */
   readonly dropped: number;
+  /** Pushes a push service took. */
+  readonly pushed: number;
+  /** Pushes a push service didn't take, a subscription that had ended aside. */
+  readonly pushFailed: number;
 }
 
 export interface SendNoticesOptions {
   /** The provider's own answer: never a sender that reports `sent` for every message. */
   readonly sender: EmailSender;
   readonly keys: EmailKeys;
+  /** Wakes the account's subscribed browsers; without it, nothing is pushed. */
+  readonly push?: PushSender;
   readonly now: Date;
   /** At most `MAX_NOTICE_BATCH`. */
   readonly limit?: number;
@@ -107,7 +123,7 @@ export interface SendNoticesOptions {
  */
 export async function sendNotices(
   client: Sql,
-  { sender, keys, now, limit = MAX_NOTICE_BATCH }: SendNoticesOptions,
+  { sender, keys, push, now, limit = MAX_NOTICE_BATCH }: SendNoticesOptions,
 ): Promise<NoticeRun> {
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_NOTICE_BATCH)
     throw new RangeError(`limit must be 1 to ${MAX_NOTICE_BATCH}`);
@@ -147,7 +163,14 @@ export async function sendNotices(
   let sent = 0;
   let retrying = 0;
   let dropped = stale;
+  let pushed = 0;
+  let pushFailed = 0;
   for (const c of claimed) {
+    if (push !== undefined && c.tries === 1) {
+      const outcomes = await pushTo(client, push, c.userId, now);
+      pushed += outcomes.filter((o) => o === "sent").length;
+      pushFailed += outcomes.filter((o) => o === "unavailable").length;
+    }
     let outcome: "sent" | "unavailable" | "no-address" = "no-address";
     if (c.box !== null && c.key !== null) {
       let to: string | undefined;
@@ -170,5 +193,38 @@ export async function sendNotices(
     if (outcome === "sent") sent++;
     else dropped++;
   }
-  return { sent, retrying, dropped };
+  return { sent, retrying, dropped, pushed, pushFailed };
+}
+
+/**
+ * Pushes to every browser `userId` subscribed, side by side, deleting each
+ * that has ended. Never throws: a push or a cleanup that fails is a push not
+ * taken, and the e-mail and the rest of the batch still go.
+ */
+async function pushTo(
+  client: Sql,
+  push: PushSender,
+  userId: string,
+  now: Date,
+): Promise<PushOutcome[]> {
+  const db = drizzle({ client });
+  const s = accountPushSubscriptions;
+  let endpoints: { endpoint: string }[];
+  try {
+    endpoints = await db.select({ endpoint: s.endpoint }).from(s).where(eq(s.userId, userId));
+  } catch {
+    return [];
+  }
+  return Promise.all(
+    endpoints.map(async ({ endpoint }): Promise<PushOutcome> => {
+      try {
+        const outcome = await push.send(endpoint, now);
+        if (outcome === "gone")
+          await db.delete(s).where(and(eq(s.endpoint, endpoint), eq(s.userId, userId)));
+        return outcome;
+      } catch {
+        return "unavailable";
+      }
+    }),
+  );
 }

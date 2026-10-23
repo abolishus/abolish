@@ -64,6 +64,7 @@ import {
   postingSpend,
 } from "./postings.ts";
 import { accountNotices } from "./notices.ts";
+import { accountPushSubscriptions } from "./push.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
 
@@ -91,6 +92,7 @@ export {
   accountProfileNamings,
   accountProfilePolls,
   accountProfiles,
+  accountPushSubscriptions,
   accountReactionHours,
   accountReactions,
   accountSessions,
@@ -135,8 +137,9 @@ export {
  * (better-auth), the polls each account wrote (ADR 0032), the Tier 0 token
  * each account took ([[tier0-token]]), the reactions it set on polls
  * ([[P2-25]]), its creator profile with the handles ever issued
- * ([[0040-creator-profiles]]) and the notices waiting to be e-mailed to it
- * ([[P2-27]]): who someone is to the app, never how they voted. Operational tables (moderation, caches)
+ * ([[0040-creator-profiles]]), the notices waiting to be e-mailed to it and
+ * the browsers it asked to be told by web push ([[P2-27]]): who someone is
+ * to the app, never how they voted. Operational tables (moderation, caches)
  * hold nothing a result depends on.
  * Identity tables hold voting-identity backups (ADR 0017) and the posting
  * relay's record of what it sent ([[posting-relay]], Caps and In flight):
@@ -184,6 +187,7 @@ export const TABLE_CLASSES = {
     "account_profile_namings",
     "account_profile_polls",
     "account_profiles",
+    "account_push_subscriptions",
     "account_reaction_hours",
     "account_reactions",
     "account_sessions",

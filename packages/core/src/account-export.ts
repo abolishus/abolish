@@ -81,6 +81,8 @@ export const ACCOUNT_EXPORT = {
   account_profile_namings: "exported",
   account_profile_polls: "exported",
   account_profiles: "exported",
+  account_push_subscriptions:
+    "a browser's push endpoint: a standing way to wake that browser, which the browser itself holds",
   account_reaction_hours: "rate-limit counts, gone in two hours",
   account_reactions: "exported",
   account_sessions: "exported",

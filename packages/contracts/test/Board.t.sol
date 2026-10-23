@@ -112,6 +112,10 @@ contract BoardTest is TestBase {
     uint64 internal constant L1_NUMBER = 7_000_000;
     bytes32 internal constant L1_HASH = keccak256("l1 block");
 
+    /// The most gas the posting relay gives a call or a deposit
+    /// (posting-relay.md, Values; core's `POSTING_GAS_LIMIT_MAX`).
+    uint256 internal constant POSTING_GAS_LIMIT_MAX = 10_000_000;
+
     /// The L1 relay the board pins: the registry fixture's `l1Relay`.
     address internal constant RELAY = address(0x4E1A);
 
@@ -371,6 +375,88 @@ contract BoardTest is TestBase {
         assertTrue(used < 3_000_000, "the call");
         assertTrue(total < 3_500_000, "the transaction");
         assertTrue(total < 1 << 24, "EIP-7825's cap");
+    }
+
+    /// The largest pair the posting relay takes (docs/spec/posting-relay.md,
+    /// Values, `POSTING_GAS_HEADROOM` and `POSTING_GAS_LIMIT_MAX`): a
+    /// version-2 posting at `MAX_OPTIONS`, 5,405 bytes, with the largest
+    /// ballot record the board reads, version 4's at `MAX_OPTIONS`, both
+    /// panels of `MAX_TRUSTEES` and `MAX_QUESTIONS` questions, 81,924 bytes.
+    /// Measured cold, as a deposit runs it, for the last seat of either panel,
+    /// the relay's gas limit for it (a quarter over the transaction's gas, or
+    /// the portal's floor for its data) is within `POSTING_GAS_LIMIT_MAX`,
+    /// and the board accepts it with that limit; otherwise the relay would
+    /// refuse a voter's pair as `too-costly` (T-50, T-52).
+    function test_TheLargestPairFitsThePostingGasLimit() public {
+        // The posting's ballot passes only with the pairing mocked, as in
+        // `test_Gas`, so its real cost is added back.
+        uint256 pairing = _gas(_ballotCall(honestBallot));
+        _mockPairing();
+        board = new Board(address(elections), address(trustees), RELAY);
+        pairing -= _gas(_ballotCall(honestBallot));
+
+        bytes32 dh = keccak256("largest version-4 definition");
+        ElectionRegistry.Parameters memory p;
+        (p.ballotVersion, p.threshold, p.panelSize, p.optionCount) = (4, 16, 16, 64);
+        (p.authorThreshold, p.authorPanelSize) = (16, 16);
+        (p.opensAt, p.closesAt) = (uint64(block.timestamp), uint64(block.timestamp));
+        p.questions = new ElectionRegistry.Question[](32);
+        for (uint256 q; q < 32; q++) {
+            p.questions[q] = ElectionRegistry.Question(1, 2, 0, 2);
+        }
+        uint8[] memory tiers = new uint8[](1);
+        uint256[] memory roots = new uint256[](1);
+        roots[0] = 1;
+        elections.set(dh, p, tiers, roots);
+        elections.setCeremony(dh, keccak256("largest v4 stub"), PANEL);
+        trustees.setKeySet(keccak256("largest v4 stub"), PANEL, ((1 << 17) - 1) ^ 1);
+        elections.setAuthorKeySet(dh, ((1 << 17) - 1) ^ 1);
+
+        uint256 most;
+        for (uint8 panel = 1; panel <= 2; panel++) {
+            board = new Board(address(elections), address(trustees), RELAY);
+            bytes memory ciphertext = _largestCiphertext();
+            bytes32 shareHash = sha256(bytes.concat(_ds("abolish/v1/share-ciphertext"), ciphertext));
+            bytes memory record = _largestV4(dh, panel, shareHash);
+            // Version 3's largest and the author half at its largest
+            // (ballot-validity.md, Ballot record (version 4), Sizes).
+            assertEq(record.length, 48_380 + 33_544, "the largest record");
+            bytes memory pair = abi.encodePacked(
+                uint16(0x000d),
+                uint8(2),
+                dh,
+                ballots.ballotHash(record),
+                panel,
+                uint8(16),
+                bytes32(DENSE_SCALAR),
+                ciphertext
+            );
+            assertEq(pair.length, 5405, "the largest posting");
+            bytes memory data = _postingCall(pair, record);
+            assertEq(data.length, 87_492, "the spec's largest pair");
+            vm.cool(address(board.ballotCheck()));
+            uint256 used = _withIntrinsic(data, _coldGas(data) + pairing);
+            if (used > most) most = used;
+            // core's postingGasLimit: the gas a quarter over, rounded up, or
+            // the portal's 21,000 and 40 a byte, whichever is higher.
+            uint256 limit = (used * 5 + 3) / 4;
+            if (limit < 21_000 + 40 * data.length) limit = 21_000 + 40 * data.length;
+            assertTrue(limit <= POSTING_GAS_LIMIT_MAX, "within POSTING_GAS_LIMIT_MAX");
+            // The same pair on a fresh board, cold, with that limit less the
+            // pairing the mock skips.
+            board = new Board(address(elections), address(trustees), RELAY);
+            vm.cool(address(board.ballotCheck()));
+            vm.cool(address(elections));
+            vm.cool(address(trustees));
+            _acceptsWithin(data, limit - pairing);
+        }
+        // Measured at most about 5.7 million, the pairing's 183,000
+        // included, so the limit is at most about 7.1 million. Measured from
+        // this contract, which copies the 87 KB itself into a memory already
+        // grown large, so it reads a few hundred thousand above the board's
+        // own call (about 5.4 million as a transaction); the bound leaves
+        // room for that to grow with the test.
+        assertTrue(most < 6_500_000, string.concat("the largest pair: ", vm.toString(most)));
     }
 
     /// `qualified` is the key set the trustee registry recorded for the
@@ -2959,6 +3045,73 @@ contract BoardTest is TestBase {
             }
         }
         return w.finish();
+    }
+
+    /// The largest version-4 record for `dh`: `_largestV3`'s fields with the
+    /// version-4 committed vote (ballot-validity.md, Committed vote (version
+    /// 4)), both panels of 16 seats, and `shareHash` as seat 16's of
+    /// `panel`'s list, so a posting of seat 16 of that panel names it.
+    function _largestV4(bytes32 dh, uint8 panel, bytes32 shareHash)
+        internal
+        view
+        returns (bytes memory)
+    {
+        ByteWriter.Writer memory w = ByteWriter.create();
+        w.put(0x0002, 2);
+        w.put(4, 1);
+        w.put(uint256(dh), 32);
+        w.put(0, 1);
+        w.put(1, 32);
+        w.put(L1_NUMBER, 8);
+        w.put(uint256(L1_HASH), 32);
+        for (uint256 i; i < 256; i += 32) {
+            w.put(_word(proof, i), 32);
+        }
+        for (uint8 half = 1; half <= 2; half++) {
+            w.put(64, 4);
+            for (uint256 j; j < 64; j++) {
+                w.put(16, 4);
+                for (uint256 t; t < 16; t++) {
+                    w.put(DENSE_ELEMENT, 32);
+                }
+            }
+            w.put(16, 4);
+            for (uint256 i; i < 16; i++) {
+                w.put(
+                    half == panel && i == 15
+                        ? uint256(shareHash)
+                        : uint256(keccak256(abi.encode("share", half, i))),
+                    32
+                );
+            }
+        }
+        w.put(64, 4);
+        for (uint256 i; i < 64 * 4; i++) {
+            w.put(DENSE_SCALAR, 32);
+        }
+        w.put(32, 4);
+        for (uint256 q; q < 32; q++) {
+            w.put(3, 4);
+            for (uint256 i; i < 3 * 2; i++) {
+                w.put(DENSE_SCALAR, 32);
+            }
+        }
+        return w.finish();
+    }
+
+    /// The largest posting's ciphertext (share-encryption.md, Ciphertext):
+    /// `ct_mlkem`, `ct_dh`, `pok_c`, `pok_z` and `sealed` at `MAX_OPTIONS`,
+    /// dense bytes as `_largestV3`'s, framed as the board reads them.
+    function _largestCiphertext() internal pure returns (bytes memory c) {
+        c = new bytes(1088 + 96 + 4 + 4116);
+        for (uint256 i; i < c.length; i++) {
+            c[i] = 0x33;
+        }
+        bytes memory fields =
+            abi.encodePacked(DENSE_ELEMENT, DENSE_SCALAR, DENSE_SCALAR, uint32(4116));
+        for (uint256 i; i < fields.length; i++) {
+            c[1088 + i] = fields[i];
+        }
     }
 
     /// Sets the share-receipt stub's key set and signing keys to `panel`'s.

@@ -90,10 +90,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(main.getByRole("heading", { level: 1 })).toHaveTextContent(
     "Ask anything. Anyone can answer. Anyone can check the count.",
   );
-  // Asking starts where an account signs in; browsing is the stream, not the register.
+  // Asking signs a visitor in for it, then opens a new poll's form; browsing
+  // is the stream, not the register.
   await expect(main.getByRole("link", { name: "Ask a question" })).toHaveAttribute(
     "href",
-    "/account",
+    "/account?next=new-poll",
   );
   await expect(main.getByRole("link", { name: "Browse questions" })).toHaveAttribute(
     "href",
@@ -123,7 +124,11 @@ export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 
-/** On a small phone both ways in are on the first screen, under the frame's header. */
+/**
+ * On a small phone both ways in are on the first screen, under the frame's
+ * header: by 568px, a 320 by 568 screen's height, where iteration 1's
+ * "Browse questions" ended at 577px at this width.
+ */
 export const Phone: Story = {
   globals: { viewport: { value: "phone", isRotated: false } },
   play: async ({ canvasElement }) => {
@@ -132,7 +137,7 @@ export const Phone: Story = {
     for (const name of ["Ask a question", "Browse questions"])
       await expect(
         main.getByRole("link", { name }).getBoundingClientRect().bottom,
-      ).toBeLessThanOrEqual(640);
+      ).toBeLessThanOrEqual(568);
   },
 };
 

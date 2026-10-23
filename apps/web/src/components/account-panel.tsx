@@ -119,6 +119,12 @@ export interface AccountPanelProps {
   readonly push: PushClient;
   /** Whether this deployment verifies a phone before an account votes. */
   readonly phone: boolean;
+  /**
+   * Set when the visitor came to ask a question (home's "Ask a question"):
+   * the page asks them to sign in for that, and once they are, calls this
+   * to go on to a new poll's form instead of showing the account.
+   */
+  readonly ask?: (() => void) | undefined;
 }
 
 /**
@@ -135,6 +141,7 @@ export function AccountPanel({
   accountExport,
   push,
   phone,
+  ask,
 }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
@@ -153,8 +160,9 @@ export function AccountPanel({
 
   const refresh = useCallback(async () => {
     if (!(await client.signedIn())) return setView({ kind: "signed-out" });
+    if (ask !== undefined) return ask();
     setView({ kind: "signed-in", passkeys: await client.passkeys() });
-  }, [client]);
+  }, [client, ask]);
 
   useEffect(() => {
     refresh()
@@ -196,10 +204,10 @@ export function AccountPanel({
     <section aria-labelledby="account-title" aria-busy={busy} className="grid gap-16">
       <PageHeader
         eyebrow={t(signedIn ? "accountEyebrowSignedIn" : "accountEyebrow")}
-        title={t(signedIn ? "accountTitleSignedIn" : "accountTitle")}
+        title={t(signedIn ? "accountTitleSignedIn" : ask ? "accountTitleAsk" : "accountTitle")}
         titleId="account-title"
         titleRef={heading}
-        lede={t(signedIn ? "accountLedeSignedIn" : "accountLede")}
+        lede={t(signedIn ? "accountLedeSignedIn" : ask ? "accountLedeAsk" : "accountLede")}
       >
         {signedIn ? (
           <div className="flex flex-wrap gap-2">

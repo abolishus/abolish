@@ -12,7 +12,7 @@ const enUS = {
   siteName: "Abolish",
   homeTitle: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeLede:
-    "Questions big and small, from your street to your county. Answering takes a tap or two, and every count is public, so nobody has to take anyone's word for a result.",
+    "For your friends, your street, your club or your class. Every count is public, so nobody has to take anyone's word for the result.",
   homeAsk: "Ask a question",
   homeBrowse: "Browse questions",
   appDescription: "Ask anything. Anyone can answer. Anyone can check the count.",
@@ -738,6 +738,9 @@ const enUS = {
   accountTitle: "Sign in, or create an account",
   accountLede:
     "An account lets you create and manage polls. You don't need one to vote, and it never casts a vote: ballots are cast in the ballot app, and nothing here can tell how or whether you voted.",
+  accountTitleAsk: "Sign in to ask your question",
+  accountLedeAsk:
+    "A question is asked from an account, which keeps it as a draft until you're ready and lets you come back to it. Sign in, or create an account with a passkey, and the question's form opens next.",
   accountEyebrowSignedIn: "Account · Signed in with a passkey",
   accountTitleSignedIn: "Your account",
   accountLedeSignedIn:

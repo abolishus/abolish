@@ -23,18 +23,19 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
   const t = useTranslate(catalogs);
   return (
     <div className="grid gap-16">
-      <section className="grid gap-6 pt-2 sm:gap-8 md:pt-10 lg:grid-cols-12 lg:gap-x-10">
+      <section className="grid gap-4 sm:gap-8 sm:pt-2 md:pt-10 lg:grid-cols-12 lg:gap-x-10">
         {/* 36px on a phone: at 48px the title took six lines and pushed both
             actions below a 640px screen. */}
         <h1 className="m-0 font-heading text-4xl leading-none font-semibold tracking-tight text-balance sm:text-7xl lg:col-span-9">
           {t("homeTitle")}
         </h1>
-        <div className="grid content-start gap-6 sm:gap-8 lg:col-span-7">
-          <p className="m-0 max-w-prose text-xl text-pretty">{t("homeLede")}</p>
+        <div className="grid content-start gap-4 sm:gap-8 lg:col-span-7">
+          <p className="m-0 max-w-prose text-lg text-pretty sm:text-xl">{t("homeLede")}</p>
           <div className="flex flex-wrap gap-3">
-            {/* Asking starts on the account page, which signs a visitor in
-                first; a new poll's form can't save without an account. */}
-            <a href="/account" className={buttonVariants({ size: "lg" })}>
+            {/* A new poll's form can't save without an account, so asking
+                starts on the account page, which asks a visitor to sign in
+                for it and then opens the form. */}
+            <a href="/account?next=new-poll" className={buttonVariants({ size: "lg" })}>
               {t("homeAsk")}
             </a>
             <a href="/discover" className={buttonVariants({ size: "lg", variant: "outline" })}>

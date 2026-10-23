@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { AccountError, type AccountClient, type PasskeyView } from "../account/client.ts";
 import { type DraftsClient, DraftsError } from "../account/drafts.ts";
@@ -200,6 +200,43 @@ export const SignedOutDark: Story = {
   args: { client: fakeClient() },
   parameters: { theme: "dark" },
   play: separates,
+};
+
+/** Came from home's "Ask a question": signing in goes on to the new poll's form, not the account. */
+export const Asking: Story = {
+  args: { client: fakeClient(), ask: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Sign in to ask your question" }),
+    ).toBeVisible();
+    await expect(canvas.getByText(/the question's form opens next/)).toBeVisible();
+    await expect(args.ask).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Sign in with a passkey" }));
+    await waitFor(() => expect(args.ask).toHaveBeenCalledOnce());
+    // It never drew the account it is leaving.
+    await expect(canvas.queryByRole("heading", { level: 1, name: "Your account" })).toBeNull();
+    await expect(canvas.queryByText("You haven't created a poll yet.")).toBeNull();
+  },
+};
+
+export const AskingDark: Story = {
+  args: { client: fakeClient(), ask: fn() },
+  parameters: { theme: "dark" },
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByRole("heading", { name: "Sign in to ask your question" }),
+    ).toBeVisible();
+  },
+};
+
+/** Already signed in, asking goes straight on to the form. */
+export const AskingSignedIn: Story = {
+  args: { client: fakeClient({ signedIn: true, passkeys: ONE }), ask: fn() },
+  play: async ({ canvasElement, args }) => {
+    await waitFor(() => expect(args.ask).toHaveBeenCalledOnce());
+    await expect(within(canvasElement).queryByText("Synced passkey")).toBeNull();
+  },
 };
 
 export const SignedIn: Story = {

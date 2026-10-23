@@ -4,11 +4,14 @@
 // authenticator; the assets; and what the front refuses and logs.
 
 import {
+  ACCOUNT_EXPORT_VERSION,
+  type AccountExport,
   createAccounts,
   decideAppeal,
   decideProfileAppeal,
   emailKeys,
   type EmailMessage,
+  exportAccount,
   MAX_REACTION_CHANGES_PER_HOUR,
   parseKeyring,
   type PhoneChannel,
@@ -58,6 +61,7 @@ import type { ClientError, Page } from "../src/analytics.ts";
 import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
+import { createExportHandler } from "../src/node/export.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
 import { createProfilesHandler } from "../src/node/profiles.ts";
 import { createReactionsHandler } from "../src/node/reactions.ts";
@@ -294,6 +298,13 @@ beforeAll(async () => {
     profiles: createProfilesHandler({
       sql,
       accountOf: (headers) => accounts.accountOf(headers),
+      origin: ORIGIN,
+      now: () => NOW,
+    }),
+    accountExport: createExportHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      emailKeys: EMAIL_KEYS,
       origin: ORIGIN,
       now: () => NOW,
     }),
@@ -1092,6 +1103,7 @@ describe("failures", () => {
       token: async () => new Response(),
       reactions: record,
       profiles: record,
+      accountExport: record,
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -1111,6 +1123,7 @@ describe("failures", () => {
         "/profiles/rename",
         "/profiles/delete",
         "/profiles/show",
+        "/export",
       ])
         await fetch(`http://127.0.0.1:${port}${path}`, {
           method: "POST",
@@ -1133,6 +1146,7 @@ describe("failures", () => {
         ["/profiles/rename", `${SESSION}=tok`],
         ["/profiles/delete", `${SESSION}=tok`],
         ["/profiles/show", `${SESSION}=tok`],
+        ["/export", `${SESSION}=tok`],
       ]);
     } finally {
       await new Promise((resolve) => front.close(resolve));
@@ -1891,6 +1905,7 @@ describe("an account's Tier 0 token under /token", () => {
       }),
       reactions: async () => new Response(),
       profiles: async () => new Response(),
+      accountExport: async () => new Response(),
       clientDir,
       origin: ORIGIN,
       log: (line) => lines.push(line),
@@ -2574,6 +2589,105 @@ describe("a profile's reports and its author's appeals under /profiles", () => {
   });
 });
 
+describe("an account's own data under /export", () => {
+  const cookieOf = (b: Browser) => [...b.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+
+  async function signedIn() {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const account = (await accounts.accountOf(new Headers({ cookie: cookieOf(browser) })))!;
+    return { browser, account };
+  }
+
+  test("a signed-in account takes its own export, and no one else's", async () => {
+    const { browser, account } = await signedIn();
+    await browser.call(
+      "POST",
+      "/email/request",
+      { address: "own@example.org" },
+      {
+        [TURNSTILE_HEADER]: "solved",
+      },
+    );
+    const { code } = mailed.at(-1) as { code: string };
+    expect((await browser.call("POST", "/email/verify", { code })).status).toBe(200);
+    const { id } = (await (await browser.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    const other = await signedIn();
+    await other.browser.call("POST", "/drafts/create", { draft });
+
+    const res = await browser.call("POST", "/export", {});
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("content-type")).toMatch(/^application\/json/);
+    const out = (await res.json()) as AccountExport;
+    expect(out).toMatchObject({
+      version: ACCOUNT_EXPORT_VERSION,
+      exportedAt: NOW.toISOString(),
+      account: { id: account },
+      email: { address: "own@example.org" },
+    });
+    expect(out.polls.map((p) => p.id)).toEqual([id]);
+    expect(out.passkeys).toHaveLength(1);
+    expect(out.sessions).toHaveLength(1);
+    // Exactly what core gives the account: the route adds and drops nothing.
+    expect(out).toEqual(
+      JSON.parse(JSON.stringify(await exportAccount(sql, account, { keys: EMAIL_KEYS, now: NOW }))),
+    );
+    const text = JSON.stringify(out);
+    expect(text).not.toContain(other.account);
+    // The session's own token is never in it (T-10).
+    for (const value of browser.cookies.values()) expect(text).not.toContain(value.split(".")[0]);
+
+    // T-10, T-11, T-67: the log has the route class, never a byte of the export.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "export", status: 200 });
+    const lines = JSON.stringify(logged);
+    for (const secret of [account, id, "own@example.org"]) expect(lines).not.toContain(secret);
+  });
+
+  test("an account deleted since its session was read is signed out", async () => {
+    const { browser, account } = await signedIn();
+    // The session goes with the account, so the front reads it as signed out.
+    await sql`DELETE FROM account_users WHERE id = ${account}`;
+    expect(await (await browser.call("POST", "/export", {})).json()).toEqual({
+      code: "SIGNED_OUT",
+      status: 401,
+    });
+  });
+
+  test("refuses signed-out, malformed and cross-site calls", async () => {
+    const { browser } = await signedIn();
+    expect(await (await new Browser().call("POST", "/export", {})).json()).toEqual({
+      code: "SIGNED_OUT",
+      status: 401,
+    });
+    // No account ID is read from the body: the session names the account (T-10).
+    for (const wrong of [{ account: "a".repeat(32) }, [], null, 1])
+      expect(await (await browser.call("POST", "/export", wrong)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    const post = (headers: Record<string, string>, body = "{}") =>
+      fetch(`${base}/export`, {
+        method: "POST",
+        headers: { cookie: cookieOf(browser), ...headers },
+        body,
+      });
+    expect(
+      (await post({ origin: "https://elsewhere.test", "content-type": "application/json" })).status,
+    ).toBe(403);
+    expect((await post({ "content-type": "application/json" })).status).toBe(403);
+    expect((await post({ origin: ORIGIN, "content-type": "text/plain" })).status).toBe(415);
+    expect((await post({ origin: ORIGIN, "content-type": "application/json" }, "{")).status).toBe(
+      400,
+    );
+    expect((await browser.call("POST", "/export?x=1", {})).status).toBe(404);
+    expect((await browser.call("POST", "/export/all", {})).status).toBe(404);
+    expect((await browser.call("GET", "/export")).status).toBe(404);
+  });
+});
+
 describe("limits", () => {
   test("past maxInFlight a request is refused with 503 before it is handled", async () => {
     let release!: () => void;
@@ -2594,6 +2708,7 @@ describe("limits", () => {
       token: async () => new Response(null, { status: 404 }),
       reactions: async () => new Response(null, { status: 404 }),
       profiles: async () => new Response(null, { status: 404 }),
+      accountExport: async () => new Response(null, { status: 404 }),
       clientDir,
       origin: ORIGIN,
       log: () => {},
@@ -2622,6 +2737,7 @@ describe("limits", () => {
       token: async () => new Response(),
       reactions: async () => new Response(),
       profiles: async () => new Response(),
+      accountExport: async () => new Response(),
       clientDir,
       log: () => {},
     };

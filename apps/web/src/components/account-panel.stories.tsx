@@ -144,7 +144,13 @@ const notice = async (canvas: ReturnType<typeof within>) =>
 
 const meta = {
   component: AccountPanel,
-  args: { drafts: noPolls, profiles: noProfile, verify: fakeVerify(), phone: true },
+  args: {
+    drafts: noPolls,
+    profiles: noProfile,
+    verify: fakeVerify(),
+    accountExport: { download: async () => {} },
+    phone: true,
+  },
 } satisfies Meta<typeof AccountPanel>;
 
 export default meta;
@@ -210,6 +216,8 @@ export const SignedIn: Story = {
       "/account/verify",
     );
     await expect(await canvas.findByText("You haven't created a poll yet.")).toBeVisible();
+    // The account's data, before its deletion.
+    await expect(canvas.getByRole("heading", { name: "Download your data" })).toBeVisible();
     const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);
     await expect(remove[1]).toHaveAccessibleName(

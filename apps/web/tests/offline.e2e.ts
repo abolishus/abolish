@@ -49,6 +49,7 @@ async function up() {
     token: nothing,
     reactions: nothing,
     profiles: nothing,
+    accountExport: nothing,
     clientDir: `${root}dist/client`,
     origin,
     log: () => {},

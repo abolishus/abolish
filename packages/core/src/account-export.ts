@@ -108,7 +108,10 @@ export interface AccountExport {
   }[];
   readonly sessions: readonly { readonly createdAt: string; readonly expiresAt: string }[];
   readonly signInMethods: readonly { readonly providerId: string; readonly createdAt: string }[];
-  /** The address is `null` if its box no longer opens (its key left the keyring). */
+  /**
+   * The address is `null` if its box no longer opens (its key left the
+   * keyring) or the deployment holds no e-mail keys.
+   */
   readonly email: { readonly address: string | null; readonly verifiedOn: string } | null;
   /** The number itself is never kept. */
   readonly phone: { readonly verifiedOn: string } | null;
@@ -150,9 +153,11 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 const dayOf = (d: Date) => new Date(Math.floor(d.getTime() / 86_400_000) * 86_400_000);
 
-// A box the rotation couldn't move keeps an account's export from failing: the
-// rest is still the account's to take.
-function opened(keys: EmailKeys, accountId: string, box: Uint8Array, keyId: string) {
+// A box the rotation couldn't move, or a deployment that no longer holds the
+// e-mail keys, keeps an account's export from failing: the rest is still the
+// account's to take.
+function opened(keys: EmailKeys | undefined, accountId: string, box: Uint8Array, keyId: string) {
+  if (keys === undefined) return null;
   try {
     return unsealEmailAddress(keys, accountId, box, keyId);
   } catch {
@@ -175,12 +180,12 @@ const appealOf = (r: {
 /**
  * Everything the account tables hold about `accountId` that `ACCOUNT_EXPORT`
  * exports, read in one snapshot, or `undefined` if there is no such account.
- * `keys` opens the address's box.
+ * `keys` opens the address's box; without them the address is `null`.
  */
 export async function exportAccount(
   client: Sql,
   accountId: string,
-  { keys, now }: { readonly keys: EmailKeys; readonly now: Date },
+  { keys, now }: { readonly keys: EmailKeys | undefined; readonly now: Date },
 ): Promise<AccountExport | undefined> {
   if (!ACCOUNT_ID.test(accountId)) throw new RangeError("not an account ID");
   return drizzle({ client }).transaction(

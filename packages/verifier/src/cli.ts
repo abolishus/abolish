@@ -6,12 +6,21 @@
 // read "failed" or "verified" (T-53, T-24).
 
 import { parseArgs } from "node:util";
+import { DEFAULT_MANIFEST_BUDGET, DEFAULT_OBJECT_READS } from "./archive.ts";
+import { arweaveSource } from "./arweave.ts";
 import { BundleError } from "./bundle.ts";
-import { DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "./files.ts";
+import { type ArchiveSources, DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "./files.ts";
 import { type Gateways, gatewaySource, MAX_GATEWAYS, parseGateway } from "./gateways.ts";
 import { type KeysReport, keysSummary, parseKeysEvidence, runKeys } from "./keys.ts";
 import { PINNED_RELEASE_REGISTRY, type ReleaseRegistryPin } from "./registry.ts";
-import { authenticated, type Report, type Verdict, verifyBundle } from "./verify.ts";
+import {
+  type ArchiveReadOptions,
+  authenticated,
+  DEFAULT_ARCHIVE_BYTES,
+  type Report,
+  type Verdict,
+  verifyBundle,
+} from "./verify.ts";
 
 export interface CliOutput {
   readonly stdout: (text: string) => void;
@@ -45,12 +54,16 @@ export const EXIT_CODES = Object.freeze({
   usage: 64,
 } as const);
 
-const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]... [--] <bundle-directory>
+const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]...
+                      [--arweave <url>]... [--max-archive-manifests <n>]
+                      [--max-archive-bytes <n>] [--max-archive-reads <n>]
+                      [--] <bundle-directory>
        abolish-verify keys [--] <evidence-directory>
 
 Verifies one election from a bundle (bundle.json, and board.bin, blocks.car,
-or neither with --gateway; see docs/spec/verifier.md, Inputs, procedure and
-report). Prints the JSON report on stdout and a summary on stderr.
+or neither with --gateway or --arweave; see docs/spec/verifier.md, Inputs,
+procedure and report). Prints the JSON report on stdout and a summary on
+stderr.
 
 --max-board-bytes caps what a board copy read by CID may hold, in bytes
 (default ${DEFAULT_MAX_BOARD_BYTES}); a copy past it is unverifiable.
@@ -61,6 +74,18 @@ up to ${MAX_GATEWAYS} times, asked in order. Every block is checked against its 
 but each gateway sees which blocks, and so which election, you read (and,
 over http:, so does the network); prefer https:.
 
+--arweave reads the permanent archive (check 4.3) for a bundle of format 3
+or later from an Arweave node or ar.io gateway (http: or https:), up to
+${MAX_GATEWAYS} times, asked in order; the objects it reads also serve the board
+copy, after blocks.car and before any --gateway. Each gateway sees which
+manifests and segments, and so which deployment and election, you read.
+Its budgets: --max-archive-manifests manifest reads (default
+${DEFAULT_MANIFEST_BUDGET}, each up to about 620 KiB from each gateway asked),
+--max-archive-bytes for the listed objects' answers (default
+${DEFAULT_ARCHIVE_BYTES}) and --max-archive-reads transactions asked for them
+(default ${DEFAULT_OBJECT_READS}). A budget run out leaves 4.3 unverifiable,
+never failed: raise it for an older deployment or a longer election.
+
 keys judges the Tier 0 token keys of every release in the release registry
 from keys.json (docs/spec/verifier.md, Token keys across releases), and
 contacts nothing.
@@ -69,6 +94,21 @@ Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle or evidence
 rejected, 64 usage (and --help). Any other code is an error of the
 verifier, not a verdict.
 `;
+
+/** The archive read's budget options, and the `readArchive` option each sets. */
+const ARCHIVE_BUDGETS = {
+  "max-archive-manifests": "maxManifests",
+  "max-archive-bytes": "maxBytes",
+  "max-archive-reads": "maxReads",
+} as const satisfies Record<string, keyof ArchiveReadOptions>;
+type ArchiveBudget = keyof typeof ARCHIVE_BUDGETS;
+
+// A budget in canonical decimal only, as the bundle's integers: positive,
+// no sign or leading zero, below 2^53.
+function positive(text: string): number | undefined {
+  const n = Number(text);
+  return /^[1-9][0-9]*$/.test(text) && Number.isSafeInteger(n) ? n : undefined;
+}
 
 /** The exit code for a report's `verdict`. */
 export function exitCode(verdict: Verdict): number {
@@ -230,20 +270,30 @@ export async function runCli(
   let help: boolean | undefined;
   let budget: string | undefined;
   let gatewayArgs: string[] | undefined;
+  let arweaveArgs: string[] | undefined;
+  let archiveBudgets: Readonly<Record<ArchiveBudget, string | undefined>>;
   try {
-    ({
-      positionals,
-      values: { help, "max-board-bytes": budget, gateway: gatewayArgs },
-    } = parseArgs({
+    let values;
+    ({ positionals, values } = parseArgs({
       args: [...args],
       options: {
         help: { type: "boolean", short: "h" },
         "max-board-bytes": { type: "string" },
         gateway: { type: "string", multiple: true },
+        arweave: { type: "string", multiple: true },
+        "max-archive-manifests": { type: "string" },
+        "max-archive-bytes": { type: "string" },
+        "max-archive-reads": { type: "string" },
       },
       allowPositionals: true,
       strict: true,
     }));
+    ({ help, "max-board-bytes": budget, gateway: gatewayArgs, arweave: arweaveArgs } = values);
+    archiveBudgets = {
+      "max-archive-manifests": values["max-archive-manifests"],
+      "max-archive-bytes": values["max-archive-bytes"],
+      "max-archive-reads": values["max-archive-reads"],
+    };
   } catch (e) {
     out.stderr(`${printable(e instanceof Error ? e.message : String(e))}\n${USAGE}`);
     return EXIT_CODES.usage;
@@ -259,29 +309,44 @@ export async function runCli(
     out.stderr(USAGE);
     return EXIT_CODES.usage;
   }
-  // Canonical decimal only, as for the bundle's integers.
-  const maxBytes = budget === undefined ? DEFAULT_MAX_BOARD_BYTES : Number(budget);
-  if (budget !== undefined && (!/^[1-9][0-9]*$/.test(budget) || !Number.isSafeInteger(maxBytes))) {
-    out.stderr(`--max-board-bytes: expected a positive integer\n${USAGE}`);
+  const usage = (option: string, problem: string) => {
+    out.stderr(`--${option}: ${printable(problem)}\n${USAGE}`);
     return EXIT_CODES.usage;
-  }
+  };
+  const maxBytes = budget === undefined ? DEFAULT_MAX_BOARD_BYTES : positive(budget);
+  if (maxBytes === undefined) return usage("max-board-bytes", "expected a positive integer");
   let gateways: Gateways | undefined;
   if (gatewayArgs !== undefined) {
-    if (gatewayArgs.length > MAX_GATEWAYS) {
-      out.stderr(`--gateway: at most ${MAX_GATEWAYS}\n${USAGE}`);
-      return EXIT_CODES.usage;
-    }
+    if (gatewayArgs.length > MAX_GATEWAYS) return usage("gateway", `at most ${MAX_GATEWAYS}`);
     try {
       gateways = gatewaySource(gatewayArgs.map(parseGateway));
     } catch (e) {
       if (!(e instanceof RangeError)) throw e;
-      out.stderr(`--gateway: ${printable(e.message)}\n${USAGE}`);
-      return EXIT_CODES.usage;
+      return usage("gateway", e.message);
+    }
+  }
+  const options: { -readonly [K in keyof ArchiveReadOptions]: number } = {};
+  for (const [option, value] of Object.entries(archiveBudgets) as [ArchiveBudget, string][]) {
+    if (value === undefined) continue;
+    // A budget for an archive the run won't read would read as one it did.
+    if (arweaveArgs === undefined) return usage(option, "only with --arweave");
+    const n = positive(value);
+    if (n === undefined) return usage(option, "expected a positive integer");
+    options[ARCHIVE_BUDGETS[option]] = n;
+  }
+  let archive: ArchiveSources | undefined;
+  if (arweaveArgs !== undefined) {
+    if (arweaveArgs.length > MAX_GATEWAYS) return usage("arweave", `at most ${MAX_GATEWAYS}`);
+    try {
+      archive = { source: arweaveSource(arweaveArgs.map(parseGateway)).source, options };
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      return usage("arweave", e.message);
     }
   }
   let report: Report;
   try {
-    report = verifyBundle(await loadBundle(dir, maxBytes, gateways));
+    report = verifyBundle(await loadBundle(dir, maxBytes, gateways, archive));
   } catch (e) {
     if (!(e instanceof BundleError)) throw e;
     // A rejected bundle has no report: it isn't evidence about any election.

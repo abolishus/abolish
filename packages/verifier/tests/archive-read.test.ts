@@ -1,4 +1,8 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type ArchiveManifest,
   boardEntryHash,
@@ -9,23 +13,28 @@ import {
   encodeArchiveLocator,
   encodeArchiveManifest,
   encodeCheckpoint,
+  arweaveId,
   objectCar,
   objectCid,
   replayEventAccumulator,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT,
   BUNDLE_FORMAT_DEFINITION,
+  BUNDLE_FORMAT_L1,
   type Bundle,
   BundleError,
   type CheckResult,
+  EXIT_CODES,
+  MAX_GATEWAYS,
   parseBundle,
   readArchive,
   readBlockStore,
   readBoardByCid,
   type Report,
+  runCli,
   splitEntries,
   verifyBundle,
 } from "../src/index.ts";
@@ -192,20 +201,21 @@ const logsJson = (logs: readonly ContractLog[]) =>
     data: toHex(l.data),
   }));
 
-function bundle(
-  options: {
-    readonly locator?: Uint8Array;
-    readonly count?: bigint;
-    readonly board?: readonly Uint8Array[];
-    readonly withCheckpoints?: boolean;
-    readonly nodes?: readonly string[];
-    readonly definition?: string;
-    /** The logs the bundle carries, and the ones the anchor's state counts, if others. */
-    readonly logs?: readonly ContractLog[];
-    readonly stateLogs?: readonly ContractLog[] | null;
-    readonly extra?: readonly (readonly [Uint8Array, Uint8Array])[];
-  } = {},
-): Bundle {
+interface BundleOptions {
+  readonly locator?: Uint8Array;
+  readonly count?: bigint;
+  readonly board?: readonly Uint8Array[];
+  readonly withCheckpoints?: boolean;
+  readonly nodes?: readonly string[];
+  readonly definition?: string;
+  /** The logs the bundle carries, and the ones the anchor's state counts, if others. */
+  readonly logs?: readonly ContractLog[];
+  readonly stateLogs?: readonly ContractLog[] | null;
+  readonly extra?: readonly (readonly [Uint8Array, Uint8Array])[];
+}
+
+// bundle.json's text for `options`.
+function bundleJson(options: BundleOptions = {}): string {
   // `null`: no accumulator in the anchor's storage but what `extra` holds.
   const stateLogs = options.stateLogs === null ? undefined : (options.stateLogs ?? options.logs);
   const l1 = anchoredL1(
@@ -226,17 +236,17 @@ function bundle(
   if (options.withCheckpoints === true)
     l1.checkpoints = [...checkpoints.values()].map((c) => toHex(encodeCheckpoint(c)));
   if (options.nodes !== undefined) l1.nodes = [...options.nodes];
-  const board = options.board ?? copy;
-  return parseBundle(
-    JSON.stringify({
-      format: BUNDLE_FORMAT_DEFINITION,
-      definition: options.definition ?? honest?.definition,
-      clock: honest?.clock,
-      l1,
-      ...(options.logs !== undefined && { anchorLogs: logsJson(options.logs) }),
-    }),
-    concat(board),
-  );
+  return JSON.stringify({
+    format: BUNDLE_FORMAT_DEFINITION,
+    definition: options.definition ?? honest?.definition,
+    clock: honest?.clock,
+    l1,
+    ...(options.logs !== undefined && { anchorLogs: logsJson(options.logs) }),
+  });
+}
+
+function bundle(options: BundleOptions = {}): Bundle {
+  return parseBundle(bundleJson(options), concat(options.board ?? copy));
 }
 
 const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as CheckResult;
@@ -816,5 +826,207 @@ describe("the earlier locators, from the anchor's logs", () => {
       [{ block: one["block"], timestamp: one["timestamp"], topics: one["topics"] }],
     ])
       expect(() => parseBundle(base(bad), concat(copy))).toThrow(BundleError);
+  });
+});
+
+describe("the command line with --arweave", () => {
+  // Arweave gateways as one local HTTP server: `/ar/raw/{id}` serves the
+  // transactions `held` names, and `/none/raw/{id}` none.
+  let server: Server;
+  let origin: string;
+  let held = new Map<string, Uint8Array>();
+  const requests: string[] = [];
+  const root = mkdtempSync(join(tmpdir(), "abolish-verify-arweave-"));
+  let dirs = 0;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const url = req.url ?? "";
+      requests.push(url);
+      const m = /^\/ar\/raw\/([A-Za-z0-9_-]{43})$/u.exec(url);
+      const body = m === null ? undefined : held.get(m[1] as string);
+      if (body === undefined) res.writeHead(404).end();
+      else res.writeHead(200).end(body);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const hold = (archive: readonly Archived[]) => {
+    held = new Map(archive.map((a) => [arweaveId(a.transaction), objectCar(a.bytes)]));
+    requests.length = 0;
+  };
+
+  function dir(json: string, board?: readonly Uint8Array[]): string {
+    const d = join(root, String(dirs++));
+    mkdirSync(d);
+    writeFileSync(join(d, "bundle.json"), json);
+    if (board !== undefined) writeFileSync(join(d, "board.bin"), concat(board));
+    return d;
+  }
+
+  async function run(...args: string[]) {
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli(args, {
+      stdout: (t) => (stdout += t),
+      stderr: (t) => (stderr += t),
+    });
+    return { code, stdout, stderr };
+  }
+
+  const logs = [other(), located(locatorOf(m0)), located(locatorOf(m1))];
+  const logged = { locator: locatorOf(m1), logs };
+
+  test("reads the archive over the gateways named, in order, and 4.3 passes", async () => {
+    hold(WHOLE);
+    const d = dir(bundleJson(logged), copy);
+    const r = await run("--arweave", `${origin}/none`, "--arweave", `${origin}/ar/`, d);
+    const report = JSON.parse(r.stdout) as Report;
+    expect(row(report, "4.3")).toEqual({ id: "4.3", kind: "election", status: "pass" });
+    // As the library reads it, and every other row as a run without the archive.
+    const read = await readArchive(bundle(logged), arweave(WHOLE).source);
+    expect(report).toEqual(JSON.parse(JSON.stringify(verifyBundle(read.bundle))));
+    expect(without43(report)).toEqual(without43(JSON.parse((await run(d)).stdout) as Report));
+    // Each transaction asked of the first gateway, then the second: only the
+    // raw-data route under each base path.
+    expect(requests).toEqual(
+      [m1, m0, ...objects].flatMap((o) => {
+        const id = arweaveId(o.transaction);
+        return [`/none/raw/${id}`, `/ar/raw/${id}`];
+      }),
+    );
+  });
+
+  test("the objects read serve the board copy of a bundle that holds none", async () => {
+    hold(WHOLE);
+    const r = await run(
+      "--arweave",
+      `${origin}/ar`,
+      dir(bundleJson({ ...logged, board: [], withCheckpoints: true })),
+    );
+    const report = JSON.parse(r.stdout) as Report;
+    for (const id of ["4.1", "4.2", "4.3"]) expect(row(report, id).status, id).toBe("pass");
+    expect(report.board.byCid).toEqual({});
+  });
+
+  test("blocks.car is asked first, then the objects read, and a --gateway for neither's blocks only (T-11)", async () => {
+    hold(WHOLE);
+    const json = bundleJson({ ...logged, board: [], withCheckpoints: true });
+    const segment = objects[0] as Archived;
+    const viaGateway = (...files: string[]) =>
+      run("--arweave", `${origin}/ar`, "--gateway", `${origin}/ipfs-none`, ...files);
+    for (const car of [objectCar(segment.bytes), undefined]) {
+      requests.length = 0;
+      const d = dir(json);
+      if (car !== undefined) writeFileSync(join(d, "blocks.car"), car);
+      const report = JSON.parse((await viaGateway(d)).stdout) as Report;
+      for (const id of ["4.1", "4.2", "4.3"]) expect(row(report, id).status, id).toBe("pass");
+      expect(report.board.byCid).toEqual({
+        ...(car !== undefined && { storeBlocks: 1, storeUnreadableBytes: 0 }),
+        gateways: { requests: 0, blocks: 0 },
+      });
+      expect(requests.filter((r) => !r.startsWith("/ar/"))).toEqual([]);
+    }
+  });
+
+  test("without --arweave nothing is read and 4.3 stays not-implemented", async () => {
+    hold(WHOLE);
+    const r = await run(dir(bundleJson(logged), copy));
+    expect(row(JSON.parse(r.stdout) as Report, "4.3").code).toBe("not-implemented");
+    expect(requests).toEqual([]);
+  });
+
+  test("each budget reaches the read, and one run out leaves 4.3 unverifiable", async () => {
+    hold(WHOLE);
+    const d = dir(bundleJson(logged), copy);
+    const archive = async (...args: string[]) => {
+      const r = await run("--arweave", `${origin}/ar`, ...args, d);
+      expect(r.code).toBe(EXIT_CODES.unverifiable);
+      const report = JSON.parse(r.stdout) as Report;
+      return { row: row(report, "4.3"), archive: report.archive };
+    };
+    const walk = await archive("--max-archive-manifests", "1");
+    expect(walk.row).toMatchObject({ status: "unverifiable", code: "over-budget" });
+    for (const budget of ["--max-archive-bytes", "--max-archive-reads"]) {
+      const objects = await archive(budget, "1");
+      expect(objects.row, budget).toMatchObject({
+        status: "unverifiable",
+        code: "objects-over-budget",
+      });
+    }
+    // Budgets large enough change nothing.
+    const roomy = await archive(
+      "--max-archive-manifests",
+      "2",
+      "--max-archive-bytes",
+      String(2 ** 20),
+      "--max-archive-reads",
+      String(objects.length),
+    );
+    expect(roomy.row.status).toBe("pass");
+  });
+
+  test("refuses a bad budget, a budget without --arweave, a bad gateway or too many as usage, asking nothing", async () => {
+    hold(WHOLE);
+    const d = dir(bundleJson(logged), copy);
+    for (const budget of [
+      "--max-archive-manifests",
+      "--max-archive-bytes",
+      "--max-archive-reads",
+    ]) {
+      for (const bad of ["0", "01", "-1", "1e3", "", " 1", String(2 ** 53)]) {
+        const u = await run("--arweave", `${origin}/ar`, budget, bad, d);
+        expect(u.code, `${budget} ${bad}`).toBe(EXIT_CODES.usage);
+        expect(u.stdout).toBe("");
+      }
+      const alone = await run(budget, "1", d);
+      expect(alone.code, budget).toBe(EXIT_CODES.usage);
+      expect(alone.stderr).toMatch(new RegExp(`^${budget}: only with --arweave`, "u"));
+    }
+    for (const bad of ["", "ftp://x", "https://x/?a", "https://u:p@x"]) {
+      const u = await run("--arweave", bad, d);
+      expect(u.code, bad).toBe(EXIT_CODES.usage);
+      expect(u.stdout).toBe("");
+    }
+    const many = Array.from({ length: MAX_GATEWAYS + 1 }, () => ["--arweave", origin]).flat();
+    expect((await run(...many, d)).code).toBe(EXIT_CODES.usage);
+    expect(requests).toEqual([]);
+  });
+
+  test("a bundle of format 1 or 2 has no archive to read: rejected, nothing asked", async () => {
+    hold(WHOLE);
+    const common = {
+      electionId: bytesToHex(definition.election_id),
+      boardEntryVersion: 1,
+      clock: honest?.clock,
+    };
+    const format1 = { format: BUNDLE_FORMAT, ...common, now: "0", anchors: [] };
+    // Format 2: the same L1 evidence under the anchor it names.
+    const { l1 } = JSON.parse(bundleJson(logged)) as { l1: object };
+    const format2 = {
+      format: BUNDLE_FORMAT_L1,
+      ...common,
+      l1: { ...l1, anchor: bytesToHex(definition.l1_anchor), firstSegment: "0" },
+    };
+    for (const [format, json] of [
+      [BUNDLE_FORMAT, format1],
+      [BUNDLE_FORMAT_L1, format2],
+    ] as const) {
+      const d = dir(JSON.stringify(json), []);
+      // The bundle itself is one a run without the archive takes.
+      expect((await run(d)).code, format).not.toBe(EXIT_CODES.bundleRejected);
+      const r = await run("--arweave", `${origin}/ar`, d);
+      expect(r.code, format).toBe(EXIT_CODES.bundleRejected);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(
+        `bundle rejected: format: ${format} names no deployment, so it has no archive to read\n`,
+      );
+    }
+    expect(requests).toEqual([]);
   });
 });

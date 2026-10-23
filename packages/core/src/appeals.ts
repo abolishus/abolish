@@ -405,7 +405,6 @@ export async function decideAppeal(
         outcome: accountAppeals.outcome,
         electionId: moderationActions.electionId,
         decidedBy: moderationActions.moderator,
-        reason: moderationActions.reason,
         author: accountPolls.userId,
       })
       .from(accountAppeals)
@@ -438,14 +437,7 @@ export async function decideAppeal(
       review = { outcome: "rejected", state: stateAfter(newest.action) };
     }
     const reviewedAt = await clock(tx);
-    if (review.outcome === "rejected")
-      await queueNotice(
-        tx,
-        appeal.author,
-        // An appeal is filed only against a removal (`fileAppeal`).
-        { subject: "poll", event: "appeal-rejected", reason: appeal.reason as RemovalReason },
-        reviewedAt,
-      );
+    if (review.outcome === "rejected") await queueNotice(tx, appeal.author, reviewedAt);
     await tx
       .update(accountAppeals)
       .set({ outcome: review.outcome, reviewer: moderator, reviewedAt })

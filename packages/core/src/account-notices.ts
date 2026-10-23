@@ -4,77 +4,86 @@
 // These are always sent, whatever the account's other notification choices,
 // since an appeal needs the author to know (the account page's mockup).
 //
+// T-73 ([[0038-verified-accounts]], Amendment (P2-27 part 3a)): the public
+// log gives each decision's action, reason and time, so a notice that said
+// any of them, or went out at the decision's time, would let the provider
+// match the address to the poll or profile. So a notice says only that a
+// moderator decided something, an account has at most one waiting, and it is
+// due after the UTC midnight that follows the newest decision it carries: the
+// provider learns that the address's account had a poll or profile moderated
+// that day, never which. What was decided is on the account page.
+//
 // A notice is queued in the decision's own transaction (`queueNotice`, called
 // by src/moderation.ts, src/appeals.ts and src/profile-moderation.ts), so a
-// decision that commits always has its notice. `sendNotices` sends what is
-// due to the account's verified address and deletes each notice once it is
-// sent; a provider that doesn't take it is tried again later, up to
-// `NOTICE_TRIES` times in all, and then the notice is dropped, as it is for
-// an account with no verified address: the decision stays in the public log
-// and on the account page either way. A notice is claimed before it is sent,
-// so a sender that dies mid-send can repeat one, never lose it unclaimed.
+// decision that commits always has its notice. `sendNotices` claims what is
+// due with a try and a lease, sends to the account's verified address and
+// deletes the notice unless a decision renewed it meanwhile; a refusal is
+// tried again after `NOTICE_WAIT_SECONDS`, up to `NOTICE_TRIES` tries in all,
+// and then the notice is dropped, as one for an account with no verified
+// address is: the decision stays in the public log and on the account page.
+// A sender that dies after the provider took a notice sends it again once
+// its lease ends.
 //
-// T-73: the provider is sent the address and words that name no poll or
-// profile, only what was decided and on which ground, so it learns that the
-// address has an account with a poll or a profile moderators acted on, not
-// which. T-10: account-side only; nothing here reads the board or a ballot,
-// and a notice keeps no decision's sequence number to join the log on.
-// T-52: only a moderator's decision queues one, so no one else can make us
-// mail an address.
+// T-10: account-side only; nothing here reads the board or a ballot, and a
+// notice keeps nothing to join the log on but its day. T-52: only a
+// moderator's decision queues one, so no one else can make us mail an
+// address, and an address gets one a day at most however many decisions.
 
-import { and, asc, eq, gte, inArray, lt, lte } from "drizzle-orm";
+import { and, asc, eq, lt, lte, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { type EmailKeys, type EmailSender, unsealEmailAddress } from "./account-emails.ts";
 import { accountEmails, accountNotices } from "./db/schema/index.ts";
-import type { ModerationTx, RemovalReason, RestoreReason } from "./moderation.ts";
-
-/**
- * What moderation did, as a notice says it: never which poll or profile.
- * A restore cites a restore's reason, anything else a removal's; a profile
- * is hidden, never delisted.
- */
-export type Notice =
-  | {
-      readonly subject: "poll";
-      readonly event: "delist" | "hide" | "appeal-rejected";
-      readonly reason: RemovalReason;
-    }
-  | {
-      readonly subject: "profile";
-      readonly event: "hide" | "appeal-rejected";
-      readonly reason: RemovalReason;
-    }
-  | {
-      readonly subject: "poll" | "profile";
-      readonly event: "restore";
-      readonly reason: RestoreReason;
-    };
+import type { ModerationTx } from "./moderation.ts";
 
 /** Tries a notice gets, the first included, before it is dropped. */
 export const NOTICE_TRIES = 5;
 /**
- * Seconds to wait after each try that the provider refused, before the
- * next: the last entry is how long a notice's final try may take before a
- * later run drops it unsent or not.
+ * Seconds a claimed notice waits before its next try: after each refused
+ * try, and after the last one, how long it may take before a later run
+ * drops it. Each is longer than a batch can take (`MAX_NOTICE_BATCH` sends
+ * at the Postmark sender's 10-second timeout), so no run claims a notice
+ * another run is still sending.
  */
-export const NOTICE_WAIT_SECONDS = [5 * 60, 30 * 60, 2 * 60 * 60, 12 * 60 * 60, 60 * 60] as const;
+export const NOTICE_WAIT_SECONDS = [
+  30 * 60,
+  2 * 60 * 60,
+  6 * 60 * 60,
+  24 * 60 * 60,
+  60 * 60,
+] as const;
 /** The most notices one `sendNotices` call claims. */
 export const MAX_NOTICE_BATCH = 100;
 
-/** Queues `notice` for `userId`, due at `at`, inside the decision's transaction. */
+const DAY = 24 * 60 * 60 * 1000;
+
+/** The UTC midnight after `at`: when a notice for a decision made at `at` is due. */
+export const noticeDue = (at: Date): Date => new Date(Math.floor(at.getTime() / DAY) * DAY + DAY);
+
+/**
+ * Queues a notice for `userId` about a decision made at `at`, inside the
+ * decision's transaction. A notice already waiting carries this decision
+ * too, due no sooner than this one would be and with its tries reset, so a
+ * send in flight for the older decisions doesn't delete it.
+ */
 export async function queueNotice(
   tx: Pick<ModerationTx, "insert">,
   userId: string,
-  notice: Notice,
   at: Date,
 ): Promise<void> {
-  await tx.insert(accountNotices).values({ userId, ...notice, notBefore: at });
+  const n = accountNotices;
+  await tx
+    .insert(n)
+    .values({ userId, notBefore: noticeDue(at) })
+    .onConflictDoUpdate({
+      target: n.userId,
+      set: { tries: 0, notBefore: q`greatest(${n.notBefore}, excluded.not_before)` },
+    });
 }
 
 /** What one `sendNotices` call did. */
 export interface NoticeRun {
-  /** Taken by the provider, and deleted. */
+  /** Taken by the provider. */
   readonly sent: number;
   /** Refused by the provider, and due again later. */
   readonly retrying: number;
@@ -83,6 +92,7 @@ export interface NoticeRun {
 }
 
 export interface SendNoticesOptions {
+  /** The provider's own answer: never a sender that reports `sent` for every message. */
   readonly sender: EmailSender;
   readonly keys: EmailKeys;
   readonly now: Date;
@@ -93,7 +103,7 @@ export interface SendNoticesOptions {
 /**
  * Sends the notices due at `now`, oldest first, at most `limit` of them.
  * Runs side by side with itself: each claims its notices with a try and a
- * later due time before it sends them, skipping any another run holds.
+ * lease before it sends them, skipping any another run holds.
  */
 export async function sendNotices(
   client: Sql,
@@ -105,69 +115,58 @@ export async function sendNotices(
   const db = drizzle({ client });
   const n = accountNotices;
   const { claimed, stale } = await db.transaction(async (tx) => {
-    // Final tries that never reported back: whether they went or not, the
-    // notice has had all its tries.
+    // Final tries whose lease ended: whether they went or not, the notice
+    // has had all its tries.
     const stale = await tx
       .delete(n)
-      .where(and(gte(n.tries, NOTICE_TRIES), lte(n.notBefore, now)))
-      .returning({ id: n.id });
+      .where(and(eq(n.tries, NOTICE_TRIES), lte(n.notBefore, now)))
+      .returning({ userId: n.userId });
     const due = await tx
-      .select()
+      .select({
+        userId: n.userId,
+        tries: n.tries,
+        box: accountEmails.addressBox,
+        key: accountEmails.boxKey,
+      })
       .from(n)
+      .leftJoin(accountEmails, eq(accountEmails.userId, n.userId))
       .where(and(lt(n.tries, NOTICE_TRIES), lte(n.notBefore, now)))
-      .orderBy(asc(n.notBefore), asc(n.id))
+      .orderBy(asc(n.notBefore), asc(n.userId))
       .limit(limit)
-      .for("update", { skipLocked: true });
+      .for("update", { of: n, skipLocked: true });
     const claimed = [];
     for (const row of due) {
       const tries = row.tries + 1;
       // `tries` is 1 to NOTICE_TRIES, and the table holds no more.
-      const wait = NOTICE_WAIT_SECONDS[tries - 1]!;
-      await tx
-        .update(n)
-        .set({ tries, notBefore: new Date(now.getTime() + wait * 1000) })
-        .where(eq(n.id, row.id));
-      claimed.push({ ...row, tries });
+      const lease = new Date(now.getTime() + NOTICE_WAIT_SECONDS[tries - 1]! * 1000);
+      await tx.update(n).set({ tries, notBefore: lease }).where(eq(n.userId, row.userId));
+      claimed.push({ ...row, tries, lease });
     }
     return { claimed, stale: stale.length };
   });
-  if (claimed.length === 0) return { sent: 0, retrying: 0, dropped: stale };
-  const boxes = new Map(
-    (
-      await db
-        .select({
-          userId: accountEmails.userId,
-          box: accountEmails.addressBox,
-          key: accountEmails.boxKey,
-        })
-        .from(accountEmails)
-        .where(inArray(accountEmails.userId, [...new Set(claimed.map((c) => c.userId))]))
-    ).map((r) => [r.userId, r] as const),
-  );
   let sent = 0;
   let retrying = 0;
   let dropped = stale;
   for (const c of claimed) {
-    const box = boxes.get(c.userId);
     let outcome: "sent" | "unavailable" | "no-address" = "no-address";
-    if (box !== undefined) {
+    if (c.box !== null && c.key !== null) {
       let to: string | undefined;
       try {
-        to = unsealEmailAddress(keys, c.userId, box.box, box.key);
+        to = unsealEmailAddress(keys, c.userId, c.box, c.key);
       } catch {
         // A box under a key this deployment no longer holds: tried again,
         // in case the keyring is restored, then dropped like a refusal.
       }
-      // The table's checks admit only the combinations `Notice` names.
-      const notice = { subject: c.subject, event: c.event, reason: c.reason } as Notice;
-      outcome =
-        to === undefined ? "unavailable" : await sender.send({ kind: "notice", to, notice });
+      outcome = to === undefined ? "unavailable" : await sender.send({ kind: "notice", to });
     }
     if (outcome === "unavailable" && c.tries < NOTICE_TRIES) {
       retrying++;
       continue;
     }
-    await db.delete(n).where(eq(n.id, c.id));
+    // Only the notice as claimed: one a decision renewed since is sent again.
+    await db
+      .delete(n)
+      .where(and(eq(n.userId, c.userId), eq(n.tries, c.tries), eq(n.notBefore, c.lease)));
     if (outcome === "sent") sent++;
     else dropped++;
   }

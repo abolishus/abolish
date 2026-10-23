@@ -191,14 +191,7 @@ async function recordProfileDecision(
     // The insert trigger draws `seq` from the poll log's sequence.
     .values({ seq: 0n, handle, action, reason, moderator, decidedAt })
     .returning({ seq: profileModerationActions.seq });
-  await queueNotice(
-    tx,
-    author,
-    decision.action === "restore"
-      ? { subject: "profile", event: "restore", reason: decision.reason }
-      : { subject: "profile", event: "hide", reason: decision.reason },
-    decidedAt,
-  );
+  await queueNotice(tx, author, decidedAt);
   // INSERT … RETURNING yields exactly the one row inserted.
   return { seq: row!.seq, state };
 }
@@ -666,7 +659,6 @@ export async function decideProfileAppeal(
         outcome: a.outcome,
         handle: a.handle,
         decidedBy: profileModerationActions.moderator,
-        reason: profileModerationActions.reason,
       })
       .from(a)
       .innerJoin(profileModerationActions, sameProfile)
@@ -699,14 +691,7 @@ export async function decideProfileAppeal(
       review = { outcome: "rejected", state: stateAfter(newest.action) };
     }
     const reviewedAt = await clock(tx);
-    if (review.outcome === "rejected")
-      await queueNotice(
-        tx,
-        author,
-        // An appeal is filed only against a hide (`fileProfileAppeal`).
-        { subject: "profile", event: "appeal-rejected", reason: appeal.reason as RemovalReason },
-        reviewedAt,
-      );
+    if (review.outcome === "rejected") await queueNotice(tx, author, reviewedAt);
     await tx
       .update(a)
       .set({ outcome: review.outcome, reviewer: moderator, reviewedAt })

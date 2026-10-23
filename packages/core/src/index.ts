@@ -247,7 +247,7 @@ export {
 } from "./account-emails.ts";
 export {
   MAX_NOTICE_BATCH,
-  type Notice,
+  noticeDue,
   NOTICE_TRIES,
   NOTICE_WAIT_SECONDS,
   type NoticeRun,

@@ -281,15 +281,7 @@ export async function recordDecision(
     .select({ userId: accountPolls.userId })
     .from(accountPolls)
     .where(eq(accountPolls.electionId, id));
-  if (author !== undefined)
-    await queueNotice(
-      tx,
-      author.userId,
-      decision.action === "restore"
-        ? { subject: "poll", event: "restore", reason: decision.reason }
-        : { subject: "poll", event: decision.action, reason: decision.reason },
-      decidedAt,
-    );
+  if (author !== undefined) await queueNotice(tx, author.userId, decidedAt);
   // INSERT … RETURNING yields exactly the one row inserted.
   return { seq: row!.seq, state };
 }

@@ -25,7 +25,7 @@ export const esUS: Messages = {
     "No se pudieron cargar las preguntas más recientes en este momento. El enlace propio de cada encuesta sigue funcionando.",
   trustTitle: "Por qué puedes confiar en una encuesta informal",
   trustLede:
-    "Una pregunta sobre los árboles de la calle recibe el mismo cuidado que un referéndum. Esto es lo que pasa con una respuesta, en cuatro pasos.",
+    "Una pregunta sobre los árboles de la calle se sella, se publica y se cuenta igual que un referéndum. Esto es lo que pasa con una respuesta, en cuatro pasos.",
   trustLabel: "Qué pasa con una respuesta",
   trustStep: "Paso {step} de {total}",
   trust1Title: "Sellada en tu dispositivo",

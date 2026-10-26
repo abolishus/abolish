@@ -14,8 +14,15 @@
 // destroys late, never early (When). The statement is held for sending; a
 // seat that never reaches either moment, its L1 node down, keeps its
 // material until it does.
+import type { DeadlineClock } from "@abolishus/crypto";
 import type { ApprovedElectionInfo, CeremonySeat } from "./ceremony.ts";
-import type { PublishedCells } from "./opening-sender.ts";
+import {
+  afterDestruction,
+  DestructionDuties,
+  type DestructionEvent,
+  tallyDeadline,
+} from "./duties.ts";
+import type { PublishedCells, PublishedReads } from "./opening-sender.ts";
 
 export interface DestructionDutyOptions {
   readonly election: ApprovedElectionInfo;
@@ -65,4 +72,48 @@ export class DestructionDuty {
       throw new Error("trustee node: destruction of an election the seat didn't approve");
     return { state: "destroyed", at };
   }
+}
+
+export interface DestructionWiring {
+  readonly seat: Pick<
+    CeremonySeat,
+    "approvedStubs" | "approvedElectionInfo" | "destroy" | "destroying"
+  >;
+  /** Fed by the tally duty's steps, when it runs; empty without it, so the seat destroys at `t_D`. */
+  readonly published: PublishedReads;
+  /** The time of the latest finalized L1 block at the seat's own L1 node, never the node's clock. */
+  readonly finalizedL1Time: () => Promise<bigint>;
+  /** The deployment's pinned anchoring clock, which `t_D` is read under. */
+  readonly anchorClock: DeadlineClock;
+  /** The node's wall clock, in seconds: the schedule's, never the moment's. */
+  readonly clock: () => bigint;
+  readonly log: (event: DestructionEvent) => void;
+}
+
+/**
+ * Every approved election's destruction in a deployment. Its schedule reads
+ * the seat without secrets (`afterDestruction`), so the `destroying` record
+ * that drops every other duty never drops this one: a destruction a crash
+ * cut short is finished on the next step, after a restart included.
+ */
+export function destructionDuties(w: DestructionWiring): DestructionDuties {
+  return new DestructionDuties(
+    {
+      seat: afterDestruction(w.seat),
+      clock: w.clock,
+      log: w.log,
+      build: async (election) => {
+        const deadline = tallyDeadline(election, w.anchorClock);
+        const duty = new DestructionDuty({
+          election,
+          seat: w.seat,
+          published: () => w.published.of(election.stubHash),
+          finalizedTime: w.finalizedL1Time,
+          deadline,
+        });
+        return { step: () => duty.step(), deadline };
+      },
+    },
+    w.anchorClock,
+  );
 }

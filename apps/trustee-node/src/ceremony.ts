@@ -229,6 +229,10 @@ export class CeremonySeat {
   // Approvals run one at a time, so no two can each pass stub check 4
   // against a ledger the other is about to add to.
   #approving: Promise<unknown> = Promise.resolve();
+  // Uses of each election's secrets in progress (`withSecrets`), by stub
+  // hash, and who waits for them to end: destruction removes nothing before.
+  readonly #uses = new Map<string, number>();
+  readonly #drained = new Map<string, (() => void)[]>();
 
   constructor(config: SeatConfig) {
     const key = config.panel.keys[config.index - 1];
@@ -566,6 +570,46 @@ export class CeremonySeat {
   }
 
   /**
+   * Runs `use` with the election's secrets as one use of them that
+   * destruction waits for, and returns its result; undefined, without
+   * running it, unless this seat approved the stub and hasn't begun
+   * destroying its material. Whatever writes or signs with the secrets
+   * (intake's records and receipts) does it inside `use`, so nothing is
+   * written or signed with them once `destroy` has removed anything, and no
+   * record it removed is written again (T-14, T-40).
+   */
+  async withSecrets<T>(
+    stubHash: Uint8Array,
+    use: (secrets: IntakeSecrets) => Promise<T>,
+  ): Promise<T | undefined> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
+    const name = hex(stubHash);
+    // Counted before `destroying` is read: a use that reads it unset is one
+    // `destroy`, which writes it first, waits for.
+    this.#uses.set(name, (this.#uses.get(name) ?? 0) + 1);
+    try {
+      const secrets = await this.intakeSecrets(stubHash);
+      return secrets === undefined ? undefined : await use(secrets);
+    } finally {
+      const left = (this.#uses.get(name) ?? 1) - 1;
+      if (left > 0) this.#uses.set(name, left);
+      else {
+        this.#uses.delete(name);
+        for (const done of this.#drained.get(name) ?? []) done();
+        this.#drained.delete(name);
+      }
+    }
+  }
+
+  /** Resolves once no use of the election's secrets begun before is still running. */
+  #drain(name: string): Promise<void> {
+    if (!this.#uses.has(name)) return Promise.resolve();
+    return new Promise((done) =>
+      this.#drained.set(name, [...(this.#drained.get(name) ?? []), done]),
+    );
+  }
+
+  /**
    * Whether the seat has begun destroying the election's material
    * (`destroy`): from then on no secret of it is handed out, and no duty
    * that reads one is stepped again.
@@ -583,12 +627,14 @@ export class CeremonySeat {
    * opening and `t_D` (`DestructionDuty`).
    *
    * First a write-once record that destruction has begun, so nothing hands
-   * out a secret of the election again, even across a crash; then every
+   * out a secret of the election again, even across a crash, and a wait for
+   * every use of them already begun (`withSecrets`); then every
    * ballot's ciphertext and shares from intake; then the statement, signed
    * and recorded once; then the approved run's KEM and signing secrets, one
    * record, so the signature is the signing key's last use. The KEM secret
    * goes with it, after the signing rather than before: the statement is
-   * returned only once both are gone, so nothing outside the node can tell.
+   * returned only once both are gone, so nothing outside the node can tell,
+   * and whatever sends it must take it from here, never from its record.
    * Summed shares and the messages received are held only by the tally
    * duty, in memory, which the schedule drops once `destroying` holds.
    * Each step is repeated on a later call after a crash, and the statement
@@ -601,6 +647,7 @@ export class CeremonySeat {
     const store = this.#config.store;
     const name = hex(stubHash);
     await store.putOnce(`destroying/${name}`, Uint8Array.of(1));
+    await this.#drain(name);
     // Intake's records (`intake.ts`): each holds the ballot's share ciphertext and the shares opened from it.
     for (const ballot of await store.list(`intake/${name}`))
       await store.remove(`intake/${name}/${ballot}`);
@@ -692,7 +739,10 @@ export class CeremonySeat {
     if (!(runId instanceof Uint8Array) || runId.length !== 32) return undefined;
     const prefix = `runs/${hex(stubHash)}/${hex(runId)}`;
     const begun = await this.#durable(`${prefix}/begun`);
-    const secrets = await this.#durable(`${prefix}/secrets`);
+    // Read, never written again as `#durable` would: destruction removes this
+    // record, and a read in flight must not put it back. `keys` wrote it, and
+    // made it durable, before the round-1 record this run is used by.
+    const secrets = await this.#config.store.get(`${prefix}/secrets`);
     const round1 = await this.#durable(`${prefix}/round-1`);
     // A crash between the run's records leaves it unusable: it is abandoned,
     // and the creator starts another with a fresh run_id.

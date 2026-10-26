@@ -236,7 +236,14 @@ class ElectionDuties<
       if (this.#kind.settles(status, wall, duty.deadline)) this.#settle(name);
     } catch (e) {
       const final = FINAL.some((type) => e instanceof type);
-      if (!final && !RETRIED.some((type) => e instanceof type)) throw e;
+      if (!final && !RETRIED.some((type) => e instanceof type)) {
+        // A step that destruction overtook (a record it removed, read
+        // midway) is over, not a failure that ends the loop: the duty is
+        // dropped as it would have been before the step (docs/spec/tally.md,
+        // Destruction).
+        if (await this.#o.seat.destroying(stubHash)) return this.#settle(name);
+        throw e;
+      }
       this.#failed(name, e as Error);
       if (final) this.#settle(name);
     }

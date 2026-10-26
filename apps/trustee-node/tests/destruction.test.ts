@@ -9,8 +9,9 @@ import { RpcError } from "@abolishus/node";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import type { CeremonySeat } from "../src/ceremony.ts";
-import { DestructionDuty } from "../src/destruction.ts";
-import type { PublishedCells } from "../src/opening-sender.ts";
+import { DestructionDuty, destructionDuties } from "../src/destruction.ts";
+import { type DestructionEvent, tallyDeadline } from "../src/duties.ts";
+import { type PublishedCells, PublishedReads } from "../src/opening-sender.ts";
 import { MemoryStore, type SeatStore } from "../src/store.ts";
 import { election, runCeremony, value } from "./fixture.ts";
 
@@ -153,6 +154,105 @@ describe("the seat's destruction", () => {
     expect(await store.get(a.secrets)).toBeDefined();
     expect(await a.seat.destroy(a.e.stubHash)).toEqual(held);
     expect(await store.get(a.secrets)).toBeUndefined();
+  });
+});
+
+describe("uses of the secrets and destruction", () => {
+  test("destruction waits for a use of the secrets already begun, and none begins after it", async () => {
+    const a = await approved();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const use = a.seat.withSecrets(a.e.stubHash, async (secrets) => {
+      await gate;
+      return secrets.signingSecret.length;
+    });
+    const destroyed = a.seat.destroy(a.e.stubHash);
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    // Begun, and waiting: nothing is removed while the use runs.
+    expect(await a.seat.destroying(a.e.stubHash)).toBe(true);
+    expect(await a.store.get(a.secrets)).toBeDefined();
+    expect(await a.store.list(`intake/${a.stub}`)).toHaveLength(BALLOTS.length);
+    let ran = false;
+    expect(await a.seat.withSecrets(a.e.stubHash, async () => (ran = true))).toBeUndefined();
+    expect(ran).toBe(false);
+    release();
+    expect(await use).toBe(32);
+    expect(await destroyed).toBeDefined();
+    expect(await a.store.get(a.secrets)).toBeUndefined();
+  });
+
+  test("a read of the secrets in flight never puts back the record destruction removed", async () => {
+    const inner = new MemoryStore();
+    let held: (() => void) | undefined;
+    // Holds the first read of a run's secrets until the record is removed.
+    const store: SeatStore = {
+      get: async (key) => {
+        const value = await inner.get(key);
+        if (held === undefined && key.endsWith("/secrets") && armed) {
+          await new Promise<void>((resolve) => (held = resolve));
+        }
+        return value;
+      },
+      putOnce: (key, value) => inner.putOnce(key, value),
+      list: (prefix) => inner.list(prefix),
+      remove: async (key) => {
+        await inner.remove(key);
+        if (key.endsWith("/secrets")) held?.();
+      },
+    };
+    let armed = false;
+    const a = await approved(store);
+    armed = true;
+    // The coordinator can ask for any round of the approved run at any time.
+    const asked = a.seat.challenges(a.e.stubHash, a.run.runId, a.run.keys);
+    const statement = await a.seat.destroy(a.e.stubHash);
+    await asked;
+    expect(statement).toBeDefined();
+    expect(await inner.get(a.secrets)).toBeUndefined();
+  });
+
+  test("the deployment's destruction finishes one a crash cut short after the destroying record, however the board and L1 stand", async () => {
+    const store = crashingAt("destruction/", "putOnce");
+    const a = await approved(store);
+    await expect(a.seat.destroy(a.e.stubHash)).rejects.toThrow("crash");
+    const events: DestructionEvent[] = [];
+    const duties = destructionDuties({
+      seat: a.seat,
+      published: new PublishedReads(),
+      finalizedL1Time: async () => 0n,
+      anchorClock: { epoch: 0n, period: 3600n, deadline: 43_200n },
+      clock: () => 0n,
+      log: (e) => events.push(e),
+    });
+    await duties.step();
+    expect(events).toEqual([
+      { event: "destruction", stubHash: a.stub, state: "destroyed", at: "resumed" },
+    ]);
+    expect(await store.get(a.secrets)).toBeUndefined();
+    expect(await store.get(`destruction/${a.stub}`)).toBeDefined();
+  });
+
+  test("the deployment's destruction reads t_D from finalized L1, not the node's clock", async () => {
+    const a = await approved();
+    const clock = { epoch: 0n, period: 3600n, deadline: 43_200n };
+    const info = await a.seat.approvedElectionInfo(a.e.stubHash);
+    if (info === undefined) expect.fail("approved");
+    const tD = tallyDeadline(info, clock);
+    let finalized = tD - 1n;
+    const duties = destructionDuties({
+      seat: a.seat,
+      published: new PublishedReads(),
+      finalizedL1Time: async () => finalized,
+      anchorClock: clock,
+      // A node clock long past t_D destroys nothing.
+      clock: () => tD + 1_000_000n,
+      log: () => undefined,
+    });
+    await duties.step();
+    expect(await a.seat.destroying(a.e.stubHash)).toBe(false);
+    finalized = tD;
+    await duties.step();
+    expect(await a.store.get(a.secrets)).toBeUndefined();
   });
 });
 

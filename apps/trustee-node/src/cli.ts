@@ -52,7 +52,7 @@ import {
   type TallyConfig,
 } from "./config.ts";
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
-import { DestructionDuty } from "./destruction.ts";
+import { destructionDuties } from "./destruction.ts";
 import {
   afterDestruction,
   AvailabilityDuties,
@@ -480,25 +480,14 @@ async function availabilityDuties(
   // Fed by the tally duty's reads of the anchored board, when it runs;
   // without it, the seat destroys at `t_D`.
   const published = new PublishedReads();
-  const destruction = new DestructionDuties(
-    {
-      seat: afterDestruction(seat),
-      clock,
-      log: (e: DutyEvent) => io.out(e),
-      build: async (election) => {
-        const deadline = tallyDeadline(election, a.anchorClock);
-        const duty = new DestructionDuty({
-          election,
-          seat,
-          published: () => published.of(election.stubHash),
-          finalizedTime: async () => (await finalizedHeader(l1)).timestamp,
-          deadline,
-        });
-        return { step: () => duty.step(), deadline };
-      },
-    },
-    a.anchorClock,
-  );
+  const destruction = destructionDuties({
+    seat,
+    published,
+    finalizedL1Time: async () => (await finalizedHeader(l1)).timestamp,
+    anchorClock: a.anchorClock,
+    clock,
+    log: (e: DutyEvent) => io.out(e),
+  });
   const server = gateway(served);
   server.listen(a.serve.port, a.serve.host);
   try {

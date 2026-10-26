@@ -37,7 +37,7 @@ import {
   u8,
   type ViewBallot,
 } from "@abolishus/crypto";
-import type { CeremonySeat } from "./ceremony.ts";
+import type { CeremonySeat, IntakeSecrets } from "./ceremony.ts";
 import type { SeatStore } from "./store.ts";
 import {
   checkStub,
@@ -124,7 +124,6 @@ interface Opened {
   readonly election: BallotElection | QuestionBallotElection;
   readonly stubHash: Uint8Array;
   readonly cutoff: bigint;
-  readonly keys: Parameters<typeof intakeBallot>[1];
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -135,7 +134,8 @@ export class IntakeSeat {
   readonly #config: IntakeConfig;
   // Elections that passed every check, by stub hash and transcript hash. Each
   // check reads finalized state, so a pass stays one; a refusal isn't kept,
-  // since a check that couldn't decide yet may pass later.
+  // since a check that couldn't decide yet may pass later. No secret is kept
+  // here: each delivery reads them (`withSecrets`), so none outlives destruction.
   readonly #opened = new Map<string, Opened>();
 
   constructor(config: IntakeConfig) {
@@ -163,7 +163,29 @@ export class IntakeSeat {
   ): Promise<IntakeOutcome> {
     const opened = await this.#open(stubBytes, transcript);
     if (!opened.ok) return opened;
-    const { election, stubHash, keys } = opened.value;
+    const { stubHash } = opened.value;
+    // The secrets are read for this delivery only, as one use destruction
+    // waits for: once it has begun, nothing is opened, stored or signed with
+    // them, and no intake record it removed is written again (docs/spec/tally.md,
+    // Destruction; T-14, T-40). By then intake has long closed at `c_I`.
+    const outcome = await this.#config.ceremony.withSecrets(stubHash, (secrets) =>
+      this.#take(opened.value, secrets, record, ciphertext),
+    );
+    return outcome ?? { ok: false, code: "intake-closed" };
+  }
+
+  async #take(
+    opened: Opened,
+    secrets: IntakeSecrets,
+    record: Uint8Array,
+    ciphertext: Uint8Array,
+  ): Promise<IntakeOutcome> {
+    const { election, stubHash } = opened;
+    const keys = {
+      seat: this.#config.index,
+      kemSecret: secrets.kemSecret,
+      signingSecret: secrets.signingSecret,
+    };
     const taken = intakeBallot(election, keys, record, ciphertext);
     if (!taken.ok)
       return taken.option === undefined
@@ -171,7 +193,7 @@ export class IntakeSeat {
         : { ok: false, code: taken.code, option: taken.option };
     // The proofs take a while: a delivery begun before `c_I` that finishes
     // after it stores and signs nothing (What a node owes).
-    if (this.#closed(opened.value)) return { ok: false, code: "intake-closed" };
+    if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
     // Held before the receipt leaves the node, so a crash after this never
     // leaves a receipt for a share the seat lost (Intake and receipts).
     const ballot = hex(taken.ballotHash);
@@ -196,7 +218,7 @@ export class IntakeSeat {
     // only if its records were written before `c_I`, so the decision taken
     // from `c_I` on, which reads them then, covers every receipt the seat
     // gave (`decideObligation`).
-    if (this.#closed(opened.value)) return { ok: false, code: "intake-closed" };
+    if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
     return {
       ok: true,
       ballotHash: taken.ballotHash,
@@ -314,11 +336,6 @@ export class IntakeSeat {
         election,
         stubHash,
         cutoff: intakeCutoff(stub.closes_at, BigInt(stub.l1_inclusion_bound), RELEASE_WINDOWS),
-        keys: {
-          seat: config.index,
-          kemSecret: secrets.kemSecret,
-          signingSecret: secrets.signingSecret,
-        },
       },
     };
   }

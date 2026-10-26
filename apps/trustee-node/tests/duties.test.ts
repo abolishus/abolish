@@ -959,6 +959,22 @@ describe("destruction in the schedule", () => {
     expect(restarted.built).toEqual([name(2)]);
   });
 
+  test("a step destruction overtook settles its duty rather than ending the loop; the same failure otherwise ends it", async () => {
+    const h = harness([1]);
+    h.steps.set(1, [
+      () => {
+        h.destroying.add(1);
+        throw new Error("trustee node: intake record ab is gone");
+      },
+    ]);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(1);
+    const other = harness([1]);
+    other.steps.set(1, [new Error("a store it can't read")]);
+    await expect(other.duties.step()).rejects.toThrow("a store it can't read");
+  });
+
   test("destruction beginning between the check and the build sets nothing up and stops nothing else", async () => {
     const h = harness([1]);
     let checks = 0;

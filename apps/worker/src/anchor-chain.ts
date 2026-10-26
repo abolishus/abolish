@@ -7,7 +7,10 @@
 // Reads at one pinned block: `now()` pins the node's latest block, and the
 // `anchored` calls that follow read the anchor's slots at that same block,
 // so a run judges each window against the state at the time it judges by
-// (T-49). A call is simulated from the authority before it is sent, so one
+// (T-49). `ViemAnchorReader` is those reads alone, for the operator's
+// boarding of tally openings, which judges the anchored counted extent by
+// what the anchor holds and never sends (core's `anchoredCountedTally`). A
+// call is simulated from the authority before it is sent, so one
 // the anchor would refuse costs no signatures or gas, and is confirmed in
 // the anchor's state after its sender resolves: a call that reached the
 // authority but not the anchor (a Safe transaction whose inner call failed
@@ -28,14 +31,17 @@ import {
   type PublicClient,
 } from "viem";
 
-export interface AnchorChainOptions {
+export interface AnchorReaderOptions {
   /** One L1 node; its HTTP transport should time out well within the job's period. */
   readonly client: PublicClient;
-  /** The node's chain, as `checkAnchorDeployment` checked it. */
+  /** The node's chain, as `checkAnchorClock` checked it. */
   readonly chainId: bigint;
   readonly anchor: Address;
-  /** The anchor's clock, as `checkAnchorDeployment` checked it. */
+  /** The anchor's clock, as `checkAnchorClock` checked it. */
   readonly clock: AnchoringClock;
+}
+
+export interface AnchorChainOptions extends AnchorReaderOptions {
   /** The anchoring authority, as `checkAnchorDeployment` checked it: calls are simulated from it. */
   readonly authority: Address;
   /**
@@ -51,14 +57,15 @@ interface Pin {
   readonly timestamp: bigint;
 }
 
-/** The L1 board anchor as the anchoring job reads it and sends to it. */
-export class ViemAnchorChain implements AnchorChain {
+/** The L1 board anchor, read only. */
+export class ViemAnchorReader implements Pick<
+  AnchorChain,
+  "chainId" | "address" | "clock" | "now" | "anchored"
+> {
   readonly chainId: bigint;
   readonly clock: AnchoringClock;
-  readonly #client: PublicClient;
-  readonly #anchor: Address;
-  readonly #authority: Address;
-  readonly #send: (calldata: Uint8Array) => Promise<void>;
+  protected readonly client: PublicClient;
+  protected readonly anchorAddress: Address;
   #pin: Pin | undefined;
   // The highest block this adapter has read at. A node (or a load
   // balancer's other node) that later answers from below it is refused: its
@@ -66,26 +73,24 @@ export class ViemAnchorChain implements AnchorChain {
   // time before one already judged by (T-49).
   #seen: Pin = { number: 0n, timestamp: 0n };
 
-  constructor(options: AnchorChainOptions) {
+  constructor(options: AnchorReaderOptions) {
     const { epoch, period, deadline } = options.clock;
     if (period < 1n || epoch < 0n || deadline < 0n)
       throw new RangeError("the clock must have a period of at least 1 and no negative value");
     this.chainId = options.chainId;
     this.clock = { epoch, period, deadline };
-    this.#client = options.client;
-    this.#anchor = getAddress(options.anchor);
-    this.#authority = getAddress(options.authority);
-    this.#send = options.send;
+    this.client = options.client;
+    this.anchorAddress = getAddress(options.anchor);
   }
 
   get address(): Uint8Array {
-    return hexToBytes(this.#anchor);
+    return hexToBytes(this.anchorAddress);
   }
 
   /** The latest block's timestamp; pins that block for the `anchored` calls that follow. */
   async now(): Promise<bigint> {
     this.#pin = undefined;
-    const pin = await this.#latest();
+    const pin = await this.latest();
     this.#pin = pin;
     return pin.timestamp;
   }
@@ -95,9 +100,40 @@ export class ViemAnchorChain implements AnchorChain {
     if (electionId.length !== 32) throw new TypeError("electionId must be 32 bytes");
     if (!Number.isInteger(segment) || segment < 0 || segment > 2 ** 32 - 1)
       throw new RangeError("segment must be a u32");
-    const pin = this.#pin ?? (await this.#latest());
-    const held = await this.#hashOf(electionId, segment, pin.number);
+    const pin = this.#pin ?? (await this.latest());
+    const held = await this.hashOf(electionId, segment, pin.number);
     return /^0x0{64}$/.test(held) ? undefined : hexToBytes(held);
+  }
+
+  protected async latest(): Promise<Pin> {
+    const block = await this.client.getBlock({ blockTag: "latest" });
+    const pin = { number: block.number, timestamp: block.timestamp };
+    if (pin.number < this.#seen.number || pin.timestamp < this.#seen.timestamp)
+      throw new Error("the node is behind blocks already read");
+    this.#seen = pin;
+    return pin;
+  }
+
+  protected hashOf(electionId: Uint8Array, segment: number, blockNumber: bigint) {
+    return this.client.readContract({
+      address: this.anchorAddress,
+      abi: boardAnchorAbi,
+      functionName: "checkpointHashOf",
+      args: [bytesToHex(electionId), segment],
+      blockNumber,
+    });
+  }
+}
+
+/** The L1 board anchor as the anchoring job reads it and sends to it. */
+export class ViemAnchorChain extends ViemAnchorReader implements AnchorChain {
+  readonly #authority: Address;
+  readonly #send: (calldata: Uint8Array) => Promise<void>;
+
+  constructor(options: AnchorChainOptions) {
+    super(options);
+    this.#authority = getAddress(options.authority);
+    this.#send = options.send;
   }
 
   async anchor(checkpoints: readonly Checkpoint[]): Promise<void> {
@@ -108,43 +144,56 @@ export class ViemAnchorChain implements AnchorChain {
       args: [bytesToHex(concatBytes(checkpoints.map(encodeCheckpoint))), "0x"],
     });
     // Throws on a call the anchor would refuse now, before anything is signed.
-    await this.#client.call({ account: this.#authority, to: this.#anchor, data });
+    await this.client.call({ account: this.#authority, to: this.anchorAddress, data });
     await this.#send(hexToBytes(data));
     // Confirmed at the node's latest block, at or above every block read so
     // far, so a sender that resolved without the anchor's state changing
     // fails here.
-    const after = await this.#latest();
+    const after = await this.latest();
     for (const c of checkpoints) {
-      const held = await this.#hashOf(c.election_id, c.segment, after.number);
+      const held = await this.hashOf(c.election_id, c.segment, after.number);
       if (held !== bytesToHex(checkpointHash(c))) throw new Error("the call didn't anchor");
     }
   }
-
-  async #latest(): Promise<Pin> {
-    const block = await this.#client.getBlock({ blockTag: "latest" });
-    const pin = { number: block.number, timestamp: block.timestamp };
-    if (pin.number < this.#seen.number || pin.timestamp < this.#seen.timestamp)
-      throw new Error("the node is behind blocks already read");
-    this.#seen = pin;
-    return pin;
-  }
-
-  #hashOf(electionId: Uint8Array, segment: number, blockNumber: bigint) {
-    return this.#client.readContract({
-      address: this.#anchor,
-      abi: boardAnchorAbi,
-      functionName: "checkpointHashOf",
-      args: [bytesToHex(electionId), segment],
-      blockNumber,
-    });
-  }
 }
 
-export interface AnchorDeployment {
+export interface AnchorClockDeployment {
   readonly chainId: bigint;
   readonly anchor: Address;
   readonly clock: AnchoringClock;
+}
+
+export interface AnchorDeployment extends AnchorClockDeployment {
   readonly authority: Address;
+}
+
+/**
+ * The reader's startup check: the node is on the configured chain, and the
+ * anchor's finalized code fixes exactly the configured clock, so the counted
+ * extent is judged by the clock the anchor judges by (T-49, T-53). Returns
+ * the authority the anchor names, at that finalized block. Throws naming the
+ * mismatch.
+ */
+export async function checkAnchorClock(
+  client: PublicClient,
+  deployment: AnchorClockDeployment,
+): Promise<{ readonly authority: Address; readonly blockNumber: bigint }> {
+  const chainId = BigInt(await client.getChainId());
+  if (chainId !== deployment.chainId) throw new Error("the L1 node is on another chain");
+  const blockNumber = (await client.getBlock({ blockTag: "finalized" })).number;
+  const at = { address: deployment.anchor, abi: boardAnchorAbi, blockNumber } as const;
+  const code = await client.getCode({ address: deployment.anchor, blockNumber });
+  if (code === undefined || code === "0x") throw new Error("no anchor at the address");
+  const [epoch, period, deadline, authority] = await Promise.all([
+    client.readContract({ ...at, functionName: "epoch" }),
+    client.readContract({ ...at, functionName: "period" }),
+    client.readContract({ ...at, functionName: "deadline" }),
+    client.readContract({ ...at, functionName: "authority" }),
+  ]);
+  const { clock } = deployment;
+  if (epoch !== clock.epoch || period !== clock.period || deadline !== clock.deadline)
+    throw new Error("the anchor fixes another clock");
+  return { authority: getAddress(authority), blockNumber };
 }
 
 /**
@@ -162,22 +211,8 @@ export async function checkAnchorDeployment(
   client: PublicClient,
   deployment: AnchorDeployment,
 ): Promise<void> {
-  const chainId = BigInt(await client.getChainId());
-  if (chainId !== deployment.chainId) throw new Error("the L1 node is on another chain");
-  const blockNumber = (await client.getBlock({ blockTag: "finalized" })).number;
-  const at = { address: deployment.anchor, abi: boardAnchorAbi, blockNumber } as const;
-  const code = await client.getCode({ address: deployment.anchor, blockNumber });
-  if (code === undefined || code === "0x") throw new Error("no anchor at the address");
-  const [epoch, period, deadline, authority] = await Promise.all([
-    client.readContract({ ...at, functionName: "epoch" }),
-    client.readContract({ ...at, functionName: "period" }),
-    client.readContract({ ...at, functionName: "deadline" }),
-    client.readContract({ ...at, functionName: "authority" }),
-  ]);
-  const { clock } = deployment;
-  if (epoch !== clock.epoch || period !== clock.period || deadline !== clock.deadline)
-    throw new Error("the anchor fixes another clock");
-  if (getAddress(authority) !== getAddress(deployment.authority))
+  const { authority, blockNumber } = await checkAnchorClock(client, deployment);
+  if (authority !== getAddress(deployment.authority))
     throw new Error("the anchor names another authority");
   const authorityCode = await client.getCode({ address: authority, blockNumber });
   if (authorityCode === undefined || authorityCode === "0x" || authorityCode.startsWith("0xef0100"))

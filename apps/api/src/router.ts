@@ -39,7 +39,7 @@ import {
 } from "@abolishus/core";
 import type { PeriodClock } from "@abolishus/crypto";
 import { implement, ORPCError } from "@orpc/server";
-import type { BallotQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
+import type { BallotQueue, OpeningQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
 import type { Sql } from "postgres";
 
 // The contract's procedures (packages/api-contract). Each handler parses its
@@ -47,7 +47,7 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, the worker's ballot and receipt queues, Tier 0
+// The context holds the database, the worker's ballot, receipt and opening queues, Tier 0
 // registration, the Tier 1 relay, the posting relay, the clock and the boards'
 // anchoring clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
@@ -59,12 +59,17 @@ export type BallotSubmitter = Pick<BallotQueue, "submit">;
 /** What `receipts.submit` needs of the worker's queue. */
 export type ReceiptSubmitter = Pick<ReceiptQueue, "submit">;
 
+/** What `openings.submit` needs of the worker's queue. */
+export type OpeningSubmitter = Pick<OpeningQueue, "submit">;
+
 export interface Context {
   readonly sql: Sql;
   /** Absent when this server has no ballot queue: it then boards no ballot. */
   readonly ballots?: BallotSubmitter | undefined;
   /** Absent when this server has no receipt queue: it then boards no share receipt. */
   readonly receipts?: ReceiptSubmitter | undefined;
+  /** Absent when this server has no opening queue: it then boards no tally opening. */
+  readonly openings?: OpeningSubmitter | undefined;
   /** UNIX time in seconds. */
   readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
@@ -285,6 +290,51 @@ export const router = os.router({
           throw errors.RECEIPT_REJECTED({ data: { code: outcome.rejection ?? "decode" } });
         case "unavailable":
           throw errors.RECEIPTS_UNAVAILABLE();
+      }
+    }),
+  },
+  openings: {
+    // The board path for tally openings (docs/spec/tally.md, Opening record,
+    // Boarding): judged in the worker by core's OpeningBoardings over the
+    // anchored counted set, which crypto's judge and the verifier's counted
+    // set decide, never here (T-17, T-29, T-52). Only an election this
+    // server holds is queued. A server without the queue boards none.
+    submit: os.openings.submit.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      if (context.openings === undefined) throw errors.ELECTION_NOT_OPEN();
+      const opening = fromHex(input.opening);
+      const outcome = await context.openings.submit(id, opening);
+      if (outcome.ok) {
+        // Read from the board, never taken on the worker's word: the entry
+        // carries the bytes sent or, for a resend of the same signed
+        // message in other bytes, the opening boarded before, which must at
+        // least be a record of the type and version sent (its 3-byte
+        // header), and which the seat checks against its own.
+        const index = BigInt(outcome.index);
+        let boarded = await readBoardedEntry(context.sql, id, index, opening);
+        let earlier = false;
+        if (boarded === undefined) {
+          const at = await readEntryAt(context.sql, id, index);
+          const header = (b: Uint8Array) => Buffer.from(b.subarray(0, 3)).toString("hex");
+          if (at !== undefined && header(at.payload) === header(opening)) {
+            boarded = at;
+            earlier = true;
+          }
+        }
+        if (boarded === undefined) throw new Error("the board doesn't carry the boarded opening");
+        return { entry: toHex(boarded.entry), link: toHex(boarded.link), earlier };
+      }
+      switch (outcome.code) {
+        case "unknown-election":
+          throw errors.ELECTION_NOT_FOUND();
+        case "not-open":
+          throw errors.ELECTION_NOT_OPEN();
+        case "not-ready":
+          throw errors.OPENING_NOT_READY();
+        case "rejected":
+          throw errors.OPENING_REJECTED({ data: { code: outcome.rejection ?? "decode" } });
+        case "unavailable":
+          throw errors.OPENINGS_UNAVAILABLE();
       }
     }),
   },

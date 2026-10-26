@@ -24,8 +24,16 @@ import {
   type PublicClient,
   toHex,
 } from "viem";
+import { parseRpcUrl, rpcClient } from "@abolishus/node";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { type AnchorDeployment, checkAnchorDeployment, ViemAnchorChain } from "../src/index.ts";
+import {
+  type AnchorDeployment,
+  checkAnchorClock,
+  checkAnchorDeployment,
+  RpcL1HeaderRun,
+  ViemAnchorChain,
+  ViemAnchorReader,
+} from "../src/index.ts";
 
 // The anchoring job's chain adapter against a real chain (P4-1 part 2b-1):
 // Anvil runs the board anchor, the startup check refuses every mismatch,
@@ -33,7 +41,9 @@ import { type AnchorDeployment, checkAnchorDeployment, ViemAnchorChain } from ".
 // checkpoints under the hashes a verifier reads (T-23, T-49). The authority
 // is an address given code and impersonated on Anvil, standing in for the
 // Safe, whose transactions are part 2b-2's (no key of ours is held here,
-// AGENTS.md).
+// AGENTS.md). The read-only reader and the finalized header run the
+// boarding of tally openings reads through (P2-13 part 5b-2b-3b-2b-2) run
+// against the same chain.
 
 const ballot = (...body: number[]) => Uint8Array.of(0x00, 0x02, 1, ...body);
 const bytes = (a: Address) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
@@ -420,5 +430,76 @@ describe("a node not to trust", () => {
     );
     const run = await anchorBoards(app, reader, localNow());
     expect(about(run.findings, id)).toEqual([{ code: "anchor-send-failed", electionId: id }]);
+  });
+});
+
+describe("the tally openings' reads", () => {
+  test("the clock check passes the anchor's own clock, whatever its authority, and refuses each mismatch", async () => {
+    const deployment = await deployAnchor();
+    const { chainId: id, anchor, clock } = deployment;
+    await mine(FINALITY_DEPTH);
+    expect((await checkAnchorClock(client, { chainId: id, anchor, clock })).authority).toBe(
+      deployment.authority,
+    );
+    // The reader sends nothing, so a single key as the authority is no matter.
+    await rpc("anvil_setCode", [deployment.authority, "0x"]);
+    await mine(FINALITY_DEPTH);
+    await expect(checkAnchorClock(client, { chainId: id, anchor, clock })).resolves.toBeDefined();
+    await expect(checkAnchorClock(client, { chainId: id + 1n, anchor, clock })).rejects.toThrow(
+      "another chain",
+    );
+    await expect(
+      checkAnchorClock(client, { chainId: id, anchor, clock: { ...clock, deadline: 1n } }),
+    ).rejects.toThrow("another clock");
+    await expect(
+      checkAnchorClock(client, { chainId: id, anchor: accounts[1] as Address, clock }),
+    ).rejects.toThrow("no anchor");
+  });
+
+  test("the reader holds what the anchoring job anchored, and can't send", async () => {
+    const deployment = await deployAnchor();
+    const id = await board(deployment.anchor);
+    await anchorBoards(app, adapter(deployment), localNow());
+    const reader = new ViemAnchorReader({
+      client,
+      chainId: deployment.chainId,
+      anchor: deployment.anchor,
+      clock: deployment.clock,
+    });
+    expect(reader.address).toEqual(bytes(deployment.anchor));
+    expect(await reader.now()).toBeTypeOf("bigint");
+    for (const c of await readCheckpoints(app, id))
+      expect(await reader.anchored(id, c.segment)).toEqual(checkpointHash(c));
+    expect(await reader.anchored(id, 2)).toBeUndefined();
+    expect("anchor" in reader).toBe(false);
+  });
+
+  test("the header run is the finalized chain from the last block before the window to the first after it", async () => {
+    // Twenty blocks twelve seconds apart, all but the last two finalized.
+    await rpc("anvil_mine", [toHex(20), toHex(12)]);
+    const latest = await client.getBlock({ blockTag: "latest" });
+    const at = (n: bigint) => client.getBlock({ blockNumber: n });
+    const base = latest.number - 19n;
+    const [b5, b10] = await Promise.all([at(base + 5n), at(base + 10n)]);
+    const node = rpcClient(parseRpcUrl(rpcUrl));
+    await expect(RpcL1HeaderRun.connect(node, chainId + 1n)).rejects.toThrow("another chain");
+    const headers = await RpcL1HeaderRun.connect(node, chainId);
+    const run = await headers.run({ before: b5.timestamp + 1n, after: b10.timestamp });
+    expect(run.map((h) => h.number)).toEqual(
+      Array.from({ length: 7 }, (_, i) => base + 5n + BigInt(i)),
+    );
+    for (const [i, h] of run.entries()) {
+      expect(toHex(h.hash)).toBe((await at(h.number)).hash);
+      if (i > 0) expect(h.parentHash).toEqual(run[i - 1]!.hash);
+    }
+    // A window past the finalized head ends at it.
+    const finalized = await client.getBlock({ blockTag: "finalized" });
+    const open = await headers.run({ before: b10.timestamp + 1n, after: latest.timestamp + 60n });
+    expect(open.at(-1)!.number).toBe(finalized.number);
+    // A budget that cuts the run inside the window is refused, not run short.
+    const cut = await RpcL1HeaderRun.connect(node, chainId, 1_500);
+    await expect(cut.run({ before: b5.timestamp + 1n, after: b10.timestamp })).rejects.toThrow(
+      "past its budget",
+    );
   });
 });

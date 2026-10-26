@@ -30,6 +30,8 @@ export {
   type PostingForm,
   type PostingFormCode,
   postingForm,
+  type ReadElection,
+  readElection,
   type ReceiptAdmission,
   type ReceiptAdmissionCode,
 } from "./admission.ts";

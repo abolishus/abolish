@@ -758,4 +758,6 @@ export {
   OpeningError,
   type OpeningErrorCode,
   type OpeningRejectionCode,
+  type OpeningTarget,
+  openingTargets,
 } from "./tally-boarding.ts";

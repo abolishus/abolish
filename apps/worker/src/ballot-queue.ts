@@ -11,6 +11,10 @@
 // (`ReceiptQueue`): the job carries the election and the receipt record's
 // bytes, and the worker judges it by the board path's rules
 // (docs/spec/delivery.md, Boarding), so the API checks no signature either.
+// So does the `{opening-submit}` queue for tally openings (`OpeningQueue`),
+// judged by the Boarding rule over the anchored counted set
+// (docs/spec/tally.md, Opening record, Boarding), whose admission of the
+// board's ballots the API never runs (T-52).
 
 import { Queue, QueueEvents } from "bullmq";
 import { Redis } from "ioredis";
@@ -61,6 +65,25 @@ export const RECEIPT_OUTCOME = z.union([
 ]);
 export type ReceiptOutcome = z.output<typeof RECEIPT_OUTCOME>;
 
+/**
+ * What the worker returns for each tally opening: the board position of the
+ * entry that carries it, its own or, for a resend, the one boarded before,
+ * or the refusal's code (core's OpeningError), never the opening.
+ */
+export const OPENING_OUTCOME = z.union([
+  z.strictObject({ ok: z.literal(true), index: z.string().regex(/^(0|[1-9][0-9]{0,18})$/) }),
+  z.strictObject({
+    ok: z.literal(false),
+    code: z.enum(["unknown-election", "not-ready", "not-open", "rejected"]),
+    rejection: z
+      .string()
+      .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/)
+      .max(64)
+      .optional(),
+  }),
+]);
+export type OpeningOutcome = z.output<typeof OPENING_OUTCOME>;
+
 /** The worker gave no outcome in time, or the queue couldn't take the ballot. */
 export interface BallotUnavailable {
   readonly ok: false;
@@ -72,13 +95,16 @@ const UNAVAILABLE: BallotUnavailable = { ok: false, code: "unavailable" };
 /** A share receipt's `BallotUnavailable`. */
 export type ReceiptUnavailable = BallotUnavailable;
 
+/** A tally opening's `BallotUnavailable`. */
+export type OpeningUnavailable = BallotUnavailable;
+
 /** About four events per job (added, waiting, active, completed). */
 export const BALLOT_EVENTS_MAX_LEN = 1024;
 
 /**
  * A job older than this is refused unjudged by the worker: its API has
  * answered it `unavailable` long ago (20 s by default), or was gone before it
- * could remove it, and a ballot or receipt shouldn't sit in Redis to be
+ * could remove it, and a ballot, receipt or opening shouldn't sit in Redis to be
  * boarded much later (T-10).
  */
 export const BALLOT_MAX_AGE_MS = 60_000;
@@ -102,7 +128,7 @@ export interface BallotQueueOptions {
 }
 
 /** The queues the API submits to and hears an outcome from. */
-type SubmitKey = "ballotSubmit" | "receiptSubmit";
+type SubmitKey = "ballotSubmit" | "receiptSubmit" | "openingSubmit";
 
 /**
  * One submitting queue: queues a job of `key`'s data and waits for the
@@ -289,6 +315,41 @@ export class ReceiptQueue {
   }
 
   /** Answers every waiting receipt `unavailable` and disconnects. */
+  close(): Promise<void> {
+    return this.#queue.close();
+  }
+}
+
+export class OpeningQueue {
+  readonly #queue: SubmitQueue<OpeningOutcome>;
+
+  private constructor(queue: SubmitQueue<OpeningOutcome>) {
+    this.#queue = queue;
+  }
+
+  /** Connects, and resolves once outcomes can be heard. */
+  static async open(options: BallotQueueOptions): Promise<OpeningQueue> {
+    return new OpeningQueue(await SubmitQueue.open("openingSubmit", OPENING_OUTCOME, options));
+  }
+
+  /**
+   * Queues `opening`, a tally opening record's bytes, for `electionId` and
+   * answers the worker's outcome, or `unavailable`. Never throws for
+   * Redis's state: the seat's node sends it again until the seal.
+   */
+  submit(
+    electionId: Uint8Array,
+    opening: Uint8Array,
+  ): Promise<OpeningOutcome | OpeningUnavailable> {
+    return this.#queue.submit(
+      QUEUES.openingSubmit.data.parse({
+        electionId: Buffer.from(electionId).toString("hex"),
+        opening: Buffer.from(opening).toString("hex"),
+      }),
+    );
+  }
+
+  /** Answers every waiting opening `unavailable` and disconnects. */
   close(): Promise<void> {
     return this.#queue.close();
   }

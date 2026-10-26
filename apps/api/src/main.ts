@@ -5,7 +5,7 @@ import {
   Tier0Registrations,
   Tier1Relay,
 } from "@abolishus/core";
-import { BallotQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
+import { BallotQueue, OpeningQueue, ReceiptQueue } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import * as z from "zod";
@@ -85,6 +85,7 @@ const env = Env.parse({
 let redis: Redis | undefined;
 let ballots: BallotQueue | undefined;
 let receipts: ReceiptQueue | undefined;
+let openings: OpeningQueue | undefined;
 if (env.REDIS_URL !== undefined) {
   // Fail fast while Redis is down or stalled, so a request answers
   // unavailable within a second rather than hold one of the server's slots
@@ -99,6 +100,7 @@ if (env.REDIS_URL !== undefined) {
   redis.on("error", () => process.stdout.write(`${JSON.stringify({ error: "redis" })}\n`));
   ballots = await BallotQueue.open({ connection: redis });
   receipts = await ReceiptQueue.open({ connection: redis });
+  openings = await OpeningQueue.open({ connection: redis });
 }
 
 const tier0Env = [env.API_TIER0_GROUP, env.TURNSTILE_SECRET_KEY, env.API_CHALLENGE_HOST];
@@ -205,6 +207,7 @@ const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
   ...(receipts !== undefined && { receipts }),
+  ...(openings !== undefined && { openings }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
   ...(postings !== undefined && { postings }),
@@ -222,7 +225,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
       () =>
         void Promise.all([
           sql.end(),
-          Promise.all([ballots?.close(), receipts?.close()]).then(() => redis?.quit()),
+          Promise.all([ballots?.close(), receipts?.close(), openings?.close()]).then(() =>
+            redis?.quit(),
+          ),
           postingRedis?.quit(),
         ]),
     );

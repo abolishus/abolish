@@ -1095,6 +1095,7 @@ export {
   tallyOpeningBoarding,
   tallyOpeningStatement,
   type TallyOpeningStatement,
+  tallyOpeningSigner,
   type WholeOpeningVersion,
 } from "./tally-opening.ts";
 export {

@@ -17,6 +17,8 @@ import {
   MAX_PROOF_PATH,
   MAX_SHARE_RECEIPT,
   MAX_SHARE_RECEIPT_ENTRY,
+  MAX_TALLY_OPENING,
+  MAX_TALLY_OPENING_ENTRY,
   PageSize,
   POSTING_MAX_DATA,
   RegionCode,
@@ -345,6 +347,47 @@ const submitReceipt = oc
     }),
   );
 
+const submitOpening = oc
+  .route({
+    method: "POST",
+    path: "/openings",
+    successStatus: 201,
+    summary: "Board a trustee's tally opening",
+    description:
+      "Appends one tally opening record (0x0006, version 1 or 2) to the board by the Boarding rule (docs/spec/tally.md, Opening record, Boarding): it decodes under the version the election pins, names this election's definition and a cell of its partition, has one entry per option, is over that cell's aggregate of the anchored counted set, opens every option, and is attributed by a registered seat's signature, and the board carries no other opening of that cell attributed to that seat. A seat's node sends it until the seal and needs no account or session (T-10). Returns the board entry that carries it and the chain link after it, as for a ballot. When the board already carries the same signed message for that seat and cell, in these bytes or others, nothing is written and the entry returned carries it, with `earlier` true if its bytes are other than these; the caller checks that entry's opening against its own. Before the counted set is fixed (until `t_S` has passed by the anchor's time and finalized L1 has reached every counted ballot's reference) it is `OPENING_NOT_READY`; an election this server never boards an opening of is `ELECTION_NOT_OPEN`.",
+    tags: ["openings"],
+  })
+  .errors({
+    ...electionNotFound,
+    ELECTION_NOT_OPEN: {
+      status: 409,
+      message: "The election takes no tally opening on this board.",
+    },
+    OPENING_REJECTED: {
+      status: 422,
+      message: "The tally opening failed decoding or the Boarding rule.",
+      data: z.strictObject({ code: ErrorCode }),
+    },
+    RATE_LIMITED: { status: 429, message: "Too many requests; retry later." },
+    OPENING_NOT_READY: {
+      status: 503,
+      message: "The counted set isn't fixed yet; send the same bytes again later.",
+    },
+    // The opening may still be boarded: the same bytes again return its entry.
+    OPENINGS_UNAVAILABLE: {
+      status: 503,
+      message: "The tally opening couldn't be judged in time; submit the same bytes again.",
+    },
+  })
+  .input(z.strictObject({ electionId: Hash32, opening: hexBytes(MAX_TALLY_OPENING) }))
+  .output(
+    z.strictObject({
+      entry: hexBytes(MAX_TALLY_OPENING_ENTRY),
+      link: Hash32,
+      earlier: z.boolean(),
+    }),
+  );
+
 // Moderation (docs/moderation-policy.md; T-68). The log is public, so anyone
 // can see what we did to a poll's display text and why; it never names the
 // moderator or a reporter. Moderation never reaches a result: these routes
@@ -658,6 +701,7 @@ export const contract = {
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   receipts: { submit: submitReceipt },
+  openings: { submit: submitOpening },
   postings: { submit: submitPosting },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },

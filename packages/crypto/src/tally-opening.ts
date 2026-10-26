@@ -333,6 +333,29 @@ function attribution(election: Pick<TallyElection, "registered">, o: TallyOpenin
     : null;
 }
 
+/**
+ * The registered seat whose signature attributes `payload`, a tally opening
+ * under version 1 or 2, or `null` when none does or it doesn't decode under
+ * `pinned` (docs/spec/tally.md, Opening record). For a board
+ * operator deciding whether an opening may start the costly read of the
+ * counted set (T-52): it judges attribution alone, never whether the opening
+ * is boarded, which is `tallyOpeningBoarding`'s.
+ */
+export function tallyOpeningSigner(
+  registered: TallyElection["registered"],
+  payload: Uint8Array,
+  pinned: WholeOpeningVersion,
+): number | null {
+  let opening: TallyOpening;
+  try {
+    opening = decodeTallyOpening(payload, pinned);
+  } catch (e) {
+    if (e instanceof DecodeError) return null;
+    throw e;
+  }
+  return attribution({ registered }, opening);
+}
+
 /** The first option whose `(V_j, R_j)` doesn't open `Ĉ_j`, or `null` if every one does. */
 function firstUnopened(aggregate: CellAggregate, opening: readonly Share[]): number | null {
   for (let j = 0; j < aggregate.length; j++) {

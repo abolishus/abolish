@@ -17,6 +17,16 @@ export {
   nextManifestLinks,
 } from "./archive-chain.ts";
 export {
+  ARCHIVE_DEPTH,
+  ARCHIVE_REPOST_AFTER,
+  archiveBoards,
+  type ArchiveLocator,
+  archiveLocator,
+  type ArchiveOptions,
+  type ArchiveRun,
+  type ArweaveClient,
+} from "./archiving.ts";
+export {
   addModerator,
   APPEAL_DECISIONS,
   type AppealDecision,
@@ -64,6 +74,7 @@ export {
   type BoardReadErrorCode,
   readBallotByHash,
   readBoard,
+  readBoardRange,
   readBoardedEntry,
   readBoardedOpenings,
   readEntryAt,
@@ -167,6 +178,9 @@ export {
   accountSessions,
   accountUsers,
   accountVerifications,
+  archiveManifests,
+  archiveObjects,
+  archiveTransactions,
   boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,

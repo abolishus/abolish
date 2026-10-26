@@ -695,6 +695,43 @@ export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Ui
 }
 
 /**
+ * The election's encoded entries from index `first` up to `end`, in order:
+ * the run a segment object holds (docs/spec/board.md, Segments and
+ * checkpoints). Throws unless the board holds every one of them.
+ */
+export async function readBoardRange(
+  client: Sql,
+  electionId: Uint8Array,
+  first: bigint,
+  end: bigint,
+): Promise<Uint8Array[]> {
+  const id = checkId(electionId);
+  if (!isU64(first) || !isU64(end) || end < first)
+    throw new RangeError("first and end must be u64s, first at most end");
+  const rows = await drizzle({ client })
+    .select({ idx: boardEntries.idx, segment: boardEntries.segment, payload: boardEntries.payload })
+    .from(boardEntries)
+    .where(
+      and(eq(boardEntries.electionId, id), gte(boardEntries.idx, first), lt(boardEntries.idx, end)),
+    )
+    .orderBy(asc(boardEntries.idx));
+  if (BigInt(rows.length) !== end - first) throw new BoardReadError("beyond-board");
+  if (rows.length === 0) return [];
+  const version = await storedBoardVersion(client, id);
+  return rows.map((r) =>
+    encodeBoardEntry(
+      {
+        election_id: id,
+        index: r.idx,
+        segment: Number(r.segment),
+        payload: new Uint8Array(r.payload),
+      },
+      version,
+    ),
+  );
+}
+
+/**
  * What an encoded board entry adds around its payload (record 0x0007 v1,
  * docs/spec/board.md): the record header (3), `election_id` (32), `index`
  * (8), `segment` (4) and the payload's length prefix (4). A test ties it to

@@ -37,6 +37,7 @@ import { LocaleChoice } from "./language-switch.tsx";
 import { type Link, parseLink } from "./link.ts";
 import { electionLock } from "./lock.ts";
 import {
+  estimatePosting,
   loadBoard,
   loadChainTime,
   loadDeposits,
@@ -370,6 +371,7 @@ const source: ElectionSource = {
               {
                 send: (call, late) => session.send(call, late),
                 deposit: (call, gas, late) => session.deposit(call, gas, late),
+                estimate: (call) => estimatePosting(STAGING, call, fetchFn),
                 find: (head, from, stop) =>
                   loadPostings(
                     STAGING,

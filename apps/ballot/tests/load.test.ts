@@ -20,6 +20,7 @@ import { confirming, STAGING } from "../src/deployment.ts";
 import { parseLink } from "../src/link.ts";
 import {
   DEFINITION_HASH_OF,
+  estimatePosting,
   type Fetch,
   loadBoard,
   loadChainTime,
@@ -1760,5 +1761,29 @@ describe("the portal's deposits", () => {
       }),
       { numRuns },
     );
+  });
+
+  test("the build's own estimate of a posting is the board's call through its L2 endpoint, or nothing", async () => {
+    const { calls, fetchFn } = nodes([]);
+    expect(await estimatePosting(WITH_BOARD, CALL, fetchFn)).toBe(ESTIMATE);
+    // To the board, through the build's L2 endpoint only, never L1's.
+    expect(calls.map((c) => [c.url, c.method])).toEqual([
+      [WITH_BOARD.rpc, "eth_chainId"],
+      [WITH_BOARD.rpc, "eth_estimateGas"],
+    ]);
+    expect(calls[1]?.params).toEqual([{ to: BOARD, data: `0x${hex(CALL)}` }]);
+    // A revert, a malformed answer, a network failure and a build
+    // that pins no board give no estimate, so nothing is deposited.
+    expect(
+      await estimatePosting(WITH_BOARD, CALL, nodes([], { estimate: () => undefined }).fetchFn),
+    ).toBe(undefined);
+    expect(
+      await estimatePosting(WITH_BOARD, CALL, nodes([], { estimate: () => "0xzz" }).fetchFn),
+    ).toBe(undefined);
+    const failing: Fetch = () => Promise.reject(new TypeError("network"));
+    expect(await estimatePosting(WITH_BOARD, CALL, failing)).toBe(undefined);
+    const none = nodes([]);
+    expect(await estimatePosting(DEPLOYMENT, CALL, none.fetchFn)).toBe(undefined);
+    expect(none.calls).toHaveLength(0);
   });
 });

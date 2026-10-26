@@ -5,8 +5,9 @@
 // (the counted checkpoints) and the board contract's events (the bundle's,
 // or the archive's contract-event runs once no L2 node serves them),
 // replayed against its event accumulator proven under an L2 output root
-// (the bundle's, or an archived record's), never the board copy, so a withheld board fails here rather than leaving the
-// election unverifiable for good (T-24, T-25, T-53, T-54;
+// (the bundle's, or an archived record's), never the board copy, so a
+// withheld board fails here rather than leaving the election unverifiable
+// for good (T-24, T-25, T-53, T-54;
 // 0029-board-data-availability).
 //
 // Only the ballot extent is decided. The counted extent's point needs `t_S`,
@@ -242,13 +243,18 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   // archive's where those do: the replay against the proof is what holds
   // either to the board's history, so a run's events count for no more
   // than the proof they replay to (T-53, T-71). Where neither reaches it,
-  // the bundle's are replayed and come up short.
+  // the bundle's are replayed as they are.
   const { archivedEvents } = inputs;
   const fromArchive =
     archivedEvents !== undefined &&
     BigInt(inputs.l2.events.length) < proven.count &&
     BigInt(archivedEvents.length) >= proven.count;
-  const records: ContractEventRecord[] = fromArchive ? [...archivedEvents] : [];
+  // Only the first `count`: the proof fixes them, and the events the runs
+  // give past it are the archive's word, which mustn't leave unverifiable
+  // a point the proven prefix decides.
+  const records: ContractEventRecord[] = fromArchive
+    ? archivedEvents.slice(0, Number(proven.count))
+    : [];
   if (!fromArchive)
     for (const [at, bytes] of inputs.l2.events.entries())
       try {

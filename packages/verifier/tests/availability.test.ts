@@ -787,13 +787,23 @@ describe("the board's events from the archive", { timeout: 120_000 }, () => {
       code: "event-topics",
       at: {},
     });
-    // Another contract's: the replay doesn't hash the address, so the event check refuses it.
+    // Another contract's: the replay doesn't read the record's contract field, so the event check refuses it.
     const foreign = runs.map((r) => ({ ...r, contract: CONTRACTS.groupRegistry }));
     expect(availabilityChecks(inputs(sent, { l2: none, archivedEvents: foreign })).row).toEqual({
       status: "unverifiable",
       code: "unknown-event",
       at: {},
     });
+  });
+
+  test("an archived event past the proven count changes nothing", () => {
+    // The proof fixes the first `count`; one the runs give after them, here
+    // in a block the proof already covers, is the archive's word alone.
+    const last = runs[runs.length - 1] as (typeof runs)[number];
+    const junk = { ...last, n: last.n + 1n };
+    const r = availabilityChecks(inputs(sent, { l2: none, archivedEvents: [...runs, junk] }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(r.report?.events).toBe("archive");
   });
 
   test("bundle events that don't decode aren't read when the archive's are taken", () => {

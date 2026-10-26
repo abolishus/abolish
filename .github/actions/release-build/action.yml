@@ -49,6 +49,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
       run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
+    # A package's build dependencies may need the pinned toolchain:
+    # @abolishus/sdk builds @abolishus/contracts, whose build runs forge.
+    - name: Install Noir, Barretenberg and Foundry
+      shell: bash
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
+      run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
     # Gate code runs before any build code in this job; verify re-judges the
     # tarball against the hash this job outputs.
     - name: Build and pack
@@ -67,7 +73,14 @@ runs:
         export SOURCE_DATE_EPOCH
         printf '%s\n' "$VERSIONS" >"$RUNNER_TEMP/versions.txt"
         vp node .github/tools/ci/src/cli.ts release-apply --versions "$RUNNER_TEMP/versions.txt" >/dev/null
-        vp run --no-cache --filter "$NAME..." build
+        # To a file, not the job's pipe: node tasks set that pipe non-blocking,
+        # and forge's compiler panics when a write to it returns EAGAIN.
+        log="$RUNNER_TEMP/build.log"
+        if ! vp run --no-cache --filter "$NAME..." build >"$log" 2>&1; then
+          cat "$log"
+          exit 1
+        fi
+        cat "$log"
         mkdir -p "$OUT"
         (cd "$DIR" && vp pm pack --pack-destination "$OUT")
         slug="$(printf '%s' "${NAME#@}" | tr / -)"

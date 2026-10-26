@@ -55,7 +55,7 @@ export type AuditFindingLine =
 
 /**
  * What an anchoring run found (core's AnchorFindingCode), for one election
- * but `anchor-clock` and the archive locator's two. The election ID and
+ * but `anchor-clock` and the archive locator's findings. The election ID and
  * segment are public: both are on the board and on L1.
  */
 export interface AnchorFindingLine {

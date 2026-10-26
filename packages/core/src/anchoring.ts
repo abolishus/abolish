@@ -335,8 +335,10 @@ function checkClock(clock: AnchoringClock): void {
  * The archive's locator is read once, before any call, with the one the
  * anchor holds, and carried by every call with checkpoints only if the
  * anchor holds none, ours, or one naming our chain's manifest at or below
- * ours: so it never falls, whatever order runs overlap in, and never
- * overwrites another chain's (T-69). A run that sent no checkpoint call
+ * ours: so it never falls below what the run read and never overwrites
+ * another chain's (T-69). Runs aren't serialised across processes yet, so a
+ * run whose call lands after a later run's can set it back a step until the
+ * next run (P4-3 part 4b-2b). A run that sent no checkpoint call
  * sends it alone unless the anchor holds it; one whose checkpoint call
  * failed leaves it to the next run, since a second call from the authority
  * could replace the pending one in the mempool and miss its window (T-49).

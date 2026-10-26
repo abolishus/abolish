@@ -8,7 +8,6 @@ import {
 } from "@abolishus/crypto";
 import { walkArchive } from "@abolishus/verifier";
 import { randomBytes } from "node:crypto";
-import postgres from "postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -126,14 +125,9 @@ let now = 1_000_000n;
 // The run holds its lock on one connection and works through another.
 beforeAll(async () => {
   db = await testDb();
-  app = postgres(process.env["TEST_DATABASE_URL"]!, {
-    max: 2,
-    onnotice: () => {},
-    connection: { search_path: db.schema, role: "abolish_app" },
-  });
+  app = await db.as("abolish_app", { max: 2 });
 });
 afterAll(async () => {
-  await app?.end();
   await db?.close();
 });
 

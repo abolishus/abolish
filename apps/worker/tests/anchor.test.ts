@@ -23,6 +23,8 @@ const prefix = `abolish-test-${hex(randomBytes(6))}`;
 // The worker's clock and the node's, in period 2: periods 0 and 1 have ended.
 const NOW = new Date(Number(2n * CLOCK.period + 60n) * 1000);
 const START = 2n * CLOCK.period + 60n;
+/** The worker's clock as a test moves it. */
+let workerNow = NOW;
 
 /** An anchor holding whatever it is sent, at a fixed L1 time. */
 class HeldAnchor implements AnchorChain {
@@ -77,7 +79,7 @@ beforeAll(async () => {
     log: (l) => logs.push(l),
     auditEveryMs: 3_600_000,
     anchor: { chain, everyMs: 300_000 },
-    now: () => NOW,
+    now: () => workerNow,
     prefix,
   });
   anchors = new Queue(QUEUES.boardAnchor.name, { connection, prefix });
@@ -144,16 +146,40 @@ test("logs a node ahead of the worker's clock, and fails the job", async () => {
   }
 });
 
-test("logs a run that met another's lock, and fails nothing for it", async () => {
+test("logs a run that met another's lock, failing nothing until runs meet it past a quarter deadline", async () => {
   const other = await db.as("abolish_app");
   await other`SELECT pg_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+  const busy = { queue: "{board-anchor}", finding: "anchor-busy" };
+  const completed = { queue: "{board-anchor}", outcome: "completed", ms: expect.any(Number) };
+  const failed = {
+    queue: "{board-anchor}",
+    outcome: "failed",
+    error: "board-anchor-findings",
+    ms: expect.any(Number),
+  };
+  const at = (seconds: bigint) => new Date(NOW.getTime() + Number(seconds) * 1000);
   try {
     await anchors.add("boardAnchor", {});
-    expect(await outcome()).toEqual([
-      { queue: "{board-anchor}", finding: "anchor-busy" },
-      { queue: "{board-anchor}", outcome: "completed", ms: expect.any(Number) },
-    ]);
+    expect(await outcome()).toEqual([busy, completed]);
+    workerNow = at(CLOCK.deadline / 4n);
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([busy, completed]);
+    workerNow = at(CLOCK.deadline / 4n + 1n);
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([busy, failed]);
   } finally {
     await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+  }
+  // A run that holds the lock ends the streak: meeting it again starts anew.
+  await anchors.add("boardAnchor", {});
+  expect(await outcome()).toContainEqual(completed);
+  await other`SELECT pg_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+  try {
+    workerNow = at(CLOCK.deadline);
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([busy, completed]);
+  } finally {
+    await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+    workerNow = NOW;
   }
 });

@@ -680,11 +680,30 @@ describe("anchorBoards", () => {
     };
     const first = run(chain);
     await inCall;
-    const second = await anchorBoards(await db.as("abolish_app", { max: 2 }), chain, chain.time);
-    expect(second.findings).toEqual([{ code: "anchor-busy" }]);
+    // Bounded, so a second run that isn't kept out fails here rather than
+    // waiting on the first's call until the test's timeout.
+    const second = await Promise.race([
+      anchorBoards(await db.as("abolish_app", { max: 2 }), chain, chain.time),
+      new Promise<"overlapped">((r) => setTimeout(() => r("overlapped"), 2000)),
+    ]);
+    expect(second).toMatchObject({ findings: [{ code: "anchor-busy" }] });
     release();
     expect(reportOf(await first, e)?.anchored).toEqual([0]);
     expect(chain.attempts).toBe(1);
+  });
+
+  test("a run that throws releases the lock", async () => {
+    const chain = new ModelAnchor();
+    await boardFor(chain, 0);
+    chain.time = endOf(0) + 60n;
+    // Thrown inside the lock, by the run's first read.
+    chain.now = async () => "nonsense" as unknown as bigint;
+    await expect(run(chain)).rejects.toThrow(TypeError);
+    const other = await db.as("abolish_app");
+    const [row] =
+      await other`SELECT pg_try_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0)) AS held`;
+    expect(row?.["held"]).toBe(true);
+    await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
   });
 
   test("refuses a pool of one connection, which the lock would hold", async () => {

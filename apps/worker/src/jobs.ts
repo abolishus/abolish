@@ -12,6 +12,7 @@ import {
   type CreationAnchors,
   type AnchorChain,
   anchorBoards,
+  anchorBusyLimit,
   auditBoard,
   BoardAuditError,
   DefinitionError,
@@ -134,12 +135,20 @@ async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promis
 }
 
 /**
+ * When each worker's anchoring runs began meeting another's lock without a
+ * break, in the worker's seconds; absent while its last run held the lock.
+ */
+const anchorBusySince = new WeakMap<JobContext, bigint>();
+
+/**
  * One anchoring run over every board, with the worker's clock as the bound
  * on the L1 node's. Each finding is logged; the job fails if any is an
  * election at risk of failing on its anchors, or a node to distrust. An
  * election naming another anchor, and a run that met another's lock, are
  * logged on every run but fail nothing, so a job failing means something to
- * act on.
+ * act on; runs meeting the lock without a break for longer than
+ * `anchorBusyLimit` fail it, since a worker that froze holding the lock
+ * keeps every run out and no other finding is made (T-49).
  */
 async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Promise<void> {
   if (ctx.anchor === undefined) throw new JobError("internal");
@@ -152,6 +161,12 @@ async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Prom
       ...(f.electionId === undefined ? {} : { election: hex(f.electionId) }),
       ...(f.segment === undefined ? {} : { segment: f.segment }),
     });
+  if (findings.some((f) => f.code === "anchor-busy")) {
+    const since = anchorBusySince.get(ctx) ?? localNow;
+    anchorBusySince.set(ctx, since);
+    if (localNow - since > anchorBusyLimit(ctx.anchor.clock))
+      throw new JobError("board-anchor-findings");
+  } else anchorBusySince.delete(ctx);
   if (findings.some((f) => f.code !== "anchor-unserved" && f.code !== "anchor-busy"))
     throw new JobError("board-anchor-findings");
 }

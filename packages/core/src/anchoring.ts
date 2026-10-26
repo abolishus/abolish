@@ -246,8 +246,7 @@ export type AnchorFindingCode =
   | "anchor-missed"
   /**
    * Another run held the anchoring lock, so this one did nothing. Expected
-   * while a deploy overlaps two workers; reported every run, so a run that
-   * never ends and keeps the lock is seen.
+   * while a deploy overlaps two workers.
    */
   | "anchor-busy";
 
@@ -268,6 +267,15 @@ export const MAX_L1_CLOCK_LEAD = 120n;
  * too late and reverts, it holds back none of its election's others.
  */
 export const ANCHOR_INCLUSION_MARGIN = 600n;
+
+/**
+ * How long, in seconds, runs may meet another's lock (`anchor-busy`) without
+ * a break before that is raised: a quarter of the anchor's deadline. An
+ * honest run lasts a few inclusions, so a holder past this has frozen with
+ * its connection open, and three quarters of each window remain for an
+ * operator to end its session (T-49).
+ */
+export const anchorBusyLimit = (clock: AnchoringClock): bigint => clock.deadline / 4n;
 
 export interface AnchorReport {
   readonly electionId: Uint8Array;
@@ -352,8 +360,10 @@ function checkClock(clock: AnchoringClock): void {
  * across processes (a deploy runs the old worker beside the new): a run's
  * call landing after a later run's could set the locator back a step (T-69),
  * and two runs would sign at the same Safe and executor nonce (T-49). A run
- * that meets the lock does nothing and reports `anchor-busy`. The pool needs
- * at least two connections.
+ * that meets the lock does nothing and reports `anchor-busy`; a caller
+ * seeing only that for longer than `anchorBusyLimit` allows must raise it,
+ * since a worker that froze holding the lock keeps every run out and no
+ * other finding is made. The pool needs at least two connections.
  */
 export async function anchorBoards(
   client: Sql,

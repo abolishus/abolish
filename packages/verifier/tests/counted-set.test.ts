@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  aggregateCell,
   countedExtent,
   decodeBoardEntry,
   encodeBoardEntry,
@@ -7,6 +8,7 @@ import {
   L1_REF_MARGIN,
   pinnedVersion,
   RECORD_TYPES,
+  tallyRules,
 } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
@@ -15,9 +17,12 @@ import {
   type CheckResult,
   countedSet,
   type CountedExtentInputs,
+  countedTally,
   parseBundle,
   verifyBundle,
 } from "../src/index.ts";
+import { readElection } from "../src/admission.ts";
+import { wholeOpeningPin } from "../src/counted-set.ts";
 import { decodeDefinition } from "../src/definition.ts";
 import { run, type TestHeader, toHex } from "./headers.ts";
 
@@ -234,5 +239,93 @@ describe("the counted set from the counted extent", { timeout: 60_000 }, () => {
     expect(() => countedSet({ ...base, entries: [...base.entries, Uint8Array.of(0)] })).toThrow(
       RangeError,
     );
+  });
+});
+
+// What the board operator judges a tally opening against (`countedTally`):
+// `countedSet`'s cells summed, the registered key set and the pinned
+// whole-opening version, undecided exactly where the set is.
+describe("the counted tally from the counted extent", { timeout: 60_000 }, () => {
+  const admitted = byId("admitted");
+  const afterClose = run(21_000_000n, [START - 12n, CLOSES + 12n]);
+
+  test("sums the decided set's cells, with the registered key set and the pin", () => {
+    const inputs = inputsOf(admitted, afterClose);
+    const result = countedTally(inputs);
+    if (!result.ok) return expect.fail(`undecided: ${JSON.stringify(result)}`);
+    const record = decodeDefinition(inputs.definition);
+    const set = countedSet(inputs);
+    if (!set.ok) return expect.fail("countedSet undecided");
+    const rules = tallyRules(record);
+    // Every ballot is rejected, so each cell sums nothing.
+    expect(result.aggregates).toEqual(set.cells.map(() => aggregateCell(rules, [])));
+    expect(result.election.definitionHash).toEqual(set.definitionHash);
+    expect(result.election.rules).toEqual(rules);
+    const read = readElection(inputs.definition, inputs.panel, inputs.entries);
+    if (!read.ok) return expect.fail("readElection refused");
+    expect(result.election.registered).toEqual(
+      read.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
+    );
+    expect(result.pinned).toBe(pinnedVersion(record.value, RECORD_TYPES.tallyOpening));
+  });
+
+  test("is undecided exactly where the counted set is", () => {
+    fc.assert(
+      fc.property(fc.bigInt({ min: OPENS, max: CLOSES + 100n }), (head) => {
+        const inputs = inputsOf(admitted, run(21_000_000n, [START - 12n, head]));
+        const set = countedSet(inputs);
+        const tally = countedTally(inputs);
+        if (set.ok) expect(tally.ok).toBe(true);
+        else expect(tally).toEqual(set);
+      }),
+      { numRuns },
+    );
+    const base = inputsOf(admitted, afterClose);
+    expect(countedTally({ ...base, entries: base.entries.slice(1) })).toEqual({
+      ok: false,
+      code: "ceremony-transcript-missing",
+    });
+  });
+});
+
+// The pin read off each definition vector's JSON value, not the decoder.
+describe("the whole-opening pin", () => {
+  interface DefinitionVector {
+    readonly id: string;
+    readonly value?: {
+      readonly author_keys?: readonly unknown[];
+      readonly profile: { readonly pins: readonly { record_type: string; version: string }[] };
+    };
+    readonly encoding?: string;
+  }
+  const vectors = ["election-definition.json", "election-definition-v6.json"].flatMap(
+    (name) => (read(name) as { readonly vectors: readonly DefinitionVector[] }).vectors,
+  );
+
+  test("is 1 or 2 as pinned, and none beside an author panel or for another pin", () => {
+    let read = 0;
+    const seen = new Set<string>();
+    for (const v of vectors) {
+      if (v.value === undefined || v.encoding === undefined) continue;
+      let record;
+      try {
+        record = decodeDefinition(hex(v.encoding));
+      } catch {
+        continue;
+      }
+      read++;
+      const pin = v.value.profile.pins.find((p) => Number(p.record_type) === 6);
+      const expected =
+        (v.value.author_keys?.length ?? 0) !== 0 || pin === undefined
+          ? undefined
+          : Number(pin.version) === 1 || Number(pin.version) === 2
+            ? Number(pin.version)
+            : undefined;
+      expect(wholeOpeningPin(record), v.id).toBe(expected);
+      seen.add(String(expected));
+    }
+    expect(read).toBeGreaterThan(10);
+    // Both a pin and its absence are among the vectors.
+    expect(seen).toEqual(new Set(["1", "undefined"]));
   });
 });

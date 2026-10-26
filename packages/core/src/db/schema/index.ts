@@ -13,6 +13,7 @@ import {
   boardEntries,
   boardShareReceipts,
   boardSubtrees,
+  boardTallyOpenings,
 } from "./board.ts";
 import { electionDefinitions, electionRegistrations, electionSchedules } from "./definitions.ts";
 import { displayTexts, displayTextSearch } from "./display-texts.ts";
@@ -105,6 +106,7 @@ export {
   boardEntries,
   boardShareReceipts,
   boardSubtrees,
+  boardTallyOpenings,
   ceremonyApprovals,
   ceremonyMessages,
   ceremonyRuns,
@@ -159,6 +161,7 @@ export const TABLE_CLASSES = {
     "board_entries",
     "board_share_receipts",
     "board_subtrees",
+    "board_tally_openings",
     "election_definitions",
     "election_registrations",
     "election_schedules",

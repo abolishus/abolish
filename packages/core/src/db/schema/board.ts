@@ -82,6 +82,25 @@ export const boardShareReceipts = pgTable(
   ],
 );
 
+// Drizzle view of migrations/0045_board_tally_openings.sql: each tally
+// opening the operator boarded, by the cell it opens and the seat its
+// signature attributes it to, so at most one per cell and seat is boarded
+// (docs/spec/tally.md, Opening record, Boarding; T-17, T-52). Append-only
+// like the board.
+export const boardTallyOpenings = pgTable(
+  "board_tally_openings",
+  {
+    electionId: bytea("election_id").notNull(),
+    cell: smallint("cell").notNull(),
+    seat: smallint("seat").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.electionId, t.cell, t.seat] }),
+    unique().on(t.electionId, t.idx),
+  ],
+);
+
 // Drizzle view of migrations/0009_board_checkpoints.sql: each checkpoint the
 // anchoring job took, append-only like the board; taking one fences its
 // segment (T-24).

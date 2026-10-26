@@ -2,11 +2,12 @@
 // docs/spec/verifier.md, Availability): whether each panel's threshold of
 // seats attested, through the L2 contract path, that it held the board an
 // election's result rests on, before any result existed. It reads only L1
-// (the counted checkpoints) and the board contract's events, replayed
-// against its event accumulator proven under an L2 output root (the
-// bundle's, or an archived record's once no L2 node serves it), never the
-// board copy, so a withheld board fails here rather than leaving the
-// election unverifiable for good (T-24, T-25, T-53, T-54;
+// (the counted checkpoints) and the board contract's events (the bundle's,
+// or the archive's contract-event runs once no L2 node serves them),
+// replayed against its event accumulator proven under an L2 output root
+// (the bundle's, or an archived record's), never the board copy, so a
+// withheld board fails here rather than leaving the election unverifiable
+// for good (T-24, T-25, T-53, T-54;
 // 0029-board-data-availability).
 //
 // Only the ballot extent is decided. The counted extent's point needs `t_S`,
@@ -108,6 +109,13 @@ export interface AvailabilityInputs {
    * own proof doesn't hold, or is before `t_A` and earlier than it.
    */
   readonly archived?: ArchivedAccumulator;
+  /**
+   * The board's events from the permanent archive's contract-event runs,
+   * from index 0, where 4.4's replay read them (docs/spec/verifier.md,
+   * Contract events, step 6): replayed in place of the bundle's where these
+   * don't reach the proven count and those do.
+   */
+  readonly archivedEvents?: readonly ContractEventRecord[];
 }
 
 export interface AvailabilityOutcome {
@@ -153,6 +161,8 @@ export interface AvailabilityReport {
       readonly outputRoot: string;
     };
   };
+  /** Where the events replayed came from: the bundle's `l2Board`, or the archive's runs. */
+  readonly events: "bundle" | "archive";
   readonly ballotExtent: {
     /** `t_A`. */
     readonly deadline: string;
@@ -229,16 +239,32 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   if (used !== undefined) proven = used.accumulator;
   if (proven === undefined)
     return { row: { status: "unverifiable", code: failed as OutputRootErrorCode, at: {} } };
-  const records: ContractEventRecord[] = [];
-  for (const [at, bytes] of inputs.l2.events.entries())
-    try {
-      records.push(decodeContractEvent(bytes, eventVersion));
-    } catch (e) {
-      if (!(e instanceof DecodeError)) throw e;
-      return {
-        row: { status: "unverifiable", code: "decode", at: { event: at, decodeError: e.code } },
-      };
-    }
+  // The bundle's events where they reach the proven count, else the
+  // archive's where those do: the replay against the proof is what holds
+  // either to the board's history, so a run's events count for no more
+  // than the proof they replay to (T-53, T-71). Where neither reaches it,
+  // the bundle's are replayed as they are.
+  const { archivedEvents } = inputs;
+  const fromArchive =
+    archivedEvents !== undefined &&
+    BigInt(inputs.l2.events.length) < proven.count &&
+    BigInt(archivedEvents.length) >= proven.count;
+  // Only the first `count`: the proof fixes them, and the events the runs
+  // give past it are the archive's word, which mustn't leave unverifiable
+  // a point the proven prefix decides.
+  const records: ContractEventRecord[] = fromArchive
+    ? archivedEvents.slice(0, Number(proven.count))
+    : [];
+  if (!fromArchive)
+    for (const [at, bytes] of inputs.l2.events.entries())
+      try {
+        records.push(decodeContractEvent(bytes, eventVersion));
+      } catch (e) {
+        if (!(e instanceof DecodeError)) throw e;
+        return {
+          row: { status: "unverifiable", code: "decode", at: { event: at, decodeError: e.code } },
+        };
+      }
   // The replay takes a counted log's 1 to 4 topics on trust; one with none
   // isn't any log our contracts emit, so the archive isn't the board's.
   if (records.slice(0, Number(proven.count)).some((r) => r.topics.length === 0))
@@ -319,6 +345,7 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
         },
       }),
     },
+    events: fromArchive ? "archive" : "bundle",
     ballotExtent: {
       deadline: tA.toString(),
       // `C_A` and every code judged against it are fixed only once held.

@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import {
   type ArchiveManifestV2,
+  type ArchiveManifestV3,
+  encodeAvailabilityComplaint,
+  encodeContractEventRun,
+  type RunEvent,
+  signAvailabilityComplaint,
   copyCheckpoints,
   decodeBoardEntry,
   encodeArchiveLocator,
@@ -16,6 +21,8 @@ import {
   replayEventAccumulator,
   signDestructionStatement,
 } from "@abolishus/crypto";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT_BLOCKS,
@@ -421,9 +428,9 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
       at: {},
     });
     const r = verifyBundle((await readArchive(withArchive(a.locator), a.source)).bundle);
-    // 4.6 asks for the latest record only; 4.4's replay then reads every
-    // record of the board, from the earliest block up.
-    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(2)), toHex(tx(1)), toHex(tx(2))]);
+    // 4.4's replay reads every record of the board, from the earliest block
+    // up, and then 4.6 asks for the latest record only.
+    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(1)), toHex(tx(2)), toHex(tx(2))]);
     // No seat attested, but the record's output root is its writer's word
     // until P1-19 reads its game: shown, never failed (T-71).
     expect(row(r, "4.6")).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
@@ -514,6 +521,125 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
       await expect(
         readArchive(withArchive(honest.locator), honest.source, { [option]: 0 }),
       ).rejects.toThrow(RangeError);
+  });
+
+  test("4.6 replays the board's archived events where the bundle carries none", async () => {
+    // One complaint by seat 1 at L2 block 1,500, archived as a run, and a
+    // record at block 3,000 counting it. The bundle's own proof is the empty
+    // board before t_A and its `events` are empty.
+    const complaint = encodeAvailabilityComplaint(
+      signAvailabilityComplaint(new Uint8Array(32).fill(0x51), {
+        definition_hash: new Uint8Array(32).fill(0xd1),
+        panel: 1,
+        seat: 1,
+        point: 1,
+        checkpoint_hash: new Uint8Array(32),
+        cid: objectCid(Uint8Array.of(1)),
+      }),
+    );
+    const padded = new Uint8Array(Math.ceil(complaint.length / 32) * 32);
+    padded.set(complaint);
+    const event: RunEvent = {
+      l2_block: 1_500n,
+      l2_timestamp: late + 1_500n,
+      topics: [
+        keccak_256(utf8ToBytes("AvailabilityComplaintSubmitted(bytes32,uint8,bytes)")),
+        new Uint8Array(32).fill(0xd1),
+        word(1n),
+      ],
+      data: Uint8Array.from([...word(32n), ...word(BigInt(complaint.length)), ...padded]),
+    };
+    const { accumulator } = replayEventAccumulator(definition.l2_chain_id, definition.board, [
+      {
+        block: event.l2_block,
+        timestamp: event.l2_timestamp,
+        topics: event.topics,
+        data: event.data,
+      },
+    ]);
+    const e = l2State(
+      [
+        {
+          address: definition.board,
+          storage: [
+            [word(ACCUMULATOR_SLOT), accumulator],
+            [word(ACCUMULATOR_SLOT + 1n), word(1n)],
+          ],
+        },
+      ],
+      3_000n,
+      late + 3_000n,
+    ).evidence;
+    const record = encodeContractEventEvidence({
+      l2_chain_id: definition.l2_chain_id,
+      contract: definition.board,
+      game_index: 7n,
+      game: new Uint8Array(20).fill(0x9a),
+      output_root: e.outputRoot,
+      message_passer_storage_root: e.messagePasserStorageRoot,
+      header: e.header,
+      nodes: [...new Map(e.nodes.map((n) => [toHex(n), n])).values()].sort(bytewise),
+    });
+    const runBytes = encodeContractEventRun({
+      l2_chain_id: definition.l2_chain_id,
+      contract: definition.board,
+      first: 0n,
+      events: [event],
+    });
+    const manifest = encodeArchiveManifest(
+      {
+        l1_chain_id: definition.l1_chain_id,
+        anchor: definition.l1_anchor,
+        sequence: 0n,
+        objects: [],
+        links: [],
+        evidence: [
+          {
+            contract: definition.board,
+            l2_block: 3_000n,
+            cid: objectCid(record),
+            transaction: tx(1),
+          },
+        ],
+        runs: [
+          {
+            contract: definition.board,
+            first: 0n,
+            count: 1,
+            cid: objectCid(runBytes),
+            transaction: tx(2),
+          },
+        ],
+      } satisfies ArchiveManifestV3,
+      3,
+    );
+    const held = new Map([
+      [toHex(tx(0xee)), objectCar(manifest)],
+      [toHex(tx(1)), objectCar(record)],
+      [toHex(tx(2)), objectCar(runBytes)],
+    ]);
+    const source = async (t: Uint8Array) => {
+      const car = held.get(toHex(t));
+      return car === undefined ? [] : [car];
+    };
+    const locator = encodeArchiveLocator(objectCid(manifest), tx(0xee), 3);
+    const r = verifyBundle((await readArchive(withArchive(locator), source)).bundle);
+    // The record counts one event, more than the bundle carries, and the
+    // runs give it: taken, never passed over with `evidence-count`.
+    expect(evidenceOf(r)).toMatchObject({ findings: [] });
+    expect(r.availability).toMatchObject({
+      proven: { block: "3000", count: "1", source: "archive" },
+      events: "archive",
+      records: [{ at: 0, kind: "complaint" }],
+    });
+    // No seat attested, on the archive's word alone: shown, never failed (T-71).
+    expect(row(r, "4.6")).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
+    // Without the run, the record is passed over and the bundle's proof is pending.
+    const noRun = async (t: Uint8Array) => (toHex(t) === toHex(tx(2)) ? [] : source(t));
+    const short = verifyBundle((await readArchive(withArchive(locator), noRun)).bundle);
+    expect(evidenceOf(short)?.findings).toMatchObject([{ code: "evidence-count", count: "1" }]);
+    expect(short.availability).toMatchObject({ proven: { source: "bundle" }, events: "bundle" });
+    expect(row(short, "4.6")).toMatchObject({ code: "availability-pending" });
   });
 
   test("a format-5 bundle's archive read keeps no evidence for 4.6", async () => {

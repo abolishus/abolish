@@ -694,3 +694,153 @@ describe("the board's accumulator from the archive", { timeout: 120_000 }, () =>
     expect(r.row).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
   });
 });
+
+describe("the board's events from the archive", { timeout: 120_000 }, () => {
+  const sent = [attest(1), attest(2, T_A)];
+  const late = board(sent, { timestamp: T_A + 10n });
+  // The board's events as 4.4's replay reads them from its runs.
+  const runs = late.events.map((b) => decodeContractEvent(b, 8));
+  const none = { ...late, events: [] };
+
+  test("they stand in for bundle events that don't reach the proven count", () => {
+    expect(availabilityChecks(inputs(sent, { l2: none })).row).toEqual({
+      status: "unverifiable",
+      code: "accumulator",
+      at: {},
+    });
+    const r = availabilityChecks(inputs(sent, { l2: none, archivedEvents: runs }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(r.report?.events).toBe("archive");
+    expect(r.report?.proven.source).toBe("bundle");
+    expect(r.report?.ballotExtent.panels?.[0]).toMatchObject({ holds: true, attested: [1, 2] });
+    // A bundle with some of the events, short of the count, is passed over whole.
+    const some = { ...late, events: late.events.slice(0, 1) };
+    expect(
+      availabilityChecks(inputs(sent, { l2: some, archivedEvents: runs })).report?.events,
+    ).toBe("archive");
+  });
+
+  test("replayed to the bundle's proof, they can fail the ballot extent", () => {
+    // The bundle's root is the run's input, as it is for the bundle's own
+    // events: the archive's events replay to it, so they are the board's.
+    const one = [attest(1)];
+    const proven = board(one, { timestamp: T_A + 10n });
+    const r = availabilityChecks(
+      inputs(one, {
+        l2: { ...proven, events: [] },
+        archivedEvents: proven.events.map((b) => decodeContractEvent(b, 8)),
+      }),
+    );
+    expect(r.row).toEqual({
+      status: "fail",
+      code: "unavailable",
+      at: { point: AVAILABILITY_POINTS.ballotExtent, panel: SEAT_PANELS.default },
+    });
+    expect(r.report?.events).toBe("archive");
+  });
+
+  test("replayed to an archived record, they show the point held but never fail it", () => {
+    const one = [attest(1)];
+    const early = board(one, { timestamp: T_A - 1n });
+    const proven = board(one, { timestamp: T_A + 10n });
+    const r = availabilityChecks(
+      inputs(one, {
+        l2: { ...early, events: [] },
+        archived: proven.archived(9),
+        archivedEvents: proven.events.map((b) => decodeContractEvent(b, 8)),
+        now: T_A + 10n,
+      }),
+    );
+    expect(r.row).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
+    expect(r.report?.events).toBe("archive");
+    expect(r.report?.proven.source).toBe("archive");
+  });
+
+  test("bundle events that reach the count are kept, whatever the archive's", () => {
+    const forged = runs.map((r) => ({ ...r, data: r.data.slice(1) }));
+    const r = availabilityChecks(inputs(sent, { archivedEvents: forged }));
+    expect(r.report?.events).toBe("bundle");
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
+
+  test("they are held to the proof as the bundle's are", () => {
+    // An event's data edited: the accumulator doesn't replay.
+    const edited = runs.map((r, i) =>
+      i === 0 ? { ...r, data: Uint8Array.from(r.data, (b, j) => (j === 70 ? b ^ 1 : b)) } : r,
+    );
+    expect(availabilityChecks(inputs(sent, { l2: none, archivedEvents: edited })).row).toEqual({
+      status: "unverifiable",
+      code: "accumulator",
+      at: {},
+    });
+    // Renumbered: rule 1.
+    const renumbered = runs.map((r) => ({ ...r, n: r.n + 1n }));
+    expect(availabilityChecks(inputs(sent, { l2: none, archivedEvents: renumbered })).row).toEqual({
+      status: "unverifiable",
+      code: "index",
+      at: {},
+    });
+    // One with no topic, which no log of ours has.
+    const anonymous = runs.map((r, i) => (i === 1 ? { ...r, topics: [] } : r));
+    expect(availabilityChecks(inputs(sent, { l2: none, archivedEvents: anonymous })).row).toEqual({
+      status: "unverifiable",
+      code: "event-topics",
+      at: {},
+    });
+    // Another contract's: the replay doesn't read the record's contract field, so the event check refuses it.
+    const foreign = runs.map((r) => ({ ...r, contract: CONTRACTS.groupRegistry }));
+    expect(availabilityChecks(inputs(sent, { l2: none, archivedEvents: foreign })).row).toEqual({
+      status: "unverifiable",
+      code: "unknown-event",
+      at: {},
+    });
+  });
+
+  test("an archived event past the proven count changes nothing", () => {
+    // The proof fixes the first `count`; one the runs give after them, here
+    // in a block the proof already covers, is the archive's word alone.
+    const last = runs[runs.length - 1] as (typeof runs)[number];
+    const junk = { ...last, n: last.n + 1n };
+    const r = availabilityChecks(inputs(sent, { l2: none, archivedEvents: [...runs, junk] }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(r.report?.events).toBe("archive");
+  });
+
+  test("bundle events that don't decode aren't read when the archive's are taken", () => {
+    const garbage = { ...late, events: [Uint8Array.of(0xff)] };
+    expect(availabilityChecks(inputs(sent, { l2: garbage })).row).toMatchObject({
+      code: "decode",
+    });
+    expect(availabilityChecks(inputs(sent, { l2: garbage, archivedEvents: runs })).row).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
+  test("where either source reaches the count, the row is the whole bundle's", () => {
+    const whole = availabilityChecks(inputs(sent, { l2: late }));
+    fc.assert(
+      fc.property(
+        fc.nat({ max: runs.length }),
+        fc.option(fc.nat({ max: runs.length }), { nil: undefined }),
+        (bundleCut, archiveCut) => {
+          const r = availabilityChecks(
+            inputs(sent, {
+              l2: { ...late, events: late.events.slice(0, bundleCut) },
+              ...(archiveCut !== undefined && { archivedEvents: runs.slice(0, archiveCut) }),
+            }),
+          );
+          const reaches = bundleCut === runs.length || archiveCut === runs.length;
+          if (!reaches) {
+            expect(r.row).toMatchObject({ code: "accumulator" });
+            return;
+          }
+          expect(r.row).toEqual(whole.row);
+          expect(r.report?.events).toBe(bundleCut === runs.length ? "bundle" : "archive");
+          expect({ ...r.report, events: "bundle" }).toEqual(whole.report);
+        },
+      ),
+      { numRuns },
+    );
+  });
+});

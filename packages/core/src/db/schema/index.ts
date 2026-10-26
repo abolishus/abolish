@@ -6,6 +6,7 @@ import {
   accountVerifications,
 } from "./accounts.ts";
 import { accountAppeals, accountModerators } from "./appeals.ts";
+import { archiveManifests, archiveObjects, archiveTransactions } from "./archive.ts";
 import {
   boardBallotHashes,
   boardBallotKeys,
@@ -100,6 +101,9 @@ export {
   accountTokens,
   accountUsers,
   accountVerifications,
+  archiveManifests,
+  archiveObjects,
+  archiveTransactions,
   boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,
@@ -208,6 +212,9 @@ export const TABLE_CLASSES = {
     "posting_spend",
   ],
   operational: [
+    "archive_manifests",
+    "archive_objects",
+    "archive_transactions",
     "ceremony_approvals",
     "ceremony_messages",
     "ceremony_runs",

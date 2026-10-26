@@ -101,7 +101,7 @@ def event_check(rec, contracts, definitions):
         return v10.event_check(rec, contracts, definitions)
     if len(topics) != 1 + len(INDEXED["RelayedRollingBallotSubmitted"]):
         return "event-topics"
-    # Four uint64 words, the root's word, the record's offset 0xc0: seven head words.
+    # Four uint64 words, the root's word, the record's offset 0xc0: six head words.
     body = abi_tail(data, 6, 5, 1)
     if body is None:
         return "event-data"

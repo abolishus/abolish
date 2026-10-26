@@ -210,6 +210,8 @@ function release(c: Case, r: Release, opening: string): Release {
 const start = epoch - 4000n;
 const historyEvent = fc.record({
   gap: fc.integer({ min: 0, max: 5000 }),
+  // -1, 0 or 1: the event's timestamp moved to a boundary τ_n plus this.
+  onBoundary: fc.option(fc.integer({ min: -1, max: 1 })),
   group: fc.constantFrom("1", "2", "9"),
   add: fc.array(fc.integer({ min: 1, max: 6 }), { maxLength: 3 }),
   remove: fc.boolean(),
@@ -218,17 +220,33 @@ const historyEvent = fc.record({
 /**
  * A strictly replayable history of two listed groups and one unlisted one
  * from `start`, with commitments that repeat within and across groups, and
- * removals of the oldest live member.
+ * removals of the oldest live member; several events may share a block, and
+ * some fall on, just before or just after a boundary.
  */
 function history(
-  raw: readonly { gap: number; group: string; add: number[]; remove: boolean }[],
+  raw: readonly {
+    gap: number;
+    onBoundary: number | null;
+    group: string;
+    add: number[];
+    remove: boolean;
+  }[],
 ): RollingEvent[] {
   const events: RollingEvent[] = [];
   const live = new Map<string, number[]>();
   const size = new Map<string, number>();
   let ts = start;
-  raw.forEach((r, block) => {
-    ts += BigInt(r.gap);
+  let block = 0;
+  raw.forEach((r) => {
+    // A gap of 0 keeps the block, so several events share one.
+    if (r.gap > 0) {
+      block++;
+      ts += BigInt(r.gap);
+      if (r.onBoundary !== null) {
+        const snapped = tau(boundaryAtOrBefore(ts)) + BigInt(r.onBoundary);
+        if (snapped > BigInt(events.at(-1)?.timestamp ?? start)) ts = snapped;
+      }
+    }
     const members = live.get(r.group) ?? [];
     const base = { block: String(block), timestamp: String(ts), group: r.group };
     if (r.remove && members.length > 0) {

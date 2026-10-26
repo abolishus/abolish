@@ -61,7 +61,8 @@ export function rootStepWindow(step: bigint, l1Timestamp: bigint): RootStepWindo
 
 /**
  * One event of the group registry, in chain order (L2 block number, then log
- * index), after its group's strict replay ([[contracts]], Group registry,
+ * index; the scans check the block numbers and timestamps, and the order
+ * within a block is the caller's, from the event accumulator), after its group's strict replay ([[contracts]], Group registry,
  * Verification): a `MembersAdded` or `SelfPaidMemberAdded` with its
  * commitments in record order, or a `MembersRemoved` with the member indices
  * it names. A listed Tier 1 group's events are the additions [[vouching]]
@@ -175,12 +176,12 @@ export class RollingTierTree {
       const raw = event.indices;
       if (!Array.isArray(raw)) throw new TypeError("event.indices: expected an array");
       const indices = raw.slice();
-      const zeroed: number[] = [];
+      const zeroed = new Set<number>();
       for (const i of indices) {
         const at = typeof i === "bigint" && i >= 0n ? members[Number(i)] : undefined;
-        if (at === undefined || this.#leaves[at] === 0n || zeroed.includes(at))
+        if (at === undefined || this.#leaves[at] === 0n || zeroed.has(at))
           throw new RangeError("event.indices: a removal the strict replay refuses");
-        zeroed.push(at);
+        zeroed.add(at);
       }
       for (const at of zeroed) {
         const c = this.#leaves[at] as bigint; // checked nonzero above
@@ -190,7 +191,7 @@ export class RollingTierTree {
         this.#leaves[at] = 0n;
         this.#tree.remove(at);
       }
-      return { appended: [], zeroed };
+      return { appended: [], zeroed: [...zeroed] };
     }
     throw new TypeError('event.kind: expected "add" or "remove"');
   }

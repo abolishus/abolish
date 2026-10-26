@@ -1,9 +1,9 @@
 // The rolling tier tree of docs/spec/membership.md (Rolling tier tree, Root
-// clock and steps), read from the spec for the vector tests: packages/crypto
-// has no rolling tree yet (P2-17 part 3), so the leaves and the clock come
-// from here and only the tier tree's root from the code under test.
+// clock and steps), read from the spec as a full rebuild per step: the model
+// packages/crypto's incremental tree (src/rolling-tier-tree.ts) is checked
+// against, and the leaves the ballot records' tests prove against.
 
-import { PARAMETERS } from "../src/index.ts";
+import { PARAMETERS, type RollingTierEvent } from "../src/index.ts";
 
 export interface RollingEvent {
   readonly block: string;
@@ -42,3 +42,15 @@ export const memberCount = (leaves: readonly bigint[]) =>
 /** Boundary `n` of the root clock, in UNIX seconds. */
 export const tau = (n: bigint) =>
   n * BigInt(PARAMETERS.ROOT_PERIOD) + BigInt(PARAMETERS.ROOT_OFFSET);
+
+/** A vector file's event as `packages/crypto` takes it. */
+export const tierEvent = (e: RollingEvent): RollingTierEvent => {
+  const at = {
+    blockNumber: BigInt(e.block),
+    timestamp: BigInt(e.timestamp),
+    groupId: BigInt(e.group),
+  };
+  return e.remove === undefined
+    ? { ...at, kind: "add", commitments: (e.add ?? []).map(BigInt) }
+    : { ...at, kind: "remove", indices: e.remove.map(BigInt) };
+};

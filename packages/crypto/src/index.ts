@@ -472,6 +472,23 @@ export {
   type TierMembershipErrorCode,
 } from "./tier-membership.ts";
 export {
+  type AnchoringClock,
+  type RollingReleaseInput,
+  type RollingStep,
+  type RollingTierChange,
+  type RollingTierContext,
+  type RollingTierEvent,
+  type RollingTierReport,
+  rollingTierReport,
+  type RollingTierState,
+  rollingTierSteps,
+  RollingTierTree,
+  rootClockBoundary,
+  rootClockStepAtOrBefore,
+  type RootStepWindow,
+  rootStepWindow,
+} from "./rolling-tier-tree.ts";
+export {
   replayTierGroup,
   TIER_TREE_MAX_LEAVES,
   type TierGroupEvent,

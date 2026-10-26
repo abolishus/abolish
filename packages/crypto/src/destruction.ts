@@ -293,6 +293,79 @@ export function checkDestruction(
   return { from, seats, duplicates, unattributed, stray, rejected };
 }
 
+/**
+ * The Boarding rule's verdict on one destruction statement: the seat its
+ * signature attributes it to, or why it is refused: `decode` for a payload
+ * that doesn't decode strictly, `destruction-stray` for one naming another
+ * definition, `destruction-unattributed` for one no registered seat's
+ * signature attributes, and `destruction-repeat` when a statement attributed
+ * to the same seat is already boarded, found at `of`.
+ */
+export type DestructionBoarding =
+  | { readonly ok: true; readonly signer: number }
+  | { readonly ok: false; readonly code: "decode"; readonly error: DecodeErrorCode }
+  | { readonly ok: false; readonly code: "destruction-stray" | "destruction-unattributed" }
+  | { readonly ok: false; readonly code: "destruction-repeat"; readonly of: number };
+
+/**
+ * The board operator's Boarding rule for one destruction statement under
+ * version 1 (docs/spec/tally.md, Destruction, Boarding): `payload` is boarded
+ * only if it decodes strictly, names this election's definition, its
+ * signature attributes it to a registered seat, and no statement attributed
+ * to that seat is among `boarded`, the destruction-statement payloads already
+ * on the board in board order (`of` is a position in it). Timing is never
+ * judged: a statement boarded early is the seat's to explain, and 8.5 reports
+ * it.
+ *
+ * Every statement it passes is fixed but for the seat's ECDSA nonce, at most
+ * one per seat, so the board carries no other chosen bytes (T-17); any
+ * statement this refuses, 8.5 would list as rejected, stray, unattributed or
+ * a duplicate against the operator. A seat signs one message per election,
+ * so a second attributed statement is always the same signed message: its
+ * caller should answer `destruction-repeat` with the entry at `of`, since a
+ * node resends its statement until it is boarded.
+ */
+export function destructionBoarding(
+  election: DestructionElection,
+  boarded: readonly Uint8Array[],
+  payload: Uint8Array,
+  pinned: 1,
+): DestructionBoarding {
+  if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
+    throw new RangeError("destructionBoarding: definitionHash must be 32 bytes");
+  let statement: DestructionStatement;
+  try {
+    statement = decodeDestructionStatement(payload, pinned);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return { ok: false, code: "decode", error: e.code };
+  }
+  if (!sameBytes(statement.definition_hash, election.definitionHash))
+    return { ok: false, code: "destruction-stray" };
+  const signer = attribution(election, statement);
+  if (signer === null) return { ok: false, code: "destruction-unattributed" };
+  for (const [at, earlier] of boarded.entries()) {
+    let s: DestructionStatement;
+    try {
+      s = decodeDestructionStatement(earlier, pinned);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      continue;
+    }
+    // Only a statement naming this definition and seat can be the seat's, so
+    // only those cost a signature check; one anyone wrote naming the seat
+    // without its signature never keeps the seat's own off the board (T-29,
+    // T-52, T-54).
+    if (
+      s.signer === signer &&
+      sameBytes(s.definition_hash, election.definitionHash) &&
+      attribution(election, s) === signer
+    )
+      return { ok: false, code: "destruction-repeat", of: at };
+  }
+  return { ok: true, signer };
+}
+
 // --- Version 2: both panels' seats ----------------------------------------------
 
 type Registered = DestructionElection["registered"];

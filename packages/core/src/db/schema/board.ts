@@ -101,6 +101,20 @@ export const boardTallyOpenings = pgTable(
   ],
 );
 
+// Drizzle view of migrations/0047_board_destruction_statements.sql: each
+// destruction statement the operator boarded, by the seat its signature
+// attributes it to, so at most one per seat is boarded (docs/spec/tally.md,
+// Destruction, Boarding; T-17, T-52). Append-only like the board.
+export const boardDestructionStatements = pgTable(
+  "board_destruction_statements",
+  {
+    electionId: bytea("election_id").notNull(),
+    seat: smallint("seat").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.electionId, t.seat] }), unique().on(t.electionId, t.idx)],
+);
+
 // Drizzle view of migrations/0009_board_checkpoints.sql: each checkpoint the
 // anchoring job took, append-only like the board; taking one fences its
 // segment (T-24).

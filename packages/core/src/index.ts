@@ -80,6 +80,7 @@ export {
   readBoard,
   readBoardRange,
   readBoardedEntry,
+  readBoardedDestructions,
   readBoardedOpenings,
   readEntryAt,
   readConsistencyProof,
@@ -188,6 +189,7 @@ export {
   boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,
+  boardDestructionStatements,
   boardEntries,
   boardShareReceipts,
   boardSubtrees,
@@ -771,6 +773,14 @@ export {
   vapidPublicKey,
   type WebPushOptions,
 } from "./web-push.ts";
+export {
+  DestructionBoardings,
+  type DestructionBoardingOptions,
+  DestructionError,
+  type DestructionErrorCode,
+  type DestructionRejectionCode,
+  destructionTargets,
+} from "./destruction-boarding.ts";
 export {
   ANCHOR_FINALITY_MARGIN,
   anchoredCountedTally,

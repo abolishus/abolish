@@ -222,12 +222,14 @@ describe("appendEntry", () => {
     ];
     for (const [version, types] of allowed) {
       const id = await newElection(app, version);
+      let size = 0n;
       for (const type of [0x000c, 0x000e, 0x000f]) {
         const append = appendEntry(app, id, 0, record(type));
         if (!types.includes(type)) expect(await refusedWith(append)).toBe("invalid-entry");
-        // The table's CHECK takes share receipts, whose writer exists
-        // (migrations/0027), and still refuses the other types (Known-weak).
-        else if (type === 0x000c) expect((await append).index).toBe(0n);
+        // The table's CHECK takes share receipts and destruction statements,
+        // whose writers exist (migrations/0027, 0047), and still refuses
+        // complaints (Known-weak).
+        else if (type !== 0x000e) expect((await append).index).toBe(size++);
         else await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
       }
     }

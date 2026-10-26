@@ -137,6 +137,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // independent trustees.
   await expect(words).toMatch(/sealed, posted and counted the same way as a referendum\./);
   await expect(words).not.toMatch(/same care/);
+  // Step 3 says what step 1's detail does: each seat holds a share of every
+  // sealed answer. There is no key split among the seats to hold a share of.
+  await expect(words).toMatch(/each holding one share of every sealed answer,/);
+  await expect(words).not.toMatch(/share of the key/);
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);

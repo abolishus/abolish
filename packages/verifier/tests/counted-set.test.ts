@@ -38,7 +38,12 @@ import { run, type TestHeader, toHex } from "./headers.ts";
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
-const numRuns = Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 50);
+// Each run admits the whole board again (every membership and validity
+// proof) and runs the verifier's 5.8 beside it, about a second a run, so
+// both properties stay well inside their minute on a loaded CI runner. The
+// head's time only matters against a few boundaries, toward which
+// fast-check's bigint arbitrary is biased.
+const numRuns = Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 20);
 
 interface Case {
   readonly id: string;

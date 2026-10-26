@@ -128,6 +128,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const words = canvas.getByRole("main").textContent ?? "";
   await expect(words.match(/\b(\w+) seats?\b/)?.[1]).toBe("trustee");
   await expect(words).not.toMatch(/poll's trustees/);
+  // While the poll is open the board shows an answer is there, not that it
+  // was counted: step 3 says the count is opened only after the poll closes.
+  await expect(words).toMatch(/find yours there and see that it stays there\./);
+  await expect(words).not.toMatch(/it was counted/);
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);

@@ -1,124 +1,23 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
-  DecodeError,
-  ds,
-  H,
   PARAMETERS,
+  rollingNullifierScope,
   semaphoreField,
   tierTreeRoot,
   tierTreeZeros,
-  UNPINNED,
 } from "../src/index.ts";
 import { memberCount, type RollingEvent, rollingLeaves, tau } from "./rolling-tree.ts";
-import { buildSchema, hex, readVectorFile, SPEC_VECTORS, type VectorFile } from "./spec-vectors.ts";
+import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/election-definition-v7.json and rolling-tier-tree.json,
-// printed by scripts/rolling-electorate-vectors.py (P2-17 part 1).
-// packages/crypto has no codec or rolling tree for version 7 yet (part 3), so,
-// as for version 6, these tests decode the definitions with codecs built from
-// the file's own type descriptors, beside version 6's, so a record labelled
-// with the other version reads that layout (T-31, T-36), and read the rolling
-// tier tree, the root clock and the rolling scope from docs/spec/membership.md
-// directly, with only the tier tree's root taken from packages/crypto.
+// docs/spec/vectors/rolling-tier-tree.json, printed by
+// scripts/rolling-electorate-vectors.py (P2-17 part 1). The rolling scope is
+// packages/crypto's (part 3a; the definition's vectors are in
+// definition-v7-vectors.test.ts). packages/crypto has no rolling tree yet
+// (part 3b), so these tests read the rolling tier tree and the root clock from
+// docs/spec/membership.md directly, with only the tier tree's root taken from
+// packages/crypto.
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
-
-const rollingScope = (definitionHash: Uint8Array, tier: number) =>
-  H(ds("abolish/v1/rolling-nullifier-scope", Uint8Array.from([...definitionHash, tier])));
-
-type V7File = VectorFile & { readonly tags: { readonly rollingScope: string } };
-const file = readVectorFile("election-definition-v7.json") as V7File;
-
-function decodeError(f: () => unknown): string | undefined {
-  try {
-    f();
-  } catch (e) {
-    if (e instanceof DecodeError) return e.code;
-    throw e;
-  }
-  return undefined;
-}
-
-describe("election definition version 7 (docs/spec/election-definition.md, Layout (version 7))", () => {
-  const v6 = readVectorFile("election-definition-v6.json");
-  const { schema, type } = buildSchema({
-    ...file,
-    types: { ...v6.types, ...file.types },
-    vectors: [...file.vectors, ...v6.vectors],
-  });
-  const { recordType } = type(file.vectors[0]!.type); // the file has vectors
-
-  // Decoding, steps 1 and 2: strictly with no pin, then the record's own profile pin.
-  const decode = (bytes: Uint8Array) => {
-    const record = schema.decode(recordType, bytes, UNPINNED);
-    const pins = (
-      record.value as { profile: { pins: { record_type: number; version: number }[] } }
-    ).profile.pins.filter((p) => p.record_type === 1);
-    if (pins.length !== 1 || pins[0]!.version !== record.version)
-      throw new DecodeError("profile-mismatch", 0);
-    return record;
-  };
-
-  test("has unique ids, exactly one of value or error on each vector, and the tag", () => {
-    expect(new Set(file.vectors.map((v) => v.id)).size).toBe(file.vectors.length);
-    for (const v of file.vectors) expect("value" in v !== "error" in v).toBe(true);
-    expect(file.tags.rollingScope).toBe("abolish/v1/rolling-nullifier-scope");
-  });
-
-  const valid = file.vectors.filter((v) => "value" in v).map((v) => [v.id, v] as const);
-  const invalid = file.vectors.filter((v) => "error" in v).map((v) => [v.id, v] as const);
-
-  test.each(valid)("%s decodes as version 7, re-encodes and hashes", (_id, v) => {
-    const record = decode(hex(v.encoding));
-    expect(record.version).toBe(7);
-    expect(record.value).toEqual(type(v.type).built.fromJson(v.value));
-    expect(toHex(schema.encode(recordType, 7, record.value as never))).toBe(v.encoding);
-    const hash = H(ds("abolish/v1/election-definition", hex(v.encoding)));
-    expect(toHex(hash)).toBe(v.hash);
-    const stubHash = (stub: object) =>
-      toHex(H(ds("abolish/v1/election-stub", schema.encode(recordType, 7, stub as never))));
-    const stub = { ...(record.value as object), ceremony_transcript_hash: new Uint8Array(32) };
-    const w = v as typeof v & {
-      authorStubHash?: string;
-      rollingScopes?: { tier: string; scope: string }[];
-    };
-    expect(stubHash(stub)).toBe(v.stubHash);
-    expect(stubHash({ ...stub, author_transcript_hash: new Uint8Array(32) })).toBe(
-      w.authorStubHash,
-    );
-    // Membership, Rolling scope: one per tier, from the definition hash alone.
-    const { electorate_mode: mode, rolling_electorate: tiers } = record.value as {
-      electorate_mode: number;
-      rolling_electorate: { tier: number }[];
-    };
-    expect(w.rollingScopes === undefined).toBe(mode === 1);
-    for (const [i, s] of (w.rollingScopes ?? []).entries()) {
-      expect(s.tier).toBe(String(tiers[i]!.tier));
-      expect(toHex(rollingScope(hash, tiers[i]!.tier))).toBe(s.scope);
-    }
-  });
-
-  test.each(invalid)("%s is rejected", (_id, v) => {
-    expect(decodeError(() => decode(hex(v.encoding)))).toBe(v.error);
-  });
-
-  test("labels every well-formedness rule version 7 adds, beside earlier ones", () => {
-    const labelled = valid.map(([, v]) => v as typeof v & { illFormedQuestion?: string });
-    expect(new Set(labelled.map((v) => v.illFormed).filter((r) => r !== undefined))).toEqual(
-      new Set([
-        "electorate",
-        "rolling-class",
-        "rolling-tier",
-        "author-panel",
-        "civic-sealed",
-        "selections",
-        "panel",
-      ]),
-    );
-    for (const v of labelled)
-      expect(v.illFormedQuestion !== undefined).toBe(v.illFormed === "selections");
-  });
-});
 
 interface RollingTree {
   readonly leaves: readonly string[];
@@ -217,7 +116,7 @@ describe("rolling tier trees (docs/spec/membership.md, Rolling tier tree, Root c
   });
 
   test.each(rolling.scopes.map((s) => [s.id, s] as const))("scope %s", (_id, s) => {
-    const scope = rollingScope(hex(s.definitionHash), s.tier);
+    const scope = rollingNullifierScope(hex(s.definitionHash), s.tier);
     expect(toHex(scope)).toBe(s.scope);
     expect(String(semaphoreField(scope))).toBe(s.scopeField);
   });

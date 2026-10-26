@@ -73,8 +73,14 @@ describe("election definition version 6 (docs/spec/election-definition.md, Layou
     expect(file.tags.authorPanel).toBe("abolish/v1/author-panel");
   });
 
+  // Made before version 7 had a layout, so the file expects `unknown-version`;
+  // this package reads version 7 (P2-17 part 3a) and decodes it under version
+  // 7's layout instead, which ends where `electorate_mode` begins.
+  const V6_LABELLED_SEVEN = "definition-v6-version-seven";
   const valid = vectors.filter((v) => "value" in v).map((v) => [v.id, v] as const);
-  const invalid = vectors.filter((v) => "error" in v).map((v) => [v.id, v] as const);
+  const invalid = vectors
+    .filter((v) => "error" in v && v.id !== V6_LABELLED_SEVEN)
+    .map((v) => [v.id, v] as const);
 
   test.each(valid)("%s decodes, re-encodes, hashes and meets its rules", (_id, v) => {
     const decoded = decodeElectionDefinitionV6(hex(v.encoding));
@@ -102,6 +108,16 @@ describe("election definition version 6 (docs/spec/election-definition.md, Layou
 
   test.each(invalid)("%s is rejected", (_id, v) => {
     expect(decodeError(() => decodeElectionDefinitionV6(hex(v.encoding)))).toBe(v.error);
+  });
+
+  test("version 6's layout labelled version 7 is read under version 7's layout, and is truncated", () => {
+    const v = vectors.find((x) => x.id === V6_LABELLED_SEVEN)!;
+    expect(v.error).toBe("unknown-version");
+    expect(decodeError(() => decodeElectionDefinitionV6(hex(v.encoding)))).toBe("truncated");
+    // The verifier's decoder still refuses version 7 at its version byte.
+    expect(decodeError(() => decodeElectionDefinitionRecord(hex(v.encoding)))).toBe(
+      "unknown-version",
+    );
   });
 
   // The verifier reads versions 1, 3 and 4 until P2-16 part 4: a version-6

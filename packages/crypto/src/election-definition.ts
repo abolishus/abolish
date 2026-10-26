@@ -1,4 +1,4 @@
-// The election definition, record type 0x0001 versions 1, 3, 4, 5 and 6
+// The election definition, record type 0x0001 versions 1, 3, 4, 5, 6 and 7
 // (docs/spec/election-definition.md): the layouts, the well-formedness
 // rules a decoded definition must also meet, and when a listed receipt key
 // judges the election. Version 2 is never assigned: a
@@ -208,13 +208,56 @@ const electionDefinitionV6 = struct([
   ["author_transcript_hash", hash],
 ] as const);
 
-/** Record type 0x0001, versions 1, 3, 4, 5 and 6 (docs/spec/election-definition.md). */
+/** The electorate modes of version 7: a fixed electorate, or a rolling one (0028-rolling-electorates). */
+export const ELECTORATE_MODES = Object.freeze({ fixed: 1, rolling: 2 } as const);
+
+/**
+ * Version 7's per-tier limit on a rolling tier's groups, version 3's
+ * `groupsPerTier` written out so changing it can never change what version 7
+ * accepts.
+ */
+export const DEFINITION_V7_LIMITS = Object.freeze({ groupsPerTier: 1024 } as const);
+
+const rollingTier = struct([
+  ["tier", enum8(TIERS)],
+  ["root_l2_block", u64],
+  ["groups", list(u64, DEFINITION_V7_LIMITS.groupsPerTier)],
+  ["root", fieldBn254],
+  ["group_size", u64],
+] as const);
+
+// Version 6's fields, in order, then the electorate mode and the rolling
+// electorate (0028-rolling-electorates), so a version-7 definition under mode
+// 1 is a version-6 definition with the mode and an empty list appended.
+const electionDefinitionV7 = struct([
+  ...ADDRESSES,
+  ["questions", list(question, DEFINITION_V5_LIMITS.maxQuestions)],
+  ["tally_scheme", enum8([TALLY_SCHEMES.pedersenVss])],
+  ["electorate", list(tierElectorate, 3)],
+  ...TAIL,
+  ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
+  [
+    "poll_class",
+    enum8([POLL_CLASSES.everyday, POLL_CLASSES.organisational, POLL_CLASSES.civicReferendum]),
+  ],
+  ["results_mode", enum8([RESULTS_MODES.sealed, RESULTS_MODES.live])],
+  ["live_every", u32],
+  ["live_batch", u32],
+  ["author_threshold", u8],
+  ["author_keys", list(p256Key, DEFINITION_V6_LIMITS.authorKeys)],
+  ["author_transcript_hash", hash],
+  ["electorate_mode", enum8([ELECTORATE_MODES.fixed, ELECTORATE_MODES.rolling])],
+  ["rolling_electorate", list(rollingTier, 3)],
+] as const);
+
+/** Record type 0x0001, versions 1, 3, 4, 5, 6 and 7 (docs/spec/election-definition.md). */
 export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
   1: electionDefinitionV1,
   3: electionDefinitionV3,
   4: electionDefinitionV4,
   5: electionDefinitionV5,
   6: electionDefinitionV6,
+  7: electionDefinitionV7,
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
@@ -222,6 +265,8 @@ export type ElectionDefinitionV3 = CodecValue<typeof electionDefinitionV3>;
 export type ElectionDefinitionV4 = CodecValue<typeof electionDefinitionV4>;
 export type ElectionDefinitionV5 = CodecValue<typeof electionDefinitionV5>;
 export type ElectionDefinitionV6 = CodecValue<typeof electionDefinitionV6>;
+export type ElectionDefinitionV7 = CodecValue<typeof electionDefinitionV7>;
+export type RollingTier = CodecValue<typeof rollingTier>;
 export type Question = CodecValue<typeof question>;
 export type TierElectorate = CodecValue<typeof tierElectorate>;
 
@@ -380,6 +425,87 @@ export function electionDefinitionV6Rule(
   if (v5 !== undefined) return v5;
   const rule = resultsRule(d) ?? civicSealedRule(d) ?? authorPanelDefinitionRule(d);
   return rule === undefined ? undefined : { rule };
+}
+
+/**
+ * The well-formedness rule codes of version 7, in checking order: version
+ * 6's, with `electorate` and `cells` read under the electorate mode, then
+ * `rolling-class` and `rolling-tier`.
+ */
+export type ElectionDefinitionV7Rule = ElectionDefinitionV6Rule | "rolling-class" | "rolling-tier";
+
+/** The first rule a version-7 definition breaks, as `ElectionDefinitionV5Failure`. */
+export type ElectionDefinitionV7Failure =
+  | ElectionDefinitionV6Failure
+  | { readonly rule: "rolling-class" | "rolling-tier" };
+
+/**
+ * Version 7's `electionDefinitionRule` (docs/spec/election-definition.md,
+ * Well-formedness): version 6's rules, with `electorate` read under the
+ * electorate mode (mode 1: version 6's electorate and no rolling tiers; mode
+ * 2: no fixed electorate and rolling tiers in strictly ascending order of
+ * tier, so a reader never takes an unused list for the poll's electorate),
+ * then `rolling-class` (a rolling poll is everyday: civic polls keep a fixed
+ * electorate) and `rolling-tier` (each rolling tier's groups non-empty,
+ * strictly ascending and in no other tier, so no member's leaf is in two
+ * tiers' trees; T-01, T-13, T-16, T-34). Whether the groups exist, have the
+ * tier and replay to the opening root and count is [[verifier]] 2.4's.
+ */
+export function electionDefinitionV7Rule(
+  d: ElectionDefinitionV7,
+): ElectionDefinitionV7Failure | undefined {
+  const profileFailure = profileRule(d);
+  if (profileFailure !== undefined) return { rule: profileFailure };
+  const questionsFailure = definitionQuestionsRule(d.questions);
+  if (questionsFailure !== undefined) return questionsFailure;
+  // Under mode 2 `electorate` is empty, so `cells` holds trivially: a
+  // rolling tier is one cell and states none.
+  const rule =
+    electorateV7Rule(d) ??
+    cellsRule(d) ??
+    tailRule(d) ??
+    receiptKeysRule(d) ??
+    resultsRule(d) ??
+    civicSealedRule(d) ??
+    authorPanelDefinitionRule(d) ??
+    rollingClassRule(d) ??
+    rollingTierRule(d);
+  return rule === undefined ? undefined : { rule };
+}
+
+function electorateV7Rule(
+  d: Pick<ElectionDefinitionV7, "electorate" | "electorate_mode" | "rolling_electorate">,
+): "electorate" | undefined {
+  if (d.electorate_mode === ELECTORATE_MODES.fixed)
+    return d.rolling_electorate.length === 0 ? electorateV3Rule(d) : "electorate";
+  const tiers = d.rolling_electorate.map((t) => t.tier);
+  return d.electorate.length === 0 && tiers.length > 0 && strictlyAscending(tiers)
+    ? undefined
+    : "electorate";
+}
+
+function rollingClassRule(
+  d: Pick<ElectionDefinitionV7, "electorate_mode" | "poll_class">,
+): "rolling-class" | undefined {
+  return d.electorate_mode === ELECTORATE_MODES.rolling && d.poll_class !== POLL_CLASSES.everyday
+    ? "rolling-class"
+    : undefined;
+}
+
+function rollingTierRule(
+  d: Pick<ElectionDefinitionV7, "rolling_electorate">,
+): "rolling-tier" | undefined {
+  // Under mode 1 the list is empty (`electorate`), so this holds.
+  const seen = new Set<bigint>();
+  for (const t of d.rolling_electorate) {
+    if (t.groups.length === 0) return "rolling-tier";
+    for (const [i, g] of t.groups.entries()) {
+      if (i > 0 && (t.groups[i - 1] as bigint) >= g) return "rolling-tier";
+      if (seen.has(g)) return "rolling-tier";
+      seen.add(g);
+    }
+  }
+  return undefined;
 }
 
 function resultsRule(

@@ -57,6 +57,29 @@ export function membershipScope(definitionHash: Uint8Array, tier: number, root: 
 }
 
 /**
+ * `S_t = H(DS("abolish/v1/rolling-nullifier-scope", definition_hash ‖ u8(t)))`:
+ * the one scope of every ballot of tier `t` under a rolling electorate, with
+ * no root in it, so one secret has one nullifier per tier and poll whichever
+ * step, group or leaf it proves from (docs/spec/membership.md, Rolling scope;
+ * T-01, T-02, T-03). The tier is still bound, so equal trees in two tiers keep
+ * unrelated nullifiers (T-13), and its own tag keeps it from ever equalling a
+ * fixed scope (T-31).
+ */
+export function rollingNullifierScope(definitionHash: Uint8Array, tier: number): Uint8Array {
+  if (tier !== 0 && tier !== 1 && tier !== 2)
+    throw new RangeError("rollingNullifierScope: tier must be 0, 1 or 2");
+  const input = new Uint8Array(33);
+  input.set(bytes32(definitionHash, "rollingNullifierScope: definitionHash"));
+  input.set(encode(u8, tier), 32);
+  return H(ds("abolish/v1/rolling-nullifier-scope", input));
+}
+
+/** `ŝ_t = F(S_t)`: the rolling scope as the circuit's public input. */
+export function rollingMembershipScope(definitionHash: Uint8Array, tier: number): bigint {
+  return semaphoreField(rollingNullifierScope(definitionHash, tier));
+}
+
+/**
  * The one protocol-wide tree depth every membership proof uses (Semaphore's
  * maximum). A per-tier depth would be an input a server could steer to
  * suppress and identify one voter's ballot (T-10, T-13); a fixed one also

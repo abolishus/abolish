@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { rollingBallotElectionWith } from "../src/ballot.ts";
+import { rollingBallotElectionWith, rollingStepRootOf } from "../src/ballot.ts";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import {
   type BallotCheckV5,
@@ -13,6 +13,7 @@ import {
   checkL1ReferenceV5,
   checkValidityV4,
   checkValidityV5,
+  coreHashV5,
   DecodeError,
   decodeBallot,
   decodeElectionDefinitionV7,
@@ -27,6 +28,7 @@ import {
   type RegisteredKeys,
   type RollingBallotElection,
   rollingBallotElection,
+  rollingTierSteps,
   rootClockBoundary,
   statementHashV4,
   statementHashV5,
@@ -91,6 +93,7 @@ interface Vectors {
     readonly encoding: string;
     readonly statementHash: string;
     readonly ballotHash: string;
+    readonly coreHash: string;
     readonly signals?: Readonly<Record<"root" | "nullifier" | "message" | "scope", string>>;
     readonly snarkjs?: boolean;
     readonly admission: Admission;
@@ -144,10 +147,9 @@ const definitions = new Map<string, ElectionDefinitionV7>(
 );
 const definitionOf = (name: string) => definitions.get(name) as ElectionDefinitionV7;
 const events = vectors.events.map(tierEvent);
-const chainOf = (name: string, steps?: readonly number[]) => ({
+const chainOf = (name: string) => ({
   events,
   registeredAt: BigInt(vectors.elections[name]!.registeredAt),
-  ...(steps === undefined ? {} : { steps }),
 });
 
 // These vectors carry no author run, so a context with an author panel comes
@@ -156,13 +158,12 @@ function electionOf(
   name: string,
   seats: readonly number[],
   authorSeats: readonly number[],
-  steps?: readonly number[],
 ): RollingBallotElection {
   const d = definitionOf(name);
   const registered = keySet(seats, d.ceremony_transcript_hash);
   return d.author_keys.length === 0 && authorSeats.length === 0
-    ? rollingBallotElection(d, registered, chainOf(name, steps))
-    : rollingBallotElectionWith(d, registered, chainOf(name, steps), authorSeats);
+    ? rollingBallotElection(d, registered, chainOf(name))
+    : rollingBallotElectionWith(d, registered, chainOf(name), authorSeats);
 }
 
 const vector = (id: string) => vectors.ballots.find((b) => b.id === id)!;
@@ -216,6 +217,12 @@ describe("ballot-v5-records.json through packages/crypto", () => {
       expect(
         election.cells.map((c) => ({ cell: c.cell, tier: c.tier, scope: String(c.scope) })),
       ).toEqual(e.cells.map((c) => ({ cell: c.cell, tier: c.tier, scope: c.scope })));
+      // Every step the file lists, from the distinct trees the context computed in one pass.
+      for (const c of e.cells)
+        for (const st of c.steps)
+          expect(rollingStepRootOf(election, c.cell, st.step)).toBe(
+            st.accepted ? BigInt(st.root) : undefined,
+          );
     },
   );
 
@@ -223,6 +230,19 @@ describe("ballot-v5-records.json through packages/crypto", () => {
     const bytes = hex(b.encoding);
     const record = decodeBallot(bytes, 5);
     expect(toHex(encodeBallotV5(record))).toBe(b.encoding);
+    const vote = record.committed_vote;
+    expect(
+      toHex(
+        coreHashV5({
+          definitionHash: record.definition_hash,
+          cell: record.cell,
+          vss: vote.vss,
+          shareHashes: vote.share_hashes,
+          authorVss: vote.author_vss,
+          authorShareHashes: vote.author_share_hashes,
+        }),
+      ),
+    ).toBe(b.coreHash);
     const election = contextOf(b);
     const ctx = {
       questions: election.questions,
@@ -276,13 +296,34 @@ describe("ballot-v5-records.json through packages/crypto", () => {
     }
   }, 60_000);
 
-  test("steps computed up front and steps computed when first named give the same verdicts", () => {
-    for (const b of vectors.ballots) {
-      const record = decodeBallot(hex(b.encoding), 5);
-      const ahead = electionOf(b.election, b.registered, b.authorRegistered, [record.step]);
-      expect(checkBallotV5(ahead, record)).toEqual(checkBallotV5(contextOf(b), record));
+  // A per-step rebuild (packages/crypto's rollingTierSteps asked for that step
+  // alone) against the context's distinct trees, at every step around the
+  // poll and its events' boundaries.
+  test("every step's root is the one a scan of that step alone gives", () => {
+    for (const [name, e] of Object.entries(vectors.elections)) {
+      const d = definitionOf(name);
+      const election = electionOf(name, [1, 2], d.author_keys.length === 0 ? [] : [1, 2]);
+      const listed = e.cells.flatMap((c) => c.steps.map((st) => st.step));
+      const lo = Math.min(...listed) - 3;
+      const hi = Math.max(...listed) + 3;
+      for (const [cell, tier] of d.rolling_electorate.entries())
+        for (let step = lo; step <= hi; step++) {
+          const alone = rollingTierSteps(
+            events,
+            {
+              groups: tier.groups,
+              rootL2Block: tier.root_l2_block,
+              registeredAt: BigInt(e.registeredAt),
+              closesAt: d.closes_at,
+            },
+            [BigInt(step)],
+          ).steps[0]!;
+          expect(rollingStepRootOf(election, cell, step)).toBe(
+            alone.accepted ? alone.root : undefined,
+          );
+        }
     }
-  }, 60_000);
+  });
 
   // contract-event-v10.json: a root the board's rolling call carried beside
   // the ballot. It only ever rejects, at its place in the order.
@@ -532,9 +573,6 @@ describe("ballot record version 5 (docs/spec/ballot-validity.md, Ballot record (
       rollingBallotElection(civic, keySet([1, 2], civic.ceremony_transcript_hash), chain),
     ).toThrow(/well-formed/);
     // Malformed chains.
-    expect(() => rollingBallotElection(d, registered, { ...chain, steps: [-1] })).toThrow(
-      RangeError,
-    );
     expect(() => rollingBallotElection(d, registered, { ...chain, registeredAt: -1n })).toThrow(
       RangeError,
     );

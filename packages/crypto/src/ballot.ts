@@ -83,6 +83,8 @@ import {
   electionDefinitionV5Hash,
   electionDefinitionV6Hash,
   electionDefinitionV7Hash,
+  decodeElectionDefinitionV7,
+  encodeElectionDefinitionV7,
   pinnedVersion,
   UnsupportedVersionError,
 } from "./protocol.ts";
@@ -92,6 +94,7 @@ import { membershipMessage } from "./revoting.ts";
 import {
   rollingTierSteps,
   rootClockBoundary,
+  rootClockStepAtOrBefore,
   type RollingStep,
   type RollingTierContext,
   type RollingTierEvent,
@@ -1606,13 +1609,6 @@ export interface RollingBallotChain {
   readonly events: readonly RollingTierEvent[];
   /** The timestamp of the L2 block holding the definition's `DefinitionRegistered`. */
   readonly registeredAt: bigint;
-  /**
-   * Steps to compute now, in one pass over each tier's events: those the
-   * ballots about to be checked name. A step not listed is computed, in a pass
-   * of its own, when a ballot first names one inside the poll, so a verifier
-   * judging a board lists every step its ballots name (T-36, T-52).
-   */
-  readonly steps?: readonly number[];
 }
 
 /** One cell of a rolling partition: its position, its rolling tier and the tier's rolling scope `ŝ_t`. */
@@ -1637,13 +1633,21 @@ export interface RollingBallotElection extends ValidityRulesV4 {
   readonly authorQualified: readonly number[];
 }
 
-// A rolling context's events and each cell's tier context and computed steps,
-// copied when it was made, so no caller can change the trees it checks
-// against afterwards.
+// One tree a rolling tier's steps can have inside the poll: the tree of
+// `step` and of every later step up to the next entry's, since no event lands
+// between their boundaries.
+interface StepTree {
+  readonly step: number;
+  readonly root: bigint;
+  readonly accepted: boolean;
+}
+
+// Each cell's tier context and the distinct trees of its accepted range,
+// computed when the context was made, so no caller can change the trees it
+// checks against afterwards.
 interface RollingState {
-  readonly events: readonly RollingTierEvent[];
   readonly tiers: readonly RollingTierContext[];
-  readonly steps: readonly Map<number, RollingStep>[];
+  readonly trees: readonly (readonly StepTree[])[];
 }
 
 const ROLLING = new WeakMap<object, RollingState>();
@@ -1653,7 +1657,10 @@ const ROLLING = new WeakMap<object, RollingState>();
  * which pins ballot version 5 (verifier 2.3; docs/spec/ballot-validity.md,
  * Ballot record (version 5)): version 6's questions and panels, one cell per
  * rolling tier, each with its rolling scope, and the step trees from
- * `chain`. The caller has run 2.x for the definition; one that isn't
+ * `chain`, every tree a step inside the poll can have computed in one pass
+ * over each tier's events, so admitting any number of ballots naming any
+ * steps costs no more passes (docs/spec/membership.md, Rolling checks;
+ * T-36, T-52). The caller has run 2.x for the definition; one that isn't
  * well-formed is refused here too (T-28, T-34; `rolling-class` among the
  * rules, so a civic poll is never rolling), and so are events whose opening
  * state isn't the definition's: each tier's tree through `root_l2_block`
@@ -1695,17 +1702,20 @@ const isU32 = (n: unknown): n is number =>
 
 function rollingElection(
   caller: string,
-  definition: ElectionDefinitionV7,
+  given: ElectionDefinitionV7,
   registered: readonly RegisteredKeys[],
   chain: RollingBallotChain,
   author: { readonly keys: readonly RegisteredKeys[] } | { readonly seats: readonly number[] },
 ): RollingBallotElection {
-  const own = pinnedVersion(definition, RECORD_TYPES.electionDefinition);
-  const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
+  const own = pinnedVersion(given, RECORD_TYPES.electionDefinition);
   // The pin and the value's own fields must agree, so a version-6 value
   // pinned at 7 is never hashed as version 7.
-  if (own !== 7 || !("electorate_mode" in definition))
+  if (own !== 7 || !("electorate_mode" in given))
     throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
+  // One snapshot, so a value with getters can't show the hash one list of
+  // groups and the trees another.
+  const definition = decodeElectionDefinitionV7(encodeElectionDefinitionV7(given));
+  const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
   if (pinned !== 5) throw new UnsupportedVersionError(RECORD_TYPES.ballot, pinned);
   if (electionDefinitionV7Rule(definition) !== undefined)
     throw new RangeError(`${caller}: the definition isn't well-formed`);
@@ -1729,12 +1739,9 @@ function rollingElection(
     throw new TypeError(`${caller}: chain: expected an object`);
   // Each field read once, so a getter can't show one check one value and a
   // later scan another.
-  const { events: rawEvents, registeredAt, steps: rawSteps = [] } = chain;
+  const { events: rawEvents, registeredAt } = chain;
   if (!Array.isArray(rawEvents)) throw new TypeError(`${caller}: chain.events: expected an array`);
-  if (!Array.isArray(rawSteps)) throw new TypeError(`${caller}: chain.steps: expected an array`);
   const events = Object.freeze(rawEvents.map((e, at) => copyEvent(caller, e, at)));
-  const steps = rawSteps.slice();
-  if (!steps.every(isU32)) throw new RangeError(`${caller}: chain.steps: expected u32 steps`);
   const definitionHash = electionDefinitionV7Hash(definition);
   const tiers = definition.rolling_electorate.map((t): RollingTierContext =>
     Object.freeze({
@@ -1744,10 +1751,10 @@ function rollingElection(
       closesAt: definition.closes_at,
     }),
   );
-  const computed = tiers.map((ctx, cell) => {
+  const trees = tiers.map((ctx, cell) => {
     // Validates `registeredAt` and every event, and throws for events out of
     // chain order or that no strict replay gives.
-    const got = rollingTierSteps(events, ctx, steps.map(BigInt));
+    const got = rollingTierSteps(events, ctx, distinctTreeSteps(events, ctx));
     const tier = definition.rolling_electorate[
       cell
     ] as ElectionDefinitionV7["rolling_electorate"][number];
@@ -1755,7 +1762,11 @@ function rollingElection(
       throw new RangeError(
         `${caller}: the events don't give the opening state of rolling tier ${tier.tier}`,
       );
-    return new Map(got.steps.map((s) => [Number(s.step), s] as const));
+    return Object.freeze(
+      got.steps.map((s: RollingStep) =>
+        Object.freeze({ step: Number(s.step), root: s.root, accepted: s.accepted }),
+      ),
+    );
   });
   const election: RollingBallotElection = Object.freeze({
     definitionHash: Uint8Array.from(definitionHash),
@@ -1790,8 +1801,33 @@ function rollingElection(
   MADE.set(election, { definitionHash, version: 5 });
   KEYS.set(election, copyKeys(registered));
   if ("keys" in author) AUTHOR_KEYS.set(election, copyKeys(author.keys));
-  ROLLING.set(election, { events, tiers, steps: computed });
+  ROLLING.set(election, { tiers, trees });
   return election;
+}
+
+// The first step whose boundary is after `ts`, or undefined past the clock's last.
+function stepAfter(ts: bigint): bigint | undefined {
+  const n = ts < 0n ? undefined : rootClockStepAtOrBefore(ts);
+  const next = n === undefined ? 0n : n + 1n;
+  return next > BigInt(MAX_U32) ? undefined : next;
+}
+
+// The steps whose trees are every tree a step inside the poll can have: the
+// first step after registration, and the first step at or after each event
+// timestamp inside the poll. A step between two of these has the earlier
+// one's tree, since no event lands between their boundaries. At most one per
+// event, so the scan stays linear in the events.
+function distinctTreeSteps(events: readonly RollingTierEvent[], ctx: RollingTierContext): bigint[] {
+  const first = stepAfter(ctx.registeredAt);
+  if (first === undefined || rootClockBoundary(first) > ctx.closesAt) return [];
+  const steps = new Set<bigint>([first]);
+  for (const e of events) {
+    const t = e.timestamp;
+    if (typeof t !== "bigint" || t <= ctx.registeredAt || t > ctx.closesAt) continue;
+    const n = stepAfter(t - 1n);
+    if (n !== undefined && rootClockBoundary(n) <= ctx.closesAt) steps.add(n);
+  }
+  return [...steps];
 }
 
 function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTierEvent {
@@ -1821,17 +1857,37 @@ function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTier
  * any tree is computed for it, so a ballot naming one costs no pass over the
  * events.
  */
-function acceptedStep(state: RollingState, cell: number, step: number): RollingStep | undefined {
+function acceptedStep(state: RollingState, cell: number, step: number): StepTree | undefined {
   const ctx = state.tiers[cell] as RollingTierContext;
-  const cache = state.steps[cell] as Map<number, RollingStep>;
+  const trees = state.trees[cell] as readonly StepTree[];
   const tau = rootClockBoundary(BigInt(step));
   if (tau <= ctx.registeredAt || tau > ctx.closesAt) return undefined;
-  let got = cache.get(step);
-  if (got === undefined) {
-    got = rollingTierSteps(state.events, ctx, [BigInt(step)]).steps[0] as RollingStep;
-    cache.set(step, got);
+  // The newest distinct tree at or before `step`; the first is the first
+  // step after registration, so one exists.
+  let lo = 0;
+  let hi = trees.length;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >>> 1;
+    if ((trees[mid] as StepTree).step <= step) lo = mid;
+    else hi = mid;
   }
-  return got.accepted ? got : undefined;
+  const got = trees[lo];
+  return got !== undefined && got.step <= step && got.accepted ? got : undefined;
+}
+
+/**
+ * Internal: step `step`'s root of `cell`'s tier in a context
+ * `rollingBallotElection` made, if the poll accepts it, for tests against a
+ * per-step rebuild. The package entry point doesn't export it.
+ */
+export function rollingStepRootOf(
+  election: RollingBallotElection,
+  cell: number,
+  step: number,
+): bigint | undefined {
+  madeHashOf(election, 5);
+  if (rollingCellOf(election, cell) === undefined || !isU32(step)) return undefined;
+  return acceptedStep(ROLLING.get(election) as RollingState, cell, step)?.root;
 }
 
 const rollingCellOf = (

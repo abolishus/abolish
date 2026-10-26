@@ -124,6 +124,7 @@ export {
   cellCoreHash,
   type CellBallotCoreV4,
   coreHashV4,
+  coreHashV5,
   cellTrackingCode,
   opensBallotCommitment,
   type ChallengeOpeningCheck,

@@ -11,6 +11,12 @@ export {
   type SubmitOutcome,
 } from "./admission.ts";
 export {
+  type ChainManifest,
+  locatorManifest,
+  needsLinkingManifest,
+  nextManifestLinks,
+} from "./archive-chain.ts";
+export {
   addModerator,
   APPEAL_DECISIONS,
   type AppealDecision,

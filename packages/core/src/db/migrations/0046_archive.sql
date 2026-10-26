@@ -19,12 +19,16 @@
 -- Operational: nothing a result depends on. Every object is the board's and
 -- every manifest is on Arweave under the anchor's locator, so a wipe loses
 -- the worker's place in the chain, never a result; the archive's readers
--- never read these tables (T-53).
+-- never read these tables (T-53). After a wipe the run refuses to start a
+-- new chain while the anchor names one, since a new manifest 0 would read
+-- as an overwritten locator (T-69); resuming from the anchor's chain is P4-3
+-- part 4b-2's.
 
 CREATE TABLE archive_manifests (
   sequence bigint PRIMARY KEY CHECK (sequence >= 0),
-  -- Every manifest is one raw block (docs/spec/archive.md, Archive manifest).
-  cid bytea NOT NULL UNIQUE CHECK (octet_length(cid) = 36),
+  -- Every manifest is one raw block (docs/spec/archive.md, Archive manifest),
+  -- so its CID is fixed by its bytes, and no row can post other bytes under it.
+  cid bytea NOT NULL UNIQUE CHECK (cid = '\x01551220'::bytea || sha256(manifest)),
   manifest bytea NOT NULL CHECK (octet_length(manifest) BETWEEN 1 AND 1048576)
 );
 

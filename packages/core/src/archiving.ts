@@ -27,9 +27,11 @@ import {
   encodeArchiveLocator,
   encodeArchiveManifest,
   MAX_MANIFEST_LINKS,
+  MAX_BOARD_PAYLOAD,
   MAX_MANIFEST_OBJECTS,
   objectCar,
   objectCid,
+  readArchivedObject,
 } from "@abolishus/crypto";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -61,6 +63,13 @@ export interface ArweaveClient {
    * reorganised away).
    */
   confirmations(transaction: Uint8Array): Promise<number | undefined>;
+  /**
+   * The data a node serves for `transaction`, at most `limit` bytes, or
+   * `undefined` if none serves it within the limit. A transaction's header
+   * can be mined without its data ever being uploaded, so depth alone never
+   * shows it is archived.
+   */
+  data(transaction: Uint8Array, limit: number): Promise<Uint8Array | undefined>;
 }
 
 /**
@@ -78,6 +87,14 @@ export const ARCHIVE_DEPTH = 25;
 export const ARCHIVE_REPOST_AFTER = 7200n;
 
 export interface ArchiveOptions {
+  /**
+   * The locator the board anchor holds now (`latestLocator()`), or `undefined`
+   * if it holds none. A run with no chain of its own refuses to start one
+   * while the anchor names a chain: after a wipe of Postgres a new chain from
+   * sequence 0 would read as an overwritten locator (`locator-mismatch`,
+   * T-69); resuming from the anchor's chain is part 4b-2's.
+   */
+  readonly latestLocator: Uint8Array | undefined;
   /** The L1 the deployment's board anchor is on, which every manifest names. */
   readonly l1ChainId: bigint;
   /** The board anchor's 20-byte address, which every manifest names. */
@@ -104,6 +121,8 @@ export interface ArchiveRun {
   readonly written: readonly bigint[];
   /** Transactions posted, first uploads and reposts alike. */
   readonly posted: number;
+  /** Objects not posted because the board no longer gives the bytes their CID names. */
+  readonly refused: number;
   /** The sequence the locator names, or `undefined` while no manifest meets the locator rule. */
   readonly locator: bigint | undefined;
 }
@@ -124,6 +143,8 @@ function checkOptions(o: ArchiveOptions) {
   if (typeof o.l1ChainId !== "bigint" || o.l1ChainId < 0n || o.l1ChainId >= 1n << 64n)
     throw new RangeError("l1ChainId must be a u64");
   if (!isBytes(o.anchor) || o.anchor.length !== 20) throw new TypeError("anchor must be 20 bytes");
+  if (o.latestLocator !== undefined && !isBytes(o.latestLocator))
+    throw new TypeError("latestLocator must be bytes or undefined");
   if (typeof o.now !== "bigint" || o.now < 0n)
     throw new RangeError("now must be a non-negative bigint");
   const depth = o.depth ?? ARCHIVE_DEPTH;
@@ -198,22 +219,40 @@ async function register(client: Sql): Promise<number> {
   return inserted.length;
 }
 
+interface ObjectRow {
+  readonly cid: Uint8Array;
+  readonly electionId: Uint8Array;
+  readonly kind: string;
+  readonly first: bigint;
+  readonly size: bigint;
+}
+
 /**
  * An object's bytes, read again from the board: the run's encoded entries,
- * or their entry hashes, concatenated. Throws unless they are the bytes its
- * CID names, so nothing but what its checkpoint names is ever posted (T-23).
+ * or their entry hashes, concatenated. `undefined` unless they are the bytes
+ * its CID names, so nothing but what its checkpoint names is ever posted
+ * (T-23).
  */
-async function objectBytes(
-  client: Sql,
-  o: { cid: Uint8Array; electionId: Uint8Array; kind: string; first: bigint; size: bigint },
-): Promise<Uint8Array> {
+async function objectBytes(client: Sql, o: ObjectRow): Promise<Uint8Array | undefined> {
   const entries = await readBoardRange(client, o.electionId, o.first, o.size);
   const parts = o.kind === "segment" ? entries : entries.map(boardEntryHash);
-  const bytes = Buffer.concat(parts);
-  if (!equal(objectCid(bytes), o.cid))
-    throw new Error(`the board no longer gives archived object ${cidText(o.cid)}`);
-  return new Uint8Array(bytes);
+  const bytes = new Uint8Array(Buffer.concat(parts));
+  return equal(objectCid(bytes), o.cid) ? bytes : undefined;
 }
+
+/** The most an object's bytes can be: an entry is 51 bytes and its payload, a hash 32 (docs/spec/archive.md, The listed objects). */
+function objectBound(o: ObjectRow): number {
+  const n = o.size - o.first;
+  const bound = o.kind === "segment" ? n * BigInt(51 + MAX_BOARD_PAYLOAD) : n * 32n;
+  return bound > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(bound);
+}
+
+/** A manifest is one raw block of at most 1 MiB (docs/spec/archive.md, Archive manifest). */
+const MANIFEST_BOUND = 1 << 20;
+
+/** The CAR of an object of `bound` bytes is at most this long (docs/spec/archive.md, The listed objects, step 2). */
+const carLimit = (bound: number) =>
+  Math.min(Number.MAX_SAFE_INTEGER, bound + 59 + 256 * Math.max(1, Math.ceil(bound / 2 ** 20)));
 
 interface Chain {
   readonly manifests: ChainManifest[];
@@ -221,7 +260,11 @@ interface Chain {
 }
 
 /** The manifest chain as written, each manifest's links read from its own bytes. */
-async function readChain(client: Sql, confirmed: ReadonlyMap<string, Uint8Array>): Promise<Chain> {
+async function readChain(
+  client: Sql,
+  confirmed: ReadonlyMap<string, Uint8Array>,
+  o: Pick<ArchiveOptions, "l1ChainId" | "anchor">,
+): Promise<Chain> {
   const rows = await drizzle({ client })
     .select()
     .from(archiveManifests)
@@ -231,6 +274,10 @@ async function readChain(client: Sql, confirmed: ReadonlyMap<string, Uint8Array>
   for (const [k, r] of rows.entries()) {
     if (r.sequence !== BigInt(k)) throw new Error(`the manifest chain has no manifest ${k}`);
     const m = decodeArchiveManifest(new Uint8Array(r.manifest), 3);
+    // A reader takes another deployment's manifest as foreign, so linking
+    // one would cut the chain (`manifest-foreign`, then `archive-gap`).
+    if (m.sequence !== r.sequence || m.l1_chain_id !== o.l1ChainId || !equal(m.anchor, o.anchor))
+      throw new Error(`manifest ${k} isn't this deployment's at its sequence`);
     manifests.push({
       links: m.links.map((l) => Number(l.sequence)),
       confirmed: confirmed.has(hex(r.cid)),
@@ -254,33 +301,49 @@ async function confirmedTransactions(client: Sql): Promise<Map<string, Uint8Arra
 }
 
 /**
- * Asks the client how deep each unconfirmed transaction is, and marks those
- * at `depth` confirmed. Returns how many it marked, and the transactions in
- * some block, which are left to deepen rather than posted again.
+ * Asks the client how deep each unconfirmed transaction is whose CID has no
+ * confirmed one, and marks confirmed those at `depth` whose data a node
+ * serves and reads as their CID (docs/spec/archive.md, Archived objects): a
+ * header can be mined without its data, and a confirmed transaction may be
+ * listed, linked and named for good (T-51). Returns how many it marked, and
+ * the transactions in some block whose data may yet arrive, which are left
+ * to deepen rather than posted again; one at depth whose data doesn't read
+ * is posted again once `repostAfter` has passed.
  */
 async function confirm(
   client: Sql,
   arweave: ArweaveClient,
   depth: number,
+  bounds: ReadonlyMap<string, number>,
 ): Promise<{ confirmed: number; mined: Set<string> }> {
   const db = drizzle({ client });
+  const done = await confirmedTransactions(client);
   const pending = await db
-    .select({ transaction: archiveTransactions.transaction })
+    .select({ transaction: archiveTransactions.transaction, cid: archiveTransactions.cid })
     .from(archiveTransactions)
     .where(eq(archiveTransactions.confirmed, false));
   let confirmed = 0;
   const mined = new Set<string>();
-  for (const { transaction } of pending) {
+  for (const { transaction, cid } of pending) {
+    if (done.has(hex(cid))) continue;
     const n = await arweave.confirmations(new Uint8Array(transaction));
     if (n === undefined) continue;
     if (!Number.isSafeInteger(n) || n < 1)
       throw new Error("the Arweave client gave a depth below 1");
-    mined.add(hex(transaction));
-    if (n < depth) continue;
+    if (n < depth) {
+      mined.add(hex(transaction));
+      continue;
+    }
+    const bound = bounds.get(hex(cid));
+    if (bound === undefined)
+      throw new Error(`a transaction for ${cidText(cid)}, which nothing archives`);
+    const data = await arweave.data(new Uint8Array(transaction), carLimit(bound));
+    if (data === undefined || !readArchivedObject(data, cid, bound).ok) continue;
     await db
       .update(archiveTransactions)
       .set({ confirmed: true })
       .where(eq(archiveTransactions.transaction, transaction));
+    done.set(hex(cid), new Uint8Array(transaction));
     confirmed++;
   }
   return { confirmed, mined };
@@ -370,7 +433,7 @@ async function post(
   mined: ReadonlySet<string>,
   now: bigint,
   repostAfter: bigint,
-): Promise<number> {
+): Promise<{ posted: number; refused: number }> {
   const db = drizzle({ client });
   const unconfirmed = await db
     .select({
@@ -392,18 +455,25 @@ async function post(
     await db.insert(archiveTransactions).values({ transaction, cid, postedAt: now });
     posted++;
   };
-  const objects = await db.select().from(archiveObjects).orderBy(asc(archiveObjects.cid));
-  for (const o of objects) {
-    if (live.has(hex(o.cid))) continue;
-    await send(o.cid, await objectBytes(client, o));
-  }
+  // Manifests first, so an object that can't be posted never holds up the
+  // chain the locator names.
   const manifests = await db
     .select()
     .from(archiveManifests)
     .orderBy(asc(archiveManifests.sequence));
   for (const m of manifests)
     if (!live.has(hex(m.cid))) await send(m.cid, new Uint8Array(m.manifest));
-  return posted;
+  let refused = 0;
+  const objects = await db.select().from(archiveObjects).orderBy(asc(archiveObjects.cid));
+  for (const o of objects) {
+    if (live.has(hex(o.cid))) continue;
+    const bytes = await objectBytes(client, o);
+    // Reported, never posted: the stored checkpoint and the board disagree,
+    // which the anchoring job's checks are the place to judge (T-23).
+    if (bytes === undefined) refused++;
+    else await send(o.cid, bytes);
+  }
+  return { posted, refused };
 }
 
 function locatorOf(
@@ -433,23 +503,43 @@ export async function archiveBoards(
 ): Promise<ArchiveRun> {
   const { depth, repostAfter, maxLinks } = checkOptions(options);
   const run = await exclusively(client, async () => {
+    const db = drizzle({ client });
+    const [first] = await db
+      .select({ sequence: archiveManifests.sequence })
+      .from(archiveManifests)
+      .limit(1);
+    if (first === undefined && options.latestLocator !== undefined)
+      throw new Error("the anchor names an archive chain this database doesn't hold");
     const registered = await register(client);
-    const { confirmed, mined } = await confirm(client, arweave, depth);
+    const bounds = new Map<string, number>();
+    for (const o of await db.select().from(archiveObjects)) bounds.set(hex(o.cid), objectBound(o));
+    for (const m of await db.select({ cid: archiveManifests.cid }).from(archiveManifests))
+      bounds.set(hex(m.cid), MANIFEST_BOUND);
+    const { confirmed, mined } = await confirm(client, arweave, depth, bounds);
     const held = await confirmedTransactions(client);
-    const chain = await readChain(client, held);
+    const chain = await readChain(client, held, options);
     const written = await writeManifests(client, chain, held, options, maxLinks);
-    const posted = await post(client, arweave, held, mined, options.now, repostAfter);
+    const { posted, refused } = await post(client, arweave, held, mined, options.now, repostAfter);
     return {
       busy: false,
       registered,
       confirmed,
       written,
       posted,
+      refused,
       locator: locatorOf(chain, held)?.sequence,
     };
   });
   return (
-    run ?? { busy: true, registered: 0, confirmed: 0, written: [], posted: 0, locator: undefined }
+    run ?? {
+      busy: true,
+      registered: 0,
+      confirmed: 0,
+      written: [],
+      posted: 0,
+      refused: 0,
+      locator: undefined,
+    }
   );
 }
 
@@ -458,7 +548,10 @@ export async function archiveBoards(
  * confirmed manifest that reaches every manifest before it and the
  * transaction that confirmed it first, or `undefined` while none does.
  */
-export async function archiveLocator(client: Sql): Promise<ArchiveLocator | undefined> {
+export async function archiveLocator(
+  client: Sql,
+  deployment: Pick<ArchiveOptions, "l1ChainId" | "anchor">,
+): Promise<ArchiveLocator | undefined> {
   const held = await confirmedTransactions(client);
-  return locatorOf(await readChain(client, held), held);
+  return locatorOf(await readChain(client, held, deployment), held);
 }

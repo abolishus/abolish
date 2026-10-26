@@ -56,7 +56,10 @@ const ballot = (...body: number[]) => Uint8Array.of(0x00, 0x02, 1, ...body);
  */
 class ModelArweave implements ArweaveClient {
   height = 0;
-  readonly txs = new Map<string, { data: Uint8Array; minedAt?: number; dropped?: boolean }>();
+  readonly txs = new Map<
+    string,
+    { data: Uint8Array; minedAt?: number; dropped?: boolean; withheld?: boolean }
+  >();
   /** Makes the next posts throw. */
   failing = false;
 
@@ -84,6 +87,17 @@ class ModelArweave implements ArweaveClient {
     this.height += n;
   }
 
+  /** Mines the headers of the pending transactions `pick` chooses, their data never uploaded. */
+  withhold(pick: (id: string) => boolean) {
+    for (const [id, t] of this.txs) if (t.minedAt === undefined && pick(id)) t.withheld = true;
+  }
+
+  async data(transaction: Uint8Array, limit: number) {
+    const t = this.txs.get(hex(transaction));
+    if (t?.minedAt === undefined || t.withheld || t.data.length > limit) return undefined;
+    return t.data;
+  }
+
   /** Never mines the pending transactions `pick` chooses. */
   drop(pick: (id: string) => boolean) {
     for (const [id, t] of this.txs) if (t.minedAt === undefined && pick(id)) t.dropped = true;
@@ -95,10 +109,10 @@ class ModelArweave implements ArweaveClient {
       if (t.minedAt !== undefined && this.height - t.minedAt + 1 < DEPTH) delete t.minedAt;
   }
 
-  /** What a reader is served: the data of a mined transaction. */
+  /** What a reader is served: the data of a mined transaction, if it was uploaded. */
   readonly source = async (transaction: Uint8Array) => {
     const t = this.txs.get(hex(transaction));
-    return t?.minedAt === undefined ? [] : [t.data];
+    return t?.minedAt === undefined || t.withheld ? [] : [t.data];
   };
 }
 
@@ -133,7 +147,10 @@ beforeEach(async () => {
   });
 });
 
+const DEPLOYMENT = { l1ChainId: L1, anchor: ANCHOR };
+
 const options = (o: Partial<ArchiveOptions> = {}): ArchiveOptions => ({
+  latestLocator: undefined,
   l1ChainId: L1,
   anchor: ANCHOR,
   now,
@@ -173,7 +190,7 @@ async function walk(
   objects: readonly Uint8Array[],
   earlier: Uint8Array[] = [],
 ) {
-  const latest = await archiveLocator(app);
+  const latest = await archiveLocator(app, DEPLOYMENT);
   if (latest === undefined) throw new Error("no locator");
   return walkArchive(latest.locator, { l1ChainId: L1, anchor: ANCHOR }, arweave.source, {
     objects,
@@ -215,6 +232,11 @@ describe("archive tables", () => {
       await refused(c`UPDATE archive_transactions SET confirmed = false`);
       await refused(c`UPDATE archive_objects SET listed_in = NULL`);
       await refused(c`UPDATE archive_manifests SET manifest = '\\x00'`);
+      // A row whose CID isn't its bytes' is refused whoever writes it.
+      await expect(
+        c`INSERT INTO archive_manifests (sequence, cid, manifest)
+          VALUES (99, ${new Uint8Array(36)}, '\\x00')`,
+      ).rejects.toMatchObject({ code: "23514" });
     }
     // The app role may set only these columns, and only forward.
     await refused(app`UPDATE archive_objects SET size = size + 1`);
@@ -250,7 +272,7 @@ describe("archiveBoards", () => {
     expect(await run(arweave)).toMatchObject({ confirmed: 0, written: [], locator: undefined });
     arweave.advance(DEPTH - 1);
     expect(await run(arweave)).toMatchObject({ confirmed: 4, written: [0n], posted: 1 });
-    expect(await archiveLocator(app)).toBeUndefined();
+    expect(await archiveLocator(app, DEPLOYMENT)).toBeUndefined();
     const [row] = await app<{ manifest: Uint8Array }[]>`SELECT manifest FROM archive_manifests`;
     const manifest = decodeArchiveManifest(new Uint8Array(row!.manifest), 3);
     expect(manifest).toMatchObject({
@@ -267,7 +289,7 @@ describe("archiveBoards", () => {
     arweave.mine();
     arweave.advance(DEPTH - 1);
     expect(await run(arweave)).toMatchObject({ confirmed: 1, written: [], posted: 0, locator: 0n });
-    const latest = await archiveLocator(app);
+    const latest = await archiveLocator(app, DEPLOYMENT);
     const read = decodeArchiveLocator(latest!.locator, [3]);
     expect(read).toMatchObject({ kind: "manifest", version: 3 });
     const w = await walk(arweave, cidsOf(taken));
@@ -340,12 +362,47 @@ describe("archiveBoards", () => {
     expect(w.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
   });
 
-  test("refuses to post an object the board no longer gives", async () => {
+  test("refuses to post an object the board no longer gives, and posts the rest", async () => {
     const arweave = new ModelArweave();
     const { id } = await board(0);
     await app`INSERT INTO archive_objects (cid, election_id, kind, first, size)
-      VALUES (${new Uint8Array(36).fill(1)}, ${id}, 'segment', 0, 1)`;
-    await expect(run(arweave)).rejects.toThrow(/no longer gives/);
+      VALUES (${new Uint8Array(36).fill(1)}, ${id}, 'hashes', 0, 1)`;
+    expect(await run(arweave)).toMatchObject({ registered: 2, posted: 2, refused: 1 });
+    expect(arweave.txs.size).toBe(2);
+  });
+
+  test("never counts confirmed a transaction mined without its data, and posts it again", async () => {
+    const arweave = new ModelArweave();
+    const { taken } = await board(0);
+    await run(arweave);
+    arweave.withhold(() => true);
+    arweave.mine();
+    arweave.advance(DEPTH);
+    expect(await run(arweave)).toMatchObject({ confirmed: 0, written: [], posted: 0 });
+    now += REPOST;
+    expect(await run(arweave)).toMatchObject({ confirmed: 0, posted: 2 });
+    await drain(arweave);
+    const w = await walk(arweave, cidsOf(taken));
+    expect(w.findings).toEqual([]);
+  });
+
+  test("starts no chain of its own while the anchor names one", async () => {
+    const arweave = new ModelArweave();
+    await board(0);
+    const named = new Uint8Array(70);
+    await expect(run(arweave, { latestLocator: named })).rejects.toThrow(/doesn't hold/);
+    expect(arweave.txs.size).toBe(0);
+    // Once its own chain exists, the anchor naming it is what is expected.
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({ busy: false });
+  });
+
+  test("refuses a stored manifest of another deployment", async () => {
+    const arweave = new ModelArweave();
+    await board(0);
+    await drain(arweave);
+    await expect(run(arweave, { anchor: new Uint8Array(20) })).rejects.toThrow(/deployment/);
   });
 
   test("a run that meets another's lock does nothing", async () => {
@@ -360,6 +417,7 @@ describe("archiveBoards", () => {
         confirmed: 0,
         written: [],
         posted: 0,
+        refused: 0,
         locator: undefined,
       });
       expect(arweave.txs.size).toBe(0);
@@ -395,6 +453,7 @@ describe("archiveBoards", () => {
       | { kind: "mine"; mask: number }
       | { kind: "advance"; n: number }
       | { kind: "drop"; mask: number }
+      | { kind: "withhold"; mask: number }
       | { kind: "reorg" }
       | { kind: "wait" };
     const step: fc.Arbitrary<Step> = fc.oneof(
@@ -406,6 +465,7 @@ describe("archiveBoards", () => {
       fc.record({ kind: fc.constant("mine" as const), mask: fc.nat() }),
       fc.record({ kind: fc.constant("advance" as const), n: fc.integer({ min: 1, max: DEPTH }) }),
       fc.record({ kind: fc.constant("drop" as const), mask: fc.nat() }),
+      fc.record({ kind: fc.constant("withhold" as const), mask: fc.nat() }),
       fc.constant({ kind: "reorg" as const }),
       fc.constant({ kind: "wait" as const }),
     );
@@ -436,7 +496,7 @@ describe("archiveBoards", () => {
             const at = r.locator ?? -1n;
             expect(at).toBeGreaterThanOrEqual(named);
             named = at;
-            const l = await archiveLocator(app);
+            const l = await archiveLocator(app, DEPLOYMENT);
             expect(l?.sequence).toBe(r.locator);
             if (l !== undefined) locators.push(l.locator);
             return r;
@@ -448,6 +508,7 @@ describe("archiveBoards", () => {
             else if (s.kind === "mine") arweave.mine(picker(arweave, s.mask));
             else if (s.kind === "advance") arweave.advance(s.n);
             else if (s.kind === "drop") arweave.drop(picker(arweave, s.mask));
+            else if (s.kind === "withhold") arweave.withhold(picker(arweave, s.mask));
             else if (s.kind === "reorg") arweave.reorg();
             else now += REPOST;
           }
@@ -463,13 +524,13 @@ describe("archiveBoards", () => {
             if (r.registered + r.confirmed + r.posted + r.written.length === 0) break;
           }
           if (cids.length === 0) {
-            expect(await archiveLocator(app)).toBeUndefined();
+            expect(await archiveLocator(app, DEPLOYMENT)).toBeUndefined();
             return;
           }
           const [row] = await app<
             { count: string }[]
           >`SELECT count(*)::text FROM archive_manifests`;
-          const latest = await archiveLocator(app);
+          const latest = await archiveLocator(app, DEPLOYMENT);
           expect(latest?.sequence).toBe(BigInt(row!.count) - 1n);
           const w = await walk(arweave, cids, locators);
           expect(w.findings).toEqual([]);

@@ -32,7 +32,7 @@ export const esUS: Messages = {
   trust1Body:
     "Cuando respondes, la app de votación la sella en tu propio dispositivo antes de que vaya a ninguna parte. Lo que viaja es una caja cerrada, no tu respuesta.",
   trust1Detail:
-    "El detalle: se divide en partes, cada una cifrada para uno de los custodios de la encuesta.",
+    "El detalle: se divide en partes, cada una cifrada para uno de los puestos de custodio de la encuesta.",
   trust2Title: "Publicada en un tablero público",
   trust2Body:
     "Cada respuesta sellada va a un tablero público que cualquiera puede leer. Tú guardas un código de seguimiento, para encontrar la tuya ahí y ver que se contó.",
@@ -40,7 +40,7 @@ export const esUS: Messages = {
     "El detalle: cada entrada extiende una cadena de hashes, así que quitar o cambiar una se nota.",
   trust3Title: "Se abre solo después de que cierra la encuesta",
   trust3Body:
-    "El conteo se desbloquea solo cuando suficientes custodios de la encuesta, cada uno con una parte de la clave, trabajan juntos después del cierre. Ningún puesto puede abrirlo por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas encuestas son privadas para todos excepto para nosotros. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
+    "El conteo se desbloquea solo cuando suficientes puestos de custodio de la encuesta, cada uno con una parte de la clave, trabajan juntos después del cierre. Ningún puesto puede abrirlo por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas encuestas son privadas para todos excepto para nosotros. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
   trust3Detail: "El detalle: se necesitan {threshold} de los {seats} puestos.",
   trust4Title: "Cualquiera lo vuelve a contar",
   trust4Body:

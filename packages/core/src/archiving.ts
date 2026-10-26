@@ -544,6 +544,23 @@ export async function archiveBoards(
 }
 
 /**
+ * The sequence of this database's manifest `cid`, or `undefined` if it holds
+ * none by that CID: whether a locator the anchor holds names our own chain.
+ */
+export async function archiveManifestSequence(
+  client: Sql,
+  cid: Uint8Array,
+): Promise<bigint | undefined> {
+  if (!isBytes(cid)) throw new TypeError("cid must be bytes");
+  const [row] = await drizzle({ client })
+    .select({ sequence: archiveManifests.sequence })
+    .from(archiveManifests)
+    .where(eq(archiveManifests.cid, Uint8Array.from(cid)))
+    .limit(1);
+  return row?.sequence;
+}
+
+/**
  * The locator the anchoring calls carry: version 3, naming the highest
  * confirmed manifest that reaches every manifest before it and the
  * transaction that confirmed it first, or `undefined` while none does.

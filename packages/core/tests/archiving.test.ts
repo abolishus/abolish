@@ -19,6 +19,7 @@ import {
   appendEntry,
   archiveBoards,
   archiveLocator,
+  archiveManifestSequence,
   archiveManifests,
   archiveObjects,
   type ArchiveOptions,
@@ -424,11 +425,21 @@ describe("archiveBoards", () => {
     expect(sent.locator).toBe("sent");
     expect(calls).toEqual([latest!.locator]);
     expect((await anchorBoards(app, chain, 10n * 3600n)).locator).toBe("held");
+    // The held locator is judged by our chain's own sequences.
+    const named = decodeArchiveLocator(latest!.locator, [3]);
+    if (named.kind !== "manifest") throw new Error("not a locator");
+    expect(await archiveManifestSequence(app, named.manifest)).toBe(latest!.sequence);
+    expect(await archiveManifestSequence(app, new Uint8Array(36))).toBeUndefined();
+    // An anchor naming a manifest this database doesn't hold is never overwritten.
+    calls.push(Uint8Array.of(...latest!.locator.slice(0, 6), ...new Uint8Array(64)));
+    const foreign = await anchorBoards(app, chain, 10n * 3600n);
+    expect(foreign.findings).toContainEqual({ code: "anchor-locator-foreign" });
+    expect(calls).toHaveLength(2);
     // A database holding another deployment's chain gives no locator, and says so.
     const other = { ...chain, address: new Uint8Array(20) };
     const unread = await anchorBoards(app, other, 10n * 3600n);
     expect(unread.findings).toContainEqual({ code: "anchor-locator-unread" });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
   });
 
   test("refuses a stored manifest of another deployment", async () => {

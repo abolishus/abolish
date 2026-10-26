@@ -20,6 +20,7 @@ import {
   type AnchorFinding,
   type AnchorRun,
   appendEntry,
+  type LocatorSource,
   AppendError,
   boardCheckpoints,
   readBoard,
@@ -113,6 +114,8 @@ class ModelAnchor implements AnchorChain {
   readonly locators: (Uint8Array | undefined)[] = [];
   /** The locator the anchor holds. */
   held: Uint8Array | undefined;
+  /** Calls sent, failed or not. */
+  attempts = 0;
   readonly #slots = new Map<string, Anchor>();
 
   constructor(chain: { chainId?: bigint; address?: Uint8Array } = {}) {
@@ -138,6 +141,7 @@ class ModelAnchor implements AnchorChain {
   }
 
   async anchor(checkpoints: readonly Checkpoint[], locator: Uint8Array | undefined) {
+    this.attempts++;
     if (this.failing) throw new Error("reverted");
     if (checkpoints.length === 0 && locator === undefined) throw new Error("reverted");
     const keys = new Set<string>();
@@ -181,9 +185,28 @@ class ModelAnchor implements AnchorChain {
 /** A run with the worker's clock at the L1 time, unless a test says otherwise. */
 const run = (chain: ModelAnchor, localNow = chain.time) => anchorBoards(app, chain, localNow);
 
-/** A run whose archive gives `locator`. */
-const runWith = (chain: ModelAnchor, locator: Uint8Array | undefined) =>
-  anchorBoards(app, chain, chain.time, { locator: async () => locator });
+/**
+ * An archive whose chain's manifests are those `locators` name, the i-th at
+ * sequence i, and whose latest locator is the last.
+ */
+const archiveOf = (...locators: Uint8Array[]): LocatorSource => ({
+  latest: async () =>
+    locators.length === 0
+      ? undefined
+      : { sequence: BigInt(locators.length - 1), locator: locators.at(-1)! },
+  sequenceOf: async (cid) => {
+    const i = locators.findIndex((l) => Buffer.from(l.slice(2, 38)).equals(Buffer.from(cid)));
+    return i < 0 ? undefined : BigInt(i);
+  },
+});
+
+/** A run over `archive`. */
+const runWith = (chain: ModelAnchor, archive: LocatorSource) =>
+  anchorBoards(app, chain, chain.time, { archive });
+
+/** The run's findings about no election: the locator's. */
+const locatorFindings = (result: AnchorRun) =>
+  result.findings.filter((f) => f.electionId === undefined).map((f) => f.code);
 
 /** A version-3 locator naming a raw CID and a transaction (docs/spec/archive.md, Locator). */
 const locatorOf = (version: 1 | 2 | 3 = 3) =>
@@ -680,7 +703,7 @@ describe("the archive's locator", () => {
     const f = await boardFor(chain, 1);
     chain.time = endOf(0) + CLOCK.deadline - 100n;
     const locator = locatorOf();
-    const result = await runWith(chain, locator);
+    const result = await runWith(chain, archiveOf(locator));
     // Segment 0 goes alone, after 11, near its deadline; f's in a call of its own.
     expect(chain.calls.length).toBe(3);
     expect(chain.locators).toEqual([locator, locator, locator]);
@@ -688,20 +711,21 @@ describe("the archive's locator", () => {
     expect(reportOf(result, e)?.anchored).toEqual([11, 0]);
     expect(reportOf(result, f)?.anchored).toEqual([1]);
     expect(chain.held).toEqual(locator);
+    expect(locatorFindings(result)).toEqual([]);
   });
 
   test("a run with nothing to anchor sends it alone, unless the anchor holds it", async () => {
     const chain = new ModelAnchor();
     chain.time = endOf(5);
     const first = locatorOf();
-    expect((await runWith(chain, first)).locator).toBe("sent");
+    expect((await runWith(chain, archiveOf(first))).locator).toBe("sent");
     expect(chain.calls).toEqual([[]]);
     expect(chain.locators).toEqual([first]);
-    expect((await runWith(chain, first)).locator).toBe("held");
+    expect((await runWith(chain, archiveOf(first))).locator).toBe("held");
     expect(chain.calls.length).toBe(1);
     // A newer locator, from the archive confirming, replaces it.
     const next = locatorOf();
-    expect((await runWith(chain, next)).locator).toBe("sent");
+    expect((await runWith(chain, archiveOf(first, next))).locator).toBe("sent");
     expect(chain.held).toEqual(next);
   });
 
@@ -711,65 +735,130 @@ describe("the archive's locator", () => {
     chain.held = locatorOf();
     const held = chain.held;
     chain.time = endOf(0);
-    const result = await runWith(chain, undefined);
+    const result = await runWith(chain, archiveOf());
     expect(reportOf(result, e)?.anchored).toEqual([0]);
     expect(chain.locators).toEqual([undefined]);
     expect(chain.held).toBe(held);
     expect(result.locator).toBeUndefined();
-    expect(result.findings.filter((x) => x.electionId === undefined)).toEqual([]);
+    expect(locatorFindings(result)).toEqual([]);
   });
 
   test("a locator that can't be read, or isn't version 3, is never sent and holds back no anchor", async () => {
-    const reads: (() => Promise<Uint8Array | undefined>)[] = [
-      async () => {
-        throw new Error("archive down");
+    const at = (locator: unknown, sequence: unknown = 0n): LocatorSource => ({
+      latest: async () => ({ locator, sequence }) as never,
+      sequenceOf: async () => undefined,
+    });
+    const archives: LocatorSource[] = [
+      {
+        latest: async () => {
+          throw new Error("archive down");
+        },
+        sequenceOf: async () => undefined,
       },
-      async () => locatorOf(1),
-      async () => locatorOf(2),
-      async () => locatorOf().slice(0, 69),
-      async () => Uint8Array.of(0x00, 0x03, ...locatorOf().slice(2, 38), 0),
-      async () => "0x00" as unknown as Uint8Array,
+      at(locatorOf(1)),
+      at(locatorOf(2)),
+      at(locatorOf().slice(0, 69)),
+      at(Uint8Array.of(0x00, 0x03, ...locatorOf().slice(2, 38), 0)),
+      at("0x00"),
+      at(locatorOf(), -1n),
+      at(locatorOf(), 0),
     ];
-    for (const read of reads) {
+    for (const archive of archives) {
       const chain = new ModelAnchor();
       const e = await boardFor(chain, 0);
       chain.time = endOf(0);
-      const result = await anchorBoards(app, chain, chain.time, { locator: read });
-      expect(result.findings.filter((x) => x.electionId === undefined)).toEqual([
-        { code: "anchor-locator-unread" },
-      ]);
+      const result = await runWith(chain, archive);
+      expect(locatorFindings(result)).toEqual(["anchor-locator-unread"]);
       expect(reportOf(result, e)?.anchored).toEqual([0]);
       expect(chain.locators).toEqual([undefined]);
       expect(result.locator).toBeUndefined();
     }
   });
 
-  test("failed calls send the locator again on the next run", async () => {
+  test("never overwrites a locator that isn't ours at or below the archive's", async () => {
+    const ours = [locatorOf(), locatorOf()];
+    for (const held of [
+      // Another chain's, or one this database lost (a wipe and a new chain).
+      locatorOf(),
+      // Ours, above the archive's latest: a run reading a stale archive.
+      ours[1]!,
+      // One no version this reader knows names.
+      Uint8Array.of(0x00, 0x09, 1, 2, 3),
+    ]) {
+      const chain = new ModelAnchor();
+      const e = await boardFor(chain, 0);
+      chain.held = held;
+      chain.time = endOf(0);
+      const result = await runWith(chain, archiveOf(ours[0]!));
+      expect(locatorFindings(result)).toEqual(["anchor-locator-foreign"]);
+      expect(reportOf(result, e)?.anchored).toEqual([0]);
+      expect(chain.locators).toEqual([undefined]);
+      expect(chain.held).toBe(held);
+    }
+    // Ours, above the latest a stale read of our own archive gives: never
+    // sent, so the anchor's locator never falls.
+    const stale: LocatorSource = {
+      latest: async () => ({ sequence: 0n, locator: ours[0]! }),
+      sequenceOf: archiveOf(...ours).sequenceOf,
+    };
+    const ahead = new ModelAnchor();
+    ahead.held = ours[1];
+    ahead.time = endOf(5);
+    const fell = await runWith(ahead, stale);
+    expect(locatorFindings(fell)).toEqual(["anchor-locator-foreign"]);
+    expect(ahead.calls).toEqual([]);
+    // Ours below the archive's latest is replaced.
+    const chain = new ModelAnchor();
+    chain.held = ours[0];
+    chain.time = endOf(5);
+    expect((await runWith(chain, archiveOf(...ours))).locator).toBe("sent");
+    expect(chain.held).toEqual(ours[1]);
+  });
+
+  test("after a failed checkpoint call the locator never goes alone, so it can't displace the call", async () => {
     const chain = new ModelAnchor();
     const e = await boardFor(chain, 0);
     chain.time = endOf(0);
     chain.failing = true;
     const locator = locatorOf();
-    const failed = await runWith(chain, locator);
+    const failed = await runWith(chain, archiveOf(locator));
     expect(findingsOf(failed.findings, e)).toEqual(["anchor-send-failed"]);
-    expect(failed.findings.filter((x) => x.electionId === undefined)).toEqual([
-      { code: "anchor-locator-failed" },
-    ]);
+    expect(locatorFindings(failed)).toEqual([]);
     expect(failed.locator).toBeUndefined();
+    expect(chain.attempts).toBe(1);
     chain.failing = false;
     chain.time += 60n;
-    expect((await runWith(chain, locator)).locator).toBe("carried");
+    expect((await runWith(chain, archiveOf(locator))).locator).toBe("carried");
     expect(chain.locators).toEqual([locator]);
-    // A failed read of the anchor's locator is the same finding.
-    chain.latestLocator = async () => {
-      throw new Error("node down");
-    };
-    chain.time += 60n;
-    const unread = await runWith(chain, locatorOf());
-    expect(unread.findings.filter((x) => x.electionId === undefined)).toEqual([
-      { code: "anchor-locator-failed" },
-    ]);
-    expect(chain.calls.length).toBe(1);
+  });
+
+  test("a failed locator-only call, or a failed read of the anchor's, is reported and retried", async () => {
+    const chain = new ModelAnchor();
+    chain.time = endOf(5);
+    chain.failing = true;
+    const locator = locatorOf();
+    const failed = await runWith(chain, archiveOf(locator));
+    expect(locatorFindings(failed)).toEqual(["anchor-locator-failed"]);
+    expect(failed.locator).toBeUndefined();
+    chain.failing = false;
+    expect((await runWith(chain, archiveOf(locator))).locator).toBe("sent");
+    // A read of the anchor's locator that fails, or answers nonsense,
+    // carries none: checkpoints still go.
+    for (const answer of [
+      async () => {
+        throw new Error("node down");
+      },
+      async () => "0x" as unknown as Uint8Array,
+    ]) {
+      const other = new ModelAnchor();
+      const e = await boardFor(other, 0);
+      other.time = endOf(0);
+      other.latestLocator = answer;
+      const unread = await runWith(other, archiveOf(locatorOf()));
+      expect(locatorFindings(unread)).toEqual(["anchor-locator-failed"]);
+      expect(reportOf(unread, e)?.anchored).toEqual([0]);
+      expect(other.locators).toEqual([undefined]);
+    }
   });
 
   test("by default reads this database's archive, which names nothing while it holds no chain", async () => {
@@ -777,7 +866,7 @@ describe("the archive's locator", () => {
     chain.time = endOf(5);
     const result = await run(chain);
     expect(result.locator).toBeUndefined();
-    expect(result.findings.filter((x) => x.electionId === undefined)).toEqual([]);
+    expect(locatorFindings(result)).toEqual([]);
     expect(chain.calls).toEqual([]);
   });
 });

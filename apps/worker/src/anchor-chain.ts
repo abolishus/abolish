@@ -141,7 +141,7 @@ export class ViemAnchorChain extends ViemAnchorReader implements AnchorChain {
    * its own calls, whose locators the pinned state wouldn't show.
    */
   async latestLocator(): Promise<Uint8Array | undefined> {
-    const held = await this.locatorAt((await this.latest()).number);
+    const [held] = await this.locatorAt((await this.latest()).number);
     return held === "0x" ? undefined : hexToBytes(held);
   }
 
@@ -158,6 +158,10 @@ export class ViemAnchorChain extends ViemAnchorReader implements AnchorChain {
     });
     // Throws on a call the anchor would refuse now, before anything is signed.
     await this.client.call({ account: this.#authority, to: this.anchorAddress, data });
+    // The anchor counts the locators it was sent, so a call that didn't
+    // publish one is caught even when the anchor already held the same bytes.
+    const [, before] =
+      locator === undefined ? ["0x", 0n] : await this.locatorAt((await this.latest()).number);
     await this.#send(hexToBytes(data));
     // Confirmed at the node's latest block, at or above every block read so
     // far, so a sender that resolved without the anchor's state changing
@@ -167,18 +171,20 @@ export class ViemAnchorChain extends ViemAnchorReader implements AnchorChain {
       const held = await this.hashOf(c.election_id, c.segment, after.number);
       if (held !== bytesToHex(checkpointHash(c))) throw new Error("the call didn't anchor");
     }
-    if (locator !== undefined && (await this.locatorAt(after.number)) !== bytesToHex(locator))
-      throw new Error("the call didn't publish the locator");
+    if (locator !== undefined) {
+      const [held, count] = await this.locatorAt(after.number);
+      if (count <= before || held !== bytesToHex(locator))
+        throw new Error("the call didn't publish the locator");
+    }
   }
 
-  private async locatorAt(blockNumber: bigint) {
-    const [held] = await this.client.readContract({
+  private locatorAt(blockNumber: bigint) {
+    return this.client.readContract({
       address: this.anchorAddress,
       abi: boardAnchorAbi,
       functionName: "latestLocator",
       blockNumber,
     });
-    return held;
   }
 }
 

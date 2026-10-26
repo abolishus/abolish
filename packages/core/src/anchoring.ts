@@ -9,10 +9,12 @@
 //
 // Every call that carries checkpoints also carries the archive's latest
 // locator once one exists (docs/spec/contracts.md, Archive locator), so no
-// anchored period lacks a locator at or after it, and a run whose calls
-// carried none sends the locator alone when the anchor holds another: that
-// is the final anchor after a poll closes, made whenever the archive
-// confirms (docs/spec/archive.md, Locator; T-51, T-69).
+// anchored period lacks a locator at or after it, and a run that had no
+// checkpoint to send sends the locator alone when the anchor holds another:
+// that is the final anchor after a poll closes, made whenever the archive
+// confirms (docs/spec/archive.md, Locator; T-51, T-69). A locator only ever
+// replaces the anchor's own when that one names our chain at or below it,
+// so the worker's locators never fall.
 
 import {
   type Checkpoint,
@@ -26,7 +28,7 @@ import {
 import { and, asc, desc, eq, gt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
-import { archiveLocator } from "./archiving.ts";
+import { type ArchiveLocator, archiveLocator, archiveManifestSequence } from "./archiving.ts";
 import { listBoards } from "./audit.ts";
 import { lockBoard, pinnedBoardVersion, readBoard } from "./board.ts";
 import { isBytes } from "./bytes.ts";
@@ -224,6 +226,13 @@ export type AnchorFindingCode =
    * fails an election and a late locator fails nothing (T-49, T-51).
    */
   | "anchor-locator-unread"
+  /**
+   * The anchor holds a locator naming no manifest of our chain, or one above
+   * the archive's: our database lost its place (a wipe), or another writer
+   * named another chain (T-69). This run's calls carry none, so the anchor's
+   * is never overwritten with a locator that would read as a rollback.
+   */
+  | "anchor-locator-foreign"
   /** The locator-only call, or the read of the locator the anchor holds, failed; the next run sends it again. */
   | "anchor-locator-failed"
   /** A checkpoint is still unanchored past half its deadline (T-49). */
@@ -272,13 +281,17 @@ export interface AnchorRun {
   readonly locator: "carried" | "sent" | "held" | undefined;
 }
 
+/** The archive the anchoring run reads its locator from. */
+export interface LocatorSource {
+  /** The archive's latest locator (version 3) with its manifest's sequence, or `undefined` while it has none. */
+  latest(): Promise<ArchiveLocator | undefined>;
+  /** The sequence of the archive's manifest `cid`, or `undefined` if it holds none by that CID. */
+  sequenceOf(cid: Uint8Array): Promise<bigint | undefined>;
+}
+
 export interface AnchorOptions {
-  /**
-   * Reads the latest locator of the archive (version 3), or `undefined`
-   * while the archive has none. By default `archiveLocator` over this
-   * database and the chain's anchor.
-   */
-  readonly locator?: () => Promise<Uint8Array | undefined>;
+  /** By default `archiveLocator` and `archiveManifestSequence` over this database and the chain's anchor. */
+  readonly archive?: LocatorSource;
 }
 
 /** The period containing `t`, or -1 before the epoch. */
@@ -319,11 +332,14 @@ function checkClock(clock: AnchoringClock): void {
  * the seal's period added nothing, isn't taken yet: nothing computes the
  * seal from a definition (P4-1, Known-weak).
  *
- * The archive's locator is read once, before any call, and carried by every
- * call with checkpoints; if none of those went through, it is sent alone
- * unless the anchor already holds it. The locator never falls: the archive
- * names the highest manifest that meets its rule, and a database that holds
- * no chain (after a wipe) gives no locator, leaving the anchor's in place.
+ * The archive's locator is read once, before any call, with the one the
+ * anchor holds, and carried by every call with checkpoints only if the
+ * anchor holds none, ours, or one naming our chain's manifest at or below
+ * ours: so it never falls, whatever order runs overlap in, and never
+ * overwrites another chain's (T-69). A run that sent no checkpoint call
+ * sends it alone unless the anchor holds it; one whose checkpoint call
+ * failed leaves it to the next run, since a second call from the authority
+ * could replace the pending one in the mempool and miss its window (T-49).
  */
 export async function anchorBoards(
   client: Sql,
@@ -352,7 +368,7 @@ export async function anchorBoards(
   const lag = now - clock.epoch - 2n * clock.deadline;
   const from =
     lag <= 0n ? 0 : Number(atMostPastLast((lag + clock.period - 1n) / clock.period - 1n));
-  const locator = await readLocator(client, chain, options, findings);
+  const { locator, held } = await readLocator(client, chain, options, findings);
   const reports: AnchorReport[] = [];
   for (const id of await listBoards(client)) {
     try {
@@ -364,47 +380,80 @@ export async function anchorBoards(
       findings.push({ code: "anchor-error", electionId: id });
     }
   }
-  if (locator === undefined) return { reports, findings, locator: undefined };
-  if (reports.some((r) => r.anchored.length > 0)) return { reports, findings, locator: "carried" };
+  const result = (state: AnchorRun["locator"]) => ({ reports, findings, locator: state });
+  if (locator === undefined) return result(undefined);
+  if (reports.some((r) => r.anchored.length > 0)) return result("carried");
+  if (held) return result("held");
+  if (findings.some((f) => f.code === "anchor-send-failed" || f.code === "anchor-error"))
+    return result(undefined);
   try {
-    const held = await chain.latestLocator();
-    if (held !== undefined && !isBytes(held)) throw new TypeError("a held locator must be bytes");
-    if (held !== undefined && equal(held, locator)) return { reports, findings, locator: "held" };
     await chain.anchor([], locator);
-    return { reports, findings, locator: "sent" };
+    return result("sent");
   } catch {
     findings.push({ code: "anchor-locator-failed" });
-    return { reports, findings, locator: undefined };
+    return result(undefined);
   }
 }
 
 /**
- * The archive's latest locator, which must be a well-formed version-3
- * locator, or `undefined` with `anchor-locator-unread` pushed if it can't be
- * read: a broken archive never holds back an anchor.
+ * The locator this run's calls carry, if any, and whether the anchor holds
+ * it already. Every failure gives no locator and a finding, never a thrown
+ * error: a broken archive never holds back an anchor.
  */
 async function readLocator(
   client: Sql,
   chain: AnchorChain,
   options: AnchorOptions,
   findings: AnchorFinding[],
-): Promise<Uint8Array | undefined> {
-  const read =
-    options.locator ??
-    (async () =>
-      (await archiveLocator(client, { l1ChainId: chain.chainId, anchor: chain.address }))?.locator);
+): Promise<{ locator: Uint8Array | undefined; held: boolean }> {
+  const archive: LocatorSource = options.archive ?? {
+    latest: () => archiveLocator(client, { l1ChainId: chain.chainId, anchor: chain.address }),
+    sequenceOf: (cid) => archiveManifestSequence(client, cid),
+  };
+  const none = { locator: undefined, held: false };
+  let ours: ArchiveLocator | undefined;
   try {
-    const locator = await read();
-    if (locator === undefined) return undefined;
+    ours = await archive.latest();
+    if (ours === undefined) return none;
     // The anchor frames a locator but never reads it, so a malformed one
     // would land on L1 for good and send verifiers nowhere (T-17, T-69).
-    if (!isBytes(locator) || decodeArchiveLocator(locator, [3]).kind !== "manifest")
+    if (
+      !isBytes(ours.locator) ||
+      decodeArchiveLocator(ours.locator, [3]).kind !== "manifest" ||
+      typeof ours.sequence !== "bigint" ||
+      ours.sequence < 0n
+    )
       throw new TypeError("the archive's locator isn't a version-3 locator");
-    return new Uint8Array(locator);
   } catch {
     findings.push({ code: "anchor-locator-unread" });
-    return undefined;
+    return none;
   }
+  const locator = new Uint8Array(ours.locator);
+  let anchors: Uint8Array | undefined;
+  try {
+    anchors = await chain.latestLocator();
+    if (anchors !== undefined && !isBytes(anchors))
+      throw new TypeError("a held locator must be bytes");
+  } catch {
+    findings.push({ code: "anchor-locator-failed" });
+    return none;
+  }
+  if (anchors === undefined) return { locator, held: false };
+  if (equal(anchors, locator)) return { locator, held: true };
+  const read = decodeArchiveLocator(anchors, [1, 2, 3]);
+  let below = false;
+  if (read.kind === "manifest") {
+    try {
+      const at = await archive.sequenceOf(read.manifest);
+      below = typeof at === "bigint" && at <= ours.sequence;
+    } catch {
+      findings.push({ code: "anchor-locator-unread" });
+      return none;
+    }
+  }
+  if (below) return { locator, held: false };
+  findings.push({ code: "anchor-locator-foreign" });
+  return none;
 }
 
 /**

@@ -5,6 +5,7 @@ import { boardAnchorAbi } from "@abolishus/contracts/abi";
 import {
   type AnchorFinding,
   anchorBoards,
+  type LocatorSource,
   appendEntry,
   readCheckpoints,
   readDefinition,
@@ -239,6 +240,18 @@ const locator = () =>
     3,
   );
 
+/** An archive whose chain's manifests are those `locators` name, in order. */
+const archiveOf = (...locators: Uint8Array[]): LocatorSource => ({
+  latest: async () =>
+    locators.length === 0
+      ? undefined
+      : { sequence: BigInt(locators.length - 1), locator: locators.at(-1)! },
+  sequenceOf: async (cid) => {
+    const i = locators.findIndex((l) => toHex(l.slice(2, 38)) === toHex(cid));
+    return i < 0 ? undefined : BigInt(i);
+  },
+});
+
 const locatorHeld = (deployment: AnchorDeployment) =>
   client.readContract({
     address: deployment.anchor,
@@ -353,19 +366,21 @@ describe("the adapter", () => {
     const chain = adapter(deployment, sender(deployment, sent));
     expect(await chain.latestLocator()).toBeUndefined();
     const first = locator();
-    const run = await anchorBoards(app, chain, localNow(), { locator: async () => first });
+    const run = await anchorBoards(app, chain, localNow(), { archive: archiveOf(first) });
     expect(about(run.findings, id)).toEqual([]);
     expect(run.locator).toBe("carried");
     expect(sent).toHaveLength(1);
     expect(await chain.latestLocator()).toEqual(first);
     expect(await locatorHeld(deployment)).toEqual([toHex(first), 1n]);
     // Held already: nothing is sent.
-    const same = await anchorBoards(app, chain, localNow(), { locator: async () => first });
+    const same = await anchorBoards(app, chain, localNow(), { archive: archiveOf(first) });
     expect(same.locator).toBe("held");
     expect(sent).toHaveLength(1);
     // A newer one goes alone.
     const next = locator();
-    const alone = await anchorBoards(app, chain, localNow(), { locator: async () => next });
+    const alone = await anchorBoards(app, chain, localNow(), {
+      archive: archiveOf(first, next),
+    });
     expect(alone.locator).toBe("sent");
     expect(sent).toHaveLength(2);
     expect(await locatorHeld(deployment)).toEqual([toHex(next), 2n]);
@@ -377,11 +392,17 @@ describe("the adapter", () => {
       app,
       adapter(deployment, async () => {}),
       localNow(),
-      { locator: async () => locator() },
+      { archive: archiveOf(locator()) },
     );
     expect(run.findings).toContainEqual({ code: "anchor-locator-failed" });
     expect(run.locator).toBeUndefined();
     expect(await locatorHeld(deployment)).toEqual(["0x", 0n]);
+    // Even when the anchor already holds the same bytes: its count didn't move.
+    const held = locator();
+    await adapter(deployment).anchor([], held);
+    await expect(adapter(deployment, async () => {}).anchor([], held)).rejects.toThrow(
+      "didn't publish the locator",
+    );
   });
 
   test("fails a call whose sender resolved without the anchor holding it", async () => {

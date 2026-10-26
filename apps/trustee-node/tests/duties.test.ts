@@ -6,7 +6,9 @@
 // recorded or can't be, and giving up a view no retry can read; and the
 // complaint duty's (P2-13 part 4b-3b), the same until `t_K`; and the tally
 // duty's (P2-13 part 5b-2b-3a), until every cell is opened or `t_D`, with
-// the channel's messages handed to every duty still stepped.
+// the channel's messages handed to every duty still stepped; and the
+// opening sender's (part 5b-2b-3b-2c), until every cell is published or the
+// seal's tally term, `t_D + DESTRUCTION_WINDOW`.
 import { deliveryDeadlines, kemKeygen } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
@@ -22,6 +24,9 @@ import {
   type ComplaintEvent,
   type Duty,
   type DutyEvent,
+  type OpeningEvent,
+  OpeningSends,
+  openingsDeadline,
   ReceiptDuties,
   type ReceiptEvent,
   TallyDuties,
@@ -29,6 +34,7 @@ import {
   type TallyEvent,
 } from "../src/duties.ts";
 import { L1AnchorError } from "../src/l1.ts";
+import type { OpeningSenderStatus } from "../src/opening-sender.ts";
 import { SendError } from "../src/send.ts";
 import type { TallyDutyStatus } from "../src/tally.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -838,5 +844,85 @@ describe("the tally duties", () => {
     // s_T = 155, and segment 154's deadline is 1,085,100, earlier.
     expect(tallyDeadline(e, { epoch: 0n, period: 7000n, deadline: 100n })).toBe(1_087_900n);
     expect(() => tallyDeadline(e, { ...CLOCK, epoch: 1n })).toThrow(L1AnchorError);
+  });
+});
+
+describe("the opening senders", () => {
+  const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n };
+  const sending: OpeningSenderStatus = {
+    state: "sending",
+    openings: [{ cell: 0, state: "not-ready" }],
+  };
+
+  function senders(scripts: Map<number, OpeningSenderStatus[]>, clock: () => bigint) {
+    const events: OpeningEvent[] = [];
+    const stepped: string[] = [];
+    let built = 0;
+    const duties = new OpeningSends(
+      {
+        seat: {
+          approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+          approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+        },
+        build: async (e) => {
+          built++;
+          const n = e.stubHash[0] as number;
+          return {
+            deadline: openingsDeadline(e, CLOCK),
+            step: async () => {
+              stepped.push(name(n));
+              const script = scripts.get(n) as OpeningSenderStatus[];
+              return (script.length > 1 ? script.shift() : script[0]) as OpeningSenderStatus;
+            },
+          };
+        },
+        clock,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    return { duties, events, stepped, built: () => built };
+  }
+
+  test("the seal's tally term is t_D plus the destruction window", () => {
+    expect(openingsDeadline(approvedOf(1), CLOCK)).toBe(
+      tallyDeadline(approvedOf(1), CLOCK) + 86_400n,
+    );
+  });
+
+  test("send past t_D until every cell is published or the seal's tally term has passed, and never past it", async () => {
+    const tD = tallyDeadline(approvedOf(1), CLOCK);
+    let wall = tD + 1n;
+    const h = senders(
+      new Map<number, OpeningSenderStatus[]>([
+        [1, [{ state: "none" }, sending, { state: "complete" }]],
+        [2, [sending]],
+      ]),
+      () => wall,
+    );
+    for (let i = 0; i < 4; i++) await h.duties.step();
+    // Past t_D the tally duty is over, but its openings are still sent.
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(4);
+    wall = openingsDeadline(approvedOf(2), CLOCK);
+    await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(5);
+    wall += 1n;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(5);
+    expect(h.events.filter((e) => e.stubHash === name(1))).toEqual([
+      { event: "openings", stubHash: name(1), state: "none" },
+      { event: "openings", stubHash: name(1), ...sending },
+      { event: "openings", stubHash: name(1), state: "complete" },
+    ]);
+  });
+
+  test("set nothing up once the seal's tally term has passed", async () => {
+    const h = senders(new Map([[1, [sending]]]), () => openingsDeadline(approvedOf(1), CLOCK) + 1n);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.built()).toBe(0);
+    expect(h.events).toEqual([{ event: "openings-abandoned", stubHash: name(1) }]);
   });
 });

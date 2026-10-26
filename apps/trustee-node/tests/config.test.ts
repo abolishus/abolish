@@ -233,6 +233,7 @@ describe("the tally's configuration", () => {
             "1": "https://seat-1.example/v1/summed-shares",
             "3": "https://seat-3.example/v1/summed-shares",
           },
+          operator: "https://api.example/",
           ...change,
         },
       }),
@@ -251,6 +252,7 @@ describe("the tally's configuration", () => {
       ]),
       caFile: "/ca.pem",
       timeoutMs: 30_000,
+      operator: "https://api.example/",
     });
     const plain = parseConfig(
       JSON.stringify(
@@ -276,6 +278,10 @@ describe("the tally's configuration", () => {
     ["a peer past the panel", { peers: { "5": "https://seat-5.example/" } }],
     ["a peer named by anything but its index", { peers: { "01": "https://seat-1.example/" } }],
     ["no timeout", { timeoutSeconds: 0 }],
+    ["no operator", { operator: undefined }],
+    ["an operator over plain HTTP off loopback", { operator: "http://api.example/" }],
+    ["an operator URL with credentials", { operator: "https://u:p@api.example/" }],
+    ["an operator that isn't a URL", { operator: "api.example" }],
     ["an unknown field", { extra: 1 }],
   ])("refuses %s", (_, change) => {
     expect(() => parseConfig(JSON.stringify(tally(change)))).toThrow(

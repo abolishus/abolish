@@ -50,6 +50,8 @@ import {
   ComplaintDuties,
   CountedAvailabilityDuties,
   type DutyEvent,
+  OpeningSends,
+  openingsDeadline,
   ReceiptDuties,
   TallyDuties,
   tallyDeadline,
@@ -60,6 +62,8 @@ import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
+import { OpeningSender, PublishedReads } from "./opening-sender.ts";
+import { HttpOperator } from "./operator.ts";
 import {
   l2AvailabilityRecords,
   l2Postings,
@@ -74,7 +78,7 @@ import { FileStore, type SeatStore } from "./store.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
 import { type BoardOpenings, boardOpenings } from "./openings.ts";
-import { TallyDuty } from "./tally.ts";
+import { signedOpenings, TallyDuty } from "./tally.ts";
 import {
   complaintBallots,
   countedSource,
@@ -237,6 +241,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
           availability.receipts.run(signal, ms),
           availability.complaints.run(signal, ms),
           ...(availability.tally ? [availability.tally.run(signal, ms)] : []),
+          ...(availability.openings ? [availability.openings.run(signal, ms)] : []),
         ]
       : []),
   ].map((loop) =>
@@ -323,6 +328,8 @@ interface Duties {
   readonly complaints: ComplaintDuties;
   /** With `availability.tally` only. */
   readonly tally: TallyDuties | undefined;
+  /** With `availability.tally` only. */
+  readonly openings: OpeningSends | undefined;
   readonly channel: Endpoint | undefined;
   readonly server: Server;
 }
@@ -465,7 +472,9 @@ async function availabilityDuties(
     io.err({ error: `serve: ${e.code ?? "failed"}` }),
   );
   io.out({ event: "serving", address: server.address() });
-  let tally: { readonly duties: TallyDuties; readonly channel: Endpoint } | undefined;
+  let tally:
+    | { readonly duties: TallyDuties; readonly openings: OpeningSends; readonly channel: Endpoint }
+    | undefined;
   if (a.tally !== undefined && records !== undefined) {
     try {
       tally = await tallyDuties(config, a, a.tally, { seat, wiring, records, store, clock }, io);
@@ -480,6 +489,7 @@ async function availabilityDuties(
     receipts,
     complaints,
     tally: tally?.duties,
+    openings: tally?.openings,
     channel: tally?.channel,
     server,
   };
@@ -492,7 +502,10 @@ async function availabilityDuties(
  * over the definition registered on the seat's own L2 node, the transcript
  * the seat's approval signed for, the summed-share rule over the counted
  * extent's L1 reader and the board's availability records, and the counted
- * set from the counted extent the seat attested (T-14, T-54, T-15).
+ * set from the counted extent the seat attested (T-14, T-54, T-15). Beside
+ * it, the sending of the openings it signs to the operator's API, until the
+ * duty reads every cell published on the anchored board or the seal's
+ * tally term (T-54).
  */
 async function tallyDuties(
   config: NodeConfig,
@@ -506,7 +519,11 @@ async function tallyDuties(
     readonly clock: () => bigint;
   },
   io: CliIo,
-): Promise<{ readonly duties: TallyDuties; readonly channel: Endpoint }> {
+): Promise<{
+  readonly duties: TallyDuties;
+  readonly openings: OpeningSends;
+  readonly channel: Endpoint;
+}> {
   let ca: string | undefined;
   if (t.caFile !== undefined) {
     try {
@@ -529,6 +546,7 @@ async function tallyDuties(
     throw e;
   }
   const { seat, wiring, records, store, clock } = s;
+  const published = new PublishedReads();
   const duties = new TallyDuties(
     {
       seat,
@@ -563,10 +581,37 @@ async function tallyDuties(
           board: wiring.openings(election),
         });
         return {
-          step: () => duty.step(),
+          step: async () => {
+            const status = await duty.step();
+            published.track(election.stubHash, status);
+            return status;
+          },
           receive: (message) => duty.receive(message),
           deadline: tallyDeadline(election, a.anchorClock),
         };
+      },
+    },
+    a.anchorClock,
+  );
+  const operator = new HttpOperator(t.operator, { timeoutMs: t.timeoutMs });
+  const openings = new OpeningSends(
+    {
+      seat,
+      clock,
+      log: (e: DutyEvent) => io.out(e),
+      build: async (election) => {
+        // The pinned board-entry version, read as the board's openings are,
+        // under which an entry the operator answers must decode.
+        const { boardVersion } = await l1BoardAnchors(wiring.anchors, election, "tally");
+        const sender = new OpeningSender({
+          election,
+          boardVersion,
+          openings: () => signedOpenings(store, election.stubHash),
+          published: () => published.of(election.stubHash),
+          operator,
+          clock,
+        });
+        return { step: () => sender.step(), deadline: openingsDeadline(election, a.anchorClock) };
       },
     },
     a.anchorClock,
@@ -587,7 +632,7 @@ async function tallyDuties(
     throw new ConfigError(`availability.tally: ${code}`);
   }
   io.out({ event: "summed-shares", url: channel.url });
-  return { duties, channel };
+  return { duties, openings, channel };
 }
 
 /** What `run` builds the duty over, besides the configuration. */

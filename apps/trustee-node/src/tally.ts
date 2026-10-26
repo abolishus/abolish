@@ -381,14 +381,8 @@ export class TallyDuty {
   }
 
   /** The tally openings (`0x0006`, version 1) the seat signed, by cell. */
-  async openings(): Promise<Map<number, Uint8Array>> {
-    const out = new Map<number, Uint8Array>();
-    const { store, election } = this.#o;
-    for (const name of await store.list(`tally/${hex(election.stubHash)}/openings`)) {
-      const bytes = await store.get(`tally/${hex(election.stubHash)}/openings/${name}`);
-      if (bytes !== undefined) out.set(Number(name), bytes);
-    }
-    return out;
+  openings(): Promise<Map<number, Uint8Array>> {
+    return signedOpenings(this.#o.store, this.#o.election.stubHash);
   }
 
   /** The seat's own sums and every passing sum received for cell `c`. */
@@ -637,4 +631,22 @@ function countedBallot(
     if (e instanceof DecodeError) throw new Refused("a counted ballot doesn't decode");
     throw e;
   }
+}
+
+/**
+ * The tally openings (`0x0006`, version 1) the seat signed for the election
+ * approved as `stubHash`, by cell, as `TallyDuty` wrote them: kept, and
+ * resent until the seal, after the duty itself is over (docs/spec/tally.md,
+ * Destruction, When).
+ */
+export async function signedOpenings(
+  store: SeatStore,
+  stubHash: Uint8Array,
+): Promise<Map<number, Uint8Array>> {
+  const out = new Map<number, Uint8Array>();
+  for (const name of await store.list(`tally/${hex(stubHash)}/openings`)) {
+    const bytes = await store.get(`tally/${hex(stubHash)}/openings/${name}`);
+    if (bytes !== undefined) out.set(Number(name), bytes);
+  }
+  return out;
 }

@@ -376,6 +376,7 @@ describe("run with the availability duty", () => {
       host: "127.0.0.1",
       port: 0,
       peers: { "2": "https://seat-2.example/v1/summed-shares" },
+      operator: "http://127.0.0.1:1/",
     };
     const run = await runWith("tally", { tally }, "summed-shares", async (e) => {
       url = e.url ?? "";
@@ -418,7 +419,13 @@ describe("run with the availability duty", () => {
     "refuses %s as bad configuration",
     async (name, change, error) => {
       const run = await runWith(name.replaceAll(" ", "-"), {
-        tally: { host: "127.0.0.1", port: 0, peers: {}, ...change },
+        tally: {
+          host: "127.0.0.1",
+          port: 0,
+          peers: {},
+          operator: "http://127.0.0.1:1/",
+          ...change,
+        },
       });
       expect(run.code).toBe(2);
       expect(run.err).toEqual([{ error }]);

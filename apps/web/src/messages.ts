@@ -34,14 +34,14 @@ const enUS = {
   trust1Body:
     "When you answer, the ballot app seals it on your own device before it goes anywhere. What travels is a locked box, not your answer.",
   trust1Detail:
-    "The detail: it is split into shares, each encrypted to one of the poll's trustees.",
+    "The detail: it is split into shares, each encrypted to one of the poll's trustee seats.",
   trust2Title: "Put on a public board",
   trust2Body:
     "Every sealed answer goes on a public board that anyone can read. You keep a tracking code, so you can find yours there and see that it was counted.",
   trust2Detail: "The detail: each entry extends a hash chain, so removing or changing one shows.",
   trust3Title: "Opened only after the poll closes",
   trust3Body:
-    "The count is unlocked only when enough of the poll's trustees, each holding one share of the key, work together after it closes. No single seat can open it alone. During launch every seat is run by Abolish, so these polls are private from everyone except us. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
+    "The count is unlocked only when enough of the poll's trustee seats, each holding one share of the key, work together after it closes. No single seat can open it alone. During launch every seat is run by Abolish, so these polls are private from everyone except us. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
   trust3Detail: "The detail: it takes {threshold} of the {seats} seats.",
   trust4Title: "Counted again by anyone",
   trust4Body:

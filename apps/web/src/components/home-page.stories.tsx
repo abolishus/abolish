@@ -122,6 +122,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByRole("main")).toHaveTextContent(/open it in the ballot app\./);
   await expect(canvas.getByRole("main")).toHaveTextContent(/the ballot app seals it/);
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/voting app/);
+  // The trust scene's picture counts seats, so its words name them as the
+  // trustees' seats the first time, not trustees in one sentence and seats,
+  // unexplained, in the next.
+  const words = canvas.getByRole("main").textContent ?? "";
+  await expect(words.match(/\b(\w+) seats?\b/)?.[1]).toBe("trustee");
+  await expect(words).not.toMatch(/poll's trustees/);
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);

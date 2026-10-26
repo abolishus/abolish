@@ -170,9 +170,15 @@ test("logs a run that met another's lock, failing nothing until runs meet it pas
   } finally {
     await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
   }
-  // A run that holds the lock ends the streak: meeting it again starts anew.
-  await anchors.add("boardAnchor", {});
-  expect(await outcome()).toContainEqual(completed);
+  // A run that holds the lock ends the streak, even one that throws:
+  // meeting it again starts anew.
+  chain.time = -1n;
+  try {
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([{ ...failed, error: "internal" }]);
+  } finally {
+    chain.time = START;
+  }
   await other`SELECT pg_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
   try {
     workerNow = at(CLOCK.deadline);

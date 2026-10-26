@@ -11,6 +11,7 @@ import {
   closeCeremonyRounds,
   type CreationAnchors,
   type AnchorChain,
+  type AnchorFinding,
   anchorBoards,
   anchorBusyLimit,
   auditBoard,
@@ -153,7 +154,14 @@ const anchorBusySince = new WeakMap<JobContext, bigint>();
 async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Promise<void> {
   if (ctx.anchor === undefined) throw new JobError("internal");
   const localNow = BigInt(Math.floor(ctx.now().getTime() / 1000));
-  const { findings } = await anchorBoards(ctx.sql, ctx.anchor, localNow);
+  let findings: readonly AnchorFinding[];
+  try {
+    ({ findings } = await anchorBoards(ctx.sql, ctx.anchor, localNow));
+  } catch (e) {
+    // A run that threw met no lock held elsewhere: the streak ends with it.
+    anchorBusySince.delete(ctx);
+    throw e;
+  }
   for (const f of findings)
     ctx.log({
       queue: "{board-anchor}",

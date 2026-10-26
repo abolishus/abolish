@@ -27,6 +27,7 @@ import {
 import type { AnchorLogsRule } from "./anchor-logs.ts";
 import type { ArchiveFinding, ListedFinding } from "./archive.ts";
 import type { ContractEvidence } from "./evidence.ts";
+import type { ContractSequence } from "./replay.ts";
 import type { L2BoardEvidence } from "./availability.ts";
 import type { GatewayStats } from "./gateways.ts";
 
@@ -113,6 +114,15 @@ export type ArchiveRead =
       };
       /** Format 6: the board contract's evidence (docs/spec/verifier.md, Archive, step 5); never 4.3's. */
       readonly evidence?: ContractEvidence;
+      /**
+       * 4.4's replay of each of the definition's L2 contracts' archive, in
+       * role order, with the walk's `evidence-over-budget` where it kept
+       * no more references; never 4.3's.
+       */
+      readonly replay?: {
+        readonly contracts: readonly ContractSequence[];
+        readonly findings: readonly Extract<ArchiveFinding, { code: "evidence-over-budget" }>[];
+      };
     };
 
 interface BundleCommon {

@@ -1,9 +1,18 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
-import { decodeElectionDefinitionRecord } from "@abolishus/crypto";
+import {
+  type ContractEventRecord,
+  type ContractEventVersion,
+  decodeBoardEntry,
+  decodeContractEvent,
+  decodeElectionDefinitionRecord,
+  pinnedVersion,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
-import { eventChecks } from "../src/events.ts";
+import { type ArchivedEvents, eventChecks } from "../src/events.ts";
+import type { ContractSequence, ReplayedEvidence } from "../src/replay.ts";
 import {
   BUNDLE_FORMAT,
   BUNDLE_FORMAT_CEREMONY,
@@ -358,6 +367,205 @@ describe("a record fails 4.4 only inside the anchored extent", () => {
   test("with no authenticated extent, the first failing record leaves 4.4 unverifiable with its code", () => {
     expect(eventChecks(definition, entries, boardVersion, undefined)).toEqual({
       status: "unverifiable",
+      code: "event-data",
+      at: { entry: 1 },
+    });
+  });
+});
+
+describe("4.4 against the archive's replay", () => {
+  // `first-failure`'s honest creation at entry 0, read alone (anchored 1),
+  // judged against made-up replays: the archive's word is never a failure
+  // (docs/spec/verifier.md 4.4; src/replay.ts; T-53, T-71).
+  const c = byId("first-failure");
+  const definition = decodeElectionDefinitionRecord(hex(c.definition));
+  const d = definition.value;
+  const entries = parseBundle(
+    JSON.stringify({
+      format: BUNDLE_FORMAT_DEFINITION,
+      definition: c.definition,
+      clock: c.clock,
+      l1,
+    }),
+    hex(c.board),
+  ).entries;
+  const boardVersion = hex(c.board)[2] as 4;
+  const version = pinnedVersion(d, RECORD_TYPES.contractEvent) as ContractEventVersion;
+  const creation = decodeContractEvent(
+    decodeBoardEntry(entries[0] as Uint8Array, boardVersion).payload,
+    version,
+  );
+  // The registry's sequence: copies of the creation at every other index
+  // up to one past it, each passing the event check, and the creation at its own.
+  const other = (n: bigint): ContractEventRecord => ({ ...creation, n });
+  const registry = [
+    ...Array.from({ length: Number(creation.n) }, (_, i) => other(BigInt(i))),
+    creation,
+    other(creation.n + 1n),
+  ];
+  const roles = [
+    ["election-registry", d.election_registry],
+    ["trustee-registry", d.trustee_registry],
+    ["group-registry", d.group_registry],
+    ["board", d.board],
+  ] as const;
+  const proven = (count: bigint, replay: ReplayedEvidence["replay"] = null) =>
+    ({
+      accumulator: {
+        accumulator: new Uint8Array(32),
+        count,
+        block: 1n,
+        blockHash: new Uint8Array(32),
+        timestamp: 1n,
+      },
+      gameIndex: 0n,
+      game: new Uint8Array(20),
+      outputRoot: new Uint8Array(32),
+      cid: new Uint8Array(36),
+      transaction: new Uint8Array(32),
+      replay,
+    }) satisfies ReplayedEvidence;
+  const sequence = (
+    role: (typeof roles)[number][0],
+    over: Partial<ContractSequence> = {},
+  ): ContractSequence => {
+    const contract = (roles.find(([r]) => r === role) as (typeof roles)[number])[1];
+    const records = role === "election-registry" ? registry : [];
+    const held = BigInt(records.length);
+    return {
+      role,
+      contract,
+      evidence: { records: held > 0n ? [proven(held)] : [], reads: 1, findings: [] },
+      runs: { taken: [], complete: true, spent: 0, reads: 1, findings: [] },
+      held,
+      records,
+      ...over,
+    };
+  };
+  const archived = (
+    over: Partial<Record<(typeof roles)[number][0], Partial<ContractSequence>>> = {},
+    findings: ArchivedEvents["findings"] = [],
+  ): ArchivedEvents => ({
+    contracts: roles.map(([role]) => sequence(role, over[role])),
+    findings,
+  });
+  const judge = (a: ArchivedEvents, anchored = 1) =>
+    eventChecks(definition, entries, boardVersion, anchored, undefined, a);
+
+  test("the creation is the registry's held event at its index: not implemented, for the required entries", () => {
+    expect(creation.n).toBeGreaterThanOrEqual(0n);
+    expect(judge(archived())).toEqual({ status: "unverifiable", code: "not-implemented" });
+    // Without the archive, as before.
+    expect(eventChecks(definition, entries, boardVersion, 1)).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
+  test("a boarded record other than the held event at its index is archived-mismatch", () => {
+    const changed = registry.map((r) =>
+      r.n === creation.n ? { ...r, l2_block: r.l2_block + 1n } : r,
+    );
+    expect(judge(archived({ "election-registry": { records: changed } }))).toEqual({
+      status: "unverifiable",
+      code: "archived-mismatch",
+      at: { entry: 0 },
+    });
+  });
+
+  test("a boarded record past what its contract holds is archived-unreached", () => {
+    for (const held of [0n, creation.n])
+      expect(judge(archived({ "election-registry": { held } }))).toEqual({
+        status: "unverifiable",
+        code: "archived-unreached",
+        at: { entry: 0 },
+      });
+  });
+
+  test("each contract's archive is judged in role order, before the boarded records", () => {
+    const at = { contract: "trustee-registry" };
+    const cases: [Partial<ContractSequence>, string][] = [
+      [
+        {
+          evidence: {
+            records: [],
+            reads: 1,
+            findings: [{ code: "evidence-reads-over-budget", maxReads: 1 }],
+          },
+        },
+        "evidence-reads-over-budget",
+      ],
+      [
+        { evidence: { records: [proven(3n, "accumulator")], reads: 1, findings: [] } },
+        "accumulator",
+      ],
+      [
+        { evidence: { records: [proven(3n, "block-range")], reads: 1, findings: [] } },
+        "block-range",
+      ],
+      [
+        {
+          runs: {
+            taken: [],
+            complete: false,
+            spent: 0,
+            reads: 1,
+            findings: [{ code: "run-gap", n: 0n }],
+          },
+        },
+        "run-gap",
+      ],
+      [
+        {
+          runs: {
+            taken: [],
+            complete: false,
+            spent: 0,
+            reads: 1,
+            findings: [{ code: "runs-over-budget", n: 0n, maxBytes: 1, maxReads: 1 }],
+          },
+        },
+        "runs-over-budget",
+      ],
+      // An event of the registry's, held by the trustee registry's archive.
+      [
+        { records: [{ ...creation, contract: d.trustee_registry, n: 0n }], held: 1n },
+        "unknown-event",
+      ],
+      [
+        { evidence: { records: [proven(3n, "unreached")], reads: 1, findings: [] } },
+        "event-topics",
+      ],
+    ];
+    for (const [over, code] of cases) {
+      // The election registry's mismatch comes after every contract's own judgement.
+      const changed = registry.map((r) =>
+        r.n === creation.n ? { ...r, l2_block: r.l2_block + 1n } : r,
+      );
+      expect(
+        judge(archived({ "trustee-registry": over, "election-registry": { records: changed } })),
+        code,
+      ).toEqual({ status: "unverifiable", code, at });
+    }
+    // An event the held count doesn't reach isn't judged.
+    expect(
+      judge(
+        archived({ board: { records: [{ ...creation, contract: d.board, n: 0n }], held: 0n } }),
+      ),
+    ).toEqual({ status: "unverifiable", code: "not-implemented" });
+    // The walk keeping no more references comes first.
+    expect(
+      judge(
+        archived({ "trustee-registry": cases[1]?.[0] ?? {} }, [
+          { code: "evidence-over-budget", budget: 1 },
+        ]),
+      ),
+    ).toEqual({ status: "unverifiable", code: "evidence-over-budget", at: {} });
+  });
+
+  test("a failing boarded record still decides 4.4 first, failed inside the anchored extent", () => {
+    expect(judge(archived({ "election-registry": { held: 0n } }), 3)).toEqual({
+      status: "fail",
       code: "event-data",
       at: { entry: 1 },
     });

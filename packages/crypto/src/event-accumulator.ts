@@ -188,3 +188,74 @@ export function checkEventAccumulatorProof(
   const replayed = replayEventAccumulator(chainId, address, logs.slice(0, c));
   return equalBytes(replayed.accumulator, provenAccumulator) ? null : "accumulator";
 }
+
+/**
+ * `checkEventAccumulatorProof` for each of `provens` over one archive, in
+ * one pass: entry `i` of the result is what `checkEventAccumulatorProof`
+ * returns for `provens[i]`, but the archive is validated, numbered and
+ * ordered once and its accumulator replayed once, up to the largest count
+ * left to compare, rather than once per proof. A contract proven at
+ * every anchored period has one proof a period, and replaying its whole
+ * sequence for each would cost their product (T-52). Throws as
+ * `checkEventAccumulatorProof` does, for any proof or log.
+ */
+export function checkEventAccumulatorProofs(
+  chainId: bigint,
+  address: Uint8Array,
+  archive: Iterable<ArchivedContractLog>,
+  provens: readonly ProvenEventAccumulator[],
+): (EventAccumulatorProofError | null)[] {
+  const checked = provens.map((proven) => {
+    u64Arg(proven.block, "proven.block");
+    u64Arg(proven.count, "proven.count");
+    const accumulator = copyBytes(proven.accumulator, "proven.accumulator");
+    if (accumulator.length !== 32) throw new RangeError("proven.accumulator must be 32 bytes");
+    return { block: proven.block, count: proven.count, accumulator };
+  });
+  const logs = Array.from(archive);
+  for (const log of logs) {
+    u64Arg(log.n, "n");
+    u64Arg(log.block, "block");
+    u64Arg(log.timestamp, "timestamp");
+  }
+  // Rule 1 holds or breaks for every proof alike.
+  if (logs.some((log, i) => log.n !== BigInt(i))) return checked.map(() => "index");
+  for (const [i, log] of logs.entries()) {
+    const prev = logs[i - 1];
+    if (prev !== undefined && (log.block < prev.block || log.timestamp < prev.timestamp))
+      return checked.map(() => "order");
+  }
+  // Rule 2: with the blocks never decreasing (rule 1), every counted log is
+  // at or before the proof's block exactly when the last one is. A proof
+  // past the archive breaks rule 3 without a replay.
+  const rule2 = checked.map((proven): EventAccumulatorProofError | undefined => {
+    const short = proven.count > BigInt(logs.length);
+    const c = short ? logs.length : Number(proven.count);
+    const last = logs[c - 1];
+    if (last !== undefined && last.block > proven.block) return "block-range";
+    const next = logs[c];
+    if (!short && next !== undefined && next.block <= proven.block) return "block-range";
+    return short ? "accumulator" : undefined;
+  });
+  // Rule 3: one replay, as far as the largest count still to compare, so it
+  // steps exactly the logs some proof's own replay would, and throws where
+  // one of those would.
+  const asked = new Set(checked.filter((_, i) => rule2[i] === undefined).map((p) => p.count));
+  const after = new Map<bigint, Uint8Array>();
+  if (asked.size > 0) {
+    const reached = Math.max(...[...asked].map(Number));
+    let accumulator = eventAccumulatorGenesis(chainId, address);
+    if (asked.has(0n)) after.set(0n, accumulator);
+    for (let i = 0; i < reached; i++) {
+      accumulator = eventAccumulatorStep(accumulator, BigInt(i), logs[i] as ArchivedContractLog);
+      if (asked.has(BigInt(i + 1))) after.set(BigInt(i + 1), accumulator);
+    }
+  }
+  return checked.map((proven, i) => {
+    const broken = rule2[i];
+    if (broken !== undefined) return broken;
+    return equalBytes(after.get(proven.count) as Uint8Array, proven.accumulator)
+      ? null
+      : "accumulator";
+  });
+}

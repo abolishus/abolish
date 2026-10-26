@@ -31,6 +31,7 @@ import {
   type Anchor,
   type AsyncBlockSource,
   BoardError,
+  type ContractRole,
   type BoardEntryVersion,
   countedCheckpoints,
   boardPayloadTypes,
@@ -84,6 +85,8 @@ import {
   walkArchive,
 } from "./archive.ts";
 import { DEFAULT_EVIDENCE_READS, latestEvidence } from "./evidence.ts";
+import { type ContractReplay, DEFAULT_REPLAY_EVIDENCE_READS, replayArchive } from "./replay.ts";
+import { DEFAULT_RUN_BYTES, DEFAULT_RUN_READS } from "./runs.ts";
 import type { ArchiveRead, Bundle, CidRead, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -190,6 +193,8 @@ export type CheckAt =
   | { readonly seat: number }
   /** 4.6's first point and panel that doesn't hold (1 the ballot extent; 1 the default panel, 2 the author panel). */
   | { readonly point: number; readonly panel: number }
+  /** 4.4's first contract, by role, whose archive leaves it unverifiable. */
+  | { readonly contract: ContractRole }
   /** 4.6's first board event, by its position in the bundle's `l2Board.events`, that doesn't decode. */
   | { readonly event: number; readonly decodeError?: DecodeErrorCode }
   | Record<string, never>;
@@ -234,7 +239,7 @@ export interface Report {
   /** A format-6 bundle's availability check, once the board's accumulator replayed (4.6). */
   readonly availability?: AvailabilityReport;
   /** A format-3 to 6 bundle's archive read, once the run read the archive (4.3). */
-  readonly archive?: Plain<ArchiveRead>;
+  readonly archive?: Plain<ReportedArchive>;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -598,6 +603,34 @@ function runBoard(
   }
 }
 
+/** The archive read as the report gives it: each replay without the events it read. */
+export type ReportedArchive =
+  | Extract<ArchiveRead, { readonly stopped: unknown }>
+  | (Omit<Extract<ArchiveRead, { readonly walk: unknown }>, "replay"> & {
+      readonly replay?: {
+        readonly contracts: readonly ContractReplay[];
+        readonly findings: readonly Extract<ArchiveFinding, { code: "evidence-over-budget" }>[];
+      };
+    });
+
+// 4.4's replay of the archive, where the run read one.
+const archivedEvents = (bundle: Bundle) =>
+  bundle.archive !== undefined && "walk" in bundle.archive ? bundle.archive.replay : undefined;
+
+function reportedArchive(read: ArchiveRead): ReportedArchive {
+  if (!("walk" in read) || read.replay === undefined) return read;
+  const contracts = read.replay.contracts.map(
+    ({ role, contract, evidence, runs, held }): ContractReplay => ({
+      role,
+      contract,
+      evidence,
+      runs,
+      held,
+    }),
+  );
+  return { ...read, replay: { ...read.replay, contracts } };
+}
+
 /** The archive read's budgets (docs/spec/archive.md; T-52). */
 export interface ArchiveReadOptions {
   /** Manifest reads; default `DEFAULT_MANIFEST_BUDGET`. */
@@ -608,6 +641,12 @@ export interface ArchiveReadOptions {
   readonly maxReads?: number;
   /** Transactions the board's evidence reads may ask (format 6); default `DEFAULT_EVIDENCE_READS`. */
   readonly maxEvidenceReads?: number;
+  /** Transactions 4.4's replay may ask for evidence; default `DEFAULT_REPLAY_EVIDENCE_READS`. */
+  readonly maxReplayEvidenceReads?: number;
+  /** Bytes 4.4's replay may hold of runs; default `DEFAULT_RUN_BYTES`. */
+  readonly maxRunBytes?: number;
+  /** Transactions 4.4's replay may ask for runs; default `DEFAULT_RUN_READS`. */
+  readonly maxRunReads?: number;
 }
 
 /** The listed objects' byte budget when the caller sets none: 1 GiB, as a copy's (T-52). */
@@ -648,12 +687,20 @@ export async function readArchive(
   const maxBytes = options.maxBytes ?? DEFAULT_ARCHIVE_BYTES;
   const maxReads = options.maxReads ?? DEFAULT_OBJECT_READS;
   const maxEvidenceReads = options.maxEvidenceReads ?? DEFAULT_EVIDENCE_READS;
+  const replayBudgets = {
+    maxEvidenceReads: options.maxReplayEvidenceReads ?? DEFAULT_REPLAY_EVIDENCE_READS,
+    maxRunBytes: options.maxRunBytes ?? DEFAULT_RUN_BYTES,
+    maxRunReads: options.maxRunReads ?? DEFAULT_RUN_READS,
+  };
   // Checked before anything is read, whatever the bundle holds.
   for (const [name, value] of [
     ["maxManifests", maxManifests],
     ["maxBytes", maxBytes],
     ["maxReads", maxReads],
     ["maxEvidenceReads", maxEvidenceReads],
+    ["maxReplayEvidenceReads", replayBudgets.maxEvidenceReads],
+    ["maxRunBytes", replayBudgets.maxRunBytes],
+    ["maxRunReads", replayBudgets.maxRunReads],
   ] as const)
     if (!Number.isSafeInteger(value) || value < 1)
       throw new RangeError(`${name} must be a positive integer`);
@@ -712,9 +759,10 @@ export async function readArchive(
             maxManifests,
             ...(earlier !== undefined && { earlier }),
             ...(targets !== undefined && { objects: targets.map((t) => t.cid) }),
-            // Format 6's 4.6 replays the board contract's events, so its
-            // evidence is kept (step 5).
-            ...("l2Board" in bundle && { contracts: [d.board] }),
+            // 4.4 replays every one of the definition's L2 contracts, and
+            // format 6's 4.6 the board's, so their evidence and runs are
+            // kept (step 5).
+            contracts: [d.election_registry, d.trustee_registry, d.group_registry, d.board],
           },
         )
       : // A length word no locator has: reported as the anchor's framing
@@ -743,11 +791,28 @@ export async function readArchive(
   const evidence =
     "l2Board" in bundle && state.kind === "locator"
       ? await latestEvidence(
-          walk.evidence,
+          walk.evidence.filter((l) => equal(l.contract, d.board)),
           d.l2_chain_id,
           bundle.l2Board.events.length,
           source,
           maxEvidenceReads,
+        )
+      : undefined;
+  // 4.4's replay of every contract's archive, from a partial walk's
+  // listings too: a run or record a manifest left unread costs only a gap.
+  const replay =
+    state.kind === "locator"
+      ? await replayArchive(
+          walk,
+          {
+            "election-registry": d.election_registry,
+            "trustee-registry": d.trustee_registry,
+            "group-registry": d.group_registry,
+            board: d.board,
+          },
+          d.l2_chain_id,
+          source,
+          replayBudgets,
         )
       : undefined;
   const overEvidence = walk.findings.filter(
@@ -767,6 +832,9 @@ export async function readArchive(
       ...(evidence !== undefined && {
         evidence: { ...evidence, findings: [...overEvidence, ...evidence.findings] },
       }),
+      // The walk's budget of references is the replay's too: a walk that
+      // kept no more leaves every contract's listings partial.
+      ...(replay !== undefined && { replay: { contracts: replay, findings: overEvidence } }),
       ...(objects !== undefined &&
         targets !== undefined && {
           objects: {
@@ -960,6 +1028,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
                   : board.entries - board.unauthenticated,
                 // Format 5's run decides whether an L1 origin is a finalized block.
                 "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
+                archivedEvents(bundle),
               ),
             ] as const,
           ]),
@@ -1244,7 +1313,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
     ...(counted?.close !== undefined && { close: counted.close }),
     ...(releases !== undefined && { releases }),
     ...(availability !== undefined && { availability }),
-    ...(bundle.archive !== undefined && { archive: plain(bundle.archive) }),
+    ...(bundle.archive !== undefined && { archive: plain(reportedArchive(bundle.archive)) }),
     board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {
@@ -1385,6 +1454,7 @@ export function anchoredAdmitted(
     inputs.boardEntryVersion,
     extent,
     "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
+    archivedEvents(bundle),
   );
   const admission = ballotChecks(
     definition,

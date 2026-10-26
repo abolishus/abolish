@@ -74,6 +74,25 @@ const clock = {
 };
 const NOW = clock.epoch + BigInt(clock.lastSegment + 1) * clock.period + clock.deadline + 1n;
 const copy = splitEntries(hex(honest.board)).entries;
+// 4.4's replay of an archive listing no evidence and no run: each of the
+// definition's L2 contracts, in role order, with nothing read.
+const NOTHING_REPLAYED = {
+  contracts: (
+    [
+      ["election-registry", definition.election_registry],
+      ["trustee-registry", definition.trustee_registry],
+      ["group-registry", definition.group_registry],
+      ["board", definition.board],
+    ] as const
+  ).map(([role, contract]) => ({
+    role,
+    contract: toHex(contract),
+    evidence: { records: [], reads: 0, findings: [] },
+    runs: { taken: [], complete: true, spent: 0, reads: 0, findings: [] },
+    held: "0",
+  })),
+  findings: [],
+};
 const segments = [
   ...new Set([...copy.map((e) => decodeBoardEntry(e, VERSION).segment), clock.lastSegment]),
 ];
@@ -282,6 +301,7 @@ describe("readArchive", () => {
         spent: objects.reduce((n, o) => n + objectCar(o.bytes).length, 0),
         findings: [],
       },
+      replay: NOTHING_REPLAYED,
     });
     // The manifests from the latest down, then each object once, segment objects first.
     expect(asked).toEqual([m1, m0, ...objects].map((o) => bytesToHex(o.transaction)));
@@ -478,6 +498,7 @@ describe("readArchive", () => {
         reads: 0,
         findings: [{ code: "locator-version", locator: "latest", version: 9 }],
       },
+      replay: NOTHING_REPLAYED,
     });
     expect(r.archive && "walk" in r.archive && "latest" in r.archive.walk).toBe(false);
   });
@@ -568,6 +589,7 @@ describe("readArchive", () => {
     expect(r.archive).toEqual({
       count: "2",
       walk: { latest: "1", manifests: 2, reads: 2, findings: [] },
+      replay: NOTHING_REPLAYED,
     });
     expect(asked).toEqual([m1, m0].map((o) => bytesToHex(o.transaction)));
   });
@@ -997,8 +1019,15 @@ describe("the command line with --arweave", () => {
       String(2 ** 20),
       "--max-archive-reads",
       String(objects.length),
-      // A format-3 bundle reads no evidence, so its budget changes nothing.
+      // A format-3 bundle reads no evidence for 4.6, and this archive lists
+      // none and no run for 4.4's replay, so their budgets change nothing.
       "--max-archive-evidence-reads",
+      "1",
+      "--max-archive-replay-evidence-reads",
+      "1",
+      "--max-archive-run-bytes",
+      "1",
+      "--max-archive-run-reads",
       "1",
     );
     expect(roomy.row.status).toBe("pass");
@@ -1012,6 +1041,9 @@ describe("the command line with --arweave", () => {
       "--max-archive-bytes",
       "--max-archive-reads",
       "--max-archive-evidence-reads",
+      "--max-archive-replay-evidence-reads",
+      "--max-archive-run-bytes",
+      "--max-archive-run-reads",
     ]) {
       for (const bad of ["0", "01", "-1", "1e3", "", " 1", String(2 ** 53)]) {
         const u = await run("--arweave", `${origin}/ar`, budget, bad, d);

@@ -252,6 +252,7 @@ export {
 export {
   type ArchivedContractLog,
   checkEventAccumulatorProof,
+  checkEventAccumulatorProofs,
   type ContractLog,
   eventAccumulatorGenesis,
   eventAccumulatorStep,

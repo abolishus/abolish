@@ -8,6 +8,8 @@
 import { parseArgs } from "node:util";
 import { DEFAULT_MANIFEST_BUDGET, DEFAULT_OBJECT_READS } from "./archive.ts";
 import { DEFAULT_EVIDENCE_READS } from "./evidence.ts";
+import { DEFAULT_REPLAY_EVIDENCE_READS } from "./replay.ts";
+import { DEFAULT_RUN_BYTES, DEFAULT_RUN_READS } from "./runs.ts";
 import { arweaveSource } from "./arweave.ts";
 import { BundleError } from "./bundle.ts";
 import { type ArchiveSources, DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "./files.ts";
@@ -58,7 +60,10 @@ export const EXIT_CODES = Object.freeze({
 const USAGE = `Usage: abolish-verify [--max-board-bytes <n>] [--gateway <url>]...
                       [--arweave <url>]... [--max-archive-manifests <n>]
                       [--max-archive-bytes <n>] [--max-archive-reads <n>]
-                      [--max-archive-evidence-reads <n>] [--] <bundle-directory>
+                      [--max-archive-evidence-reads <n>]
+                      [--max-archive-replay-evidence-reads <n>]
+                      [--max-archive-run-bytes <n>] [--max-archive-run-reads <n>]
+                      [--] <bundle-directory>
        abolish-verify keys [--] <evidence-directory>
 
 Verifies one election from a bundle (bundle.json, and board.bin, blocks.car,
@@ -90,6 +95,14 @@ bundle of format 6 the run also reads the board contract's archived
 evidence, which check 4.6 can take in place of the bundle's: at most
 --max-archive-evidence-reads transactions (default ${DEFAULT_EVIDENCE_READS}, each up to
 about 35 KiB from each gateway asked).
+Check 4.4 replays each of the definition's L2 contracts' archived events
+against all of its archived evidence: at most
+--max-archive-replay-evidence-reads transactions for the evidence (default
+${DEFAULT_REPLAY_EVIDENCE_READS}, each up to about 35 KiB), and
+--max-archive-run-bytes held (default ${DEFAULT_RUN_BYTES}) and
+--max-archive-run-reads transactions asked (default ${DEFAULT_RUN_READS}) for the
+event runs, shared by the four contracts. A budget run out leaves 4.4
+unverifiable, never failed.
 
 keys judges the Tier 0 token keys of every release in the release registry
 from keys.json (docs/spec/verifier.md, Token keys across releases), and
@@ -106,6 +119,9 @@ const ARCHIVE_BUDGETS = {
   "max-archive-bytes": "maxBytes",
   "max-archive-reads": "maxReads",
   "max-archive-evidence-reads": "maxEvidenceReads",
+  "max-archive-replay-evidence-reads": "maxReplayEvidenceReads",
+  "max-archive-run-bytes": "maxRunBytes",
+  "max-archive-run-reads": "maxRunReads",
 } as const satisfies Record<string, keyof ArchiveReadOptions>;
 type ArchiveBudget = keyof typeof ARCHIVE_BUDGETS;
 
@@ -291,6 +307,9 @@ export async function runCli(
         "max-archive-bytes": { type: "string" },
         "max-archive-reads": { type: "string" },
         "max-archive-evidence-reads": { type: "string" },
+        "max-archive-replay-evidence-reads": { type: "string" },
+        "max-archive-run-bytes": { type: "string" },
+        "max-archive-run-reads": { type: "string" },
       },
       allowPositionals: true,
       strict: true,
@@ -301,6 +320,9 @@ export async function runCli(
       "max-archive-bytes": values["max-archive-bytes"],
       "max-archive-reads": values["max-archive-reads"],
       "max-archive-evidence-reads": values["max-archive-evidence-reads"],
+      "max-archive-replay-evidence-reads": values["max-archive-replay-evidence-reads"],
+      "max-archive-run-bytes": values["max-archive-run-bytes"],
+      "max-archive-run-reads": values["max-archive-run-reads"],
     };
   } catch (e) {
     out.stderr(`${printable(e instanceof Error ? e.message : String(e))}\n${USAGE}`);

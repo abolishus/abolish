@@ -24,17 +24,27 @@
 // run of finalized L1 headers, and one that fails fails 4.4 like a record
 // that fails the event check (T-71, T-69, T-34).
 //
+// Where the run read the archive, each contract's archived sequence is
+// replayed against its archived evidence (src/replay.ts), and every boarded
+// record must be the sequence's event at its `n`. The archive's authority
+// writes the runs and the evidence whole, and a record's output root is its
+// word until P1-19 reads its game on L1 (T-71), so a replay that doesn't
+// hold, an archived event that fails the event check, or a boarded record
+// the sequence doesn't hold leaves 4.4 unverifiable, never failed (T-53).
+//
 // Nothing here can pass 4.4. Which events the board must carry (the
 // required entries) needs the L2 reads that 2.4, 2.5 and 3.1 wait on too,
-// and whether the records are the contracts' own needs the accumulator
-// replayed against archived storage proofs (P4-3) at output roots settled on
-// L1 (P1-19 part 3b). The board carries only the events the election's
-// checks use, out of sequences shared by every election, so their `n` have
-// gaps, and the accumulator's rule 1 holds only over a contract's whole
-// archived sequence: no ordering rule is applied to the board's subset.
+// and the replay is worth its records' output roots, which P1-19 part 3b
+// settles on L1. The board carries only the events the election's checks
+// use, out of sequences shared by every election, so their `n` have gaps,
+// and the accumulator's rule 1 holds only over a contract's whole archived
+// sequence: no ordering rule is applied to the board's subset.
 
 import {
   checkContractEvent,
+  type ContractRole,
+  encodeContractEvent,
+  type EventAccumulatorProofError,
   type ContractEventError,
   type ContractEventVersion,
   DecodeError,
@@ -48,13 +58,36 @@ import {
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
+import type { ArchiveFinding } from "./archive.ts";
 import type { VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
+import type { ContractSequence } from "./replay.ts";
+import type { RunFinding } from "./runs.ts";
 
 /** Why an event's L1 origin fails (docs/spec/verifier.md, Contract events, step 4). */
 export type OriginCode = "l1-origin-unknown" | "l1-origin-drift" | "l1-origin-order";
 
-export type EventCode = "decode" | ContractEventError | OriginCode;
+/**
+ * Why the archive leaves 4.4 unverifiable (docs/spec/verifier.md 4.4): a
+ * budget that kept or read no more, a replay rule broken, runs that stop
+ * short, or a boarded record the replayed sequence doesn't hold at its `n`
+ * (`archived-mismatch`) or doesn't reach (`archived-unreached`).
+ */
+export type ArchivedCode =
+  | "evidence-over-budget"
+  | "evidence-reads-over-budget"
+  | EventAccumulatorProofError
+  | Extract<RunFinding["code"], "run-gap" | "runs-over-budget">
+  | "archived-mismatch"
+  | "archived-unreached";
+
+export type EventCode = "decode" | ContractEventError | OriginCode | ArchivedCode;
+
+/** 4.4's replay of the archive, as the archive read keeps it. */
+export interface ArchivedEvents {
+  readonly contracts: readonly ContractSequence[];
+  readonly findings: readonly Extract<ArchiveFinding, { code: "evidence-over-budget" }>[];
+}
 
 /**
  * The `max_sequencer_drift` this release pins for the deployment's L2, in
@@ -69,6 +102,7 @@ export interface EventOutcome {
   readonly code: EventCode | "unsupported-version" | "not-implemented";
   readonly at?:
     | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
+    | { readonly contract: ContractRole }
     | Record<string, never>;
 }
 
@@ -88,7 +122,8 @@ const isReadable = (v: number | undefined): v is ContractEventVersion =>
  * `not-implemented`. `anchored` is the number of entries the board checks
  * authenticated, when 4.1 and 4.2 passed: a failing record among them
  * fails 4.4, and entries past them aren't read. Without it a failing record
- * leaves 4.4 unverifiable, with its code.
+ * leaves 4.4 unverifiable, with its code. Where no record fails and the run
+ * read the archive (`archived`), its replay is judged (`archivedOutcome`).
  */
 export function eventChecks(
   definition: VerifiedDefinition,
@@ -96,6 +131,7 @@ export function eventChecks(
   boardEntryVersion: BoardEntryVersion,
   anchored: number | undefined,
   blocks?: readonly L1Header[],
+  archived?: ArchivedEvents,
 ): EventOutcome {
   const d = definition.value;
   const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
@@ -167,8 +203,80 @@ export function eventChecks(
     );
     if (code !== undefined) return { status, code, at: { entry: c.at } };
   }
+  if (archived === undefined) return { status: "unverifiable", code: "not-implemented" };
+  return archivedOutcome(
+    archived,
+    // Every record read passed the event check, above.
+    checked.flatMap((c) => ("record" in c ? [{ at: c.at, record: c.record }] : [])),
+    contracts,
+    version,
+  );
+}
+
+/**
+ * 4.4 against the archive's replay (docs/spec/verifier.md 4.4; [[archive]],
+ * The event replay), unverifiable with the first of, in order: the walk
+ * keeping no more references (`evidence-over-budget`); then for each
+ * contract in role order, its evidence reads cut short
+ * (`evidence-reads-over-budget`), a proven record its sequence breaks a
+ * rule of (`index`, `order`, `block-range`, `accumulator`), its runs
+ * stopping short of the largest count proven (`run-gap`,
+ * `runs-over-budget`), and an event it holds that fails the event check
+ * (the check's code), each at `{"contract": role}`; then, in copy order, a
+ * boarded record past the events its contract holds (`archived-unreached`)
+ * or other than the held event at its `n` (`archived-mismatch`), at
+ * `{"entry": n}`. Otherwise `not-implemented`, for the required entries.
+ * Never a failure: the authority writes runs and evidence whole, and their
+ * roots are its word until P1-19 (T-71, T-53).
+ */
+function archivedOutcome(
+  archived: ArchivedEvents,
+  boarded: readonly { readonly at: number; readonly record: ContractEventRecordOf }[],
+  contracts: EventContracts,
+  version: ContractEventVersion,
+): EventOutcome {
+  const unverifiable = (
+    code: EventOutcome["code"],
+    at: NonNullable<EventOutcome["at"]>,
+  ): EventOutcome => ({
+    status: "unverifiable",
+    code,
+    at,
+  });
+  if (archived.findings.length > 0) return unverifiable("evidence-over-budget", {});
+  for (const c of archived.contracts) {
+    const at = { contract: c.role };
+    if (c.evidence.findings.some((f) => f.code === "evidence-reads-over-budget"))
+      return unverifiable("evidence-reads-over-budget", at);
+    for (const r of c.evidence.records)
+      if (r.replay !== null && r.replay !== "unreached") return unverifiable(r.replay, at);
+    const stop = c.runs.findings.at(-1);
+    if (!c.runs.complete && (stop?.code === "run-gap" || stop?.code === "runs-over-budget"))
+      return unverifiable(stop.code, at);
+    // Only the events a proven record authenticates are judged; one that
+    // fails is the archive's, never the board's (T-53).
+    for (const r of c.records.slice(0, Number(c.held))) {
+      const result = checkContractEvent(r, contracts, version);
+      if (!result.ok) return unverifiable(result.error, at);
+    }
+    // With the runs whole, only an event with no topic, which no log of
+    // ours has, leaves a proven record unreached (src/replay.ts).
+    if (c.runs.complete && c.evidence.records.some((r) => r.replay === "unreached"))
+      return unverifiable("event-topics", at);
+  }
+  for (const { at, record } of boarded) {
+    const sequence = archived.contracts.find((c) => equal(c.contract, record.contract));
+    // The event check passed, so the record is one of the four contracts'.
+    if (sequence === undefined || record.n >= sequence.held)
+      return unverifiable("archived-unreached", { entry: at });
+    const held = sequence.records[Number(record.n)] as ContractEventRecordOf;
+    if (!equal(encodeContractEvent(held, version), encodeContractEvent(record, version)))
+      return unverifiable("archived-mismatch", { entry: at });
+  }
   return { status: "unverifiable", code: "not-implemented" };
 }
+
+type ContractEventRecordOf = ReturnType<typeof decodeContractEvent>;
 
 /**
  * The first of docs/spec/contracts.md's L1-origin checks an event fails

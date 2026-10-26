@@ -410,8 +410,9 @@ describe("the registry's records", () => {
     // Only up to the block heads() gave: core checks that block's hash.
     await expect(stepped.records(null, first.latest)).rejects.toThrow(Tier1ChainError);
     // Some forty node round trips and four deployments: past the default
-    // five seconds on a busy runner.
-  }, 30_000);
+    // five seconds, and past thirty on a busy runner, like every test here
+    // that deploys a registry (deployWithGroups).
+  }, 60_000);
 
   test("are refused when the node drops, alters or re-times a log", async () => {
     const { registry, fromBlock } = await deployWithGroups();

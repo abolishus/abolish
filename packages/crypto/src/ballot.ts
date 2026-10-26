@@ -1,6 +1,7 @@
-// The ballot record, type 0x0002 versions 1 to 4 (docs/spec/ballot-validity.md,
+// The ballot record, type 0x0002 versions 1 to 5 (docs/spec/ballot-validity.md,
 // Ballot record): a cast ballot's committed vote with its tier (versions 2
-// to 4: its cell), nullifier, L1 reference and membership proof, and its admission
+// to 5: its cell), nullifier, L1 reference and membership proof (version 5:
+// with the root clock's step it was made against), and its admission
 // checks (verifier 5.1 to 5.4): the election it names, its tier or cell, the
 // committed vote's shape, the share hashes of seats outside the registered
 // key set, the membership proof over the message the verifier recomputes,
@@ -14,9 +15,11 @@ import {
   type BallotHashContextV3,
   ballotHashV3,
   ballotHashV4,
+  ballotHashV5,
   checkValidity,
   checkValidityV3,
   checkValidityV4,
+  checkValidityV5,
   COMMITTED_VOTE,
   COMMITTED_VOTE_V3,
   COMMITTED_VOTE_V4,
@@ -45,6 +48,7 @@ import {
   enum8,
   fieldBn254,
   struct,
+  u32,
   u64,
   u8,
 } from "./codec.ts";
@@ -54,11 +58,14 @@ import {
   type ElectionDefinitionV4,
   type ElectionDefinitionV5,
   type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
   electionDefinitionV5Rule,
   electionDefinitionV6Rule,
+  electionDefinitionV7Rule,
+  ELECTORATE_MODES,
   TIERS,
 } from "./election-definition.ts";
-import { membershipScope, semaphoreField } from "./membership.ts";
+import { membershipScope, rollingMembershipScope, semaphoreField } from "./membership.ts";
 import {
   type MembershipProofCheck,
   type MembershipSignals,
@@ -69,17 +76,26 @@ import {
 } from "./membership-proof.ts";
 import {
   electionAuthorStubV6Hash,
+  electionAuthorStubV7Hash,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
   electionDefinitionV6Hash,
+  electionDefinitionV7Hash,
   pinnedVersion,
   UnsupportedVersionError,
 } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { KEM_PUBLIC_KEY } from "./share-encryption.ts";
 import { membershipMessage } from "./revoting.ts";
+import {
+  rollingTierSteps,
+  rootClockBoundary,
+  type RollingStep,
+  type RollingTierContext,
+  type RollingTierEvent,
+} from "./rolling-tier-tree.ts";
 import { authorPanelId } from "./trustee.ts";
 
 // The fixed-width fields come first, at fixed offsets, so a contract reads
@@ -137,6 +153,24 @@ const ballotV4 = struct([
   ["committed_vote", COMMITTED_VOTE_V4],
 ] as const);
 
+// Version 4's fields and offsets through the membership proof, then the root
+// clock's step the proof was made against, then version 4's committed vote
+// four bytes later (docs/spec/ballot-validity.md, Ballot record (version 5);
+// 0028-rolling-electorates). A contract reads the cell, the nullifier, the
+// L1 reference and the proof where it reads version 4's, and the step at
+// 364. Any u32 decodes; admission refuses a step the poll doesn't accept
+// (`root-step-range`).
+const ballotV5 = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["cell", u8],
+  ["nullifier", fieldBn254],
+  ["l1_ref_number", u64],
+  ["l1_ref_hash", bytesFixed(32)],
+  ["membership_proof", membershipProof],
+  ["step", u32],
+  ["committed_vote", COMMITTED_VOTE_V4],
+] as const);
+
 /** Ballot record, version 1: one cast ballot, naming its tier. */
 export type BallotRecord = CodecValue<typeof ballotV1>;
 
@@ -148,6 +182,9 @@ export type BallotRecordV3 = CodecValue<typeof ballotV3>;
 
 /** Ballot record, version 4: one cast ballot of a poll with two panels (definition version 6), naming its cell. */
 export type BallotRecordV4 = CodecValue<typeof ballotV4>;
+
+/** Ballot record, version 5: one cast ballot of a rolling poll (definition version 7, mode 2), naming its cell and step. */
+export type BallotRecordV5 = CodecValue<typeof ballotV5>;
 
 /** The fields a ballot's membership proof is made over: every field but the proof. */
 export type UnprovenBallot = Omit<BallotRecord, "membership_proof">;
@@ -161,12 +198,16 @@ export type UnprovenBallotV3 = Omit<BallotRecordV3, "membership_proof">;
 /** The fields a version-4 ballot's membership proof is made over. */
 export type UnprovenBallotV4 = Omit<BallotRecordV4, "membership_proof">;
 
+/** The fields a version-5 ballot's membership proof is made over, its step among them. */
+export type UnprovenBallotV5 = Omit<BallotRecordV5, "membership_proof">;
+
 /** Record type `0x0002`. The election's profile pins its version. */
 export const BALLOT = recordType(RECORD_TYPES.ballot, {
   1: ballotV1,
   2: ballotV2,
   3: ballotV3,
   4: ballotV4,
+  5: ballotV5,
 });
 
 const SCHEMA = new RecordSchema([BALLOT]);
@@ -187,22 +228,29 @@ export function encodeBallotV4(record: BallotRecordV4): Uint8Array {
   return SCHEMA.encode(BALLOT, 4, record);
 }
 
+export function encodeBallotV5(record: BallotRecordV5): Uint8Array {
+  return SCHEMA.encode(BALLOT, 5, record);
+}
+
 /**
  * Strictly decodes a ballot record against the version the election's profile
  * pins. Decoding doesn't compare the definition hash, tier or cell with the
- * election, nor a version-4 ballot's author half with its author panel;
- * `checkBallot` to `checkBallotV4` do, so a ballot naming another election,
- * or carrying an author half its poll has no panel for, is still read, and
- * reported (docs/spec/ballot-validity.md, Ballot record; Decoding (version 4)).
+ * election, nor a version-4 ballot's author half with its author panel, nor
+ * a version-5 ballot's step with the root clock; `checkBallot` to
+ * `checkBallotV5` do, so a ballot naming another election, carrying an
+ * author half its poll has no panel for or naming a step its poll doesn't
+ * accept, is still read, and reported (docs/spec/ballot-validity.md, Ballot
+ * record; Decoding (version 4); Decoding (version 5)).
  */
 export function decodeBallot(bytes: Uint8Array, pinned: 1): BallotRecord;
 export function decodeBallot(bytes: Uint8Array, pinned: 2): BallotRecordV2;
 export function decodeBallot(bytes: Uint8Array, pinned: 3): BallotRecordV3;
 export function decodeBallot(bytes: Uint8Array, pinned: 4): BallotRecordV4;
+export function decodeBallot(bytes: Uint8Array, pinned: 5): BallotRecordV5;
 export function decodeBallot(
   bytes: Uint8Array,
-  pinned: 1 | 2 | 3 | 4,
-): BallotRecord | BallotRecordV2 | BallotRecordV3 | BallotRecordV4 {
+  pinned: 1 | 2 | 3 | 4 | 5,
+): BallotRecord | BallotRecordV2 | BallotRecordV3 | BallotRecordV4 | BallotRecordV5 {
   return SCHEMA.decode(BALLOT, bytes, pinned).value;
 }
 
@@ -500,6 +548,22 @@ export function approvedFor(
   definition: ElectionDefinitionV6,
   keys: readonly RegisteredKeys[],
 ): boolean {
+  return approvedUnder(definition, electionAuthorStubV6Hash, keys);
+}
+
+/** Internal: `approvedFor` for a definition version 7, whose author stub hash is version 7's. */
+export function approvedForV7(
+  definition: ElectionDefinitionV7,
+  keys: readonly RegisteredKeys[],
+): boolean {
+  return approvedUnder(definition, electionAuthorStubV7Hash, keys);
+}
+
+function approvedUnder<D extends ElectionDefinitionV6>(
+  definition: D,
+  authorStubHash: (d: D) => Uint8Array,
+  keys: readonly RegisteredKeys[],
+): boolean {
   if (definition.author_keys.length === 0) return Array.isArray(keys) && keys.length === 0;
   return wasApproved(keys, {
     l2ChainId: definition.l2_chain_id,
@@ -508,7 +572,7 @@ export function approvedFor(
       threshold: definition.author_threshold,
       keys: definition.author_keys,
     }),
-    authorStubHash: electionAuthorStubV6Hash(definition),
+    authorStubHash: authorStubHash(definition),
     authorTranscriptHash: definition.author_transcript_hash,
   });
 }
@@ -583,7 +647,7 @@ function rulesOf(
 // must never check the other's records.
 const MADE = new WeakMap<
   object,
-  { readonly definitionHash: Uint8Array; readonly version: 1 | 2 | 3 | 4 }
+  { readonly definitionHash: Uint8Array; readonly version: 1 | 2 | 3 | 4 | 5 }
 >();
 
 const MAKERS = {
@@ -591,9 +655,10 @@ const MAKERS = {
   2: "cellBallotElection",
   3: "questionBallotElection",
   4: "panelBallotElection",
+  5: "rollingBallotElection",
 };
 
-function madeHashOf(election: object, version: 1 | 2 | 3 | 4): Uint8Array {
+function madeHashOf(election: object, version: 1 | 2 | 3 | 4 | 5): Uint8Array {
   const made = MADE.get(election);
   if (made === undefined || made.version !== version)
     throw new TypeError(`expected a context made by ${MAKERS[version]}`);
@@ -1206,7 +1271,7 @@ function runStep<R>(step: Step<R>): R {
 
 /**
  * A ballot's admission checks run up to its membership proof, by
- * `stepBallot` to `stepBallotV4`. Only `finishBallotStep` and
+ * `stepBallot` to `stepBallotV5`. Only `finishBallotStep` and
  * `finishBallotSteps` read it, and only steps this module made are accepted,
  * so no caller can finish one with a verdict it chose (T-05). The step holds
  * the decoded record, whose validity proofs are read when it is finished:
@@ -1228,7 +1293,7 @@ function stepOf<R>(step: Step<R>): BallotStep<R> {
 
 function stepFrom<R>(handle: BallotStep<R>): Step<R> {
   const step = STEPS.get(handle);
-  if (step === undefined) throw new TypeError("expected a step made by stepBallot to stepBallotV4");
+  if (step === undefined) throw new TypeError("expected a step made by stepBallot to stepBallotV5");
   return step as Step<R>;
 }
 
@@ -1282,14 +1347,19 @@ function admit<V extends ShareHashLists>(
   return runStep(admitStep(election, checks, target, fields, proof, delivered));
 }
 
+// A target known only once the cheap checks pass: version 5's step root,
+// which `root-step-range` and `root-step-mismatch` decide before the
+// membership proof (docs/spec/ballot-validity.md, Admission (version 5)).
+type LateTarget<X> = () => Target | { readonly code: X };
+
 // `admit` up to the membership proof.
-function admitStep<V extends ShareHashLists>(
+function admitStep<V extends ShareHashLists, X extends string = never>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
-  target: Target,
+  target: Target | LateTarget<X>,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
-): Step<Admitted | Rejected<AdmitCode>>;
+): Step<Admitted | Rejected<AdmitCode | X>>;
 function admitStep<V extends ShareHashLists>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
@@ -1298,14 +1368,14 @@ function admitStep<V extends ShareHashLists>(
   proof: BallotRecord["membership_proof"],
   delivered: SeatCiphertext,
 ): Step<Admitted | Rejected<AdmitCode | "share-hash">>;
-function admitStep<V extends ShareHashLists>(
+function admitStep<V extends ShareHashLists, X extends string = never>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
-  target: Target,
+  late: Target | LateTarget<X>,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered?: SeatCiphertext,
-): Step<Admitted | Rejected<AdmitCode | "share-hash">> {
+): Step<Admitted | Rejected<AdmitCode | "share-hash" | X>> {
   const { vote } = fields;
   if (!checks.shape(vote)) return { done: { ok: false, code: "validity-shape" } };
   const unqualified = firstUnqualified(election, vote);
@@ -1329,6 +1399,8 @@ function admitStep<V extends ShareHashLists>(
     )
   )
     return { done: { ok: false, code: "share-hash" } };
+  const target = typeof late === "function" ? late() : late;
+  if ("code" in target) return { done: { ok: false, code: target.code } };
   const hash = checks.hash(vote);
   const derived = signalsOf(checks.ctx.definitionHash, target, fields, hash);
   return {
@@ -1516,6 +1588,354 @@ export function admitForIntakeV4(
   const result = admit(election, checks, target, fields, ballot.membership_proof, delivered);
   if (!result.ok) return result;
   return { ...result, ctx: checks.ctx, vote: fields.vote, cell, panel };
+}
+
+/**
+ * What a rolling poll's ballots are checked against beside its definition and
+ * key sets: the group registry's events and the definition's registration,
+ * from which every step root is computed here, never a root a caller, a
+ * ballot or a relay states (docs/spec/ballot-validity.md, Context (version
+ * 5); docs/spec/membership.md, Rolling checks; T-04, T-08, T-16).
+ */
+export interface RollingBallotChain {
+  /**
+   * The group registry's events in chain order through close, after each
+   * group's strict replay, as `rollingTierSteps` reads them; each tier keeps
+   * its own listed groups'.
+   */
+  readonly events: readonly RollingTierEvent[];
+  /** The timestamp of the L2 block holding the definition's `DefinitionRegistered`. */
+  readonly registeredAt: bigint;
+  /**
+   * Steps to compute now, in one pass over each tier's events: those the
+   * ballots about to be checked name. A step not listed is computed, in a pass
+   * of its own, when a ballot first names one inside the poll, so a verifier
+   * judging a board lists every step its ballots name (T-36, T-52).
+   */
+  readonly steps?: readonly number[];
+}
+
+/** One cell of a rolling partition: its position, its rolling tier and the tier's rolling scope `ŝ_t`. */
+export interface RollingBallotCell {
+  readonly cell: number;
+  readonly tier: number;
+  readonly scope: bigint;
+}
+
+/**
+ * The same for a definition version 7 under `electorate_mode` 2, whose
+ * ballots (version 5) name their cell and step: version 4's questions and
+ * panels, one cell per rolling tier, and no root, since each ballot proves
+ * against the root of the step it names (docs/spec/ballot-validity.md,
+ * Context (version 5)).
+ */
+export interface RollingBallotElection extends ValidityRulesV4 {
+  readonly definitionHash: Uint8Array;
+  /** One per entry of `rolling_electorate`, in its order; `cells[c]` is cell `c`. */
+  readonly cells: readonly RollingBallotCell[];
+  readonly qualified: readonly number[];
+  readonly authorQualified: readonly number[];
+}
+
+// A rolling context's events and each cell's tier context and computed steps,
+// copied when it was made, so no caller can change the trees it checks
+// against afterwards.
+interface RollingState {
+  readonly events: readonly RollingTierEvent[];
+  readonly tiers: readonly RollingTierContext[];
+  readonly steps: readonly Map<number, RollingStep>[];
+}
+
+const ROLLING = new WeakMap<object, RollingState>();
+
+/**
+ * `ballotElection` for a definition version 7 under `electorate_mode` 2,
+ * which pins ballot version 5 (verifier 2.3; docs/spec/ballot-validity.md,
+ * Ballot record (version 5)): version 6's questions and panels, one cell per
+ * rolling tier, each with its rolling scope, and the step trees from
+ * `chain`. The caller has run 2.x for the definition; one that isn't
+ * well-formed is refused here too (T-28, T-34; `rolling-class` among the
+ * rules, so a civic poll is never rolling), and so are events whose opening
+ * state isn't the definition's: each tier's tree through `root_l2_block`
+ * must have its `root` and `group_size` (verifier 2.4), which ties the
+ * events to the definition the voter's client checked. `authorRegistered` is
+ * `panelBallotElection`'s, approved under version 7's author stub hash.
+ */
+export function rollingBallotElection(
+  definition: ElectionDefinitionV7,
+  registered: readonly RegisteredKeys[],
+  chain: RollingBallotChain,
+  authorRegistered: readonly RegisteredKeys[] = [],
+): RollingBallotElection {
+  return rollingElection("rollingBallotElection", definition, registered, chain, {
+    keys: authorRegistered,
+  });
+}
+
+/**
+ * Internal: `rollingBallotElection` with the author panel's registered seats
+ * given, unchecked against the definition's `author_transcript_hash`, as
+ * `panelBallotElectionWith`. The package entry point doesn't export it.
+ */
+export function rollingBallotElectionWith(
+  definition: ElectionDefinitionV7,
+  registered: readonly RegisteredKeys[],
+  chain: RollingBallotChain,
+  authorQualified: readonly number[],
+): RollingBallotElection {
+  return rollingElection("rollingBallotElectionWith", definition, registered, chain, {
+    seats: authorQualified,
+  });
+}
+
+const MAX_U32 = 0xffff_ffff;
+
+const isU32 = (n: unknown): n is number =>
+  typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= MAX_U32;
+
+function rollingElection(
+  caller: string,
+  definition: ElectionDefinitionV7,
+  registered: readonly RegisteredKeys[],
+  chain: RollingBallotChain,
+  author: { readonly keys: readonly RegisteredKeys[] } | { readonly seats: readonly number[] },
+): RollingBallotElection {
+  const own = pinnedVersion(definition, RECORD_TYPES.electionDefinition);
+  const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
+  // The pin and the value's own fields must agree, so a version-6 value
+  // pinned at 7 is never hashed as version 7.
+  if (own !== 7 || !("electorate_mode" in definition))
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
+  if (pinned !== 5) throw new UnsupportedVersionError(RECORD_TYPES.ballot, pinned);
+  if (electionDefinitionV7Rule(definition) !== undefined)
+    throw new RangeError(`${caller}: the definition isn't well-formed`);
+  if (definition.electorate_mode !== ELECTORATE_MODES.rolling)
+    throw new RangeError(`${caller}: the definition's electorate isn't rolling`);
+  checkKeys(caller, definition, registered);
+  const authorPanelSize = definition.author_keys.length;
+  if ("keys" in author && !approvedForV7(definition, author.keys))
+    throw new RangeError(
+      authorPanelSize === 0
+        ? `${caller}: the definition has no author panel`
+        : `${caller}: not the author panel's approved key set of this definition`,
+    );
+  const seats = "keys" in author ? author.keys.map((k) => k.index) : [...author.seats];
+  if (
+    !seats.every((s) => Number.isSafeInteger(s) && s >= 1 && s <= authorPanelSize) ||
+    new Set(seats).size !== seats.length
+  )
+    throw new RangeError(`${caller}: author seats must be distinct seats of the author panel`);
+  if (chain === null || typeof chain !== "object")
+    throw new TypeError(`${caller}: chain: expected an object`);
+  // Each field read once, so a getter can't show one check one value and a
+  // later scan another.
+  const { events: rawEvents, registeredAt, steps: rawSteps = [] } = chain;
+  if (!Array.isArray(rawEvents)) throw new TypeError(`${caller}: chain.events: expected an array`);
+  if (!Array.isArray(rawSteps)) throw new TypeError(`${caller}: chain.steps: expected an array`);
+  const events = Object.freeze(rawEvents.map((e, at) => copyEvent(caller, e, at)));
+  const steps = rawSteps.slice();
+  if (!steps.every(isU32)) throw new RangeError(`${caller}: chain.steps: expected u32 steps`);
+  const definitionHash = electionDefinitionV7Hash(definition);
+  const tiers = definition.rolling_electorate.map((t): RollingTierContext =>
+    Object.freeze({
+      groups: Object.freeze(t.groups.slice()),
+      rootL2Block: t.root_l2_block,
+      registeredAt,
+      closesAt: definition.closes_at,
+    }),
+  );
+  const computed = tiers.map((ctx, cell) => {
+    // Validates `registeredAt` and every event, and throws for events out of
+    // chain order or that no strict replay gives.
+    const got = rollingTierSteps(events, ctx, steps.map(BigInt));
+    const tier = definition.rolling_electorate[
+      cell
+    ] as ElectionDefinitionV7["rolling_electorate"][number];
+    if (got.opening.root !== tier.root || BigInt(got.opening.memberCount) !== tier.group_size)
+      throw new RangeError(
+        `${caller}: the events don't give the opening state of rolling tier ${tier.tier}`,
+      );
+    return new Map(got.steps.map((s) => [Number(s.step), s] as const));
+  });
+  const election: RollingBallotElection = Object.freeze({
+    definitionHash: Uint8Array.from(definitionHash),
+    questions: Object.freeze(
+      definition.questions.map((q) =>
+        Object.freeze({
+          optionCount: q.option_count,
+          minSelections: q.min_selections,
+          maxSelections: q.max_selections,
+        }),
+      ),
+    ),
+    threshold: definition.threshold,
+    panelSize: definition.panel_size,
+    authorThreshold: definition.author_threshold,
+    authorPanelSize,
+    cells: Object.freeze(
+      definition.rolling_electorate.map((t, cell) =>
+        Object.freeze({
+          cell,
+          tier: t.tier,
+          // One scope per tier and poll, whatever root a ballot proves
+          // against, so one secret has one nullifier at every step
+          // (docs/spec/membership.md, Rolling scope; T-02, T-03).
+          scope: rollingMembershipScope(definitionHash, t.tier),
+        }),
+      ),
+    ),
+    qualified: Object.freeze(registered.map((k) => k.index)),
+    authorQualified: Object.freeze(seats),
+  });
+  MADE.set(election, { definitionHash, version: 5 });
+  KEYS.set(election, copyKeys(registered));
+  if ("keys" in author) AUTHOR_KEYS.set(election, copyKeys(author.keys));
+  ROLLING.set(election, { events, tiers, steps: computed });
+  return election;
+}
+
+function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTierEvent {
+  if (e === null || typeof e !== "object")
+    throw new TypeError(`${caller}: chain.events[${at}]: expected an object`);
+  const { blockNumber, timestamp, groupId, kind } = e;
+  const head = { blockNumber, timestamp, groupId };
+  if (kind === "add") {
+    const { commitments } = e;
+    if (!Array.isArray(commitments))
+      throw new TypeError(`${caller}: chain.events[${at}].commitments: expected an array`);
+    return Object.freeze({ ...head, kind, commitments: Object.freeze(commitments.slice()) });
+  }
+  if (kind === "remove") {
+    const { indices } = e;
+    if (!Array.isArray(indices))
+      throw new TypeError(`${caller}: chain.events[${at}].indices: expected an array`);
+    return Object.freeze({ ...head, kind, indices: Object.freeze(indices.slice()) });
+  }
+  throw new TypeError(`${caller}: chain.events[${at}].kind: expected "add" or "remove"`);
+}
+
+/**
+ * Step `step` of `cell`'s tier if the poll accepts it, else undefined
+ * (docs/spec/membership.md, Root clock and steps, Accepted steps): a step
+ * whose boundary is outside the poll is refused from the clock alone, before
+ * any tree is computed for it, so a ballot naming one costs no pass over the
+ * events.
+ */
+function acceptedStep(state: RollingState, cell: number, step: number): RollingStep | undefined {
+  const ctx = state.tiers[cell] as RollingTierContext;
+  const cache = state.steps[cell] as Map<number, RollingStep>;
+  const tau = rootClockBoundary(BigInt(step));
+  if (tau <= ctx.registeredAt || tau > ctx.closesAt) return undefined;
+  let got = cache.get(step);
+  if (got === undefined) {
+    got = rollingTierSteps(state.events, ctx, [BigInt(step)]).steps[0] as RollingStep;
+    cache.set(step, got);
+  }
+  return got.accepted ? got : undefined;
+}
+
+const rollingCellOf = (
+  election: RollingBallotElection,
+  cell: number,
+): RollingBallotCell | undefined =>
+  Number.isSafeInteger(cell) && cell >= 0 ? election.cells[cell] : undefined;
+
+/**
+ * `ballotSignals` for a version-5 ballot: the root of the step it names, of
+ * its cell's tier, which this package computed from the context's events;
+ * the tier's rolling scope; its nullifier; and `F(M)` over the version-5
+ * ballot hash, which binds the step (docs/spec/ballot-validity.md, Admission
+ * (version 5)). `undefined` if the ballot names another definition, a cell
+ * the partition doesn't have or a step the poll doesn't accept: there is no
+ * root to prove against.
+ */
+export function ballotSignalsV5(
+  election: RollingBallotElection,
+  ballot: UnprovenBallotV5,
+): MembershipSignals | undefined {
+  const definitionHash = madeHashOf(election, 5);
+  const state = ROLLING.get(election) as RollingState;
+  const fields = fieldsOf(ballot);
+  const { cell, step } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash)) return undefined;
+  const c = rollingCellOf(election, cell);
+  if (c === undefined || !isU32(step)) return undefined;
+  const at = acceptedStep(state, cell, step);
+  if (at === undefined) return undefined;
+  const hash = ballotHashV5(
+    { definitionHash, cell, nullifier: fields.nullifier, step },
+    fields.vote,
+  );
+  return signalsOf(definitionHash, { tier: c.tier, root: at.root, scope: c.scope }, fields, hash)
+    .signals;
+}
+
+/** Version 5's admission codes: version 4's, with the step's. */
+export type BallotV5Code = BallotV2Code | "root-step-range" | "root-step-mismatch";
+
+/** A version-5 ballot's admission: version 4's, with the step it was admitted at. */
+export type BallotCheckV5 =
+  | (Admitted & { readonly cell: number; readonly step: number })
+  | Rejected<BallotV5Code>;
+
+/**
+ * The admission checks of a decoded version-5 ballot (docs/spec/ballot-validity.md,
+ * Admission (version 5); verifier 5.1 to 5.4): version 4's, in its order,
+ * with `ballot-cell` over the rolling partition, then, before the membership
+ * proof, `root-step-range` (a step the poll doesn't accept for the cell's
+ * tier, so no root exists to check against) and, on the contract path only,
+ * `root-step-mismatch` (a `suppliedRoot` other than the step's root), and
+ * the membership proof against the step's root, which this package computed
+ * from the chain, under the tier's rolling scope (T-04, T-08, T-25, T-52).
+ * A board-path ballot supplies no root: leave `suppliedRoot` out. A ballot
+ * that passes is ranked by its cell's tier, its step never ranking, and still
+ * needs `checkL1ReferenceV5` for its reference and window (5.8).
+ */
+export function checkBallotV5(
+  election: RollingBallotElection,
+  ballot: BallotRecordV5,
+  suppliedRoot?: bigint,
+): BallotCheckV5 {
+  return finishBallotStep(stepBallotV5(election, ballot, suppliedRoot));
+}
+
+/** `checkBallotV5`'s checks run up to the membership proof, for `finishBallotSteps`. */
+export function stepBallotV5(
+  election: RollingBallotElection,
+  ballot: BallotRecordV5,
+  suppliedRoot?: bigint,
+): BallotStep<BallotCheckV5> {
+  const definitionHash = madeHashOf(election, 5);
+  const state = ROLLING.get(election) as RollingState;
+  if (suppliedRoot !== undefined && typeof suppliedRoot !== "bigint")
+    throw new TypeError("stepBallotV5: suppliedRoot: expected a bigint or undefined");
+  const proof = ballot.membership_proof;
+  const fields = fieldsOf(ballot);
+  const { cell, step } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash))
+    return stepOf({ done: { ok: false, code: "ballot-stray" } });
+  const c = rollingCellOf(election, cell);
+  if (c === undefined) return stepOf({ done: { ok: false, code: "ballot-cell" } });
+  if (!isU32(step)) throw new RangeError("stepBallotV5: the ballot's step must be a u32");
+  const named = { definitionHash, cell, nullifier: fields.nullifier };
+  const ctx = contextOfV4(election, named);
+  const checks: VoteChecks<CommittedVoteV4, ValidityContextV4> = {
+    ctx,
+    shape: (vote) => shapeOkV4(ctx, vote),
+    hash: (vote) => ballotHashV5({ ...named, step }, vote),
+    validity: (vote) => checkValidityV5(ctx, vote),
+  };
+  const target = (): Target | { readonly code: "root-step-range" | "root-step-mismatch" } => {
+    const at = acceptedStep(state, cell, step);
+    if (at === undefined) return { code: "root-step-range" };
+    // The supplied root only ever rejects: the proof is checked against the
+    // verifier's own step root either way (T-08, T-53).
+    if (suppliedRoot !== undefined && suppliedRoot !== at.root)
+      return { code: "root-step-mismatch" };
+    return { tier: c.tier, root: at.root, scope: c.scope };
+  };
+  const result = admitStep(election, checks, target, fields, proof);
+  return stepOf(mapStep(result, (r) => (r.ok ? { ...r, cell, step } : r)));
 }
 
 // Public data, so a constant-time comparison isn't needed.

@@ -374,6 +374,10 @@ const CORE_OPENING: ReadonlyMap<number, number> = new Map([
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
 // for the same reason. Version 4 pairs only with definition version 6.
+// Ballot.ts reads version 5 too, which only definition version 7 pins: 2.3
+// learns both in P2-17 part 4, and until then judges a version-5 pin as
+// unknown, as the verifier's 2.3 vectors, written before version 5 had a
+// layout, expect.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.

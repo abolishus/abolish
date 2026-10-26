@@ -606,7 +606,8 @@ describe("2.3's profile combination", () => {
     expect([...SPOILED_OPENING_VERSIONS].sort(ascending)).toEqual(
       Object.keys(SPOILED_BALLOT_OPENING.versions).map(Number).sort(ascending),
     );
-    expect([...BALLOT_VERSIONS].sort(ascending)).toEqual(
+    // Ballot version 5 joins 2.3's set with definition version 7 (P2-17 part 4).
+    expect([...BALLOT_VERSIONS, 5].sort(ascending)).toEqual(
       Object.keys(BALLOT.versions).map(Number).sort(ascending),
     );
   });

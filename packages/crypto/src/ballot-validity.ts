@@ -17,6 +17,7 @@ import {
   type CodecValue,
   struct,
   u16,
+  u32,
   u8,
   Writer,
 } from "./codec.ts";
@@ -1108,6 +1109,10 @@ export interface ValidityRulesV4 extends ValidityRulesV3 {
 export type ValidityContextV4 = ValidityRulesV4 & BallotHashContextV3;
 
 const BALLOT_VERSION_4 = 4;
+const BALLOT_VERSION_5 = 5;
+
+// The ballot versions whose committed vote is version 4's, both halves.
+type HalvesVersion = typeof BALLOT_VERSION_4 | typeof BALLOT_VERSION_5;
 
 function checkRulesV4(rules: ValidityRulesV4): void {
   checkRulesV3(rules);
@@ -1130,8 +1135,18 @@ function checkContextV4(ctx: ValidityContextV4): void {
  * proved statement fixes the shares of both panels (T-30, T-31, T-32).
  */
 export function statementHashV4(ctx: ValidityContextV4, halves: VoteHalvesV4): Uint8Array {
+  return statementOfHalves(ctx, halves, BALLOT_VERSION_4);
+}
+
+// Versions 4 and 5 share the statement's layout; the version byte keeps a
+// proof made under one from verifying under the other (T-31).
+function statementOfHalves(
+  ctx: ValidityContextV4,
+  halves: VoteHalvesV4,
+  version: HalvesVersion,
+): Uint8Array {
   checkContextV4(ctx);
-  const w = headerV3(ctx, BALLOT_VERSION_4);
+  const w = headerV3(ctx, version);
   VSS.write(w, halves.vss);
   SHARE_HASHES.write(w, halves.share_hashes);
   VSS.write(w, halves.author_vss);
@@ -1191,9 +1206,17 @@ export function shapeOkV4(ctx: ValidityContextV4, vote: CommittedVoteV4): boolea
  * result, naming the flat option or the question.
  */
 export function checkValidityV4(ctx: ValidityContextV4, vote: CommittedVoteV4): ValidityResultV3 {
+  return validityOfHalves(ctx, vote, BALLOT_VERSION_4);
+}
+
+function validityOfHalves(
+  ctx: ValidityContextV4,
+  vote: CommittedVoteV4,
+  version: HalvesVersion,
+): ValidityResultV3 {
   checkContextV4(ctx);
   if (!shapeOkV4(ctx, vote)) return { ok: false, code: "validity-shape" };
-  const statement = statementHashV4(ctx, vote);
+  const statement = statementOfHalves(ctx, vote, version);
   const commitments = voteCommitmentsV4(vote);
   for (const [j, p] of vote.option_proofs.entries()) {
     const branches = [
@@ -1374,6 +1397,17 @@ export function proveValidityV4With(
   authorShareHashes: CommittedVoteV4["author_share_hashes"],
   nonces: ValidityNoncesV3,
 ): CommittedVoteV4 {
+  return proveHalvesWith(ctx, sharing, shareHashes, authorShareHashes, nonces, BALLOT_VERSION_4);
+}
+
+function proveHalvesWith(
+  ctx: ValidityContextV4,
+  sharing: VoteSharingV4,
+  shareHashes: CommittedVoteV4["share_hashes"],
+  authorShareHashes: CommittedVoteV4["author_share_hashes"],
+  nonces: ValidityNoncesV3,
+  version: HalvesVersion,
+): CommittedVoteV4 {
   checkContextV4(ctx);
   if (!SHARINGS_V4.has(sharing))
     throw new TypeError("prove: the sharing must come from shareVoteV4, unchanged");
@@ -1406,7 +1440,7 @@ export function proveValidityV4With(
     author_vss: sharing.authorVss,
     author_share_hashes: authorShareHashes,
   };
-  const statement = statementHashV4(ctx, halves);
+  const statement = statementOfHalves(ctx, halves, version);
   const commitments = voteCommitmentsV4(halves);
   // The client knows the whole r_j, never only a half (Validity proofs (version 4)).
   const rs = sharing.polynomials.map((p, j) =>
@@ -1468,6 +1502,84 @@ export function proveValidityV4(
 ): CommittedVoteV4 {
   checkContextV4(ctx);
   return proveValidityV4With(ctx, sharing, shareHashes, authorShareHashes, {
+    options: sharing.vss.map(() => randomOrNonces(2)),
+    questions: ctx.questions.map((q) => randomOrNonces(q.maxSelections - q.minSelections + 1)),
+  });
+}
+
+// Ballot version 5 (docs/spec/ballot-validity.md, Ballot record (version 5)):
+// version 4's committed vote in a rolling poll, its proofs under version
+// input 5. The step a ballot's membership proof was made against is bound by
+// the ballot hash alone: the validity proofs don't speak about it, and the
+// core is made before the step is chosen at cast (Hashes (version 5); T-38).
+
+/** What a version-5 ballot hash binds beside version 3's context: the root clock's step, a `u32`. */
+export type BallotHashContextV5 = BallotHashContextV3 & { readonly step: number };
+
+/**
+ * `statement_hash` under ballot version 5 (Hashes (version 5)): version 4's
+ * with version input 5, so no proof made for a version-4 ballot verifies in
+ * a version-5 one, or the reverse (T-31).
+ */
+export function statementHashV5(ctx: ValidityContextV4, halves: VoteHalvesV4): Uint8Array {
+  return statementOfHalves(ctx, halves, BALLOT_VERSION_5);
+}
+
+/**
+ * `ballot_hash` under ballot version 5 (Hashes (version 5)): version 4's
+ * header with version input 5, then `u32(step)`, then the committed vote's
+ * own encoding, so a membership proof made for one step can't be relabelled
+ * to another, even one with the same root (T-38).
+ */
+export function ballotHashV5(ctx: BallotHashContextV5, vote: CommittedVoteV4): Uint8Array {
+  checkBallotContextV3(ctx);
+  const { step } = ctx;
+  if (!Number.isSafeInteger(step) || step < 0 || step > 0xffff_ffff)
+    throw new RangeError("ballotHashV5: step must be a u32");
+  const w = headerV3(ctx, BALLOT_VERSION_5);
+  u32.write(w, step);
+  COMMITTED_VOTE_V4.write(w, vote);
+  return H(ds("abolish/v1/ballot", w.finish()));
+}
+
+/**
+ * The validity check of a version-5 committed vote (Admission (version 5);
+ * verifier 5.4): version 4's shape, option and range proofs, under the
+ * version-5 statement.
+ */
+export function checkValidityV5(ctx: ValidityContextV4, vote: CommittedVoteV4): ValidityResultV3 {
+  return validityOfHalves(ctx, vote, BALLOT_VERSION_5);
+}
+
+/**
+ * Internal: proves a version-4 sharing valid for a version-5 ballot with the
+ * given randomness. Production code calls `proveValidityV5`; the package
+ * entry point doesn't export this.
+ */
+export function proveValidityV5With(
+  ctx: ValidityContextV4,
+  sharing: VoteSharingV4,
+  shareHashes: CommittedVoteV4["share_hashes"],
+  authorShareHashes: CommittedVoteV4["author_share_hashes"],
+  nonces: ValidityNoncesV3,
+): CommittedVoteV4 {
+  return proveHalvesWith(ctx, sharing, shareHashes, authorShareHashes, nonces, BALLOT_VERSION_5);
+}
+
+/**
+ * Proves a version-4 sharing valid for a version-5 ballot (Casting (version
+ * 5), step 3): version 4's proofs under the version-5 statement, all
+ * randomness from the CSPRNG. A version-5 core is a version-4 core in a
+ * rolling poll, so the sharing is `shareVoteV4`'s.
+ */
+export function proveValidityV5(
+  ctx: ValidityContextV4,
+  sharing: VoteSharingV4,
+  shareHashes: CommittedVoteV4["share_hashes"],
+  authorShareHashes: CommittedVoteV4["author_share_hashes"],
+): CommittedVoteV4 {
+  checkContextV4(ctx);
+  return proveValidityV5With(ctx, sharing, shareHashes, authorShareHashes, {
     options: sharing.vss.map(() => randomOrNonces(2)),
     questions: ctx.questions.map((q) => randomOrNonces(q.maxSelections - q.minSelections + 1)),
   });

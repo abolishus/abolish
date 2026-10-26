@@ -15,6 +15,7 @@ import {
   checkShares,
   checkValidityV3,
   checkValidityV4,
+  checkValidityV5,
   COMMITTED_VOTE_V3,
   COMMITTED_VOTE_V4,
   coreHashV4,
@@ -29,6 +30,7 @@ import {
   proveValidity,
   proveValidityV3,
   proveValidityV4,
+  proveValidityV5,
   type QuestionRules,
   SHARES,
   shareVoteV3,
@@ -421,6 +423,30 @@ describe("ballot version 4 properties", () => {
           );
           expect(checkValidityV4(ctx, { ...vote, author_share_hashes })).toEqual(fail);
         }
+      }),
+      { numRuns: Math.max(10, numRuns / 50) },
+    );
+  }, 120_000);
+
+  // Ballot version 5 (Hashes (version 5)): version 4's committed vote, its
+  // proofs under version input 5, so a proof made for one version never
+  // verifies in the other's ballot (T-31).
+  test("proofs made for ballot version 5 verify under version 5 only, and version 4's under 4 only", () => {
+    fc.assert(
+      fc.property(pollArb, (p) => {
+        const { votes: _, ...ctx } = p;
+        const sharing = shareVoteV4(ctx, p.votes);
+        const vote = proveValidityV5(
+          ctx,
+          sharing,
+          hashes(p.panelSize, 1),
+          hashes(p.authorPanelSize, 100),
+        );
+        const fail = { ok: false, code: "option-proof", option: 0 };
+        expect(checkValidityV5(ctx, vote)).toEqual({ ok: true });
+        expect(checkValidityV4(ctx, vote)).toEqual(fail);
+        expect(checkValidityV5({ ...ctx, nullifier: ctx.nullifier + 1n }, vote)).toEqual(fail);
+        expect(checkValidityV5(ctx, honest(p).vote)).toEqual(fail);
       }),
       { numRuns: Math.max(10, numRuns / 50) },
     );

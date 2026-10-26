@@ -659,7 +659,7 @@ An operator admitting many ballots, or a verifier judging a board, MAY verify th
 - **Any grouping.** A ballot's verdict reads no other entry (R4), so a batch may hold ballots of any elections, tiers and cells, in any order, and repeats of one ballot.
 - **Flooding.** Anyone can build ballots that reach `membership-proof` and fail it: an invalid proof costs at most its own batch the gain from batching, and a batch of junk about 1.35 times checking it proof by proof ([[vouching]], Batched verification; T-52).
 
-`finishBallotSteps` in `packages/crypto` batches this way, over the steps `stepBallot` to `stepBallotV4` return (each ballot's checks up to its membership proof), in batches of at most 64 by `verifyDecodedMembershipProofs`; `electionAdmission`'s `admitAll` in `packages/verifier` runs it over many payloads. Checking each ballot alone ([[membership]], Checks) remains the reference: an implementation that never batches reaches the same verdicts.
+`finishBallotSteps` in `packages/crypto` batches this way, over the steps `stepBallot` to `stepBallotV5` return (each ballot's checks up to its membership proof), in batches of at most 64 by `verifyDecodedMembershipProofs`; `electionAdmission`'s `admitAll` in `packages/verifier` runs it over many payloads. Checking each ballot alone ([[membership]], Checks) remains the reference: an implementation that never batches reaches the same verdicts.
 
 ## Residuals
 

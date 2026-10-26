@@ -20,7 +20,7 @@ const enUS = {
   homeStreamTitle: "What people are asking",
   homeStreamLede: "The newest open questions.",
   homeStreamPick:
-    "Choose an answer on any card to open it in the voting app. Nothing is sent until you cast your ballot there.",
+    "Choose an answer on any card to open it in the ballot app. Nothing is sent until you cast your ballot there.",
   homeStreamAll: "See all questions",
   homeStreamEmpty: "No questions are open just now. When someone asks one, it shows up here.",
   homeListUnavailable:
@@ -259,7 +259,7 @@ const enUS = {
   navDiscover: "Discover",
   discoverTitle: "What people are asking",
   discoverLede:
-    "Open questions from neighbours, groups and schools. Answer any of them in the voting app. Nothing here is ranked by clicks, by arguments or by anything about you: every order below is the same for everyone.",
+    "Open questions from neighbours, groups and schools. Answer any of them in the ballot app. Nothing here is ranked by clicks, by arguments or by anything about you: every order below is the same for everyone.",
   discoverTopicLede:
     "Open questions their askers filed under this topic. Nothing here is ranked by clicks, by arguments or by anything about you.",
   discoverSorts: "Order",
@@ -275,9 +275,9 @@ const enUS = {
   streamQuestions: "Questions",
   streamCloses: "Closes",
   streamPick: {
-    one: "Choose an answer to open it in the voting app. Nothing is sent until you cast your ballot there.",
+    one: "Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",
     other:
-      "Choose an answer to question 1 of {count} to open it in the voting app. Nothing is sent until you cast your ballot there.",
+      "Choose an answer to question 1 of {count} to open it in the ballot app. Nothing is sent until you cast your ballot there.",
   },
   streamPickFirst: "These answers are for question 1 of {count}.",
   streamNoBallot: "Answering from this page isn't set up on this site yet.",

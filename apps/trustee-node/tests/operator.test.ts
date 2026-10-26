@@ -64,6 +64,19 @@ describe("HttpOperator", () => {
       { state: "rejected", code: "tally-aggregate" },
     ],
     [503, { code: "OPENING_NOT_READY" }, { state: "not-ready" }],
+    // oRPC's whole error body.
+    [
+      503,
+      {
+        defined: true,
+        code: "OPENING_NOT_READY",
+        status: 503,
+        message: "The counted set isn't fixed yet.",
+      },
+      { state: "not-ready" },
+    ],
+    // A body of another shape is read as its status alone.
+    [503, { code: "OPENING_NOT_READY", extra: 1 }, { state: "unavailable", reason: "503" }],
     [409, { code: "ELECTION_NOT_OPEN" }, { state: "not-open" }],
     [404, { code: "ELECTION_NOT_FOUND" }, { state: "not-open" }],
     [

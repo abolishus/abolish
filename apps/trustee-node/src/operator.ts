@@ -57,11 +57,16 @@ const BOARDED = z.strictObject({
   link: z.string().regex(/^[0-9a-f]{64}$/),
   earlier: z.boolean(),
 });
-// oRPC's error body; only `code` and, for a refusal, `data.code` are read.
-const ERROR = z.object({
+// oRPC's error body: every field it sends is declared, and only `code` and,
+// for a refusal, `data.code` are read. A body of any other shape (a proxy's
+// error page) fails the parse and is read as its status alone.
+const ERROR = z.strictObject({
+  defined: z.boolean().optional(),
   code: z.string(),
+  status: z.number().optional(),
+  message: z.string().optional(),
   data: z
-    .object({
+    .strictObject({
       code: z
         .string()
         .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/)

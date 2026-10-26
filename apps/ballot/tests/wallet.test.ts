@@ -10,9 +10,10 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import type { LoadedDeposits, LoadedPostings } from "../src/load.ts";
-import { POSTING_FORCE_AFTER, POSTING_POLL_MS } from "../src/posting.ts";
+import { POSTING_FORCE_AFTER, POSTING_GAS_LIMIT_MAX, POSTING_POLL_MS } from "../src/posting.ts";
 import {
   depositCalldata,
+  depositGas,
   type Eip1193,
   injectedWallet,
   postFromWallet,
@@ -340,6 +341,17 @@ describe("depositCalldata", () => {
   });
 });
 
+describe("depositGas", () => {
+  test("keeps the send's gas between the portal's minimum and POSTING_GAS_LIMIT_MAX", () => {
+    const call = new Uint8Array(1_000);
+    expect(depositGas(125_000n, call)).toBe(125_000n);
+    // Below the portal's minimum for 1,000 bytes the deposit would revert on L1.
+    expect(depositGas(30_000n, call)).toBe(61_000n);
+    // An inflated estimate can't price the deposit past the portal's caps (T-50).
+    expect(depositGas(50_000_000n, call)).toBe(POSTING_GAS_LIMIT_MAX);
+  });
+});
+
 describe("WalletSession.deposit", () => {
   /** A wallet on `start` that switches to whichever chain it is asked for. */
   function switching(start: bigint, extra: Parameters<typeof wallet>[0] = {}) {
@@ -441,6 +453,7 @@ describe("postFromWallet", () => {
     },
     chainAhead = 0n,
     readFails = false,
+    depositTakes = 0,
   }: {
     finalized?: (t: bigint, sent: readonly Uint8Array[]) => readonly Uint8Array[];
     safe?: (t: bigint, sent: readonly Uint8Array[]) => readonly Uint8Array[];
@@ -453,6 +466,8 @@ describe("postFromWallet", () => {
     ) => bigint | undefined;
     chainAhead?: bigint;
     readFails?: boolean;
+    /** Milliseconds a deposit's switch to L1 takes, before its cutoff is checked again. */
+    depositTakes?: number;
   }) {
     let ms = Number(START) * 1000;
     const t = () => BigInt(Math.floor(ms / 1000));
@@ -465,11 +480,15 @@ describe("postFromWallet", () => {
     const met = (m: "sent" | "unknown" | Error, gas: bigint) =>
       m instanceof Error ? Promise.reject(m) : Promise.resolve({ sent: m, gas });
     const io: WalletIo = {
-      send(call) {
+      send(call, late) {
+        // The wallet's own check before its estimate, as `WalletSession` makes it.
+        if (late()) return Promise.reject(new WalletRefusal("late"));
         sends.push({ call, at: t() - START });
         return met(answer(call, sends.length - 1), 1_000n + BigInt(sends.length));
       },
-      deposit(call, gas) {
+      deposit(call, gas, late) {
+        ms += depositTakes;
+        if (late()) return Promise.reject(new WalletRefusal("late"));
         deposits.push({ call, gas, at: t() - START });
         return met(deposited(call, deposits.length - 1), gas);
       },
@@ -613,6 +632,14 @@ describe("postFromWallet", () => {
     const roomy = START + POSTING_FORCE_AFTER + WALLET_DEPOSIT_SPAN + POLL;
     expect(await room.run([A], roomy)).toBe("forced");
     expect(START + (room.deposits[0]?.at ?? 0n) + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(roomy);
+  });
+
+  test("checks the deposit's cutoff again once the wallet is on L1", async () => {
+    // Forceable when the deposit is asked for, past its cutoff after the switch.
+    const cutoff = START + POSTING_FORCE_AFTER + WALLET_DEPOSIT_SPAN + POLL;
+    const slow = world({ safe: () => [], depositTakes: 2 * Number(POLL) * 1000 });
+    expect(await slow.run([A], cutoff)).toBe("sent");
+    expect(slow.deposits).toEqual([]);
   });
 
   test("ends the forcing, never the run, on a deposit the wallet doesn't make", async () => {

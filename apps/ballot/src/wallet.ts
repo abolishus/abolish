@@ -14,13 +14,20 @@
 // head already shows, from the relay or a deposit, is waited on rather than
 // paid for again beside it (T-13). A posting the wallet sent that a
 // sequencer doesn't take is forced through L1 from the same account, a
-// deposit to the portal the release pins (Forced through L1; T-50). No code
+// deposit to the portal the release pins (Forced through L1; T-50), as long
+// as the wallet's node took the send at all (Known-weak). No code
 // of the wallet's runs here: the provider is the browser's, and the client
 // only calls its `request`.
 
 import type { Deployment } from "./deployment.ts";
 import type { LoadedDeposits, LoadedPostings } from "./load.ts";
-import { POSTING_FINALITY, POSTING_FORCE_AFTER, POSTING_POLL_MS, POSTING_SEEN } from "./posting.ts";
+import {
+  POSTING_FINALITY,
+  POSTING_FORCE_AFTER,
+  POSTING_GAS_LIMIT_MAX,
+  POSTING_POLL_MS,
+  POSTING_SEEN,
+} from "./posting.ts";
 
 /** The one method of an EIP-1193 provider the client calls. */
 export interface Eip1193 {
@@ -63,10 +70,10 @@ export const WALLET_DEPOSIT_SPAN = BigInt((2 * WALLET_REQUEST_MS) / 1000) + 300n
 
 /**
  * Seconds before `c_D` at which a latest-head sighting stops holding a
- * posting back: the send's five requests at their longest (the account, the
- * chain and a switch, the estimate and the confirmation), then
- * `POSTING_FORCE_AFTER` for the sequencer to take it, then the switch to L1
- * and a deposit's span. The latest head is the untrusted endpoint's word,
+ * posting back: the send's six requests at their longest (the account, the
+ * chain read twice around a switch, the estimate and the confirmation),
+ * then `POSTING_FORCE_AFTER` for the sequencer to take it, then a deposit's
+ * span, which a prompt switch to L1 leaves whole (Known-weak). The latest head is the untrusted endpoint's word,
  * and a sequencer can show a call it never batches, so a sighting may delay
  * the voter's own send but never push it, or its forcing, past `c_D` (T-25,
  * T-50).
@@ -205,6 +212,22 @@ export function depositCalldata(board: string, gasLimit: bigint, call: Uint8Arra
   return out;
 }
 
+/**
+ * The gas limit a deposit gives `call` on L2, from `gas`, the limit the
+ * wallet's L2 send gave it: never below the portal's minimum for its data,
+ * `21,000 + 40 · d`, below which the deposit reverts on L1, and never above
+ * `POSTING_GAS_LIMIT_MAX`, which an honest posting never needs, so a wallet
+ * node that inflated its estimate can't price the deposit past the portal's
+ * caps (T-50). One that understated it leaves a deposit that runs out of
+ * gas on L2, which the client never reads as forced: a qualifying deposit
+ * needs the build's own estimate (`loadDeposits`).
+ */
+export function depositGas(gas: bigint, call: Uint8Array): bigint {
+  const floor = 21_000n + 40n * BigInt(call.length);
+  const raised = gas > floor ? gas : floor;
+  return raised < POSTING_GAS_LIMIT_MAX ? raised : POSTING_GAS_LIMIT_MAX;
+}
+
 /** What the wallet answered a send or a deposit (`WalletSession`). */
 export interface WalletSent {
   /** `unknown` when the wallet didn't answer in time and may still send it. */
@@ -334,8 +357,10 @@ export class WalletSession {
   /**
    * Forces `call` through L1 from the same account: `depositTransaction`
    * on the portal the release pins, on the release's L1, to the board,
-   * value 0, with `gas`, the gas limit its L2 send was given, as the call's
-   * gas on L2 ([[posting-relay]], Own wallet, Forced through L1; T-50). An
+   * value 0, with `gas`, the gas limit its L2 send was given, held between
+   * the portal's minimum and `POSTING_GAS_LIMIT_MAX` (`depositGas`), as the
+   * call's gas on L2 ([[posting-relay]], Own wallet, Forced through L1;
+   * T-50). An
    * account without code keeps its address on L2, so the board sees the
    * same call; one with code is aliased there, which the board, taking a
    * posting from anyone, doesn't weigh. The L1 estimate prices the portal's
@@ -343,7 +368,7 @@ export class WalletSession {
    * covers its rise before the deposit is mined.
    */
   deposit(call: Uint8Array, gas: bigint, late: () => boolean = () => false): Promise<WalletSent> {
-    const data = depositCalldata(this.board.address, gas, call);
+    const data = depositCalldata(this.board.address, depositGas(gas, call), call);
     return this.transact(this.l1ChainId, this.board.portal, data, late).finally(() => data.fill(0));
   }
 }

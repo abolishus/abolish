@@ -156,7 +156,7 @@ export function decodeRegistrableElectionDefinition(
   bytes: Uint8Array,
 ): AnyElectionDefinitionRecord {
   const record = decodeAnyElectionDefinition(bytes);
-  // Version 7 until P2-17 part 5's registry decodes it.
+  // The set excludes 7; the comparison narrows the record's type.
   if (!REGISTRABLE_VERSIONS.has(record.version) || record.version === 7)
     throw new DecodeError("unknown-version", 2);
   return record;
@@ -465,7 +465,7 @@ export function profileCombinationRule(
   if (ballot === undefined || opening === undefined) return "profile-combination";
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
   // A definition version this function doesn't know the pairings of (7
-  // until its codec exists) never falls back to another version's rules, and
+  // until P2-17 part 4 defines them) never falls back to another version's rules, and
   // neither does a version-6 pin on a value without version 6's fields.
   if (definition === undefined || ![1, 3, 4, 5, 6].includes(definition))
     return "profile-combination";

@@ -123,7 +123,11 @@ async function setUp(options: { tally?: CountedTally | false; timeoutMs?: number
           openings: {
             boardings: new OpeningBoardings({
               tally: async () => tally,
-              target: async () => ({ definitionHash: own.definitionHash, pinned: 1 }),
+              target: async () => ({
+                definitionHash: own.definitionHash,
+                pinned: 1,
+                registered: own.registered,
+              }),
               clock: CLOCK,
             }),
           },
@@ -263,7 +267,11 @@ test("openings are boarded only beside ballot admission", async () => {
       auditEveryMs: 3_600_000,
       prefix,
       openings: {
-        boardings: new OpeningBoardings({ tally: async () => FIXED, clock: CLOCK }),
+        boardings: new OpeningBoardings({
+          tally: async () => FIXED,
+          target: async () => undefined,
+          clock: CLOCK,
+        }),
       },
     }),
   ).rejects.toThrow("beside ballot admission");

@@ -27,9 +27,10 @@ import {
   decodeTallyOpening,
   type TallyElection,
   tallyOpeningBoarding,
+  tallyOpeningSigner,
   type WholeOpeningVersion,
 } from "@abolishus/crypto";
-import { countedTally, type L1Header } from "@abolishus/verifier";
+import { countedTally, type L1Header, readElection } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import { type AnchorChain, readCheckpoints } from "./anchoring.ts";
 import {
@@ -39,11 +40,15 @@ import {
   boardVersion,
   readBoard,
   readBoardedOpenings,
+  readEntryAt,
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
 
 const MAX_SEGMENT = 2 ** 32 - 1;
+
+/** Elections whose `OpeningTarget` is kept: a key set each, a few kilobytes at most. */
+const TARGETS_KEPT = 4096;
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -88,6 +93,13 @@ export interface AnchoredCountedTallyOptions {
   readonly anchor: Pick<AnchorChain, "chainId" | "address" | "clock" | "now" | "anchored">;
   /** Finalized L1 headers from a node on the anchor's chain. */
   readonly l1: L1HeaderRun;
+  /**
+   * UNIX time in seconds by this process's clock, which must be past the
+   * same point as the anchor's, so one node reporting a time ahead of L1's
+   * can't fix the tally over a checkpoint before the counted one (T-53);
+   * the system clock unless a test moves it.
+   */
+  readonly now?: () => bigint;
 }
 
 // Undecided outcomes a later read of finalized L1 can settle, at 5.8 only:
@@ -126,7 +138,7 @@ export const ANCHOR_FINALITY_MARGIN = 1_800n;
 export function anchoredCountedTally(
   options: AnchoredCountedTallyOptions,
 ): (client: Sql, electionId: Uint8Array) => Promise<CountedTally> {
-  const { panels, anchor, l1 } = options;
+  const { panels, anchor, l1, now = () => BigInt(Math.floor(Date.now() / 1000)) } = options;
   if (panels.length === 0) throw new RangeError("panels must name at least one panel");
   // A malformed panel throws PanelError here, at start, not on an opening.
   for (const panel of panels) panelId(panel);
@@ -155,8 +167,10 @@ export function anchoredCountedTally(
     if (extent.segment > BigInt(MAX_SEGMENT))
       return { state: "refused", reason: "s_S past the last segment" };
     const sS = Number(extent.segment);
-    // By the anchor's own time, which judges whether a checkpoint is timely.
-    if ((await anchor.now()) <= extent.due + ANCHOR_FINALITY_MARGIN) return { state: "waiting" };
+    // By the anchor's own time, which judges whether a checkpoint is timely,
+    // and by this process's, which no node reports.
+    const final = extent.due + ANCHOR_FINALITY_MARGIN;
+    if (now() <= final || (await anchor.now()) <= final) return { state: "waiting" };
     let counted;
     for (const checkpoint of await readCheckpoints(client, electionId))
       if (checkpoint.segment <= sS) counted = checkpoint;
@@ -271,47 +285,69 @@ export class OpeningError extends Error {
 /**
  * What an opening is checked against before its election's counted tally is
  * asked for: the definition hash and the whole-opening version the stored
- * definition pins.
+ * definition pins, and the registered key set its transcript check returns.
  */
 export interface OpeningTarget {
   readonly definitionHash: Uint8Array;
   readonly pinned: WholeOpeningVersion;
+  readonly registered: TallyElection["registered"];
 }
 
 /**
- * The stored definition's `OpeningTarget`, or undefined when this release
- * boards no whole opening of it (a definition it can't read, or one pinning
- * no tally-opening version 1 or 2). Throws `OpeningError` `unknown-election`
- * when no definition is stored.
+ * Each election's `OpeningTarget` from its stored definition and the
+ * transcript at entry 0, read by packages/verifier's `readElection` under
+ * the first of `panels` the definition names, or undefined when this
+ * release boards no whole opening of it: a definition it can't read, one
+ * pinning no tally-opening version 1 or 2, or no transcript that passes the
+ * check. The result throws `OpeningError` `unknown-election` when no
+ * definition is stored.
  */
-export async function storedOpeningTarget(
-  client: Sql,
-  electionId: Uint8Array,
-): Promise<OpeningTarget | undefined> {
-  const definition = await readDefinition(client, electionId);
-  if (definition === undefined) throw new OpeningError("unknown-election");
-  let record;
-  try {
-    record = decodeStoredDefinition(definition);
-  } catch (e) {
-    if (e instanceof DecodeError) return undefined;
-    throw e;
-  }
-  const pinned = pinnedVersion(record.value, RECORD_TYPES.tallyOpening);
-  if (pinned !== 1 && pinned !== 2) return undefined;
-  return { definitionHash: storedDefinitionHash(record), pinned };
+export function openingTargets(
+  panels: readonly Panel[],
+): (client: Sql, electionId: Uint8Array) => Promise<OpeningTarget | undefined> {
+  if (panels.length === 0) throw new RangeError("panels must name at least one panel");
+  for (const panel of panels) panelId(panel);
+  return async (client, electionId) => {
+    const definition = await readDefinition(client, electionId);
+    if (definition === undefined) throw new OpeningError("unknown-election");
+    let record;
+    try {
+      record = decodeStoredDefinition(definition);
+    } catch (e) {
+      if (e instanceof DecodeError) return undefined;
+      throw e;
+    }
+    const pinned = pinnedVersion(record.value, RECORD_TYPES.tallyOpening);
+    if (pinned !== 1 && pinned !== 2) return undefined;
+    const first = await readEntryAt(client, electionId, 0n);
+    if (first === undefined) return undefined;
+    for (const panel of panels) {
+      const read = readElection(definition, panel, [first.entry]);
+      if (read.ok)
+        return {
+          definitionHash: storedDefinitionHash(record),
+          pinned,
+          registered: read.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
+        };
+      if (read.code !== "panel-unpinned") return undefined;
+    }
+    return undefined;
+  };
 }
 
 export interface OpeningBoardingOptions {
   /** Each election's counted tally: `anchoredCountedTally`'s in a deployment. */
   readonly tally: (client: Sql, electionId: Uint8Array) => Promise<CountedTally>;
-  /** Each election's `OpeningTarget`: `storedOpeningTarget` unless a test supplies one. */
-  readonly target?: (client: Sql, electionId: Uint8Array) => Promise<OpeningTarget | undefined>;
+  /** Each election's `OpeningTarget`: `openingTargets`' in a deployment. */
+  readonly target: (client: Sql, electionId: Uint8Array) => Promise<OpeningTarget | undefined>;
   /** The anchoring clock: it labels each entry's segment. */
   readonly clock: { readonly epoch: bigint; readonly period: bigint };
   /** Elections whose counted tally is kept in memory once decided (default 256). */
   readonly cacheSize?: number;
-  /** How long a `waiting` answer is kept before the tally is asked again (default 60 s). */
+  /**
+   * How long a `waiting` answer, or a tally that threw, is kept before the
+   * tally is asked again (default 60 s).
+   */
   readonly waitMs?: number;
   /** How long a refusal that `lapses` is kept before the tally is asked again (default 10 min). */
   readonly lapseMs?: number;
@@ -327,11 +363,15 @@ type Decided = Exclude<CountedTally, { readonly state: "waiting" }>;
  * read of the board through `C_S` and the admission of its ballots. That is
  * sound because the anchored counted extent never changes once `t_S` has
  * passed. An opening must decode under its election's pin and name its
- * definition before the tally is asked for, so no unsigned bytes for an
- * election start one; one election's tally is computed at a time, and an
- * opening of another meanwhile is answered `not-ready`; and a `waiting`
- * answer is kept for `waitMs`, so openings sent before the set is fixed cost
- * one admission per election per interval at most (T-52).
+ * definition, and one already on the board in the same bytes is answered
+ * from it, before the tally is asked for; only an opening a registered seat
+ * signed starts a computation, so no one else's bytes, nor a replay of what
+ * the board shows, ever do; one election's tally is computed at a time, and
+ * an opening of another meanwhile is answered `not-ready`; and a `waiting`
+ * answer, or a computation that threw, is kept for `waitMs`, so openings
+ * sent before the set is fixed cost one admission per election per interval
+ * at most (T-52). Each election's target is kept too, for 4,096 elections,
+ * so its transcript is checked once.
  */
 export class OpeningBoardings {
   readonly #tally: OpeningBoardingOptions["tally"];
@@ -345,10 +385,11 @@ export class OpeningBoardings {
   readonly #waiting = new Map<string, number>();
   readonly #lapsing = new Map<string, { readonly tally: Decided; readonly until: number }>();
   readonly #inFlight = new Map<string, Promise<CountedTally>>();
+  readonly #targets = new Map<string, OpeningTarget>();
 
   constructor({
     tally,
-    target = storedOpeningTarget,
+    target,
     clock,
     cacheSize = 256,
     waitMs = 60_000,
@@ -395,7 +436,7 @@ export class OpeningBoardings {
     // The Boarding rule's first two refusals, decided from the stored
     // definition alone, so they are answered whatever the tally's state and
     // never cost an admission of the board (T-52).
-    const target = await this.#target(client, id);
+    const target = await this.#targetOf(client, id);
     if (target === undefined) throw new OpeningError("not-open");
     let decoded;
     try {
@@ -406,7 +447,15 @@ export class OpeningBoardings {
     }
     if (!equal(decoded.definition_hash, target.definitionHash))
       throw new OpeningError("rejected", "tally-stray");
-    const tally = await this.#counted(client, id);
+    // A boarded opening in the same bytes is its own repeat, whatever the
+    // tally: a replay of the board never costs one.
+    const same = (await readBoardedOpenings(client, id)).find((b) => equal(b.payload, own));
+    if (same !== undefined) {
+      const { payload: _, ...entry } = same;
+      return entry;
+    }
+    const signed = tallyOpeningSigner(target.registered, own, target.pinned) !== null;
+    const tally = await this.#counted(client, id, signed);
     if (tally.state === "waiting") throw new OpeningError("not-ready");
     if (tally.state === "refused") throw new OpeningError("not-open");
     if (now < this.#clock.epoch) throw new OpeningError("not-ready");
@@ -440,12 +489,9 @@ export class OpeningBoardings {
       });
       return entry;
     } catch (e) {
-      // The segment's spoiled-ballot openings, or its checkpoint, came
-      // first: the next segment takes it, so the seat's resend boards it.
-      if (
-        e instanceof AppendError &&
-        (e.code === "opening-order" || e.code === "segment-checkpointed")
-      )
+      // The segment's spoiled-ballot openings came first: the next segment
+      // takes it, so the seat's resend boards it.
+      if (e instanceof AppendError && e.code === "opening-order")
         throw new OpeningError("not-ready");
       if (!(e instanceof AppendError && e.code === "opening-present" && e.existing !== undefined))
         throw e;
@@ -465,7 +511,22 @@ export class OpeningBoardings {
     }
   }
 
-  async #counted(client: Sql, id: Uint8Array): Promise<CountedTally> {
+  async #targetOf(client: Sql, id: Uint8Array): Promise<OpeningTarget | undefined> {
+    const key = Buffer.from(id).toString("hex");
+    const known = this.#targets.get(key);
+    if (known !== undefined) return known;
+    // A definition and the transcript at entry 0 never change once stored,
+    // so a target, once read, holds; none yet is asked for again.
+    const target = await this.#target(client, id);
+    if (target !== undefined) remember(this.#targets, key, target, TARGETS_KEPT);
+    return target;
+  }
+
+  /**
+   * The election's counted tally, computed only for an opening a registered
+   * seat `signed`: any other is answered `waiting` until one has.
+   */
+  async #counted(client: Sql, id: Uint8Array, signed: boolean): Promise<CountedTally> {
     const key = Buffer.from(id).toString("hex");
     const known = this.#decided.get(key);
     if (known !== undefined) {
@@ -482,12 +543,17 @@ export class OpeningBoardings {
     // another election's waits for it to end (T-52).
     const running = this.#inFlight.get(key);
     if (running !== undefined) return running;
-    if (this.#inFlight.size > 0) return { state: "waiting" };
+    if (!signed || this.#inFlight.size > 0) return { state: "waiting" };
     const pending = this.#tally(client, id);
     this.#inFlight.set(key, pending);
     let tally;
     try {
       tally = await pending;
+    } catch (e) {
+      // A node that can't be read, or a run past its budget, is asked again
+      // only after `waitMs`, never on each resend (T-52).
+      remember(this.#waiting, key, this.#nowMs() + this.#waitMs, this.#cacheSize);
+      throw e;
     } finally {
       this.#inFlight.delete(key);
     }

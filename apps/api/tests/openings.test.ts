@@ -119,7 +119,11 @@ async function judging(sql: Sql, tally: CountedTally = FIXED): Promise<OpeningQu
       openings: {
         boardings: new OpeningBoardings({
           tally: async () => tally,
-          target: async () => ({ definitionHash: own.definitionHash, pinned: 1 }),
+          target: async () => ({
+            definitionHash: own.definitionHash,
+            pinned: 1,
+            registered: own.registered,
+          }),
           clock: CLOCK,
         }),
       },

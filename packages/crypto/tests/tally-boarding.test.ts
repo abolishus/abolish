@@ -13,6 +13,7 @@ import {
   sortTallyOpenings,
   type TallyElection,
   tallyOpeningBoarding,
+  tallyOpeningSigner,
   type WholeOpeningVersion,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
@@ -277,6 +278,43 @@ describe("the Boarding rule's properties", { timeout: 60_000 }, () => {
       ),
       { numRuns },
     );
+  });
+});
+
+describe("the opening's signer alone", () => {
+  for (const [pinned, elections] of [
+    [1, vectors.elections],
+    [2, vectors.version2.elections],
+  ] as const)
+    test.each(elections)(
+      `version ${pinned}: each opening of $id as the report attributes it`,
+      (e) => {
+        for (const [at, opening] of e.openings.entries()) {
+          const reports = [
+            ...e.result.cells.flatMap((c) => [...c.passing, ...c.failing]),
+            ...e.result.stray,
+          ];
+          const want = e.result.rejected.some((r) => r.at === at)
+            ? null
+            : (reports.find((r) => r.at === at) as Report).signer;
+          expect(
+            tallyOpeningSigner(election.registered, hex(opening), pinned),
+            `${e.id} ${at}`,
+          ).toBe(want);
+          // One of the pinned version doesn't decode under the other, so no one signed it.
+          if (hex(opening)[2] === pinned)
+            expect(
+              tallyOpeningSigner(election.registered, hex(opening), pinned === 1 ? 2 : 1),
+            ).toBe(null);
+        }
+      },
+    );
+
+  test("attributes nothing to a seat the key set doesn't register", () => {
+    const opening = hex(byId("signed").openings[0] as string);
+    expect(tallyOpeningSigner(election.registered, opening, 1)).toBe(1);
+    expect(tallyOpeningSigner(election.registered.slice(1), opening, 1)).toBe(null);
+    expect(tallyOpeningSigner([], opening, 1)).toBe(null);
   });
 });
 

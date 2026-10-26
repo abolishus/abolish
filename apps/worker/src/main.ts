@@ -4,6 +4,7 @@ import {
   CREATE_DAILY_CEILING,
   L1References,
   OpeningBoardings,
+  openingTargets,
   Tier0Batches,
   Tier1Batches,
 } from "@abolishus/core";
@@ -237,6 +238,7 @@ if (ballotEnv.some((v) => v !== undefined)) {
           anchor: new ViemAnchorReader({ client, chainId, anchor, clock: anchorClock }),
           l1: headers,
         }),
+        target: openingTargets(panels),
         clock,
       }),
     };

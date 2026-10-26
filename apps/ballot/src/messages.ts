@@ -344,7 +344,7 @@ const enUS = {
     "The network didn't take your wallet's posting in time, or your wallet's node refused it, so your wallet sent it through Ethereum, which the network has to include. Count the missing parts as posted: they reach the public record by the poll's delivery deadline, which can take some hours, and leaving this ballot can't take them back. Keep this page open, and don't reload it or open this ballot in another tab: after the poll's posting cutoff that erases what this device kept for them, and your ballot can then no longer be sent from here. Post from your wallet again only once the record may show them: this device looks for them first, and sends your ballot once it finds them.",
   walletRejectedTitle: "Your wallet didn't send anything",
   walletRejected:
-    "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts. Choose again below.",
+    "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts, and so may the node this device reads the board through. Choose again below.",
   walletRefusedTitle: "Your wallet refused this posting",
   walletRefused:
     "Your wallet's check of the posting says the board would refuse it, and it couldn't be forced through Ethereum instead, so nothing was sent and none of your fee was spent. Your wallet and its nodes, and the node this device reads the board through, may have been given the missing parts for those checks. Try the trustees again, or leave this ballot.",

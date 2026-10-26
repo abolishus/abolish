@@ -424,8 +424,13 @@ interface Pending {
   readonly call: Uint8Array;
   /** When the wallet sent it, or may have, on L2 or forced through L1, in seconds. */
   sentAt: bigint | undefined;
-  /** The gas limit the wallet's send gave it, which a deposit gives it too. */
-  gas: bigint | undefined;
+  /**
+   * The gas limit a deposit gives it: the one the wallet's send gave it, or
+   * the build's own estimate a quarter over where the send failed, asked
+   * only once it is due (`undefined` until then, `null` where that estimate
+   * refuses it).
+   */
+  gas: bigint | null | undefined;
   /** When the latest head first showed it, in seconds. */
   seenAt: bigint | undefined;
   /** Whether the safe head showed it: the sequencer batched it to L1. */
@@ -452,11 +457,13 @@ interface Pending {
  * WALLET_DEPOSIT_SPAN`: the safe head, since a censoring sequencer can show
  * a call at the latest head that it never batches (Forced through L1;
  * T-50). A deposit the wallet doesn't make ends the forcing for the run,
- * never the run. A posting whose send the wallet's node refused once it
- * was given the call, at the estimate or the send, is deposited at once,
- * with the gas limit from the build's own estimate, and only if that
- * estimate passes: the wallet's node, which a censoring sequencer's
- * endpoint can be, can't keep the voter's posting off L2 (T-50).
+ * never the run. A posting whose estimate the wallet's node refused once it
+ * was given the call is deposited at once, with the gas limit from the
+ * build's own estimate, and only if that estimate passes: the wallet's
+ * node, which a censoring sequencer's endpoint can be, can't keep the
+ * voter's posting off L2 (T-50). One whose send failed may have been
+ * broadcast, so it counts as sent, and is forced as any sent one is, with
+ * the build's estimate for its gas.
  *
  * It answers `recorded` only once the finalized head carries every
  * posting's exact bytes; otherwise, once every unrecorded posting was sent,
@@ -515,19 +522,29 @@ export async function postFromWallet(
   const forceable = () => forcing && time() + WALLET_DEPOSIT_SPAN <= cutoff;
   const shows = (read: LoadedPostings, p: Pending) =>
     read.ok && read.records.some((record) => equalBytes(record, p.posting));
-  // Forced through L1 at once: a posting the wallet's node refused after it
-  // was given the call. The gas limit is the build's own estimate a quarter
-  // over, as the wallet's send gives its own, so the deposit qualifies by
-  // the same estimate the outcome judges it by (`loadDeposits`); a call that
-  // estimate refuses too is one the board refuses, and isn't paid for on L1.
-  // It answers what to end the run with when nothing could be deposited.
+  // A deposit's gas limit from the build's own estimate, a quarter over as
+  // the wallet's send gives its own, so the deposit qualifies by the same
+  // estimate the outcome judges it by (`loadDeposits`). A call that estimate
+  // refuses too is one the board refuses, and one past
+  // `POSTING_GAS_LIMIT_MAX` could never qualify at the portal's cap: neither
+  // is paid for on L1.
+  const built = async (call: Uint8Array) => {
+    const estimated = await io.estimate(call).catch(() => undefined);
+    if (estimated === undefined || estimated > POSTING_GAS_LIMIT_MAX) return null;
+    return estimated + estimated / 4n;
+  };
+  // Forced through L1 at once: a posting whose estimate the wallet's node
+  // refused after it was given the call. It answers what to end the run
+  // with when nothing could be deposited.
   const forceRefused = async (p: Pending, refusal: WalletRefusal) => {
-    const handed = refusal.at !== "before";
-    if (!handed || (refusal.answer !== "refused" && refusal.answer !== "failed") || !forceable())
+    if (
+      refusal.at !== "estimate" ||
+      (refusal.answer !== "refused" && refusal.answer !== "failed") ||
+      !forceable()
+    )
       return refusal.answer;
-    const estimated = await io.estimate(p.call).catch(() => undefined);
-    if (estimated === undefined) return refusal.answer;
-    const gas = estimated + estimated / 4n;
+    const gas = await built(p.call);
+    if (gas === null) return refusal.answer;
     try {
       await io.deposit(p.call, gas, () => !forceable());
     } catch (error) {
@@ -564,6 +581,14 @@ export async function postFromWallet(
       try {
         met = await io.send(p.call, () => time() > cutoff);
       } catch (error) {
+        // A send that failed may follow a broadcast: sent, as one the
+        // wallet never answered, and forced if the safe head doesn't show
+        // it, rather than paid for on L1 beside it at once (T-13, T-54).
+        if (error instanceof WalletRefusal && error.at === "send" && error.answer === "failed") {
+          sent = true;
+          p.sentAt = time();
+          continue;
+        }
         const ended = await forceRefused(
           p,
           error instanceof WalletRefusal ? error : new WalletRefusal("failed"),
@@ -594,7 +619,9 @@ export async function postFromWallet(
         heard(safe.timestamp);
         for (const p of due()) if (shows(safe, p)) p.safe = true;
         for (const p of due()) {
-          if (!forceable() || p.gas === undefined) break;
+          if (!forceable()) break;
+          if (p.gas === undefined) p.gas = await built(p.call);
+          if (p.gas === null) continue;
           try {
             await io.deposit(p.call, p.gas, () => !forceable());
           } catch {

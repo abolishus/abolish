@@ -40,7 +40,7 @@ export const esUS: Messages = {
     "El detalle: cada entrada extiende una cadena de hashes, así que quitar o cambiar una se nota.",
   trust3Title: "Se abre solo después de que cierra la encuesta",
   trust3Body:
-    "El conteo se desbloquea solo cuando suficientes puestos de custodio de la encuesta, cada uno con una parte de la clave, trabajan juntos después del cierre. Ningún puesto puede abrirlo por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas encuestas son privadas para todos excepto para nosotros. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
+    "El conteo se desbloquea solo cuando suficientes puestos de custodio de la encuesta, cada uno con una parte de cada respuesta sellada, trabajan juntos después del cierre. Ningún puesto puede abrirlo por sí solo. Durante el lanzamiento, Abolish opera todos los puestos, así que estas encuestas son privadas para todos excepto para nosotros. Custodios independientes tomarán el relevo antes de la primera votación cívica, y quienes pregunten podrán añadir sus propios custodios.",
   trust3Detail: "El detalle: se necesitan {threshold} de los {seats} puestos.",
   trust4Title: "Cualquiera lo vuelve a contar",
   trust4Body:

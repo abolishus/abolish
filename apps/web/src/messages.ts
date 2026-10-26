@@ -41,7 +41,7 @@ const enUS = {
   trust2Detail: "The detail: each entry extends a hash chain, so removing or changing one shows.",
   trust3Title: "Opened only after the poll closes",
   trust3Body:
-    "The count is unlocked only when enough of the poll's trustee seats, each holding one share of the key, work together after it closes. No single seat can open it alone. During launch every seat is run by Abolish, so these polls are private from everyone except us. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
+    "The count is unlocked only when enough of the poll's trustee seats, each holding one share of every sealed answer, work together after it closes. No single seat can open it alone. During launch every seat is run by Abolish, so these polls are private from everyone except us. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
   trust3Detail: "The detail: it takes {threshold} of the {seats} seats.",
   trust4Title: "Counted again by anyone",
   trust4Body:

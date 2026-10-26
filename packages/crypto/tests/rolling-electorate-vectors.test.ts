@@ -3,20 +3,20 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   PARAMETERS,
   rollingNullifierScope,
+  rollingTierSteps,
+  RollingTierTree,
+  rootClockBoundary,
+  rootStepWindow,
   semaphoreField,
-  tierTreeRoot,
   tierTreeZeros,
 } from "../src/index.ts";
-import { memberCount, type RollingEvent, rollingLeaves, tau } from "./rolling-tree.ts";
+import { type RollingEvent, tierEvent } from "./rolling-tree.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/rolling-tier-tree.json, printed by
-// scripts/rolling-electorate-vectors.py (P2-17 part 1). The rolling scope is
-// packages/crypto's (part 3a; the definition's vectors are in
-// definition-v7-vectors.test.ts). packages/crypto has no rolling tree yet
-// (part 3b), so these tests read the rolling tier tree and the root clock from
-// docs/spec/membership.md directly, with only the tier tree's root taken from
-// packages/crypto.
+// scripts/rolling-electorate-vectors.py (P2-17 part 1), through packages/crypto's
+// rolling tier tree, root clock and window (part 3b) and rolling scope (part
+// 3a; the definition's vectors are in definition-v7-vectors.test.ts).
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 interface RollingTree {
@@ -72,29 +72,39 @@ describe("rolling tier trees (docs/spec/membership.md, Rolling tier tree, Root c
     expect(rolling.rootWindow).toBe(String(PARAMETERS.ROOT_WINDOW));
   });
 
-  const check = (leaves: bigint[], want: RollingTree) => {
-    expect(leaves.map(String)).toEqual(want.leaves);
-    expect(String(tierTreeRoot(leaves))).toBe(want.root);
-    expect(String(memberCount(leaves))).toBe(want.memberCount);
-  };
+  const ctx = (t: RollingFile["trees"][number]) => ({
+    groups: t.groups.map(BigInt),
+    rootL2Block: BigInt(t.rootL2Block),
+    registeredAt: BigInt(t.registeredAt),
+    closesAt: BigInt(t.closesAt),
+  });
 
   test.each(rolling.trees.map((t) => [t.id, t] as const))("%s", (_id, t) => {
-    check(
-      rollingLeaves(t.events, t.groups, (e) => BigInt(e.block) <= BigInt(t.rootL2Block)),
-      t.opening,
+    const events = t.events.map(tierEvent);
+    const got = rollingTierSteps(
+      events,
+      ctx(t),
+      t.steps.map((s) => BigInt(s.step)),
     );
-    for (const s of t.steps) {
-      const boundary = tau(BigInt(s.step));
-      expect(String(boundary)).toBe(s.tau);
-      const leaves = rollingLeaves(t.events, t.groups, (e) => BigInt(e.timestamp) <= boundary);
-      check(leaves, s);
-      const accepted =
-        boundary > BigInt(t.registeredAt) &&
-        boundary <= BigInt(t.closesAt) &&
-        leaves.length <= 2 ** 32 &&
-        tierTreeRoot(leaves) !== z32;
-      expect(accepted).toBe(s.accepted);
+    expect(String(got.opening.root)).toBe(t.opening.root);
+    expect(String(got.opening.memberCount)).toBe(t.opening.memberCount);
+    expect(got.steps.map((s) => String(s.step))).toEqual(t.steps.map((s) => s.step));
+    for (const [i, s] of t.steps.entries()) {
+      const step = got.steps[i]!;
+      expect(String(rootClockBoundary(step.step))).toBe(s.tau);
+      expect(String(step.root)).toBe(s.root);
+      expect(String(step.memberCount)).toBe(s.memberCount);
+      expect(step.size).toBe(s.leaves.length);
+      expect(step.accepted).toBe(s.accepted);
+      // The leaves themselves, from the tree updated in chain order.
+      const tree = new RollingTierTree(ctx(t).groups);
+      for (const e of events) if (e.timestamp <= rootClockBoundary(step.step)) tree.apply(e);
+      expect(tree.leaves.map(String)).toEqual(s.leaves);
+      expect(String(tree.root())).toBe(s.root);
     }
+    const opening = new RollingTierTree(ctx(t).groups);
+    for (const e of events) if (e.blockNumber <= BigInt(t.rootL2Block)) opening.apply(e);
+    expect(opening.leaves.map(String)).toEqual(t.opening.leaves);
   });
 
   test("covers accepted and refused steps, an empty opening and a repeated commitment", () => {
@@ -108,11 +118,7 @@ describe("rolling tier trees (docs/spec/membership.md, Rolling tier tree, Root c
   });
 
   test.each(rolling.windows.map((w) => [w.id, w] as const))("window %s", (_id, w) => {
-    const boundary = tau(BigInt(w.step));
-    const t = BigInt(w.l1Timestamp);
-    const window = BigInt(PARAMETERS.ROOT_WINDOW);
-    const verdict = boundary > t ? "future" : boundary <= t - window ? "stale" : "in";
-    expect(verdict).toBe(w.window);
+    expect(rootStepWindow(BigInt(w.step), BigInt(w.l1Timestamp))).toBe(w.window);
   });
 
   test.each(rolling.scopes.map((s) => [s.id, s] as const))("scope %s", (_id, s) => {

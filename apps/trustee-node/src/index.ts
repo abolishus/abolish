@@ -34,6 +34,22 @@ export {
   type ReceiptPath,
 } from "./delivery.ts";
 export {
+  OpeningSender,
+  type OpeningSend,
+  type OpeningSenderOptions,
+  type OpeningSenderStatus,
+  type PublishedCells,
+  publishedOf,
+  RESEND_AFTER,
+} from "./opening-sender.ts";
+export {
+  HttpOperator,
+  type HttpOperatorOptions,
+  MAX_ANSWER,
+  type OpeningOperator,
+  type OperatorAnswer,
+} from "./operator.ts";
+export {
   type BoardOpening,
   type BoardOpenings,
   boardOpenings,
@@ -42,6 +58,7 @@ export {
 export {
   type CellStatus,
   type CountedSet,
+  signedOpenings,
   type SummedSharePeers,
   type TallyDefinition,
   TallyDuty,

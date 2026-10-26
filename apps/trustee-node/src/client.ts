@@ -35,16 +35,16 @@ const LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
  * The coordinator's base URL: HTTPS, or HTTP to loopback for a local run, so
  * no one on the path can read or change what the node is asked (it would
  * still be checked, but a path attacker could withhold it like any
- * coordinator) or learn which elections a seat takes part in.
+ * coordinator) or learn which elections a seat takes part in. The
+ * operator's API base URL, which the seat sends its tally openings to, is
+ * held to the same rule (`what`).
  */
-export function coordinatorUrl(url: string): URL {
+export function coordinatorUrl(url: string, what = "coordinator"): URL {
   const u = new URL(url);
   if (u.protocol !== "https:" && !(u.protocol === "http:" && LOOPBACK.has(u.hostname)))
-    throw new RangeError("trustee node: the coordinator URL must be https (or http to loopback)");
+    throw new RangeError(`trustee node: the ${what} URL must be https (or http to loopback)`);
   if (u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "")
-    throw new RangeError(
-      "trustee node: the coordinator URL takes no credentials, query or fragment",
-    );
+    throw new RangeError(`trustee node: the ${what} URL takes no credentials, query or fragment`);
   if (!u.pathname.endsWith("/")) u.pathname += "/";
   return u;
 }
@@ -122,7 +122,11 @@ export class HttpCoordinator implements Coordinator {
 }
 
 /** A response body, refused once it passes `max` bytes rather than buffered whole. */
-async function readCapped(response: Response, max: number): Promise<Uint8Array> {
+export async function readCapped(
+  response: Response,
+  max: number,
+  what = "coordinator",
+): Promise<Uint8Array> {
   if (response.body === null) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -134,13 +138,13 @@ async function readCapped(response: Response, max: number): Promise<Uint8Array> 
       length += value.length;
       if (length > max) {
         await reader.cancel();
-        throw new TransportError("coordinator: body too large");
+        throw new TransportError(`${what}: body too large`);
       }
       chunks.push(value);
     }
   } catch (e) {
     if (e instanceof TransportError) throw e;
-    throw new TransportError("coordinator: body unreadable", { cause: e });
+    throw new TransportError(`${what}: body unreadable`, { cause: e });
   }
   const out = new Uint8Array(length);
   let at = 0;

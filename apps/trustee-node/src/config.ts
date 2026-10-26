@@ -51,6 +51,7 @@ const TALLY = z.strictObject({
   peers: z.record(z.string().regex(/^[1-9][0-9]{0,2}$/), z.string().min(1)),
   caFile: z.string().min(1).optional(),
   timeoutSeconds: z.number().int().min(1).max(300).default(30),
+  operator: z.string().min(1),
 });
 
 const AVAILABILITY = z.strictObject({
@@ -194,6 +195,11 @@ export interface TallyConfig {
   readonly peers: ReadonlyMap<number, string>;
   readonly caFile: string | undefined;
   readonly timeoutMs: number;
+  /**
+   * The board operator's API base URL (`https:`, or `http:` on loopback),
+   * which the seat sends its signed tally openings to until the seal.
+   */
+  readonly operator: string;
 }
 
 export interface NodeConfig {
@@ -320,6 +326,12 @@ function tallyOf(t: z.output<typeof TALLY>, seat: number, panel: Panel): TallyCo
       throw fail(`peers.${key}`, "not another seat of the panel");
     peers.set(index, url);
   }
+  try {
+    coordinatorUrl(t.operator, "operator");
+  } catch (e) {
+    if (e instanceof TypeError || e instanceof RangeError) throw fail("operator", e.message);
+    throw e;
+  }
   return {
     host: t.host,
     port: t.port,
@@ -331,6 +343,7 @@ function tallyOf(t: z.output<typeof TALLY>, seat: number, panel: Panel): TallyCo
     peers,
     caFile: t.caFile,
     timeoutMs: t.timeoutSeconds * 1000,
+    operator: t.operator,
   };
 }
 

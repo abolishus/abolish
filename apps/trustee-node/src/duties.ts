@@ -5,8 +5,10 @@
 // T-54), the receipt duty
 // (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52),
 // the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29),
-// and the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
-// which also takes the summed-share messages the channel hands it.
+// the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
+// which also takes the summed-share messages the channel hands it, and the
+// sending of the openings it signed (`OpeningSender`, Destruction, When;
+// T-54).
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
@@ -24,6 +26,7 @@ import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
 import { L1AnchorError, tallySegment } from "./l1.ts";
+import type { OpeningSender, OpeningSenderStatus } from "./opening-sender.ts";
 import { SendError } from "./send.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
 import type { TallyDuty, TallyDutyStatus } from "./tally.ts";
@@ -55,13 +58,15 @@ export type CountedAvailabilityEvent = KindEvent<"counted-availability", Availab
 export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
 export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 export type TallyEvent = KindEvent<"tally", TallyDutyStatus>;
+export type OpeningEvent = KindEvent<"openings", OpeningSenderStatus>;
 /** What the duties report. */
 export type DutyEvent =
   | AvailabilityEvent
   | CountedAvailabilityEvent
   | ReceiptEvent
   | ComplaintEvent
-  | TallyEvent;
+  | TallyEvent
+  | OpeningEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -107,6 +112,9 @@ export type ComplaintStep = Pick<ComplaintDuty, "step" | "deadline">;
  * and receive, with the deadline its builder reads (`tallyDeadline`).
  */
 export type TallyStep = Pick<TallyDuty, "step" | "receive"> & { readonly deadline: bigint };
+
+/** What the schedule needs of an election's opening sender: `OpeningSender`, with `openingsDeadline`. */
+export type OpeningStep = Pick<OpeningSender, "step"> & { readonly deadline: bigint };
 
 /** What the schedule needs of any duty. */
 interface Stepped<S> {
@@ -434,5 +442,41 @@ export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyS
   /** Hands a summed-share message to every election's duty; never throws for the message's sake. */
   async receive(message: Uint8Array): Promise<void> {
     for (const duty of this.active()) await duty.receive(message);
+  }
+}
+
+/**
+ * The end of the tally term in the seal's `W` (docs/spec/tally.md,
+ * Destruction window): `t_D + DESTRUCTION_WINDOW`. No seal is derived from
+ * a definition yet ([[election-definition]], The seal), and every seal is
+ * at or after the period containing this, so a seat that sends its
+ * openings until then sends them until the seal's tally term, whatever the
+ * other windows add.
+ */
+export function openingsDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
+  return tallyDeadline(election, clock) + BigInt(PARAMETERS.DESTRUCTION_WINDOW);
+}
+
+/**
+ * The opening sender of every election the seat approved: each one's
+ * `OpeningSender`, stepped from the approval (it sends nothing until the
+ * tally duty has signed an opening) until the seat's own read of the
+ * anchored board has every cell published, or `openingsDeadline` has
+ * passed: openings boarded after the tally window still count until the
+ * seal, so the seat keeps sending them past `t_D`, when the tally duty
+ * itself has stopped (docs/spec/tally.md, Destruction, When; T-54). No
+ * step begins past the deadline, nor is a sender set up.
+ */
+export class OpeningSends extends ElectionDuties<"openings", OpeningSenderStatus, OpeningStep> {
+  constructor(options: DutyOptions<OpeningStep, OpeningEvent>, clock: DeadlineClock) {
+    super(
+      {
+        name: "openings",
+        deadline: (e) => openingsDeadline(e, clock),
+        noStepPast: true,
+        settles: (status, wall, deadline) => status.state === "complete" || wall > deadline,
+      },
+      options,
+    );
   }
 }

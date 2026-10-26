@@ -1,8 +1,12 @@
 export {
   type AnchorChainOptions,
+  type AnchorClockDeployment,
   type AnchorDeployment,
+  type AnchorReaderOptions,
+  checkAnchorClock,
   checkAnchorDeployment,
   ViemAnchorChain,
+  ViemAnchorReader,
 } from "./anchor-chain.ts";
 export {
   ANCHOR_ENV,
@@ -34,6 +38,10 @@ export {
   BallotQueue,
   type BallotQueueOptions,
   type BallotUnavailable,
+  OPENING_OUTCOME,
+  type OpeningOutcome,
+  OpeningQueue,
+  type OpeningUnavailable,
   RECEIPT_OUTCOME,
   type ReceiptOutcome,
   ReceiptQueue,
@@ -44,6 +52,7 @@ export {
   BALLOT_BATCH_WAIT_MS,
   type BallotBatchOptions,
   BallotBatches,
+  OpeningSubmissions,
   ReceiptSubmissions,
 } from "./ballots.ts";
 export {
@@ -64,6 +73,7 @@ export {
   sweepCreationKey,
   type SweepOptions,
 } from "./creation-key.ts";
+export { RpcL1HeaderRun } from "./l1-headers.ts";
 export { ViemL1Source } from "./l1-source.ts";
 export {
   CEREMONY_CHECK_GAS,
@@ -112,6 +122,7 @@ export {
   type JobData,
   KEY_PREFIX,
   MAX_SHARE_RECEIPT,
+  MAX_TALLY_OPENING,
   QUEUES,
   type QueueKey,
   type QueueSpec,
@@ -192,6 +203,7 @@ export {
   CEREMONY_COORDINATE_EVERY_MS,
   POLL_CREATE_EVERY_MS,
   POLL_ROOT_EVERY_MS,
+  OPENING_CONCURRENCY,
   POLL_STUB_EVERY_MS,
   PRUNE_EVERY_MS,
   RECEIPT_CONCURRENCY,

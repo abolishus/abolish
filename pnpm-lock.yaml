@@ -848,6 +848,9 @@ importers:
       '@abolishus/indexer':
         specifier: workspace:*
         version: link:../indexer
+      '@abolishus/node':
+        specifier: workspace:*
+        version: link:../node
       '@abolishus/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier

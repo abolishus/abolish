@@ -15,7 +15,12 @@ import { BodyError, readBody } from "./body.ts";
 import { type CeremonyOptions, ceremonyHandler, ceremonyRoute } from "./ceremony.ts";
 import { type IntakeRelayOptions, intakeRelay, intakeRoute } from "./intake.ts";
 import { hasDuplicateKey } from "./json.ts";
-import { type BallotSubmitter, type ReceiptSubmitter, router } from "./router.ts";
+import {
+  type BallotSubmitter,
+  type OpeningSubmitter,
+  type ReceiptSubmitter,
+  router,
+} from "./router.ts";
 
 // The HTTP transport: oRPC's OpenAPI handler on node:http, behind a front
 // that bounds request bodies and writes the request log.
@@ -210,6 +215,8 @@ export interface ApiOptions {
   readonly ballots?: BallotSubmitter;
   /** The worker's share-receipt queue; without it the server boards no receipt (`ELECTION_NOT_OPEN`). */
   readonly receipts?: ReceiptSubmitter;
+  /** The worker's tally-opening queue; without it the server boards no opening (`ELECTION_NOT_OPEN`). */
+  readonly openings?: OpeningSubmitter;
   /** UNIX time in seconds; the system clock by default. Injected so tests can set it. */
   readonly now?: () => bigint;
   /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
@@ -278,6 +285,7 @@ export function createApiServer({
   log,
   ballots,
   receipts,
+  openings,
   now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
   tier1,
@@ -404,7 +412,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, receipts, now, tier0, tier1, postings, boardClock },
+          context: { sql, ballots, receipts, openings, now, tier0, tier1, postings, boardClock },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

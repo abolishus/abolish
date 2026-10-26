@@ -39,9 +39,12 @@ import {
   readBoard,
   readCheckpoints,
   readBoardedOpenings,
+  readDefinition,
+  storedOpeningTarget,
   storeDefinition,
   takeCheckpoints,
 } from "../src/index.ts";
+import { decodeStoredDefinition, storedDefinitionHash } from "../src/definitions.ts";
 import { newElection, type TestDb, testDb } from "./db.ts";
 
 // The board path for tally openings (src/tally-boarding.ts;
@@ -158,8 +161,14 @@ async function failsWith(p: Promise<unknown>): Promise<string> {
   return "boarded";
 }
 
+/** The `OpeningTarget` a fixed tally's openings are checked against first. */
+const targetOf = (tally: CountedTally) => async () => {
+  if (tally.state !== "fixed") throw new Error("a target needs a fixed tally");
+  return { definitionHash: tally.election.definitionHash, pinned: tally.pinned };
+};
+
 const boardings = (tally: CountedTally) =>
-  new OpeningBoardings({ tally: async () => tally, clock: CLOCK });
+  new OpeningBoardings({ tally: async () => tally, target: targetOf(tally), clock: CLOCK });
 
 describe("the Boarding rule on the board path", () => {
   for (const [version, elections] of [
@@ -296,6 +305,7 @@ describe("submitting openings", () => {
         calls++;
         return answer;
       },
+      target: targetOf(OWN),
       clock: CLOCK,
       waitMs: 1_000,
       nowMs: () => ms,
@@ -331,6 +341,7 @@ describe("submitting openings", () => {
         await gate;
         return { state: "waiting" };
       },
+      target: targetOf(OWN),
       clock: CLOCK,
       waitMs: 0,
     });
@@ -351,6 +362,7 @@ describe("submitting openings", () => {
         calls++;
         return OWN;
       },
+      target: targetOf(OWN),
       clock: CLOCK,
     });
     for (const id of ids)
@@ -361,6 +373,128 @@ describe("submitting openings", () => {
       ] as const)
         await boarding.submitOpening(app, id, openingOf(cell, seat), NOW);
     expect(calls).toBe(2);
+  });
+
+  test("refuses an opening that doesn't decode or names another definition before asking for the tally", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    let calls = 0;
+    const boarding = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        return OWN;
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+    });
+    const v2 = Uint8Array.from(openingOf(0, 1));
+    v2[2] = 2;
+    for (const [opening, code] of [
+      [Uint8Array.of(0x00, 0x06, 1), "decode"],
+      [v2, "decode"],
+      [openingOf(0, 1).subarray(1), "decode"],
+      [openingOf(0, 1, new Uint8Array(32)), "tally-stray"],
+    ] as const)
+      expect(await failsWith(boarding.submitOpening(app, id, opening, NOW))).toBe(code);
+    expect(calls).toBe(0);
+    // Nor for an election whose definition pins no whole opening.
+    const none = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        return OWN;
+      },
+      target: async () => undefined,
+      clock: CLOCK,
+    });
+    expect(await failsWith(none.submitOpening(app, id, openingOf(0, 1), NOW))).toBe("not-open");
+    expect(calls).toBe(0);
+    expect(await readBoard(app, id)).toHaveLength(0);
+  });
+
+  test("reads the target off the stored definition", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    const target = await storedOpeningTarget(app, id);
+    const stored = decodeStoredDefinition((await readDefinition(app, id)) as Uint8Array);
+    expect(target).toEqual({
+      definitionHash: storedDefinitionHash(stored),
+      pinned: pinnedVersion(stored.value, RECORD_TYPES.tallyOpening),
+    });
+    expect(await failsWith(storedOpeningTarget(app, new Uint8Array(32)))).toBe("unknown-election");
+    // The default target: another definition's opening is stray, unasked.
+    const boarding = new OpeningBoardings({
+      tally: async () => expect.unreachable("the tally was asked for"),
+      clock: CLOCK,
+    });
+    expect(await failsWith(boarding.submitOpening(app, id, openingOf(0, 1), NOW))).toBe(
+      "tally-stray",
+    );
+  });
+
+  test("computes one election's tally at a time, answering another's opening not-ready meanwhile", async () => {
+    const app = await db.as("abolish_app");
+    const [a, b] = [await newElection(app), await newElection(app)];
+    const asked: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const boarding = new OpeningBoardings({
+      tally: async (_, id) => {
+        asked.push(Buffer.from(id).toString("hex"));
+        await gate;
+        return OWN;
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+    });
+    const first = boarding.submitOpening(app, a, openingOf(0, 1), NOW);
+    // The first opening reaches the tally only after its own reads.
+    for (let i = 0; i < 100 && asked.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(await failsWith(boarding.submitOpening(app, b, openingOf(0, 1), NOW))).toBe("not-ready");
+    release();
+    expect((await first).index).toBe(0n);
+    // Not kept as waiting: once the first ends, the other's is computed.
+    expect((await boarding.submitOpening(app, b, openingOf(0, 1), NOW)).index).toBe(0n);
+    expect(asked).toEqual([a, b].map((id) => Buffer.from(id).toString("hex")));
+  });
+
+  test("asks again after lapseMs when a refusal lapses, and keeps any other", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    let calls = 0;
+    let ms = 0;
+    let answer: CountedTally = { state: "refused", reason: "a test's", lapses: true };
+    const boarding = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        return answer;
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+      lapseMs: 5_000,
+      nowMs: () => ms,
+    });
+    expect(await failsWith(boarding.submitOpening(app, id, openingOf(0, 1), NOW))).toBe("not-open");
+    ms = 4_999;
+    expect(await failsWith(boarding.submitOpening(app, id, openingOf(0, 1), NOW))).toBe("not-open");
+    expect(calls).toBe(1);
+    ms = 5_000;
+    answer = OWN;
+    expect((await boarding.submitOpening(app, id, openingOf(0, 1), NOW)).index).toBe(0n);
+    expect(calls).toBe(2);
+  });
+
+  test("answers not-ready when the segment's spoiled-ballot openings came first, writing nothing", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    await appendEntry(app, id, 12, Uint8Array.of(0x00, 0x03, 1));
+    const boarding = boardings(OWN);
+    expect(await failsWith(boarding.submitOpening(app, id, openingOf(0, 1), NOW))).toBe(
+      "not-ready",
+    );
+    expect(await readBoard(app, id)).toHaveLength(1);
+    // In the next segment it is boarded.
+    const at = await boarding.submitOpening(app, id, openingOf(0, 1), NOW + 3n * CLOCK.period);
+    expect(decodeBoardEntry(at.entry, 5).segment).toBe(13);
   });
 
   test("refuses arguments that aren't what they say", async () => {

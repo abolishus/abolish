@@ -40,6 +40,18 @@ export const MAX_SHARE_RECEIPT = 256;
 export const MAX_SHARE_RECEIPT_ENTRY = MAX_SHARE_RECEIPT + BOARD_ENTRY_OVERHEAD;
 
 /**
+ * Bound on a tally opening record (`0x0006`, docs/spec/tally.md, Opening
+ * record) as the opening route carries it: a whole opening of `MAX_OPTIONS`
+ * options is under 4.5 KB, so this only keeps a request small before the
+ * Boarding rule decodes it strictly (T-52). A test ties it to the largest
+ * opening of versions 1 and 2.
+ */
+export const MAX_TALLY_OPENING = 8192;
+
+/** The largest board entry carrying a tally opening. */
+export const MAX_TALLY_OPENING_ENTRY = MAX_TALLY_OPENING + BOARD_ENTRY_OVERHEAD;
+
+/**
  * `POSTING_MAX_DATA` from docs/spec/posting-relay.md (Values): the most bytes
  * of `submitPosting` calldata the posting relay sends. Each record the
  * posting route takes is bounded by it here, so a request stays small before

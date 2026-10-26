@@ -11,8 +11,8 @@ import * as z from "zod";
 //   `tests/no-join.test.ts` checks every schema here.
 // - Job data is a strict object, parsed before it is queued and again before
 //   it is handled, so no field the schema doesn't name reaches Redis or a
-//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`
-//   and `{receipt-submit}`, never derived from the data.
+//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`,
+//   `{receipt-submit}` and `{opening-submit}`, never derived from the data.
 //
 // Every key a queue uses is `abolish:{<queue>}:…`, so the braces are a hash
 // tag: Dragonfly (and Redis Cluster) keep each queue's keys in one slot,
@@ -26,6 +26,12 @@ export const KEY_PREFIX = "abolish";
  * contract's `MAX_SHARE_RECEIPT`, which a test of apps/api ties to this.
  */
 export const MAX_SHARE_RECEIPT = 256;
+
+/**
+ * Bound on a tally opening record in an `{opening-submit}` job: the API
+ * contract's `MAX_TALLY_OPENING`, which a test of apps/api ties to this.
+ */
+export const MAX_TALLY_OPENING = 8192;
 
 export type Side = "board" | "account" | "operational";
 
@@ -183,6 +189,26 @@ export const QUEUES = {
       record: z
         .string()
         .max(2 * MAX_SHARE_RECEIPT)
+        .regex(/^(?:[0-9a-f]{2})*$/),
+    }),
+  },
+  /**
+   * Tally openings the API received, to judge and board by the Boarding rule
+   * over the anchored counted set (core's OpeningBoardings.submitOpening;
+   * docs/spec/tally.md, Opening record, Boarding; T-17, T-29, T-52). Queued
+   * by the API's `openings.submit` through `OpeningQueue` and run only when
+   * the worker reads the anchor and finalized L1. A job carries the election
+   * and the opening's bytes, never who sent them (T-10), and returns only
+   * the outcome (`OPENING_OUTCOME`).
+   */
+  openingSubmit: {
+    name: "{opening-submit}",
+    side: "board",
+    data: z.strictObject({
+      electionId: z.string().regex(/^[0-9a-f]{64}$/),
+      opening: z
+        .string()
+        .max(2 * MAX_TALLY_OPENING)
         .regex(/^(?:[0-9a-f]{2})*$/),
     }),
   },

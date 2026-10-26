@@ -36,8 +36,8 @@ import {
 import { type Panel, TierMembershipError } from "@abolishus/crypto";
 import { OutputRootError } from "@abolishus/verifier";
 import type { Sql } from "postgres";
-import type { BallotOutcome, ReceiptOutcome } from "./ballot-queue.ts";
-import type { BallotBatches, ReceiptSubmissions } from "./ballots.ts";
+import type { BallotOutcome, OpeningOutcome, ReceiptOutcome } from "./ballot-queue.ts";
+import type { BallotBatches, OpeningSubmissions, ReceiptSubmissions } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import { GameBlockError } from "./output-roots.ts";
 import type { JobData, QueueKey } from "./queues.ts";
@@ -69,6 +69,8 @@ export interface JobContext {
   readonly ballots?: BallotBatches;
   /** Share-receipt boarding, beside ballot admission and with its admissions; its queue runs only then. */
   readonly receipts?: ReceiptSubmissions;
+  /** Tally-opening boarding, when the worker reads the anchor and finalized L1; its queue runs only then. */
+  readonly openings?: OpeningSubmissions;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
   readonly registry?: RegistrySync;
   /** The roots step, beside the registry sync; its queue runs only then. */
@@ -447,12 +449,27 @@ async function receiptSubmit(
   return ctx.receipts.submit(data.electionId, data.record);
 }
 
-/** What a job returns: nothing, but `{ballot-submit}`'s and `{receipt-submit}`'s outcomes. */
+/**
+ * Judges one tally opening by the Boarding rule over its election's counted
+ * tally and returns its outcome, a refusal's code or the entry's position,
+ * as for a ballot.
+ */
+async function openingSubmit(
+  ctx: JobContext,
+  data: JobData<"openingSubmit">,
+): Promise<OpeningOutcome> {
+  if (ctx.openings === undefined) throw new JobError("internal");
+  return ctx.openings.submit(data.electionId, data.opening);
+}
+
+/** What a job returns: nothing, but the submitting queues' outcomes. */
 export type JobResult<K extends QueueKey> = K extends "ballotSubmit"
   ? BallotOutcome
   : K extends "receiptSubmit"
     ? ReceiptOutcome
-    : void;
+    : K extends "openingSubmit"
+      ? OpeningOutcome
+      : void;
 
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<JobResult<K>>;
@@ -472,4 +489,5 @@ export const HANDLERS: {
   pollOpen,
   ballotSubmit,
   receiptSubmit,
+  openingSubmit,
 };

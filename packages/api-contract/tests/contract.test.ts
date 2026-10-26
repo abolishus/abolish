@@ -248,6 +248,7 @@ describe("the generated OpenAPI document", () => {
       "POST /backups/fetch",
       "POST /ballots",
       "POST /moderation/reports",
+      "POST /openings",
       "POST /postings",
       "POST /receipts",
       "POST /registrations/tier0",

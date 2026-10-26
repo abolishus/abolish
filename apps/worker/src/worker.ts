@@ -11,6 +11,7 @@ import type {
   BallotAdmissions,
   BoardClock,
   CreationAnchors,
+  OpeningBoardings,
   PollCreationChain,
   PollRegistrationChain,
   PollStubDeployment,
@@ -22,7 +23,7 @@ import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
 import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
-import { BALLOT_BATCH, BallotBatches, ReceiptSubmissions } from "./ballots.ts";
+import { BALLOT_BATCH, BallotBatches, OpeningSubmissions, ReceiptSubmissions } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES, TIER1_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
@@ -81,6 +82,14 @@ export interface WorkerOptions {
     /** How long a batch's first ballot waits for others; `BALLOT_BATCH_WAIT_MS` unless a test says otherwise. */
     readonly waitMs?: number;
   };
+  /**
+   * Tally-opening boarding for the API's `{opening-submit}` queue, over the
+   * anchored counted set it reads from the anchor and finalized L1 (T-29,
+   * T-52); only beside ballot admission, whose clock labels each entry.
+   * Without it, nothing takes that queue's jobs and the API answers each
+   * opening unavailable once it times out.
+   */
+  readonly openings?: { readonly boardings: OpeningBoardings };
   /** The registry sync; without it, its queue has no worker and no schedule. */
   readonly registry?: {
     readonly sync: RegistrySync;
@@ -149,6 +158,14 @@ export interface WorkerOptions {
  * bounds what a flood of receipts takes from the ballots beside it (T-52).
  */
 export const RECEIPT_CONCURRENCY = 8;
+
+/**
+ * Tally openings judged at once. Each holds a database connection while it
+ * is judged and, if it passes, the board's lock for its append; the counted
+ * tally they are judged against is computed for one election at a time
+ * whatever this is (core's OpeningBoardings; T-52).
+ */
+export const OPENING_CONCURRENCY = 4;
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
@@ -235,6 +252,8 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     throw new Error("the roots step runs only beside the registry sync");
   if (options.pollStubs !== undefined && options.registry === undefined)
     throw new Error("the stub step runs only beside the registry sync");
+  if (options.openings !== undefined && options.ballots === undefined)
+    throw new Error("tally openings are boarded only beside ballot admission");
   if (
     creating &&
     (options.anchor !== undefined ||
@@ -296,6 +315,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             now: unixNow,
           }),
         }),
+    ...(options.openings === undefined
+      ? {}
+      : {
+          openings: new OpeningSubmissions({
+            sql,
+            boardings: options.openings.boardings,
+            now: unixNow,
+          }),
+        }),
   };
   const running = (key: QueueKey) =>
     creating
@@ -304,16 +332,18 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         ? false
         : key === "ballotSubmit" || key === "receiptSubmit"
           ? options.ballots !== undefined
-          : key === "registrySync"
-            ? options.registry !== undefined
-            : key === "pollRoot"
-              ? options.pollRoots !== undefined
-              : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
-                ? options.pollStubs !== undefined
-                : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
-                  ? options.tier1 !== undefined
-                  : options.tier0 !== undefined ||
-                    !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+          : key === "openingSubmit"
+            ? options.openings !== undefined
+            : key === "registrySync"
+              ? options.registry !== undefined
+              : key === "pollRoot"
+                ? options.pollRoots !== undefined
+                : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
+                  ? options.pollStubs !== undefined
+                  : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
+                    ? options.tier1 !== undefined
+                    : options.tier0 !== undefined ||
+                      !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -328,7 +358,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         // By the system clock, as the API stamped it: a ballot whose API gave
         // up on it is never judged late (T-10, T-25).
         if (
-          (key === "ballotSubmit" || key === "receiptSubmit") &&
+          (key === "ballotSubmit" || key === "receiptSubmit" || key === "openingSubmit") &&
           Date.now() - job.timestamp > BALLOT_MAX_AGE_MS
         )
           throw new JobError("stale-job");
@@ -352,10 +382,17 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         prefix,
         autorun: false,
         // The ballots handled at once are what a batch gathers (T-52); a
-        // receipt costs one signature check, and these bound how many share
-        // the database at once.
+        // receipt costs one signature check, an opening a few once its
+        // election's tally is computed, and these bound how many share the
+        // database at once.
         concurrency:
-          key === "ballotSubmit" ? batch : key === "receiptSubmit" ? RECEIPT_CONCURRENCY : 1,
+          key === "ballotSubmit"
+            ? batch
+            : key === "receiptSubmit"
+              ? RECEIPT_CONCURRENCY
+              : key === "openingSubmit"
+                ? OPENING_CONCURRENCY
+                : 1,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 0 },
       },

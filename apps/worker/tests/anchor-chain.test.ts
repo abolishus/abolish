@@ -101,7 +101,7 @@ let nextAuthority = 0xa0c4000n;
 
 beforeAll(async () => {
   db = await testDb();
-  app = await db.as("abolish_app");
+  app = await db.as("abolish_app", { max: 2 });
   // The chain the vector's definitions name, so its elections are served.
   const probe = await newElection(app);
   chainId = decodeElectionDefinition((await readDefinition(app, probe))!).l1_chain_id;

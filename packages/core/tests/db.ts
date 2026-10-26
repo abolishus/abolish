@@ -20,7 +20,8 @@ if (!url) throw new Error("TEST_DATABASE_URL is not set");
 export interface TestDb {
   readonly schema: string;
   readonly admin: Sql;
-  as(role: "abolish_migrator" | "abolish_app"): Promise<Sql>;
+  /** A client acting as `role`, with one connection unless `max` says more. */
+  as(role: "abolish_migrator" | "abolish_app", options?: { max?: number }): Promise<Sql>;
   close(): Promise<void>;
 }
 
@@ -30,13 +31,14 @@ export async function testDb(): Promise<TestDb> {
   await admin.unsafe(readFileSync(new URL("../src/db/roles.sql", import.meta.url), "utf8"));
   await admin.unsafe(`CREATE SCHEMA "${schema}" AUTHORIZATION abolish_migrator`);
   const clients: Sql[] = [];
-  const as = async (role: string) => {
+  // The role is a startup parameter, so every connection of a larger pool
+  // takes it, not only the first.
+  const as = async (role: string, options: { max?: number } = {}) => {
     const c = postgres(url!, {
-      max: 1,
+      max: options.max ?? 1,
       onnotice: () => {},
-      connection: { search_path: schema },
+      connection: { search_path: schema, role },
     });
-    await c.unsafe(`SET ROLE ${role}`);
     clients.push(c);
     return c;
   };

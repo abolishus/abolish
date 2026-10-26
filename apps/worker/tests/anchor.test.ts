@@ -64,7 +64,7 @@ const logs: LogLine[] = [];
 
 beforeAll(async () => {
   db = await testDb();
-  app = await db.as("abolish_app");
+  app = await db.as("abolish_app", { max: 2 });
   served = await newElection(app);
   await appendEntry(app, served, 0, ballot(0));
   await appendEntry(app, served, 1, ballot(1));
@@ -141,5 +141,19 @@ test("logs a node ahead of the worker's clock, and fails the job", async () => {
     ]);
   } finally {
     chain.time = START;
+  }
+});
+
+test("logs a run that met another's lock, and fails nothing for it", async () => {
+  const other = await db.as("abolish_app");
+  await other`SELECT pg_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+  try {
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([
+      { queue: "{board-anchor}", finding: "anchor-busy" },
+      { queue: "{board-anchor}", outcome: "completed", ms: expect.any(Number) },
+    ]);
+  } finally {
+    await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
   }
 });

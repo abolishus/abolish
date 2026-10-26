@@ -453,7 +453,7 @@ describe("archiveBoards", () => {
     const arweave = new ModelArweave();
     await board(0);
     const other = await db.as("abolish_app");
-    await other`SELECT pg_advisory_lock(hashtextextended('archive_writer', 0))`;
+    await other`SELECT pg_advisory_lock(hashtextextended('archive_writer:' || current_schema(), 0))`;
     try {
       expect(await run(arweave)).toEqual({
         busy: true,
@@ -466,7 +466,7 @@ describe("archiveBoards", () => {
       });
       expect(arweave.txs.size).toBe(0);
     } finally {
-      await other`SELECT pg_advisory_unlock(hashtextextended('archive_writer', 0))`;
+      await other`SELECT pg_advisory_unlock(hashtextextended('archive_writer:' || current_schema(), 0))`;
     }
     expect(await run(arweave)).toMatchObject({ busy: false, posted: 2 });
   });

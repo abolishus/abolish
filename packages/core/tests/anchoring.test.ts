@@ -58,7 +58,7 @@ let l1ChainId: bigint;
 
 beforeAll(async () => {
   db = await testDb();
-  app = await db.as("abolish_app");
+  app = await db.as("abolish_app", { max: 2 });
   owner = await db.as("abolish_migrator");
   l1ChainId = decodeElectionDefinition(
     (await readDefinition(app, await newElection(app)))!,
@@ -637,6 +637,60 @@ describe("anchorBoards", () => {
     await expect(anchorBoards(app, chain, -1n)).rejects.toThrow(TypeError);
     chain.now = async () => -1n;
     await expect(run(chain)).rejects.toThrow(TypeError);
+  });
+
+  test("a run that meets another's lock reads, takes and sends nothing", async () => {
+    const chain = new ModelAnchor();
+    const e = await boardFor(chain, 0);
+    chain.time = endOf(0) + 60n;
+    let reads = 0;
+    const now = chain.now.bind(chain);
+    chain.now = () => (reads++, now());
+    const other = await db.as("abolish_app");
+    await other`SELECT pg_advisory_lock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+    try {
+      expect(await run(chain)).toEqual({
+        reports: [],
+        findings: [{ code: "anchor-busy" }],
+        locator: undefined,
+      });
+      expect(reads).toBe(0);
+      expect(chain.attempts).toBe(0);
+      expect(await readCheckpoints(app, e)).toEqual([]);
+    } finally {
+      await other`SELECT pg_advisory_unlock(hashtextextended('anchor_writer:' || current_schema(), 0))`;
+    }
+    expect(reportOf(await run(chain), e)?.anchored).toEqual([0]);
+  });
+
+  test("a run overlapping another, from another process, does nothing until it ends", async () => {
+    const chain = new ModelAnchor();
+    const e = await boardFor(chain, 0);
+    chain.time = endOf(0) + 60n;
+    // The first run's call stays pending until the second run has finished.
+    let release!: () => void;
+    const pending = new Promise<void>((r) => (release = r));
+    const send = chain.anchor.bind(chain);
+    let entered!: () => void;
+    const inCall = new Promise<void>((r) => (entered = r));
+    chain.anchor = async (checkpoints, locator) => {
+      entered();
+      await pending;
+      return send(checkpoints, locator);
+    };
+    const first = run(chain);
+    await inCall;
+    const second = await anchorBoards(await db.as("abolish_app", { max: 2 }), chain, chain.time);
+    expect(second.findings).toEqual([{ code: "anchor-busy" }]);
+    release();
+    expect(reportOf(await first, e)?.anchored).toEqual([0]);
+    expect(chain.attempts).toBe(1);
+  });
+
+  test("refuses a pool of one connection, which the lock would hold", async () => {
+    await expect(anchorBoards(await db.as("abolish_app"), new ModelAnchor(), 0n)).rejects.toThrow(
+      /two connections/,
+    );
   });
 
   test(

@@ -617,6 +617,10 @@ export type ReportedArchive =
 const archivedEvents = (bundle: Bundle) =>
   bundle.archive !== undefined && "walk" in bundle.archive ? bundle.archive.replay : undefined;
 
+// The board's events from 4.4's replay of its runs, which 4.6 may take.
+const boardRecords = (bundle: Bundle) =>
+  archivedEvents(bundle)?.contracts.find((c) => c.role === "board")?.records;
+
 function reportedArchive(read: ArchiveRead): ReportedArchive {
   if (!("walk" in read) || read.replay === undefined) return read;
   const contracts = read.replay.contracts.map(
@@ -784,20 +788,6 @@ export async function readArchive(
     targets === undefined || !whole
       ? undefined
       : await readListedObjects(targets, walk.listings, source, maxBytes, maxReads);
-  // The evidence is 4.6's, never 4.3's: its budget's report is kept apart
-  // from the walk's, or a long evidence list would make 4.3 unverifiable.
-  // A partial walk's listings are read too: a record is held to its proof,
-  // not to being the latest, so a manifest left unread costs only a later one.
-  const evidence =
-    "l2Board" in bundle && state.kind === "locator"
-      ? await latestEvidence(
-          walk.evidence.filter((l) => equal(l.contract, d.board)),
-          d.l2_chain_id,
-          bundle.l2Board.events.length,
-          source,
-          maxEvidenceReads,
-        )
-      : undefined;
   // 4.4's replay of every contract's archive, from a partial walk's
   // listings too: a run or record a manifest left unread costs only a gap.
   const replay =
@@ -813,6 +803,25 @@ export async function readArchive(
           d.l2_chain_id,
           source,
           replayBudgets,
+        )
+      : undefined;
+  // The evidence is 4.6's, never 4.3's: its budget's report is kept apart
+  // from the walk's, or a long evidence list would make 4.3 unverifiable.
+  // A partial walk's listings are read too: a record is held to its proof,
+  // not to being the latest, so a manifest left unread costs only a later one.
+  const evidence =
+    "l2Board" in bundle && state.kind === "locator"
+      ? await latestEvidence(
+          walk.evidence.filter((l) => equal(l.contract, d.board)),
+          d.l2_chain_id,
+          // A record is worth reading only if some events can replay it:
+          // the bundle's, or the board's from the runs the replay read.
+          Math.max(
+            bundle.l2Board.events.length,
+            replay?.find((c) => c.role === "board")?.records.length ?? 0,
+          ),
+          source,
+          maxEvidenceReads,
         )
       : undefined;
   const overEvidence = walk.findings.filter(
@@ -1233,6 +1242,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       if ("l2Board" in bundle) {
         const d = definition.definition.value;
         const author = authorRunOf(definition.definition);
+        const archivedBoard = boardRecords(bundle);
         const checkedAvailability =
           input instanceof L1Error || checked.registered === undefined
             ? { row: NOT_REACHED }
@@ -1278,6 +1288,7 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
                   bundle.archive.evidence?.proven !== undefined && {
                     archived: bundle.archive.evidence.proven,
                   }),
+                ...(archivedBoard !== undefined && { archivedEvents: archivedBoard }),
               });
         implemented = new Map<string, Outcome>([...implemented, ["4.6", checkedAvailability.row]]);
         if ("report" in checkedAvailability) availability = checkedAvailability.report;

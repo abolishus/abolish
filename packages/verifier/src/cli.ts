@@ -102,7 +102,8 @@ ${DEFAULT_REPLAY_EVIDENCE_READS}, each up to about 35 KiB), and
 --max-archive-run-bytes held (default ${DEFAULT_RUN_BYTES}) and
 --max-archive-run-reads transactions asked (default ${DEFAULT_RUN_READS}) for the
 event runs, shared by the four contracts. A budget run out leaves 4.4
-unverifiable, never failed.
+unverifiable, never failed. Check 4.6 replays the board's archived events
+where the bundle's l2Board.events don't reach the count proven.
 
 keys judges the Tier 0 token keys of every release in the release registry
 from keys.json (docs/spec/verifier.md, Token keys across releases), and

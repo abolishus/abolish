@@ -85,8 +85,9 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
  * smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes, version
  * 2's a framed `BallotSubmitted`, about 175 KB, version 9's a framed
  * `BallotSubmitted` carrying ballot version 4, about 209 KB, and versions
- * 10's and 11's a rolling event carrying ballot version 5, about as much. An
- * event that needs more is a new record version.
+ * 10's and 11's a rolling event carrying ballot version 5, that with the
+ * step's 4 bytes and the root's word (and, for the relayed one, its four call
+ * fields' 128 bytes). An event that needs more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 

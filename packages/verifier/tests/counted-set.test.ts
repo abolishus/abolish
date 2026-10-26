@@ -119,8 +119,12 @@ const row = (c: Case, headers: readonly TestHeader[], id: string) => {
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
 };
 
-// Each test admits whole boards, at about a second a run on CI's shared runner.
-describe("the counted set from the counted extent", { timeout: 60_000 }, () => {
+// Each test admits whole boards, at about a second a run on CI's shared runner,
+// so a property's 50 runs take about 50 s there, and twice that on a busy
+// one: three minutes leaves room for both.
+const WHOLE_BOARDS = 180_000;
+
+describe("the counted set from the counted extent", { timeout: WHOLE_BOARDS }, () => {
   const admitted = byId("admitted");
   const afterClose = run(21_000_000n, [START - 12n, CLOSES + 12n]);
 
@@ -245,7 +249,7 @@ describe("the counted set from the counted extent", { timeout: 60_000 }, () => {
 // What the board operator judges a tally opening against (`countedTally`):
 // `countedSet`'s cells summed, the registered key set and the pinned
 // whole-opening version, undecided exactly where the set is.
-describe("the counted tally from the counted extent", { timeout: 60_000 }, () => {
+describe("the counted tally from the counted extent", { timeout: WHOLE_BOARDS }, () => {
   const admitted = byId("admitted");
   const afterClose = run(21_000_000n, [START - 12n, CLOSES + 12n]);
 

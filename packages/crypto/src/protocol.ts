@@ -25,6 +25,7 @@ import {
   type ElectionDefinitionV5,
   type ElectionDefinitionV5Failure,
   type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
   electionDefinitionRule,
   type ElectionDefinitionRule,
   electionDefinitionV5Rule,
@@ -77,6 +78,10 @@ export function encodeElectionDefinitionV6(d: ElectionDefinitionV6): Uint8Array 
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 6, d);
 }
 
+export function encodeElectionDefinitionV7(d: ElectionDefinitionV7): Uint8Array {
+  return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 7, d);
+}
+
 /** A decoded definition of any version the verifier reads (1, 3 and 4). */
 export type ElectionDefinitionRecord =
   | { readonly version: 1; readonly value: ElectionDefinition }
@@ -97,7 +102,9 @@ export type AnyElectionDefinitionRecord =
  * could be created under a retired layout by labelling it with an older
  * version byte (T-34, T-31).
  */
-function decodeAnyElectionDefinition(bytes: Uint8Array): AnyElectionDefinitionRecord {
+function decodeAnyElectionDefinition(
+  bytes: Uint8Array,
+): AnyElectionDefinitionRecord | { readonly version: 7; readonly value: ElectionDefinitionV7 } {
   const record = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
   // Exactly one pin for 0x0001, at the record's own version; a second pin,
   // whatever its order, is a mismatch too, so every decoder agrees.
@@ -112,11 +119,12 @@ function decodeAnyElectionDefinition(bytes: Uint8Array): AnyElectionDefinitionRe
 
 /**
  * `decodeAnyElectionDefinition` for definition versions 1, 3 and 4: a
- * version-5 or version-6 definition is `unknown-version` at its version
- * byte, read before any field as it was before those versions had layouts.
- * The verifier reads version 5 with `decodeElectionDefinitionV5` beside it
- * (P2-14 part 5a), and leaves version 6 unverifiable (2.3) until it reads
- * author panels (P2-16 part 4; T-36).
+ * version-5, version-6 or version-7 definition is `unknown-version` at its
+ * version byte, read before any field as it was before those versions had
+ * layouts. The verifier reads version 5 with `decodeElectionDefinitionV5`
+ * beside it (P2-14 part 5a), leaves version 6 unverifiable (2.3) until it
+ * reads author panels (P2-16 part 4; T-36), and version 7 until it reads
+ * rolling electorates (P2-17 part 4).
  */
 export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
   if (
@@ -124,12 +132,13 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
     bytes.length >= 3 &&
     bytes[0] === 0 &&
     bytes[1] === RECORD_TYPES.electionDefinition &&
-    (bytes[2] === 5 || bytes[2] === 6)
+    (bytes[2] === 5 || bytes[2] === 6 || bytes[2] === 7)
   )
     throw new DecodeError("unknown-version", 2);
   const record = decodeAnyElectionDefinition(bytes);
   // Unreachable: the version byte was read above.
-  if (record.version === 5 || record.version === 6) throw new DecodeError("unknown-version", 2);
+  if (record.version === 5 || record.version === 6 || record.version === 7)
+    throw new DecodeError("unknown-version", 2);
   return record;
 }
 
@@ -147,7 +156,9 @@ export function decodeRegistrableElectionDefinition(
   bytes: Uint8Array,
 ): AnyElectionDefinitionRecord {
   const record = decodeAnyElectionDefinition(bytes);
-  if (!REGISTRABLE_VERSIONS.has(record.version)) throw new DecodeError("unknown-version", 2);
+  // The set excludes 7; the comparison narrows the record's type.
+  if (!REGISTRABLE_VERSIONS.has(record.version) || record.version === 7)
+    throw new DecodeError("unknown-version", 2);
   return record;
 }
 
@@ -171,6 +182,18 @@ export function decodeElectionDefinitionV5(bytes: Uint8Array): ElectionDefinitio
 export function decodeElectionDefinitionV6(bytes: Uint8Array): ElectionDefinitionV6 {
   const record = decodeAnyElectionDefinition(bytes);
   if (record.version !== 6) throw new DecodeError("unknown-version", 2);
+  return record.value;
+}
+
+/**
+ * `decodeAnyElectionDefinition` for callers that read only version 7 (the
+ * electorate mode and rolling electorates): a definition of any other
+ * version is `unknown-version` to them, after it has decoded under its own
+ * layout and pin.
+ */
+export function decodeElectionDefinitionV7(bytes: Uint8Array): ElectionDefinitionV7 {
+  const record = decodeAnyElectionDefinition(bytes);
+  if (record.version !== 7) throw new DecodeError("unknown-version", 2);
   return record.value;
 }
 
@@ -209,6 +232,33 @@ export function electionDefinitionV5Hash(d: ElectionDefinitionV5): Uint8Array {
 /** `electionDefinitionHash` for version 6: the same tag over the version-6 encoding. */
 export function electionDefinitionV6Hash(d: ElectionDefinitionV6): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV6(d)));
+}
+
+/** `electionDefinitionHash` for version 7: the same tag over the version-7 encoding. */
+export function electionDefinitionV7Hash(d: ElectionDefinitionV7): Uint8Array {
+  return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV7(d)));
+}
+
+/**
+ * `electionStubV6Hash` for version 7: `ceremony_transcript_hash` zeroed and
+ * `author_transcript_hash` kept. The electorate mode, the rolling tiers,
+ * their groups and the opening state are in it, so the creator fixes them
+ * before either ceremony (docs/spec/election-definition.md, Rolling
+ * electorates; T-34, T-37).
+ */
+export function electionStubV7Hash(d: ElectionDefinitionV7): Uint8Array {
+  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV7(stub)));
+}
+
+/** `electionAuthorStubV6Hash` for version 7: both transcript hashes zeroed. */
+export function electionAuthorStubV7Hash(d: ElectionDefinitionV7): Uint8Array {
+  const stub = {
+    ...d,
+    ceremony_transcript_hash: new Uint8Array(32),
+    author_transcript_hash: new Uint8Array(32),
+  };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV7(stub)));
 }
 
 /**
@@ -415,7 +465,7 @@ export function profileCombinationRule(
   if (ballot === undefined || opening === undefined) return "profile-combination";
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
   // A definition version this function doesn't know the pairings of (7
-  // until its codec exists) never falls back to another version's rules, and
+  // until P2-17 part 4 defines them) never falls back to another version's rules, and
   // neither does a version-6 pin on a value without version 6's fields.
   if (definition === undefined || ![1, 3, 4, 5, 6].includes(definition))
     return "profile-combination";

@@ -14,9 +14,11 @@
 import {
   type CellAggregate,
   checkpointHash,
+  copyCheckpoints,
   countedExtent,
   DecodeError,
   decodeBoardEntry,
+  encodeCheckpoint,
   L1_REF_MARGIN,
   type Panel,
   panelId,
@@ -63,6 +65,8 @@ export type CountedTally =
       readonly election: TallyElection;
       readonly aggregates: readonly CellAggregate[];
       readonly pinned: WholeOpeningVersion;
+      /** `s_S`, the counted extent's last segment: no opening is labelled at or before it. */
+      readonly lastSegment: number;
     }
   /** Not yet decided: before `t_S`, or while finalized L1 hasn't reached every ballot's reference. */
   | { readonly state: "waiting" }
@@ -157,9 +161,18 @@ export function anchoredCountedTally(
     if (typeof version === "string") return { state: "refused", reason: version };
     const board = await readBoard(client, electionId);
     const size = Number(counted.size);
-    // A board shorter than a checkpoint taken from it was written around appendEntry.
-    if (board.length < size)
-      return { state: "refused", reason: "a board shorter than its counted checkpoint" };
+    // T-23: the stored board through `C_S` must still give the anchored
+    // checkpoint, so a row written around appendEntry never moves the
+    // aggregates openings are judged against.
+    const recomputed = copyCheckpoints(electionId, board.slice(0, size), [counted.segment]).get(
+      counted.segment,
+    );
+    if (
+      board.length < size ||
+      recomputed === undefined ||
+      !equal(encodeCheckpoint(recomputed), encodeCheckpoint(counted))
+    )
+      return { state: "refused", reason: "a board that doesn't give its counted checkpoint" };
     // An entry at or before `s_S` past the checkpoint was never anchored: the
     // anchored extent isn't this board's.
     for (const encoded of board.slice(size))
@@ -194,6 +207,7 @@ export function anchoredCountedTally(
           election: result.election,
           aggregates: result.aggregates,
           pinned: result.pinned,
+          lastSegment: sS,
         };
       if ("code" in result) {
         if (result.code === "panel-unpinned") continue;
@@ -320,7 +334,13 @@ export class OpeningBoardings {
     if (tally.state === "waiting") throw new OpeningError("not-ready");
     if (tally.state === "refused") throw new OpeningError("not-open");
     if (now < this.#clock.epoch) throw new OpeningError("not-ready");
-    const segment = (now - this.#clock.epoch) / this.#clock.period;
+    // Never at or before `s_S`, whatever `now` says: the checkpoint fences
+    // only through `C_S`'s segment, which may be earlier, and an entry
+    // labelled between them would land in a period whose anchoring deadline
+    // has passed, failing the board (T-24, T-54).
+    const byClock = (now - this.#clock.epoch) / this.#clock.period;
+    const past = BigInt(tally.lastSegment) + 1n;
+    const segment = byClock > past ? byClock : past;
     if (segment > BigInt(MAX_SEGMENT)) throw new OpeningError("not-open");
     const boarded = await readBoardedOpenings(client, id);
     const verdict = tallyOpeningBoarding(
@@ -338,8 +358,6 @@ export class OpeningBoardings {
       return entry;
     }
     try {
-      // The counted checkpoint fences every segment through it, so the
-      // opening lands past the counted extent whatever `now` says.
       const entry = await appendEntry(client, id, Number(segment), own, {
         raiseToPrevious: true,
         opening: { cell: verdict.cell, seat: verdict.signer },

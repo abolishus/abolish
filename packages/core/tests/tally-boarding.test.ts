@@ -10,6 +10,7 @@ import {
   type BoardEntryVersion,
   decodeBoardEntry,
   element,
+  encodeCheckpoint,
   encodeTallyOpening,
   identityKey,
   list,
@@ -36,6 +37,7 @@ import {
   OpeningBoardings,
   OpeningError,
   readBoard,
+  readCheckpoints,
   readBoardedOpenings,
   storeDefinition,
   takeCheckpoints,
@@ -129,7 +131,8 @@ const fixed = (
   election: TallyElection,
   aggregates: readonly CellAggregate[],
   pinned: WholeOpeningVersion,
-): CountedTally => ({ state: "fixed", election, aggregates, pinned });
+  lastSegment = 5,
+): CountedTally => ({ state: "fixed", election, aggregates, pinned, lastSegment });
 
 const CLOCK = { epoch: 1_000_000n, period: 3_600n };
 const NOW = CLOCK.epoch + 10n * CLOCK.period;
@@ -260,6 +263,15 @@ describe("submitting openings", () => {
     const later = await boarding.submitOpening(app, id, openingOf(0, 2), NOW + 5n * 3_600n);
     expect(decodeBoardEntry(later.entry, 5).segment).toBe(15);
     expect(await failsWith(boarding.submitOpening(app, id, openingOf(1, 1), 0n))).toBe("not-ready");
+  });
+
+  test("never labels an opening at or before s_S, whatever the clock says", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    // A clock lagging L1 reads segment 10; s_S is 20.
+    const boarding = boardings(fixed(own, [empty, empty], 1, 20));
+    const at = await boarding.submitOpening(app, id, openingOf(0, 1), NOW);
+    expect(decodeBoardEntry(at.entry, 5).segment).toBe(21);
   });
 
   test("boards one entry for copies racing in on two connections", async () => {
@@ -585,6 +597,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
       election: want.election,
       aggregates: want.aggregates,
       pinned: want.pinned,
+      lastSegment: sS,
     });
     // Every ballot is rejected by its reference, so each cell sums nothing.
     if (got.state !== "fixed") return;
@@ -610,6 +623,20 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
     script.held.set(last, new Uint8Array(32));
     expect(await tally(app, d.election_id)).toMatchObject({ state: "refused" });
     script.held.delete(last);
+    expect(await tally(app, d.election_id)).toMatchObject({ state: "refused" });
+    expect(script.l1Reads).toBe(0);
+  });
+
+  test("refuses a counted checkpoint the stored board doesn't give", async () => {
+    const { app, script, tally } = await stored();
+    const last = Math.max(...script.held.keys());
+    const [taken] = await readCheckpoints(app, d.election_id, last);
+    if (taken === undefined) return expect.fail("no checkpoint");
+    // A row written around takeCheckpoints, which the anchor holds.
+    const forged = { ...taken, segment: last + 1, root: new Uint8Array(32).fill(5) };
+    await app`INSERT INTO board_checkpoints VALUES (${d.election_id}, ${forged.segment},
+      ${String(forged.size)}, ${encodeCheckpoint(forged)})`;
+    script.held.set(forged.segment, checkpointHash(forged));
     expect(await tally(app, d.election_id)).toMatchObject({ state: "refused" });
     expect(script.l1Reads).toBe(0);
   });

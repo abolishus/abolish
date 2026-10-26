@@ -317,6 +317,18 @@
       "result": "relay-record-type"
     },
     {
+      "id": "type-0200",
+      "description": "The ballot type's bytes swapped",
+      "record": "0200228de2d9f6012e098e627ca85111723a34818baed6d9f1576d5258bac16cf4c0526fc467cd05dd6b27d111a5dc48ae8268be024c391f57b6ba3694bdebd8c0c5bab069efc81bec6272018e712dce6fd691b64f867f995d1e04fcc9f9e2422fd99906",
+      "result": "relay-record-type"
+    },
+    {
+      "id": "short-wrong-type",
+      "description": "34 bytes of another type: truncated is found first",
+      "record": "0001baf1bcbcc95633de23b1beaac33fc22456b767069b119649af9d347f5a9d86af",
+      "result": "relay-truncated"
+    },
+    {
       "id": "max",
       "description": "MAX_ROLLING_RELAY_RECORD bytes",
       "recordPrefix": "000205916ff17b3ef0eb8eab833f5f155c728958474d75566c95eedaba6967d4cf754b",

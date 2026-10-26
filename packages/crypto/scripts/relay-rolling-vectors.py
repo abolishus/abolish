@@ -199,6 +199,10 @@ def main(repo):
         ("version-4", "A version-4 header: framed, since the relay reads no version; the board refuses it "
          "(unknown-version)", ballot("frame/v4", 4, 100), "rolling/frame/v4"),
         ("type-0001", "Record type 0x0001", b"\x00\x01" + det("rolling/frame/t1", 98), "rolling/frame/t1"),
+        ("type-0200", "The ballot type's bytes swapped", b"\x02\x00" + det("rolling/frame/t200", 98),
+         "rolling/frame/t200"),
+        ("short-wrong-type", "34 bytes of another type: truncated is found first",
+         b"\x00\x01" + det("rolling/frame/st", 32), "rolling/frame/st"),
         ("max", "MAX_ROLLING_RELAY_RECORD bytes", r1.filled(pre("max"), "rolling/frame/max", MAX_ROLLING_RELAY_RECORD),
          "rolling/frame/max"),
         ("max-plus-one", "One byte more than MAX_ROLLING_RELAY_RECORD",

@@ -117,6 +117,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(main.getAllByText(/Nothing is sent until you cast your ballot/)).toHaveLength(1);
   await expect(main.getByText(/The newest open questions\. Choose an answer/)).toBeVisible();
   await expect(newest.getByText("These answers are for question 1 of 2.")).toBeVisible();
+  // The lede and the trust scene name the app that seals an answer one way,
+  // where two names read as two apps.
+  await expect(canvas.getByRole("main")).toHaveTextContent(/open it in the ballot app\./);
+  await expect(canvas.getByRole("main")).toHaveTextContent(/the ballot app seals it/);
+  await expect(canvas.getByRole("main")).not.toHaveTextContent(/voting app/);
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);

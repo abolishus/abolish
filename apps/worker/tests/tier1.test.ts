@@ -235,7 +235,12 @@ async function createGroup(registry: Address, tier: number) {
   if (receipt.status !== "success") throw new Error("createGroup reverted");
 }
 
-/** A registry with group 0 at Tier 0 and group 1 at Tier 1, both final. */
+/**
+ * A registry with group 0 at Tier 0 and group 1 at Tier 1, both final. Each
+ * transaction and FINALITY_DEPTH blocks wait on Anvil, several seconds on a
+ * busy runner, so a test that deploys one has a minute: one past its timeout
+ * leaves its transactions racing the next test's.
+ */
 async function deployWithGroups() {
   const deployed = await deployRegistry();
   await createGroup(deployed.registry, 0);
@@ -348,7 +353,7 @@ describe("the startup check", () => {
     await expect(
       checkTier1Deployment(client, { ...deployment, fromBlock: fromBlock + 1n }),
     ).rejects.toThrow("deployment block");
-  });
+  }, 60_000);
 });
 
 /** The registry's records up to the latest block, as core reads them: heads first. */
@@ -478,7 +483,7 @@ describe("the registry's records", () => {
     expect((await readTo(plain)).records).toEqual(
       (await readTo(adapter(registry, fromBlock, key))).records,
     );
-  });
+  }, 60_000);
 
   test("are read against the block core was given, refused for a block the node doesn't have", async () => {
     const { registry, fromBlock } = await deployWithGroups();
@@ -503,7 +508,7 @@ describe("the registry's records", () => {
     const honest = adapter(registry, fromBlock, key);
     expect((await readTo(honest)).records).toHaveLength(3);
     expect((await honest.nonce()).count).toBe(0n);
-  });
+  }, 60_000);
 });
 
 describe("the heads", () => {
@@ -520,7 +525,7 @@ describe("the heads", () => {
       (await client.getBlock({ blockNumber: fromBlock })).hash,
     );
     expect(await reader.blockHash(latest.number + 1_000n)).toBeNull();
-  });
+  }, 60_000);
 
   test("throw a fixed error when the node can't be reached, quoting neither URL nor record", async () => {
     const closed = `http://127.0.0.1:${await freePort()}/secret-api-key`;
@@ -574,7 +579,7 @@ describe("sending", () => {
       });
       await expect(flaky.simulate(junkRecord(1n)), message).rejects.toThrow(Tier1ChainError);
     }
-  });
+  }, 60_000);
 
   test("a broadcast the node already holds is sent, another error refused, a wrong hash rejected", async () => {
     const standIn = getAddress(`0x${randomBytes(20).toString("hex")}`);

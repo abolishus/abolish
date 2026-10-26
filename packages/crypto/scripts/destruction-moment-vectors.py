@@ -64,7 +64,8 @@ def destruction_moment(clock, closes_at, bound):
     assert s_t >= 1
     previous_deadline = segment_end(clock, s_t - 1) + clock["deadline"]
     t_d = previous_deadline if previous_deadline > window_end else window_end
-    return s_s, t_s, s_t, t_d, "window" if window_end >= previous_deadline else "anchoring"
+    binds = "window" if window_end > previous_deadline else "anchoring" if previous_deadline > window_end else "tie"
+    return s_s, t_s, s_t, t_d, binds
 
 
 DEPLOYED = {"epoch": 1_700_000_000, "period": HOUR, "deadline": 12 * HOUR}
@@ -156,8 +157,8 @@ def main():
                 "due": str(t_d),
             }
         )
-    # Each side of the maximum is chosen by some case.
-    assert bound_by == {"window", "anchoring"}
+    # Each side of the maximum is strictly the later in some case, and some case ties.
+    assert bound_by == {"window", "anchoring", "tie"}
     doc = {
         "format": "abolish-destruction-moment-vectors/1",
         "title": "Destruction's fallback moment: s_T and t_D",

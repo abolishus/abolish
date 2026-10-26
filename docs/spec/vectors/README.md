@@ -605,7 +605,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `windows`: `counted` (`W_S`) and `tally` (`TALLY_WINDOW`), seconds as decimal strings ([[parameters]]).
 - `cases`: each has `id`, `description`, `clock` (`epoch`, `period` and `deadline`), `closesAt` and `l1InclusionBound`, with the expected `countedSegment` (`s_S`), `countedDue` (`t_S`), `segment` (`s_T`) and `due` (`t_D`), all decimal strings. Some exceed 2^53.
 
-`packages/crypto/scripts/destruction-moment-vectors.py`, an independent Python implementation, prints them; it finds each moment's anchoring period by walking the clock's periods, never by dividing, and requires that some case has each side of `t_D`'s maximum as the later.
+`packages/crypto/scripts/destruction-moment-vectors.py`, an independent Python implementation, prints them; it finds each moment's anchoring period by walking the clock's periods, never by dividing, and requires that some case has each side of `t_D`'s maximum strictly the later and one has them equal.
 
 ## Ceremony vectors
 

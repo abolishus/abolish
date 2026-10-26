@@ -71,12 +71,14 @@ describe("destruction-moment vectors", () => {
     }
   });
 
-  test("the file has a case where each side of t_D's maximum is the later", () => {
+  test("the file has a case where each side of t_D's maximum is strictly the later, and a tie", () => {
     const sides = V.cases.map((c) => {
+      const clock = clockOf(c.clock);
       const end = BigInt(c.countedDue) + TALLY_WINDOW;
-      return BigInt(c.due) === end ? "window" : "anchoring";
+      const anchored = clock.epoch + BigInt(c.segment) * clock.period + clock.deadline;
+      return end > anchored ? "window" : anchored > end ? "anchoring" : "tie";
     });
-    expect(new Set(sides)).toEqual(new Set(["window", "anchoring"]));
+    expect(new Set(sides)).toEqual(new Set(["window", "anchoring", "tie"]));
   });
 });
 

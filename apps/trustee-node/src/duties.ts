@@ -445,7 +445,8 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
  * `t_D` (docs/spec/tally.md, Destruction): the later of the tally window's
  * end, `t_S + TALLY_WINDOW`, and the anchoring deadline of segment `s_T − 1`,
  * `s_T` the period containing the window's end, under the pinned clock, as
- * crypto's `destructionMoment` computes it. Throws `L1AnchorError` `outside-clock` for a close before its epoch.
+ * crypto's `destructionMoment` computes it. Throws `L1AnchorError`
+ * `outside-clock` for a close before its epoch.
  */
 export function tallyDeadline(election: ApprovedElectionInfo, clock: DeadlineClock): bigint {
   if (election.closesAt < clock.epoch) throw new L1AnchorError("outside-clock");

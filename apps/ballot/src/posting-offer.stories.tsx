@@ -100,6 +100,9 @@ export const OfferedTheWallet: Story = {
     await expect(canvas.getByText(/published for good beside this ballot/)).toBeVisible();
     await expect(canvas.getByText(/use a fresh address funded privately/)).toBeVisible();
     await expect(canvas.getByText(/see the missing parts before the public record/)).toBeVisible();
+    // And that forcing it through Ethereum is a second request, paid there
+    // from the same address (Own wallet, Forced through L1).
+    await expect(canvas.getByText(/force it through Ethereum from the same address/)).toBeVisible();
     // Beside the other choices, never above them: after the relay's, and
     // never the frame's primary action, which stays trying again.
     const buttons = canvas.getAllByRole("button").map((b) => b.textContent);
@@ -133,6 +136,20 @@ export const WalletSentNotRecorded: Story = {
     await expect(canvas.getByText("Your wallet's posting isn't on the board yet")).toBeVisible();
     await expect(canvas.getByText(/count them as posted/)).toBeVisible();
     await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+  },
+};
+
+export const WalletForced: Story = {
+  name: "Parts the wallet forced through Ethereum are counted as posted, with the page kept open",
+  args: { failed: true, handed: true, onWallet: fn(), wallet: "forced" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Your wallet forced the posting through Ethereum")).toBeVisible();
+    await expect(canvas.getByText(/Count the missing parts as posted/)).toBeVisible();
+    await expect(canvas.getByText(/Keep this page open/)).toBeVisible();
+    await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
+    // Its own note says they were given, so the handed note isn't repeated.
+    await expect(canvas.queryByText("The missing parts may still reach the board")).toBeNull();
   },
 };
 

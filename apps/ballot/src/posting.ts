@@ -35,6 +35,12 @@ export const POSTING_PATIENCE = 1_800n;
 export const POSTING_FORCE_AFTER = 600n;
 export const POSTING_SEEN = 600n;
 export const POSTING_FINALITY = 1_800n;
+/**
+ * The most gas limit any posting's call or deposit is given: the board's
+ * test measures the largest pair well within it, so an honest posting
+ * never needs more ([[posting-relay]], Values).
+ */
+export const POSTING_GAS_LIMIT_MAX = 10_000_000n;
 
 /** How long the client waits between rounds of sending and reading the board. */
 export const POSTING_POLL_MS = 30_000;

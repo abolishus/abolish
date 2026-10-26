@@ -349,8 +349,9 @@ const source: ElectionSource = {
           }
         },
         // The voter's own wallet, once the relay fell back: the browser's
-        // provider pays, and the outcome is read from the board through
-        // this build's L2 endpoint, never the wallet's (T-25).
+        // provider pays, on L2 and, forced through L1, on L1, and the
+        // outcome is read from the board and the portal through this
+        // build's endpoints, never the wallet's (T-25).
         async postOwn(
           _electionId: Uint8Array,
           ballot: Uint8Array,
@@ -363,11 +364,12 @@ const source: ElectionSource = {
           const fetchFn = timedFetch((url, init) => fetch(url, init));
           // Each holding its posting's `m_i` until the run ends (T-18).
           const calls = postings.map((posting) => postingCalldata(posting, ballot));
-          const session = new WalletSession(wallet, STAGING.chainId, board);
+          const session = new WalletSession(wallet, STAGING.chainId, board, STAGING.l1ChainId);
           try {
             return await postFromWallet(
               {
                 send: (call, late) => session.send(call, late),
+                deposit: (call, gas, late) => session.deposit(call, gas, late),
                 find: (head, from, stop) =>
                   loadPostings(
                     STAGING,
@@ -380,6 +382,7 @@ const source: ElectionSource = {
                     undefined,
                     stop,
                   ),
+                deposits: (since, stop) => loadDeposits(STAGING, calls, since, fetchFn, stop),
                 now: () => Date.now(),
                 sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
               },

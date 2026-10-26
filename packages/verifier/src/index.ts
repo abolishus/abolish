@@ -39,7 +39,13 @@ export {
   type RejectedBallot,
   type WindowCode,
 } from "./ballots.ts";
-export { type EventCode, type OriginCode, PINNED_SEQUENCER_DRIFT } from "./events.ts";
+export {
+  type ArchivedCode,
+  type ArchivedEvents,
+  type EventCode,
+  type OriginCode,
+  PINNED_SEQUENCER_DRIFT,
+} from "./events.ts";
 export {
   type AvailabilityEvidenceCode,
   type AvailabilityReport,
@@ -179,6 +185,8 @@ export {
   walkArchive,
 } from "./archive.ts";
 export {
+  type AllEvidence,
+  allEvidence,
   type ArchivedAccumulator,
   checkContractEventEvidence,
   type ContractEvidence,
@@ -203,6 +211,14 @@ export {
   type RunFinding,
   type TakenRun,
 } from "./runs.ts";
+export {
+  type ContractReplay,
+  type ContractSequence,
+  DEFAULT_REPLAY_EVIDENCE_READS,
+  type ReplayBudgets,
+  type ReplayedEvidence,
+  replayArchive,
+} from "./replay.ts";
 export { ARCHIVE_LOCATED, type AnchorLogsRule, earlierLocators } from "./anchor-logs.ts";
 export { type ArweaveGateways, type ArweaveStats, arweaveSource } from "./arweave.ts";
 export {
@@ -226,6 +242,7 @@ export {
   type DropReport,
   judgeDrop,
   type Report,
+  type ReportedArchive,
   REPORT_FORMAT,
   type ArchiveReadOptions,
   DEFAULT_ARCHIVE_BYTES,

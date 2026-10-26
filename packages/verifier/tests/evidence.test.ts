@@ -18,6 +18,7 @@ import {
   DEFAULT_EVIDENCE_READS,
   EVIDENCE_DATA_LIMIT,
   type EvidenceListing,
+  allEvidence,
   latestEvidence,
   MAX_EVIDENCE_RECORD,
   readEvidence,
@@ -609,5 +610,95 @@ describe("latestEvidence", () => {
   test("refuses a read budget that isn't a positive integer", async () => {
     for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 53])
       await expect(latestEvidence([], L2, 3, async () => [], bad)).rejects.toThrow(RangeError);
+  });
+});
+
+describe("allEvidence", () => {
+  const tx = (n: number) => new Uint8Array(32).fill(n);
+  const OTHER = new Uint8Array(20).fill(0x0c);
+  const at = (block: bigint) => {
+    const encoded = encodeContractEventEvidence(
+      record(replayed.accumulator, replayed.count, [], block),
+    );
+    return { encoded, cid: objectCid(encoded) };
+  };
+  const listing = (
+    r: { readonly cid: Uint8Array },
+    block: bigint,
+    transactions: readonly Uint8Array[],
+    contract = BOARD,
+  ): EvidenceListing => ({ contract, l2Block: block, cid: r.cid, transactions });
+  function source(held: ReadonlyMap<string, Uint8Array>) {
+    const asked: string[] = [];
+    return {
+      asked,
+      source: async (t: Uint8Array) => {
+        asked.push(toHex(t));
+        const b = held.get(toHex(t));
+        return b === undefined ? [] : [objectCar(b)];
+      },
+    };
+  }
+  const early = at(1_000n);
+  const late = at(2_000n);
+  const held = new Map([
+    [toHex(tx(1)), early.encoded],
+    [toHex(tx(2)), late.encoded],
+  ]);
+
+  test("keeps every record of the contract, in ascending order of block, reporting the rest", async () => {
+    const { source: s, asked } = source(held);
+    const got = await allEvidence(
+      [
+        listing(late, 2_000n, [tx(2)]),
+        listing(at(3_000n), 3_000n, [tx(3)]),
+        // Another contract's listing is never read.
+        listing(early, 1_000n, [tx(4)], OTHER),
+        listing(early, 1_000n, [tx(1)]),
+      ],
+      BOARD,
+      L2,
+      s,
+      8,
+    );
+    expect(got.proven.map((p) => p.accumulator.block)).toEqual([1_000n, 2_000n]);
+    expect(got.proven.map((p) => toHex(p.transaction))).toEqual([toHex(tx(1)), toHex(tx(2))]);
+    expect(got.findings).toMatchObject([{ code: "evidence-unavailable", l2Block: 3_000n }]);
+    expect(got.reads).toBe(3);
+    expect(asked).toEqual([tx(1), tx(2), tx(3)].map(toHex));
+  });
+
+  test("a budget, part of it spent by earlier callers, keeps a prefix in block order", async () => {
+    const listings = [listing(late, 2_000n, [tx(2)]), listing(early, 1_000n, [tx(9), tx(1)])];
+    for (const [maxReads, spent, blocks, reads] of [
+      [4, 0, [1_000n, 2_000n], 3],
+      [4, 1, [1_000n, 2_000n], 3],
+      [4, 2, [1_000n], 2],
+      // The second transaction of the first listing is cut: the budget's, never unavailable.
+      [4, 3, [], 1],
+      [4, 4, [], 0],
+    ] as const) {
+      const { source: s } = source(held);
+      const got = await allEvidence(listings, BOARD, L2, s, maxReads, spent);
+      expect(
+        got.proven.map((p) => p.accumulator.block),
+        `${spent}`,
+      ).toEqual(blocks);
+      expect(got.reads, `${spent}`).toBe(reads);
+      if (blocks.length < 2)
+        expect(got.findings, `${spent}`).toEqual([
+          { code: "evidence-reads-over-budget", maxReads },
+        ]);
+    }
+    const { source: s } = source(held);
+    for (const [maxReads, spent] of [
+      [0, 0],
+      [1.5, 0],
+      [2, 3],
+      [2, -1],
+    ] as const)
+      await expect(allEvidence(listings, BOARD, L2, s, maxReads, spent)).rejects.toThrow(
+        RangeError,
+      );
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   type ArchivedContractLog,
   checkEventAccumulatorProof,
+  checkEventAccumulatorProofs,
   type ContractLog,
   eventAccumulatorGenesis,
   eventAccumulatorStep,
@@ -369,5 +370,137 @@ describe("event accumulator", () => {
         accumulator: new Uint8Array(31),
       }),
     ).toThrow(RangeError);
+  });
+
+  describe("checkEventAccumulatorProofs", () => {
+    // An archive of up to 8 logs whose blocks, numbering and topics a few
+    // mutations may break, and proofs at each block over prefixes of it,
+    // honest or one log off, or of any count and accumulator.
+    const archive = fc
+      .record({
+        gaps: fc.array(fc.nat({ max: 2 }), { maxLength: 8 }),
+        swap: fc.option(fc.nat(), { nil: undefined }),
+        renumber: fc.option(fc.nat(), { nil: undefined }),
+        anonymous: fc.option(fc.nat(), { nil: undefined }),
+      })
+      .map(({ gaps, swap, renumber, anonymous }) => {
+        let block = 10n;
+        const logs: ArchivedContractLog[] = gaps.map((g, i) => {
+          block += BigInt(g);
+          return {
+            n: BigInt(i),
+            block,
+            timestamp: block * 2n,
+            topics: [new Uint8Array(32).fill(i)],
+            data: new Uint8Array([i]),
+          };
+        });
+        const at = (k: number | undefined) => (k === undefined ? -1 : k % (logs.length + 1));
+        const s = at(swap);
+        if (s >= 1 && s < logs.length)
+          [logs[s - 1], logs[s]] = [
+            logs[s] as ArchivedContractLog,
+            logs[s - 1] as ArchivedContractLog,
+          ];
+        const r = at(renumber);
+        if (r >= 0 && r < logs.length) logs[r] = { ...(logs[r] as ArchivedContractLog), n: 99n };
+        const z = at(anonymous);
+        if (z >= 0 && z < logs.length)
+          logs[z] = { ...(logs[z] as ArchivedContractLog), topics: [] };
+        return logs;
+      });
+    const outcome = (f: () => unknown) => {
+      try {
+        return { value: f() };
+      } catch (e) {
+        return { threw: (e as Error).constructor.name };
+      }
+    };
+
+    test("gives, for every proof, what checkEventAccumulatorProof gives it alone", () => {
+      fc.assert(
+        fc.property(
+          chainId,
+          address,
+          archive,
+          fc.array(
+            fc.record({
+              block: fc.bigInt({ min: 8n, max: 30n }),
+              count: fc.bigInt({ min: 0n, max: 10n }),
+              honest: fc.boolean(),
+              accumulator: fc.uint8Array({ minLength: 32, maxLength: 32 }),
+            }),
+            { maxLength: 6 },
+          ),
+          (c, a, logs, claims) => {
+            const provens = claims.map(({ block, count, honest, accumulator }) => {
+              if (!honest) return { block, count, accumulator };
+              const covered = logs.filter((l) => l.block <= block && l.topics.length > 0);
+              return { ...replayEventAccumulator(c, a, covered), block };
+            });
+            const alone = outcome(() =>
+              provens.map((p) => checkEventAccumulatorProof(c, a, logs, p)),
+            );
+            expect(outcome(() => checkEventAccumulatorProofs(c, a, logs, provens))).toEqual(alone);
+          },
+        ),
+        { numRuns },
+      );
+    });
+
+    test("an honest history holds at every block in one call", () => {
+      const logs: ArchivedContractLog[] = [11n, 11n, 13n, 20n].map((block, i) => ({
+        n: BigInt(i),
+        block,
+        timestamp: block,
+        topics: [new Uint8Array(32)],
+        data: new Uint8Array([i]),
+      }));
+      const a = new Uint8Array(20).fill(7);
+      const provens = [10n, 11n, 12n, 13n, 20n, 21n].map((block) => ({
+        ...replayEventAccumulator(
+          5n,
+          a,
+          logs.filter((l) => l.block <= block),
+        ),
+        block,
+      }));
+      type Proven = (typeof provens)[number];
+      expect(checkEventAccumulatorProofs(5n, a, logs, provens)).toEqual(provens.map(() => null));
+      expect(checkEventAccumulatorProofs(5n, a, logs, [])).toEqual([]);
+      // One log more than block 12 covers, one fewer than block 13 does, and
+      // a count past the archive.
+      const [, eleven, , thirteen] = provens as [unknown, Proven, unknown, Proven];
+      expect(
+        checkEventAccumulatorProofs(5n, a, logs, [
+          { ...thirteen, block: 12n },
+          { ...eleven, block: 13n },
+          { ...thirteen, block: 30n, count: 5n },
+        ]),
+      ).toEqual(["block-range", "block-range", "accumulator"]);
+    });
+
+    test("rejects a malformed proof or log as the single check does", () => {
+      const proof = { count: 0n, block: 0n, accumulator: new Uint8Array(32) };
+      const addr = new Uint8Array(20);
+      expect(() =>
+        checkEventAccumulatorProofs(1n, addr, [], [proof, { ...proof, block: -1n }]),
+      ).toThrow(RangeError);
+      expect(() =>
+        checkEventAccumulatorProofs(1n, addr, [], [{ ...proof, accumulator: new Uint8Array(31) }]),
+      ).toThrow(RangeError);
+      const log = {
+        n: 0n,
+        block: 1n,
+        timestamp: 1n,
+        topics: [new Uint8Array(32)],
+        data: new Uint8Array(),
+      };
+      expect(() => checkEventAccumulatorProofs(1n, addr, [{ ...log, n: -1n }], [proof])).toThrow(
+        RangeError,
+      );
+      // With no proof nothing is judged, as no single call would be made.
+      expect(checkEventAccumulatorProofs(1n, addr, [{ ...log, n: -1n }], [])).toEqual([]);
+    });
   });
 });

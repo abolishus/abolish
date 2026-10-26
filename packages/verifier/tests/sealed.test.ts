@@ -77,12 +77,14 @@ const T_A = CLOSES + BigInt(definition.l1_inclusion_bound) + DELIVERY_WINDOW - P
 
 // The board contract with no event at all, its accumulator at genesis, in
 // the state of an L2 block `block` at `timestamp`.
-function emptyState(timestamp: bigint, block = 1_000n) {
-  const { accumulator, count } = replayEventAccumulator(
+function emptyState(timestamp: bigint, block = 1_000n, forged?: Uint8Array) {
+  const { accumulator: genesis, count } = replayEventAccumulator(
     definition.l2_chain_id,
     definition.board,
     [],
   );
+  // A forged accumulator stands for events the board never emitted.
+  const accumulator = forged ?? genesis;
   const { evidence } = l2State(
     [
       {
@@ -347,8 +349,8 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
   // archived record; the finalized L1 time is past every record's.
   const late = T_A;
   const L1_NOW = (T_A > NOW ? T_A : NOW) + 10_000n;
-  function evidenceRecord(block: bigint) {
-    const e = emptyState(late + block, block);
+  function evidenceRecord(block: bigint, forged?: Uint8Array) {
+    const e = emptyState(late + block, block, forged);
     const nodes = [...new Map(e.nodes.map((n) => [toHex(n), n])).values()].sort(bytewise);
     return encodeContractEventEvidence({
       l2_chain_id: definition.l2_chain_id,
@@ -362,11 +364,11 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
     });
   }
   // A version-2 manifest listing `records` (block, transaction) and nothing else.
-  function archive(records: readonly (readonly [bigint, number])[]) {
+  function archive(records: readonly (readonly [bigint, number, Uint8Array?])[]) {
     const held = new Map<string, Uint8Array>();
     const evidence = records
-      .map(([block, t]) => {
-        const r = evidenceRecord(block);
+      .map(([block, t, forged]) => {
+        const r = evidenceRecord(block, forged);
         held.set(toHex(tx(t)), objectCar(r));
         return {
           contract: definition.board,
@@ -419,8 +421,9 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
       at: {},
     });
     const r = verifyBundle((await readArchive(withArchive(a.locator), a.source)).bundle);
-    // The latest record only: the earlier one is never asked for.
-    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(2))]);
+    // 4.6 asks for the latest record only; 4.4's replay then reads every
+    // record of the board, from the earliest block up.
+    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(2)), toHex(tx(1)), toHex(tx(2))]);
     // No seat attested, but the record's output root is its writer's word
     // until P1-19 reads its game: shown, never failed (T-71).
     expect(row(r, "4.6")).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
@@ -462,7 +465,58 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
     ).rejects.toThrow(RangeError);
   });
 
-  test("a format-5 bundle's archive read keeps no evidence", async () => {
+  test("4.4 replays the board's archived events against every record of it", async () => {
+    // Two records of no event, each the board's genesis: both reproduced.
+    const honest = archive([
+      [2_000n, 1],
+      [3_000n, 2],
+    ]);
+    const plain = verifyBundle(withArchive(honest.locator));
+    expect(row(plain, "4.4")).toEqual({ status: "unverifiable", code: "not-implemented" });
+    const r = verifyBundle((await readArchive(withArchive(honest.locator), honest.source)).bundle);
+    expect(row(r, "4.4")).toEqual(row(plain, "4.4"));
+    const replay = r.archive !== undefined && "replay" in r.archive ? r.archive.replay : undefined;
+    expect(replay?.contracts.map((c) => c.role)).toEqual([
+      "election-registry",
+      "trustee-registry",
+      "group-registry",
+      "board",
+    ]);
+    expect(replay?.contracts[3]).toMatchObject({
+      held: "0",
+      evidence: { reads: 2, findings: [] },
+      runs: { complete: true, taken: [] },
+    });
+    expect(
+      replay?.contracts[3]?.evidence.records.map((x) => [x.accumulator.block, x.replay]),
+    ).toEqual([
+      ["2000", null],
+      ["3000", null],
+    ]);
+    // The report never carries the events read.
+    expect(replay?.contracts[3]).not.toHaveProperty("records");
+    // A record proving an accumulator no event of the archive's gives: 4.4
+    // is unverifiable with the rule, never failed, since the record's root is
+    // its writer's word until P1-19 reads its game (T-71, T-53).
+    const forged = archive([
+      [2_000n, 1],
+      [3_000n, 2, new Uint8Array(32).fill(7)],
+    ]);
+    const f = verifyBundle((await readArchive(withArchive(forged.locator), forged.source)).bundle);
+    expect(row(f, "4.4")).toEqual({
+      status: "unverifiable",
+      code: "accumulator",
+      at: { contract: "board" },
+    });
+    expect(f.verdict).not.toBe("failed");
+    // The replay's budgets reach it.
+    for (const option of ["maxReplayEvidenceReads", "maxRunBytes", "maxRunReads"])
+      await expect(
+        readArchive(withArchive(honest.locator), honest.source, { [option]: 0 }),
+      ).rejects.toThrow(RangeError);
+  });
+
+  test("a format-5 bundle's archive read keeps no evidence for 4.6", async () => {
     const a = archive([[2_000n, 1]]);
     const five = parseBundle(
       JSON.stringify(bundleJson(undefined, copy, false, a.locator, L1_NOW)),
@@ -470,6 +524,7 @@ describe("4.6 from the permanent archive's evidence (format 6)", { timeout: 60_0
     );
     const r = verifyBundle((await readArchive(five, a.source)).bundle);
     expect(evidenceOf(r)).toBeUndefined();
-    expect(a.asked).toEqual([toHex(tx(0xee))]);
+    // Only 4.4's replay reads the record.
+    expect(a.asked).toEqual([toHex(tx(0xee)), toHex(tx(1))]);
   });
 });

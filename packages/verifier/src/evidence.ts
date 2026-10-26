@@ -242,6 +242,62 @@ export interface ContractEvidence {
   readonly findings: readonly EvidenceFinding[];
 }
 
+// One listing read within what is left of a read budget: its transactions
+// asked in walk order, as `readEvidence` reads them, and how many were
+// asked. A listing the budget cut short before it settled is `cut`: its
+// transactions left unasked may serve it, so it is the budget's, never the
+// archive's (T-52).
+async function readWithin(
+  listing: EvidenceListing,
+  l2ChainId: bigint,
+  source: TransactionSource,
+  left: number,
+): Promise<{ readonly read: EvidenceRead; readonly reads: number; readonly cut: boolean }> {
+  const asked = listing.transactions.slice(0, left);
+  const read = await readEvidence({ ...listing, transactions: asked }, l2ChainId, source);
+  // A settled listing stopped at its transaction; an unavailable one asked them all.
+  const reads =
+    read.kind === "evidence-unavailable"
+      ? asked.length
+      : asked.findIndex((t) => equal(t, read.transaction)) + 1;
+  const cut = read.kind === "evidence-unavailable" && asked.length < listing.transactions.length;
+  return { read, reads, cut };
+}
+
+// A listing's read that proves nothing, as its finding.
+function findingOf(
+  listing: EvidenceListing,
+  read: Exclude<EvidenceRead, { kind: "proven" }>,
+): EvidenceFinding {
+  const { l2Block, cid } = listing;
+  switch (read.kind) {
+    case "evidence-check":
+      return {
+        code: "evidence-check",
+        check: read.code,
+        l2Block,
+        cid,
+        transaction: read.transaction,
+      };
+    case "evidence-malformed":
+      return { code: "evidence-malformed", l2Block, cid, transaction: read.transaction };
+    case "evidence-unavailable":
+      return { code: "evidence-unavailable", l2Block, cid, transactions: read.transactions };
+  }
+}
+
+const archived = (
+  listing: EvidenceListing,
+  read: Extract<EvidenceRead, { kind: "proven" }>,
+): ArchivedAccumulator => ({
+  accumulator: read.accumulator,
+  gameIndex: read.gameIndex,
+  game: read.game,
+  outputRoot: read.outputRoot,
+  cid: listing.cid,
+  transaction: read.transaction,
+});
+
 /**
  * The latest of a contract's archived accumulators that the bundle's events
  * can replay (docs/spec/verifier.md, Archive, step 5): its listings are
@@ -270,57 +326,84 @@ export async function latestEvidence(
     a.l2Block > b.l2Block ? -1 : a.l2Block < b.l2Block ? 1 : 0,
   );
   for (const listing of order) {
-    const { l2Block, cid } = listing;
-    const left = maxReads - reads;
-    if (left === 0) {
+    if (reads === maxReads) {
       findings.push({ code: "evidence-reads-over-budget", maxReads });
       break;
     }
-    const asked = listing.transactions.slice(0, left);
-    const read = await readEvidence({ ...listing, transactions: asked }, l2ChainId, source);
-    // A settled listing stopped at its transaction; an unavailable one asked them all.
-    reads +=
-      read.kind === "evidence-unavailable"
-        ? asked.length
-        : asked.findIndex((t) => equal(t, read.transaction)) + 1;
-    switch (read.kind) {
-      case "proven":
-        if (read.accumulator.count > BigInt(events)) {
-          findings.push({ code: "evidence-count", l2Block, cid, count: read.accumulator.count });
-          continue;
-        }
-        return {
-          proven: {
-            accumulator: read.accumulator,
-            gameIndex: read.gameIndex,
-            game: read.game,
-            outputRoot: read.outputRoot,
-            cid,
-            transaction: read.transaction,
-          },
-          reads,
-          findings,
-        };
-      case "evidence-check":
-        findings.push({
-          code: "evidence-check",
-          check: read.code,
-          l2Block,
-          cid,
-          transaction: read.transaction,
-        });
-        continue;
-      case "evidence-malformed":
-        findings.push({ code: "evidence-malformed", l2Block, cid, transaction: read.transaction });
-        continue;
-      case "evidence-unavailable":
-        // Transactions left unasked may serve it: the budget's, not the archive's.
-        if (asked.length < listing.transactions.length) {
-          findings.push({ code: "evidence-reads-over-budget", maxReads });
-          return { reads, findings };
-        }
-        findings.push({ code: "evidence-unavailable", l2Block, cid, transactions: asked });
+    const got = await readWithin(listing, l2ChainId, source, maxReads - reads);
+    reads += got.reads;
+    if (got.cut) {
+      findings.push({ code: "evidence-reads-over-budget", maxReads });
+      return { reads, findings };
     }
+    const { read } = got;
+    if (read.kind !== "proven") {
+      findings.push(findingOf(listing, read));
+      continue;
+    }
+    if (read.accumulator.count > BigInt(events)) {
+      const { l2Block, cid } = listing;
+      findings.push({ code: "evidence-count", l2Block, cid, count: read.accumulator.count });
+      continue;
+    }
+    return { proven: archived(listing, read), reads, findings };
   }
   return { reads, findings };
+}
+
+/** What reading every archived evidence record of a contract came to. */
+export interface AllEvidence {
+  /** Every record proven, in ascending order of its block, ties in walk order. */
+  readonly proven: readonly ArchivedAccumulator[];
+  /** Transactions asked of the sources, against `maxReads`. */
+  readonly reads: number;
+  readonly findings: readonly EvidenceFinding[];
+}
+
+/**
+ * Every archived accumulator of `contract` (docs/spec/verifier.md 4.4; [[archive]],
+ * The event replay): its listings are read in ascending order of their
+ * claimed block, ties in walk order, each as `latestEvidence` reads one,
+ * and every record proven is kept, since 4.4 replays the contract's
+ * archived sequence against each anchored period's record and the one at
+ * close. Whatever comes of a listing is reported; once `maxReads`
+ * transactions have been asked, `spent` of them by earlier callers sharing
+ * the budget, the rest are left with
+ * `evidence-reads-over-budget`, so the records kept are a prefix in block
+ * order, never a choice the budget made among them (T-52).
+ */
+export async function allEvidence(
+  listings: readonly EvidenceListing[],
+  contract: Uint8Array,
+  l2ChainId: bigint,
+  source: TransactionSource,
+  maxReads: number,
+  spent = 0,
+): Promise<AllEvidence> {
+  if (!Number.isSafeInteger(maxReads) || maxReads < 1)
+    throw new RangeError("maxReads must be a positive integer");
+  if (!Number.isSafeInteger(spent) || spent < 0 || spent > maxReads)
+    throw new RangeError("spent must be an integer from 0 to maxReads");
+  const proven: ArchivedAccumulator[] = [];
+  const findings: EvidenceFinding[] = [];
+  let reads = 0;
+  // `sort` is stable, so listings of one block stay in walk order.
+  const order = listings
+    .filter((l) => equal(l.contract, contract))
+    .sort((a, b) => (a.l2Block < b.l2Block ? -1 : a.l2Block > b.l2Block ? 1 : 0));
+  for (const listing of order) {
+    if (spent + reads === maxReads) {
+      findings.push({ code: "evidence-reads-over-budget", maxReads });
+      break;
+    }
+    const got = await readWithin(listing, l2ChainId, source, maxReads - spent - reads);
+    reads += got.reads;
+    if (got.cut) {
+      findings.push({ code: "evidence-reads-over-budget", maxReads });
+      break;
+    }
+    if (got.read.kind === "proven") proven.push(archived(listing, got.read));
+    else findings.push(findingOf(listing, got.read));
+  }
+  return { proven, reads, findings };
 }

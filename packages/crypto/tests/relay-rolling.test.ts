@@ -5,27 +5,31 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
-  ds,
+  decodeRelayRollingBallotCalldata,
   eventAccumulatorGenesis,
   eventAccumulatorStep,
-  H,
+  frameRollingRelayRecord,
   MAX_RELAY_RECORD,
-  PARAMETERS,
+  MAX_ROLLING_RELAY_RECORD,
   PORTAL_MAX_DATA,
   RELAY_EVENT_SIGNATURE,
+  RELAY_ROLLING_DEPOSIT_SIGNATURE,
+  RELAY_ROLLING_SIGNATURE,
   RELAY_SIGNATURE,
   relayCallHash,
   relayEvent,
+  relayRollingBallotCalldata,
+  relayRollingCallHash,
+  relayRollingDepositData,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/relay-rolling.json, from the independent Python
 // implementation in scripts/relay-rolling-vectors.py (docs/spec/contracts.md,
-// L1 relay, Rolling ballots; T-50, T-71, T-17, T-52). packages/crypto doesn't
-// build the rolling call until P2-17 part 3, so this reads it from the spec:
-// its calldata, deposit data, framing bound and call hash here, the tag rule,
-// the first call's hash, the event and the accumulator through
-// packages/crypto. Expected values all come from the file.
+// L1 relay, Rolling ballots; T-50, T-71, T-17, T-52), against packages/crypto's
+// rolling call: its framing, call hash, deposit data and calldata, beside the
+// first call's hash, the event and the accumulator. Expected values all come
+// from the file.
 
 interface RecordFields {
   readonly record?: string;
@@ -112,106 +116,15 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const U64_MAX = (1n << 64n) - 1n;
 
-const ROLLING_SIGNATURE = "relayRollingBallot(uint64,bytes32,bytes)";
-const ROLLING_DEPOSIT_SIGNATURE =
-  "submitRelayedRollingBallot(uint64,uint64,uint64,uint64,bytes32,bytes)";
-const MAX_ROLLING_RELAY_RECORD = PARAMETERS.MAX_ROLLING_RELAY_RECORD;
 const selector = (signature: string) => keccak_256(utf8(signature)).subarray(0, 4);
 
 const word = (v: bigint) => hex(v.toString(16).padStart(64, "0"));
-const u64 = (v: bigint) => {
-  if (v < 0n || v > U64_MAX) throw new RangeError("not a u64");
-  return hex(v.toString(16).padStart(16, "0"));
+
+// The framing's code, or null where the rolling call frames the record.
+const frame = (record: Uint8Array) => {
+  const framed = frameRollingRelayRecord(record);
+  return framed.ok ? null : framed.code;
 };
-const pad32 = (b: Uint8Array) => concatBytes(b, new Uint8Array(-b.length & 31));
-const bigWord = (w: Uint8Array) => BigInt(`0x${bytesToHex(w) || "0"}`);
-
-/** `H(DS("abolish/v1/relay-rolling-call", … ‖ u64(gasLimit) ‖ bytes[32](root) ‖ record))`. */
-function rollingCallHash(c: {
-  l1ChainId: bigint;
-  relay: Uint8Array;
-  index: bigint;
-  l1Block: bigint;
-  l1Timestamp: bigint;
-  gasLimit: bigint;
-  root: Uint8Array;
-  record: Uint8Array;
-}): Uint8Array {
-  if (c.relay.length !== 20 || c.root.length !== 32) throw new TypeError("relay or root length");
-  return H(
-    ds(
-      "abolish/v1/relay-rolling-call",
-      concatBytes(
-        u64(c.l1ChainId),
-        c.relay,
-        u64(c.index),
-        u64(c.l1Block),
-        u64(c.l1Timestamp),
-        u64(c.gasLimit),
-        c.root,
-        c.record,
-      ),
-    ),
-  );
-}
-
-/** `abi.encodeCall(submitRelayedRollingBallot, (i, b, τ, gasLimit, root, record))`. */
-const depositData = (
-  i: bigint,
-  b: bigint,
-  t: bigint,
-  gas: bigint,
-  root: Uint8Array,
-  record: Uint8Array,
-) =>
-  concatBytes(
-    selector(ROLLING_DEPOSIT_SIGNATURE),
-    word(i),
-    word(b),
-    word(t),
-    word(gas),
-    root,
-    word(0xc0n),
-    word(BigInt(record.length)),
-    pad32(record),
-  );
-
-const relayCalldata = (gas: bigint, root: Uint8Array, record: Uint8Array) =>
-  concatBytes(
-    selector(ROLLING_SIGNATURE),
-    word(gas),
-    root,
-    word(0x60n),
-    word(BigInt(record.length)),
-    pad32(record),
-  );
-
-/** The rolling call's canonical-calldata rule (L1 relay, Rolling ballots, step 1). */
-function decodeCalldata(
-  cd: Uint8Array,
-): { gasLimit: bigint; root: Uint8Array; record: Uint8Array } | null {
-  if (cd.length < 132 || bytesToHex(cd.subarray(0, 4)) !== bytesToHex(selector(ROLLING_SIGNATURE)))
-    return null;
-  const gas = bigWord(cd.subarray(4, 36));
-  const offset = bigWord(cd.subarray(68, 100));
-  const length = bigWord(cd.subarray(100, 132));
-  if (gas > U64_MAX || offset !== 0x60n || length > BigInt(cd.length)) return null;
-  const record = cd.slice(132, 132 + Number(length));
-  if (
-    record.length !== Number(length) ||
-    bytesToHex(cd.subarray(132)) !== bytesToHex(pad32(record))
-  )
-    return null;
-  return { gasLimit: gas, root: cd.slice(36, 68), record };
-}
-
-/** The rolling call's framing: the first call's checks with the rolling bound. */
-function frame(record: Uint8Array): string | null {
-  if (record.length > MAX_ROLLING_RELAY_RECORD) return "relay-too-large";
-  if (record.length < 35) return "relay-truncated";
-  if (record[0] !== 0x00 || record[1] !== 0x02) return "relay-record-type";
-  return null;
-}
 
 /** The generator's filler: SHA-256 of `label/i` for i = 0, 1, …, cut to `n` bytes. */
 function det(label: string, n: number): Uint8Array {
@@ -254,9 +167,9 @@ describe("relay rolling-call vectors (docs/spec/vectors/relay-rolling.json)", ()
 
   test("signatures, selectors and the event, which both calls share", () => {
     const { relay, deposit, event } = file.signatures;
-    expect(relay.signature).toBe(ROLLING_SIGNATURE);
+    expect(relay.signature).toBe(RELAY_ROLLING_SIGNATURE);
     expect(bytesToHex(selector(relay.signature))).toBe(relay.selector);
-    expect(deposit.signature).toBe(ROLLING_DEPOSIT_SIGNATURE);
+    expect(deposit.signature).toBe(RELAY_ROLLING_DEPOSIT_SIGNATURE);
     expect(bytesToHex(selector(deposit.signature))).toBe(deposit.selector);
     expect(relay.selector).not.toBe(bytesToHex(selector(RELAY_SIGNATURE)));
     expect(event.signature).toBe(RELAY_EVENT_SIGNATURE);
@@ -268,14 +181,21 @@ describe("relay rolling-call vectors (docs/spec/vectors/relay-rolling.json)", ()
     for (const v of file.calls) {
       const c = fields(v);
       expect(frame(c.record), v.id).toBeNull();
-      const callHash = rollingCallHash(c);
+      const callHash = relayRollingCallHash(c);
       expect(bytesToHex(callHash), v.id).toBe(v.callHash);
       // The first call's word for the same fields is never this one: the
       // tags differ, so no relayed event of one kind matches a call of the
       // other (L1 relay, Verification).
       expect(bytesToHex(relayCallHash(c)), v.id).toBe(v.fixedCallHash);
       expect(v.fixedCallHash, v.id).not.toBe(v.callHash);
-      const data = depositData(c.index, c.l1Block, c.l1Timestamp, c.gasLimit, c.root, c.record);
+      const data = relayRollingDepositData(
+        c.index,
+        c.l1Block,
+        c.l1Timestamp,
+        c.gasLimit,
+        c.root,
+        c.record,
+      );
       expect(data.length, v.id).toBe(v.depositDataLength);
       expect(data.length, v.id).toBeLessThanOrEqual(PORTAL_MAX_DATA);
       expect(bytesToHex(sha256(data)), v.id).toBe(v.depositDataSha256);
@@ -326,7 +246,7 @@ describe("relay rolling-call vectors (docs/spec/vectors/relay-rolling.json)", ()
   test("calldata", () => {
     for (const v of file.calldata) {
       const calldata = hex(v.calldata);
-      const decoded = decodeCalldata(calldata);
+      const decoded = decodeRelayRollingBallotCalldata(calldata);
       if (v.result === "canonical") {
         expect(decoded, v.id).not.toBeNull();
         if (decoded === null) continue;
@@ -334,7 +254,7 @@ describe("relay rolling-call vectors (docs/spec/vectors/relay-rolling.json)", ()
         expect(bytesToHex(decoded.root), v.id).toBe(v.root);
         expect(bytesToHex(decoded.record), v.id).toBe(v.record);
         expect(
-          bytesToHex(relayCalldata(decoded.gasLimit, decoded.root, decoded.record)),
+          bytesToHex(relayRollingBallotCalldata(decoded.gasLimit, decoded.root, decoded.record)),
           v.id,
         ).toBe(v.calldata);
       } else {
@@ -373,7 +293,7 @@ describe("relay rolling-call vectors (docs/spec/vectors/relay-rolling.json)", ()
       const callHash =
         c.call === "fixed"
           ? relayCallHash(call)
-          : rollingCallHash({ ...call, root: hex(c.root ?? "") });
+          : relayRollingCallHash({ ...call, root: hex(c.root ?? "") });
       expect(bytesToHex(callHash), c.index).toBe(c.callHash);
       const slot = keccak_256(concatBytes(word(call.index), word((base & ~0xffn) + 1n)));
       expect(bytesToHex(slot), c.index).toBe(c.slot);
@@ -412,7 +332,7 @@ describe("relay rolling-call properties", () => {
   test("changing any field of a call, its root included, changes its hash", () => {
     fc.assert(
       fc.property(call, fc.nat(), fc.nat({ max: 7 }), (c, at, which) => {
-        const base = bytesToHex(rollingCallHash(c));
+        const base = bytesToHex(relayRollingCallHash(c));
         // T-71: the first call's word for the same fields is another word.
         expect(bytesToHex(relayCallHash(c))).not.toBe(base);
         const flip = (b: Uint8Array) => {
@@ -433,7 +353,7 @@ describe("relay rolling-call properties", () => {
           { ...c, record: flip(c.record) },
         ][which];
         if (changed === undefined) return;
-        expect(bytesToHex(rollingCallHash(changed))).not.toBe(base);
+        expect(bytesToHex(relayRollingCallHash(changed))).not.toBe(base);
       }),
       { numRuns },
     );
@@ -448,25 +368,27 @@ describe("relay rolling-call properties", () => {
         fc.nat(),
         fc.integer({ min: 1, max: 255 }),
         (gas, r, rec, at, x) => {
-          const calldata = relayCalldata(gas, r, rec);
-          const decoded = decodeCalldata(calldata);
+          const calldata = relayRollingBallotCalldata(gas, r, rec);
+          const decoded = decodeRelayRollingBallotCalldata(calldata);
           expect(decoded?.gasLimit).toBe(gas);
           expect(bytesToHex(decoded?.root ?? new Uint8Array())).toBe(bytesToHex(r));
           expect(bytesToHex(decoded?.record ?? new Uint8Array())).toBe(bytesToHex(rec));
           const i = at % calldata.length;
           const changed = calldata.slice();
           changed[i] = (changed[i] ?? 0) ^ x;
-          const again = decodeCalldata(changed);
+          const again = decodeRelayRollingBallotCalldata(changed);
           if (again !== null)
-            expect(bytesToHex(relayCalldata(again.gasLimit, again.root, again.record))).toBe(
-              bytesToHex(changed),
-            );
+            expect(
+              bytesToHex(relayRollingBallotCalldata(again.gasLimit, again.root, again.record)),
+            ).toBe(bytesToHex(changed));
           // The selector, the gas word's top 24 bytes, the offset and the
           // padding are fixed; the root's word is any 32 bytes (T-17).
           const fixedByte = i < 28 || (i >= 68 && i < 100) || i >= 132 + rec.length;
           if (fixedByte) expect(again).toBeNull();
           if (i >= 36 && i < 68) expect(again).not.toBeNull();
-          expect(decodeCalldata(concatBytes(calldata, Uint8Array.of(0)))).toBeNull();
+          expect(
+            decodeRelayRollingBallotCalldata(concatBytes(calldata, Uint8Array.of(0))),
+          ).toBeNull();
         },
       ),
       { numRuns },
@@ -475,7 +397,8 @@ describe("relay rolling-call properties", () => {
 
   test("MAX_ROLLING_RELAY_RECORD is the longest record whose deposit fits the portal's cap", () => {
     const fits = (n: number) =>
-      depositData(0n, 0n, 0n, 0n, new Uint8Array(32), new Uint8Array(n)).length <= PORTAL_MAX_DATA;
+      relayRollingDepositData(0n, 0n, 0n, 0n, new Uint8Array(32), new Uint8Array(n)).length <=
+      PORTAL_MAX_DATA;
     expect(MAX_ROLLING_RELAY_RECORD).toBe(MAX_RELAY_RECORD - 32);
     expect(fits(MAX_ROLLING_RELAY_RECORD)).toBe(true);
     expect(fits(MAX_ROLLING_RELAY_RECORD + 1)).toBe(false);

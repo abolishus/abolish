@@ -5,7 +5,9 @@
 // and the version-1 delivery records, and version 9 adds ballot version 4 and
 // the version-2 delivery records, which name their seat's panel (What the
 // board frames (version 9); Ballots (version 4); Delivery records (version
-// 2)). It runs the contract's framing, and none of its shape checks (seat
+// 2)), and version 10's rolling event a ballot of version 5 alone, which
+// version 11's relayed rolling event shares (What the board frames (version
+// 10)). It runs the contract's framing, and none of its shape checks (seat
 // 0, counts that disagree, a posting's length), and decodes nothing the
 // contract doesn't: a ristretto255 element is only checked to be an even
 // value below 2²⁵⁵ − 19 and not 0, never decoded, since the board admits a
@@ -24,6 +26,7 @@ import {
   list,
   struct,
   bytesVar,
+  u32,
   u64,
   u8,
   Writer,
@@ -119,6 +122,20 @@ const BALLOT_BODY: Readonly<Record<1 | 2 | 3 | 4, Codec<unknown>>> = {
   4: ballotFields(u8, VOTE_V4),
 };
 
+// Version 5: version 4's fields with the step, any `u32`, at 364 between the
+// membership proof and the committed vote, which version 4's framing reads at
+// 368 (Ballots (version 5)).
+const BALLOT_BODY_V5 = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["label", u8],
+  ["nullifier", fieldBn254],
+  ["l1_ref_number", u64],
+  ["l1_ref_hash", bytesFixed(32)],
+  ["membership_proof", membershipProof],
+  ["step", u32],
+  ["committed_vote", VOTE_V4],
+] as const);
+
 /**
  * Whose framing to apply: the contract-event version's (What the board
  * frames). Version 8's, which versions 2 to 7 share, takes ballot versions 1
@@ -134,6 +151,8 @@ const DEFINITION_AT = 3;
 const LABEL_AT = 35;
 const L1_REF_AT = 68;
 const VOTE_AT = 364;
+// Version 5's `step`, where every other version's committed vote starts.
+const STEP_AT = 364;
 
 const typeOf = (b: Uint8Array) => ((b[0] ?? 0) << 8) | (b[1] ?? 0);
 
@@ -169,15 +188,42 @@ export function frameBallot(
     if (e instanceof DecodeError) return undefined;
     throw e;
   }
-  // definition_hash ‖ u16(0x0002) ‖ u8(version) ‖ u8(tier or cell) ‖
-  // encode(nullifier) ‖ encode(committed_vote): the same for every version.
+  return { version, ...framedBallot(record, VOTE_AT) };
+}
+
+/**
+ * Frames a ballot record as the board's two rolling calls do before reading
+ * its election (What the board frames (version 10)): type `0x0002`, version
+ * 5 and no other, the fixed fields, the step (any `u32`), the committed vote
+ * as version 4's, nothing after it, and the membership proof's points. The
+ * version byte alone decides which events can carry a ballot, so a version-5
+ * record relabelled version 4, whose step would be read as the vote's first
+ * count, frames under neither reading as the other (T-31). Its ballot hash
+ * is the formula every version shares, over the bytes from the step on
+ * (Hashes (version 5)). Undefined for any record the board refuses whatever
+ * its election.
+ */
+export function frameRollingBallot(record: Uint8Array): FramedRecord | undefined {
+  if (typeOf(record) !== RECORD_TYPES.ballot || record[2] !== 5) return undefined;
+  try {
+    decode(BALLOT_BODY_V5, record.subarray(3));
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  return framedBallot(record, STEP_AT);
+}
+
+// definition_hash ‖ u16(0x0002) ‖ u8(version) ‖ u8(tier or cell) ‖
+// encode(nullifier) ‖ the bytes from `hashedFrom` on, the committed vote's
+// (and, in version 5, the step's before it): the same for every version.
+function framedBallot(record: Uint8Array, hashedFrom: number): FramedRecord {
   const w = new Writer();
   w.bytes(record.subarray(DEFINITION_AT, LABEL_AT));
   w.bytes(record.subarray(0, DEFINITION_AT));
   w.bytes(record.subarray(LABEL_AT, L1_REF_AT));
-  w.bytes(record.subarray(VOTE_AT));
+  w.bytes(record.subarray(hashedFrom));
   return {
-    version,
     definitionHash: record.slice(DEFINITION_AT, LABEL_AT),
     ballotHash: H(ds("abolish/v1/ballot", w.finish())),
   };

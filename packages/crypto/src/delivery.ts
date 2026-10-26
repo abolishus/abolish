@@ -90,6 +90,13 @@ export const DELIVERY_WINDOW = BigInt(PARAMETERS.DELIVERY_WINDOW);
 export const COMPLAINT_WINDOW = BigInt(PARAMETERS.COMPLAINT_WINDOW);
 
 /**
+ * `TALLY_WINDOW`: seconds after `t_S` by which every cell's opening is on the
+ * board, the same under every tally-opening version so far (docs/spec/tally.md,
+ * Tally window).
+ */
+export const TALLY_WINDOW = BigInt(PARAMETERS.TALLY_WINDOW);
+
+/**
  * `W_C`, `CONTRACT_EVENT_WINDOW`: seconds from a contract event's submission
  * by which it is on the board, a constant of the election registry's bytecode
  * (docs/spec/tally.md, Tally window; docs/spec/parameters.md).
@@ -1246,6 +1253,34 @@ export function countedExtent(
     (closesAt + l1InclusionBound + COMPLAINT_WINDOW + CONTRACT_EVENT_WINDOW - epoch) / period;
   const segment = last > floor ? last : floor;
   return { segment, due: epoch + (segment + 1n) * period + deadline };
+}
+
+/** `s_T`, the anchoring period holding the tally window's end, and `t_D`, the fallback destruction moment. */
+export interface DestructionMoment {
+  readonly segment: bigint;
+  readonly due: bigint;
+}
+
+/**
+ * Destruction's fallback moment (docs/spec/tally.md, Destruction, When):
+ * `s_T = period(t_S + TALLY_WINDOW)` and `t_D`, the later of `t_S +
+ * TALLY_WINDOW` and segment `s_T − 1`'s anchoring deadline, `epoch + s_T ·
+ * period + deadline`. Past `t_D` no entry can join a segment before `s_T`, so
+ * a statement signed then lands in the destruction segment or later, and
+ * every tally-opening version so far fixes the same `TALLY_WINDOW` (T-14,
+ * T-40, T-54, T-69). Like `countedExtent`, a function of the definition and
+ * the anchor's immutable clock alone.
+ */
+export function destructionMoment(
+  clock: DeadlineClock,
+  closesAt: bigint,
+  l1InclusionBound: bigint,
+): DestructionMoment {
+  const { epoch, period, deadline } = clock;
+  const end = countedExtent(clock, closesAt, l1InclusionBound).due + TALLY_WINDOW;
+  const segment = (end - epoch) / period;
+  const anchored = epoch + segment * period + deadline;
+  return { segment, due: anchored > end ? anchored : end };
 }
 
 /**

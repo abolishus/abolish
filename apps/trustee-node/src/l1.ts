@@ -26,9 +26,9 @@ import {
   countedExtent,
   type BoardEntryVersion,
   type DeadlineClock,
+  destructionMoment,
   electionDefinitionHash,
   electionDefinitionV5Hash,
-  PARAMETERS,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -127,8 +127,7 @@ export type ReaderExtent = AvailabilityPoint | "tally";
  * it first.
  */
 export function tallySegment(clock: DeadlineClock, closesAt: bigint, bound: bigint): bigint {
-  const end = countedExtent(clock, closesAt, bound).due + BigInt(PARAMETERS.TALLY_WINDOW);
-  return (end - clock.epoch) / clock.period;
+  return destructionMoment(clock, closesAt, bound).segment;
 }
 const isBoardVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);

@@ -8,7 +8,6 @@ import {
 } from "@abolishus/crypto";
 import { walkArchive } from "@abolishus/verifier";
 import { randomBytes } from "node:crypto";
-import postgres from "postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -126,14 +125,9 @@ let now = 1_000_000n;
 // The run holds its lock on one connection and works through another.
 beforeAll(async () => {
   db = await testDb();
-  app = postgres(process.env["TEST_DATABASE_URL"]!, {
-    max: 2,
-    onnotice: () => {},
-    connection: { search_path: db.schema, role: "abolish_app" },
-  });
+  app = await db.as("abolish_app", { max: 2 });
 });
 afterAll(async () => {
-  await app?.end();
   await db?.close();
 });
 
@@ -453,7 +447,7 @@ describe("archiveBoards", () => {
     const arweave = new ModelArweave();
     await board(0);
     const other = await db.as("abolish_app");
-    await other`SELECT pg_advisory_lock(hashtextextended('archive_writer', 0))`;
+    await other`SELECT pg_advisory_lock(hashtextextended('archive_writer:' || current_schema(), 0))`;
     try {
       expect(await run(arweave)).toEqual({
         busy: true,
@@ -466,7 +460,7 @@ describe("archiveBoards", () => {
       });
       expect(arweave.txs.size).toBe(0);
     } finally {
-      await other`SELECT pg_advisory_unlock(hashtextextended('archive_writer', 0))`;
+      await other`SELECT pg_advisory_unlock(hashtextextended('archive_writer:' || current_schema(), 0))`;
     }
     expect(await run(arweave)).toMatchObject({ busy: false, posted: 2 });
   });

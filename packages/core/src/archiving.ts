@@ -45,6 +45,7 @@ import {
 import { readBoardRange } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { archiveManifests, archiveObjects, archiveTransactions } from "./db/schema/index.ts";
+import { withSessionLock } from "./session-lock.ts";
 
 /**
  * The deployment's Arweave access: a node or gateway to post through, with
@@ -133,8 +134,6 @@ export interface ArchiveLocator {
   readonly locator: Uint8Array;
 }
 
-const LOCK = "archive_writer";
-
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const compareBytes = (a: Uint8Array, b: Uint8Array) => Buffer.compare(a, b);
 const equal = (a: Uint8Array, b: Uint8Array) => compareBytes(a, b) === 0;
@@ -153,30 +152,6 @@ function checkOptions(o: ArchiveOptions) {
   if (typeof repostAfter !== "bigint" || repostAfter < 1n)
     throw new RangeError("repostAfter must be at least 1 second");
   return { depth, repostAfter, maxLinks: o.maxLinks ?? MAX_MANIFEST_LINKS };
-}
-
-/**
- * Runs `work` while one reserved connection holds the archive's session
- * lock, or returns `undefined` if another run holds it: two runs at once
- * would post the same objects twice and race for the next manifest's
- * sequence. The work goes through the pool's other connections, so the
- * pool needs at least two.
- */
-async function exclusively<T>(client: Sql, work: () => Promise<T>): Promise<T | undefined> {
-  if (!(client.options.max >= 2))
-    throw new RangeError("the archive run needs a pool of at least two connections");
-  const conn = await client.reserve();
-  try {
-    const [row] = await conn`SELECT pg_try_advisory_lock(hashtextextended(${LOCK}, 0)) AS held`;
-    if (row?.["held"] !== true) return undefined;
-    try {
-      return await work();
-    } finally {
-      await conn`SELECT pg_advisory_unlock(hashtextextended(${LOCK}, 0))`;
-    }
-  } finally {
-    conn.release();
-  }
 }
 
 /**
@@ -502,7 +477,7 @@ export async function archiveBoards(
   options: ArchiveOptions,
 ): Promise<ArchiveRun> {
   const { depth, repostAfter, maxLinks } = checkOptions(options);
-  const run = await exclusively(client, async () => {
+  const run = await withSessionLock(client, "archive_writer", async () => {
     const db = drizzle({ client });
     const [first] = await db
       .select({ sequence: archiveManifests.sequence })

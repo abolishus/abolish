@@ -34,6 +34,7 @@ import { lockBoard, pinnedBoardVersion, readBoard } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { decodeStoredDefinition, readDefinition } from "./definitions.ts";
 import { boardCheckpoints, boardEntries } from "./db/schema/index.ts";
+import { withSessionLock } from "./session-lock.ts";
 
 const MAX_SEGMENT = 2 ** 32 - 1;
 
@@ -242,13 +243,18 @@ export type AnchorFindingCode =
    * anchored any more, so the election fails (T-49). Reported for one
    * deadline after it.
    */
-  | "anchor-missed";
+  | "anchor-missed"
+  /**
+   * Another run held the anchoring lock, so this one did nothing. Expected
+   * while a deploy overlaps two workers.
+   */
+  | "anchor-busy";
 
 export interface AnchorFinding {
   readonly code: AnchorFindingCode;
-  /** The election it concerns; absent for `anchor-clock`. */
+  /** The election it concerns; absent for `anchor-clock`, the archive locator's findings and `anchor-busy`. */
   readonly electionId?: Uint8Array;
-  /** The segment it concerns; absent for `anchor-unserved`, `anchor-error`, `anchor-send-failed` and `anchor-clock`. */
+  /** The segment it concerns; absent for `anchor-unserved`, `anchor-error`, `anchor-send-failed`, `anchor-clock` and `anchor-busy`. */
   readonly segment?: number;
 }
 
@@ -261,6 +267,15 @@ export const MAX_L1_CLOCK_LEAD = 120n;
  * too late and reverts, it holds back none of its election's others.
  */
 export const ANCHOR_INCLUSION_MARGIN = 600n;
+
+/**
+ * How long, in seconds, runs may meet another's lock (`anchor-busy`) without
+ * a break before that is raised: a quarter of the anchor's deadline. An
+ * honest run lasts a few inclusions, so a holder past this has frozen with
+ * its connection open, and three quarters of each window remain for an
+ * operator to end its session (T-49).
+ */
+export const anchorBusyLimit = (clock: AnchoringClock): bigint => clock.deadline / 4n;
 
 export interface AnchorReport {
   readonly electionId: Uint8Array;
@@ -336,12 +351,19 @@ function checkClock(clock: AnchoringClock): void {
  * anchor holds, and carried by every call with checkpoints only if the
  * anchor holds none, ours, or one naming our chain's manifest at or below
  * ours: so it never falls below what the run read and never overwrites
- * another chain's (T-69). Runs aren't serialised across processes yet, so a
- * run whose call lands after a later run's can set it back a step until the
- * next run (P4-3 part 4b-2b). A run that sent no checkpoint call
+ * another chain's (T-69). A run that sent no checkpoint call
  * sends it alone unless the anchor holds it; one whose checkpoint call
  * failed leaves it to the next run, since a second call from the authority
  * could replace the pending one in the mempool and miss its window (T-49).
+ *
+ * Runs hold the database's `anchor_writer` session lock, so no two overlap
+ * across processes (a deploy runs the old worker beside the new): a run's
+ * call landing after a later run's could set the locator back a step (T-69),
+ * and two runs would sign at the same Safe and executor nonce (T-49). A run
+ * that meets the lock does nothing and reports `anchor-busy`; a caller
+ * seeing only that for longer than `anchorBusyLimit` allows must raise it,
+ * since a worker that froze holding the lock keeps every run out and no
+ * other finding is made. The pool needs at least two connections.
  */
 export async function anchorBoards(
   client: Sql,
@@ -354,6 +376,18 @@ export async function anchorBoards(
     throw new TypeError("the anchor's address must be 20 bytes");
   if (typeof localNow !== "bigint" || localNow < 0n)
     throw new TypeError("localNow must be a bigint ≥ 0");
+  const run = await withSessionLock(client, "anchor_writer", () =>
+    anchorRun(client, chain, localNow, options),
+  );
+  return run ?? { reports: [], findings: [{ code: "anchor-busy" }], locator: undefined };
+}
+
+async function anchorRun(
+  client: Sql,
+  chain: AnchorChain,
+  localNow: bigint,
+  options: AnchorOptions,
+): Promise<AnchorRun> {
   const now = await chain.now();
   if (typeof now !== "bigint" || now < 0n) throw new TypeError("now must be a bigint ≥ 0");
   const clock = chain.clock;

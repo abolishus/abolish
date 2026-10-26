@@ -51,6 +51,7 @@ export {
   ANCHOR_INCLUSION_MARGIN,
   type AnchorChain,
   anchorBoards,
+  anchorBusyLimit,
   type AnchorFinding,
   type AnchorFindingCode,
   type AnchorOptions,

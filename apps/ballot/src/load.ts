@@ -549,7 +549,9 @@ export type LoadedPostings =
  * block `from` (the board's deployment when absent) to the L2's `head`:
  * `finalized` for a posting the client may stand down on, `latest` only for
  * a sighting that delays its fallback, never one that cancels it
- * ([[posting-relay]], Outcome; T-25, T-50). Each log is read as a board
+ * ([[posting-relay]], Outcome; T-25, T-50), and `safe` for one the
+ * sequencer batched to L1, which the voter's wallet then doesn't force (Own
+ * wallet, Forced through L1). Each log is read as a board
  * event under the deployment's `eventVersion` and kept only if it is a
  * `SharePosted` whose topics are these hashes and whose record the board
  * frames (`checkContractEvent`), so a node can't pass off another event's
@@ -572,7 +574,7 @@ export async function loadPostings(
   definitionHash: Uint8Array,
   ballotHash: Uint8Array,
   fetchFn: Fetch,
-  head: "finalized" | "latest",
+  head: "finalized" | "safe" | "latest",
   from?: bigint,
   range = LOG_RANGE,
   maxBytes = MAX_POSTINGS_BYTES,

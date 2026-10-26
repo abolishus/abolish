@@ -17,6 +17,7 @@ const shortHex = (hash: string) => groupHex(hash).slice(0, 2).join(" ");
 // handed the wallet the parts says so, and so does every later offer, never
 // "nothing posted" (`handed`; T-15).
 const WALLET_NOTES = {
+  forced: { title: "walletForcedTitle", detail: "walletForced" },
   sent: { title: "walletSentTitle", detail: "walletSent" },
   rejected: { title: "walletRejectedTitle", detail: "walletRejected" },
   refused: { title: "walletRefusedTitle", detail: "walletRefused" },
@@ -30,7 +31,7 @@ const WALLET_NOTES = {
 >;
 
 // The wallet's notes that themselves say the parts may still reach the board.
-const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["sent"]);
+const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["forced", "sent"]);
 
 /**
  * The offer, asked as soon as delivery failed so a voter who leaves the

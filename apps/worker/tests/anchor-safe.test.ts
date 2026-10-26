@@ -484,9 +484,9 @@ describe("the sender", () => {
     const f = await fixture();
     const id = election();
     const chain = adapter(f, sender(f));
-    await chain.anchor([segment(id, 0)]);
+    await chain.anchor([segment(id, 0)], undefined);
     expect(await held(f, id, 0)).toBe(toHex(checkpointHash(segment(id, 0))));
-    await chain.anchor([segment(id, 1)]);
+    await chain.anchor([segment(id, 1)], undefined);
     expect(await held(f, id, 1)).toBe(toHex(checkpointHash(segment(id, 1))));
     expect(await sent(f)).toBe(2);
   });
@@ -496,7 +496,9 @@ describe("the sender", () => {
     const send = sender(f);
     await as(f.safe.address, f.safe.address, encode("enableModule", [f.anchor]));
     const id = election();
-    await expect(adapter(f, send).anchor([segment(id, 0)])).rejects.toThrow("has a module");
+    await expect(adapter(f, send).anchor([segment(id, 0)], undefined)).rejects.toThrow(
+      "has a module",
+    );
     expect(await sent(f)).toBe(0);
     expect(await held(f, id, 0)).toMatch(/^0x0{64}$/);
   });
@@ -505,11 +507,15 @@ describe("the sender", () => {
     const f = await fixture();
     const send = sender(f);
     const id = election();
-    await adapter(f, send).anchor([segment(id, 0)]);
+    await adapter(f, send).anchor([segment(id, 0)], undefined);
     await execSafe(f, await contractAt(), "0x", 1);
-    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("made a delegatecall");
+    await expect(adapter(f, send).anchor([segment(id, 1)], undefined)).rejects.toThrow(
+      "made a delegatecall",
+    );
     await mine(FINALITY_DEPTH);
-    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("made a delegatecall");
+    await expect(adapter(f, send).anchor([segment(id, 1)], undefined)).rejects.toThrow(
+      "made a delegatecall",
+    );
     expect(await sent(f)).toBe(1);
   });
 
@@ -543,9 +549,11 @@ describe("the sender", () => {
     }) as PublicClient;
     const send = sender(f, f.keys.map(signer), lagging);
     const id = election();
-    await adapter(f, send).anchor([segment(id, 0)]);
+    await adapter(f, send).anchor([segment(id, 0)], undefined);
     behind = 5n;
-    await expect(adapter(f, send).anchor([segment(id, 1)])).rejects.toThrow("behind blocks");
+    await expect(adapter(f, send).anchor([segment(id, 1)], undefined)).rejects.toThrow(
+      "behind blocks",
+    );
     expect(await sent(f)).toBe(1);
   });
 
@@ -565,10 +573,13 @@ describe("the sender", () => {
     };
     const id = election();
     await expect(
-      adapter(f, sender(f, [liar, signer(a), broken])).anchor([segment(id, 0)]),
+      adapter(f, sender(f, [liar, signer(a), broken])).anchor([segment(id, 0)], undefined),
     ).rejects.toThrow("too few owners signed");
     expect(await sent(f)).toBe(0);
-    await adapter(f, sender(f, [liar, broken, signer(a), signer(c)])).anchor([segment(id, 0)]);
+    await adapter(f, sender(f, [liar, broken, signer(a), signer(c)])).anchor(
+      [segment(id, 0)],
+      undefined,
+    );
     expect(await held(f, id, 0)).toBe(toHex(checkpointHash(segment(id, 0))));
   });
 
@@ -606,7 +617,10 @@ describe("the sender", () => {
       ),
     }) as PublicClient;
     await expect(
-      adapter(f, sender(f, f.keys.map(signer), stripped)).anchor([segment(election(), 0)]),
+      adapter(f, sender(f, f.keys.map(signer), stripped)).anchor(
+        [segment(election(), 0)],
+        undefined,
+      ),
     ).rejects.toThrow("didn't execute");
   });
 
@@ -651,7 +665,7 @@ describe("the runner's startup", () => {
     const f = await fixture();
     const chain = await runner(f);
     const id = election();
-    await chain.anchor([segment(id, 0)]);
+    await chain.anchor([segment(id, 0)], undefined);
     expect(await held(f, id, 0)).toBe(toHex(checkpointHash(segment(id, 0))));
     expect(await sent(f)).toBe(1);
     // Every owner key it holds, beyond the threshold too.

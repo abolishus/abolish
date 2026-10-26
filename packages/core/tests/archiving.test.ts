@@ -14,9 +14,12 @@ import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
+  type AnchorChain,
+  anchorBoards,
   appendEntry,
   archiveBoards,
   archiveLocator,
+  archiveManifestSequence,
   archiveManifests,
   archiveObjects,
   type ArchiveOptions,
@@ -396,6 +399,47 @@ describe("archiveBoards", () => {
     await drain(arweave);
     const latest = await archiveLocator(app, DEPLOYMENT);
     expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({ busy: false });
+  });
+
+  test("the anchoring run carries the locator the archive names, once it names one", async () => {
+    const arweave = new ModelArweave();
+    await board(0, 1);
+    const calls: (Uint8Array | undefined)[] = [];
+    // This deployment's anchor, which serves none of the boards here (each
+    // names another), so a run only has the locator to send.
+    const chain: AnchorChain = {
+      chainId: L1,
+      address: ANCHOR,
+      clock: { epoch: 0n, period: 3600n, deadline: 43_200n },
+      now: async () => 10n * 3600n,
+      anchored: async () => undefined,
+      latestLocator: async () => calls.at(-1),
+      anchor: async (_checkpoints, locator) => void calls.push(locator),
+    };
+    await run(arweave);
+    expect((await anchorBoards(app, chain, 10n * 3600n)).locator).toBeUndefined();
+    expect(calls).toEqual([]);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    const sent = await anchorBoards(app, chain, 10n * 3600n);
+    expect(sent.locator).toBe("sent");
+    expect(calls).toEqual([latest!.locator]);
+    expect((await anchorBoards(app, chain, 10n * 3600n)).locator).toBe("held");
+    // The held locator is judged by our chain's own sequences.
+    const named = decodeArchiveLocator(latest!.locator, [3]);
+    if (named.kind !== "manifest") throw new Error("not a locator");
+    expect(await archiveManifestSequence(app, named.manifest)).toBe(latest!.sequence);
+    expect(await archiveManifestSequence(app, new Uint8Array(36))).toBeUndefined();
+    // An anchor naming a manifest this database doesn't hold is never overwritten.
+    calls.push(Uint8Array.of(...latest!.locator.slice(0, 6), ...new Uint8Array(64)));
+    const foreign = await anchorBoards(app, chain, 10n * 3600n);
+    expect(foreign.findings).toContainEqual({ code: "anchor-locator-foreign" });
+    expect(calls).toHaveLength(2);
+    // A database holding another deployment's chain gives no locator, and says so.
+    const other = { ...chain, address: new Uint8Array(20) };
+    const unread = await anchorBoards(app, other, 10n * 3600n);
+    expect(unread.findings).toContainEqual({ code: "anchor-locator-unread" });
+    expect(calls).toHaveLength(2);
   });
 
   test("refuses a stored manifest of another deployment", async () => {

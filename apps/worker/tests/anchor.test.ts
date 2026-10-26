@@ -45,6 +45,9 @@ class HeldAnchor implements AnchorChain {
       .find((x) => hex(x.election_id) === hex(electionId) && x.segment === segment);
     return c === undefined ? undefined : checkpointHash(c);
   }
+  async latestLocator() {
+    return undefined;
+  }
   async anchor(checkpoints: readonly Checkpoint[]) {
     this.sent.push([...checkpoints]);
   }

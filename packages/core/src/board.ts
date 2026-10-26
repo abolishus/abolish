@@ -34,6 +34,7 @@ import {
   boardEntries,
   boardShareReceipts,
   boardSubtrees,
+  boardTallyOpenings,
   electionDefinitions,
 } from "./db/schema/index.ts";
 
@@ -78,15 +79,27 @@ export type AppendErrorCode =
    * 5): `existing` is that entry.
    */
   | "receipt-present"
+  /**
+   * A tally opening for a cell and seat whose opening the board already
+   * carries in other bytes (docs/spec/tally.md, Opening record, Boarding):
+   * `existing` is that entry.
+   */
+  | "opening-present"
   /** The entry would land in a segment after the latest the caller allows. */
   | "segment-late";
 
 export class AppendError extends Error {
   override readonly name = "AppendError";
   readonly code: AppendErrorCode;
-  /** Under `receipt-present`: the entry that carries the earlier receipt. */
-  readonly existing?: AppendedEntry;
-  constructor(code: AppendErrorCode, options?: { cause?: unknown; existing?: AppendedEntry }) {
+  /**
+   * Under `receipt-present` or `opening-present`: the entry that carries the
+   * earlier receipt or opening, with its payload.
+   */
+  readonly existing?: AppendedEntry & { readonly payload: Uint8Array };
+  constructor(
+    code: AppendErrorCode,
+    options?: { cause?: unknown; existing?: AppendedEntry & { readonly payload: Uint8Array } },
+  ) {
     super(`board append refused: ${code}`, options);
     this.code = code;
     if (options?.existing !== undefined) this.existing = options.existing;
@@ -235,6 +248,17 @@ export interface ReceiptKey {
   readonly seat: number;
 }
 
+/**
+ * What a tally opening opens (docs/spec/tally.md, Opening record, Boarding):
+ * the cell, by its position in the registered partition, and the registered
+ * seat whose signature attributes the opening, as the Boarding judge read
+ * them from the record.
+ */
+export interface OpeningKey {
+  readonly cell: number;
+  readonly seat: number;
+}
+
 /** `ν` as 32 big-endian bytes; a field<bn254> element, below `r`. */
 function nullifierBytes(nullifier: bigint): Uint8Array {
   if (typeof nullifier !== "bigint" || nullifier < 0n || nullifier >= BN254_R)
@@ -253,6 +277,31 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
   return a.length - b.length;
+}
+
+/** A stored entry as `appendEntry` returns it, with its payload. */
+function boardedAt(
+  id: Uint8Array,
+  version: BoardEntryVersion,
+  row: {
+    readonly idx: bigint;
+    readonly segment: bigint;
+    readonly payload: Uint8Array;
+    readonly entryHash: Uint8Array;
+    readonly link: Uint8Array;
+  },
+): AppendedEntry & { readonly payload: Uint8Array } {
+  const payload = new Uint8Array(row.payload);
+  return {
+    entry: encodeBoardEntry(
+      { election_id: id, index: row.idx, segment: Number(row.segment), payload },
+      version,
+    ),
+    index: row.idx,
+    entryHash: new Uint8Array(row.entryHash),
+    link: new Uint8Array(row.link),
+    payload,
+  };
 }
 
 /**
@@ -315,6 +364,17 @@ export async function appendEntry(
      * receipt from a failing one.
      */
     readonly receipt?: ReceiptKey;
+    /**
+     * The payload is a tally opening the caller's Boarding judge passed
+     * under this key (docs/spec/tally.md, Opening record, Boarding): the key
+     * is stored with the entry, and the board carries one opening per cell
+     * and seat (T-17, T-52). The same bytes return the entry that carries
+     * them, so a seat's resend gets its entry; other bytes are refused as
+     * `opening-present`, naming the entry that does, which the caller
+     * judges as a repeat or a second. Only for an opening the caller judged:
+     * the table can't tell a passing opening from a failing one.
+     */
+    readonly opening?: OpeningKey;
     /** The latest segment the entry may land in, else `segment-late` (rule 3's `s_D`). */
     readonly lastSegment?: number;
   } = {},
@@ -360,6 +420,21 @@ export async function appendEntry(
     )
       throw new AppendError("invalid-entry");
     receipt = { ballotHash: new Uint8Array(hash), panel, seat };
+  }
+  let opening: OpeningKey | undefined;
+  if (options.opening !== undefined) {
+    const { cell, seat } = options.opening;
+    if (
+      recordTypeOf(body) !== RECORD_TYPES.tallyOpening ||
+      !Number.isInteger(cell) ||
+      cell < 0 ||
+      cell > 255 ||
+      !Number.isInteger(seat) ||
+      seat < 1 ||
+      seat > 255
+    )
+      throw new AppendError("invalid-entry");
+    opening = { cell, seat };
   }
   const { lastSegment } = options;
   if (
@@ -441,18 +516,42 @@ export async function appendEntry(
             ),
           );
         if (seen !== undefined) {
-          const payload = new Uint8Array(seen.payload);
-          const existing: AppendedEntry = {
-            entry: encodeBoardEntry(
-              { election_id: id, index: seen.idx, segment: Number(seen.segment), payload },
-              version,
-            ),
-            index: seen.idx,
-            entryHash: new Uint8Array(seen.entryHash),
-            link: new Uint8Array(seen.link),
-          };
-          if (equalBytes(payload, body)) return existing;
+          const existing = boardedAt(id, version, seen);
+          const { payload, ...entry } = existing;
+          if (equalBytes(payload, body)) return entry;
           throw new AppendError("receipt-present", { existing });
+        }
+      }
+      if (opening !== undefined) {
+        // Read under the lock, so two openings racing in can't both be boarded.
+        const [seen] = await tx
+          .select({
+            idx: boardEntries.idx,
+            segment: boardEntries.segment,
+            payload: boardEntries.payload,
+            entryHash: boardEntries.entryHash,
+            link: boardEntries.link,
+          })
+          .from(boardTallyOpenings)
+          .innerJoin(
+            boardEntries,
+            and(
+              eq(boardEntries.electionId, boardTallyOpenings.electionId),
+              eq(boardEntries.idx, boardTallyOpenings.idx),
+            ),
+          )
+          .where(
+            and(
+              eq(boardTallyOpenings.electionId, id),
+              eq(boardTallyOpenings.cell, opening.cell),
+              eq(boardTallyOpenings.seat, opening.seat),
+            ),
+          );
+        if (seen !== undefined) {
+          const existing = boardedAt(id, version, seen);
+          const { payload, ...entry } = existing;
+          if (equalBytes(payload, body)) return entry;
+          throw new AppendError("opening-present", { existing });
         }
       }
       if (options.first === true) {
@@ -537,6 +636,8 @@ export async function appendEntry(
         await tx.insert(boardBallotHashes).values({ electionId: id, idx: index, ballotHash });
       if (receipt !== undefined)
         await tx.insert(boardShareReceipts).values({ electionId: id, idx: index, ...receipt });
+      if (opening !== undefined)
+        await tx.insert(boardTallyOpenings).values({ electionId: id, idx: index, ...opening });
       // The subtrees this entry completes, from the ones covering the board
       // before it, in the same transaction: heads and proofs then never read
       // more than O(log n) of them (T-52).
@@ -839,6 +940,40 @@ export async function readBoardedReceipt(
       ),
     );
   return row === undefined ? undefined : readBoardedEntry(client, id, row.idx, payload);
+}
+
+/**
+ * Every tally opening boarded through `appendEntry`'s `opening` key, with its
+ * entry, in board order: the openings the Boarding judge reads as already on
+ * the board (docs/spec/tally.md, Opening record, Boarding). One indexed read
+ * of at most one opening per cell and seat (T-52).
+ */
+export async function readBoardedOpenings(
+  client: Sql,
+  electionId: Uint8Array,
+): Promise<(AppendedEntry & { readonly payload: Uint8Array })[]> {
+  const id = checkId(electionId);
+  const rows = await drizzle({ client })
+    .select({
+      idx: boardEntries.idx,
+      segment: boardEntries.segment,
+      payload: boardEntries.payload,
+      entryHash: boardEntries.entryHash,
+      link: boardEntries.link,
+    })
+    .from(boardTallyOpenings)
+    .innerJoin(
+      boardEntries,
+      and(
+        eq(boardEntries.electionId, boardTallyOpenings.electionId),
+        eq(boardEntries.idx, boardTallyOpenings.idx),
+      ),
+    )
+    .where(eq(boardTallyOpenings.electionId, id))
+    .orderBy(asc(boardTallyOpenings.idx));
+  if (rows.length === 0) return [];
+  const version = await storedBoardVersion(client, id);
+  return rows.map((r) => boardedAt(id, version, r));
 }
 
 /**

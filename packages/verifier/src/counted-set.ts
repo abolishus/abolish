@@ -15,15 +15,23 @@
 // opening (T-14, T-16).
 
 import {
+  aggregateCell,
   type AnchorClock,
+  type CellAggregate,
   countedExtent,
   DecodeError,
   decodeBoardEntry,
   type Panel,
+  pinnedVersion,
+  RECORD_TYPES,
+  type TallyElection,
+  tallyRules,
+  type WholeOpeningVersion,
 } from "@abolishus/crypto";
 import { type ElectionAdmissionCode, readElection } from "./admission.ts";
-import { ALL_ROWS, ballotChecks, type BallotOutcome } from "./ballots.ts";
+import { ALL_ROWS, ballotChecks, type BallotOutcome, type BallotTally } from "./ballots.ts";
 import { type CountedOutcome, deliverSelected } from "./counted.ts";
+import type { VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
@@ -93,6 +101,99 @@ export type CountedSetResult =
  * anchored one.
  */
 export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
+  const counted = countedCells(inputs);
+  if (!counted.ok) return counted;
+  return {
+    ok: true,
+    definitionHash: counted.definitionHash,
+    cells: counted.cells.map((cell) => cell.map((b) => b.record)),
+  };
+}
+
+/**
+ * What the board operator judges a tally opening against (docs/spec/
+ * tally.md, Opening record, Boarding): the election as crypto's
+ * `tallyOpeningBoarding` reads it (the definition hash, the tally rules and
+ * the registered key set), each cell's aggregate over the counted set
+ * `countedSet` gives, and the tally-opening version the definition pins.
+ */
+export type CountedTallyResult =
+  | {
+      readonly ok: true;
+      readonly election: TallyElection;
+      /** Each cell's aggregate, in partition order. */
+      readonly aggregates: readonly CellAggregate[];
+      readonly pinned: WholeOpeningVersion;
+    }
+  | Exclude<CountedSetResult, { readonly ok: true }>;
+
+/**
+ * `countedSet`'s cells summed into their aggregates, for a party that boards
+ * or checks whole tally openings (version 1 or 2) over the counted extent:
+ * the same set, so an opening the operator boards is over the aggregate the
+ * verifier recomputes (T-29, T-17). A definition with an author panel, whose
+ * openings are version 3's partial openings with their own boarding rule, or
+ * one pinning no whole-opening version, is `unsupported-version`, decided
+ * before any ballot is admitted. Throws as `countedSet` does.
+ */
+export function countedTally(inputs: CountedExtentInputs): CountedTallyResult {
+  let pinned: WholeOpeningVersion | undefined;
+  const counted = countedCells(
+    inputs,
+    (record) => (pinned = wholeOpeningPin(record)) !== undefined,
+  );
+  if (!counted.ok) return counted;
+  if (pinned === undefined) throw new Error("countedTally: no pin past its guard");
+  const rules = tallyRules(counted.record);
+  return {
+    ok: true,
+    election: {
+      definitionHash: counted.definitionHash,
+      rules,
+      registered: counted.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
+    },
+    aggregates: counted.cells.map((cell) =>
+      aggregateCell(
+        rules,
+        cell.map((b) => b.vss),
+      ),
+    ),
+    pinned,
+  };
+}
+
+/**
+ * The whole-opening version (1, or a live poll's 2) a definition's openings
+ * are read under, or `undefined` beside an author panel, whose profile pins
+ * version 3's partial openings, and for any other pin (docs/spec/tally.md,
+ * Tally-opening version 2, Author panel; T-36, T-37).
+ */
+export function wholeOpeningPin(record: VerifiedDefinition): WholeOpeningVersion | undefined {
+  if (record.version === 6 && record.value.author_keys.length !== 0) return undefined;
+  const v = pinnedVersion(record.value, RECORD_TYPES.tallyOpening);
+  return v === 1 || v === 2 ? v : undefined;
+}
+
+/**
+ * The counted set's ballots by cell, each with its record and its
+ * commitments, after `accept` has passed the definition (else
+ * `unsupported-version`, before any ballot is read).
+ */
+function countedCells(
+  inputs: CountedExtentInputs,
+  accept: (record: VerifiedDefinition) => boolean = () => true,
+):
+  | {
+      readonly ok: true;
+      readonly definitionHash: Uint8Array;
+      readonly record: VerifiedDefinition;
+      readonly registered: readonly { readonly index: number; readonly signingKey: Uint8Array }[];
+      readonly cells: readonly (readonly {
+        readonly record: Uint8Array;
+        readonly vss: BallotTally["vss"];
+      }[])[];
+    }
+  | Exclude<CountedSetResult, { readonly ok: true }> {
   const { entries, clock, blocks } = inputs;
   const election = readElection(
     inputs.definition,
@@ -102,6 +203,7 @@ export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
   );
   if (!election.ok) return election;
   const { record, hash, boardEntryVersion, registered, authorRegistered } = election;
+  if (!accept(record)) return { ok: false, code: "unsupported-version" };
   const d = record.value;
   // 2.6 fails a definition opening before the clock's epoch: the counted
   // extent can't be placed on the clock.
@@ -190,13 +292,16 @@ export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
     sS,
   );
   if ("stop" in delivered) return { ok: false, row: "5.9", outcome: delivered.stop };
-  const cells: Uint8Array[][] = Array.from({ length: partitionSize(record) }, () => []);
+  const cells: { record: Uint8Array; vss: BallotTally["vss"] }[][] = Array.from(
+    { length: partitionSize(record) },
+    () => [],
+  );
   delivered.ballots.forEach((b, i) => {
     if (!b.counted) return;
     const { tally, record: ballot } = chosen[i] as (typeof chosen)[number];
     const into = cells[tally.cell];
     if (into === undefined) throw new Error("countedSet: a selected ballot outside the partition");
-    into.push(ballot);
+    into.push({ record: ballot, vss: tally.vss });
   });
-  return { ok: true, definitionHash: hash, cells };
+  return { ok: true, definitionHash: hash, record, registered, cells };
 }

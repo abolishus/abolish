@@ -349,8 +349,10 @@ export class BallotAdmissions {
       return { boarded, earlier: false };
     } catch (e) {
       if (!(e instanceof AppendError)) throw e;
-      if (e.code === "receipt-present" && e.existing !== undefined)
-        return { boarded: e.existing, earlier: true };
+      if (e.code === "receipt-present" && e.existing !== undefined) {
+        const { payload: _, ...boarded } = e.existing;
+        return { boarded, earlier: true };
+      }
       if (e.code === "segment-late") throw new ReceiptError("not-open");
       throw e;
     }

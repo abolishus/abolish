@@ -281,7 +281,7 @@ describe("appendEntry with a receipt key", () => {
     });
     expect(thrown).toBeInstanceOf(AppendError);
     expect((thrown as AppendError).code).toBe("receipt-present");
-    expect((thrown as AppendError).existing).toEqual(boarded);
+    expect((thrown as AppendError).existing).toEqual({ ...boarded, payload: receipt(1) });
     // Another seat, another panel: other receipts.
     for (const other of [
       { ...key, seat: 3 },

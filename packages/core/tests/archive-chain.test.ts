@@ -96,6 +96,9 @@ describe("nextManifestLinks", () => {
       expect(() => nextManifestLinks([], maxLinks)).toThrow(RangeError);
   });
 
+  // Under the cap the spec promises only that the next manifests link the
+  // rest, so this property runs below it; the locator's and the linking
+  // manifests' properties below run at caps of 2 to 4.
   test("a confirmed manifest stays reachable from every manifest written after it confirmed", () => {
     fc.assert(
       fc.property(historyArb, (steps) => {
@@ -130,6 +133,18 @@ describe("locatorManifest", () => {
     // Reached only through an unconfirmed manifest isn't reached.
     expect(locatorManifest([m([]), m([0], false), m([1])])).toBe(0);
     expect(locatorManifest([m([]), m([0], false), m([0, 1])])).toBe(0);
+  });
+
+  test("stays linear when the lowest upload confirms after thousands of others", () => {
+    // 0 stalls while 1 to n are written, each linking the one before; then 0
+    // confirms. Every candidate but 0 then misses 0, and a walk from each
+    // would take quadratic time.
+    const n = 50_000;
+    const chain = [m([]), m([]), ...Array.from({ length: n - 1 }, (_, i) => m([i + 1]))];
+    const start = performance.now();
+    expect(locatorManifest(chain)).toBe(0);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(nextManifestLinks(chain)).toEqual([0, n]);
   });
 
   test("is the brute force's answer, reaches every manifest before it and never falls", () => {

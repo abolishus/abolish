@@ -65,46 +65,38 @@ export function nextManifestLinks(
 }
 
 /**
- * Whether `from` reaches every manifest below it through links. Its caller
- * asks only where every manifest below `from` is confirmed, so the walk never
- * meets an unconfirmed one.
- */
-function reachesAllBelow(chain: readonly ChainManifest[], from: number): boolean {
-  const seen = new Uint8Array(from);
-  let reached = 0;
-  const stack = [from];
-  for (let k = stack.pop(); k !== undefined; k = stack.pop()) {
-    for (const l of chain[k]?.links ?? []) {
-      if (seen[l] === 1) continue;
-      seen[l] = 1;
-      reached += 1;
-      stack.push(l);
-    }
-  }
-  return reached === from;
-}
-
-/**
  * The sequence a locator may name: the highest confirmed manifest that reaches
  * every manifest below it through confirmed manifests, or `undefined` while
- * none does. Every manifest below it is then confirmed, so it is at most the
- * lowest unconfirmed sequence. Once a manifest meets the rule it always does,
- * so the answer never falls as uploads confirm and manifests are written.
+ * none does. Once a manifest meets the rule it always does, so the answer
+ * never falls as uploads confirm and manifests are written.
+ *
+ * `m` meets it exactly when every manifest up to `m` is confirmed and each
+ * `j < m` is linked by a manifest in `(j, m]`: following those links upward
+ * from any `j` ends at `m`, and a path from `m` to `j` ends in such a link.
+ * So one pass over the lowest linker of each manifest decides every `m`, and
+ * the worker's cost stays linear in the chain however its uploads lapsed.
  */
 export function locatorManifest(chain: readonly ChainManifest[]): number | undefined {
   checkChain(chain);
-  const unconfirmed = chain.findIndex((m) => !m.confirmed);
-  const top = unconfirmed === -1 ? chain.length - 1 : unconfirmed;
-  for (let m = top; m >= 0; m--)
-    if (chain[m]?.confirmed === true && reachesAllBelow(chain, m)) return m;
-  return undefined;
+  const lowestLinker = Array.from({ length: chain.length }, () => Infinity);
+  for (const [k, m] of chain.entries())
+    if (m.confirmed) for (const l of m.links) lowestLinker[l] = Math.min(lowestLinker[l] ?? k, k);
+  let named: number | undefined;
+  let needed = -1;
+  for (const [m, x] of chain.entries()) {
+    if (!x.confirmed) break;
+    if (needed <= m) named = m;
+    needed = Math.max(needed, lowestLinker[m] ?? Infinity);
+  }
+  return named;
 }
 
 /**
  * Whether the worker should write a manifest that only links: every manifest
  * has confirmed, but none reaches all the others, so no locator names the
  * latest. The next manifest links the roots, and once it confirms a locator
- * names it (or, past `MAX_MANIFEST_LINKS` roots, the one after). After an
+ * names it; past `maxLinks` roots, each linking manifest that confirms
+ * takes up to `maxLinks − 1` of them, until one is left. After an
  * election closes this is the closing manifest that links stragglers before
  * the final locator (docs/spec/archive.md, Locator). While a manifest is
  * unconfirmed no manifest written after it can meet the locator rule, so its

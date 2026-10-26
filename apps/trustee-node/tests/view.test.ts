@@ -542,6 +542,7 @@ describe("stepped by the receipt duties", () => {
       seat: {
         approvedStubs: async () => [approved.stubHash],
         approvedElection: async () => approved,
+        destroying: async () => false,
       },
       build: async (election) =>
         new ReceiptDuty({

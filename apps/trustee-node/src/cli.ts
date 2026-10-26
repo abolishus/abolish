@@ -21,7 +21,14 @@ import {
   identityKey,
   type Panel,
 } from "@abolishus/crypto";
-import { gateway, mirrorThen, type Rpc, rpcClient, RpcError } from "@abolishus/node";
+import {
+  finalizedHeader,
+  gateway,
+  mirrorThen,
+  type Rpc,
+  rpcClient,
+  RpcError,
+} from "@abolishus/node";
 import { gatewaySource } from "@abolishus/verifier";
 import {
   attested,
@@ -45,14 +52,18 @@ import {
   type TallyConfig,
 } from "./config.ts";
 import { type ReceiptDutyOptions, type ReceiptPath, ReceiptDuty } from "./delivery.ts";
+import { DestructionDuty } from "./destruction.ts";
 import {
+  afterDestruction,
   AvailabilityDuties,
   ComplaintDuties,
   CountedAvailabilityDuties,
+  DestructionDuties,
   type DutyEvent,
   OpeningSends,
   openingsDeadline,
   ReceiptDuties,
+  runInTurn,
   TallyDuties,
   tallyDeadline,
 } from "./duties.ts";
@@ -240,7 +251,13 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
           availability.counted.run(signal, ms),
           availability.receipts.run(signal, ms),
           availability.complaints.run(signal, ms),
-          ...(availability.tally ? [availability.tally.run(signal, ms)] : []),
+          // In turn, so no tally step reads an election's secrets while
+          // destruction removes them; destruction first, so the tally duty
+          // it ends is dropped in the same round.
+          runInTurn(signal, ms, [
+            availability.destruction,
+            ...(availability.tally ? [availability.tally] : []),
+          ]),
           ...(availability.openings ? [availability.openings.run(signal, ms)] : []),
         ]
       : []),
@@ -326,6 +343,7 @@ interface Duties {
   readonly counted: CountedAvailabilityDuties;
   readonly receipts: ReceiptDuties;
   readonly complaints: ComplaintDuties;
+  readonly destruction: DestructionDuties;
   /** With `availability.tally` only. */
   readonly tally: TallyDuties | undefined;
   /** With `availability.tally` only. */
@@ -459,6 +477,28 @@ async function availabilityDuties(
     log: (e: DutyEvent) => io.out(e),
     build: async (election) => new ComplaintDuty(wiring.complaints(election)),
   });
+  // Fed by the tally duty's reads of the anchored board, when it runs;
+  // without it, the seat destroys at `t_D`.
+  const published = new PublishedReads();
+  const destruction = new DestructionDuties(
+    {
+      seat: afterDestruction(seat),
+      clock,
+      log: (e: DutyEvent) => io.out(e),
+      build: async (election) => {
+        const deadline = tallyDeadline(election, a.anchorClock);
+        const duty = new DestructionDuty({
+          election,
+          seat,
+          published: () => published.of(election.stubHash),
+          finalizedTime: async () => (await finalizedHeader(l1)).timestamp,
+          deadline,
+        });
+        return { step: () => duty.step(), deadline };
+      },
+    },
+    a.anchorClock,
+  );
   const server = gateway(served);
   server.listen(a.serve.port, a.serve.host);
   try {
@@ -477,7 +517,13 @@ async function availabilityDuties(
     | undefined;
   if (a.tally !== undefined && records !== undefined) {
     try {
-      tally = await tallyDuties(config, a, a.tally, { seat, wiring, records, store, clock }, io);
+      tally = await tallyDuties(
+        config,
+        a,
+        a.tally,
+        { seat, wiring, records, store, clock, published },
+        io,
+      );
     } catch (e) {
       server.close();
       throw e;
@@ -488,6 +534,7 @@ async function availabilityDuties(
     counted,
     receipts,
     complaints,
+    destruction,
     tally: tally?.duties,
     openings: tally?.openings,
     channel: tally?.channel,
@@ -517,6 +564,7 @@ async function tallyDuties(
     readonly records: AvailabilityRecords;
     readonly store: SeatStore;
     readonly clock: () => bigint;
+    readonly published: PublishedReads;
   },
   io: CliIo,
 ): Promise<{
@@ -545,8 +593,7 @@ async function tallyDuties(
       throw new ConfigError(`availability.tally.peers: ${e.message}`);
     throw e;
   }
-  const { seat, wiring, records, store, clock } = s;
-  const published = new PublishedReads();
+  const { seat, wiring, records, store, clock, published } = s;
   const duties = new TallyDuties(
     {
       seat,
@@ -596,7 +643,8 @@ async function tallyDuties(
   const operator = new HttpOperator(t.operator, { timeoutMs: t.timeoutMs });
   const openings = new OpeningSends(
     {
-      seat,
+      // Openings are kept and resent past destruction (docs/spec/tally.md, Destruction).
+      seat: afterDestruction(seat),
       clock,
       log: (e: DutyEvent) => io.out(e),
       build: async (election) => {

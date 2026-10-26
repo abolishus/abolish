@@ -66,6 +66,37 @@ describe.each(Object.keys(stores))("%s store", (kind) => {
     returned[1] = 9;
     expect(await store.get("k")).toEqual(new Uint8Array([1, 2, 3]));
   });
+
+  test("removes only the record asked for, and a record already gone without failing", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.uniqueArray(key, { minLength: 1, maxLength: 6 }), async (keys) => {
+        const store = await make();
+        // A key that is another's directory can't also hold a record.
+        const records = keys.filter((k) => !keys.some((o) => o.startsWith(`${k}/`)));
+        for (const k of records) await store.putOnce(k, new Uint8Array([1]));
+        const [gone, ...kept] = records as [string, ...string[]];
+        await store.remove(gone);
+        await store.remove(gone);
+        expect(await store.get(gone)).toBeUndefined();
+        const at = gone.lastIndexOf("/");
+        if (at > 0) expect(await store.list(gone.slice(0, at))).not.toContain(gone.slice(at + 1));
+        for (const k of kept) expect(await store.get(k)).toEqual(new Uint8Array([1]));
+      }),
+      { numRuns: NUM_RUNS },
+    );
+  });
+
+  test("removing a record never written, under a directory that doesn't exist, does nothing", async () => {
+    const store = await make();
+    await store.remove("intake/none/ab");
+    expect(await store.list("intake/none")).toEqual([]);
+  });
+
+  test("refuses to remove keys outside the naming rule", async () => {
+    const store = await make();
+    for (const bad of ["", "../x", "a//b", "a/"])
+      await expect(store.remove(bad)).rejects.toThrow(RangeError);
+  });
 });
 
 describe("file store", () => {
@@ -98,6 +129,20 @@ describe("file store", () => {
     synced.length = 0;
     expect((await store.putOnce("approvals/ab", new Uint8Array([2]))).created).toBe(false);
     expect(synced).toEqual([join(dir, "approvals"), dir]);
+  });
+
+  test("a removal is durable once its directory is synced", async () => {
+    const dir = join(root, "removed");
+    const synced: string[] = [];
+    const store = await FileStore.open(dir, (path) => {
+      synced.push(path);
+      return Promise.resolve();
+    });
+    await store.putOnce("runs/s/r/secrets", new Uint8Array([1]));
+    synced.length = 0;
+    await store.remove("runs/s/r/secrets");
+    expect(synced).toEqual([join(dir, "runs/s/r")]);
+    expect(await readdir(join(dir, "runs/s/r"))).toEqual([]);
   });
 
   test("opening syncs every directory, deepest first, so a record a crash left unsynced is durable", async () => {

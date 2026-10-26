@@ -8,7 +8,10 @@
 // the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
 // which also takes the summed-share messages the channel hands it, and the
 // sending of the openings it signed (`OpeningSender`, Destruction, When;
-// T-54).
+// T-54), and destruction (`DestructionDuty`, Destruction; T-14, T-40, T-69).
+// Once the seat has begun destroying an election's material, every duty
+// that reads it is dropped unstepped, and with it whatever it held in
+// memory; the openings' sending and destruction itself go on.
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
@@ -22,9 +25,10 @@ import {
 import { L2Error, RpcError } from "@abolishus/node";
 import { L1Error } from "@abolishus/verifier";
 import { type AvailabilitySeat, type AvailabilityStatus, countedDue } from "./availability.ts";
-import type { ApprovedElection, CeremonySeat } from "./ceremony.ts";
+import type { ApprovedElection, ApprovedElectionInfo, CeremonySeat } from "./ceremony.ts";
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
+import type { DestructionDuty, DestructionStatus } from "./destruction.ts";
 import { L1AnchorError, tallySegment } from "./l1.ts";
 import type { OpeningSender, OpeningSenderStatus } from "./opening-sender.ts";
 import { SendError } from "./send.ts";
@@ -59,6 +63,7 @@ export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
 export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 export type TallyEvent = KindEvent<"tally", TallyDutyStatus>;
 export type OpeningEvent = KindEvent<"openings", OpeningSenderStatus>;
+export type DestructionEvent = KindEvent<"destruction", DestructionStatus>;
 /** What the duties report. */
 export type DutyEvent =
   | AvailabilityEvent
@@ -66,22 +71,50 @@ export type DutyEvent =
   | ReceiptEvent
   | ComplaintEvent
   | TallyEvent
-  | OpeningEvent;
+  | OpeningEvent
+  | DestructionEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
   ? { readonly [K in keyof S]: S[K] extends bigint ? string : S[K] }
   : never;
 
-export interface DutyOptions<D = Duty, E = AvailabilityEvent> {
-  readonly seat: Pick<CeremonySeat, "approvedStubs" | "approvedElection">;
+/**
+ * What the schedule reads of the seat: a `CeremonySeat`, or for the duties
+ * that outlast destruction (`OpeningSends`, `DestructionDuties`) the seat's
+ * elections without their secrets (`afterDestruction`).
+ */
+export interface DutySeat<El extends ApprovedElectionInfo = ApprovedElection> {
+  approvedStubs(): Promise<Uint8Array[]>;
+  approvedElection(stubHash: Uint8Array): Promise<El | undefined>;
+  /** Whether the seat has begun destroying the election's material (`CeremonySeat.destroying`). */
+  destroying(stubHash: Uint8Array): Promise<boolean>;
+}
+
+/** The seat as the duties that outlast destruction read it: no secret, and no election dropped for destroying. */
+export function afterDestruction(
+  seat: Pick<CeremonySeat, "approvedStubs" | "approvedElectionInfo">,
+): DutySeat<ApprovedElectionInfo> {
+  return {
+    approvedStubs: () => seat.approvedStubs(),
+    approvedElection: (stubHash) => seat.approvedElectionInfo(stubHash),
+    destroying: () => Promise.resolve(false),
+  };
+}
+
+export interface DutyOptions<
+  D = Duty,
+  E = AvailabilityEvent,
+  El extends ApprovedElectionInfo = ApprovedElection,
+> {
+  readonly seat: DutySeat<El>;
   /**
    * The election's duty over the deployment's sources. Throws
    * `L1AnchorError` when the election can never be read (the registry
    * registered another definition, the anchor's clock isn't the pinned
    * one), and an RPC or L2 error while it can't be read yet.
    */
-  readonly build: (election: ApprovedElection) => Promise<D>;
+  readonly build: (election: El) => Promise<D>;
   /** The node's wall clock, in seconds. */
   readonly clock: () => bigint;
   readonly log: (event: E) => void;
@@ -123,11 +156,14 @@ interface Stepped<S> {
   readonly deadline: bigint;
 }
 
+/** What the schedule needs of an election's destruction: `DestructionDuty`, with `tallyDeadline`. */
+export type DestructionStep = Pick<DestructionDuty, "step"> & { readonly deadline: bigint };
+
 /** What sets one kind of duty apart in the schedule. */
 interface Kind<K extends string, S> {
   readonly name: K;
   /** The duty's deadline, from the election alone, so a duty never built can be given up. */
-  readonly deadline: (election: ApprovedElection) => bigint;
+  readonly deadline: (election: ApprovedElectionInfo) => bigint;
   /** Whether `status`, from a step begun at `wall`, ends the duty. */
   readonly settles: (status: S, wall: bigint, deadline: bigint) => boolean;
   /**
@@ -139,9 +175,14 @@ interface Kind<K extends string, S> {
 }
 
 /** One kind of duty for every election the seat approved, each built once and stepped until it settles. */
-class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = Stepped<S>> {
+class ElectionDuties<
+  K extends string,
+  S extends object,
+  D extends Stepped<S> = Stepped<S>,
+  El extends ApprovedElectionInfo = ApprovedElection,
+> {
   readonly #kind: Kind<K, S>;
-  readonly #o: DutyOptions<D, KindEvent<K, S>>;
+  readonly #o: DutyOptions<D, KindEvent<K, S>, El>;
   // Each built duty, with its deadline read once.
   readonly #duties = new Map<string, { readonly seat: D; readonly deadline: bigint }>();
   // Elections whose duty is over, or that can never be read: never stepped again.
@@ -150,7 +191,7 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
   // every step is reported once.
   readonly #last = new Map<string, string>();
 
-  constructor(kind: Kind<K, S>, options: DutyOptions<D, KindEvent<K, S>>) {
+  constructor(kind: Kind<K, S>, options: DutyOptions<D, KindEvent<K, S>, El>) {
     this.#kind = kind;
     this.#o = options;
   }
@@ -182,6 +223,9 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
     const wall = this.#o.clock();
     let duty = this.#duties.get(name);
     try {
+      // Dropped, whatever it holds, before any step that could read a
+      // secret destruction is removing (docs/spec/tally.md, Destruction, What).
+      if (await this.#o.seat.destroying(stubHash)) return this.#settle(name);
       if (duty === undefined) {
         duty = await this.#build(stubHash, name, wall);
         if (duty === undefined) return;
@@ -202,13 +246,8 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
    * Steps every `intervalMs` until `signal` aborts. A step that throws
    * anything but a failure a later step can get past ends the loop.
    */
-  async run(signal: AbortSignal, intervalMs: number): Promise<void> {
-    while (!signal.aborted) {
-      await this.step();
-      await sleep(intervalMs, undefined, { signal }).catch((e: unknown) => {
-        if (!signal.aborted) throw e;
-      });
-    }
+  run(signal: AbortSignal, intervalMs: number): Promise<void> {
+    return runInTurn(signal, intervalMs, [this]);
   }
 
   async #build(
@@ -217,8 +256,15 @@ class ElectionDuties<K extends string, S extends object, D extends Stepped<S> = 
     wall: bigint,
   ): Promise<{ readonly seat: D; readonly deadline: bigint } | undefined> {
     const election = await this.#o.seat.approvedElection(stubHash);
-    // Listed as approved, so its records exist; approvedElection throws if they don't.
-    if (election === undefined) throw new Error(`trustee node: approval ${name} has no election`);
+    if (election === undefined) {
+      // Destruction began since the check above: nothing to set up.
+      if (await this.#o.seat.destroying(stubHash)) {
+        this.#settle(name);
+        return undefined;
+      }
+      // Listed as approved, so its records exist; approvedElection throws if they don't.
+      throw new Error(`trustee node: approval ${name} has no election`);
+    }
     // Not even set up past it: building reads the counted set's sources, and
     // a node restarted past `t_D` steps nothing.
     if (this.#kind.noStepPast && wall > this.#kind.deadline(election)) {
@@ -393,7 +439,7 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
  * `s_T` the period containing the window's end, under the pinned clock.
  * Throws `L1AnchorError` `outside-clock` for a close before its epoch.
  */
-export function tallyDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
+export function tallyDeadline(election: ApprovedElectionInfo, clock: DeadlineClock): bigint {
   const end = countedDue(election, clock) + BigInt(PARAMETERS.TALLY_WINDOW);
   const sT = tallySegment(clock, election.closesAt, election.l1InclusionBound);
   const anchored = clock.epoch + sT * clock.period + clock.deadline;
@@ -455,7 +501,7 @@ export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyS
  * earlier, so a seat sending its openings until then never stops before
  * the tally term, whatever the other windows add.
  */
-export function openingsDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
+export function openingsDeadline(election: ApprovedElectionInfo, clock: DeadlineClock): bigint {
   return tallyDeadline(election, clock) + BigInt(PARAMETERS.DESTRUCTION_WINDOW);
 }
 
@@ -469,8 +515,16 @@ export function openingsDeadline(election: ApprovedElection, clock: DeadlineCloc
  * itself has stopped (docs/spec/tally.md, Destruction, When; T-54). No
  * step begins past the deadline, nor is a sender set up.
  */
-export class OpeningSends extends ElectionDuties<"openings", OpeningSenderStatus, OpeningStep> {
-  constructor(options: DutyOptions<OpeningStep, OpeningEvent>, clock: DeadlineClock) {
+export class OpeningSends extends ElectionDuties<
+  "openings",
+  OpeningSenderStatus,
+  OpeningStep,
+  ApprovedElectionInfo
+> {
+  constructor(
+    options: DutyOptions<OpeningStep, OpeningEvent, ApprovedElectionInfo>,
+    clock: DeadlineClock,
+  ) {
     super(
       {
         name: "openings",
@@ -480,5 +534,55 @@ export class OpeningSends extends ElectionDuties<"openings", OpeningSenderStatus
       },
       options,
     );
+  }
+}
+
+/**
+ * The destruction of every election the seat approved: each one's
+ * `DestructionDuty`, stepped from the approval (it destroys nothing before
+ * the anchored board has a passing opening of every cell, or finalized L1
+ * shows `t_D`) until the seat has destroyed the election's material and
+ * holds its statement (docs/spec/tally.md, Destruction, When; T-14, T-40,
+ * T-69). It never stops before then, past `t_D` included: the seat's
+ * material must not outlast the election because its L1 node was down.
+ * Run it in turn with `TallyDuties` (`runInTurn`), never beside it, so no
+ * tally step is reading the secrets as they are removed.
+ */
+export class DestructionDuties extends ElectionDuties<
+  "destruction",
+  DestructionStatus,
+  DestructionStep,
+  ApprovedElectionInfo
+> {
+  constructor(
+    options: DutyOptions<DestructionStep, DestructionEvent, ApprovedElectionInfo>,
+    clock: DeadlineClock,
+  ) {
+    super(
+      {
+        name: "destruction",
+        deadline: (e) => tallyDeadline(e, clock),
+        settles: (status) => status.state === "destroyed",
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * Steps each schedule in turn, one after the other, every `intervalMs`
+ * until `signal` aborts, so no two of them step at once. A step that throws
+ * anything but a failure a later step can get past ends the loop.
+ */
+export async function runInTurn(
+  signal: AbortSignal,
+  intervalMs: number,
+  schedules: readonly { step(): Promise<void> }[],
+): Promise<void> {
+  while (!signal.aborted) {
+    for (const schedule of schedules) await schedule.step();
+    await sleep(intervalMs, undefined, { signal }).catch((e: unknown) => {
+      if (!signal.aborted) throw e;
+    });
   }
 }

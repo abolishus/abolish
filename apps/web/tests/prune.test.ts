@@ -56,6 +56,7 @@ async function codeSentAt(at: Date): Promise<string> {
     sender: { send: async () => "sent" },
     turnstile: { verify: async () => "passed" },
     token: "t",
+    locale: "en-US",
     now: at,
   });
   return account;
@@ -223,9 +224,10 @@ test("re-hashes and re-seals verified addresses under the current e-mail keys, o
     },
     turnstile: { verify: async () => "passed" },
     token: "t",
+    locale: "en-US",
     now,
   });
-  await verifyEmailCode(sql, account, sent[0]!, { keys: one, now });
+  await verifyEmailCode(sql, account, sent[0]!, { keys: one, locale: "en-US", now });
   const keysOf = async () =>
     (await sql`SELECT hash_key, box_key FROM account_emails WHERE user_id = ${account}`)[0];
   const run = async (emailKeys?: typeof two) => {
@@ -260,9 +262,10 @@ async function verifiedAt(address: string, at: Date): Promise<string> {
     },
     turnstile: { verify: async () => "passed" },
     token: "t",
+    locale: "en-US",
     now: at,
   });
-  await verifyEmailCode(sql, account, codes[0]!, { keys, now: at });
+  await verifyEmailCode(sql, account, codes[0]!, { keys, locale: "en-US", now: at });
   return account;
 }
 
@@ -309,7 +312,7 @@ test("sends the notices due to verified addresses, only where configured", async
       },
     }),
   ).toEqual([]);
-  expect(sent).toEqual([{ kind: "notice", to: "due@example.org" }]);
+  expect(sent).toEqual([{ kind: "notice", to: "due@example.org", locale: "en-US" }]);
   expect((await notices()).has(due)).toBe(false);
   expect((await notices()).get(later)).toBe(0);
   await sql`DELETE FROM account_notices`;

@@ -219,14 +219,26 @@ export const Empty: Story = {
   },
 };
 
-/** The API didn't answer: only the newest questions are left out, and nothing says why (T-67). */
+/**
+ * The API didn't answer: only the newest questions are left out, and nothing
+ * says why (T-67). A poll's page, its short link and Discover read the same
+ * API, so the note promises none of them, and the section doesn't offer
+ * "See all questions" under a note saying they couldn't be loaded. The
+ * hero's ways in stay, as the frame's links do.
+ */
 export const Unavailable: Story = {
   args: { newest: undefined },
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
-    await expect(main.getByText(/couldn't be loaded just now/)).toBeVisible();
+    await expect(
+      main.getByText(
+        "The newest questions couldn't be loaded just now. Try again in a little while.",
+      ),
+    ).toBeVisible();
+    await expect(main.queryByText(/still works/)).toBeNull();
     await expect(main.queryByText("The newest open questions.", { exact: false })).toBeNull();
     await expect(main.queryByRole("article")).toBeNull();
-    await expect(main.getByRole("link", { name: "See all questions" })).toBeVisible();
+    await expect(main.queryByRole("link", { name: "See all questions" })).toBeNull();
+    await expect(main.getByRole("link", { name: "Browse questions" })).toBeVisible();
   },
 };

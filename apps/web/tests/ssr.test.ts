@@ -1553,7 +1553,11 @@ describe("home", () => {
       expect(response.status).toBe(200);
       const html = await response.text();
       expect(html).toContain("Ask a question");
-      expect(html).toContain("couldn&#x27;t be loaded just now");
+      expect(html).toContain("couldn&#x27;t be loaded just now. Try again in a little while.");
+      // A poll's page, its short link and Discover fail on the same API (below),
+      // so the note promises none of them and the section links to none.
+      expect(html).not.toContain("still works");
+      expect(html).not.toContain("See all questions");
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
     } finally {

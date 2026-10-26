@@ -81,14 +81,18 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
           </div>
           {/* Beside the title only where the cards share a row: where they
               stack, it follows them, so the first card comes straight after
-              the lede and the way on is where the list ends. */}
-          <a
-            href="/discover"
-            className={cn(buttonVariants({ variant: "outline" }), "hidden gap-2 lg:inline-flex")}
-          >
-            {t("homeStreamAll")}
-            <ArrowRight aria-hidden="true" />
-          </a>
+              the lede and the way on is where the list ends. Not when the
+              API didn't answer: Discover reads the same listing, so the link
+              would only open the error page. */}
+          {newest === undefined ? null : (
+            <a
+              href="/discover"
+              className={cn(buttonVariants({ variant: "outline" }), "hidden gap-2 lg:inline-flex")}
+            >
+              {t("homeStreamAll")}
+              <ArrowRight aria-hidden="true" />
+            </a>
+          )}
         </div>
         {newest === undefined ? (
           <p className="m-0 text-lg">{t("homeListUnavailable")}</p>
@@ -111,16 +115,18 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
             ))}
           </ol>
         )}
-        <a
-          href="/discover"
-          className={cn(
-            buttonVariants({ variant: "outline" }),
-            "gap-2 justify-self-start lg:hidden",
-          )}
-        >
-          {t("homeStreamAll")}
-          <ArrowRight aria-hidden="true" />
-        </a>
+        {newest === undefined ? null : (
+          <a
+            href="/discover"
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "gap-2 justify-self-start lg:hidden",
+            )}
+          >
+            {t("homeStreamAll")}
+            <ArrowRight aria-hidden="true" />
+          </a>
+        )}
       </section>
       <TrustScene />
     </div>

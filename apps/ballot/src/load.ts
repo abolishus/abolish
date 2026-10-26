@@ -707,14 +707,14 @@ const MAX_DEPOSIT_BLOCKS = 256;
  * so the L1 endpoint learns nothing of which ballot the client watches
  * (T-11, T-13). A call is estimated on L2 here only once a deposit on L1
  * carries its exact bytes, which are then public (T-18); forcing a send the
- * wallet's node refused estimates it before (`estimatePosting`). Either endpoint is trusted
- * only to delay: a deposit the L1 one makes up, or an estimate the L2 one
- * understates so that a deposit made to fail qualifies, keeps the client
- * waiting, to its deadline `c_P` at most; one it hides, or an estimate
- * failed or inflated, only brings the fallback sooner. As the board's reads,
- * it runs out a `maxBytes` budget, charged each block looked up, each range
- * and each log (T-52), and is given up, as `unreachable`, as soon as `stop`
- * says so before a request (T-25).
+ * wallet's node refused estimates it before (`estimatePosting`). Either
+ * endpoint is trusted only to delay: a deposit the L1 one makes up, or an
+ * estimate the L2 one understates so that a deposit made to fail
+ * qualifies, keeps the client waiting, to its deadline `c_P` at most; one
+ * it hides, or an estimate failed or inflated, only brings the fallback
+ * sooner. As the board's reads, it runs out a `maxBytes` budget, charged
+ * each block looked up, each range and each log (T-52), and is given up, as
+ * `unreachable`, as soon as `stop` says so before a request (T-25).
  */
 export async function loadDeposits(
   deployment: Deployment,
@@ -874,8 +874,8 @@ function depositOf(
  * a deposit forcing a posting the wallet's node refused is given, judged
  * by the same estimate `loadDeposits` qualifies it by ([[posting-relay]],
  * Own wallet, Forced through L1). The call carries `m_i`, so it is asked
- * only once the wallet's node was given it, and refused or may have sent
- * it (T-18). Any failure, a timeout's abort included, is `undefined`.
+ * only once the wallet's node reverted it, or the wallet may have sent it
+ * (T-18). Any failure, a timeout's abort included, is `undefined`.
  */
 export async function estimatePosting(
   deployment: Deployment,

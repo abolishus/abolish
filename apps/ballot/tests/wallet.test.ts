@@ -699,8 +699,8 @@ describe("postFromWallet", () => {
     expect(w.deposits).toEqual([]);
   });
 
-  test("forces at once, with the build's own estimate, a posting whose estimate the wallet's node refused once given it (T-50)", async () => {
-    for (const answer of ["refused", "failed"]) {
+  test("forces at once, with the build's own estimate, a posting whose estimate the wallet's node reverted (T-50)", async () => {
+    for (const answer of ["refused"]) {
       const at: WalletStage = "estimate";
       const w = world({ answer: () => refusal(answer, at) });
       expect(await w.run([A], CUTOFF)).toBe("forced");
@@ -764,6 +764,8 @@ describe("postFromWallet", () => {
     const cases: [string, WalletStage][] = [
       ["failed", "before"],
       ["refused", "before"],
+      // Any error but a revert may come before the wallet asked its node (T-18).
+      ["failed", "estimate"],
       ["wrong-chain", "before"],
       ["late", "before"],
       ["rejected", "before"],
@@ -973,6 +975,7 @@ describe("postFromWallet", () => {
             expect(send).toBeDefined();
             const stage = send?.met instanceof WalletRefusal ? send.met.at : undefined;
             if (stage === "estimate") {
+              expect(send?.met).toMatchObject({ answer: "refused" });
               expect(depositedAt).toBe(send?.at);
             } else
               expect(depositedAt - (send?.at ?? 0n)).toBeGreaterThanOrEqual(POSTING_FORCE_AFTER);
@@ -982,10 +985,16 @@ describe("postFromWallet", () => {
             }
             expect(START + depositedAt + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(cutoff);
           }
-          // The build's endpoint is given only a call the wallet's node refused.
+          // The build's endpoint is given only a call the wallet's node
+          // reverted, or one the wallet may have sent.
           for (const { call } of w.estimates) {
-            const send = w.sends.find((s) => s.call === call);
-            expect(send?.met instanceof WalletRefusal && send.met.at !== "before").toBe(true);
+            const met = w.sends.find((s) => s.call === call)?.met;
+            expect(met).toBeInstanceOf(WalletRefusal);
+            expect(
+              met instanceof WalletRefusal &&
+                ((met.at === "estimate" && met.answer === "refused") ||
+                  (met.at === "send" && met.answer === "failed")),
+            ).toBe(true);
           }
           if (result === "forced") expect(w.deposits.length).toBeGreaterThan(0);
           // The run ends within two waits, the time to force and two rounds.

@@ -457,8 +457,8 @@ interface Pending {
  * WALLET_DEPOSIT_SPAN`: the safe head, since a censoring sequencer can show
  * a call at the latest head that it never batches (Forced through L1;
  * T-50). A deposit the wallet doesn't make ends the forcing for the run,
- * never the run. A posting whose estimate the wallet's node refused once it
- * was given the call is deposited at once, with the gas limit from the
+ * never the run. A posting whose estimate the wallet's node reverted, which
+ * shows it had the call, is deposited at once, with the gas limit from the
  * build's own estimate, and only if that estimate passes: the wallet's
  * node, which a censoring sequencer's endpoint can be, can't keep the
  * voter's posting off L2 (T-50). One whose send failed may have been
@@ -534,14 +534,12 @@ export async function postFromWallet(
     return estimated + estimated / 4n;
   };
   // Forced through L1 at once: a posting whose estimate the wallet's node
-  // refused after it was given the call. It answers what to end the run
-  // with when nothing could be deposited.
+  // reverted. Only revert data shows the node had the call; any other
+  // error may come from the wallet before it asked its node, and the build's
+  // endpoint isn't handed `m_i` on such a word (T-18). It answers what to
+  // end the run with when nothing could be deposited.
   const forceRefused = async (p: Pending, refusal: WalletRefusal) => {
-    if (
-      refusal.at !== "estimate" ||
-      (refusal.answer !== "refused" && refusal.answer !== "failed") ||
-      !forceable()
-    )
+    if (refusal.at !== "estimate" || refusal.answer !== "refused" || !forceable())
       return refusal.answer;
     const gas = await built(p.call);
     if (gas === null) return refusal.answer;

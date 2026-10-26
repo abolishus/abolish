@@ -78,16 +78,26 @@ export interface AnchoredCountedTallyOptions {
   readonly l1: L1HeaderRun;
 }
 
-// Undecided outcomes a later read of finalized L1 can settle (5.8), as the
-// trustee node's counted source takes them. 6.1's `not-reached` is the one
-// exception: it waits on authenticated contract events, which this source
-// never claims (below), so it never settles here.
+// Undecided outcomes a later read of finalized L1 can settle, at 5.8 only:
+// elsewhere `not-reached` waits on authenticated contract events (6.1, 5.9),
+// which this source never claims (below), so it never settles here.
 const GROWS: ReadonlySet<string> = new Set(["l1-ref-pending", "l1-blocks-short", "not-reached"]);
+
+/**
+ * How far, in seconds, the anchor's latest block must be past `t_S` before
+ * the anchor's state is taken as final: the L1 finality term of the
+ * contract-event window (docs/spec/tally.md, Tally window). An anchor
+ * included just before `t_S` in a block later reorganised away would
+ * otherwise fix, for the process's life, a checkpoint finalized L1 never
+ * holds (T-24, T-54).
+ */
+export const ANCHOR_FINALITY_MARGIN = 1_800n;
 
 /**
  * The operator's source of the counted tally: `countedTally` over its own
  * board through `C_S`, the latest checkpoint at or before `s_S`, once `t_S`
- * has passed by the anchor's L1 time and the anchor holds that checkpoint,
+ * has passed by the anchor's L1 time, by `ANCHOR_FINALITY_MARGIN`, and the
+ * anchor holds that checkpoint,
  * so the extent is the anchored one, which no later entry changes (T-24,
  * T-29). Before `t_S` it waits: a checkpoint at or before `s_S` may still be
  * anchored. After it, no checkpoint taken here at or before `s_S` that the
@@ -134,7 +144,7 @@ export function anchoredCountedTally(
       return { state: "refused", reason: "s_S past the last segment" };
     const sS = Number(extent.segment);
     // By the anchor's own time, which judges whether a checkpoint is timely.
-    if ((await anchor.now()) <= extent.due) return { state: "waiting" };
+    if ((await anchor.now()) <= extent.due + ANCHOR_FINALITY_MARGIN) return { state: "waiting" };
     let counted;
     for (const checkpoint of await readCheckpoints(client, electionId))
       if (checkpoint.segment <= sS) counted = checkpoint;
@@ -147,6 +157,9 @@ export function anchoredCountedTally(
     if (typeof version === "string") return { state: "refused", reason: version };
     const board = await readBoard(client, electionId);
     const size = Number(counted.size);
+    // A board shorter than a checkpoint taken from it was written around appendEntry.
+    if (board.length < size)
+      return { state: "refused", reason: "a board shorter than its counted checkpoint" };
     // An entry at or before `s_S` past the checkpoint was never anchored: the
     // anchored extent isn't this board's.
     for (const encoded of board.slice(size))
@@ -187,7 +200,7 @@ export function anchoredCountedTally(
         return { state: "refused", reason: `no ballot can be admitted: ${result.code}` };
       }
       const code = result.outcome.code ?? "";
-      if (GROWS.has(code) && result.row !== "6.1") return { state: "waiting" };
+      if (GROWS.has(code) && result.row === "5.8") return { state: "waiting" };
       return { state: "refused", reason: `the counted set is undecided at ${result.row}: ${code}` };
     }
     return { state: "refused", reason: "the definition names no pinned panel" };
@@ -260,6 +273,7 @@ export class OpeningBoardings {
   readonly #nowMs: () => number;
   readonly #decided = new Map<string, Decided>();
   readonly #waiting = new Map<string, number>();
+  readonly #inFlight = new Map<string, Promise<CountedTally>>();
 
   constructor({
     tally,
@@ -318,8 +332,8 @@ export class OpeningBoardings {
     );
     if (!verdict.ok) {
       if (verdict.code !== "tally-repeat") throw new OpeningError("rejected", verdict.code);
-      // The same signed message, attributed: the same bytes (RFC 6979, low
-      // s), so the seat's resend gets the entry that carries it.
+      // The same signed message, attributed: the seat's resend gets the
+      // entry that carries it, whatever its signature's bytes.
       const { payload: _, ...entry } = boarded[verdict.of] as (typeof boarded)[number];
       return entry;
     }
@@ -332,11 +346,20 @@ export class OpeningBoardings {
       });
       return entry;
     } catch (e) {
-      if (!(e instanceof AppendError && e.code === "opening-present")) throw e;
+      if (!(e instanceof AppendError && e.code === "opening-present" && e.existing !== undefined))
+        throw e;
       // Another opening of the cell by the seat was boarded since the judge
-      // read the board, in other bytes. Both are attributed, and a seat's
-      // signature over one message has one encoding (RFC 6979, low s), so
-      // other bytes are another signed message: the seat's second (T-29).
+      // read the board, in other bytes: judged against it, a repeat of its
+      // signed message gets its entry, anything else is the seat's second.
+      const { payload, ...entry } = e.existing;
+      const again = tallyOpeningBoarding(
+        tally.election,
+        tally.aggregates,
+        [payload],
+        own,
+        tally.pinned,
+      );
+      if (!again.ok && again.code === "tally-repeat") return entry;
       throw new OpeningError("rejected", "tally-second");
     }
   }
@@ -352,7 +375,17 @@ export class OpeningBoardings {
     }
     const until = this.#waiting.get(key);
     if (until !== undefined && this.#nowMs() < until) return { state: "waiting" };
-    const tally = await this.#tally(client, id);
+    // Concurrent openings of one election share one computation (T-52).
+    const running = this.#inFlight.get(key);
+    if (running !== undefined) return running;
+    const pending = this.#tally(client, id);
+    this.#inFlight.set(key, pending);
+    let tally;
+    try {
+      tally = await pending;
+    } finally {
+      this.#inFlight.delete(key);
+    }
     if (tally.state === "waiting") {
       remember(this.#waiting, key, this.#nowMs() + this.#waitMs, this.#cacheSize);
       return tally;

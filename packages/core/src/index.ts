@@ -748,6 +748,7 @@ export {
   type WebPushOptions,
 } from "./web-push.ts";
 export {
+  ANCHOR_FINALITY_MARGIN,
   anchoredCountedTally,
   type AnchoredCountedTallyOptions,
   type CountedTally,

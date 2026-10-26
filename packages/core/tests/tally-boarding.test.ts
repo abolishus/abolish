@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { decodeDefinition } from "../../verifier/src/definition.ts";
 import { run } from "../../verifier/tests/headers.ts";
 import {
+  ANCHOR_FINALITY_MARGIN,
   anchoredCountedTally,
   type AnchoredCountedTallyOptions,
   appendEntry,
@@ -306,6 +307,29 @@ describe("submitting openings", () => {
     expect(await readBoard(app, id)).toHaveLength(0);
   });
 
+  test("shares one computation among openings of an election sent at once", async () => {
+    const app = await db.as("abolish_app");
+    const id = await newElection(app);
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const boarding = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        await gate;
+        return { state: "waiting" };
+      },
+      clock: CLOCK,
+      waitMs: 0,
+    });
+    const sent = [0, 1, 2].map(() =>
+      failsWith(boarding.submitOpening(app, id, openingOf(0, 1), NOW)),
+    );
+    release();
+    expect(await Promise.all(sent)).toEqual(["not-ready", "not-ready", "not-ready"]);
+    expect(calls).toBe(1);
+  });
+
   test("asks for a fixed counted tally once per election", async () => {
     const app = await db.as("abolish_app");
     const ids = [await newElection(app), await newElection(app)];
@@ -513,7 +537,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
       await appendEntry(app, d.election_id, e.segment, e.payload);
     }
     const script: Scripted = {
-      now: extent.due + 1n,
+      now: extent.due + ANCHOR_FINALITY_MARGIN + 1n,
       held: new Map(),
       headers: afterClose,
       l1Reads: 0,
@@ -569,7 +593,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
 
   test("waits until t_S has passed by the anchor's time, before reading L1", async () => {
     const { app, script, tally } = await stored();
-    script.now = extent.due;
+    script.now = extent.due + ANCHOR_FINALITY_MARGIN;
     expect(await tally(app, d.election_id)).toEqual({ state: "waiting" });
     expect(script.l1Reads).toBe(0);
   });
@@ -612,7 +636,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
         chainId: d.l1_chain_id,
         address: d.l1_anchor,
         clock,
-        now: async () => extent.due + 1n,
+        now: async () => extent.due + ANCHOR_FINALITY_MARGIN + 1n,
         anchored: async () => undefined,
       },
       l1: { chainId: d.l1_chain_id, run: async () => afterClose },
@@ -677,7 +701,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
       signTallyOpening(new Uint8Array(32).fill(9), statement),
       1,
     );
-    const now = extent.due + 1n;
+    const now = extent.due + ANCHOR_FINALITY_MARGIN + 1n;
     expect(await failsWith(boarding.submitOpening(app, d.election_id, unattributed, now))).toBe(
       "tally-unattributed",
     );

@@ -2,7 +2,7 @@
 
 How the operator runs the posting key, its store and the `posting-worker` deployment that sends voters' share postings to the board and pays their gas ([[0042-posting-relay]], option A; [[posting-relay]]; [[P2-8]]). The posting key only pays: it has no role in any contract, and a posting it sends passes the board only if its `m_i` and ballot do, which only the voter's client can make ([[posting-relay]], Roles). So whoever holds the key can spend its balance and nothing more; whoever reads the store or the worker's database while a posting is queued or in flight reads its `m_i` (T-18). Threats: T-13, T-18, T-52, T-65, T-69.
 
-Status: not deployable on staging yet. The worker (`node posting.mjs`, `apps/worker` README, Posting relay) runs the queue, the ledger's tending, the forced path's deposits on L1 ([[posting-relay]], Forced through L1) and the pruning, so the key needs a float on L1 as well as on L2. The deploy workflow doesn't deploy `posting-worker` yet: that waits on a `ci:` change adding its service ID ([[railway]], Deploying).
+Status: not deployable on staging yet. The worker (`node posting.mjs`, `apps/worker` README, Posting relay) runs the queue, the ledger's tending, the forced path's deposits on L1 ([[posting-relay]], Forced through L1) and the pruning, so the key needs a float on L1 as well as on L2. The deploy workflow deploys `posting-worker` with the worker digest once the GitHub `staging` variable `RAILWAY_POSTING_WORKER_SERVICE_ID` is set ([[railway]], Deploying).
 
 ## The key
 
@@ -46,7 +46,7 @@ The forced path's log lines are `{"queue":"{posting}","step":"deposit", …}`, e
 
 One replica: within a process the rounds never overlap, and the ledger's lock keeps a deploy's overlap from paying for a posting twice, but two replicas would judge the same pairs twice over. Turn the relay on in this order, so the route never queues what nothing judges:
 
-1. The store, then `posting-worker` with its variables. Its log shows `{"queue":"{posting}", …}` lines only when something moved or a step starts failing (`"outcome":"failing"`) or recovers.
+1. The store, then `posting-worker` with its variables, then its service ID in the GitHub `staging` variable `RAILWAY_POSTING_WORKER_SERVICE_ID`, so the next deploy starts it. Its log shows `{"queue":"{posting}", …}` lines only when something moved or a step starts failing (`"outcome":"failing"`) or recovers.
 2. The `api` service's `API_POSTING_REDIS_URL` and `BALLOT_PINNED_PANELS`. The route answers `RELAY_UNAVAILABLE` whenever the worker's index is more than a minute old, so a stopped worker turns the relay off by itself.
 
 To turn it off, remove the `api` service's two variables first, then stop the worker once `SELECT count(*) FROM posting_in_flight` is 0, or leave it running: what is in flight is tended and pruned only while it runs.

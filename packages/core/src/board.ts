@@ -391,7 +391,8 @@ export async function appendEntry(
      * that carries them; other bytes are refused as `destruction-present`,
      * naming the entry that does, which the caller judges as a repeat. Only
      * for a statement the caller judged: the table can't tell an attributed
-     * statement from one that isn't.
+     * statement from one that isn't. A destruction statement is boarded only
+     * with this key.
      */
     readonly destruction?: { readonly seat: number };
     /** The latest segment the entry may land in, else `segment-late` (rule 3's `s_D`). */
@@ -456,6 +457,11 @@ export async function appendEntry(
     opening = { cell, seat };
   }
   let destruction: { seat: number } | undefined;
+  // A statement boarded without its seat's key would be missed by the next
+  // statement's judge, which would then board the seat's second, a breach
+  // 8.5 lists against the operator (T-17).
+  if (options.destruction === undefined && recordTypeOf(body) === RECORD_TYPES.destructionStatement)
+    throw new AppendError("invalid-entry");
   if (options.destruction !== undefined) {
     const { seat } = options.destruction;
     if (

@@ -328,9 +328,11 @@ describe("appendEntry's destruction key", () => {
     expect(await readBoard(app, id)).toHaveLength(2);
   });
 
-  test("refuses a key on another record type, or out of range", async () => {
+  test("refuses a statement without its key, a key on another record type, or out of range", async () => {
     const app = await db.as("abolish_app");
     const id = await newElection(app);
+    // Unkeyed, the next statement's judge wouldn't see it (T-17).
+    expect(await failsWith(appendEntry(app, id, 0, destruction(1)))).toBe("invalid-entry");
     for (const [payload, seat] of [
       [Uint8Array.of(0x00, 0x06, 1), 1],
       [destruction(1), 0],

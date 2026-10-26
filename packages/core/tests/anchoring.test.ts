@@ -799,7 +799,7 @@ describe("the archive's locator", () => {
     // sent, so the anchor's locator never falls.
     const stale: LocatorSource = {
       latest: async () => ({ sequence: 0n, locator: ours[0]! }),
-      sequenceOf: archiveOf(...ours).sequenceOf,
+      sequenceOf: (cid) => archiveOf(...ours).sequenceOf(cid),
     };
     const ahead = new ModelAnchor();
     ahead.held = ours[1];

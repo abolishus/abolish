@@ -62,7 +62,7 @@ import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
-import { OpeningSender, type PublishedCells, publishedOf } from "./opening-sender.ts";
+import { OpeningSender, PublishedReads } from "./opening-sender.ts";
 import { HttpOperator } from "./operator.ts";
 import {
   l2AvailabilityRecords,
@@ -88,8 +88,6 @@ import {
   ViewError,
   type ViewOptions,
 } from "./view.ts";
-
-const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 export interface CliIo {
   readonly out: (value: unknown) => void;
@@ -548,12 +546,7 @@ async function tallyDuties(
     throw e;
   }
   const { seat, wiring, records, store, clock } = s;
-  // Each election's cells as its tally duty last read them published on the
-  // anchored board, so the sender stops sending what the seat has seen
-  // boarded and anchored, never on the operator's word. Kept in memory, as
-  // the duty's own read is: after a restart the duty reads the board again
-  // until `t_D`, and past it the sender resends every opening until the seal.
-  const published = new Map<string, PublishedCells>();
+  const published = new PublishedReads();
   const duties = new TallyDuties(
     {
       seat,
@@ -590,8 +583,7 @@ async function tallyDuties(
         return {
           step: async () => {
             const status = await duty.step();
-            const read = publishedOf(status);
-            if (read !== undefined) published.set(hex(election.stubHash), read);
+            published.track(election.stubHash, status);
             return status;
           },
           receive: (message) => duty.receive(message),
@@ -615,8 +607,7 @@ async function tallyDuties(
           election,
           boardVersion,
           openings: () => signedOpenings(store, election.stubHash),
-          published: () =>
-            published.get(hex(election.stubHash)) ?? { cells: new Set(), complete: false },
+          published: () => published.of(election.stubHash),
           operator,
           clock,
         });

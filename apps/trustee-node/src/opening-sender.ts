@@ -58,6 +58,29 @@ export function publishedOf(status: TallyDutyStatus): PublishedCells | undefined
   return { cells, complete: cells.size === status.cells.length };
 }
 
+/**
+ * Each election's cells as its tally duty last read them published on the
+ * anchored board, by stub hash, so the sender stops sending what the seat
+ * has seen boarded and anchored, never on the operator's word. Kept in
+ * memory, as the duty's own read is: after a restart the duty reads the
+ * board again until `t_D`, and past it the sender resends every opening
+ * until the seal's tally term.
+ */
+export class PublishedReads {
+  readonly #reads = new Map<string, PublishedCells>();
+
+  /** Records what a tally step of the election approved as `stubHash` read. */
+  track(stubHash: Uint8Array, status: TallyDutyStatus): void {
+    const read = publishedOf(status);
+    if (read !== undefined) this.#reads.set(hex(stubHash), read);
+  }
+
+  /** What the election's tally duty last read, or nothing published before it reads the board. */
+  of(stubHash: Uint8Array): PublishedCells {
+    return this.#reads.get(hex(stubHash)) ?? { cells: new Set(), complete: false };
+  }
+}
+
 export interface OpeningSenderOptions {
   readonly election: ApprovedElection;
   /** The board-entry version the registered definition pins, which an answered entry must decode under. */
@@ -97,6 +120,7 @@ export type OpeningSenderStatus =
   /** Each signed opening by cell, in cell order. */
   | { readonly state: "sending"; readonly openings: readonly OpeningSend[] };
 
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -105,6 +129,8 @@ export class OpeningSender {
   readonly #o: OpeningSenderOptions;
   // Each cell's last outcome, and the wall time before which it isn't sent again.
   readonly #sent = new Map<number, { readonly send: OpeningSend; readonly until: bigint }>();
+  // Where in cell order the next step starts sending.
+  #rotation = 0;
 
   constructor(options: OpeningSenderOptions) {
     this.#o = options;
@@ -112,10 +138,12 @@ export class OpeningSender {
 
   /**
    * Sends every signed opening of a cell not yet published whose wait is
-   * over, one at a time in cell order. An answer that says the operator
-   * can't take openings of the election now (not ready, not open,
-   * unavailable) ends the step's sending: the next step sends the rest, so
-   * a stalled operator costs one request per step (T-52).
+   * over, one at a time. An answer that says the operator can't take
+   * openings of the election now (not ready, not open, unavailable) ends
+   * the step's sending, so a stalled operator costs one request per step
+   * (T-52). Each step starts one cell further on, in cell order, so a cell
+   * the operator keeps failing on its own can't hold every later one back:
+   * within as many steps as the seat has openings, each is sent first once.
    */
   async step(): Promise<OpeningSenderStatus> {
     const published = this.#o.published();
@@ -123,17 +151,18 @@ export class OpeningSender {
     const openings = [...(await this.#o.openings())].sort(([a], [b]) => a - b);
     if (openings.length === 0) return { state: "none" };
     const wall = this.#o.clock();
+    const first = this.#rotation++ % openings.length;
     let halted = false;
-    const out: OpeningSend[] = [];
-    for (const [cell, opening] of openings) {
+    const out = new Map<number, OpeningSend>();
+    for (const [cell, opening] of [...openings.slice(first), ...openings.slice(0, first)]) {
       if (published.cells.has(cell)) {
         this.#sent.delete(cell);
-        out.push({ cell, state: "published" });
+        out.set(cell, { cell, state: "published" });
         continue;
       }
       const last = this.#sent.get(cell);
       if (halted || (last !== undefined && wall < last.until)) {
-        out.push(last?.send ?? { cell, state: "unsent" });
+        out.set(cell, last?.send ?? { cell, state: "unsent" });
         continue;
       }
       const send = this.#judge(
@@ -148,9 +177,9 @@ export class OpeningSender {
       });
       halted =
         send.state === "not-ready" || send.state === "not-open" || send.state === "unavailable";
-      out.push(send);
+      out.set(cell, send);
     }
-    return { state: "sending", openings: out };
+    return { state: "sending", openings: openings.map(([cell]) => out.get(cell) as OpeningSend) };
   }
 
   #judge(cell: number, opening: Uint8Array, answer: OperatorAnswer): OpeningSend {

@@ -11,6 +11,7 @@ import {
   encodeTallyOpening,
   signTallyOpening,
 } from "@abolishus/crypto";
+import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import type { ApprovedElection } from "../src/ceremony.ts";
 import {
@@ -18,10 +19,12 @@ import {
   type OpeningSenderOptions,
   type PublishedCells,
   publishedOf,
+  PublishedReads,
   RESEND_AFTER,
 } from "../src/opening-sender.ts";
 import type { OpeningOperator, OperatorAnswer } from "../src/operator.ts";
 
+const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const ELECTION_ID = new Uint8Array(32).fill(7);
 const DEFINITION = new Uint8Array(32).fill(9);
 const SECRET = new Uint8Array(32).fill(2);
@@ -158,6 +161,71 @@ describe("OpeningSender", () => {
     }
   });
 
+  test("a cell the operator keeps failing on holds no other back: each step starts one cell further on", async () => {
+    const openings = new Map([0, 1, 2].map((c) => [c, openingOf(c)]));
+    const { op, sent } = operator((o) =>
+      o === openings.get(0) ? { state: "unavailable", reason: "500" } : boarded(o),
+    );
+    const s = sender(openings, op, { now: 0n, published: unpublished() });
+    for (let i = 0; i < 3; i++) await s.step();
+    // Step 1 halts at cell 0; step 2 starts at cell 1 and sends 1, 2, then 0
+    // (halting there); step 3 starts at cell 2, waiting, and sends 0.
+    const cellOf = (o: Uint8Array) => [...openings].find(([, b]) => b === o)?.[0];
+    expect(sent.map((x) => cellOf(x.opening))).toEqual([0, 1, 2, 0, 0]);
+    expect(await s.step()).toEqual({
+      state: "sending",
+      openings: [
+        { cell: 0, state: "unavailable", reason: "500" },
+        { cell: 1, state: "boarded", earlier: false },
+        { cell: 2, state: "boarded", earlier: false },
+      ],
+    });
+  });
+
+  test("whatever the operator answers, a published cell is never sent and every other is sent within as many steps as there are openings once its wait is over", () => {
+    const answer = fc.oneof(
+      fc.constant<"carry">("carry"),
+      fc.constant<OperatorAnswer>({ state: "rejected", code: "tally-aggregate" }),
+      fc.constant<OperatorAnswer>({ state: "not-ready" }),
+      fc.constant<OperatorAnswer>({ state: "not-open" }),
+      fc.constant<OperatorAnswer>({ state: "unavailable", reason: "500" }),
+      fc.constant<OperatorAnswer>({ state: "boarded", entry: Uint8Array.of(1), earlier: false }),
+    );
+    return fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 1, max: 5 }),
+        fc.uniqueArray(fc.integer({ min: 0, max: 4 }), { maxLength: 5 }),
+        fc.array(answer, { minLength: 1, maxLength: 40 }),
+        async (n, publishedCells, answers) => {
+          const openings = new Map(Array.from({ length: n }, (_, c) => [c, openingOf(c)]));
+          const published = new Set(publishedCells.filter((c) => c < n));
+          let i = 0;
+          const { op, sent } = operator((o) => {
+            const a = answers[i++ % answers.length] as "carry" | OperatorAnswer;
+            return a === "carry" ? boarded(o) : a;
+          });
+          const world = { now: 0n, published: { cells: published, complete: false } };
+          const s = sender(openings, op, world, { resendAfter: 10n });
+          for (let round = 0; round < 3; round++) {
+            const before = sent.length;
+            // Each step a wait's length later, so no cell is still waiting.
+            for (let step = 0; step < n; step++) {
+              world.now += 10n;
+              await s.step();
+            }
+            const cells = new Set(
+              sent.slice(before).map((x) => decodeTallyOpening(x.opening, 1).cell),
+            );
+            for (const c of published) expect(cells.has(c)).toBe(false);
+            for (let c = 0; c < n; c++)
+              if (!published.has(c)) expect(cells.has(c), `cell ${c}`).toBe(true);
+          }
+        },
+      ),
+      { numRuns },
+    );
+  });
+
   test("a refusal is reported with its code and asked again after RESEND_AFTER", async () => {
     const { op, sent } = operator(() => ({ state: "rejected", code: "tally-aggregate" }));
     const world = { now: 0n, published: unpublished() };
@@ -240,5 +308,39 @@ describe("publishedOf", () => {
     expect(
       publishedOf({ state: "tallying", cells: [published, published], board: "unread" }),
     ).toEqual({ cells: new Set([0, 1]), complete: true });
+  });
+});
+
+describe("PublishedReads", () => {
+  test("hands the sender what the election's own tally step last read, and nothing before it reads the board", async () => {
+    const reads = new PublishedReads();
+    const stub = new Uint8Array(32).fill(3);
+    const other = new Uint8Array(32).fill(4);
+    const published = { state: "published", segment: 9 } as const;
+    const opened = { state: "opened" } as const;
+    expect(reads.of(stub)).toEqual({ cells: new Set(), complete: false });
+    reads.track(stub, { state: "tallying", cells: [published, opened], board: "read" });
+    // A later step that reads no board changes nothing the seat knows.
+    reads.track(stub, { state: "waiting" });
+    expect(reads.of(stub)).toEqual({ cells: new Set([0]), complete: false });
+    expect(reads.of(other)).toEqual({ cells: new Set(), complete: false });
+    const openings = new Map([
+      [0, openingOf(0)],
+      [1, openingOf(1)],
+    ]);
+    const { op, sent } = operator(() => ({ state: "not-ready" }));
+    const s = new OpeningSender({
+      election: ELECTION,
+      boardVersion: 1,
+      openings: async () => openings,
+      published: () => reads.of(stub),
+      operator: op,
+      clock: () => 0n,
+    });
+    await s.step();
+    expect(sent.map((x) => x.opening)).toEqual([openings.get(1)]);
+    reads.track(stub, { state: "tallying", cells: [published, published], board: "read" });
+    expect(await s.step()).toEqual({ state: "complete" });
+    expect(sent).toHaveLength(1);
   });
 });

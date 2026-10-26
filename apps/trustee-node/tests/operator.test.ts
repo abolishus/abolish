@@ -116,7 +116,11 @@ describe("HttpOperator", () => {
   });
 
   test("follows no redirect, and an operator not reached or too slow is unavailable", async () => {
-    handler = (_, __, res) => res.writeHead(307, { location: "https://elsewhere.example/" }).end();
+    // The redirect's target would board it: only refusing it answers unavailable.
+    handler = (req, body, res) =>
+      req.url === "/api/openings"
+        ? res.writeHead(307, { location: "/elsewhere" }).end()
+        : json(201, { entry, link: "cd".repeat(32), earlier: false })(req, body, res);
     expect(await new HttpOperator(base).submit(ID, OPENING)).toMatchObject({
       state: "unavailable",
     });

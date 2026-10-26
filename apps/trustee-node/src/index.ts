@@ -40,6 +40,7 @@ export {
   type OpeningSenderStatus,
   type PublishedCells,
   publishedOf,
+  PublishedReads,
   RESEND_AFTER,
 } from "./opening-sender.ts";
 export {

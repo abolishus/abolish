@@ -447,11 +447,13 @@ export class TallyDuties extends ElectionDuties<"tally", TallyDutyStatus, TallyS
 
 /**
  * The end of the tally term in the seal's `W` (docs/spec/tally.md,
- * Destruction window): `t_D + DESTRUCTION_WINDOW`. No seal is derived from
- * a definition yet ([[election-definition]], The seal), and every seal is
- * at or after the period containing this, so a seat that sends its
- * openings until then sends them until the seal's tally term, whatever the
- * other windows add.
+ * Destruction window): `t_D + DESTRUCTION_WINDOW`, by when a statement, and
+ * so any opening, must be on the board. No seal is derived from a
+ * definition yet ([[election-definition]], The seal); under every
+ * board-entry version that carries destruction statements the seal's
+ * period contains or follows this, and under the others the tally term is
+ * earlier, so a seat sending its openings until then never stops before
+ * the tally term, whatever the other windows add.
  */
 export function openingsDeadline(election: ApprovedElection, clock: DeadlineClock): bigint {
   return tallyDeadline(election, clock) + BigInt(PARAMETERS.DESTRUCTION_WINDOW);

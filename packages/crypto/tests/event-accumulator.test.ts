@@ -499,6 +499,8 @@ describe("event accumulator", () => {
       expect(() => checkEventAccumulatorProofs(1n, addr, [{ ...log, n: -1n }], [proof])).toThrow(
         RangeError,
       );
+      // With no proof nothing is judged, as no single call would be made.
+      expect(checkEventAccumulatorProofs(1n, addr, [{ ...log, n: -1n }], [])).toEqual([]);
     });
   });
 });

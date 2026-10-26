@@ -696,7 +696,7 @@ describe("allEvidence", () => {
       [1.5, 0],
       [2, 3],
       [2, -1],
-    ])
+    ] as const)
       await expect(allEvidence(listings, BOARD, L2, s, maxReads, spent)).rejects.toThrow(
         RangeError,
       );

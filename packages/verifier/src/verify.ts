@@ -1448,13 +1448,15 @@ export function anchoredAdmitted(
   const extent = board.entries - board.unauthenticated;
   // Typed as a row, as `verifyBundle` reads 4.4: it can't pass in this
   // release, and selection waits on its pass wherever an ordinary ballot is.
+  // The archive's replay is left out: it only ever makes 4.4 unverifiable,
+  // which changes nothing here, and judging every held event again costs
+  // as much as the row itself.
   const events: Outcome = eventChecks(
     definition,
     bundle.entries,
     inputs.boardEntryVersion,
     extent,
     "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
-    archivedEvents(bundle),
   );
   const admission = ballotChecks(
     definition,

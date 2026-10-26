@@ -198,9 +198,10 @@ export interface ArchiveWalkOptions {
 }
 
 /**
- * How many evidence listings a walk keeps when its caller sets nothing:
- * one record per contract and anchored period, so a deployment's five
- * contracts' records for about 18 months of hourly periods.
+ * How many (reference, transaction) pairs a walk keeps when its caller
+ * sets nothing, evidence and runs together: an honest archive lists about
+ * one record and one run per contract and anchored period, so the four
+ * L2 contracts' about 8 an hour for about 11 months of hourly periods.
  */
 export const DEFAULT_EVIDENCE_BUDGET = 65_536;
 

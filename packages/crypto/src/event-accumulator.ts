@@ -197,7 +197,8 @@ export function checkEventAccumulatorProof(
  * left to compare, rather than once per proof. A contract proven at
  * every anchored period has one proof a period, and replaying its whole
  * sequence for each would cost their product (T-52). Throws as
- * `checkEventAccumulatorProof` does, for any proof or log.
+ * `checkEventAccumulatorProof` does, for any proof or log; with no proof
+ * it returns none and judges nothing, as no single call would.
  */
 export function checkEventAccumulatorProofs(
   chainId: bigint,
@@ -205,6 +206,7 @@ export function checkEventAccumulatorProofs(
   archive: Iterable<ArchivedContractLog>,
   provens: readonly ProvenEventAccumulator[],
 ): (EventAccumulatorProofError | null)[] {
+  if (provens.length === 0) return [];
   const checked = provens.map((proven) => {
     u64Arg(proven.block, "proven.block");
     u64Arg(proven.count, "proven.count");
@@ -243,7 +245,9 @@ export function checkEventAccumulatorProofs(
   const asked = new Set(checked.filter((_, i) => rule2[i] === undefined).map((p) => p.count));
   const after = new Map<bigint, Uint8Array>();
   if (asked.size > 0) {
-    const reached = Math.max(...[...asked].map(Number));
+    // A loop, not a spread: an archive may prove as many counts as a reader's budget allows.
+    let reached = 0;
+    for (const count of asked) if (Number(count) > reached) reached = Number(count);
     let accumulator = eventAccumulatorGenesis(chainId, address);
     if (asked.has(0n)) after.set(0n, accumulator);
     for (let i = 0; i < reached; i++) {

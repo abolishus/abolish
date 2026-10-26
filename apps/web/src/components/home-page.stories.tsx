@@ -132,6 +132,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // was counted: step 3 says the count is opened only after the poll closes.
   await expect(words).toMatch(/find yours there and see that it stays there\./);
   await expect(words).not.toMatch(/it was counted/);
+  // The lede promises the referendum's steps, not its care: step 3 says
+  // launch polls are held by Abolish alone, where a referendum waits for
+  // independent trustees.
+  await expect(words).toMatch(/sealed, posted and counted the same way as a referendum\./);
+  await expect(words).not.toMatch(/same care/);
   // The civic register's words and the ID lookup stay on the poll register.
   await expect(main.queryByRole("textbox")).toBeNull();
   await expect(canvas.getByRole("main")).not.toHaveTextContent(/server|64-character|Poll ID/);

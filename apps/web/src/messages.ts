@@ -27,7 +27,7 @@ const enUS = {
     "The newest questions couldn't be loaded just now. A poll's own link still works.",
   trustTitle: "Why you can trust a casual poll",
   trustLede:
-    "A question about street trees gets the same care as a referendum. Here is what happens to an answer, in four steps.",
+    "A question about street trees is sealed, posted and counted the same way as a referendum. Here is what happens to an answer, in four steps.",
   trustLabel: "What happens to an answer",
   trustStep: "Step {step} of {total}",
   trust1Title: "Sealed on your device",

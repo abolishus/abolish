@@ -89,6 +89,8 @@ describe("headerRun", () => {
     expectRun(early, [0n]);
   });
 
+  // Up to 200 runs, each a handful of calls to Anvil: past vitest's 5 s default
+  // on a loaded runner (seen on #717).
   test("any window gives the slice a scan of the chain gives", async () => {
     const last = blocks.at(-1)!.timestamp;
     const instant = fc.bigInt({ min: time(0) - 2n * GAP, max: last + 2n * GAP });
@@ -100,7 +102,7 @@ describe("headerRun", () => {
       }),
       { numRuns },
     );
-  });
+  }, 60_000);
 
   test("past its byte budget keeps the latest blocks and starts later", async () => {
     const full = await headerRun(chain.rpc, head, { before: time(5), after: time(12) });

@@ -20,6 +20,7 @@ import {
   availabilityWindows,
   type DeadlineClock,
   deliveryDeadlines,
+  destructionMoment,
   PARAMETERS,
 } from "@abolishus/crypto";
 import { L2Error, RpcError } from "@abolishus/node";
@@ -29,7 +30,7 @@ import type { ApprovedElection, ApprovedElectionInfo, CeremonySeat } from "./cer
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
 import type { DestructionDuty, DestructionStatus } from "./destruction.ts";
-import { L1AnchorError, tallySegment } from "./l1.ts";
+import { L1AnchorError } from "./l1.ts";
 import type { OpeningSender, OpeningSenderStatus } from "./opening-sender.ts";
 import { SendError } from "./send.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
@@ -443,14 +444,13 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
 /**
  * `t_D` (docs/spec/tally.md, Destruction): the later of the tally window's
  * end, `t_S + TALLY_WINDOW`, and the anchoring deadline of segment `s_T − 1`,
- * `s_T` the period containing the window's end, under the pinned clock.
- * Throws `L1AnchorError` `outside-clock` for a close before its epoch.
+ * `s_T` the period containing the window's end, under the pinned clock, as
+ * crypto's `destructionMoment` computes it. Throws `L1AnchorError`
+ * `outside-clock` for a close before its epoch.
  */
 export function tallyDeadline(election: ApprovedElectionInfo, clock: DeadlineClock): bigint {
-  const end = countedDue(election, clock) + BigInt(PARAMETERS.TALLY_WINDOW);
-  const sT = tallySegment(clock, election.closesAt, election.l1InclusionBound);
-  const anchored = clock.epoch + sT * clock.period + clock.deadline;
-  return anchored > end ? anchored : end;
+  if (election.closesAt < clock.epoch) throw new L1AnchorError("outside-clock");
+  return destructionMoment(clock, election.closesAt, election.l1InclusionBound).due;
 }
 
 /**

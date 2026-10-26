@@ -46,6 +46,10 @@ export const PARAMETERS = Object.freeze({
   // Bytes; the longest record the L1 relay takes, so its deposit fits the
   // portal's 120,000-byte data cap (docs/spec/contracts.md, L1 relay).
   MAX_RELAY_RECORD: 119_776,
+  // Bytes; the longest record the relay's rolling call takes, 32 below
+  // MAX_RELAY_RECORD since its deposit carries the root's word too
+  // (docs/spec/contracts.md, L1 relay, Rolling ballots).
+  MAX_ROLLING_RELAY_RECORD: 119_744,
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,

@@ -620,9 +620,13 @@ describe("the registry's events", () => {
   });
 
   test("are found across log ranges, reading only the finalized blocks since the last ask, and again from further back", async () => {
-    let reads = 0;
-    const counting = l2.lying(async (method, _params, forward) => {
-      if (method === "eth_getLogs") reads++;
+    // Each log query's first and last block, in the order asked.
+    let reads: [bigint, bigint][] = [];
+    const counting = l2.lying(async (method, params, forward) => {
+      if (method === "eth_getLogs") {
+        const { fromBlock, toBlock } = params[0] as { fromBlock: Hex; toBlock: Hex };
+        reads.push([BigInt(fromBlock), BigInt(toBlock)]);
+      }
       return forward();
     });
     const { address, fromBlock } = await registry();
@@ -636,15 +640,20 @@ describe("the registry's events", () => {
     const second = await register(address, hash());
     await l2.mine(FINALITY_DEPTH + 3);
     expect((await r.registered(0n)).events.map((e) => e.l2Block)).toEqual([first, second]);
-    reads = 0;
+    const kept = reads.at(-1)?.[1] as bigint;
+    reads = [];
     await l2.mine(2);
     expect((await r.registered(first)).events.map((e) => e.l2Block)).toEqual([first, second]);
-    expect(reads).toBe(1);
+    // Only the blocks finalized since, however far the head moved on a busy runner.
+    expect(reads.length).toBeGreaterThan(0);
+    reads.forEach(([lo], i) =>
+      expect(lo).toBe(i === 0 ? kept + 1n : (reads[i - 1]?.[1] as bigint) + 1n),
+    );
     expect((await r.registered(second)).events.map((e) => e.l2Block)).toEqual([second]);
     // Asked from further back than kept (an index wiped, say): read again.
-    reads = 0;
+    reads = [];
     expect((await r.registered(0n)).events.map((e) => e.l2Block)).toEqual([first, second]);
-    expect(reads).toBeGreaterThan(1);
+    expect(reads[0]?.[0]).toBe(fromBlock);
   });
 
   test("reads one ask at a time, so an abandoned read and the next never race over the kept blocks", async () => {

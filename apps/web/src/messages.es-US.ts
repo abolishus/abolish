@@ -35,7 +35,7 @@ export const esUS: Messages = {
     "El detalle: se divide en partes, cada una cifrada para uno de los puestos de custodio de la encuesta.",
   trust2Title: "Publicada en un tablero público",
   trust2Body:
-    "Cada respuesta sellada va a un tablero público que cualquiera puede leer. Tú guardas un código de seguimiento, para encontrar la tuya ahí y ver que se contó.",
+    "Cada respuesta sellada va a un tablero público que cualquiera puede leer. Tú guardas un código de seguimiento, para encontrar la tuya ahí y ver que sigue ahí.",
   trust2Detail:
     "El detalle: cada entrada extiende una cadena de hashes, así que quitar o cambiar una se nota.",
   trust3Title: "Se abre solo después de que cierra la encuesta",

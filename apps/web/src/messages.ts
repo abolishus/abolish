@@ -37,7 +37,7 @@ const enUS = {
     "The detail: it is split into shares, each encrypted to one of the poll's trustee seats.",
   trust2Title: "Put on a public board",
   trust2Body:
-    "Every sealed answer goes on a public board that anyone can read. You keep a tracking code, so you can find yours there and see that it was counted.",
+    "Every sealed answer goes on a public board that anyone can read. You keep a tracking code, so you can find yours there and see that it stays there.",
   trust2Detail: "The detail: each entry extends a hash chain, so removing or changing one shows.",
   trust3Title: "Opened only after the poll closes",
   trust3Body:

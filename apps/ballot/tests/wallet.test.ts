@@ -24,6 +24,7 @@ import {
   type WalletAnswer,
   type WalletIo,
   WalletRefusal,
+  type WalletStage,
   WalletSession,
 } from "../src/wallet.ts";
 
@@ -229,6 +230,29 @@ describe("WalletSession.send", () => {
     await expect(new WalletSession(provider, CHAIN, BOARD, L1).send(CALL)).rejects.toMatchObject({
       answer: "failed",
     });
+  });
+
+  test("says where a refusal came: before the wallet had the call, at its estimate or at its send", async () => {
+    const at = async (answers: Parameters<typeof wallet>[0]) => {
+      const { provider } = wallet({ ...honest(), ...answers });
+      const met = await new WalletSession(provider, CHAIN, BOARD, L1).send(CALL).catch((e) => e);
+      expect(met).toBeInstanceOf(WalletRefusal);
+      return [(met as WalletRefusal).answer, (met as WalletRefusal).at];
+    };
+    const fail = (error: unknown) => () => {
+      throw error;
+    };
+    expect(await at({ eth_requestAccounts: fail(new Error("down")) })).toEqual([
+      "failed",
+      "before",
+    ]);
+    expect(await at({ eth_chainId: () => "0x1" })).toEqual(["wrong-chain", "before"]);
+    expect(await at({ eth_estimateGas: fail(revert()) })).toEqual(["refused", "estimate"]);
+    expect(await at({ eth_estimateGas: fail(new Error("down")) })).toEqual(["failed", "estimate"]);
+    expect(await at({ eth_estimateGas: () => "0xzz" })).toEqual(["failed", "estimate"]);
+    expect(await at({ eth_estimateGas: fail(rejection()) })).toEqual(["rejected", "estimate"]);
+    expect(await at({ eth_sendTransaction: fail(revert()) })).toEqual(["failed", "send"]);
+    expect(await at({ eth_sendTransaction: fail(rejection()) })).toEqual(["rejected", "send"]);
   });
 
   test("checks the cutoff again before the estimate, the first request to carry the parts", async () => {
@@ -437,8 +461,9 @@ describe("postFromWallet", () => {
    * A wallet and a board on a clock that moves only by the run's sleeps:
    * `finalized`, `safe` and `latest` say which records each head carries at
    * each time (seconds from `START`), `answer` what each send meets and
-   * `deposited` each deposit, and `landed` the L1 time of each posting's
-   * qualifying deposit the L1 read finds, given the deposits made.
+   * `deposited` each deposit, `built` the build's own estimate of a call,
+   * and `landed` the L1 time of each posting's qualifying deposit the L1
+   * read finds, given the deposits made.
    */
   function world({
     finalized = () => [],
@@ -447,6 +472,7 @@ describe("postFromWallet", () => {
     latest = () => [],
     answer = () => "sent",
     deposited = () => "sent",
+    built = () => 2_000n,
     landed = (p, deposits) => {
       const made = deposits.find(({ call }) => call === p);
       return made === undefined ? undefined : START + made.at + 12n;
@@ -460,6 +486,7 @@ describe("postFromWallet", () => {
     latest?: (t: bigint, sent: readonly Uint8Array[]) => readonly Uint8Array[];
     answer?: (call: Uint8Array, n: number) => "sent" | "unknown" | Error;
     deposited?: (call: Uint8Array, n: number) => "sent" | "unknown" | Error;
+    built?: (call: Uint8Array) => bigint | undefined;
     landed?: (
       posting: Uint8Array,
       deposits: readonly { call: Uint8Array; at: bigint }[],
@@ -471,7 +498,8 @@ describe("postFromWallet", () => {
   }) {
     let ms = Number(START) * 1000;
     const t = () => BigInt(Math.floor(ms / 1000));
-    const sends: { call: Uint8Array; at: bigint }[] = [];
+    const sends: { call: Uint8Array; at: bigint; met?: "sent" | "unknown" | Error }[] = [];
+    const estimates: { call: Uint8Array; at: bigint }[] = [];
     const deposits: { call: Uint8Array; gas: bigint; at: bigint }[] = [];
     const reads: { head: string; from: bigint | undefined }[] = [];
     const l1Reads: { since: bigint; at: bigint }[] = [];
@@ -483,14 +511,20 @@ describe("postFromWallet", () => {
       send(call, late) {
         // The wallet's own check before its estimate, as `WalletSession` makes it.
         if (late()) return Promise.reject(new WalletRefusal("late"));
-        sends.push({ call, at: t() - START });
-        return met(answer(call, sends.length - 1), 1_000n + BigInt(sends.length));
+        const send: (typeof sends)[number] = { call, at: t() - START };
+        sends.push(send);
+        send.met = answer(call, sends.length - 1);
+        return met(send.met, 1_000n + BigInt(sends.length));
       },
       deposit(call, gas, late) {
         ms += depositTakes;
         if (late()) return Promise.reject(new WalletRefusal("late"));
         deposits.push({ call, gas, at: t() - START });
         return met(deposited(call, deposits.length - 1), gas);
+      },
+      estimate(call) {
+        estimates.push({ call, at: t() - START });
+        return Promise.resolve(built(call));
       },
       find(head, from): Promise<LoadedPostings> {
         reads.push({ head, from });
@@ -519,11 +553,11 @@ describe("postFromWallet", () => {
       postings = ps;
       return postFromWallet(io, ps, ps, cutoff);
     };
-    return { io, run, sends, deposits, reads, l1Reads, elapsed: () => t() - START };
+    return { io, run, sends, deposits, estimates, reads, l1Reads, elapsed: () => t() - START };
   }
 
-  const refusal = (answer: string) =>
-    new WalletRefusal(answer as Exclude<WalletAnswer, "recorded" | "forced" | "sent">);
+  const refusal = (answer: string, at: WalletStage = "before") =>
+    new WalletRefusal(answer as Exclude<WalletAnswer, "recorded" | "forced" | "sent">, at);
 
   test("recorded once the finalized head carries every posting, each sent once", async () => {
     const w = world({
@@ -661,6 +695,100 @@ describe("postFromWallet", () => {
     expect(w.deposits).toEqual([]);
   });
 
+  test("forces at once, with the build's own estimate, a posting whose send the wallet's node refused once given it (T-50)", async () => {
+    const cases: [string, WalletStage][] = [
+      ["refused", "estimate"],
+      ["failed", "estimate"],
+      ["failed", "send"],
+    ];
+    for (const [answer, at] of cases) {
+      const w = world({ answer: () => refusal(answer, at) });
+      expect(await w.run([A], CUTOFF)).toBe("forced");
+      // The build's estimate a quarter over, as the wallet's send gives its own.
+      expect(w.estimates).toEqual([{ call: A, at: 0n }]);
+      expect(w.deposits).toEqual([{ call: A, gas: 2_500n, at: 0n }]);
+      // Its wait runs out before L1 is read, once.
+      expect(w.l1Reads).toEqual([{ since: START, at: w.elapsed() }]);
+      expect(w.elapsed()).toBeGreaterThanOrEqual(WALLET_WAIT);
+    }
+  });
+
+  test("forces each refused posting in turn, and is recorded once the record is final", async () => {
+    const w = world({
+      answer: () => refusal("refused", "estimate"),
+      finalized: (t) => (t >= 3n * POLL ? [A, B] : []),
+    });
+    expect(await w.run([A, B], CUTOFF)).toBe("recorded");
+    expect(w.deposits.map(({ call }) => call)).toEqual([A, B]);
+    expect(w.sends.map(({ call }) => call)).toEqual([A, B]);
+  });
+
+  test("forces nothing the build's own estimate refuses too, nor a refusal before the wallet had the call or one the voter made", async () => {
+    const both = world({ answer: () => refusal("refused", "estimate"), built: () => undefined });
+    expect(await both.run([A], CUTOFF)).toBe("refused");
+    expect(both.deposits).toEqual([]);
+    const cases: [string, WalletStage][] = [
+      ["failed", "before"],
+      ["refused", "before"],
+      ["wrong-chain", "before"],
+      ["late", "estimate"],
+      ["rejected", "estimate"],
+      ["rejected", "send"],
+    ];
+    for (const [answer, at] of cases) {
+      const w = world({ answer: () => refusal(answer, at) });
+      expect(await w.run([A], CUTOFF)).toBe(answer);
+      // Not even estimated: the build's endpoint isn't given the call (T-18).
+      expect(w.estimates).toEqual([]);
+      expect(w.deposits).toEqual([]);
+    }
+    const thrown = world({ answer: () => new TypeError("wallet gone") });
+    expect(await thrown.run([A], CUTOFF)).toBe("failed");
+    expect(thrown.estimates).toEqual([]);
+  });
+
+  test("forces a refused send only with a deposit's span left before the cutoff", async () => {
+    const tight = world({ answer: () => refusal("refused", "estimate") });
+    expect(await tight.run([A], START + WALLET_DEPOSIT_SPAN - 1n)).toBe("refused");
+    expect(tight.estimates).toEqual([]);
+    expect(tight.deposits).toEqual([]);
+    const room = world({ answer: () => refusal("refused", "estimate") });
+    expect(await room.run([A], START + WALLET_DEPOSIT_SPAN)).toBe("forced");
+    // Checked again once the wallet is on L1.
+    const slow = world({ answer: () => refusal("refused", "estimate"), depositTakes: 1_000 });
+    expect(await slow.run([A], START + WALLET_DEPOSIT_SPAN)).toBe("refused");
+    expect(slow.deposits).toEqual([]);
+  });
+
+  test("answers the send's refusal on a deposit the wallet doesn't make, the voter's decline as theirs, and a failed deposit send as deposited", async () => {
+    for (const [deposit, expected] of [
+      [refusal("refused", "estimate"), "refused"],
+      [refusal("wrong-chain"), "refused"],
+      [refusal("failed", "estimate"), "refused"],
+      [new TypeError("wallet gone"), "refused"],
+      [refusal("rejected", "estimate"), "rejected"],
+      [refusal("rejected", "send"), "rejected"],
+      // It may follow a broadcast: L1 then says whether it landed.
+      [refusal("failed", "send"), "forced"],
+    ] as const) {
+      const w = world({ answer: () => refusal("refused", "estimate"), deposited: () => deposit });
+      expect(await w.run([A], CUTOFF)).toBe(expected);
+    }
+    // Never asked for a second deposit once one wasn't made, even one that may have been.
+    const once = world({
+      answer: () => refusal("refused", "estimate"),
+      deposited: () => refusal("failed", "send"),
+    });
+    expect(await once.run([A, B], CUTOFF)).toBe("sent");
+    expect(once.deposits.map(({ call }) => call)).toEqual([A]);
+    // Once one posting went, a later one's refusal ends the run as sent.
+    const second = world({
+      answer: (_, n) => (n === 0 ? "sent" : refusal("refused", "estimate")),
+      deposited: () => refusal("rejected", "send"),
+    });
+    expect(await second.run([A, B], CUTOFF)).toBe("sent");
+  });
+
   test("sends a posting the latest head showed once its wait passes with no record", async () => {
     const w = world({ latest: (t) => (t < POLL ? [A] : []) });
     expect(await w.run([A], CUTOFF)).toBe("sent");
@@ -747,12 +875,25 @@ describe("postFromWallet", () => {
           minLength: 1,
           maxLength: 120,
         }),
-        fc.array(fc.constantFrom("sent", "unknown", "rejected", "failed"), { minLength: 1 }),
-        fc.array(fc.constantFrom("sent", "unknown", "rejected", "refused", "failed"), {
-          minLength: 1,
-        }),
+        fc.array(
+          fc.constantFrom(
+            "sent",
+            "unknown",
+            "rejected",
+            "failed",
+            "refused@estimate",
+            "failed@estimate",
+            "failed@send",
+          ),
+          { minLength: 1 },
+        ),
+        fc.array(
+          fc.constantFrom("sent", "unknown", "rejected", "refused", "failed", "failed@send"),
+          { minLength: 1 },
+        ),
+        fc.boolean(),
         fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
-        async (finals, safes, latests, answers, depositAnswers, cutoffIn) => {
+        async (finals, safes, latests, answers, depositAnswers, estimates, cutoffIn) => {
           const postings = [A, B, Uint8Array.of(0, 13, 1, 0xcc)];
           const at = (rounds: number[][], t: bigint) =>
             (rounds[Math.min(Number(t / POLL), rounds.length - 1)] ?? []).map(
@@ -760,6 +901,13 @@ describe("postFromWallet", () => {
             );
           // Every record a finalized read carried: each read goes on from the last.
           const final: Uint8Array[] = [];
+          // "answer@stage", or an answer before the wallet had the call.
+          const met = (a: string) => {
+            const [answer = a, at = "before"] = a.split("@");
+            return answer === "sent" || answer === "unknown"
+              ? answer
+              : refusal(answer, at as WalletStage);
+          };
           const w = world({
             finalized: (t) => {
               const records = at(finals, t);
@@ -768,14 +916,9 @@ describe("postFromWallet", () => {
             },
             safe: (t) => at(safes, t),
             latest: (t) => at(latests, t),
-            answer: (_, n) => {
-              const a = answers[n % answers.length] as string;
-              return a === "sent" || a === "unknown" ? a : refusal(a);
-            },
-            deposited: (_, n) => {
-              const a = depositAnswers[n % depositAnswers.length] as string;
-              return a === "sent" || a === "unknown" ? a : refusal(a);
-            },
+            answer: (_, n) => met(answers[n % answers.length] as string),
+            deposited: (_, n) => met(depositAnswers[n % depositAnswers.length] as string),
+            built: () => (estimates ? 2_000n : undefined),
           });
           const cutoff = START + cutoffIn;
           const result = await w.run(postings, cutoff);
@@ -783,15 +926,30 @@ describe("postFromWallet", () => {
           // Each posting sent at most once, and only by the cutoff.
           expect(new Set(w.sends.map(({ call }) => call)).size).toBe(w.sends.length);
           for (const { at: sentAt } of w.sends) expect(START + sentAt).toBeLessThanOrEqual(cutoff);
-          // Each deposited at most once, only a posting the wallet sent
-          // `POSTING_FORCE_AFTER` before, and only with a deposit's span
-          // left before the cutoff.
+          // Each deposited at most once, and only with a deposit's span left
+          // before the cutoff: a posting the wallet sent `POSTING_FORCE_AFTER`
+          // before, with its send's gas, or one whose send the wallet's node
+          // refused once given it, at once, with the build's own estimate.
           expect(new Set(w.deposits.map(({ call }) => call)).size).toBe(w.deposits.length);
-          for (const { call, at: depositedAt } of w.deposits) {
+          for (const { call, gas, at: depositedAt } of w.deposits) {
             const send = w.sends.find((s) => s.call === call);
             expect(send).toBeDefined();
-            expect(depositedAt - (send?.at ?? 0n)).toBeGreaterThanOrEqual(POSTING_FORCE_AFTER);
+            const refused =
+              send?.met instanceof WalletRefusal &&
+              send.met.at !== "before" &&
+              (send.met.answer === "refused" || send.met.answer === "failed");
+            if (refused) {
+              expect(estimates).toBe(true);
+              expect(depositedAt).toBe(send.at);
+              expect(gas).toBe(2_500n);
+            } else
+              expect(depositedAt - (send?.at ?? 0n)).toBeGreaterThanOrEqual(POSTING_FORCE_AFTER);
             expect(START + depositedAt + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(cutoff);
+          }
+          // The build's endpoint is given only a call the wallet's node refused.
+          for (const { call } of w.estimates) {
+            const send = w.sends.find((s) => s.call === call);
+            expect(send?.met instanceof WalletRefusal && send.met.at !== "before").toBe(true);
           }
           if (result === "forced") expect(w.deposits.length).toBeGreaterThan(0);
           // The run ends within two waits, the time to force and two rounds.

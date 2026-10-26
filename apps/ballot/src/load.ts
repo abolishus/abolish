@@ -867,6 +867,25 @@ function depositOf(
 }
 
 /**
+ * The build's own L2 endpoint's `eth_estimateGas` of one posting's
+ * `submitPosting` calldata `call` to the board the deployment pins, or
+ * `undefined` where the call reverts or the endpoint can't answer: the gas
+ * a deposit forcing a posting the wallet's node refused is given, judged
+ * by the same estimate `loadDeposits` qualifies it by ([[posting-relay]],
+ * Own wallet, Forced through L1). The call carries `m_i`, so it is asked
+ * only once the wallet's node was given it and refused it (T-18).
+ */
+export async function estimatePosting(
+  deployment: Deployment,
+  call: Uint8Array,
+  fetchFn: Fetch,
+): Promise<bigint | undefined> {
+  const board = deployment.board;
+  if (board === undefined) return undefined;
+  return estimate(deployment, fetchFn, board.address, call);
+}
+
+/**
  * The L2 endpoint's `eth_estimateGas` of `call` to the board at its latest
  * block, or `undefined` if it can't give one (the call reverts, or the
  * node fails or isn't on the deployment's chain): then no deposit of the

@@ -331,7 +331,7 @@ const enUS = {
     "Our posting relay, run by the poll's operator, was given the missing parts with the key to their outer seal, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Try posting again in a minute: the same parts go again, never new ones.",
   postingWalletOfferTitle: "Post from your own wallet",
   postingWalletOffer:
-    "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does. If the network doesn't take the posting within ten minutes, your wallet asks you to force it through Ethereum from the same address, which needs ETH there too and costs more. This device sends your ballot only once the record shows them.",
+    "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does. If the network doesn't take the posting within ten minutes, or your wallet's node refuses it, your wallet asks you to force it through Ethereum from the same address, which needs ETH there too and costs more. This device sends your ballot only once the record shows them.",
   postingWalletPost: "Post from my wallet, then send",
   postingHandedTitle: "The missing parts may still reach the board",
   postingHanded:
@@ -341,13 +341,13 @@ const enUS = {
     "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Decline any request still open in your wallet, wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
   walletForcedTitle: "Your wallet forced the posting through Ethereum",
   walletForced:
-    "The network didn't take your wallet's posting in time, so your wallet sent it through Ethereum, which the network has to include. Count the missing parts as posted: they reach the public record by the poll's delivery deadline, which can take some hours, and leaving this ballot can't take them back. Keep this page open, and don't reload it or open this ballot in another tab: after the poll's posting cutoff that erases what this device kept for them, and your ballot can then no longer be sent from here. Post from your wallet again only once the record may show them: this device looks for them first, and sends your ballot once it finds them.",
+    "The network didn't take your wallet's posting in time, or your wallet's node refused it, so your wallet sent it through Ethereum, which the network has to include. Count the missing parts as posted: they reach the public record by the poll's delivery deadline, which can take some hours, and leaving this ballot can't take them back. Keep this page open, and don't reload it or open this ballot in another tab: after the poll's posting cutoff that erases what this device kept for them, and your ballot can then no longer be sent from here. Post from your wallet again only once the record may show them: this device looks for them first, and sends your ballot once it finds them.",
   walletRejectedTitle: "Your wallet didn't send anything",
   walletRejected:
     "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts. Choose again below.",
-  walletRefusedTitle: "The board won't take this posting",
+  walletRefusedTitle: "Your wallet refused this posting",
   walletRefused:
-    "Your wallet's check of the posting says the board would refuse it, so nothing was sent and none of your fee was spent. Your wallet and its node were given the missing parts for that check. Try the trustees again, or leave this ballot.",
+    "Your wallet's check of the posting says the board would refuse it, and it couldn't be forced through Ethereum instead, so nothing was sent and none of your fee was spent. Your wallet and its nodes, and the node this device reads the board through, may have been given the missing parts for those checks. Try the trustees again, or leave this ballot.",
   walletWrongChainTitle: "Your wallet is on another network",
   walletWrongChain:
     "Your wallet didn't switch to the network the poll's board is on, so nothing was sent this time. Switch it there, then post from your wallet again.",

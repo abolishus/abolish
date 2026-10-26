@@ -169,7 +169,7 @@ export const WalletRefusedAfterSending: Story = {
   args: { failed: true, handed: true, onWallet: fn(), wallet: "refused" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("The board won't take this posting")).toBeVisible();
+    await expect(canvas.getByText("Your wallet refused this posting")).toBeVisible();
     // The earlier run's parts may still land (T-15).
     await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
   },
@@ -188,7 +188,7 @@ export const WalletProblems: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     for (const title of [
-      "The board won't take this posting",
+      "Your wallet refused this posting",
       "Your wallet is on another network",
       "No wallet in this browser",
       "The time for posting has passed",

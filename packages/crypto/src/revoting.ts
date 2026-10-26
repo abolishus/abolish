@@ -8,6 +8,7 @@ import { BN254_R, encode, u64, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
 import { semaphoreField } from "./membership.ts";
+import { rootStepWindow } from "./rolling-tier-tree.ts";
 
 const U64_MAX = (1n << 64n) - 1n;
 
@@ -142,19 +143,56 @@ export function checkL1Reference(
   l1: FinalizedL1,
   window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
 ): L1ReferenceVerdict {
+  return referenceOf(ref, l1, window).verdict;
+}
+
+/** 5.8's verdict under ballot version 5: version 1's, then the step's window (step 5). */
+export type L1ReferenceVerdictV5 = L1ReferenceVerdict | "root-step-stale" | "root-step-future";
+
+/**
+ * Verifier 5.8 under ballot version 5 (docs/spec/revoting.md, Admission,
+ * step 5): `checkL1Reference`'s steps, then, for a reference it admits, the
+ * window `t − ROOT_WINDOW < τ_n ≤ t` between the ballot's step `n` and `t`,
+ * the timestamp of the block step 4 found (`root-step-stale`,
+ * `root-step-future`). It reads no other block, so the verdict stays the same
+ * for every head past close (T-36), and a ballot's step says at most when,
+ * within the window, its proof's tree was taken (T-13).
+ */
+export function checkL1ReferenceV5(
+  ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array; readonly step: number },
+  l1: FinalizedL1,
+  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+): L1ReferenceVerdictV5 {
+  const { step } = ref;
+  if (!Number.isSafeInteger(step) || step < 0 || step > 0xffff_ffff)
+    throw new RangeError("checkL1ReferenceV5: step must be a u32");
+  const { verdict, timestamp } = referenceOf(ref, l1, window);
+  if (verdict !== "admitted") return verdict;
+  const at = rootStepWindow(BigInt(step), timestamp);
+  return at === "in" ? "admitted" : at === "stale" ? "root-step-stale" : "root-step-future";
+}
+
+// Steps 1 to 4, with the timestamp of the block step 2 read.
+function referenceOf(
+  ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
+  l1: FinalizedL1,
+  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+): { readonly verdict: L1ReferenceVerdict; readonly timestamp: bigint } {
   checkU64(ref.l1RefNumber, "checkL1Reference: l1RefNumber");
   const refHash = bytes32(ref.l1RefHash, "checkL1Reference: l1RefHash");
   checkU64(l1.head, "checkL1Reference: head");
   checkU64(window.l1RefMin, "checkL1Reference: l1RefMin");
   checkU64(window.closesAt, "checkL1Reference: closesAt");
-  if (ref.l1RefNumber < window.l1RefMin) return "l1-ref-before-open";
+  if (ref.l1RefNumber < window.l1RefMin) return { verdict: "l1-ref-before-open", timestamp: 0n };
   const atOrBelowHead = ref.l1RefNumber <= l1.head;
   const block = l1.block(atOrBelowHead ? ref.l1RefNumber : l1.head);
   const hash = bytes32(block.hash, "checkL1Reference: block hash");
-  checkU64(block.timestamp, "checkL1Reference: block timestamp");
-  if (block.timestamp > window.closesAt) return "l1-ref-after-close";
-  if (!atOrBelowHead) return "pending";
-  return equalBytes(hash, refHash) ? "admitted" : "l1-ref-unknown";
+  const { timestamp } = block;
+  checkU64(timestamp, "checkL1Reference: block timestamp");
+  const decide = (verdict: L1ReferenceVerdict) => ({ verdict, timestamp });
+  if (timestamp > window.closesAt) return decide("l1-ref-after-close");
+  if (!atOrBelowHead) return decide("pending");
+  return decide(equalBytes(hash, refHash) ? "admitted" : "l1-ref-unknown");
 }
 
 // Public data, so a constant-time comparison isn't needed.

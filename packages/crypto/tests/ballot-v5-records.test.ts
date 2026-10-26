@@ -31,13 +31,14 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // (scripts/ballot-v5-records-vectors.py), with step roots rebuilt there from
 // the listed groups' events, membership proofs made by snarkjs over
 // Semaphore's depth-32 circuit (scripts/ballot-proofs.mjs) and every pairing
-// verdict snarkjs's. packages/crypto has no version-5 codec or checks yet
-// (P2-17 part 3), so this reads the record with a codec written from
+// verdict snarkjs's. This reads the record with a codec written from
 // docs/spec/ballot-validity.md (Ballot record (version 5)) over version 4's
 // committed vote, recomputes the hashes from their formulas, the step roots
 // with packages/crypto's tier tree, and checks every membership proof with
-// packages/crypto's Groth16 verifier against the signals derived here. The
-// validity proofs under version input 5 are checked by part 3's code.
+// packages/crypto's Groth16 verifier against the signals derived here: a
+// reading of the spec beside the production codec, context and admission,
+// which ballot-v5-admission.test.ts runs over the same file, the validity
+// proofs under version input 5 included.
 
 type Admission = {
   readonly code: string;

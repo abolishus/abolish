@@ -249,12 +249,27 @@ export interface CellBallotCoreV4 {
  * opens both (T-42, T-47, T-31).
  */
 export function coreHashV4(core: CellBallotCoreV4): Uint8Array {
+  return halvesCoreHash("coreHashV4", core, 4);
+}
+
+/**
+ * The tracking code of a core of ballot version 5 (docs/spec/ballot-validity.md,
+ * Hashes (version 5)): version 4's with version input 5. A version-5 core is
+ * a version-4 core in a rolling poll, and the step is chosen at cast, so the
+ * code doesn't name it; the version byte keeps one code from naming cores of
+ * both versions (T-31, T-42).
+ */
+export function coreHashV5(core: CellBallotCoreV4): Uint8Array {
+  return halvesCoreHash("coreHashV5", core, 5);
+}
+
+function halvesCoreHash(caller: string, core: CellBallotCoreV4, version: 4 | 5): Uint8Array {
   if (!(core.definitionHash instanceof Uint8Array) || core.definitionHash.length !== 32)
-    throw new RangeError("coreHashV4: definitionHash must be 32 bytes");
+    throw new RangeError(`${caller}: definitionHash must be 32 bytes`);
   const w = new Writer();
   w.bytes(core.definitionHash);
   u16.write(w, BALLOT_RECORD_TYPE);
-  u8.write(w, 4);
+  u8.write(w, version);
   u8.write(w, core.cell);
   VSS.write(w, core.vss);
   SHARE_HASHES.write(w, core.shareHashes);

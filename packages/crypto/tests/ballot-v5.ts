@@ -1,8 +1,7 @@
 // Ballot record version 5 (docs/spec/ballot-validity.md, Ballot record
-// (version 5)), read from the spec for the vector tests: packages/crypto has
-// no version-5 codec or hashes yet (P2-17 part 3), so the record is framed
+// (version 5)), read from the spec for the vector tests: the record is framed
 // here over version 4's committed vote and its hashes recomputed from their
-// formulas.
+// formulas, independently of packages/crypto's own codec (src/ballot.ts).
 
 import {
   bytesFixed,

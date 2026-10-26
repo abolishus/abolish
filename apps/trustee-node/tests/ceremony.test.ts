@@ -45,6 +45,9 @@ class CrashingStore implements SeatStore {
   list(prefix: string) {
     return this.#inner.list(prefix);
   }
+  remove(key: string) {
+    return this.#inner.remove(key);
+  }
 }
 
 const FIELDS = ["keys", "challenges", "answers", "reveals"] as const;
@@ -642,6 +645,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
     const crashing: SeatStore = {
       get: (key) => inner.get(key),
       list: (prefix) => inner.list(prefix),
+      remove: (key) => inner.remove(key),
       putOnce: (key, bytes) => {
         if (!crashed && key.startsWith("approvals/")) {
           crashed = true;

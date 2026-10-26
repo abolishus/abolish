@@ -56,7 +56,7 @@ import {
   RlpError,
 } from "@abolishus/verifier";
 import type { FinalizedBoardAnchors } from "./availability.ts";
-import type { ApprovedElection } from "./ceremony.ts";
+import type { ApprovedElectionInfo } from "./ceremony.ts";
 
 export interface L1AnchorOptions {
   readonly l1: Rpc;
@@ -158,7 +158,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  */
 export async function l1BoardAnchors(
   options: L1AnchorOptions,
-  election: ApprovedElection,
+  election: ApprovedElectionInfo,
   extent: ReaderExtent = AVAILABILITY_POINTS.ballotExtent,
 ): Promise<FinalizedBoardAnchors & { readonly boardVersion: BoardEntryVersion }> {
   const { l1, l2, anchor } = options;

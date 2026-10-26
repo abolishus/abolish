@@ -18,10 +18,13 @@ import type { AvailabilityStatus } from "../src/availability.ts";
 import type { ApprovedElection } from "../src/ceremony.ts";
 import type { ComplaintDutyStatus } from "../src/complaint.ts";
 import type { ReceiptDutyStatus } from "../src/delivery.ts";
+import type { DestructionStatus } from "../src/destruction.ts";
 import {
   AvailabilityDuties,
   ComplaintDuties,
   type ComplaintEvent,
+  DestructionDuties,
+  type DestructionEvent,
   type Duty,
   type DutyEvent,
   type OpeningEvent,
@@ -29,6 +32,7 @@ import {
   openingsDeadline,
   ReceiptDuties,
   type ReceiptEvent,
+  runInTurn,
   TallyDuties,
   tallyDeadline,
   type TallyEvent,
@@ -73,6 +77,8 @@ interface Harness {
   /** Each election's scripted build failures, taken in order before it builds. */
   readonly buildFailures: Map<number, Error[]>;
   readonly approved: number[];
+  /** The elections whose material the seat has begun destroying. */
+  readonly destroying: Set<number>;
   wall: bigint;
 }
 
@@ -85,6 +91,7 @@ function harness(approved: number[]): Harness {
     steps: new Map(),
     buildFailures: new Map(),
     approved,
+    destroying: new Set(),
     wall: 0n,
   };
   const duty = (n: number): Duty => ({
@@ -100,7 +107,9 @@ function harness(approved: number[]): Harness {
   (h as { duties: AvailabilityDuties }).duties = new AvailabilityDuties({
     seat: {
       approvedStubs: async () => h.approved.map((n) => approvedOf(n).stubHash),
-      approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+      approvedElection: async (stubHash) =>
+        h.destroying.has(stubHash[0] as number) ? undefined : approvedOf(stubHash[0] as number),
+      destroying: async (stubHash) => h.destroying.has(stubHash[0] as number),
     },
     build: async (e) => {
       const n = e.stubHash[0] as number;
@@ -389,6 +398,7 @@ describe("the receipt duties", () => {
       seat: {
         approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
         approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+        destroying: async () => false,
       },
       build: async (e) => {
         const n = e.stubHash[0] as number;
@@ -513,6 +523,7 @@ describe("the receipt duties", () => {
       seat: {
         approvedStubs: async () => [approvedOf(1).stubHash],
         approvedElection: async () => approvedOf(1),
+        destroying: async () => false,
       },
       build: async () => {
         throw new RpcError("eth_chainId: TimeoutError");
@@ -547,6 +558,7 @@ describe("the complaint duties", () => {
       seat: {
         approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
         approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+        destroying: async () => false,
       },
       build: async (e) => {
         const n = e.stubHash[0] as number;
@@ -635,6 +647,7 @@ describe("the complaint duties", () => {
       seat: {
         approvedStubs: async () => [approvedOf(1).stubHash],
         approvedElection: async () => approvedOf(1),
+        destroying: async () => false,
       },
       build: async () => {
         throw new RpcError("eth_chainId: TimeoutError");
@@ -676,6 +689,7 @@ describe("the tally duties", () => {
         seat: {
           approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
           approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+          destroying: async () => false,
         },
         build: async (e) => {
           const n = e.stubHash[0] as number;
@@ -797,6 +811,7 @@ describe("the tally duties", () => {
         seat: {
           approvedStubs: async () => [approvedOf(1).stubHash],
           approvedElection: async () => approvedOf(1),
+          destroying: async () => false,
         },
         build: async () => {
           built++;
@@ -863,6 +878,7 @@ describe("the opening senders", () => {
         seat: {
           approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
           approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+          destroying: async () => false,
         },
         build: async (e) => {
           built++;
@@ -924,5 +940,140 @@ describe("the opening senders", () => {
     await h.duties.step();
     expect(h.built()).toBe(0);
     expect(h.events).toEqual([{ event: "openings-abandoned", stubHash: name(1) }]);
+  });
+});
+
+describe("destruction in the schedule", () => {
+  test("a duty is dropped unstepped once the seat has begun destroying its election, and never built after", async () => {
+    const h = harness([1, 2, 3]);
+    await h.duties.step();
+    h.destroying.add(1);
+    h.destroying.add(3);
+    for (let i = 0; i < 3; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(4);
+    // A restarted node sets up nothing for an election being destroyed.
+    const restarted = harness([1, 2]);
+    restarted.destroying.add(1);
+    await restarted.duties.step();
+    expect(restarted.built).toEqual([name(2)]);
+  });
+
+  test("a step destruction overtook settles its duty rather than ending the loop; the same failure otherwise ends it", async () => {
+    const h = harness([1]);
+    h.steps.set(1, [
+      () => {
+        h.destroying.add(1);
+        throw new Error("trustee node: intake record ab is gone");
+      },
+    ]);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(1);
+    const other = harness([1]);
+    other.steps.set(1, [new Error("a store it can't read")]);
+    await expect(other.duties.step()).rejects.toThrow("a store it can't read");
+  });
+
+  test("destruction beginning between the check and the build sets nothing up and stops nothing else", async () => {
+    const h = harness([1]);
+    let checks = 0;
+    const duties = new AvailabilityDuties({
+      seat: {
+        approvedStubs: async () => [approvedOf(1).stubHash],
+        // Begun just after the schedule's first check.
+        destroying: async () => ++checks > 1,
+        approvedElection: async () => undefined,
+      },
+      build: async () => expect.fail("nothing is built"),
+      clock: () => 0n,
+      log: (e) => h.events.push(e),
+    });
+    await duties.step();
+    await duties.step();
+    expect(checks).toBe(2);
+    expect(h.events).toEqual([]);
+  });
+
+  const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n };
+
+  function destructions(scripts: Map<number, DestructionStatus[]>, clock: () => bigint) {
+    const events: DestructionEvent[] = [];
+    const stepped: string[] = [];
+    const duties = new DestructionDuties(
+      {
+        seat: {
+          approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+          approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+          destroying: async () => false,
+        },
+        build: async (e) => {
+          const n = e.stubHash[0] as number;
+          return {
+            deadline: tallyDeadline(e, CLOCK),
+            step: async () => {
+              stepped.push(name(n));
+              const script = scripts.get(n) as DestructionStatus[];
+              return (script.length > 1 ? script.shift() : script[0]) as DestructionStatus;
+            },
+          };
+        },
+        clock,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    return { duties, events, stepped };
+  }
+
+  test("each election's destruction is stepped until destroyed, past t_D included, and reported once per change", async () => {
+    const holding: DestructionStatus = { state: "holding", finalized: 10n };
+    const h = destructions(
+      new Map<number, DestructionStatus[]>([
+        [1, [holding, holding, { state: "destroyed", at: "published" }]],
+        [2, [holding]],
+      ]),
+      () => tallyDeadline(approvedOf(1), CLOCK) + 1_000_000n,
+    );
+    for (let i = 0; i < 5; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(3);
+    expect(h.stepped.filter((s) => s === name(2))).toHaveLength(5);
+    expect(h.events.filter((e) => e.stubHash === name(1))).toEqual([
+      { event: "destruction", stubHash: name(1), state: "holding", finalized: "10" },
+      { event: "destruction", stubHash: name(1), state: "destroyed", at: "published" },
+    ]);
+  });
+
+  test("schedules run in turn steps each in order and never two at once", async () => {
+    const log: string[] = [];
+    let running = 0;
+    const schedule = (label: string) => ({
+      step: async () => {
+        running++;
+        expect(running).toBe(1);
+        log.push(`${label}:start`);
+        await new Promise((resolve) => setImmediate(resolve));
+        log.push(`${label}:end`);
+        running--;
+      },
+    });
+    const stop = new AbortController();
+    const steps = [schedule("destruction"), schedule("tally")];
+    const counting = {
+      step: async () => {
+        if (log.length >= 8) stop.abort();
+      },
+    };
+    await runInTurn(stop.signal, 1, [...steps, counting]);
+    expect(log).toEqual([
+      "destruction:start",
+      "destruction:end",
+      "tally:start",
+      "tally:end",
+      "destruction:start",
+      "destruction:end",
+      "tally:start",
+      "tally:end",
+    ]);
   });
 });

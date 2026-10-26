@@ -18,7 +18,11 @@
 // - every election it approves recorded with what the capacity check reads,
 //   before it signs, and approvals one at a time, so each stub check 4 sees
 //   every election approved before it (docs/spec/delivery.md, Capacity;
-//   T-25, T-52, T-54).
+//   T-25, T-52, T-54);
+// - an election's secrets and shares destroyed once, after a write-once
+//   record that they are being destroyed, and its destruction statement
+//   signed with the per-election signing key as that key's last use
+//   (docs/spec/tally.md, Destruction; T-14, T-40, T-69).
 import {
   answersMessage,
   bytesFixed,
@@ -49,10 +53,12 @@ import {
   list,
   MAX_TRUSTEES,
   p256Sig,
+  encodeDestructionStatement,
   type RevealsMessage,
   revealsMessage,
   type SeatSecrets,
   signCeremonyRegistration,
+  signDestructionStatement,
   struct,
   type AnswersMessage,
   u32,
@@ -115,8 +121,11 @@ export type SeatRefusal =
   /** The node approved another transcript for this stub. */
   | "approved-other";
 
-/** An election this seat approved, as its later duties read it. */
-export interface ApprovedElection {
+/**
+ * An election this seat approved, without its secrets: what the duties that
+ * outlast destruction read (the openings' sending and the destruction itself).
+ */
+export interface ApprovedElectionInfo {
   readonly index: number;
   readonly stubHash: Uint8Array;
   /** The definition the approval registers: the stub with the approved transcript. */
@@ -127,6 +136,10 @@ export interface ApprovedElection {
   readonly l1InclusionBound: bigint;
   /** `M`, the definition's members over its tiers: what bounds the seat's contract-path obligation at `2M`. */
   readonly members: bigint;
+}
+
+/** An election this seat approved, as its later duties read it. */
+export interface ApprovedElection extends ApprovedElectionInfo {
   /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
   readonly signingSecret: Uint8Array;
   /** The seat's per-election KEM key pair, its public key the one the approved run registered. The secret is never logged. */
@@ -216,6 +229,10 @@ export class CeremonySeat {
   // Approvals run one at a time, so no two can each pass stub check 4
   // against a ledger the other is about to add to.
   #approving: Promise<unknown> = Promise.resolve();
+  // Uses of each election's secrets in progress (`withSecrets`), by stub
+  // hash, and who waits for them to end: destruction removes nothing before.
+  readonly #uses = new Map<string, number>();
+  readonly #drained = new Map<string, (() => void)[]>();
 
   constructor(config: SeatConfig) {
     const key = config.panel.keys[config.index - 1];
@@ -466,31 +483,45 @@ export class CeremonySeat {
   }
 
   /**
-   * The election an approved stub registers, with the seat's per-election
-   * signing secret from the approved run, for the duties after the ceremony
-   * (docs/spec/availability.md, What a seat does); undefined unless this seat
-   * approved the stub.
+   * The election an approved stub registers, without its secrets, before
+   * and after destruction alike; undefined unless this seat approved the stub.
    */
-  async approvedElection(stubHash: Uint8Array): Promise<ApprovedElection | undefined> {
+  async approvedElectionInfo(stubHash: Uint8Array): Promise<ApprovedElectionInfo | undefined> {
     if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
     const name = hex(stubHash);
     if ((await this.#durable(`approvals/${name}`)) === undefined) return undefined;
-    const runRecord = await this.#durable(`approved-runs/${name}`);
+    const runId = await this.#approvedRunId(name);
     const served = await this.#durable(`served/${name}`);
-    if (runRecord === undefined || served === undefined)
+    const begun = await this.#durable(`runs/${name}/${hex(runId)}/begun`);
+    if (served === undefined || begun === undefined)
       throw new Error(`trustee node: approval of ${name} without its run or served record`);
-    const run = await this.#run(stubHash, decode(APPROVED_RUN, runRecord).run_id);
-    if (run === undefined) throw new Error(`trustee node: the approved run of ${name} is gone`);
     const r = decode(SERVED, served);
     return {
       index: this.#config.index,
       stubHash: Uint8Array.from(stubHash),
       definitionHash: r.definition_hash,
-      electionId: Uint8Array.from(run.params.electionId),
+      electionId: decode(BEGUN, begun).election_id,
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       l1InclusionBound: BigInt(r.l1_inclusion_bound),
       members: r.members,
+    };
+  }
+
+  /**
+   * The election an approved stub registers, with the seat's per-election
+   * signing secret from the approved run, for the duties after the ceremony
+   * (docs/spec/availability.md, What a seat does); undefined unless this seat
+   * approved the stub and hasn't begun destroying its material.
+   */
+  async approvedElection(stubHash: Uint8Array): Promise<ApprovedElection | undefined> {
+    const info = await this.approvedElectionInfo(stubHash);
+    if (info === undefined || (await this.destroying(stubHash))) return undefined;
+    const name = hex(stubHash);
+    const run = await this.#run(stubHash, await this.#approvedRunId(name));
+    if (run === undefined) throw new Error(`trustee node: the approved run of ${name} is gone`);
+    return {
+      ...info,
       signingSecret: Uint8Array.from(run.seat.signingSecret),
       kemKeyPair: {
         publicKey: run.seat.kem.publicKey,
@@ -504,17 +535,15 @@ export class CeremonySeat {
 
   /**
    * The approval's transcript and key set, with the approved run's KEM and
-   * signing secrets, for intake; undefined unless this seat approved the stub.
+   * signing secrets, for intake; undefined unless this seat approved the
+   * stub and hasn't begun destroying its material.
    */
   async intakeSecrets(stubHash: Uint8Array): Promise<IntakeSecrets | undefined> {
     if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
     const name = hex(stubHash);
     const approval = await this.#durable(`approvals/${name}`);
-    if (approval === undefined) return undefined;
-    const runRecord = await this.#durable(`approved-runs/${name}`);
-    if (runRecord === undefined)
-      throw new Error(`trustee node: approval of ${name} without its run`);
-    const run = await this.#run(stubHash, decode(APPROVED_RUN, runRecord).run_id);
+    if (approval === undefined || (await this.destroying(stubHash))) return undefined;
+    const run = await this.#run(stubHash, await this.#approvedRunId(name));
     if (run === undefined) throw new Error(`trustee node: the approved run of ${name} is gone`);
     const a = decode(APPROVED, approval);
     return {
@@ -538,6 +567,117 @@ export class CeremonySeat {
     const name = hex(stubHash);
     if ((await this.#durable(`approvals/${name}`)) === undefined) return undefined;
     return this.#durable(`transcripts/${name}`);
+  }
+
+  /**
+   * Runs `use` with the election's secrets as one use of them that
+   * destruction waits for, and returns its result; undefined, without
+   * running it, unless this seat approved the stub and hasn't begun
+   * destroying its material. Whatever writes or signs with the secrets
+   * (intake's records and receipts) does it inside `use`, so nothing is
+   * written or signed with them once `destroy` has removed anything, and no
+   * record it removed is written again (T-14, T-40).
+   */
+  async withSecrets<T>(
+    stubHash: Uint8Array,
+    use: (secrets: IntakeSecrets) => Promise<T>,
+  ): Promise<T | undefined> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
+    const name = hex(stubHash);
+    // Counted before `destroying` is read: a use that reads it unset is one
+    // `destroy`, which writes it first, waits for.
+    this.#uses.set(name, (this.#uses.get(name) ?? 0) + 1);
+    try {
+      const secrets = await this.intakeSecrets(stubHash);
+      return secrets === undefined ? undefined : await use(secrets);
+    } finally {
+      const left = (this.#uses.get(name) ?? 1) - 1;
+      if (left > 0) this.#uses.set(name, left);
+      else {
+        this.#uses.delete(name);
+        for (const done of this.#drained.get(name) ?? []) done();
+        this.#drained.delete(name);
+      }
+    }
+  }
+
+  /** Resolves once no use of the election's secrets begun before is still running. */
+  #drain(name: string): Promise<void> {
+    if (!this.#uses.has(name)) return Promise.resolve();
+    return new Promise((done) =>
+      this.#drained.set(name, [...(this.#drained.get(name) ?? []), done]),
+    );
+  }
+
+  /**
+   * Whether the seat has begun destroying the election's material
+   * (`destroy`): from then on no secret of it is handed out, and no duty
+   * that reads one is stepped again.
+   */
+  async destroying(stubHash: Uint8Array): Promise<boolean> {
+    if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return false;
+    return (await this.#durable(`destroying/${hex(stubHash)}`)) !== undefined;
+  }
+
+  /**
+   * Destroys the election's material the node holds and returns the seat's
+   * signed destruction statement (`0x000f`, version 1), or undefined unless
+   * this seat approved the stub (docs/spec/tally.md, Destruction). The
+   * caller decides when: at the earlier of every cell's anchored passing
+   * opening and `t_D` (`DestructionDuty`).
+   *
+   * First a write-once record that destruction has begun, so nothing hands
+   * out a secret of the election again, even across a crash, and a wait for
+   * every use of them already begun (`withSecrets`); then every
+   * ballot's ciphertext and shares from intake; then the statement, signed
+   * and recorded once; then the approved run's KEM and signing secrets, one
+   * record, so the signature is the signing key's last use. The KEM secret
+   * goes with it, after the signing rather than before: the statement is
+   * returned only once both are gone, so nothing outside the node can tell,
+   * and whatever sends it must take it from here, never from its record.
+   * Summed shares and the messages received are held only by the tally
+   * duty, in memory, which the schedule drops once `destroying` holds.
+   * Each step is repeated on a later call after a crash, and the statement
+   * is never signed twice. Signed openings, the transcript and every other
+   * public record are kept.
+   */
+  async destroy(stubHash: Uint8Array): Promise<Uint8Array | undefined> {
+    const info = await this.approvedElectionInfo(stubHash);
+    if (info === undefined) return undefined;
+    const store = this.#config.store;
+    const name = hex(stubHash);
+    await store.putOnce(`destroying/${name}`, Uint8Array.of(1));
+    await this.#drain(name);
+    // Intake's records (`intake.ts`): each holds the ballot's share ciphertext and the shares opened from it.
+    for (const ballot of await store.list(`intake/${name}`))
+      await store.remove(`intake/${name}/${ballot}`);
+    const runId = await this.#approvedRunId(name);
+    let statement = await this.#durable(`destruction/${name}`);
+    if (statement === undefined) {
+      const run = await this.#run(stubHash, runId);
+      if (run === undefined)
+        throw new Error(`trustee node: the approved run of ${name} is gone before its statement`);
+      statement = (
+        await store.putOnce(
+          `destruction/${name}`,
+          encodeDestructionStatement(
+            signDestructionStatement(run.seat.signingSecret, {
+              definition_hash: info.definitionHash,
+              signer: this.#config.index,
+            }),
+          ),
+        )
+      ).value;
+    }
+    await store.remove(`runs/${name}/${hex(runId)}/secrets`);
+    return statement;
+  }
+
+  async #approvedRunId(name: string): Promise<Uint8Array> {
+    const runRecord = await this.#durable(`approved-runs/${name}`);
+    if (runRecord === undefined)
+      throw new Error(`trustee node: approval of ${name} without its run`);
+    return decode(APPROVED_RUN, runRecord).run_id;
   }
 
   /** Whether the seat holds an approval for the stub these bytes decode to. */
@@ -599,7 +739,10 @@ export class CeremonySeat {
     if (!(runId instanceof Uint8Array) || runId.length !== 32) return undefined;
     const prefix = `runs/${hex(stubHash)}/${hex(runId)}`;
     const begun = await this.#durable(`${prefix}/begun`);
-    const secrets = await this.#durable(`${prefix}/secrets`);
+    // Read, never written again as `#durable` would: destruction removes this
+    // record, and a read in flight must not put it back. `keys` wrote it, and
+    // made it durable, before the round-1 record this run is used by.
+    const secrets = await this.#config.store.get(`${prefix}/secrets`);
     const round1 = await this.#durable(`${prefix}/round-1`);
     // A crash between the run's records leaves it unusable: it is abandoned,
     // and the creator starts another with a fresh run_id.

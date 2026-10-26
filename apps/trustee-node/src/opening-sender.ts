@@ -24,7 +24,7 @@ import {
   decodeTallyOpening,
   tallyOpeningStatement,
 } from "@abolishus/crypto";
-import type { ApprovedElection } from "./ceremony.ts";
+import type { ApprovedElectionInfo } from "./ceremony.ts";
 import type { OpeningOperator, OperatorAnswer } from "./operator.ts";
 import type { TallyDutyStatus } from "./tally.ts";
 
@@ -82,7 +82,7 @@ export class PublishedReads {
 }
 
 export interface OpeningSenderOptions {
-  readonly election: ApprovedElection;
+  readonly election: ApprovedElectionInfo;
   /** The board-entry version the registered definition pins, which an answered entry must decode under. */
   readonly boardVersion: BoardEntryVersion;
   /** The openings the seat signed, by cell (`signedOpenings`). */

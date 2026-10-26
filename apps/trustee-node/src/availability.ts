@@ -43,7 +43,7 @@ import {
   verifyBoard,
 } from "@abolishus/crypto";
 import { RpcError } from "@abolishus/node";
-import type { ApprovedElection } from "./ceremony.ts";
+import type { ApprovedElection, ApprovedElectionInfo } from "./ceremony.ts";
 import { L1AnchorError } from "./l1.ts";
 import type { SeatStore } from "./store.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
@@ -250,7 +250,7 @@ export async function attested(
  * Throws `L1AnchorError` `outside-clock` for a close before the clock's
  * epoch, which no reader of this deployment sets up either.
  */
-export function countedDue(election: ApprovedElection, clock: DeadlineClock): bigint {
+export function countedDue(election: ApprovedElectionInfo, clock: DeadlineClock): bigint {
   if (election.closesAt < clock.epoch) throw new L1AnchorError("outside-clock");
   return countedExtent(clock, election.closesAt, election.l1InclusionBound).due;
 }

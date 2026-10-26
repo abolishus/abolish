@@ -665,3 +665,73 @@ describe("the obligation decided at the intake cutoff", () => {
     });
   });
 });
+
+/** A store over `under` whose writes and removals stay its own, so a test can destroy without touching the shared setup. */
+function overlay(under: SeatStore): SeatStore {
+  const own = new Map<string, Uint8Array>();
+  const removed = new Set<string>();
+  return {
+    get: async (key) => (removed.has(key) ? undefined : (own.get(key) ?? under.get(key))),
+    putOnce: async (key, value) => {
+      const held = removed.has(key) ? undefined : (own.get(key) ?? (await under.get(key)));
+      if (held !== undefined) return { created: false, value: held };
+      removed.delete(key);
+      own.set(key, Uint8Array.from(value));
+      return { created: true, value: Uint8Array.from(value) };
+    },
+    list: async (prefix) => {
+      const under_ = `${prefix}/`;
+      const names = new Set([
+        ...(await under.list(prefix)),
+        ...[...own.keys()]
+          .filter((k) => k.startsWith(under_) && !k.slice(under_.length).includes("/"))
+          .map((k) => k.slice(under_.length)),
+      ]);
+      return [...names].filter((n) => !removed.has(`${prefix}/${n}`)).sort();
+    },
+    remove: async (key) => {
+      own.delete(key);
+      removed.add(key);
+    },
+  };
+}
+
+describe("intake and destruction (P2-13 part 5c-1)", () => {
+  function destroyable() {
+    const store = overlay(s.stores[0] as SeatStore);
+    const ceremony = new CeremonySeat({
+      panel: s.e.panelists.panel,
+      l2ChainId: L2_CHAIN_ID,
+      trusteeRegistry: TRUSTEE_REGISTRY,
+      index: 1,
+      identitySecret: s.e.panelists.secrets[0] as Uint8Array,
+      electorate: () => Promise.resolve(true),
+      store,
+    });
+    const [seat] = seatsOf(s, { store }, [ceremony]).intake;
+    if (seat === undefined) expect.fail("one intake seat");
+    const deliver = () =>
+      seat.intake(s.e.stubBytes, s.transcript, honest.bytes, honest.ciphertexts[0] as Uint8Array);
+    return { store, ceremony, seat, deliver };
+  }
+
+  it("takes nothing once the seat has destroyed the election's material, though it took the ballot before", async () => {
+    const d = destroyable();
+    expect((await d.deliver()).ok).toBe(true);
+    await d.ceremony.destroy(s.e.stubHash);
+    expect(await d.deliver()).toEqual({ ok: false, code: "intake-closed" });
+    expect(await d.seat.receipted(s.e.stubHash)).toEqual([]);
+  });
+
+  it("a delivery in flight when destruction begins is waited for, and leaves no record behind", async () => {
+    const d = destroyable();
+    const delivered = d.deliver();
+    // Begun once the delivery holds the secrets: the destruction waits for it.
+    await new Promise((resolve) => setImmediate(resolve));
+    const destroyed = d.ceremony.destroy(s.e.stubHash);
+    await delivered;
+    expect(await destroyed).toBeDefined();
+    expect(await d.seat.receipted(s.e.stubHash)).toEqual([]);
+    expect(await d.ceremony.intakeSecrets(s.e.stubHash)).toBeUndefined();
+  });
+});

@@ -213,6 +213,7 @@ const written = new WeakMap<SeatStore, ReadonlyMap<string, Uint8Array>>();
 function overlay(store: SeatStore): SeatStore {
   const own = new Map<string, Uint8Array>();
   const over: SeatStore = {
+    remove: () => Promise.reject(new Error("the tally duty removes nothing")),
     get: async (key) => own.get(key) ?? (key.startsWith("tally/") ? undefined : store.get(key)),
     putOnce: async (key, value) => {
       const held = own.get(key);

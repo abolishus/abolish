@@ -1,9 +1,13 @@
 // The node's durable records. Every record is written once and never changed
-// or removed by the node: the duties that need a record (a run seen, at most
-// one round-4 message per run, at most one approval per stub) are each
-// "write it once, before acting", so a store that can't overwrite can't be
-// talked into breaking one by a crash, a retry or a race (docs/spec/ceremony.md,
-// Soundness and Approval and re-runs; T-14, T-37).
+// by the node: the duties that need a record (a run seen, at most one
+// round-4 message per run, at most one approval per stub) are each "write it
+// once, before acting", so a store that can't overwrite can't be talked into
+// breaking one by a crash, a retry or a race (docs/spec/ceremony.md,
+// Soundness and Approval and re-runs; T-14, T-37). The one removal is
+// destruction's (docs/spec/tally.md, Destruction): the records holding an
+// election's secrets and shares, removed only once the election's write-once
+// destruction record is durable, after which nothing writes them again
+// (`CeremonySeat.destroy`; T-14, T-40, T-69).
 import { constants } from "node:fs";
 import { link, mkdir, open, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,6 +30,14 @@ export interface SeatStore {
   putOnce(key: string, value: Uint8Array): Promise<PutOnce>;
   /** The names of the records directly under `prefix`, sorted; none if there are none. */
   list(prefix: string): Promise<string[]>;
+  /**
+   * Removes the record under `key`, if there is one, and resolves only once
+   * its removal is durable. Only destruction removes, and only records no
+   * duty writes again once the election's destruction record exists: a
+   * removed key is free for `putOnce`, so removing any other record would
+   * undo the write-once rule it keeps.
+   */
+  remove(key: string): Promise<void>;
 }
 
 const KEY = /^[a-z0-9-]{1,128}(\/[a-z0-9-]{1,128}){0,7}$/;
@@ -60,6 +72,10 @@ export class MemoryStore implements SeatStore {
       .filter((k) => k.startsWith(under) && !k.slice(under.length).includes("/"))
       .map((k) => k.slice(under.length))
       .sort();
+  }
+
+  async remove(key: string): Promise<void> {
+    this.#records.delete(checkedKey(key));
   }
 }
 
@@ -192,6 +208,26 @@ export class FileStore implements SeatStore {
     } catch (e) {
       if (isCode(e, "ENOENT")) return [];
       throw e;
+    }
+  }
+
+  // The name is gone once its directory is synced. Removing a file doesn't
+  // overwrite its blocks: the runbook's encrypted disk is what keeps them
+  // from a later reader of the device (Store).
+  async remove(key: string): Promise<void> {
+    const parts = checkedKey(key).split("/");
+    try {
+      await unlink(join(this.#root, ...parts));
+    } catch (e) {
+      // Removed before, by an earlier call or one a crash cut short: its
+      // directory is synced again below either way.
+      if (!isCode(e, "ENOENT")) throw e;
+    }
+    try {
+      await this.#sync(join(this.#root, ...parts.slice(0, -1)));
+    } catch (e) {
+      // No directory, so no record was ever written under it.
+      if (!isCode(e, "ENOENT")) throw e;
     }
   }
 }

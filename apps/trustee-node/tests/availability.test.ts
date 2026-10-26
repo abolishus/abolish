@@ -945,6 +945,7 @@ describe("the counted extent", () => {
         seat: {
           approvedStubs: async () => [w.election.stubHash],
           approvedElection: async () => w.election,
+          destroying: async () => false,
         },
         build: async () => {
           throw new RpcError("eth_chainId: TimeoutError");

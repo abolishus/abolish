@@ -10,7 +10,7 @@ import {
   readDefinition,
 } from "@abolishus/core";
 import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
-import { checkpointHash, decodeElectionDefinition } from "@abolishus/crypto";
+import { checkpointHash, decodeElectionDefinition, encodeArchiveLocator } from "@abolishus/crypto";
 import type { Sql } from "postgres";
 import {
   type Address,
@@ -231,6 +231,21 @@ const about = (findings: readonly AnchorFinding[], id: Uint8Array) =>
 
 const localNow = () => BigInt(Math.floor(Date.now() / 1000));
 
+/** A version-3 archive locator (docs/spec/archive.md, Locator). */
+const locator = () =>
+  encodeArchiveLocator(
+    Uint8Array.of(0x01, 0x55, 0x12, 0x20, ...crypto.getRandomValues(new Uint8Array(32))),
+    crypto.getRandomValues(new Uint8Array(32)),
+    3,
+  );
+
+const locatorHeld = (deployment: AnchorDeployment) =>
+  client.readContract({
+    address: deployment.anchor,
+    abi: boardAnchorAbi,
+    functionName: "latestLocator",
+  });
+
 const held = (deployment: AnchorDeployment, electionId: Uint8Array, segment: number) =>
   client.readContract({
     address: deployment.anchor,
@@ -319,13 +334,54 @@ describe("the adapter", () => {
     const sent: Hex[] = [];
     const again = adapter(deployment, sender(deployment, sent));
     // A slot already filled reverts the simulation, before any signature.
-    await expect(again.anchor(await readCheckpoints(app, id))).rejects.toThrow();
+    await expect(again.anchor(await readCheckpoints(app, id), undefined)).rejects.toThrow();
     // So does a checkpoint of an anchor whose authority is another account.
     const other = await deployAnchor();
     const stranger = adapter({ ...other, authority: accounts[3] as Address }, sender(other, sent));
-    await expect(stranger.anchor(await readCheckpoints(app, id))).rejects.toThrow();
+    await expect(stranger.anchor(await readCheckpoints(app, id), undefined)).rejects.toThrow();
+    // And a locator the anchor won't frame: version 0.
+    await expect(again.anchor([], Uint8Array.of(0, 0, ...locator().slice(2)))).rejects.toThrow();
     expect(sent).toEqual([]);
-    await expect(again.anchor([])).rejects.toThrow(RangeError);
+    await expect(again.anchor([], undefined)).rejects.toThrow(RangeError);
+    await expect(again.anchor([], new Uint8Array(0))).rejects.toThrow(RangeError);
+  });
+
+  test("carries the archive's locator with the checkpoints, then alone once it changes", async () => {
+    const deployment = await deployAnchor();
+    const id = await board(deployment.anchor);
+    const sent: Hex[] = [];
+    const chain = adapter(deployment, sender(deployment, sent));
+    expect(await chain.latestLocator()).toBeUndefined();
+    const first = locator();
+    const run = await anchorBoards(app, chain, localNow(), { locator: async () => first });
+    expect(about(run.findings, id)).toEqual([]);
+    expect(run.locator).toBe("carried");
+    expect(sent).toHaveLength(1);
+    expect(await chain.latestLocator()).toEqual(first);
+    expect(await locatorHeld(deployment)).toEqual([toHex(first), 1n]);
+    // Held already: nothing is sent.
+    const same = await anchorBoards(app, chain, localNow(), { locator: async () => first });
+    expect(same.locator).toBe("held");
+    expect(sent).toHaveLength(1);
+    // A newer one goes alone.
+    const next = locator();
+    const alone = await anchorBoards(app, chain, localNow(), { locator: async () => next });
+    expect(alone.locator).toBe("sent");
+    expect(sent).toHaveLength(2);
+    expect(await locatorHeld(deployment)).toEqual([toHex(next), 2n]);
+  });
+
+  test("fails a locator call whose sender resolved without the anchor holding it", async () => {
+    const deployment = await deployAnchor();
+    const run = await anchorBoards(
+      app,
+      adapter(deployment, async () => {}),
+      localNow(),
+      { locator: async () => locator() },
+    );
+    expect(run.findings).toContainEqual({ code: "anchor-locator-failed" });
+    expect(run.locator).toBeUndefined();
+    expect(await locatorHeld(deployment)).toEqual(["0x", 0n]);
   });
 
   test("fails a call whose sender resolved without the anchor holding it", async () => {

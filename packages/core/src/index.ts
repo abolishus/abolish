@@ -52,6 +52,7 @@ export {
   anchorBoards,
   type AnchorFinding,
   type AnchorFindingCode,
+  type AnchorOptions,
   type AnchoringClock,
   type AnchorReport,
   type AnchorRun,

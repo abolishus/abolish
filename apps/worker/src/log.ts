@@ -55,8 +55,8 @@ export type AuditFindingLine =
 
 /**
  * What an anchoring run found (core's AnchorFindingCode), for one election
- * but `anchor-clock`. The election ID and segment are public: both are on
- * the board and on L1.
+ * but `anchor-clock` and the archive locator's two. The election ID and
+ * segment are public: both are on the board and on L1.
  */
 export interface AnchorFindingLine {
   readonly queue: "{board-anchor}";

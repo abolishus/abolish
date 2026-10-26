@@ -14,6 +14,8 @@ import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
+  type AnchorChain,
+  anchorBoards,
   appendEntry,
   archiveBoards,
   archiveLocator,
@@ -396,6 +398,37 @@ describe("archiveBoards", () => {
     await drain(arweave);
     const latest = await archiveLocator(app, DEPLOYMENT);
     expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({ busy: false });
+  });
+
+  test("the anchoring run carries the locator the archive names, once it names one", async () => {
+    const arweave = new ModelArweave();
+    await board(0, 1);
+    const calls: (Uint8Array | undefined)[] = [];
+    // This deployment's anchor, which serves none of the boards here (each
+    // names another), so a run only has the locator to send.
+    const chain: AnchorChain = {
+      chainId: L1,
+      address: ANCHOR,
+      clock: { epoch: 0n, period: 3600n, deadline: 43_200n },
+      now: async () => 10n * 3600n,
+      anchored: async () => undefined,
+      latestLocator: async () => calls.at(-1),
+      anchor: async (_checkpoints, locator) => void calls.push(locator),
+    };
+    await run(arweave);
+    expect((await anchorBoards(app, chain, 10n * 3600n)).locator).toBeUndefined();
+    expect(calls).toEqual([]);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    const sent = await anchorBoards(app, chain, 10n * 3600n);
+    expect(sent.locator).toBe("sent");
+    expect(calls).toEqual([latest!.locator]);
+    expect((await anchorBoards(app, chain, 10n * 3600n)).locator).toBe("held");
+    // A database holding another deployment's chain gives no locator, and says so.
+    const other = { ...chain, address: new Uint8Array(20) };
+    const unread = await anchorBoards(app, other, 10n * 3600n);
+    expect(unread.findings).toContainEqual({ code: "anchor-locator-unread" });
+    expect(calls).toHaveLength(1);
   });
 
   test("refuses a stored manifest of another deployment", async () => {

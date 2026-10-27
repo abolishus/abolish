@@ -574,6 +574,38 @@ export const ReviewDesktop: Story = {
   },
 };
 
+/**
+ * From 768px "Ready to ask?" is its own row, with what submitting does under
+ * it, where that and the Cloudflare note sat beside it and made the row 224px
+ * tall over an empty band; the note sits by the button that starts the check,
+ * where it was read a whole review earlier (P2-29, creating a poll's
+ * iteration 9).
+ */
+export const SubmitSectionDesktop: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(1280);
+    const heading = await canvas.findByRole("heading", { name: "Ready to ask?", level: 2 });
+    // What submitting does lies under the heading, close enough to read as
+    // its next line, where it sat beside it.
+    const below =
+      canvas.getByText(/^Submitting sets your poll up/).getBoundingClientRect().top -
+      heading.getBoundingClientRect().bottom;
+    await expect(below).toBeGreaterThan(0);
+    await expect(below).toBeLessThanOrEqual(40);
+    const review = canvas.getByRole("region", { name: "Check it through" }).getBoundingClientRect();
+    const note = canvas
+      .getByText(/^Before it's sent, a check by Cloudflare/)
+      .getBoundingClientRect();
+    const submit = canvas.getByRole("button", { name: "Submit poll" }).getBoundingClientRect();
+    await expect(note.top).toBeGreaterThan(review.bottom);
+    await expect(note.bottom).toBeLessThanOrEqual(submit.top);
+    await expect(submit.top - note.bottom).toBeLessThanOrEqual(24);
+  },
+};
+
 export const SubmitIsTheNextStep: Story = {
   args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
   play: async ({ canvasElement }) => {

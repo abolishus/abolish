@@ -354,7 +354,7 @@ export function ballotChecks(
         // `RelayedBallotSubmitted` and their rolling kin, as its contract
         // framed them, carry an ordinary or a relayed ballot (T-71, T-17).
         // A rolling one's supplied root is read only beside a rolling
-        // definition (5.1's `root-step-mismatch`, P2-17 part 4d): beside any
+        // definition (5.1's `root-step-mismatch`, P2-17 part 4d-2): beside any
         // other its version-5 ballot is unpinned, so admission rejects it
         // before any root is read.
         const record = decodeContractEvent(e.payload, eventVersion);

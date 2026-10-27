@@ -294,11 +294,10 @@ describe("definition version 7", () => {
 // `electorate_mode` 1 and ballot version 5, which names its step, under 2;
 // ballot version 5 beside contract-event version 8, 9 or 10, which name no
 // relayed rolling ballot, fails, and beside 11 is unverifiable until the
-// verifier's rolling checks (P2-17 parts 4c and 4d); and what the row says of version 6's author
+// verifier's rolling 5.1 and 5.2 (P2-17 part 4d-2); and what the row says of version 6's author
 // panel, results mode and tally-opening version holds under either mode
-// (T-16, T-17, T-25, T-34, T-36, T-50, T-53). Ballot version 5 beside a
-// definition before version 7 is still judged as a version 2.3 doesn't know
-// until the verifier admits it (P2-17 part 4): unsupported, not yet failed.
+// (T-16, T-17, T-25, T-34, T-36, T-50, T-53). Ballot version 5 beside any
+// other definition fails (P2-17 part 4d-1).
 describe("2.3's profile combination under version 7", () => {
   // Sealed, with no author panel and the profile version 6 fits with.
   const FITTING: Readonly<Record<number, number>> = {
@@ -406,17 +405,18 @@ describe("2.3's profile combination under version 7", () => {
       ).toBe("profile-combination");
   });
 
-  test("ballot version 5 beside version 6 is still a ballot version 2.3 doesn't know", () => {
-    // As the verifier's 2.3 vectors, written before version 5 had a
-    // layout, expect: the events rule and its cores' opening aren't read.
-    for (const events of [8, 9, 10, 11, 12]) {
-      const d = withPins(asV6(v7(1)), {
-        [RECORD_TYPES.ballot]: 5,
-        [RECORD_TYPES.contractEvent]: events,
-        [RECORD_TYPES.spoiledBallotOpening]: 2,
-      });
-      expect(profileCombinationRule(d)).toBe("unsupported-version");
-    }
+  test("ballot version 5 beside version 6 fails, whatever else it pins", () => {
+    // Version 5 names a step, which only a rolling electorate has, so no
+    // later release can read it beside version 6 (T-36).
+    for (const events of [8, 9, 10, 11, 12, 13])
+      for (const spoiled of [2, 3, 255]) {
+        const d = withPins(asV6(v7(1)), {
+          [RECORD_TYPES.ballot]: 5,
+          [RECORD_TYPES.contractEvent]: events,
+          [RECORD_TYPES.spoiledBallotOpening]: spoiled,
+        });
+        expect(profileCombinationRule(d)).toBe("profile-combination");
+      }
   });
 
   test("a ballot version this package doesn't know is unsupported under either mode", () => {

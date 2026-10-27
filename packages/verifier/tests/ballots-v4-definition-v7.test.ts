@@ -89,8 +89,7 @@ const rows = (r: Report, ids: readonly string[]) =>
     }),
   );
 const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7"];
-// Only 2.3's ballot version 5 differs: a rolling electorate's, which a
-// fixed version 7 fails and version 6 doesn't read.
+// The cases only the version-7 file has: the same election read as version 6.
 const OWN = new Set(["v6-reading", "v6-stub"]);
 
 test("every definition is version 7 under a fixed electorate", () => {
@@ -125,20 +124,12 @@ describe("1.3, 2.3, 3.1, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 against the independe
     );
 });
 
-test("a fixed version 7 gets version 6's verdict on every ballot and row, but 2.3 beside ballot version 5", () => {
+test("a fixed version 7 gets version 6's verdict on every ballot and row", () => {
   for (const c6 of v6.cases) {
     const c7 = byId(v7, c6.id);
     expect(c7.ballots, c6.id).toEqual(c6.ballots);
     const { "3.1": _, ...expected7 } = c7.expected;
-    if (c6.id === "ballot-v5") {
-      expect(expected7["2.3"]).toEqual({ status: "fail", code: "profile-combination", at: {} });
-      expect(c6.expected["2.3"]).toEqual({
-        status: "unverifiable",
-        code: "unsupported-version",
-        at: {},
-      });
-      expect({ ...expected7, "2.3": c6.expected["2.3"] }).toEqual(c6.expected);
-    } else expect(expected7, c6.id).toEqual(c6.expected);
+    expect(expected7, c6.id).toEqual(c6.expected);
   }
 });
 

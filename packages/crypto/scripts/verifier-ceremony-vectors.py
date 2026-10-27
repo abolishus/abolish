@@ -172,11 +172,12 @@ def combination(defn):
         return failed
     # Each definition version pins one ballot version, and only it: 2 under
     # 3 and 4 (regional cells), 3 under 5 (questions), 1 under 1; ballot
-    # version 4 (an author half) only under definition version 6, which this
-    # model never sees. Any other ballot version may be a later release's,
-    # which might name its cell or carry questions (T-36).
+    # version 4 (an author half) only under definition version 6, and 5 (a
+    # step) only under a rolling version 7, which this model never sees. Any
+    # other ballot version may be a later release's, which might name its
+    # cell or carry questions (T-36).
     wanted = {3: 2, 4: 2, 5: 3}.get(definition, 1)
-    known = ballot in (1, 2, 3, 4)
+    known = ballot in (1, 2, 3, 4, 5)
     if known and ballot != wanted:
         return failed
     # Ballot versions 1 to 3 need the opening version that opens their

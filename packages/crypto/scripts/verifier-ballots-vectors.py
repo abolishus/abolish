@@ -123,7 +123,7 @@ def decode_ballot(payload):
 
 
 def combination(d):
-    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: it pins ballot version 1 with spoiled-ballot opening version 1, ballot versions 2 to 4 pair only with definition versions 3 to 6, and an unknown ballot version is a later release's to judge."""
+    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: it pins ballot version 1 with spoiled-ballot opening version 1, ballot versions 2 to 5 pair only with definition versions 3 to 7, and an unknown ballot version is a later release's to judge."""
     pins = dict(d["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(0x0006)
     events = pins.get(CONTRACT_EVENT_TYPE)
@@ -142,7 +142,7 @@ def combination(d):
     # before any combination (verifier.md, Definition, step 2).
     if board not in (1, 3, 4, 5):
         return outcome("unverifiable", "unsupported-version", {})
-    if ballot not in (1, 2, 3, 4):
+    if ballot not in (1, 2, 3, 4, 5):
         # A version this verifier doesn't know: a later release judges it.
         return settled if closes else failed
     fits = ballot == 1 and pins.get(0x0003) == 1 and board in (3, 4, 5) and (opening != 1 or board in (4, 5)) and closes
@@ -512,10 +512,18 @@ def build(constants):
     bundle("participation", "A 2-of-4 panel where only seats 1 and 2 take part: the transcript registers a key set (k = 2) but 3.2 fails ceremony-participation, so no ballot is checked under it.", d_p, t_p, e_p, None, [t_p, (ok0, None)], "not-reached")
 
     # A ballot version this verifier doesn't know may name a key a later
-    # release pins for it: 1.3 can't fail (T-36).
+    # release pins for it: 1.3 can't fail (T-36). Version 255 stands for one
+    # no release reads.
+    unread_key_pins = [(ty, 255 if ty == BALLOT_TYPE else v) for ty, v in pins]
+    d_u, t_u, e_u = election_for("ballot-unread-other-key", [1, 2, 3], profile={"protocol_major": 1, "pins": unread_key_pins}, membership_vk_hash=bal.det("verifier other key"))
+    bundle("ballot-unread-other-key", "The profile pins ballot version 255, which no release reads, with another membership key: 1.3 isn't failed, since a later release may pin that key for its version, and 5.1 to 5.5 and 5.7 are unsupported.", d_u, t_u, e_u, [1, 2, 3], [t_u, (ok0, None)], "unsupported")
+
+    # Ballot version 5 proves membership under the same pinned key as
+    # versions 1 to 4, so another key fails 1.3, and it names a step, which
+    # only a rolling electorate has, so 2.3 fails it beside version 1.
     v5_key_pins = [(ty, 5 if ty == BALLOT_TYPE else v) for ty, v in pins]
     d_v5, t_v5, e_v5 = election_for("ballot-v5-other-key", [1, 2, 3], profile={"protocol_major": 1, "pins": v5_key_pins}, membership_vk_hash=bal.det("verifier other key"))
-    bundle("ballot-v5-other-key", "The profile pins ballot version 5, unknown here, with another membership key: 1.3 isn't failed, since a later release may pin that key for version 5, and 5.1 to 5.5 and 5.7 are unsupported.", d_v5, t_v5, e_v5, [1, 2, 3], [t_v5, (ok0, None)], "unsupported")
+    bundle("ballot-v5-other-key", "The profile pins ballot version 5, a rolling electorate's, with another membership key: 1.3 fails, 2.3 fails profile-combination, and, as for any ballot version but the definition's own, 5.1 to 5.5 and 5.7 are unsupported.", d_v5, t_v5, e_v5, [1, 2, 3], [t_v5, (ok0, None)], "unsupported")
 
     zero_root = [dict(g, root=0) if g["tier"] == 2 else g for g in base["electorate"]]
     d_z, t_z, e_z = election_for("root-zero", [1, 2, 3], electorate=zero_root)
@@ -818,8 +826,8 @@ def assemble(constants, proofs_path, out_dir):
         else:
             assert ceremony_rows["3.2"]["status"] == "fail"
         expect = bnd["expect"]
-        # 1.3 knows only ballot version 1's key (docs/spec/verifier.md, Procedure, step 7).
-        vk_fails = pins.get(BALLOT_TYPE) == 1 and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
+        # 1.3 knows the one key ballot versions 1 to 5 prove under (docs/spec/verifier.md, 1.3).
+        vk_fails = pins.get(BALLOT_TYPE) in (1, 2, 3, 4, 5) and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
         # Under a contract-event version this generator doesn't read, ordinary
         # ballots can't be found: 5.5 and 5.7 stay unverifiable.
         windows = pins.get(CONTRACT_EVENT_TYPE) in READ_EVENTS

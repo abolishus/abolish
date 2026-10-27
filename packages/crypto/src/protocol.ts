@@ -530,13 +530,14 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * T-45, docs/spec/tally.md, Live results, What a node does), and must pin
  * tally-opening version 2 and board-entry version 6, which no sealed
  * definition may pin; ballot versions 1 to 5 need a board-entry
- * version that carries share receipts and complaints (3, 4 or 5) and the
+ * version that carries share receipts and complaints (3 to 7) and the
  * spoiled-ballot opening version that opens their cores (1 for version 1, 2
  * for versions 2 and 3, 3 for versions 4 and 5); and tally-opening version 1 needs one that carries
- * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
+ * destruction statements (4, 5 or 7, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
- * carries close statements (5, or 7 with an author panel) and contract-event version 8, which archives
+ * carries close statements (5, 6 for a live poll, or 7 with an author panel) and contract-event
+ * version 8 to 12, which archive
  * every board event (the close rule's, the batches', the obligation root's
  * and the availability records') and the group registry's Tier 1 and
  * self-paid additions, so a seat can always state the close, force what it

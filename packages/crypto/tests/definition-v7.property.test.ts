@@ -13,11 +13,14 @@ import {
   electionDefinitionV7Hash,
   electionDefinitionV7Rule,
   electionStubV7Hash,
+  type ElectionDefinitionV6,
   ELECTORATE_MODES,
   encodeElectionDefinitionV6,
   encodeElectionDefinitionV7,
   nullifierScope,
   profileCombinationRule,
+  RECORD_TYPES,
+  RESULTS_MODES,
   type RollingTier,
   rollingNullifierScope,
 } from "../src/index.ts";
@@ -284,12 +287,233 @@ describe("definition version 7", () => {
       opts,
     );
   });
+});
 
-  // 2.3 knows no pairing for version 7 until P2-17 part 4, so a client that
-  // must refuse an election bound to fail it refuses every version-7 one.
-  test("2.3's profile combination refuses a version-7 definition", () => {
-    for (const d of [rollingTypical, fixedTypical])
-      expect(profileCombinationRule(d as never)).toBe("profile-combination");
+// docs/spec/verifier.md 2.3 for definition version 7: display-text version 2
+// and spoiled-ballot opening version 3, as version 6; ballot version 4 under
+// `electorate_mode` 1 and ballot version 5, which names its step, under 2;
+// ballot version 5 beside contract-event version 8, 9 or 10, which name no
+// relayed rolling ballot, fails, and beside 11, which this package doesn't
+// read yet, is unverifiable; and what the row says of version 6's author
+// panel, results mode and tally-opening version holds under either mode
+// (T-16, T-17, T-25, T-34, T-36, T-50, T-53). Ballot version 5 beside any
+// other definition is still judged as a version 2.3 doesn't know until the
+// verifier admits it (P2-17 part 4): unsupported, not yet failed.
+describe("2.3's profile combination under version 7", () => {
+  // Sealed, with no author panel and the profile version 6 fits with.
+  const FITTING: Readonly<Record<number, number>> = {
+    [RECORD_TYPES.electionDefinition]: 7,
+    [RECORD_TYPES.ballot]: 4,
+    [RECORD_TYPES.spoiledBallotOpening]: 3,
+    [RECORD_TYPES.tallyOpening]: 1,
+    [RECORD_TYPES.boardEntry]: 5,
+    [RECORD_TYPES.contractEvent]: 8,
+    [RECORD_TYPES.displayText]: 2,
+  };
+  const ROLLING = { ...FITTING, [RECORD_TYPES.ballot]: 5, [RECORD_TYPES.contractEvent]: 11 };
+  const sealed = {
+    results_mode: RESULTS_MODES.sealed,
+    live_every: 0,
+    live_batch: 0,
+    author_threshold: 0,
+    author_keys: [],
+    author_transcript_hash: new Uint8Array(32),
+  };
+  const withPins = <D extends ElectionDefinitionV6>(
+    d: D,
+    pins: Readonly<Record<number, number | undefined>>,
+  ): D => ({
+    ...d,
+    profile: {
+      ...d.profile,
+      pins: [
+        ...d.profile.pins.filter((p) => !Object.hasOwn(pins, p.record_type)),
+        ...Object.entries(pins)
+          .filter((e): e is [string, number] => e[1] !== undefined)
+          .map(([t, version]) => ({ record_type: Number(t), version })),
+      ].sort((a, b) => a.record_type - b.record_type),
+    },
+  });
+  const v7 = (
+    mode: 1 | 2,
+    pins: Readonly<Record<number, number | undefined>> = {},
+    fields: Partial<ElectionDefinitionV7> = {},
+  ): ElectionDefinitionV7 =>
+    withPins(
+      { ...(mode === 1 ? fixedTypical : rollingTypical), ...sealed, ...fields },
+      { ...(mode === 1 ? FITTING : ROLLING), ...pins },
+    );
+  // The version-6 value with the same fields and pins, but for 0x0001's.
+  const asV6 = (d: ElectionDefinitionV7): ElectionDefinitionV6 => {
+    const { electorate_mode: _mode, rolling_electorate: _rolling, ...v6 } = d;
+    return withPins(v6, { [RECORD_TYPES.electionDefinition]: 6 });
+  };
+  const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+  const livePins = { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 };
+  const authorPanel = {
+    author_threshold: 1,
+    // The rule reads only whether there is a panel, never its keys.
+    author_keys: [new Uint8Array(33).fill(2)],
+    author_transcript_hash: new Uint8Array(32).fill(7),
+  };
+
+  test("a fixed electorate fits with ballot version 4 and version 6's pins", () => {
+    expect(profileCombinationRule(v7(1))).toBeUndefined();
+    expect(profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: 9 }))).toBeUndefined();
+    expect(profileCombinationRule(v7(1, livePins, live), fixedTypical.threshold)).toBeUndefined();
+    // Ballot version 5 names a step, which a fixed electorate has none of;
+    // until 2.3 reads it beside every definition it is unknown here.
+    for (const events of [8, 9, 10, 11, 255])
+      expect(
+        profileCombinationRule(
+          v7(1, { [RECORD_TYPES.ballot]: 5, [RECORD_TYPES.contractEvent]: events }),
+        ),
+      ).toBe("unsupported-version");
+  });
+
+  test("a rolling electorate pins ballot version 5 beside contract-event version 11, unverifiable until it is read", () => {
+    expect(profileCombinationRule(v7(2))).toBe("unsupported-version");
+    expect(profileCombinationRule(v7(2, livePins, live), rollingTypical.threshold)).toBe(
+      "unsupported-version",
+    );
+    // A later version this package doesn't know may name the relayed
+    // rolling ballot too: unsupported, never failed (T-36).
+    expect(profileCombinationRule(v7(2, { [RECORD_TYPES.contractEvent]: 255 }))).toBe(
+      "unsupported-version",
+    );
+    // Versions 8 and 9 archive no rolling ballot, and 10 none forced through L1.
+    for (const events of [1, 7, 8, 9, 10])
+      expect(profileCombinationRule(v7(2, { [RECORD_TYPES.contractEvent]: events }))).toBe(
+        "profile-combination",
+      );
+    // Ballot version 4 carries no step, so a rolling poll's ballots couldn't
+    // name the root their proofs used.
+    for (const events of [8, 9, 11])
+      expect(
+        profileCombinationRule(
+          v7(2, { [RECORD_TYPES.ballot]: 4, [RECORD_TYPES.contractEvent]: events }),
+        ),
+      ).toBe("profile-combination");
+  });
+
+  test("ballot version 5 beside version 6 is still a ballot version 2.3 doesn't know", () => {
+    // As the verifier's 2.3 vectors, written before version 5 had a
+    // layout, expect: the events rule and its cores' opening aren't read.
+    for (const events of [8, 9, 10, 11]) {
+      const d = withPins(asV6(v7(1)), {
+        [RECORD_TYPES.ballot]: 5,
+        [RECORD_TYPES.contractEvent]: events,
+        [RECORD_TYPES.spoiledBallotOpening]: 2,
+      });
+      expect(profileCombinationRule(d)).toBe("unsupported-version");
+    }
+  });
+
+  test("a ballot version this package doesn't know is unsupported under either mode", () => {
+    for (const mode of [1, 2] as const)
+      for (const events of [8, 9])
+        expect(
+          profileCombinationRule(
+            v7(mode, { [RECORD_TYPES.ballot]: 6, [RECORD_TYPES.contractEvent]: events }),
+          ),
+        ).toBe("unsupported-version");
+  });
+
+  test("ballot version 5 needs opening version 3, display-text version 2 and a board carrying its delivery", () => {
+    for (const spoiled of [1, 2, undefined])
+      expect(profileCombinationRule(v7(2, { [RECORD_TYPES.spoiledBallotOpening]: spoiled }))).toBe(
+        "profile-combination",
+      );
+    for (const displayText of [1, 3])
+      expect(profileCombinationRule(v7(2, { [RECORD_TYPES.displayText]: displayText }))).toBe(
+        "profile-combination",
+      );
+    for (const board of [1, 3, 7])
+      expect(profileCombinationRule(v7(2, { [RECORD_TYPES.boardEntry]: board }))).toBe(
+        "profile-combination",
+      );
+    // An opening version this package doesn't read may open version-5 cores.
+    expect(profileCombinationRule(v7(2, { [RECORD_TYPES.spoiledBallotOpening]: 255 }))).toBe(
+      "unsupported-version",
+    );
+  });
+
+  test("an author panel fails under either mode, and a live poll needs k seats pinned as ours", () => {
+    for (const mode of [1, 2] as const) {
+      for (const fields of [authorPanel, { ...live, ...authorPanel }])
+        for (const ours of [0, 255])
+          expect(profileCombinationRule(v7(mode, livePins, fields), ours)).toBe(
+            "profile-combination",
+          );
+      expect(profileCombinationRule(v7(mode, livePins, live))).toBe("profile-combination");
+      // A live poll's pins on a sealed one, and a sealed poll's on a live one.
+      expect(profileCombinationRule(v7(mode, livePins), 255)).toBe("profile-combination");
+      expect(profileCombinationRule(v7(mode, {}, live), 255)).toBe("profile-combination");
+    }
+  });
+
+  test("the definition's pin and its fields agree, either way round", () => {
+    // A version-7 value pinned 6 would be judged without its electorate mode,
+    // and a version-6 value pinned 7 has none to be judged by.
+    for (const mode of [1, 2] as const) {
+      const d = v7(mode);
+      expect(profileCombinationRule(withPins(d, { [RECORD_TYPES.electionDefinition]: 6 }))).toBe(
+        "profile-combination",
+      );
+      expect(
+        profileCombinationRule(withPins(asV6(d), { [RECORD_TYPES.electionDefinition]: 7 })),
+      ).toBe("profile-combination");
+    }
+  });
+
+  // Small version ranges around every boundary, so each rule is reached.
+  const anyPins = fc.record({
+    [RECORD_TYPES.ballot]: fc.integer({ min: 1, max: 6 }),
+    [RECORD_TYPES.spoiledBallotOpening]: fc.option(fc.integer({ min: 1, max: 4 }), {
+      nil: undefined,
+    }),
+    [RECORD_TYPES.tallyOpening]: fc.integer({ min: 1, max: 4 }),
+    [RECORD_TYPES.boardEntry]: fc.integer({ min: 1, max: 8 }),
+    [RECORD_TYPES.contractEvent]: fc.integer({ min: 1, max: 12 }),
+    [RECORD_TYPES.displayText]: fc.integer({ min: 1, max: 3 }),
+  });
+  const anyFields = fc.record({
+    results: fc.constantFrom(sealed, { ...sealed, ...live }),
+    author: fc.boolean(),
+    ours: fc.integer({ min: 0, max: 4 }),
+  });
+  const fieldsOf = (f: { results: object; author: boolean }) =>
+    ({ ...f.results, ...(f.author && authorPanel) }) as Partial<ElectionDefinitionV7>;
+
+  test("a fixed version 7 is judged as version 6 is, whatever it pins", () => {
+    fc.assert(
+      fc.property(anyPins, anyFields, (pins, f) => {
+        const d = v7(1, pins, fieldsOf(f));
+        expect(profileCombinationRule(d, f.ours)).toBe(profileCombinationRule(asV6(d), f.ours));
+      }),
+      opts,
+    );
+  });
+
+  test("a rolling version 7's ballot version 5 is judged as a fixed one's 4, and fails beside contract-event versions 1 to 10", () => {
+    fc.assert(
+      fc.property(anyPins, anyFields, (pins, f) => {
+        const ballot = pins[RECORD_TYPES.ballot];
+        const events = pins[RECORD_TYPES.contractEvent];
+        const rolling = profileCombinationRule(v7(2, pins, fieldsOf(f)), f.ours);
+        const fixed = profileCombinationRule(
+          v7(1, { ...pins, [RECORD_TYPES.ballot]: ballot === 5 ? 4 : ballot }, fieldsOf(f)),
+          f.ours,
+        );
+        // Where the board-entry version is unread, nothing else is judged.
+        const unread = ![1, 3, 4, 5, 6, 7].includes(pins[RECORD_TYPES.boardEntry]);
+        if (unread) expect(rolling).toBe("unsupported-version");
+        else if (ballot === 4) expect(rolling).toBe("profile-combination");
+        else if (ballot === 5 && events <= 10) expect(rolling).toBe("profile-combination");
+        else expect(rolling).toBe(fixed);
+      }),
+      opts,
+    );
   });
 });
 

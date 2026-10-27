@@ -10,6 +10,7 @@ import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { ANCHOR_ENV, ANCHOR_EVERY_ENV } from "./anchor-env.ts";
+import { ARCHIVE_ENV, ARCHIVE_EVERY_ENV } from "./archive-env.ts";
 import { pinnedPanels } from "./ballot-env.ts";
 import { POLL_CREATE_CEILING_ENV, POLL_CREATE_ENV } from "./poll-create-env.ts";
 import { POLL_ROOT_ENV } from "./poll-root-env.ts";
@@ -55,6 +56,8 @@ const OTHERS = [
   ...POLL_STUB_ENV,
   ...ANCHOR_ENV,
   ANCHOR_EVERY_ENV,
+  ...ARCHIVE_ENV,
+  ARCHIVE_EVERY_ENV,
 ] as const;
 
 const config = postingFromEnv(

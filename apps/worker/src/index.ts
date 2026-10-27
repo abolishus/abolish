@@ -17,6 +17,13 @@ export {
 } from "./anchor-env.ts";
 export { connectAnchorRunner, TESTNET_CHAIN_IDS } from "./anchor-runner.ts";
 export {
+  ARCHIVE_ENV,
+  ARCHIVE_EVERY_ENV,
+  ARCHIVE_EVERY_MS,
+  type ArchiveConfig,
+  archiveFromEnv,
+} from "./archive-env.ts";
+export {
   type AnchorSafe,
   checkAnchorSafe,
   checkAnchorSafeHistory,
@@ -98,6 +105,7 @@ export {
   pollCreationFromEnv,
 } from "./poll-create-env.ts";
 export {
+  ARCHIVE_BUSY_LIMIT,
   HANDLERS,
   type JobContext,
   JobError,
@@ -108,6 +116,7 @@ export {
 } from "./jobs.ts";
 export type {
   AnchorFindingLine,
+  ArchiveLine,
   AuditFindingLine,
   BallotL1Line,
   ErrorKind,

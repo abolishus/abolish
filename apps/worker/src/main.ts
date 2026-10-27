@@ -19,6 +19,8 @@ import { ANCHOR_ENV, ANCHOR_EVERY_ENV, anchorFromEnv } from "./anchor-env.ts";
 import { checkAnchorClock, ViemAnchorReader } from "./anchor-chain.ts";
 import { pinnedPanels } from "./ballot-env.ts";
 import { connectAnchorRunner } from "./anchor-runner.ts";
+import { ARCHIVE_ENV, ARCHIVE_EVERY_ENV, archiveFromEnv } from "./archive-env.ts";
+import { HttpArweaveClient } from "./arweave-client.ts";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
@@ -126,13 +128,21 @@ const tier1Config = tier1FromEnv(
 const anchorConfig = anchorFromEnv(
   Object.fromEntries([...ANCHOR_ENV, ANCHOR_EVERY_ENV].map((name) => [name, process.env[name]])),
 );
+const archiveConfig = archiveFromEnv(
+  Object.fromEntries([...ARCHIVE_ENV, ARCHIVE_EVERY_ENV].map((name) => [name, process.env[name]])),
+);
 // T-65: read once; nothing later in the process, or anything it spawns,
-// finds the key in its environment. The relay's key and the anchoring
-// runner's keys are treated the same.
+// finds the key in its environment. The relay's key, the anchoring runner's
+// keys and the archive's wallet are treated the same.
 delete process.env["CREATE_KEY"];
 delete process.env["TIER1_RELAY_KEY"];
 delete process.env["ANCHOR_OWNER_KEYS"];
 delete process.env["ANCHOR_EXECUTOR_KEY"];
+delete process.env["ARCHIVE_WALLET"];
+// The archive's manifests name the anchor the runner sends to, and its
+// calls carry their locator, so it runs only beside the runner.
+if (archiveConfig !== undefined && anchorConfig === undefined)
+  throw new Error("the archive runs only beside the anchoring runner");
 // The creation key runs alone (ADR 0032, rule 2): refused before any other
 // job's chain is touched, as startWorker refuses it too.
 if (
@@ -149,6 +159,7 @@ if (
     ...POLL_ROOT_ENV.map((name) => process.env[name]),
     ...POLL_STUB_ENV.map((name) => process.env[name]),
     ...ANCHOR_ENV.map((name) => process.env[name]),
+    ...ARCHIVE_ENV.map((name) => process.env[name]),
   ].some((v) => v !== undefined && v !== "")
 )
   throw new Error("a worker holding the creation key runs nothing else");
@@ -565,12 +576,27 @@ if (anchorConfig !== undefined) {
   }
 }
 
+// The archive (P4-3 part 4b-2b-2b-1), only beside the runner. Its node is
+// trusted for nothing but the price, capped per upload, and the depth it
+// reports: an object counts as archived only once data a node serves for it
+// reads as its CID (T-49, T-52).
+const archive: WorkerOptions["archive"] =
+  archiveConfig === undefined
+    ? undefined
+    : {
+        client: new HttpArweaveClient(archiveConfig.node, archiveConfig.wallet, {
+          maxReward: archiveConfig.maxReward,
+        }),
+        everyMs: archiveConfig.everyMs,
+      };
+
 const worker = await startWorker({
   connection,
   sql,
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   auditEveryMs: env.AUDIT_EVERY_MS,
   ...(anchor !== undefined && { anchor }),
+  ...(archive !== undefined && { archive }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
   ...(ballots !== undefined && { ballots }),

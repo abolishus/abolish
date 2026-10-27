@@ -103,6 +103,8 @@ export interface Cast {
   readonly record: BallotRecord;
   readonly bytes: Uint8Array;
   readonly ciphertexts: readonly Uint8Array[];
+  /** Each seat's ML-KEM message `m_i`, which the voter would post with `ct_i` (Public posting). */
+  readonly ms: readonly Uint8Array[];
 }
 
 /** One ballot of voter `v` for option `option`, made as the ballot client makes it (Casting). */
@@ -124,13 +126,18 @@ export async function cast(s: Setup, v: number, option: 0 | 1): Promise<Cast> {
     core.shareHashes,
   );
   const sealed = { vote, nullifier, ciphertexts: encrypted.ciphertexts };
-  return prove(s, v, sealed, { number: 100n, hash: new Uint8Array(32).fill(7) });
+  const ms = encrypted.randomness.map((r) => r.m);
+  return {
+    ...(await prove(s, v, sealed, { number: 100n, hash: new Uint8Array(32).fill(7) })),
+    ms,
+  };
 }
 
 /** The same core cast again under another L1 reference (revoting, Client rule 4): the same public part. */
-export function castAgain(s: Setup, v: number, earlier: Cast, l1Ref: L1Ref): Promise<Cast> {
+export async function castAgain(s: Setup, v: number, earlier: Cast, l1Ref: L1Ref): Promise<Cast> {
   const { committed_vote: vote, nullifier } = earlier.record;
-  return prove(s, v, { vote, nullifier, ciphertexts: earlier.ciphertexts }, l1Ref);
+  const sealed = { vote, nullifier, ciphertexts: earlier.ciphertexts };
+  return { ...(await prove(s, v, sealed, l1Ref)), ms: earlier.ms };
 }
 
 export interface L1Ref {
@@ -148,7 +155,7 @@ export async function prove(
     readonly ciphertexts: readonly Uint8Array[];
   },
   l1Ref: L1Ref,
-): Promise<Cast> {
+): Promise<Omit<Cast, "ms">> {
   const { definitionHash } = s.election;
   const secret = secrets[v] as Uint8Array;
   const { vote, nullifier } = sealed;

@@ -624,6 +624,62 @@ describe("the sender", () => {
     ).rejects.toThrow("didn't execute");
   });
 
+  test("replaces its own transaction stuck past the receipt timeout, raising both fees", async () => {
+    const f = await fixture();
+    const executor = privateKeyToAddress(toHex(f.executor));
+    const send = safeSender({
+      client,
+      chainId,
+      anchor: f.anchor,
+      safe: f.safe,
+      signers: f.keys.map(signer),
+      executor: f.executor,
+      receiptTimeoutMs: 300,
+      pollMs: 50,
+    });
+    const chain = adapter(f, send);
+    const id = election();
+    type Pending = { hash: Hex; maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+    const pending = async () => {
+      const pool = (await rpc("txpool_content", [])) as {
+        pending: Record<string, Record<string, Pending>>;
+      };
+      const ours = Object.entries(pool.pending).find(([a]) => getAddress(a) === executor);
+      return ours === undefined ? [] : Object.values(ours[1]);
+    };
+    await rpc("evm_setAutomine", [false]);
+    try {
+      // A locator-only call that isn't mined before the receipt times out.
+      await expect(chain.anchor([], Uint8Array.of(0, 3, 1))).rejects.toThrow("in time");
+      const [stuck] = (await pending()) as [Pending];
+      // The next run's checkpoint call at the same nonce, at the same base
+      // fee and tip: a pool takes it only with both fees raised.
+      const next = chain.anchor([segment(id, 0)], undefined);
+      const replacement = await until("the replacement", 20_000, async () => {
+        const [tx, ...rest] = await pending();
+        return tx !== undefined && rest.length === 0 && tx.hash !== stuck.hash ? tx : undefined;
+      });
+      expect(BigInt(replacement.maxPriorityFeePerGas) * 8n).toBeGreaterThanOrEqual(
+        BigInt(stuck.maxPriorityFeePerGas) * 9n,
+      );
+      expect(BigInt(replacement.maxFeePerGas) * 8n).toBeGreaterThanOrEqual(
+        BigInt(stuck.maxFeePerGas) * 9n,
+      );
+      await mine(1);
+      await next;
+    } finally {
+      await rpc("evm_setAutomine", [true]);
+    }
+    expect(await held(f, id, 0)).toBe(toHex(checkpointHash(segment(id, 0))));
+    const [, count] = await client.readContract({
+      address: f.anchor,
+      abi: boardAnchorAbi,
+      functionName: "latestLocator",
+    });
+    expect(count).toBe(0n);
+    expect(await sent(f)).toBe(1);
+  }, 60_000);
+
   test("refuses signers that can't meet the threshold and malformed keys", async () => {
     const f = await fixture();
     const [a, b] = f.keys as [Hex, Hex];

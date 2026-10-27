@@ -52,6 +52,17 @@ export function searchText(value: unknown): string | undefined {
   return undefined;
 }
 
+/** A filter's value if it is `"all"` or in `allowed`; anything else, a repeat included, is dropped. */
+export function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | "all" | undefined {
+  const given = searchText(value);
+  return given === "all" || allowed.some((option) => option === given)
+    ? (given as T | "all")
+    : undefined;
+}
+
 /** A Turnstile site key as Cloudflare issues them: letters, digits, `_` and `-`. */
 export function isSiteKey(value: unknown): value is string {
   return typeof value === "string" && /^[0-9A-Za-z_-]{1,100}$/.test(value);

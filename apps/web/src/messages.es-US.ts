@@ -632,6 +632,11 @@ export const esUS: Messages = {
   boardEnd: "Aquí termina el tablero. Las entradas posteriores aparecerán aquí.",
   boardBeyond:
     "El tablero tiene {count} entradas, numeradas desde 0, así que todavía no existe la entrada {entry}.",
+  boardKindLegend: "Tipo",
+  boardKindApply: "Mostrar entradas de este tipo",
+  boardKindMatches: "{shown} de las {total} entradas de esta página son de este tipo.",
+  boardKindNone:
+    "Ninguna entrada de esta página es de este tipo. Las páginas anteriores o posteriores pueden tener algunas.",
   boardPages: "Páginas del tablero",
   boardEarlier: "Entradas anteriores",
   boardLater: "Entradas posteriores",

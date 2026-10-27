@@ -1,4 +1,11 @@
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import {
+  appendEntry,
+  type ArweaveClient,
+  archiveBoards,
+  archiveLocator,
+  takeCheckpoints,
+} from "@abolishus/core";
+import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import {
   checkEventAccumulatorContinuation,
   decodeContractEventEvidence,
@@ -11,6 +18,8 @@ import {
   accumulatorAtOutputRoot,
   checkContractEventEvidence,
   OutputRootError,
+  replayArchive,
+  walkArchive,
 } from "@abolishus/verifier";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -48,7 +57,8 @@ import {
 // proposer would post it; the index is `contract_log` as Ponder creates it.
 // Every record is judged by the verifier's evidence check and every range
 // of events replayed from the record before it, as core's archive run does
-// (T-71).
+// (T-71); and core's run reads through it to an archive the verifier's own
+// walk and replay hold (P4-3 part 4b-3b-2).
 
 const CHAIN = 84_532n;
 const L1_CHAIN = 11_155_111n;
@@ -651,5 +661,93 @@ describe("failures", () => {
     });
     const indexError = await lost.events(hexToBytes(REGISTRY), 0n, 1n).catch((e) => e);
     expect(indexError.message).toBe("the index couldn't be read");
+  });
+});
+
+describe("core's archive run through the source", () => {
+  /** Arweave mining every upload with its data at once, one block deep. */
+  class InstantArweave implements ArweaveClient {
+    readonly txs = new Map<string, Uint8Array>();
+    async post(data: Uint8Array) {
+      const id = new Uint8Array(randomBytes(32));
+      this.txs.set(bytesToHex(id), Uint8Array.from(data));
+      return id;
+    }
+    async confirmations(tx: Uint8Array) {
+      return this.txs.has(bytesToHex(tx)) ? 1 : undefined;
+    }
+    async data(tx: Uint8Array, limit: number) {
+      const d = this.txs.get(bytesToHex(tx));
+      return d !== undefined && d.length <= limit ? d : undefined;
+    }
+    readonly source = async (tx: Uint8Array) => {
+      const d = this.txs.get(bytesToHex(tx));
+      return d === undefined ? [] : [d];
+    };
+  }
+
+  test("archives every record and event the verifier's walk and replay hold", async () => {
+    // The registry, and three roles with no code yet, whose records prove
+    // their absence and write nothing.
+    const contracts = {
+      "election-registry": hexToBytes(REGISTRY),
+      "trustee-registry": hexToBytes(NO_CODE),
+      "group-registry": hexToBytes("0x00000000000000000000000000000000000b0a0e"),
+      board: hexToBytes("0x00000000000000000000000000000000000b0a0f"),
+    };
+    // Two anchored periods, the first ending before the first step and the
+    // second between it and the next, so each step's block is a period's.
+    const clock = { epoch: step(0).timestamp - 150n, period: 100n };
+    const app = await db.as("abolish_app", { max: 2 });
+    try {
+      const election = await newElection(app);
+      await appendEntry(app, election, 0, Uint8Array.of(0x00, 0x02, 1, 0));
+      await appendEntry(app, election, 1, Uint8Array.of(0x00, 0x02, 1, 1));
+      await takeCheckpoints(app, election, 1);
+      const { source } = await sourceOf([
+        await honest(step(1).block, t0),
+        await honest(step(0).block, t0),
+      ]);
+      const arweave = new InstantArweave();
+      const deployment = { l1ChainId: L1_CHAIN, anchor: hexToBytes(PORTAL) };
+      const written = { evidence: 0, runs: 0 };
+      for (let i = 0; i < 5; i++) {
+        const run = await archiveBoards(app, arweave, {
+          latestLocator: undefined,
+          ...deployment,
+          now: 1_000_000n + BigInt(i),
+          depth: 1,
+          contractEvents: {
+            source,
+            l2ChainId: CHAIN,
+            contracts: Object.values(contracts),
+            clock,
+          },
+        });
+        expect(run.eventFailures).toEqual([]);
+        written.evidence += run.evidence;
+        written.runs += run.runs;
+      }
+      // A record and a run for each period's change, the absent ones none.
+      expect(written).toEqual({ evidence: 2, runs: 2 });
+      const latest = await archiveLocator(app, deployment);
+      if (latest === undefined) throw new Error("no locator");
+      const walk = await walkArchive(latest.locator, deployment, arweave.source, {
+        contracts: Object.values(contracts),
+      });
+      expect(walk.findings).toEqual([]);
+      const replays = await replayArchive(walk, contracts, CHAIN, arweave.source);
+      const registry = replays.find((r) => bytesToHex(r.contract) === REGISTRY);
+      expect(registry?.evidence.findings).toEqual([]);
+      expect(registry?.runs.findings).toEqual([]);
+      expect(registry?.runs.complete).toBe(true);
+      expect(registry?.evidence.records.map((r) => r.replay)).toEqual([null, null]);
+      expect(registry?.held).toBe(step(1).count);
+      expect(registry?.records.map((r) => bytesToHex(r.data))).toEqual(
+        logs.slice(0, Number(step(1).count)).map((l) => bytesToHex(l.data)),
+      );
+    } finally {
+      await app.end();
+    }
   });
 });

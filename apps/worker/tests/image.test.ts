@@ -50,6 +50,41 @@ const ARCHIVE = {
   ARCHIVE_MAX_REWARD: "5000000000",
 };
 
+const address = (n: number) => `0x${n.toString(16).padStart(40, "0")}`;
+const ANCHOR = {
+  ANCHOR_L1_RPC_URL: "https://l1.example/v2/provider-api-key",
+  ANCHOR_CHAIN_ID: "11155111",
+  ANCHOR_ADDRESS: address(0xa0),
+  ANCHOR_EPOCH: "1767225600",
+  ANCHOR_PERIOD: "3600",
+  ANCHOR_DEADLINE: "43200",
+  ANCHOR_SAFE: address(0x5a),
+  ANCHOR_SAFE_BLOCK: "1234",
+  ANCHOR_SAFE_PROXY_CODE_HASH: `0x${"1a".repeat(32)}`,
+  ANCHOR_SAFE_SINGLETON: address(0x5b),
+  ANCHOR_SAFE_SINGLETON_CODE_HASH: `0x${"2b".repeat(32)}`,
+  ANCHOR_SAFE_OWNERS: [address(1), address(2), address(3)].join(","),
+  ANCHOR_SAFE_THRESHOLD: "2",
+  ANCHOR_SAFE_FALLBACK_HANDLER: address(0),
+  ANCHOR_OWNER_KEYS: `${"aa".repeat(32)},${"bb".repeat(32)}`,
+  ANCHOR_EXECUTOR_KEY: KEY,
+};
+
+const REGISTRY_SYNC = {
+  REGISTRY_SYNC_INDEX_URL: "postgres://reader:index-password@127.0.0.1:1/abolish",
+  REGISTRY_SYNC_INDEX_SCHEMA: "indexer",
+  REGISTRY_SYNC_L2_RPC_URL: "https://l2.example/v2/provider-api-key",
+  REGISTRY_SYNC_CHAIN_ID: "84532",
+  REGISTRY_SYNC_L1_RPC_URL: "https://l1.example/v2/provider-api-key",
+  REGISTRY_SYNC_L1_CHAIN_ID: "11155111",
+  REGISTRY_SYNC_PORTAL: address(0x20),
+  REGISTRY_SYNC_ELECTION_REGISTRY: address(0x10),
+  REGISTRY_SYNC_TRUSTEE_REGISTRY: address(0x11),
+  REGISTRY_SYNC_GROUP_REGISTRY: address(0x12),
+  REGISTRY_SYNC_BOARD: address(0x13),
+  REGISTRY_SYNC_EVENT_VERSION: "8",
+};
+
 let dir: string;
 
 beforeAll(() => {
@@ -106,6 +141,29 @@ describe("the bundle", () => {
       expect(output).toContain("the archive runs only beside the anchoring runner");
       expect(output).not.toContain(WALLET.d);
       expect(output).not.toContain("provider-api-key");
+    }
+  }, 60_000);
+
+  test("main.mjs refuses the archive without the registry sync on the anchor's L1, never quoting a secret", async () => {
+    for (const [other, refusal] of [
+      [{}, "the archive runs only beside the registry sync"],
+      [
+        { ...REGISTRY_SYNC, REGISTRY_SYNC_L1_CHAIN_ID: "1" },
+        "the archive needs the registry sync's L1 to be the anchor's",
+      ],
+    ] as const) {
+      const { code, output } = await run(["main.mjs"], {
+        ...NOWHERE,
+        ...ANCHOR,
+        ...ARCHIVE,
+        ...other,
+      });
+      expect(code).not.toBe(0);
+      expect(output).toContain(refusal);
+      expect(output).not.toContain(KEY);
+      expect(output).not.toContain(WALLET.d);
+      expect(output).not.toContain("provider-api-key");
+      expect(output).not.toContain("index-password");
     }
   }, 60_000);
 

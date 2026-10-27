@@ -19,6 +19,7 @@ import {
   type ArchiveRun,
   type ArweaveClient,
   auditBoard,
+  type ContractEventArchive,
   BoardAuditError,
   DefinitionError,
   GroupRecordsError,
@@ -80,12 +81,14 @@ export interface JobContext {
   /**
    * The archive's Arweave client, beside the anchor, whose locator and
    * address its manifests are judged by; its queue runs only then. The depth
-   * and repost wait are core's defaults unless a test sets them.
+   * and repost wait are core's defaults unless a test sets them. With
+   * `contractEvents`, the deployment's L2 contracts' evidence and runs too.
    */
   readonly archive?: {
     readonly client: ArweaveClient;
     readonly depth?: number;
     readonly repostAfter?: bigint;
+    readonly contractEvents?: ContractEventArchive;
   };
   /** The Tier 0 batch job, when the worker is configured for it; its queues run only then. */
   readonly tier0?: Tier0Batches;
@@ -225,7 +228,10 @@ const archiveBusySince = new WeakMap<JobContext, bigint>();
  * fails the job, and the next run tries again. What the run did is logged in
  * counts; the job fails if an
  * object was refused (the board no longer gives the bytes its anchored CID
- * names, T-23), or if runs met another's lock without a break for longer
+ * names, T-23), if a contract's evidence or events weren't archived (its
+ * source failed or gave what doesn't check, logged with the contract and
+ * why: that contract's archive waits while the board's objects go on, T-71),
+ * or if runs met another's lock without a break for longer
  * than `ARCHIVE_BUSY_LIMIT`, since a worker that froze holding it stops the
  * archive with nothing else raised (T-51). A run that throws (Arweave, L1 or
  * the database failed) fails the job, and the next run takes up from there.
@@ -242,6 +248,9 @@ async function archive(ctx: JobContext, _data: JobData<"archive">): Promise<void
       now: localNow,
       ...(ctx.archive.depth === undefined ? {} : { depth: ctx.archive.depth }),
       ...(ctx.archive.repostAfter === undefined ? {} : { repostAfter: ctx.archive.repostAfter }),
+      ...(ctx.archive.contractEvents === undefined
+        ? {}
+        : { contractEvents: ctx.archive.contractEvents }),
     });
   } catch (e) {
     archiveBusySince.delete(ctx);
@@ -265,9 +274,18 @@ async function archive(ctx: JobContext, _data: JobData<"archive">): Promise<void
     posted: run.posted,
     refused: run.refused,
     ...(run.resumed === 0 ? {} : { resumed: run.resumed }),
+    ...(run.evidence === 0 ? {} : { evidence: run.evidence }),
+    ...(run.runs === 0 ? {} : { runs: run.runs }),
     ...(run.locator === undefined ? {} : { locator: Number(run.locator) }),
   });
-  if (run.refused > 0) throw new JobError("archive-findings");
+  for (const f of run.eventFailures)
+    ctx.log({
+      queue: "{archive}",
+      finding: "archive-events",
+      contract: `0x${Buffer.from(f.contract).toString("hex")}`,
+      reason: f.error.code,
+    });
+  if (run.refused > 0 || run.eventFailures.length > 0) throw new JobError("archive-findings");
 }
 
 /**

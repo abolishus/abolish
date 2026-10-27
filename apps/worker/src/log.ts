@@ -7,6 +7,7 @@ import type {
   AnchorFindingCode,
   ArchiveResumeErrorCode,
   CloseRoundsReport,
+  ContractEventError,
   OpenRunsReport,
   PollOpenReport,
   PostingDepositReport,
@@ -69,11 +70,15 @@ export interface AnchorFindingLine {
 /**
  * What an archive run did, in counts: objects first seen, transactions
  * confirmed, manifests written, uploads posted and objects refused, with the
- * manifests read back from the anchor's chain after a wipe when there were
- * any, and the sequence of the manifest the locator names once one does. Or
- * that another run held the archive's lock, or why the anchor's chain
- * couldn't be taken up (core's ArchiveResumeErrorCode). Everything counted is
- * public: the objects are the board's, and the uploads are on Arweave.
+ * manifests read back from the anchor's chain after a wipe and the L2
+ * contracts' evidence records and runs written when there were any, and the
+ * sequence of the manifest the locator names once one does. Or that another
+ * run held the archive's lock, or why the anchor's chain couldn't be taken up
+ * (core's ArchiveResumeErrorCode), or why one L2 contract's evidence or
+ * events weren't archived (core's ContractEventError codes), never the
+ * source's message, which can quote what a node said. Everything counted or
+ * named is public: the objects are the board's, the contracts are the
+ * deployment's, and the uploads are on Arweave.
  */
 export type ArchiveLine =
   | {
@@ -84,6 +89,8 @@ export type ArchiveLine =
       readonly posted: number;
       readonly refused: number;
       readonly resumed?: number;
+      readonly evidence?: number;
+      readonly runs?: number;
       readonly locator?: number;
     }
   | { readonly queue: "{archive}"; readonly finding: "archive-busy" }
@@ -91,6 +98,12 @@ export type ArchiveLine =
       readonly queue: "{archive}";
       readonly finding: "archive-resume";
       readonly reason: ArchiveResumeErrorCode;
+    }
+  | {
+      readonly queue: "{archive}";
+      readonly finding: "archive-events";
+      readonly contract: string;
+      readonly reason: ContractEventError["code"];
     };
 
 /**

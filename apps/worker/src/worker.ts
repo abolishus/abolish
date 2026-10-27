@@ -11,6 +11,7 @@ import type {
   ArweaveClient,
   BallotAdmissions,
   BoardClock,
+  ContractEventArchive,
   CreationAnchors,
   DestructionBoardings,
   OpeningBoardings,
@@ -60,13 +61,15 @@ export interface WorkerOptions {
    * through, and how often to run; only beside `anchor`, whose anchor every
    * manifest names and whose calls carry the locator. The depth and repost
    * wait are core's defaults unless a test sets them. Without it, nothing is
-   * archived.
+   * archived. With `contractEvents`, each manifest also lists the
+   * deployment's L2 contracts' evidence and runs, read through its source.
    */
   readonly archive?: {
     readonly client: ArweaveClient;
     readonly everyMs: number;
     readonly depth?: number;
     readonly repostAfter?: bigint;
+    readonly contractEvents?: ContractEventArchive;
   };
   /** The clock handlers judge time by; the system clock unless a test moves it. */
   readonly now?: () => Date;
@@ -331,6 +334,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             ...(options.archive.repostAfter === undefined
               ? {}
               : { repostAfter: options.archive.repostAfter }),
+            ...(options.archive.contractEvents === undefined
+              ? {}
+              : { contractEvents: options.archive.contractEvents }),
           },
         }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),

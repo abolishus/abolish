@@ -325,7 +325,18 @@ export function countedSource(
       if (e instanceof RangeError) return { state: "refused", reason: e.message };
       throw e;
     }
-    if (result.ok) return { state: "fixed", cells: result.cells };
+    if (result.ok)
+      return {
+        state: "fixed",
+        cells: result.cells,
+        postings: extentPostings(
+          extent.entries,
+          boardVersion,
+          eventVersion,
+          options.board,
+          election,
+        ),
+      };
     if ("code" in result)
       return { state: "refused", reason: `no ballot can be admitted: ${result.code}` };
     // These wait on finalized L1 growing until it reaches every ballot's
@@ -336,6 +347,49 @@ export function countedSource(
       reason: `the counted set is undecided at ${result.row}: ${result.outcome.code ?? "unknown"}`,
     };
   };
+}
+
+/**
+ * The share postings for the definition that the board contract's
+ * `SharePosted` events among `entries` carry, as their records, for any
+ * seat and whether or not in time: the tally duty reads only its own seat's,
+ * and opens a posted ciphertext only for the counted ballot whose share hash
+ * it matches, which a late posting's still does. Each event was
+ * shown by the seat's own L2 node (`eventsShown`) before the counted set was
+ * read. An entry or event that doesn't decode, or isn't the board's, carries
+ * none, as `countedSet` passes it over.
+ */
+function extentPostings(
+  entries: readonly Uint8Array[],
+  boardVersion: BoardEntryVersion,
+  eventVersion: ContractEventVersion,
+  board: Uint8Array,
+  election: ApprovedElection,
+): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  for (const encoded of entries) {
+    let checked;
+    try {
+      const { payload } = decodeBoardEntry(encoded, boardVersion);
+      if (
+        payload.length < 2 ||
+        (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent
+      )
+        continue;
+      checked = checkContractEvent(
+        decodeContractEvent(payload, eventVersion),
+        boardOnly(board),
+        eventVersion,
+      );
+    } catch (e) {
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+    if (!checked.ok || checked.event.event !== "SharePosted") continue;
+    const e = checked.event;
+    if (equal(e.definitionHash, election.definitionHash)) out.push(e.record);
+  }
+  return out;
 }
 
 // The undecided codes a later read of finalized L1 can settle.

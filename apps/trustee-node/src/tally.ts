@@ -37,6 +37,7 @@ import {
   type CommittedVote,
   decodeBallot,
   DecodeError,
+  decodeSharePosting,
   EncodeError,
   type ElectionDefinition,
   electionDefinitionHash,
@@ -49,10 +50,13 @@ import {
   keySetEntry,
   keySetHash,
   openCell,
+  openShares,
   openSummedShares,
   type RegisteredKeys,
   sealSummedShares,
   type Share,
+  SHARE_CIPHERTEXT,
+  shareCiphertextHash,
   signTallyOpening,
   sumShares,
   type TallyRules,
@@ -107,7 +111,21 @@ export type CountedSet =
    * published opening, let `k − 1` other trustees open the ballots the sets
    * differ by (T-14, T-16).
    */
-  | { readonly state: "fixed"; readonly cells: readonly (readonly Uint8Array[])[] };
+  | {
+      readonly state: "fixed";
+      readonly cells: readonly (readonly Uint8Array[])[];
+      /**
+       * The share postings (`0x000d`) the counted extent's contract events
+       * carry for the definition, as their records: where the seat's own
+       * shares of a counted ballot it didn't take in at intake come from
+       * (docs/spec/tally.md, Destruction, What). None trusted: only a
+       * version-1 posting naming this seat is read, its ciphertext opened
+       * only for the counted ballot whose share hash for this seat it
+       * hashes to, and its shares kept only if they pass the share check
+       * against that ballot's commitments.
+       */
+      readonly postings?: readonly Uint8Array[];
+    };
 
 /** The channel to the other seats' nodes, which negotiates hybrid post-quantum TLS. */
 export interface SummedSharePeers {
@@ -173,9 +191,10 @@ export type CellStatus =
    */
   | { readonly state: "combining"; readonly held: number; readonly sent: number }
   /**
-   * The seat holds no shares of `missing` of the cell's counted ballots, so
-   * it has no sums of its own to send; it can still combine the other seats'.
-   * An alarm for the node's operator.
+   * The seat holds no shares of `missing` of the cell's counted ballots,
+   * neither from intake nor opened from a posting, so it has no sums of its
+   * own to send; it can still combine the other seats'. An alarm for the
+   * node's operator.
    */
   | { readonly state: "missing-shares"; readonly missing: number; readonly held: number };
 
@@ -426,6 +445,41 @@ export class TallyDuty {
     return (await store.putOnce(`tally/${hex(election.stubHash)}/openings/${c}`, record)).value;
   }
 
+  /**
+   * The seat's shares of counted ballot `b`, opened from a posted ciphertext
+   * of `ciphertexts` whose hash is `b`'s share hash for this seat, or
+   * `undefined` if none opens to shares that pass the share check. That hash
+   * fixes the ciphertext, so every one that matches opens alike, as the one
+   * delivered at intake would have (docs/spec/share-encryption.md,
+   * Decryption): the posting's `m_i` isn't needed. The share check against
+   * `b`'s own commitments is what keeps another ballot's shares out (T-38);
+   * the hash spares a decapsulation for every posting that can't be `b`'s,
+   * which anyone can make (T-52). Opened in memory each time the
+   * counted set is fixed and never stored, so destruction leaves none behind
+   * (docs/spec/tally.md, Destruction, What; T-14, T-15). Shares that fail
+   * are the complaint duty's to prove, never revealed here.
+   */
+  #postedShares(
+    b: CountedBallot,
+    ciphertexts: readonly Uint8Array[],
+  ): readonly Share[] | undefined {
+    const { election } = this.#o;
+    const expected = b.shareHashes[election.index - 1];
+    if (expected === undefined) return undefined;
+    for (const ciphertext of ciphertexts) {
+      if (!equal(shareCiphertextHash(ciphertext), expected)) continue;
+      const opened = openShares(
+        { definitionHash: election.definitionHash },
+        election.index,
+        election.kemKeyPair.secretKey,
+        b.vss,
+        ciphertext,
+      );
+      if (opened.ok) return opened.shares;
+    }
+    return undefined;
+  }
+
   /** The election's definition, key set and counted cells, once the source fixes them. */
   async #fix(): Promise<Fixed | Exclude<TallyDutyStatus, { state: "tallying" }>> {
     if (this.#fixed !== undefined) return this.#fixed;
@@ -453,7 +507,7 @@ export class TallyDuty {
         throw new Refused("an attested root whose leaf object the seat doesn't hold");
       const counted = await this.#o.counted(this.#o.election);
       if (counted.state !== "fixed") return counted;
-      this.#fixed = await this.#cells(checked, counted.cells);
+      this.#fixed = await this.#cells(checked, counted.cells, counted.postings ?? []);
     } catch (e) {
       if (e instanceof Refused) return { state: "refused", reason: e.message };
       throw e;
@@ -464,9 +518,11 @@ export class TallyDuty {
   async #cells(
     { definition, registered }: { definition: Definition; registered: readonly RegisteredKeys[] },
     counted: readonly (readonly Uint8Array[])[],
+    postings: readonly Uint8Array[],
   ): Promise<Fixed> {
     const { election, store } = this.#o;
     const rules = tallyRules(definition);
+    const posted = postedCiphertexts(postings, election.definitionHash, election.index);
     // The partition's cells, each with its tier: under version 1 one per
     // `electorate` entry, under version 5 every tier's cells numbered across
     // the definition (verifier 2.8). No more and no fewer: a sum over any
@@ -494,7 +550,9 @@ export class TallyDuty {
         if (voters.has(voter)) throw new Refused("a voter counted twice");
         voters.add(voter);
         vss.push(b.vss);
-        const held = await heldShares(store, election.stubHash, b.hash);
+        const held =
+          (await heldShares(store, election.stubHash, b.hash)) ??
+          this.#postedShares(b, posted.get(hex(b.hash)) ?? []);
         if (held === undefined) missing++;
         else shares.push(held);
       }
@@ -508,7 +566,8 @@ export class TallyDuty {
       let own: Cell["own"];
       if (missing === 0) {
         const sums = sumShares(rules, shares);
-        // Each share passed its check at intake, so its sums pass too; a seat
+        // Each share passed its check, at intake or opened from a posting, so
+        // its sums pass too; a seat
         // whose store gives sums that fail sends nothing (Resending).
         if (!checkSummedShares(aggregate, election.index, sums))
           throw new Refused("the seat's own sums fail the summed-share check");
@@ -595,6 +654,48 @@ export class TallyDuty {
   }
 }
 
+interface CountedBallot {
+  readonly nullifier: bigint;
+  readonly vss: CommittedVote["vss"];
+  readonly shareHashes: CommittedVote["share_hashes"];
+  readonly hash: Uint8Array;
+}
+
+const voteOf = (vote: Pick<CommittedVote, "vss" | "share_hashes">) => ({
+  vss: vote.vss,
+  shareHashes: vote.share_hashes,
+});
+
+/**
+ * The ciphertexts of `postings` for seat `seat` under the definition, by the
+ * ballot hash each names. A posting that doesn't decode under version 1, the
+ * version ballot versions 1 and 3 fix, or names another definition or seat,
+ * carries nothing this seat can open (docs/spec/delivery.md, Decoding).
+ */
+function postedCiphertexts(
+  postings: readonly Uint8Array[],
+  definitionHash: Uint8Array,
+  seat: number,
+): Map<string, Uint8Array[]> {
+  const out = new Map<string, Uint8Array[]>();
+  for (const record of postings) {
+    let r;
+    try {
+      r = decodeSharePosting(record, 1);
+    } catch (e) {
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+    if (!equal(r.definition_hash, definitionHash) || r.seat !== seat) continue;
+    const ballot = hex(r.ballot_hash);
+    const ciphertext = encode(SHARE_CIPHERTEXT, r.ciphertext);
+    const held = out.get(ballot);
+    if (held === undefined) out.set(ballot, [ciphertext]);
+    else held.push(ciphertext);
+  }
+  return out;
+}
+
 /**
  * A counted ballot of cell `c` read under the ballot version the definition
  * pins (1 under definition version 1, 3 under version 5), with its ballot
@@ -610,14 +711,14 @@ function countedBallot(
   c: number,
   tier: number,
   bytes: Uint8Array,
-): { readonly nullifier: bigint; readonly vss: CommittedVote["vss"]; readonly hash: Uint8Array } {
+): CountedBallot {
   try {
     if (version === 1) {
       const b = decodeBallot(bytes, 1);
       if (!equal(b.definition_hash, definitionHash) || b.tier !== tier)
         throw new Refused("a counted ballot of another election or cell");
       const hash = ballotHash({ definitionHash, tier, nullifier: b.nullifier }, b.committed_vote);
-      return { nullifier: b.nullifier, vss: b.committed_vote.vss, hash };
+      return { nullifier: b.nullifier, ...voteOf(b.committed_vote), hash };
     }
     const b = decodeBallot(bytes, 3);
     if (!equal(b.definition_hash, definitionHash) || b.cell !== c)
@@ -626,7 +727,7 @@ function countedBallot(
       { definitionHash, cell: c, nullifier: b.nullifier },
       b.committed_vote,
     );
-    return { nullifier: b.nullifier, vss: b.committed_vote.vss, hash };
+    return { nullifier: b.nullifier, ...voteOf(b.committed_vote), hash };
   } catch (e) {
     if (e instanceof DecodeError) throw new Refused("a counted ballot doesn't decode");
     throw e;

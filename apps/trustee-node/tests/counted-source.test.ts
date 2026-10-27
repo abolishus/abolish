@@ -10,21 +10,25 @@ import { readFile } from "node:fs/promises";
 import {
   type AnchorClock,
   availabilityWindows,
+  ballotHash,
   type BoardEntryVersion,
   countedExtent,
   type ContractEventVersion,
   decodeTallyOpening,
   deliverySegments,
   checkOpening,
+  decode,
   decodeBallot,
   electionDefinitionHash,
   encodeBoardEntry,
   encodeContractEvent,
   encodeElectionDefinition,
+  encodeSharePosting,
   frameBallot,
   type L1Origin,
   pinnedVersion,
   RECORD_TYPES,
+  SHARE_CIPHERTEXT,
   tallyRules,
 } from "@abolishus/crypto";
 import { DEFINITION_REGISTERED, ELECTION_CREATED, type Rpc } from "@abolishus/node";
@@ -56,6 +60,7 @@ const events = (await vector("contract-event-v8.json")) as {
   events: { signature: string; topic0: string }[];
 };
 const BALLOT_SUBMITTED = `0x${events.events.find((e) => e.signature.startsWith("BallotSubmitted("))?.topic0}`;
+const SHARE_POSTED = `0x${events.events.find((e) => e.signature.startsWith("SharePosted("))?.topic0}`;
 
 const hex = (b: Uint8Array) => `0x${Buffer.from(b).toString("hex")}`;
 const word = (n: bigint) => {
@@ -330,7 +335,11 @@ describe("the counted set from the attested counted extent", () => {
     // Voter 1's ballot came through the contract: it counts once its log is
     // authenticated. Seat 3 never receipted voter 2's ballot, and voter 0's
     // older ballot is superseded.
-    expect(await read(options())).toEqual({ state: "fixed", cells: [[second.bytes, newer.bytes]] });
+    expect(await read(options())).toEqual({
+      state: "fixed",
+      cells: [[second.bytes, newer.bytes]],
+      postings: [],
+    });
     // Exactly what packages/verifier gives over the same inputs.
     const head = await finalizedBlock(l1.rpc);
     const run = await headerRun(l1.rpc, head, {
@@ -419,6 +428,23 @@ describe("the counted set from the attested counted extent", () => {
     expect(await read(options({ entries }))).toEqual({
       state: "fixed",
       cells: [[second.bytes, newer.bytes]],
+      postings: [],
+    });
+  });
+
+  test("gives the share postings the extent's contract events carry for the definition, the ballot one delivers counted", async () => {
+    // Voter 2's ballot lacks seat 3's receipt: its posting for seat 3
+    // delivers it. Another definition's posting, a posting the L2 node shows
+    // but the extent doesn't carry, and a ballot event are no postings here.
+    const own = posted(third, 3);
+    const other = posted(third, 2, new Uint8Array(32).fill(9));
+    const unarchived = posted(second, 1);
+    const logs = [...registrationLogs(), submitted(second), own.log, other.log, unarchived.log];
+    const entries = board([archived(submitted(second)), archived(own.log), archived(other.log)]);
+    expect(await read(options({ logs, entries }))).toEqual({
+      state: "fixed",
+      cells: [[second.bytes, newer.bytes, third.bytes]],
+      postings: [own.record],
     });
   });
 
@@ -472,6 +498,72 @@ class Wire implements SummedSharePeers {
   }
 }
 
+/** `c`'s ballot hash. */
+const hashOf = (c: Cast) =>
+  ballotHash(
+    {
+      definitionHash: s.election.definitionHash,
+      tier: c.record.tier,
+      nullifier: c.record.nullifier,
+    },
+    c.record.committed_vote,
+  );
+
+/** Seat `seat`'s posting of `c`, as the voter posts it through the board, under `definitionHash`. */
+function posted(
+  c: Cast,
+  seat: number,
+  definitionHash = s.election.definitionHash,
+  block = LOG_BLOCK,
+) {
+  const record = encodeSharePosting({
+    definition_hash: definitionHash,
+    ballot_hash: hashOf(c),
+    seat,
+    m: c.ms[seat - 1] as Uint8Array,
+    ciphertext: decode(SHARE_CIPHERTEXT, c.ciphertexts[seat - 1] as Uint8Array),
+  });
+  const log: Log = {
+    address: s.definition.board,
+    topics: [SHARE_POSTED, hex(record.slice(3, 35)), hex(record.slice(35, 67))],
+    data: concatBytes(word(32n), word(BigInt(record.length)), padded(record)),
+    block,
+  };
+  return { record, log };
+}
+
+/**
+ * `store` with the tally's records kept apart, so each test fixes its own
+ * counted set, and without its intake record of `hidden`, if given.
+ */
+function scratch(store: SeatStore, hidden?: Cast): SeatStore {
+  const own = new Map<string, Uint8Array>();
+  const name = hidden === undefined ? undefined : hex(hashOf(hidden)).slice(2);
+  return {
+    ...store,
+    get: async (key) => {
+      if (key.startsWith("tally/")) return own.get(key);
+      if (name !== undefined && key.endsWith(name)) return undefined;
+      return store.get(key);
+    },
+    putOnce: async (key, value) => {
+      if (!key.startsWith("tally/")) return store.putOnce(key, value);
+      const held = own.get(key);
+      if (held !== undefined) return { created: false, value: held };
+      own.set(key, value);
+      return { created: true, value };
+    },
+    list: async (prefix) => {
+      if (!prefix.startsWith("tally/")) return store.list(prefix);
+      const under = `${prefix}/`;
+      return [...own.keys()]
+        .filter((k) => k.startsWith(under) && !k.slice(under.length).includes("/"))
+        .map((k) => k.slice(under.length))
+        .sort();
+    },
+  };
+}
+
 describe("the seats' tally over the source", () => {
   test("opens the counted set to the votes it holds", async () => {
     const wire = new Wire();
@@ -505,6 +597,56 @@ describe("the seats' tally over the source", () => {
     if (!checked.ok) return expect.fail(`the opening fails ${checked.code}`);
     // Voter 1 chose option 1 through the contract, voter 0's newer ballot option 0.
     expect(checked.counts).toEqual([1n, 1n]);
+  });
+
+  test("a seat that never took a counted ballot in sums its shares from the ballot's posting on the extent", async () => {
+    const own = posted(third, 3);
+    const counted = countedSource(
+      options({
+        logs: [...registrationLogs(), submitted(second), own.log],
+        entries: board([archived(submitted(second)), archived(own.log)]),
+      }),
+    );
+    const wire = new Wire();
+    wire.duties = approved.map(
+      (election, i) =>
+        new TallyDuty({
+          panel: s.e.panelists.panel,
+          l2ChainId: L2_CHAIN_ID,
+          trusteeRegistry: TRUSTEE_REGISTRY,
+          election,
+          secrets: secrets[i] as IntakeSecrets,
+          definition: s.definition,
+          transcript: s.transcript,
+          // Seat 3's store without voter 2's ballot, as if its delivery never came.
+          store: scratch(s.stores[i] as SeatStore, i === 2 ? third : undefined),
+          summing: AVAILABLE,
+          counted,
+          board: async () => ({ state: "unread" }),
+          peers: wire,
+        }),
+    );
+    for (const duty of wire.duties) await duty.step();
+    wire.deliver = true;
+    // Seat 3 sends its sums; seat 1 combines them with its own.
+    expect(await (wire.duties[2] as TallyDuty).step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
+    });
+    expect(await (wire.duties[0] as TallyDuty).step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "opened" }],
+      board: "unread",
+    });
+    const rules = tallyRules({ version: 1, value: s.definition });
+    const vss = [second, newer, third].map((c) => decodeBallot(c.bytes, 1).committed_vote.vss);
+    const opening = (await (wire.duties[0] as TallyDuty).openings()).get(0);
+    if (opening === undefined) return expect.fail("a seat holding k sums signed no opening");
+    const checked = checkOpening(rules, vss, decodeTallyOpening(opening, 1).opening);
+    if (!checked.ok) return expect.fail(`the opening fails ${checked.code}`);
+    // Voter 1 chose option 1, voter 0's newer ballot and voter 2's option 0.
+    expect(checked.counts).toEqual([2n, 1n]);
   });
 
   test("refuses, and sends nothing, over an extent the L2 node contradicts", async () => {

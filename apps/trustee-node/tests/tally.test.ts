@@ -11,13 +11,16 @@ import {
   type BallotRecord,
   checkOpening,
   decodeBallot,
+  decode,
   decodeTallyOpening,
   type ElectionDefinition,
   encodeBallot,
+  encodeSharePosting,
   encodeTallyOpening,
   identityKey,
   type RegisteredKeys,
   sealSummedShares,
+  SHARE_CIPHERTEXT,
   sumShares,
   tallyOpeningStatement,
   tallyRules,
@@ -78,10 +81,10 @@ beforeAll(async () => {
   }
 }, 120_000);
 
-const fixed = (cells: readonly (readonly Uint8Array[])[]): CountedSet => ({
-  state: "fixed",
-  cells,
-});
+const fixed = (
+  cells: readonly (readonly Uint8Array[])[],
+  postings: readonly Uint8Array[] = [],
+): CountedSet => ({ state: "fixed", cells, postings });
 const all = () => fixed([ballots.map((b) => b.bytes)]);
 
 /** A peer channel that hands each message to the recipient's duty, and records what it sent. */
@@ -341,17 +344,7 @@ describe("the tally duty", () => {
   });
 
   test("a seat lacking shares of a counted ballot sends nothing but still combines the others' sums", async () => {
-    const stores = fresh();
-    const missing = ballots[2] as Cast;
-    const hidden = Buffer.from(seatHash(missing)).toString("hex");
-    // Seat 3's store without its intake record of ballot 3.
-    const store = stores[2] as SeatStore;
-    stores[2] = {
-      ...store,
-      get: (key) => (key.endsWith(hidden) ? Promise.resolve(undefined) : store.get(key)),
-      putOnce: (key, value) => store.putOnce(key, value),
-      list: (prefix) => store.list(prefix),
-    };
+    const stores = withoutThird();
     const wire = new Wire();
     const d = duties(wire, { stores });
     expect(await d[2]!.step()).toEqual({
@@ -379,6 +372,111 @@ describe("the tally duty", () => {
         3,
       ),
     ).toEqual([2n, 1n]);
+  });
+
+  test("a seat that didn't take a counted ballot in opens its shares from the ballot's posting and sums the whole set", async () => {
+    const wire = new Wire();
+    const third = ballots[2] as Cast;
+    const d = duties(wire, {
+      stores: withoutThird(),
+      counted: () => fixed([ballots.map((b) => b.bytes)], [postingOf(third, 3)]),
+    });
+    await prime(wire);
+    expect(await d[2]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "combining", held: 1, sent: 2 }],
+      board: "unread",
+    });
+    // Seat 1 holds its own sums and seat 3's: they pass its check, and the
+    // opening they give passes the verifier's.
+    expect(states([await d[0]!.step()])).toEqual([["opened"]]);
+    const opening = (await d[0]!.openings()).get(0) as Uint8Array;
+    expect(
+      judge(
+        opening,
+        ballots.map((b) => b.bytes),
+        1,
+      ),
+    ).toEqual([2n, 1n]);
+  });
+
+  test("a posting's ciphertext opens shares only for the counted ballot whose share hash for the seat it hashes to", async () => {
+    const [first, , third] = ballots as [Cast, Cast, Cast];
+    const missing = async (postings: readonly Uint8Array[]) => {
+      const wire = new Wire();
+      const d = duties(wire, {
+        stores: withoutThird(),
+        counted: () => fixed([ballots.map((b) => b.bytes)], postings),
+      });
+      const status = await d[2]!.step();
+      return { status: states([status])[0], sent: wire.sent.length };
+    };
+    // Another seat's ciphertext of the ballot, the seat's ciphertext of
+    // another ballot under this one's hash, the right ciphertext naming
+    // another seat, another definition or another ballot, and bytes that
+    // aren't a posting.
+    for (const posting of [
+      postingOf(third, 3, { ciphertext: third.ciphertexts[1] }),
+      postingOf(third, 3, { ciphertext: first.ciphertexts[2] }),
+      postingOf(third, 3, { seat: 2 }),
+      postingOf(third, 3, { definitionHash: new Uint8Array(32).fill(1) }),
+      postingOf(third, 3, { ballotHash: seatHash(first) }),
+      postingOf(third, 3).slice(0, -1),
+      new Uint8Array(10),
+    ])
+      expect(await missing([posting])).toEqual({ status: ["missing-shares"], sent: 0 });
+    // The ciphertext alone decides: an `m_i` that fails the public check
+    // opens the same shares, as the ciphertext delivered at intake would.
+    expect(await missing([postingOf(third, 3, { m: new Uint8Array(32) })])).toEqual({
+      status: ["combining"],
+      sent: 2,
+    });
+  });
+
+  test("a property: whatever other postings sit beside it, the seat sums exactly when the counted ballot's own ciphertext is among them", async () => {
+    const [first, second, third] = ballots as [Cast, Cast, Cast];
+    const others = [
+      postingOf(third, 3, { ciphertext: third.ciphertexts[0] }),
+      postingOf(third, 3, { ciphertext: second.ciphertexts[2] }),
+      postingOf(third, 3, { seat: 1 }),
+      postingOf(first, 3),
+      postingOf(third, 3, { ballotHash: seatHash(second) }),
+      new Uint8Array(3),
+    ];
+    await fc.assert(
+      fc.asyncProperty(
+        fc.subarray(others),
+        fc.nat({ max: 2 }),
+        fc.nat(),
+        async (chosen, copies, at) => {
+          const postings = [...chosen];
+          for (let i = 0; i < copies; i++)
+            postings.splice(at % (postings.length + 1), 0, postingOf(third, 3));
+          const wire = new Wire();
+          const d = duties(wire, {
+            stores: withoutThird(),
+            counted: () => fixed([ballots.map((b) => b.bytes)], postings),
+          });
+          await prime(wire);
+          const status = await d[2]!.step();
+          expect(states([status])).toEqual([[copies > 0 ? "combining" : "missing-shares"]]);
+          // Whichever posting opened them, seat 1 combines seat 3's sums
+          // with its own into the one opening.
+          if (copies > 0) {
+            expect(states([await d[0]!.step()])).toEqual([["opened"]]);
+            const opening = (await d[0]!.openings()).get(0) as Uint8Array;
+            expect(
+              judge(
+                opening,
+                ballots.map((b) => b.bytes),
+                1,
+              ),
+            ).toEqual([2n, 1n]);
+          }
+        },
+      ),
+      { numRuns },
+    );
   });
 
   test("one unreachable seat doesn't hold up the others' messages", async () => {
@@ -736,6 +834,44 @@ describe("the board's openings read back", () => {
 });
 
 /** The ballot hash a seat stores a ballot's intake under. */
+/** Fresh stores, seat 3's without its intake record of ballot 3. */
+function withoutThird(): SeatStore[] {
+  const stores = fresh();
+  const hidden = Buffer.from(seatHash(ballots[2] as Cast)).toString("hex");
+  const store = stores[2] as SeatStore;
+  stores[2] = {
+    ...store,
+    get: (key) => (key.endsWith(hidden) ? Promise.resolve(undefined) : store.get(key)),
+    putOnce: (key, value) => store.putOnce(key, value),
+    list: (prefix) => store.list(prefix),
+  };
+  return stores;
+}
+
+/** Seat `seat`'s share posting of `b`, as the voter would post it, with `change` applied. */
+function postingOf(
+  b: Cast,
+  seat: number,
+  change: {
+    readonly seat?: number;
+    readonly m?: Uint8Array;
+    readonly ciphertext?: Uint8Array | undefined;
+    readonly definitionHash?: Uint8Array;
+    readonly ballotHash?: Uint8Array;
+  } = {},
+): Uint8Array {
+  return encodeSharePosting({
+    definition_hash: change.definitionHash ?? s.election.definitionHash,
+    ballot_hash: change.ballotHash ?? seatHash(b),
+    seat: change.seat ?? seat,
+    m: change.m ?? (b.ms[seat - 1] as Uint8Array),
+    ciphertext: decode(
+      SHARE_CIPHERTEXT,
+      change.ciphertext ?? (b.ciphertexts[seat - 1] as Uint8Array),
+    ),
+  });
+}
+
 function seatHash(b: Cast): Uint8Array {
   const r = b.record;
   return ballotHash(

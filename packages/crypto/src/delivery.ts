@@ -45,15 +45,17 @@ import {
   type ElectionDefinitionV5,
   type ElectionDefinitionV6,
   type ElectionDefinitionV7,
-  electionDefinitionV6Rule,
 } from "./election-definition.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
 import {
   decodeElectionDefinitionV6,
-  electionDefinitionV6Hash,
+  decodeElectionDefinitionV7,
   encodeElectionDefinitionV6,
+  encodeElectionDefinitionV7,
+  type PanelledDefinition,
+  panelledFacts,
 } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
@@ -2825,7 +2827,8 @@ export interface DeliveryRootsV2 {
  * share hashes and registered key set, so a record for one panel's seat `i`
  * never delivers, excludes or contradicts the other's (T-37). Otherwise
  * `checkDelivery`'s. Given `definition`, a well-formed definition whose hash
- * is `definitionHash`, `registered.default` must be the key set
+ * is `definitionHash` (a version 6, or a version 7 under a fixed electorate,
+ * hashed under its own version, `panelledFacts`), `registered.default` must be the key set
  * `checkCeremonyTranscript` returned for its default transcript, and
  * `registered.author` the one it returned for the author transcript and
  * `checkAuthorApprovals` then approved under it (empty without an author
@@ -2844,7 +2847,7 @@ export function checkDeliveryV2(
   election: DeliveryElectionV2,
   ballots: readonly DeliveryBallotV4[],
   entries: readonly DeliveryEntry[],
-  definition?: ElectionDefinitionV6,
+  definition?: PanelledDefinition,
   roots?: DeliveryRootsV2,
 ): DeliveryCheckV2 {
   const name = "checkDeliveryV2";
@@ -2863,18 +2866,24 @@ export function checkDeliveryV2(
     return checkDeliveryV2With(e, ballots, entries, roots);
   }
   // One decoded copy of its bytes, so every check below reads the same
-  // definition, whatever the caller's object returns on a later read.
-  const d = decodeElectionDefinitionV6(encodeElectionDefinitionV6(definition));
+  // definition, whatever the caller's object returns on a later read. Its
+  // layout is version 7's when it carries the electorate mode; either
+  // decoder then refuses a value whose own pin is another version.
+  const d: PanelledDefinition =
+    "electorate_mode" in definition
+      ? decodeElectionDefinitionV7(encodeElectionDefinitionV7(definition))
+      : decodeElectionDefinitionV6(encodeElectionDefinitionV6(definition));
+  // Refuses any version but 6 and a fixed 7 (T-36).
+  const facts = panelledFacts(d);
   const transcript = checkedTranscriptHash(e.registered.default);
   if (
     !(e.definitionHash instanceof Uint8Array) ||
-    hex(electionDefinitionV6Hash(d)) !== hex(e.definitionHash) ||
+    hex(facts.hash) !== hex(e.definitionHash) ||
     d.panel_size !== e.panelSize ||
     d.author_keys.length !== e.authorPanelSize
   )
     throw new RangeError(`${name}: not the definition of this election`);
-  if (electionDefinitionV6Rule(d) !== undefined)
-    throw new RangeError(`${name}: the definition isn't well-formed`);
+  if (!facts.wellFormed) throw new RangeError(`${name}: the definition isn't well-formed`);
   // The default seats too are the key set its own run registered, so no
   // caller can drop a default seat from, or add one to, those a ballot must
   // be delivered to (T-25, T-37).

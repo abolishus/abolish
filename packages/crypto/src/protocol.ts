@@ -29,6 +29,8 @@ import {
   electionDefinitionRule,
   type ElectionDefinitionRule,
   electionDefinitionV5Rule,
+  electionDefinitionV6Rule,
+  electionDefinitionV7Rule,
   ELECTORATE_MODES,
   RESULTS_MODES,
 } from "./election-definition.ts";
@@ -105,7 +107,7 @@ export type AnyElectionDefinitionRecord =
  */
 function decodeAnyElectionDefinition(
   bytes: Uint8Array,
-): AnyElectionDefinitionRecord | { readonly version: 7; readonly value: ElectionDefinitionV7 } {
+): AnyElectionDefinitionRecord | ElectionDefinitionV7Record {
   const record = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
   // Exactly one pin for 0x0001, at the record's own version; a second pin,
   // whatever its order, is a mismatch too, so every decoder agrees.
@@ -288,6 +290,52 @@ export function electionAuthorStubV6Hash(d: ElectionDefinitionV6): Uint8Array {
     author_transcript_hash: new Uint8Array(32),
   };
   return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV6(stub)));
+}
+
+/** A definition version 6's per-election checks read: version 6, or version 7 under a fixed electorate. */
+export type PanelledDefinition = ElectionDefinitionV6 | ElectionDefinitionV7;
+
+/** A decoded version-7 definition. */
+export type ElectionDefinitionV7Record = {
+  readonly version: 7;
+  readonly value: ElectionDefinitionV7;
+};
+
+/**
+ * What version 6's per-election checks take from a definition, under its own
+ * version's encoding: its hash, its author stub hash and whether it is well
+ * formed. Version 7 under a fixed electorate is read as version 6 is, with
+ * version 7's hashes and rules ([[verifier]] 2.3: what holds of version 6's
+ * poll class, results mode and author panel holds for version 7, and a fixed
+ * version 7 pins ballot version 4). The version is the value's own pin, and
+ * that version's encoder takes exactly its fields, so no value is hashed
+ * under another version's layout. Any other
+ * version, and a rolling version 7, whose ballots are version 5 and whose
+ * roots are its steps', is `UnsupportedVersionError` (T-36). The package
+ * entry point doesn't export it.
+ */
+export function panelledFacts(d: PanelledDefinition): {
+  readonly version: 6 | 7;
+  readonly hash: Uint8Array;
+  readonly authorStubHash: Uint8Array;
+  readonly wellFormed: boolean;
+} {
+  const own = pinnedVersion(d, RECORD_TYPES.electionDefinition);
+  if (own === 6)
+    return {
+      version: 6,
+      hash: electionDefinitionV6Hash(d),
+      authorStubHash: electionAuthorStubV6Hash(d),
+      wellFormed: electionDefinitionV6Rule(d) === undefined,
+    };
+  if (own === 7 && "electorate_mode" in d && d.electorate_mode === ELECTORATE_MODES.fixed)
+    return {
+      version: 7,
+      hash: electionDefinitionV7Hash(d),
+      authorStubHash: electionAuthorStubV7Hash(d),
+      wellFormed: electionDefinitionV7Rule(d) === undefined,
+    };
+  throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
 }
 
 /**

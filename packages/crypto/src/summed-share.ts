@@ -55,7 +55,8 @@ import {
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
-  electionDefinitionV6Hash,
+  type ElectionDefinitionV7Record,
+  panelledFacts,
   UnsupportedVersionError,
 } from "./protocol.ts";
 import { aggregateHash } from "./tally-opening.ts";
@@ -186,11 +187,13 @@ function signedBytes(m: AnyStatement): Uint8Array {
  */
 export type SummedShareDefinition = ElectionDefinition | AnyElectionDefinitionRecord;
 
-/** A version-6 definition with an author panel: its tally is per panel, under summed-share version 2. */
-export type PanelSummedShareDefinition = {
-  readonly version: 6;
-  readonly value: ElectionDefinitionV6;
-};
+/**
+ * A version-6 definition, or a version-7 one under a fixed electorate, with
+ * an author panel: its tally is per panel, under summed-share version 2.
+ */
+export type PanelSummedShareDefinition =
+  | { readonly version: 6; readonly value: ElectionDefinitionV6 }
+  | ElectionDefinitionV7Record;
 
 /**
  * The cell a message is about: the registered definition, the cell's
@@ -237,11 +240,13 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
     "version" in definition && "value" in definition
       ? definition
       : { version: 1, value: definition };
-  // Summed-share message version 1 under definition version 6 is the
+  // Summed-share message version 1 under definition version 6 or 7 is the
   // trustee node's tally of a poll without an author panel, which isn't
-  // built yet: refused, as before tallyRules read version 6 (T-36).
-  if (record.version === 6)
-    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, record.version);
+  // built yet: refused, as before tallyRules read either (T-36). A caller's
+  // cast can pass version 7, which the type doesn't admit.
+  const version: number = record.version;
+  if (version === 6 || version === 7)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, version);
   // Refuses a definition that isn't well-formed (T-28).
   const rules = tallyRules(record);
   switch (record.version) {
@@ -274,7 +279,8 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
 }
 
 /**
- * Panel `panel`'s values from a version-6 definition with an author panel:
+ * Panel `panel`'s values from a version-6 definition, or a fixed version-7
+ * one, with an author panel, its hash its own version's:
  * its hash, the transcript its seats' key set comes from, its half's rules
  * and the partition's cells (T-37).
  */
@@ -284,7 +290,7 @@ function panelContextOf(definition: PanelSummedShareDefinition, panel: 1 | 2): D
   const rules = panelTallyRules(definition, panel);
   const d = definition.value;
   return {
-    definitionHash: electionDefinitionV6Hash(d),
+    definitionHash: panelledFacts(d).hash,
     panel,
     ceremonyTranscriptHash: Uint8Array.from(
       panel === 1 ? d.ceremony_transcript_hash : d.author_transcript_hash,

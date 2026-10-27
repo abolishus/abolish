@@ -60,7 +60,6 @@ import {
   type ElectionDefinitionV6,
   type ElectionDefinitionV7,
   electionDefinitionV5Rule,
-  electionDefinitionV6Rule,
   electionDefinitionV7Rule,
   ELECTORATE_MODES,
   TIERS,
@@ -75,16 +74,16 @@ import {
   verifyDecodedMembershipProofs,
 } from "./membership-proof.ts";
 import {
-  electionAuthorStubV6Hash,
   electionAuthorStubV7Hash,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
-  electionDefinitionV6Hash,
   electionDefinitionV7Hash,
   decodeElectionDefinitionV7,
   encodeElectionDefinitionV7,
+  type PanelledDefinition,
+  panelledFacts,
   pinnedVersion,
   UnsupportedVersionError,
 } from "./protocol.ts";
@@ -447,8 +446,9 @@ export function questionBallotElection(
 }
 
 /**
- * `ballotElection` for a definition version 6, which pins ballot version 4
- * (verifier 2.3, `profile-combination`): version 5's questions and cells, and
+ * `ballotElection` for a definition version 6, or a version 7 under a fixed
+ * electorate, either of which pins ballot version 4 (verifier 2.3,
+ * `profile-combination`): version 5's questions and cells, and
  * the author panel's threshold and size. The caller has run 2.x for the
  * definition, 2.5's `panel-kind` and `default-seat` included; one that isn't
  * well-formed is refused here too (T-28, T-34), and so is a cell root of 0
@@ -459,10 +459,11 @@ export function questionBallotElection(
  * `author_transcript_hash`: the author panel's registration, which no
  * contract records, so no seat list is taken on trust (T-37, T-17;
  * docs/spec/ballot-validity.md, Admission and Casting (version 4)). Without
- * one it must be empty.
+ * one it must be empty. A version 7's hash and author stub hash are its own
+ * (`panelledFacts`), so its ballots name it, never a version-6 reading of it.
  */
 export function panelBallotElection(
-  definition: ElectionDefinitionV6,
+  definition: PanelledDefinition,
   registered: readonly RegisteredKeys[],
   authorRegistered: readonly RegisteredKeys[] = [],
 ): PanelBallotElection {
@@ -476,7 +477,7 @@ export function panelBallotElection(
  * author run. The package entry point doesn't export it.
  */
 export function panelBallotElectionWith(
-  definition: ElectionDefinitionV6,
+  definition: PanelledDefinition,
   registered: readonly RegisteredKeys[],
   authorQualified: readonly number[],
 ): PanelBallotElection {
@@ -487,16 +488,15 @@ export function panelBallotElectionWith(
 
 function panelElection(
   caller: string,
-  definition: ElectionDefinitionV6,
+  definition: PanelledDefinition,
   registered: readonly RegisteredKeys[],
   author: { readonly keys: readonly RegisteredKeys[] } | { readonly seats: readonly number[] },
 ): PanelBallotElection {
-  const own = pinnedVersion(definition, RECORD_TYPES.electionDefinition);
+  // Refuses any version but 6 and a fixed 7.
+  const facts = panelledFacts(definition);
   const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
-  if (own !== 6) throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
   if (pinned !== 4) throw new UnsupportedVersionError(RECORD_TYPES.ballot, pinned);
-  if (electionDefinitionV6Rule(definition) !== undefined)
-    throw new RangeError(`${caller}: the definition isn't well-formed`);
+  if (!facts.wellFormed) throw new RangeError(`${caller}: the definition isn't well-formed`);
   checkKeys(caller, definition, registered);
   // Well-formed, so `author_threshold` and `author_keys` are both empty or a
   // panel of 1 ≤ k_A ≤ n_A ≤ MAX_TRUSTEES (author-panel).
@@ -513,7 +513,7 @@ function panelElection(
     new Set(seats).size !== seats.length
   )
     throw new RangeError(`${caller}: author seats must be distinct seats of the author panel`);
-  const definitionHash = electionDefinitionV6Hash(definition);
+  const definitionHash = facts.hash;
   const election: PanelBallotElection = Object.freeze({
     definitionHash: Uint8Array.from(definitionHash),
     questions: Object.freeze(
@@ -545,13 +545,15 @@ function panelElection(
  * Internal: without an author panel only the empty set; with one, the set
  * `checkAuthorApprovals` approved for this definition's author run, under
  * its chain, trustee registry, author panel identifier, author stub hash and
- * `author_transcript_hash`. The package entry point doesn't export it.
+ * `author_transcript_hash`, a fixed version 7's under its own author stub
+ * hash. The package entry point doesn't export it.
  */
 export function approvedFor(
-  definition: ElectionDefinitionV6,
+  definition: PanelledDefinition,
   keys: readonly RegisteredKeys[],
 ): boolean {
-  return approvedUnder(definition, electionAuthorStubV6Hash, keys);
+  const { authorStubHash } = panelledFacts(definition);
+  return approvedUnder(definition, () => authorStubHash, keys);
 }
 
 /** Internal: `approvedFor` for a definition version 7, whose author stub hash is version 7's. */

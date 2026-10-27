@@ -654,6 +654,10 @@ export const ReviewDesktop: Story = {
     }
     await expect(changes).toBe(5);
     await valuesLineUp(review);
+    // The questions are numbered as the form numbers them, where the reset's
+    // bare list drew them as an unmarked indent (iteration 15).
+    const questions = within(review).getByRole("list");
+    await expect(getComputedStyle(questions).listStyleType).toBe("decimal");
   },
 };
 
@@ -1089,9 +1093,11 @@ export const SubmitADraft: Story = {
     await expect(submits(args.client)).toEqual([[ID, "token-1"]]);
     await expect(args.onSubmitted).toHaveBeenCalledOnce();
     await expect(args.onSubmitted).toHaveBeenCalledWith(ID);
-    // Nothing more is saved or sent from the page.
+    // Nothing more is saved or sent from the page, and the review offers no
+    // "Change" that would lead to a field taking no edits (iteration 15).
     await expect(canvas.getByRole("button", { name: "Save draft" })).toBeDisabled();
     await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeDisabled();
+    await expect(canvas.queryAllByRole("link", { name: /^Change/ })).toEqual([]);
     await expect(writes(args.client)).toEqual([]);
   },
 };
@@ -1318,6 +1324,7 @@ export const NoEditsWhileSending: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Submit poll" }));
     await userEvent.click(canvas.getByRole("button", { name: "I'm a person" }));
     await expect(await canvas.findByText("Submitting your poll…")).toBeVisible();
+    await expect(canvas.queryAllByRole("link", { name: /^Change/ })).toEqual([]);
     await userEvent.type(title, "!");
     await expect(title).toHaveValue("Harbor library hours");
   },

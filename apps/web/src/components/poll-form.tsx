@@ -613,10 +613,13 @@ interface ReviewRow {
 function ReviewList({
   t,
   rows,
+  locked,
   onJump,
 }: {
   t: Translate;
   rows: readonly ReviewRow[];
+  /** The draft is on its way to setup, so no field takes an edit any more. */
+  locked: boolean;
   onJump: (event: SyntheticEvent, target: string) => void;
 }) {
   return (
@@ -638,8 +641,10 @@ function ReviewList({
           <dd className="col-start-2 row-start-1 m-0 sm:col-start-3">
             {/* A row nothing on the page changes keeps the link's room, so its
                 value sits where every other row's does rather than 20px
-                higher (P2-29, creating a poll's iteration 8). */}
-            {r.field === undefined ? (
+                higher (P2-29, creating a poll's iteration 8). Once the draft
+                is sent, every row is one nothing changes: a "Change" then led
+                to a field that drops what is typed into it (iteration 15). */}
+            {r.field === undefined || locked ? (
               <span aria-hidden="true" className="invisible inline-flex min-h-12 items-center">
                 {t("pollFormReviewChange")}
               </span>
@@ -670,11 +675,13 @@ function PollReview({
   t,
   form,
   phoneVerification,
+  locked,
   onJump,
 }: {
   t: Translate;
   form: PollForm;
   phoneVerification: boolean;
+  locked: boolean;
   onJump: (event: SyntheticEvent, target: string) => void;
 }) {
   const { locale } = useI18n();
@@ -699,7 +706,9 @@ function PollReview({
         <>
           {t("pollFormReviewQuestionCount", { count: form.questions.length })}
           {form.questions.length === 0 ? null : (
-            <ol className="m-0 mt-1 grid gap-1 ps-5">
+            // Numbered as the form's "Question 1" and "Question 2" are; the
+            // reset's bare list read as a stray indent (iteration 15).
+            <ol className="m-0 mt-1 grid list-decimal gap-1 ps-5">
               {form.questions.map((q) => (
                 <li key={q.key}>{q.question}</li>
               ))}
@@ -754,14 +763,14 @@ function PollReview({
         <p className="m-0 max-w-prose text-sm text-muted-foreground">
           {t("pollFormReviewPermanentLede")}
         </p>
-        <ReviewList t={t} rows={permanent} onJump={onJump} />
+        <ReviewList t={t} rows={permanent} locked={locked} onJump={onJump} />
       </div>
       <div className="grid gap-3">
         <h4 className="m-0 text-base font-semibold">{t("pollFormReviewListing")}</h4>
         <p className="m-0 max-w-prose text-sm text-muted-foreground">
           {t("pollFormReviewListingLede")}
         </p>
-        <ReviewList t={t} rows={listing} onJump={onJump} />
+        <ReviewList t={t} rows={listing} locked={locked} onJump={onJump} />
       </div>
     </section>
   );
@@ -1461,6 +1470,7 @@ export function PollFormPage({
                     t={t}
                     form={form}
                     phoneVerification={phoneVerification}
+                    locked={submitting === "sending" || submitting === "sent"}
                     onJump={jump}
                   />
                   {/* The note on Cloudflare's check sits by the button that

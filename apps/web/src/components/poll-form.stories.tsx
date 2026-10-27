@@ -225,6 +225,30 @@ export const NewPoll: Story = {
   },
 };
 
+export const OnlyItemsStayPut: Story = {
+  args: { client: fakeDrafts(), onCreated: fn() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The only question has no move buttons, which could never be used, so
+    // its heading's row is the heading alone (P2-29, creating a poll's
+    // iteration 12).
+    const only = within(canvas.getByRole("region", { name: "Question 1" }));
+    await expect(only.queryByRole("button", { name: /^Move question/ })).toBeNull();
+    await expect(
+      only.getByRole("button", { name: "Move option 1 of question 1 down" }),
+    ).toBeVisible();
+    // A second question gives both their moves; removing it takes them away again.
+    await userEvent.click(canvas.getByRole("button", { name: "Add a question" }));
+    await expect(canvas.getByRole("button", { name: "Move question 1 down" })).toBeEnabled();
+    await expect(canvas.getByRole("button", { name: "Move question 2 up" })).toBeEnabled();
+    await userEvent.click(canvas.getByRole("button", { name: "Remove question 2" }));
+    await expect(canvas.queryByRole("button", { name: /^Move question/ })).toBeNull();
+    // The same for an option left on its own, which can't be removed either.
+    await userEvent.click(only.getByRole("button", { name: "Remove option 2 of question 1" }));
+    await expect(only.queryByRole("button", { name: /option 1 of question 1$/ })).toBeNull();
+  },
+};
+
 export const WriteAndSave: Story = {
   args: { client: fakeDrafts(), onCreated: fn() },
   play: async ({ canvasElement, args }) => {

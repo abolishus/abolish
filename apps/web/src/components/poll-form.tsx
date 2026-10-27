@@ -158,26 +158,35 @@ function ItemControls({
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
 }) {
+  // A list's only item has nowhere to move: two buttons that are always
+  // disabled would only be read out and skipped (P2-29, creating a poll's
+  // iteration 12).
+  const canMove = count > 1;
+  if (!canMove && !canRemove) return null;
   return (
     <div className="flex shrink-0 gap-1">
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label={t("pollFormMoveUp", { what })}
-        disabled={index === 0}
-        onClick={() => onMove(-1)}
-      >
-        <ArrowUp aria-hidden="true" />
-      </Button>
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label={t("pollFormMoveDown", { what })}
-        disabled={index === count - 1}
-        onClick={() => onMove(1)}
-      >
-        <ArrowDown aria-hidden="true" />
-      </Button>
+      {canMove ? (
+        <>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={t("pollFormMoveUp", { what })}
+            disabled={index === 0}
+            onClick={() => onMove(-1)}
+          >
+            <ArrowUp aria-hidden="true" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={t("pollFormMoveDown", { what })}
+            disabled={index === count - 1}
+            onClick={() => onMove(1)}
+          >
+            <ArrowDown aria-hidden="true" />
+          </Button>
+        </>
+      ) : null}
       {canRemove ? (
         <Button
           variant="outline"

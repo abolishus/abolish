@@ -349,6 +349,58 @@ export function Sent({
   );
 }
 
+/**
+ * The poll opened on a device whose last cast in it the board took
+ * (`answeredCast`): changing the answers starts the questions from nothing
+ * chosen, since the device keeps how the voter answered nowhere, and a new
+ * ballot replaces the earlier one ([[revoting]]). The board's answer was
+ * never signed, so the screen claims no more than that it took the ballot,
+ * says it is the board's word and shows the tracking code for the voter to
+ * find on the board from another device (T-26).
+ */
+export function Answered({
+  poll,
+  trackingCode,
+  onChange,
+}: {
+  poll: FramePoll;
+  trackingCode: string;
+  onChange: () => void;
+}) {
+  const t = useTranslate(catalogs);
+  return (
+    <EverydayFrame
+      poll={poll}
+      primary={
+        <Button size="lg" className={ACTION} onClick={onChange}>
+          {t("answeredChange")}
+        </Button>
+      }
+    >
+      <ScreenTitle title={t("answeredTitle")} focus>
+        <p className="m-0">{t("answered")}</p>
+      </ScreenTitle>
+      <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
+        <Fingerprint
+          value={trackingCode}
+          label={t("trackingCodeFingerprint", { hash: shortHex(trackingCode) })}
+          size={56}
+        />
+        <Hash value={trackingCode} label={t("trackingCodeLabel")} />
+      </div>
+      <Part title={t("sentUnsignedTitle")}>
+        <p className="m-0">{t("sentUnsigned")}</p>
+      </Part>
+      <Part title={t("answeredFreshTitle")}>
+        <p className="m-0">{t("answeredFresh")}</p>
+      </Part>
+      <Part title={t("answeredPressuredTitle")}>
+        <p className="m-0">{t("answeredPressured")}</p>
+      </Part>
+    </EverydayFrame>
+  );
+}
+
 const STOPPED: Record<
   | "cant-seal-version"
   | "no-delivery"

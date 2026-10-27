@@ -499,13 +499,7 @@ export function unsentCast(
     return "other-election";
   return {
     ballot: newest.ballot.slice(),
-    trackingCode: cellCoreHash({
-      definitionHash: record.definition_hash,
-      ballotVersion: BALLOT_VERSION,
-      cell: record.cell,
-      vss: record.committed_vote.vss,
-      shareHashes: record.committed_vote.share_hashes,
-    }),
+    trackingCode: trackingCodeOf(record),
     // A receipted seat's `m_i` is gone, so it is never delivered or posted
     // again; every other seat is, with the `ct_i` recorded before the
     // ballot first left (Client rules 2 and 4).
@@ -513,6 +507,39 @@ export function unsentCast(
       "m" in share ? [{ seat: share.seat, ciphertext: share.ciphertext.slice() }] : [],
     ),
   };
+}
+
+/**
+ * The tracking code of the newest of `casts` once a checked answer of the
+ * board is kept for it, so the poll opens on "You've already answered"
+ * rather than on the questions (P2-25 part 3): the device's own record,
+ * never the server's word on whether this voter answered (T-10, T-11).
+ * Only the newest: a later cast the board never confirmed is `unsentCast`'s
+ * to finish, and under one the voter declined or whose shares were erased
+ * the screen would have to say which ballot stands, so the poll opens on
+ * the questions as before. `undefined` too for a newest cast that isn't a
+ * version-3 record naming `definitionHash`.
+ */
+export function answeredCast(
+  casts: readonly CastRecord[],
+  definitionHash: Uint8Array,
+): Uint8Array | undefined {
+  const newest = casts.at(-1);
+  if (newest?.boarded === undefined) return undefined;
+  const record = decodedOf(newest.ballot);
+  if (record === undefined || !equalBytes(record.definition_hash, definitionHash)) return undefined;
+  return trackingCodeOf(record);
+}
+
+/** A cast's tracking code, the core hash the voter was shown before casting it ([[challenge]], Core and tracking code). */
+function trackingCodeOf(record: BallotRecordV3): Uint8Array {
+  return cellCoreHash({
+    definitionHash: record.definition_hash,
+    ballotVersion: BALLOT_VERSION,
+    cell: record.cell,
+    vss: record.committed_vote.vss,
+    shareHashes: record.committed_vote.share_hashes,
+  });
 }
 
 /**

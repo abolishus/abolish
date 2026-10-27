@@ -381,6 +381,17 @@ export const esUS: Messages = {
   sentUnsignedTitle: "Lo que comprobó este dispositivo",
   sentUnsigned:
     "La respuesta del tablero todavía no está firmada, así que es solo la palabra del tablero. Más tarde, comprueba desde otro dispositivo que tu código de seguimiento está en el tablero.",
+  // A poll this device already answered (sealed.tsx, Answered).
+  answeredTitle: "Ya respondiste esta encuesta",
+  answered:
+    "Este dispositivo envió tu boleta sellada para esta encuesta, y el tablero público la recibió. Puedes cambiar tus respuestas hasta que cierre la encuesta: una boleta nueva desde este dispositivo reemplaza a la anterior, y solo cuenta la última.",
+  answeredChange: "Cambiar mis respuestas",
+  answeredFreshTitle: "Empezarás desde cero",
+  answeredFresh:
+    "Cambiarlas significa responder otra vez cada pregunta, sin nada elegido. Este dispositivo no guarda cómo respondiste, así que nadie que lo tome puede verlo aquí. Para mantener tus respuestas anteriores, no tienes que hacer nada.",
+  answeredPressuredTitle: "Si alguien te presionó",
+  answeredPressured:
+    "Puedes cambiar tus respuestas más tarde, en un lugar privado, y solo cuentan las últimas.",
   revoteExplained:
     "Puedes cambiar tus respuestas hasta que cierre la encuesta. Una boleta nueva desde este dispositivo reemplaza a esta.",
   sendRejectedTitle: "El tablero rechazó tu boleta",

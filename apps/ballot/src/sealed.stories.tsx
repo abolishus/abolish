@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 
-import { Opened, Sealed, SealStopped, Sent, Unsent, Working } from "./sealed.tsx";
+import { Answered, Opened, Sealed, SealStopped, Sent, Unsent, Working } from "./sealed.tsx";
 
 // The screens between sealing and the board (sealed.tsx), with the worker
 // and the network left out: each story is one screen as the voter meets it.
@@ -349,6 +349,44 @@ export const OnTheBoardAsACopy: Story = {
     await expect(canvas.getByText(/already holds a copy/)).toBeVisible();
     await expect(canvas.queryByText(/^Entry/)).toBeNull();
   },
+};
+
+const onChange = fn();
+
+const answered: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+    "You've already answered this poll",
+  );
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+  await expect(
+    canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+  ).toHaveTextContent(CODE);
+  // The board's unsigned word, never "counted" (T-26).
+  await expect(canvas.getByText(/the public board took it/)).toBeVisible();
+  await expect(canvas.queryByText(/counted/)).toBeNull();
+  await expect(canvas.getByText(/it is the board's word/)).toBeVisible();
+  // Nothing of how the voter answered is shown or kept (T-18).
+  await expect(canvas.getByText(/doesn't keep how you answered/)).toBeVisible();
+  await expect(canvas.getByRole("heading", { name: "If someone pressured you" })).toBeVisible();
+  // One way on: keeping the answers needs no tap.
+  await expect(canvas.getAllByRole("button")).toHaveLength(1);
+  onChange.mockClear();
+  await userEvent.click(canvas.getByRole("button", { name: "Change my answers" }));
+  await expect(onChange).toHaveBeenCalledOnce();
+};
+
+export const AlreadyAnswered: Story = {
+  name: "The poll opens on a device that already answered it",
+  render: () => <Answered poll={POLL} trackingCode={CODE} onChange={onChange} />,
+  play: answered,
+};
+
+export const AlreadyAnsweredDark: Story = {
+  name: "The poll opens on a device that already answered it, dark",
+  parameters: { layout: "fullscreen", theme: "dark" },
+  render: () => <Answered poll={POLL} trackingCode={CODE} onChange={onChange} />,
+  play: answered,
 };
 
 export const AnswerConflict: Story = {

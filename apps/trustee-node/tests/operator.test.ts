@@ -1,10 +1,11 @@
-// The seat's side of the operator's opening and destruction routes
-// (`POST /openings`, `POST /destructions`): the request carries the
+// The seat's side of the operator's opening, destruction and share-receipt
+// routes (`POST /openings`, `POST /destructions`, `POST /receipts`): the request carries the
 // election's id and the record in lowercase hex and nothing else, and each
 // answer the route gives is read as what it says (apps/api's
 // openings.submit: 201 with the entry, 422 OPENING_REJECTED with the
 // Boarding rule's code, 503 OPENING_NOT_READY, 409 ELECTION_NOT_OPEN, 404
-// ELECTION_NOT_FOUND; destructions.submit's the same with DESTRUCTION_*),
+// ELECTION_NOT_FOUND; destructions.submit's the same with DESTRUCTION_*;
+// receipts.submit's with RECEIPT_REJECTED and no not-ready answer),
 // anything else, another route's codes included, as unavailable, never
 // trusted further. A body past MAX_ANSWER is refused unread, and no
 // redirect is followed.
@@ -34,6 +35,7 @@ const json =
 const ID = new Uint8Array(32).fill(0xab);
 const OPENING = Uint8Array.of(0, 6, 1, 0xfe);
 const STATEMENT = Uint8Array.of(0, 0x0f, 1, 9);
+const RECEIPT = Uint8Array.of(0, 0x0c, 1, 7);
 const entry = "000501ab";
 
 describe("HttpOperator", () => {
@@ -216,6 +218,63 @@ describe("HttpOperator", () => {
         ? res.writeHead(307, { location: "/elsewhere" }).end()
         : json(201, { entry, link: "cd".repeat(32), earlier: false })(req, body, res);
     expect(await new HttpOperator(base).submitDestruction(ID, STATEMENT)).toMatchObject({
+      state: "unavailable",
+    });
+  });
+
+  test("posts the election's id and the receipt, in hex, to the base URL's receipts route", async () => {
+    let seen: { method?: string | undefined; url?: string | undefined; body: string } = {
+      body: "",
+    };
+    handler = (req, body, res) => {
+      seen = { method: req.method, url: req.url, body };
+      json(201, { entry, link: "cd".repeat(32), earlier: true })(req, body, res);
+    };
+    expect(await new HttpOperator(base).submitReceipt(ID, RECEIPT)).toEqual({
+      state: "boarded",
+      entry: Uint8Array.of(0, 5, 1, 0xab),
+      earlier: true,
+    });
+    expect(seen).toEqual({
+      method: "POST",
+      url: "/api/receipts",
+      body: JSON.stringify({ electionId: "ab".repeat(32), record: "000c0107" }),
+    });
+  });
+
+  test.each([
+    [
+      422,
+      { code: "RECEIPT_REJECTED", data: { code: "receipt-ballot" } },
+      { state: "rejected", code: "receipt-ballot" },
+    ],
+    [409, { code: "ELECTION_NOT_OPEN" }, { state: "not-open" }],
+    [404, { code: "ELECTION_NOT_FOUND" }, { state: "not-open" }],
+    [
+      503,
+      { code: "RECEIPTS_UNAVAILABLE" },
+      { state: "unavailable", reason: "RECEIPTS_UNAVAILABLE" },
+    ],
+    [429, { code: "RATE_LIMITED" }, { state: "unavailable", reason: "RATE_LIMITED" }],
+    // The other routes' codes are no answer from this one, and it has no not-ready answer.
+    [
+      422,
+      { code: "OPENING_REJECTED", data: { code: "tally-repeat" } },
+      { state: "unavailable", reason: "OPENING_REJECTED" },
+    ],
+    [503, { code: "OPENING_NOT_READY" }, { state: "unavailable", reason: "OPENING_NOT_READY" }],
+    [503, {}, { state: "unavailable", reason: "503" }],
+  ])("reads the receipts route's %i %j as what it says", async (status, body, answer) => {
+    handler = json(status, body);
+    expect(await new HttpOperator(base).submitReceipt(ID, RECEIPT)).toEqual(answer);
+  });
+
+  test("follows no redirect from the receipts route", async () => {
+    handler = (req, body, res) =>
+      req.url === "/api/receipts"
+        ? res.writeHead(307, { location: "/elsewhere" }).end()
+        : json(201, { entry, link: "cd".repeat(32), earlier: false })(req, body, res);
+    expect(await new HttpOperator(base).submitReceipt(ID, RECEIPT)).toMatchObject({
       state: "unavailable",
     });
   });

@@ -17,6 +17,7 @@ import {
   type AsyncBlockSource,
   AVAILABILITY_POINTS,
   type BoardEntryVersion,
+  deliveryDeadlines,
   encodeElectionDefinition,
   identityKey,
   type Panel,
@@ -62,6 +63,7 @@ import {
   type DutyEvent,
   OpeningSends,
   openingsDeadline,
+  ReceiptCopySends,
   ReceiptDuties,
   runInTurn,
   StatementSends,
@@ -70,12 +72,13 @@ import {
 } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
 import { seatFromEnv } from "./env-seat.ts";
-import { IntakeSeat, type RegistrationCheck } from "./intake.ts";
+import { givenReceipts, IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
 import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
 import { OpeningSender, PublishedReads } from "./opening-sender.ts";
 import { HttpOperator } from "./operator.ts";
+import { ReceiptCopySender } from "./receipt-copies.ts";
 import { StatementSender } from "./statement-sender.ts";
 import {
   l2AvailabilityRecords,
@@ -300,6 +303,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
           availability.duties.run(signal, ms),
           availability.counted.run(signal, ms),
           availability.receipts.run(signal, ms),
+          ...(availability.receiptCopies ? [availability.receiptCopies.run(signal, ms)] : []),
           availability.complaints.run(signal, ms),
           // In turn, so no tally step reads an election's secrets while
           // destruction removes them; destruction first, so the tally duty
@@ -403,6 +407,8 @@ interface Duties {
   readonly openings: OpeningSends | undefined;
   /** With `availability.tally` only, whose `operator` it sends to. */
   readonly statements: StatementSends | undefined;
+  /** With `availability.tally` only, whose `operator` it sends to. */
+  readonly receiptCopies: ReceiptCopySends | undefined;
   readonly channel: Endpoint | undefined;
   readonly server: Server;
 }
@@ -561,6 +567,7 @@ async function availabilityDuties(
         readonly duties: TallyDuties;
         readonly openings: OpeningSends;
         readonly statements: StatementSends;
+        readonly receiptCopies: ReceiptCopySends;
         readonly channel: Endpoint;
       }
     | undefined;
@@ -587,6 +594,7 @@ async function availabilityDuties(
     tally: tally?.duties,
     openings: tally?.openings,
     statements: tally?.statements,
+    receiptCopies: tally?.receiptCopies,
     channel: tally?.channel,
     server,
   };
@@ -603,7 +611,9 @@ async function availabilityDuties(
  * it, the sending of the openings it signs to the operator's API, until the
  * duty reads every cell published on the anchored board or the seal's
  * tally term (T-54), and of the seat's destruction statement, once it has
- * destroyed, until the destruction window ends (T-14).
+ * destroyed, until the destruction window ends (T-14); and to the same
+ * operator, the board-path copy of every share receipt the seat gave, until
+ * the delivery deadline (T-25).
  */
 async function tallyDuties(
   config: NodeConfig,
@@ -622,6 +632,7 @@ async function tallyDuties(
   readonly duties: TallyDuties;
   readonly openings: OpeningSends;
   readonly statements: StatementSends;
+  readonly receiptCopies: ReceiptCopySends;
   readonly channel: Endpoint;
 }> {
   let ca: string | undefined;
@@ -736,6 +747,26 @@ async function tallyDuties(
     },
     a.anchorClock,
   );
+  const receiptCopies = new ReceiptCopySends({
+    // Receipts are public records, kept past destruction; the sending ends at `t_D`.
+    seat: afterDestruction(seat),
+    clock,
+    log: (e: DutyEvent) => io.out(e),
+    build: async (election) => {
+      const { boardVersion } = await l1BoardAnchors(wiring.anchors, election);
+      const sender = new ReceiptCopySender({
+        election,
+        boardVersion,
+        receipts: () => givenReceipts(store, election.stubHash),
+        operator,
+        clock,
+      });
+      return {
+        step: () => sender.step(),
+        deadline: deliveryDeadlines(election.closesAt, election.l1InclusionBound).delivery,
+      };
+    },
+  });
   const tls = await tlsOf(t.tls);
   let channel;
   try {
@@ -752,7 +783,7 @@ async function tallyDuties(
     throw new ConfigError(`availability.tally: ${code}`);
   }
   io.out({ event: "summed-shares", url: channel.url });
-  return { duties, openings, statements, channel };
+  return { duties, openings, statements, receiptCopies, channel };
 }
 
 /** What `run` builds the duty over, besides the configuration. */

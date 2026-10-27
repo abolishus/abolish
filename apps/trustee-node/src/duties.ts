@@ -1,9 +1,11 @@
 // A seat's duties in a deployment: for each election the seat approved, one
 // duty, built once its sources can be set up and stepped on a schedule until
-// it settles. Five kinds run so: the availability duty at each point
+// it settles. Six kinds run so: the availability duty at each point
 // (`AvailabilitySeat`, docs/spec/availability.md, What a seat does; T-24,
 // T-54), the receipt duty
 // (`ReceiptDuty`, docs/spec/delivery.md, What a node owes; T-25, T-52),
+// with the board-path copies of every receipt the seat gave
+// (`ReceiptCopySender`, Client rules; T-25),
 // the complaint duty (`ComplaintDuty`, What a node owes in complaints; T-29),
 // the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
 // which also takes the summed-share messages the channel hands it, and the
@@ -31,6 +33,7 @@ import { type AvailabilitySeat, type AvailabilityStatus, countedDue } from "./av
 import type { ApprovedElection, ApprovedElectionInfo, CeremonySeat } from "./ceremony.ts";
 import type { ComplaintDuty, ComplaintDutyStatus } from "./complaint.ts";
 import type { ReceiptDuty, ReceiptDutyStatus } from "./delivery.ts";
+import type { ReceiptCopiesStatus, ReceiptCopySender } from "./receipt-copies.ts";
 import type { DestructionDuty, DestructionStatus } from "./destruction.ts";
 import { L1AnchorError } from "./l1.ts";
 import type { OpeningSender, OpeningSenderStatus } from "./opening-sender.ts";
@@ -64,6 +67,7 @@ export type KindEvent<K extends string, S> =
 export type AvailabilityEvent = KindEvent<"availability", AvailabilityStatus>;
 export type CountedAvailabilityEvent = KindEvent<"counted-availability", AvailabilityStatus>;
 export type ReceiptEvent = KindEvent<"receipts", ReceiptDutyStatus>;
+export type ReceiptCopyEvent = KindEvent<"receipt-copies", ReceiptCopiesStatus>;
 export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 export type TallyEvent = KindEvent<"tally", TallyDutyStatus>;
 export type OpeningEvent = KindEvent<"openings", OpeningSenderStatus>;
@@ -74,6 +78,7 @@ export type DutyEvent =
   | AvailabilityEvent
   | CountedAvailabilityEvent
   | ReceiptEvent
+  | ReceiptCopyEvent
   | ComplaintEvent
   | TallyEvent
   | OpeningEvent
@@ -87,8 +92,8 @@ type Logged<S> = S extends unknown
 
 /**
  * What the schedule reads of the seat: a `CeremonySeat`, or for the duties
- * that outlast destruction (`OpeningSends`, `DestructionDuties`,
- * `StatementSends`) the seat's
+ * that read no secret (`ReceiptCopySends`, `OpeningSends`,
+ * `DestructionDuties`, `StatementSends`) the seat's
  * elections without their secrets (`afterDestruction`).
  */
 export interface DutySeat<El extends ApprovedElectionInfo = ApprovedElection> {
@@ -145,6 +150,8 @@ const FINAL = [L1AnchorError, ViewError] as const;
 export type Duty = Pick<AvailabilitySeat, "step" | "deadline">;
 /** What the schedule needs of an election's receipt duty: `ReceiptDuty`. */
 export type ReceiptStep = Pick<ReceiptDuty, "step" | "deadline">;
+/** What the schedule needs of an election's receipt copies: `ReceiptCopySender`, with `t_D`. */
+export type ReceiptCopyStep = Pick<ReceiptCopySender, "step"> & { readonly deadline: bigint };
 /** What the schedule needs of an election's complaint duty: `ComplaintDuty`. */
 export type ComplaintStep = Pick<ComplaintDuty, "step" | "deadline">;
 /**
@@ -422,6 +429,34 @@ export class ReceiptDuties extends ElectionDuties<"receipts", ReceiptDutyStatus>
         // `t_D`, as `ReceiptDuty.deadline` computes it.
         deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery,
         settles: (status) => status.state === "recorded" || status.state === "unrecorded",
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * The board-path copies of every receipt the seat gave: each approved
+ * election's `ReceiptCopySender`, stepped from the approval (intake gives
+ * receipts until `c_I`) until the delivery deadline `t_D`, past which a
+ * board-path receipt delivers nothing; and settled at once where the
+ * pinned board-entry version can't carry one (docs/spec/delivery.md,
+ * Client rules, Windows; T-25). No step begins past `t_D`, nor is a sender
+ * set up.
+ */
+export class ReceiptCopySends extends ElectionDuties<
+  "receipt-copies",
+  ReceiptCopiesStatus,
+  ReceiptCopyStep,
+  ApprovedElectionInfo
+> {
+  constructor(options: DutyOptions<ReceiptCopyStep, ReceiptCopyEvent, ApprovedElectionInfo>) {
+    super(
+      {
+        name: "receipt-copies",
+        deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery,
+        noStepPast: true,
+        settles: (status, wall, deadline) => status.state === "unboardable" || wall > deadline,
       },
       options,
     );

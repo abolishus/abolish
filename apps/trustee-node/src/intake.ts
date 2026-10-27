@@ -93,7 +93,7 @@ export type IntakeOutcome =
   | {
       readonly ok: true;
       readonly ballotHash: Uint8Array;
-      /** The share receipt record (`0x000b`) for the ballot, under this seat. */
+      /** The share receipt record (`0x000c`) for the ballot, under this seat. */
       readonly receipt: Uint8Array;
     }
   | { readonly ok: false; readonly code: IntakeRefusal; readonly option?: number };
@@ -224,11 +224,16 @@ export class IntakeSeat {
     // from `c_I` on, which reads them then, covers every receipt the seat
     // gave (`decideObligation`).
     if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
-    return {
-      ok: true,
-      ballotHash: taken.ballotHash,
-      receipt: encodeShareReceipt(shareReceiptRecord(election.definitionHash, keys.seat, taken)),
-    };
+    const receipt = encodeShareReceipt(
+      shareReceiptRecord(election.definitionHash, keys.seat, taken),
+    );
+    // Kept for the copy the seat boards itself through the board path
+    // (`ReceiptCopySender`; docs/spec/delivery.md, Client rules), so a
+    // receipted seat reaches the board even when the client goes away
+    // (T-25). The same ballot signs the same bytes (RFC 6979), so a second
+    // delivery finds them held.
+    await this.#config.store.putOnce(`receipts/${hex(stubHash)}/${ballot}`, receipt);
+    return { ok: true, ballotHash: taken.ballotHash, receipt };
   }
 
   /** The ballot hashes this seat receipted for the stub, sorted. */
@@ -393,6 +398,25 @@ export async function heldIntake(
     }
   }
   return { receipts, copies };
+}
+
+/**
+ * Every share receipt record (`0x000c`) the seat gave for the stub, by its
+ * ballot hash in hex, as intake kept them: public records, which the seat
+ * boards itself (`ReceiptCopySender`) and destruction leaves in place.
+ */
+export async function givenReceipts(
+  store: SeatStore,
+  stubHash: Uint8Array,
+): Promise<{ readonly ballot: string; readonly receipt: Uint8Array }[]> {
+  const stub = hex(stubHash);
+  const given = [];
+  for (const ballot of await store.list(`receipts/${stub}`)) {
+    const receipt = await store.get(`receipts/${stub}/${ballot}`);
+    if (receipt === undefined) throw new Error(`trustee node: receipt record ${ballot} is gone`);
+    given.push({ ballot, receipt });
+  }
+  return given;
 }
 
 /**

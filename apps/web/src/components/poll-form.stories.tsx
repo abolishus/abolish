@@ -116,6 +116,8 @@ function fakeDrafts({
   };
 }
 
+const savedDraft = () => fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } });
+
 const writes = (client: unknown) => (client as ReturnType<typeof fakeDrafts>).writes;
 const submits = (client: unknown) => (client as ReturnType<typeof fakeDrafts>).submits;
 
@@ -170,6 +172,13 @@ export const NewPoll: Story = {
     await expect(canvas.getByRole("heading", { level: 1, name: "Ask a question" })).toBeVisible();
     await expect(canvas.getByText("New poll")).toBeVisible();
     await expect(canvas.queryByRole("link", { name: "Back to your polls" })).toBeNull();
+    // Nothing to check through or submit before a first save, only the way to
+    // it (P2-29, creating a poll's iteration 2).
+    await expect(canvas.queryByRole("region", { name: "Check it through" })).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Submit poll" })).toBeNull();
+    await expect(
+      canvas.getByText("Save your draft first. Then you can check it through here and submit it."),
+    ).toBeVisible();
     // The lede leaves the poll's title field on a small phone's first screen.
     await expect(
       canvas.getByRole("textbox", { name: "Title" }).getBoundingClientRect().bottom,
@@ -232,6 +241,14 @@ export const WriteAndSave: Story = {
     // Saved, it is a draft in the author's list, and the page says so.
     await expect(canvas.getByRole("heading", { level: 1, name: "Edit your poll" })).toBeVisible();
     await expect(canvas.getAllByRole("link", { name: "Back to your polls" })).toHaveLength(2);
+    // And it can be checked through and submitted.
+    await expect(canvas.getByRole("region", { name: "Check it through" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Submit poll" })).toBeEnabled();
+    await expect(
+      canvas.queryByText(
+        "Save your draft first. Then you can check it through here and submit it.",
+      ),
+    ).toBeNull();
     // A second save edits the draft the first one made.
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 3" }), "s");
     await expect(canvas.queryByText("Your draft is saved.")).toBeNull();
@@ -293,6 +310,9 @@ export const TopicAndPlace: Story = {
     );
     await expect(preview.getByText("Harbor Ward")).toBeVisible();
     await expect(preview.getByText("Transport")).toBeVisible();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     // The review keeps where it is listed apart from what is recorded for good.
     const review = within(canvas.getByRole("region", { name: "Check it through" }));
     const terms = review.getAllByRole("term").map((d) => d.textContent);
@@ -306,13 +326,10 @@ export const TopicAndPlace: Story = {
     ]);
     await expect(review.getByText("November 4, 2026 at 3:00 PM UTC")).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
-    // With phone verification off, Tier 0 is named by the e-mail alone.
-    await expect(review.getByText("Tier 0 (verified e-mail)")).toBeVisible();
+    // With phone verification off, Tier 0 is named by the e-mail alone, in words.
+    await expect(review.getByText("People with a verified e-mail address")).toBeVisible();
     await userEvent.click(review.getByRole("link", { name: "Change Topic" }));
     await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveFocus();
-
-    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
-    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     await expect(writes(args.client)[0]![2]).toMatchObject({
       title: "Ferry name",
       topic: "transport",
@@ -332,16 +349,55 @@ export const TopicAndPlace: Story = {
   },
 };
 
-/** With phone verification on, Tier 0 is named by both checks, in the form and its review. */
+/**
+ * With phone verification on, Tier 0 is named by both checks, in the form and
+ * its review, in words rather than its code (P2-29, creating a poll's
+ * iteration 2), and what counts once is the number.
+ */
 export const PhoneVerification: Story = {
-  args: { client: fakeDrafts(), phoneVerification: true },
+  args: { client: savedDraft(), id: ID, phoneVerification: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
-    await expect(who.getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
+    const name = "People with a verified e-mail address and phone number";
+    await expect(who.getByText(name)).toBeVisible();
+    await expect(who.getByText(/Each verified phone number counts once/)).toBeVisible();
     const review = within(canvas.getByRole("region", { name: "Check it through" }));
-    await expect(review.getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
-    await expect(canvas.queryByText("Tier 0 (verified e-mail)")).toBeNull();
+    await expect(review.getByText(name)).toBeVisible();
+    await expect(canvas.queryByText(/Tier 0/)).toBeNull();
+  },
+};
+
+/** Without it, what counts once is the address, and no tier's code is shown. */
+export const EmailVerification: Story = {
+  args: { client: savedDraft(), id: ID },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
+    await expect(who.getByText("People with a verified e-mail address")).toBeVisible();
+    await expect(who.getByText(/Each verified e-mail address counts once/)).toBeVisible();
+    await expect(canvas.queryByText(/Tier 0|voting identity/)).toBeNull();
+  },
+};
+
+/**
+ * Where the preview stacks on a phone, it comes after saving and before the
+ * review, where it came last, under the submit button (P2-29, creating a
+ * poll's iteration 2).
+ */
+export const PreviewBeforeSubmitPhone: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const preview = (
+      await canvas.findByRole("complementary", { name: "What people will see" })
+    ).getBoundingClientRect();
+    const save = canvas.getByRole("button", { name: "Save draft" }).getBoundingClientRect();
+    const review = canvas.getByRole("region", { name: "Check it through" }).getBoundingClientRect();
+    await expect(preview.top).toBeGreaterThan(save.bottom);
+    await expect(preview.bottom).toBeLessThan(review.top);
   },
 };
 
@@ -570,8 +626,6 @@ export const TooManyDrafts: Story = {
   },
 };
 
-const savedDraft = () => fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } });
-
 export const SubmitADraft: Story = {
   args: { client: savedDraft(), id: ID, challenge: fakeChallenge(), onSubmitted: fn() },
   play: async ({ canvasElement, args }) => {
@@ -613,12 +667,9 @@ export const SubmitSavesFirst: Story = {
   args: { client: fakeDrafts(), challenge: fakeChallenge(), onCreated: fn(), onSubmitted: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    // Nothing saved yet: nothing to submit.
-    await userEvent.click(await canvas.findByRole("button", { name: "Submit poll" }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent(
-      "Save your draft first: only a saved draft can be submitted.",
-    );
-    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), "Ferry name");
+    // Nothing saved yet: nothing to submit, and no button that could only refuse.
+    await userEvent.type(await canvas.findByRole("textbox", { name: "Title" }), "Ferry name");
+    await expect(canvas.queryByRole("button", { name: "Submit poll" })).toBeNull();
     await userEvent.type(
       canvas.getByRole("textbox", { name: "What do you want to ask?" }),
       "What should the new ferry be called?",

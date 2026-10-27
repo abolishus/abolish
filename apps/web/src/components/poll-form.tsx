@@ -68,6 +68,16 @@ const tierName = (t: Translate, tier: number, phoneVerification: boolean) => {
   return key === undefined ? String(tier) : t(key);
 };
 
+/**
+ * Who can answer, in the everyday register's words rather than a tier's code
+ * (P2-29, creating a poll's iteration 2): Tier 0 by what the token issuer
+ * checks, any other tier by its name.
+ */
+const whoName = (t: Translate, tier: number, phoneVerification: boolean) =>
+  tier === 0
+    ? t(phoneVerification ? "pollFormWho_phone" : "pollFormWho_email")
+    : tierName(t, tier, phoneVerification);
+
 /** A problem's words, saying which question it is in. */
 const say = (t: Translate, e: FieldError) => {
   const problem = t(`pollForm_${e.problem}`);
@@ -612,7 +622,7 @@ function PollReview({
     },
     {
       label: t("pollFormReviewWho"),
-      value: form.tiers.map((tier) => tierName(t, tier, phoneVerification)).join(", "),
+      value: form.tiers.map((tier) => whoName(t, tier, phoneVerification)).join(", "),
     },
     {
       label: t("pollFormReviewCloses"),
@@ -1033,7 +1043,7 @@ export function PollFormPage({
         noValidate
         aria-busy={busy}
         onSubmit={save}
-        className="grid gap-14 outline-none lg:grid-cols-12 lg:gap-x-12"
+        className="grid gap-14 outline-none lg:grid-cols-12 lg:gap-x-12 lg:gap-y-12"
       >
         <div className="grid min-w-0 content-start gap-12 lg:col-span-7">
           {errors.length > 0 ? (
@@ -1228,12 +1238,16 @@ export function PollFormPage({
             mark={t("pollFormWhoMark")}
             title={t("pollFormWhoTitle")}
             id="poll-form-who"
-            lede={<p className="m-0">{t("pollFormWhoLede")}</p>}
+            lede={
+              <p className="m-0">
+                {t(phoneVerification ? "pollFormWhoLede_phone" : "pollFormWhoLede_email")}
+              </p>
+            }
           >
             <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
               {form.tiers.map((tier) => (
                 <li key={tier} className="border-b border-border py-3 text-base font-semibold">
-                  {tierName(t, tier, phoneVerification)}
+                  {whoName(t, tier, phoneVerification)}
                 </li>
               ))}
             </ul>
@@ -1304,60 +1318,15 @@ export function PollFormPage({
               </p>
             )}
           </div>
-
-          <Section
-            index="05"
-            mark={t("pollFormSubmitMark")}
-            title={t("pollFormSubmitTitle")}
-            id="poll-form-submit"
-            lede={
-              <>
-                <p className="m-0">{t("pollFormSubmitLede")}</p>
-                <p className="m-0 text-sm text-muted-foreground">{t("pollFormSubmitCloudflare")}</p>
-              </>
-            }
-          >
-            <div className="grid gap-4">
-              <PollReview t={t} form={form} phoneVerification={phoneVerification} onJump={jump} />
-              <div>
-                <Button
-                  type="button"
-                  size="lg"
-                  variant="outline"
-                  disabled={busy || submitting !== "idle"}
-                  onClick={() => void submit()}
-                >
-                  {t("pollFormSubmit")}
-                </Button>
-              </div>
-              {/* Turnstile renders its frame here (src/account/challenge.ts). */}
-              <div
-                ref={checkBox}
-                role="group"
-                aria-label={t("pollFormSubmitCheckLabel")}
-                hidden={submitting !== "checking"}
-              />
-              <div role="status" className="min-h-6 text-base">
-                {submitting === "checking"
-                  ? t("pollFormSubmitChecking")
-                  : submitting === "sending"
-                    ? t("pollFormSubmitting")
-                    : submitting === "sent"
-                      ? t("pollFormSubmitted")
-                      : null}
-              </div>
-              {submitFailure === undefined ? null : (
-                <p role="alert" className="m-0 text-destructive">
-                  {t(
-                    SUBMIT_MESSAGES[submitFailure] ??
-                      `pollsFailure_${submitFailure as DraftsFailure}`,
-                  )}
-                </p>
-              )}
-            </div>
-          </Section>
         </div>
-        <aside aria-labelledby="poll-form-preview" className="min-w-0 lg:col-span-5">
+
+        {/* Where the preview stacks, it comes between saving and submitting, so
+            an author sees what people will see before the review (P2-29,
+            creating a poll's iteration 2); from lg it is the second column. */}
+        <aside
+          aria-labelledby="poll-form-preview"
+          className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1"
+        >
           <div className="grid gap-4 lg:sticky lg:top-6">
             <p className="m-0 font-mono text-xs tracking-widest uppercase">
               {t("pollFormPreviewMark")}
@@ -1372,6 +1341,73 @@ export function PollFormPage({
             <ListingPreview t={t} form={form} />
           </div>
         </aside>
+
+        <div className="grid min-w-0 content-start gap-12 lg:col-span-7">
+          <Section
+            index="05"
+            mark={t("pollFormSubmitMark")}
+            title={t("pollFormSubmitTitle")}
+            id="poll-form-submit"
+            lede={
+              <>
+                <p className="m-0">{t("pollFormSubmitLede")}</p>
+                {isNew ? null : (
+                  <p className="m-0 text-sm text-muted-foreground">
+                    {t("pollFormSubmitCloudflare")}
+                  </p>
+                )}
+              </>
+            }
+          >
+            {/* Only a saved draft can be submitted, so before the first save
+                there is nothing to check through and no button that could
+                only refuse. */}
+            {isNew ? (
+              <p className="m-0 max-w-prose text-base font-semibold">
+                {t("pollFormSubmitAfterSave")}
+              </p>
+            ) : (
+              <div className="grid gap-4">
+                <PollReview t={t} form={form} phoneVerification={phoneVerification} onJump={jump} />
+                <div>
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="outline"
+                    disabled={busy || submitting !== "idle"}
+                    onClick={() => void submit()}
+                  >
+                    {t("pollFormSubmit")}
+                  </Button>
+                </div>
+                {/* Turnstile renders its frame here (src/account/challenge.ts). */}
+                <div
+                  ref={checkBox}
+                  role="group"
+                  aria-label={t("pollFormSubmitCheckLabel")}
+                  hidden={submitting !== "checking"}
+                />
+                <div role="status" className="min-h-6 text-base">
+                  {submitting === "checking"
+                    ? t("pollFormSubmitChecking")
+                    : submitting === "sending"
+                      ? t("pollFormSubmitting")
+                      : submitting === "sent"
+                        ? t("pollFormSubmitted")
+                        : null}
+                </div>
+                {submitFailure === undefined ? null : (
+                  <p role="alert" className="m-0 text-destructive">
+                    {t(
+                      SUBMIT_MESSAGES[submitFailure] ??
+                        `pollsFailure_${submitFailure as DraftsFailure}`,
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
+          </Section>
+        </div>
       </form>
     </div>
   );

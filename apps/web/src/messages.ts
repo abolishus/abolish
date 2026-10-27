@@ -1162,8 +1162,12 @@ const enUS = {
   pollFormWhatOption: "option {n} of question {q}",
   pollFormWhoMark: "Who can answer",
   pollFormWhoTitle: "Who can answer?",
-  pollFormWhoLede:
-    "Today's polls run at Tier 0: anyone with a voting identity on their device can answer, and anyone can make several. Its result counts identities, not people, and says so. Stricter tiers are being built.",
+  pollFormWhoLede_email:
+    "For now, every poll is open to the same people. Each verified e-mail address counts once, so someone with two addresses could answer twice: results count addresses, not people.",
+  pollFormWhoLede_phone:
+    "For now, every poll is open to the same people. Each verified phone number counts once, so someone with two numbers could answer twice: results count numbers, not people.",
+  pollFormWho_email: "People with a verified e-mail address",
+  pollFormWho_phone: "People with a verified e-mail address and phone number",
   pollFormWhenMark: "When it closes",
   pollFormWhenTitle: "When does it close?",
   pollFormWhenLede:
@@ -1215,6 +1219,8 @@ const enUS = {
   pollFormSubmitCloudflare:
     "Before it's sent, a check by Cloudflare confirms you're a person. Cloudflare sees your browser's address while it runs.",
   pollFormSubmit: "Submit poll",
+  pollFormSubmitAfterSave:
+    "Save your draft first. Then you can check it through here and submit it.",
   pollFormSubmitCheckLabel: "Check that you're a person",
   pollFormSubmitChecking: "Complete the check to submit your poll.",
   pollFormSubmitting: "Submitting your poll…",

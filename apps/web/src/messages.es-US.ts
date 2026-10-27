@@ -1189,8 +1189,12 @@ export const esUS: Messages = {
   pollFormWhatOption: "la opción {n} de la pregunta {q}",
   pollFormWhoMark: "Quién puede responder",
   pollFormWhoTitle: "¿Quién puede responder?",
-  pollFormWhoLede:
-    "Las encuestas de hoy funcionan en Nivel 0: cualquiera con una identidad de votación en su dispositivo puede responder, y cualquiera puede crear varias. Su resultado cuenta identidades, no personas, y así lo indica. Se están creando niveles más estrictos.",
+  pollFormWhoLede_email:
+    "Por ahora, todas las encuestas están abiertas a las mismas personas. Cada correo electrónico verificado cuenta una vez, así que alguien con dos direcciones podría responder dos veces: los resultados cuentan direcciones, no personas.",
+  pollFormWhoLede_phone:
+    "Por ahora, todas las encuestas están abiertas a las mismas personas. Cada número de teléfono verificado cuenta una vez, así que alguien con dos números podría responder dos veces: los resultados cuentan números, no personas.",
+  pollFormWho_email: "Personas con un correo electrónico verificado",
+  pollFormWho_phone: "Personas con un correo electrónico y un número de teléfono verificados",
   pollFormWhenMark: "Cuándo cierra",
   pollFormWhenTitle: "¿Cuándo cierra?",
   pollFormWhenLede:
@@ -1242,6 +1246,7 @@ export const esUS: Messages = {
   pollFormSubmitCloudflare:
     "Antes de enviarla, una verificación de Cloudflare confirma que eres una persona. Cloudflare ve la dirección de tu navegador mientras se ejecuta.",
   pollFormSubmit: "Enviar encuesta",
+  pollFormSubmitAfterSave: "Primero guarda tu borrador. Después podrás revisarlo aquí y enviarlo.",
   pollFormSubmitCheckLabel: "Verifica que eres una persona",
   pollFormSubmitChecking: "Completa la verificación para enviar tu encuesta.",
   pollFormSubmitting: "Enviando tu encuesta…",

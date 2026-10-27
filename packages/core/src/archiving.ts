@@ -46,8 +46,8 @@ import {
   encodeArchiveManifest,
   encodeContractEventEvidence,
   encodeContractEventRun,
+  checkEventAccumulatorContinuation,
   eventAccumulatorGenesis,
-  eventAccumulatorStep,
   type EvidenceRef,
   MAX_CONTRACT_EVENT_RUN,
   MAX_EVENT_DATA,
@@ -417,12 +417,22 @@ function splitRuns(
   return out;
 }
 
+/** What a record the writer takes proves, and its encoding. */
+interface Judged {
+  readonly bytes: Uint8Array;
+  readonly block: bigint;
+  readonly count: bigint;
+  readonly accumulator: Uint8Array;
+}
+
 /**
  * The evidence check a reader applies (docs/spec/archive.md, The evidence
- * check), with the listing's block the header's own, and what the writer
- * adds: the record is canonical, at or after the period's end, and proves
- * no less than, and at its count nothing other than, the contract's last.
- * Returns what it proves.
+ * check) to the record as decoded from the bytes to be posted, with the
+ * listing's block the header's own, and what the writer adds: the record is
+ * canonical, at or after the period's end, and proves no lower block or
+ * count than the contract's last. Returns what it proves, or `absent` for
+ * a record proving the contract had no code yet while it has counted no
+ * event, which moves its place on and writes nothing.
  */
 function judgeEvidence(
   record: ContractEventEvidence,
@@ -430,81 +440,87 @@ function judgeEvidence(
   l2ChainId: bigint,
   end: bigint,
   last: Progress,
-): { bytes: Uint8Array; block: bigint; count: bigint; accumulator: Uint8Array } {
+): Judged | "absent" {
   const fail = (why: string) => new ContractEventError("evidence", why);
   let bytes: Uint8Array;
-  let block: bigint;
+  let decoded: ContractEventEvidence;
   try {
     bytes = encodeContractEventEvidence(record);
-    decodeContractEventEvidence(bytes, 1);
-    block = accumulatorAtOutputRoot(
-      {
-        outputRoot: record.output_root,
-        messagePasserStorageRoot: record.message_passer_storage_root,
-        header: record.header,
-        nodes: record.nodes,
-      },
-      contract,
-    ).block;
+    decoded = decodeContractEventEvidence(bytes, 1);
   } catch (e) {
-    if (e instanceof OutputRootError) throw fail(e.code);
     throw fail(
       `it isn't a canonical version-1 record (${e instanceof Error ? e.message : String(e)})`,
     );
   }
-  const check = checkContractEventEvidence(record, { contract, l2Block: block }, l2ChainId);
+  let block: bigint;
+  try {
+    block = accumulatorAtOutputRoot(
+      {
+        outputRoot: decoded.output_root,
+        messagePasserStorageRoot: decoded.message_passer_storage_root,
+        header: decoded.header,
+        nodes: decoded.nodes,
+      },
+      contract,
+    ).block;
+  } catch (e) {
+    if (!(e instanceof OutputRootError)) throw e;
+    // A contract deployed after the first anchored period has no account
+    // at that period's block; its sequence starts at genesis all the same.
+    if (
+      e.code === "l2-contract-absent" &&
+      last.count === 0n &&
+      decoded.l2_chain_id === l2ChainId &&
+      equal(decoded.contract, contract)
+    )
+      return "absent";
+    throw fail(e.code);
+  }
+  const check = checkContractEventEvidence(decoded, { contract, l2Block: block }, l2ChainId);
   if (!check.ok) throw fail(check.code);
   const { count, accumulator, timestamp } = check.accumulator;
   if (timestamp < end) throw fail(`its block's timestamp ${timestamp} is before ${end}`);
   if (block < last.l2Block || count < last.count)
     throw fail(`it proves less than the contract's last record`);
-  if (count === last.count && !equal(accumulator, last.accumulator))
-    throw fail(`it proves another accumulator at the last record's count`);
   return { bytes, block, count, accumulator };
 }
 
 /**
- * Replays `events`, the contract's from the last record's count, from the
- * accumulator that record proved, as a reader's replay does (docs/spec/
- * contracts.md, Event accumulator, Verification): exactly the events the new
- * record counts, in order of block and timestamp after the last one counted,
- * none past its block, reproducing its accumulator. So a run posted always
- * replays against the evidence posted with it (T-71).
+ * Whether `events`, the contract's from the last record's count, take the
+ * archive from where the last record left it to `proven`, as the reader's
+ * replay of the whole sequence would judge it against both
+ * (`checkEventAccumulatorContinuation`; docs/spec/contracts.md, Event
+ * accumulator, Verification): so a record and the runs posted with it
+ * always replay, with every record before them (T-71).
  */
-function replayEvents(
-  events: readonly RunEvent[],
-  last: Progress,
-  proven: { block: bigint; count: bigint; accumulator: Uint8Array },
-): void {
+function replayEvents(events: readonly RunEvent[], last: Progress, proven: Judged): void {
   const fail = (why: string) => new ContractEventError("events", why);
-  if (BigInt(events.length) !== proven.count - last.count)
-    throw fail(`the source gave ${events.length} events for ${proven.count - last.count}`);
-  let accumulator = last.accumulator;
-  let block = last.lastBlock;
-  let timestamp = last.lastTimestamp;
-  for (const [i, e] of events.entries()) {
-    const n = last.count + BigInt(i);
-    if (e.l2_block < block || e.l2_timestamp < timestamp)
-      throw fail(`event ${n} is before the one it follows`);
-    if (e.l2_block > proven.block) throw fail(`event ${n} is past the record's block`);
-    if (e.data.length > MAX_EVENT_DATA) throw fail(`event ${n}'s data is over MAX_EVENT_DATA`);
-    try {
-      accumulator = eventAccumulatorStep(accumulator, n, {
+  if (!Array.isArray(events)) throw fail("the source gave no list of events");
+  let broken: string | null;
+  try {
+    if (events.some((e) => e.data.length > MAX_EVENT_DATA))
+      throw new RangeError("an event's data is over MAX_EVENT_DATA");
+    broken = checkEventAccumulatorContinuation(
+      {
+        accumulator: last.accumulator,
+        count: last.count,
+        block: last.l2Block,
+        lastBlock: last.lastBlock,
+        lastTimestamp: last.lastTimestamp,
+      },
+      events.map((e, i) => ({
+        n: last.count + BigInt(i),
         block: e.l2_block,
         timestamp: e.l2_timestamp,
         topics: e.topics,
         data: e.data,
-      });
-    } catch (err) {
-      throw fail(
-        `event ${n} is no log of ours (${err instanceof Error ? err.message : String(err)})`,
-      );
-    }
-    block = e.l2_block;
-    timestamp = e.l2_timestamp;
+      })),
+      proven,
+    );
+  } catch (e) {
+    throw fail(`an event is no log of ours (${e instanceof Error ? e.message : String(e)})`);
   }
-  if (!equal(accumulator, proven.accumulator))
-    throw fail("the events don't reproduce the record's accumulator");
+  if (broken !== null) throw fail(`they don't replay to the record (${broken})`);
 }
 
 /**
@@ -574,7 +590,31 @@ async function writeContractEvents(
         const end = ce.clock.epoch + (segment + 1n) * ce.clock.period;
         const record = await ask(() => ce.source.evidence(contract, end));
         if (record === undefined) break;
-        const proven = judgeEvidence(record, contract, ce.l2ChainId, end, last);
+        const judged = judgeEvidence(record, contract, ce.l2ChainId, end, last);
+        if (judged === "absent") {
+          await db
+            .insert(archiveEventProgress)
+            .values({ contract: Uint8Array.from(contract), ...last, segment })
+            .onConflictDoUpdate({ target: archiveEventProgress.contract, set: { segment } });
+          last = { ...last, segment };
+          continue;
+        }
+        const proven = judged;
+        // A record is listed with all its runs, in one manifest, so a span
+        // more runs than that would need is refused before it is fetched.
+        if (proven.count - last.count > BigInt(MAX_MANIFEST_RUNS * MAX_RUN_EVENTS))
+          throw new ContractEventError("runs", "its events need more runs than a manifest lists");
+        // The same count again: `replayEvents` with no event holds it to
+        // the last record's accumulator and blocks.
+        if (proven.count === last.count)
+          try {
+            replayEvents([], last, proven);
+          } catch {
+            throw new ContractEventError(
+              "evidence",
+              "it proves another accumulator at the last record's count",
+            );
+          }
         let next: Progress = { ...last, segment, l2Block: proven.block };
         let written: ReturnType<typeof splitRuns> = [];
         if (proven.count > last.count) {
@@ -1009,6 +1049,10 @@ async function writeManifests(
     let runCount = 0;
     while (g < groups.length && taken.length < MAX_MANIFEST_EVIDENCE) {
       const next = groups[g] as EvidenceGroup;
+      // Written within the bound (`writeContractEvents`), so only a row
+      // written by another hand can be over it, and never fits a manifest.
+      if (next.runs.length > MAX_MANIFEST_RUNS)
+        throw new Error(`${cidText(next.evidence.cid)} has more runs than a manifest lists`);
       if (runCount + next.runs.length > MAX_MANIFEST_RUNS) break;
       taken.push(next);
       runCount += next.runs.length;

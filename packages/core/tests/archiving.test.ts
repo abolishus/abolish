@@ -888,6 +888,17 @@ class ModelL2 implements ContractEventSource {
   readonly logs = new Map<string, RunEvent[]>();
   /** Makes the next reads throw, as a node that is down. */
   failing = false;
+  /** Each contract's first block with code; none before it. */
+  readonly deployedAt = new Map<string, bigint>();
+  /**
+   * A forger's history of the board, from which its records and events are
+   * both built, so each is consistent with the other.
+   */
+  forgeLogs: ((logs: RunEvent[]) => RunEvent[]) | undefined;
+  /** A forger's accumulator and count for the board's records. */
+  forgeState: { accumulator?: Uint8Array; count?: bigint } | undefined;
+  /** How many times `events` was asked. */
+  eventReads = 0;
   /** Rewrites the board's record or events before they are given. */
   tamper: {
     evidence?: (e: ContractEventEvidence) => ContractEventEvidence;
@@ -911,8 +922,13 @@ class ModelL2 implements ContractEventSource {
     this.head += blocks;
   }
 
+  history(contract: Uint8Array) {
+    const logs = this.logs.get(hex(contract)) ?? [];
+    return equalBytes(contract, BOARD) && this.forgeLogs ? this.forgeLogs(logs) : logs;
+  }
+
   counted(contract: Uint8Array, block: bigint) {
-    return (this.logs.get(hex(contract)) ?? []).filter((e) => e.l2_block <= block);
+    return this.history(contract).filter((e) => e.l2_block <= block);
   }
 
   async evidence(contract: Uint8Array, after: bigint) {
@@ -931,16 +947,20 @@ class ModelL2 implements ContractEventSource {
         data: e.data,
       })),
     );
+    const forged = equalBytes(contract, BOARD) ? this.forgeState : undefined;
+    const deployed = block >= (this.deployedAt.get(hex(contract)) ?? 0n);
     const { evidence } = l2State(
-      [
-        {
-          address: contract,
-          storage: [
-            [word(ACCUMULATOR_SLOT), state.accumulator],
-            [word(ACCUMULATOR_SLOT + 1n), word(state.count)],
-          ],
-        },
-      ],
+      deployed
+        ? [
+            {
+              address: contract,
+              storage: [
+                [word(ACCUMULATOR_SLOT), forged?.accumulator ?? state.accumulator],
+                [word(ACCUMULATOR_SLOT + 1n), word(forged?.count ?? state.count)],
+              ],
+            },
+          ]
+        : [{ address: new Uint8Array(20).fill(0xee), storage: [] }],
       block,
       blockTime(block),
     );
@@ -962,7 +982,8 @@ class ModelL2 implements ContractEventSource {
 
   async events(contract: Uint8Array, from: bigint, to: bigint) {
     if (this.failing) throw new Error("the index is down");
-    const list = (this.logs.get(hex(contract)) ?? []).slice(Number(from), Number(to));
+    this.eventReads++;
+    const list = this.history(contract).slice(Number(from), Number(to));
     return (equalBytes(contract, BOARD) && this.tamper.events?.(list)) || list;
   }
 }
@@ -1319,6 +1340,113 @@ describe("archiveBoards with contract events", () => {
     await refused(app`UPDATE archive_evidence SET count = count + 1`);
     await refused(app`UPDATE archive_runs SET run = '\\x00'`);
     await refused(owner`UPDATE archive_runs SET run = '\\x00'`);
+  });
+
+  test("refuses a forger's record and events that agree with each other but not with the last record", async () => {
+    // Each forgery is consistent in itself, a record over the events it is
+    // given, so only the writer's continuation from the last record (or its
+    // bounds) refuses it (checkEventAccumulatorContinuation).
+    const cases: [string, (l2: ModelL2) => void, string][] = [
+      [
+        "an event moved to before the last record's block",
+        (l2) => {
+          l2.forgeLogs = (logs) => logs.map((e, i) => (i === 1 ? { ...e, l2_block: 5n } : e));
+        },
+        "events",
+      ],
+      [
+        "an event dated before the one it follows",
+        (l2) => {
+          l2.forgeLogs = (logs) =>
+            logs.map((e, i) => (i === 1 ? { ...e, l2_timestamp: e.l2_timestamp - 100n } : e));
+        },
+        "events",
+      ],
+      [
+        "an event's data over MAX_EVENT_DATA",
+        (l2) => {
+          l2.forgeLogs = (logs) =>
+            logs.map((e, i) => (i === 1 ? { ...e, data: new Uint8Array((1 << 20) + 1) } : e));
+        },
+        "events",
+      ],
+      [
+        "a count beyond what a manifest's runs hold",
+        (l2) => {
+          l2.forgeState = { count: 1n << 40n };
+        },
+        "runs",
+      ],
+    ];
+    for (const [what, forge, code] of cases) {
+      await db.admin.begin(async (tx) => {
+        await tx`SET LOCAL session_replication_role = replica`;
+        for (const t of [
+          "archive_transactions",
+          "archive_runs",
+          "archive_evidence",
+          "archive_event_progress",
+          "archive_objects",
+          "archive_manifests",
+          "board_checkpoints",
+        ])
+          await tx`DELETE FROM ${tx(t)}`;
+      });
+      const arweave = new ModelArweave();
+      const l2 = new ModelL2();
+      l2.emit(BOARD);
+      l2.advance(10n);
+      l2.emit(BOARD);
+      l2.advance(20n);
+      await board(0);
+      expect(await run(arweave, eventOptions(l2)), what).toMatchObject({ evidence: 1 });
+      await board(1);
+      forge(l2);
+      const reads = l2.eventReads;
+      const r = await run(arweave, eventOptions(l2));
+      expect(r.evidence, what).toBe(0);
+      expect(
+        r.eventFailures.map((f) => [hex(f.contract), f.error.code]),
+        what,
+      ).toEqual([[hex(BOARD), code]]);
+      // A span past the bound is refused before the events are fetched.
+      if (code === "runs") expect(l2.eventReads, what).toBe(reads);
+    }
+  });
+
+  test("refuses a record proving another accumulator at the last record's count", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(30n);
+    await board(0, 1);
+    expect(await run(arweave, eventOptions(l2, { maxPeriods: 1 }))).toMatchObject({ evidence: 1 });
+    l2.forgeState = { accumulator: new Uint8Array(32).fill(3), count: 1n };
+    const r = await run(arweave, eventOptions(l2));
+    expect(r.eventFailures.map((f) => [hex(f.contract), f.error.code])).toEqual([
+      [hex(BOARD), "evidence"],
+    ]);
+    expect(r.eventFailures[0]!.error.message).toMatch(/another accumulator/);
+  });
+
+  test("a contract deployed after the first anchored period starts from genesis at its first record", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.deployedAt.set(hex(REGISTRY), 25n);
+    l2.emit(BOARD);
+    l2.advance(25n);
+    l2.emit(REGISTRY);
+    l2.advance(10n);
+    await board(0, 1, 2);
+    const first = await run(arweave, eventOptions(l2));
+    expect(first.eventFailures).toEqual([]);
+    await drain(arweave, eventOptions(l2));
+    const { walk, replays } = await replay(arweave);
+    expect(
+      walk.evidence.filter((e) => equalBytes(e.contract, REGISTRY)).map((e) => e.l2Block),
+    ).toEqual([30n]);
+    expectReplays(replays, l2);
+    expect(replays.find((x) => x.role === "election-registry")?.held).toBe(1n);
   });
 
   test("refuses malformed contract-event options", async () => {

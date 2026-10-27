@@ -271,12 +271,14 @@ export {
 export {
   type ArchivedContractLog,
   checkEventAccumulatorProof,
+  checkEventAccumulatorContinuation,
   checkEventAccumulatorProofs,
   type ContractLog,
   eventAccumulatorGenesis,
   eventAccumulatorStep,
   type EventAccumulatorProofError,
   type EventAccumulatorState,
+  type ProvenContinuation,
   type ProvenEventAccumulator,
   replayEventAccumulator,
 } from "./event-accumulator.ts";

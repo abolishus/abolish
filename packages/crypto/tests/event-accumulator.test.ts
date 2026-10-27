@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   type ArchivedContractLog,
+  checkEventAccumulatorContinuation,
   checkEventAccumulatorProof,
   checkEventAccumulatorProofs,
   type ContractLog,
@@ -445,6 +446,102 @@ describe("event accumulator", () => {
           },
         ),
         { numRuns },
+      );
+    });
+
+    test("checkEventAccumulatorContinuation from a proof that matched holds exactly when the archive up to the new proof matches both", () => {
+      // What a writer holding only where its archive stands checks: from a
+      // proof `from` that matched, the logs `proven` adds. The judge is the
+      // whole archive, cut at `proven`'s count, under both proofs.
+      const verdict = (f: () => unknown) => {
+        const o = outcome(f);
+        return "threw" in o ? "threw" : o.value === null ? "holds" : "fails";
+      };
+      fc.assert(
+        fc.property(
+          chainId,
+          address,
+          archive,
+          fc.bigInt({ min: 8n, max: 30n }),
+          fc.nat({ max: 8 }),
+          fc.record({
+            block: fc.bigInt({ min: 8n, max: 30n }),
+            extra: fc.nat({ max: 8 }),
+            honest: fc.boolean(),
+            accumulator: fc.uint8Array({ minLength: 32, maxLength: 32 }),
+          }),
+          (c, a, logs, fromBlock, fromCount, claim) => {
+            const c1 = Math.min(fromCount, logs.length);
+            const c2 = Math.min(c1 + claim.extra, logs.length);
+            const prefix = logs.slice(0, c1);
+            // `from` counts exactly the prefix, as a proof that matched does.
+            fc.pre(prefix.every((l) => l.topics.length > 0));
+            const from = {
+              ...replayEventAccumulator(c, a, prefix),
+              block: fromBlock,
+            };
+            fc.pre(verdict(() => checkEventAccumulatorProof(c, a, logs, from)) === "holds");
+            // An honest proof counts every log up to its count, none anonymous.
+            fc.pre(!claim.honest || logs.slice(0, c2).every((l) => l.topics.length > 0));
+            const proven = claim.honest
+              ? {
+                  ...replayEventAccumulator(c, a, logs.slice(0, c2)),
+                  block: claim.block,
+                }
+              : { block: claim.block, count: BigInt(c2), accumulator: claim.accumulator };
+            const last = prefix.at(-1);
+            const continuation = verdict(() =>
+              checkEventAccumulatorContinuation(
+                {
+                  ...from,
+                  lastBlock: last?.block ?? 0n,
+                  lastTimestamp: last?.timestamp ?? 0n,
+                },
+                logs.slice(c1, c2),
+                proven,
+              ),
+            );
+            const whole = verdict(() => {
+              const r = checkEventAccumulatorProofs(c, a, logs.slice(0, c2), [from, proven]);
+              return r.every((x) => x === null) ? null : r;
+            });
+            expect(continuation).toBe(whole);
+          },
+        ),
+        { numRuns },
+      );
+    });
+
+    test("checkEventAccumulatorContinuation refuses a log counted at or before the earlier proof's block", () => {
+      const a = new Uint8Array(20).fill(7);
+      const log = (n: bigint, block: bigint): ArchivedContractLog => ({
+        n,
+        block,
+        timestamp: block,
+        topics: [new Uint8Array(32)],
+        data: new Uint8Array([Number(n)]),
+      });
+      const first = [log(0n, 11n)];
+      const from = {
+        ...replayEventAccumulator(5n, a, first),
+        block: 20n,
+        lastBlock: 11n,
+        lastTimestamp: 11n,
+      };
+      // Event 1 at block 15 extends the accumulator, but `from`, at block
+      // 20, would have counted it.
+      const moved = [log(1n, 15n)];
+      const proven = { ...replayEventAccumulator(5n, a, [...first, ...moved]), block: 30n };
+      expect(checkEventAccumulatorContinuation(from, moved, proven)).toBe("block-range");
+      const honest = [log(1n, 21n)];
+      const next = { ...replayEventAccumulator(5n, a, [...first, ...honest]), block: 30n };
+      expect(checkEventAccumulatorContinuation(from, honest, next)).toBeNull();
+      expect(checkEventAccumulatorContinuation(from, honest, { ...next, block: 20n })).toBe(
+        "block-range",
+      );
+      expect(checkEventAccumulatorContinuation(from, [], { ...from })).toBeNull();
+      expect(() => checkEventAccumulatorContinuation(from, [], { ...from, count: 0n })).toThrow(
+        RangeError,
       );
     });
 

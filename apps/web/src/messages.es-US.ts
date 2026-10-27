@@ -22,7 +22,7 @@ export const esUS: Messages = {
   homeStreamEmpty:
     "No hay preguntas abiertas en este momento. Cuando alguien haga una, aparecerá aquí.",
   homeListUnavailable:
-    "No se pudieron cargar las preguntas más recientes en este momento. El enlace propio de cada encuesta sigue funcionando.",
+    "No se pudieron cargar las preguntas más recientes en este momento. Vuelve a intentarlo dentro de un rato.",
   trustTitle: "Por qué puedes confiar en una encuesta informal",
   trustLede:
     "Una pregunta sobre los árboles de la calle se sella, se publica y se cuenta igual que un referéndum. Esto es lo que pasa con una respuesta, en cuatro pasos.",

@@ -24,7 +24,7 @@ const enUS = {
   homeStreamAll: "See all questions",
   homeStreamEmpty: "No questions are open just now. When someone asks one, it shows up here.",
   homeListUnavailable:
-    "The newest questions couldn't be loaded just now. A poll's own link still works.",
+    "The newest questions couldn't be loaded just now. Try again in a little while.",
   trustTitle: "Why you can trust a casual poll",
   trustLede:
     "A question about street trees is sealed, posted and counted the same way as a referendum. Here is what happens to an answer, in four steps.",

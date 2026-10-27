@@ -29,7 +29,7 @@ import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { Declined, PostingOffer } from "./posting-offer.tsx";
-import { POSTING_SEND_MARGIN } from "./posting.ts";
+import { POSTING_REQUEST_MS, POSTING_SEND_MARGIN } from "./posting.ts";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
@@ -49,7 +49,7 @@ import {
 } from "./sealed.tsx";
 import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
-import { type WalletAnswer, WALLET_FORCE_MARGIN } from "./wallet.ts";
+import { type WalletAnswer, WALLET_FORCE_MARGIN, WALLET_HOLD_MARGIN } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -507,6 +507,9 @@ export function BrokenLink() {
 }
 
 /** Where a voter is between answering and sending. */
+/** The note the offer shows for a run before it can be chosen ([[posting-relay]], The ballot's own deadline). */
+type OfferNote = "late" | "halt" | undefined;
+
 type Step =
   | { readonly kind: "resuming" }
   | { readonly kind: "answering" }
@@ -678,7 +681,7 @@ export function Ballot({
   const definitionHash = fromHex(election.definitionHash);
   const electionId = fromHex(election.electionId);
 
-  /** The poll's own posting cutoffs `c_B` and `c_L`, in seconds ([[posting-relay]], The ballot's own deadline). */
+  /** The poll's own posting cutoffs, in seconds ([[posting-relay]], The ballot's own deadline). */
   const cutoffs = () =>
     postingCutoffs(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
 
@@ -692,6 +695,52 @@ export function Ballot({
    * WALLET_FORCE_MARGIN` passed on this device ([[posting-relay]], The offer).
    */
   const walletLate = () => passedOnDevice(cutoffs().force - WALLET_FORCE_MARGIN, source.now());
+  /**
+   * Whether a posting forced through L1 lands in time only while the L2
+   * keeps running: the halt cutoff `c_W` passed on this device (T-50).
+   */
+  const halted = () => passedOnDevice(cutoffs().halt, source.now());
+  /** What the offer says of a run through the relay before it can be chosen, and of one from the wallet. */
+  const relayNote = (): OfferNote => (relayLate() ? "late" : halted() ? "halt" : undefined);
+  const walletNote = (): OfferNote => (walletLate() ? "late" : halted() ? "halt" : undefined);
+
+  // The latest finalized head's time read near the last-offer cutoff `c_E`,
+  // counted only within `WALLET_HOLD_MARGIN` of this device's clock, as for
+  // the wallet's sends: an endpoint answering a far-future head can't take
+  // the offer away (T-25). Kept in state too, so an offer already shown is
+  // withdrawn once a read finds the head past `c_E`.
+  const head = useRef(0n);
+  const [, setHead] = useState(0n);
+  /**
+   * Reads the finalized head's time, only once `c_E` may have passed by it,
+   * and gives up after `POSTING_REQUEST_MS`: an endpoint that never answers
+   * mustn't keep the voter from the offer's other choices (T-25).
+   */
+  async function readHead() {
+    if (!passedOnDevice(cutoffs().lastOffer - WALLET_HOLD_MARGIN, source.now())) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const time = await Promise.race([
+      source.chainTime().catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), POSTING_REQUEST_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    const ahead = BigInt(Math.floor(source.now() / 1000)) + WALLET_HOLD_MARGIN;
+    if (time?.ok === true && time.timestamp > head.current && time.timestamp <= ahead) {
+      head.current = time.timestamp;
+      setHead(time.timestamp);
+    }
+  }
+  /**
+   * Whether the offer is withdrawn: the last-offer cutoff `c_E` passed by
+   * this device's clock or by a head's time read (`readHead`), past which a
+   * posting is rarely recorded in time to send the ballot ([[posting-relay]],
+   * The offer; T-15, T-25).
+   */
+  const offerClosed = () => {
+    const { lastOffer } = cutoffs();
+    return passedOnDevice(lastOffer, source.now()) || head.current > lastOffer;
+  };
 
   /** Runs `steps` under the election's lock, where the build has one (`ElectionSource.exclusive`). */
   const locked = <T,>(steps: () => Promise<T>): Promise<T> =>
@@ -1254,6 +1303,8 @@ export function Ballot({
       if (current()) setStep({ kind: "sending" });
       return send(checked.sending);
     }
+    // Not waited on: a head past `c_E` withdraws the offer once it is read.
+    void readHead();
     return { kind: "offer", sending: checked.sending };
   }
 
@@ -1264,21 +1315,27 @@ export function Ballot({
    * path, and only once every one is recorded is the ballot sent: a ballot
    * boarded with a seat neither receipted nor posted would void the voter's
    * earlier one (Client rule 4; [[revoting]], Selection). A posting that
-   * doesn't go through returns to the offer.
+   * doesn't go through returns to the offer. `said` is the note the offer
+   * showed for the relay when chosen.
    */
-  function post(sending: Sending, handed: boolean, offered: Step, warned: boolean) {
+  function post(sending: Sending, handed: boolean, offered: Step, said: OfferNote) {
     if (posting === undefined) return;
-    // A run that became late while the offer was open is chosen only once
-    // the offer has said so (T-15).
-    const late = relayLate();
-    if (late && !warned) {
+    // A run that became late, or forced only while the L2 runs, while the
+    // offer was open is chosen only once the offer has said so, and none
+    // once the offer is withdrawn (T-15, T-25).
+    const note = relayNote();
+    if (offerClosed() || (note !== undefined && note !== said)) {
       setStep({ ...offered });
       return;
     }
+    const late = note === "late";
     setStep({ kind: "posting" });
     run(
       async (current) => {
-        const posted = await postChecked(sending, (postings) =>
+        // The head's time read before the run: one past `c_E` withdraws the offer.
+        await readHead();
+        if (offerClosed()) return { ...offered };
+        const posted = await postChecked(sending, offered, (postings) =>
           posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
             (): PostAnswer => "unreachable",
           ),
@@ -1290,6 +1347,7 @@ export function Ballot({
         // ([[posting-relay]], Outcome), so the voter's own wallet may now
         // be offered beside trying the relay again.
         const relayed = answer === "relayed";
+        void readHead();
         return fellBack(checked, { relayed, handed: handed || relayed });
       },
       handed
@@ -1334,10 +1392,11 @@ export function Ballot({
     relayed: boolean,
     handed: boolean,
     offered: Step,
-    warned: boolean,
+    said: OfferNote,
   ) {
     if (postingOwn === undefined) return;
-    if (walletLate() && !warned) {
+    const note = walletNote();
+    if (offerClosed() || (note !== undefined && note !== said)) {
       setStep({ ...offered });
       return;
     }
@@ -1351,7 +1410,9 @@ export function Ballot({
         wallet,
       });
     run(async (current) => {
-      const posted = await postChecked(sending, (postings) =>
+      await readHead();
+      if (offerClosed()) return { ...offered };
+      const posted = await postChecked(sending, offered, (postings) =>
         postingOwn(electionId, sending.ballot, postings, cutoffs()).catch(
           (): WalletAnswer => "failed",
         ),
@@ -1359,6 +1420,7 @@ export function Ballot({
       if ("kind" in posted) return posted;
       const { checked, answer } = posted;
       if (answer === "recorded") return sendPosted(checked, current);
+      void readHead();
       return { ...back(answer), sending: checked };
     }, back("failed"));
   }
@@ -1368,13 +1430,18 @@ export function Ballot({
    * changed since the offer, then `through` given the records, from the
    * check through the posting under the election's lock: a tab that keeps
    * a receipt for a seat between them would have this one post a receipted
-   * seat (Client rule 2; T-15). The records are zeroed once it settles.
+   * seat (Client rule 2; T-15). The records are zeroed once it settles. An
+   * offer withdrawn while the lock was waited for (`offerClosed`) posts
+   * nothing and returns to `offered`.
    */
   async function postChecked<A extends PostAnswer | WalletAnswer>(
     sending: Sending,
+    offered: Step,
     through: (postings: readonly Uint8Array[]) => Promise<A>,
   ): Promise<{ readonly checked: Sending; readonly answer: A | "recorded" } | Step> {
     return locked(async () => {
+      // Another tab's run may hold the lock past `c_E` (T-15).
+      if (offerClosed()) return { ...offered };
       const checked = await postable(sending);
       if ("kind" in checked) return checked;
       try {
@@ -1476,8 +1543,8 @@ export function Ballot({
     case "offer": {
       const { sending } = step;
       // What the offer says now, which the choice is checked against when made.
-      const late = relayLate();
-      const lateWallet = walletLate();
+      const relaySays = relayNote();
+      const walletSays = walletNote();
       return (
         <PostingOffer
           poll={poll}
@@ -1491,7 +1558,7 @@ export function Ballot({
           onPost={
             posting === undefined
               ? undefined
-              : () => post(sending, step.handed === true, step, late)
+              : () => post(sending, step.handed === true, step, relaySays)
           }
           onWallet={
             step.fallback === true && postingOwn !== undefined
@@ -1501,13 +1568,15 @@ export function Ballot({
                     step.relayed === true,
                     step.handed === true,
                     step,
-                    lateWallet,
+                    walletSays,
                   )
               : undefined
           }
           wallet={step.wallet}
-          late={late}
-          lateWallet={lateWallet}
+          late={relaySays === "late"}
+          lateWallet={walletSays === "late"}
+          halt={halted()}
+          closed={offerClosed()}
         />
       );
     }

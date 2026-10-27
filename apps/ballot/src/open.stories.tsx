@@ -1720,6 +1720,168 @@ export const PostingTurnsLateWhileOffered: Story = {
   },
 };
 
+export const PostingTurnsPastHaltWhileOffered: Story = {
+  name: "An offer left open past the halt cutoff says a halted network keeps the parts out before it can be chosen",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 50_500n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.queryByText("If the network stops")).toBeNull();
+    // The halt cutoff `c_W = c_B − F` passes while the offer is open.
+    Object.assign(args.source, { now: () => Number(ELECTION.closesAt - 50_000n) * 1000 });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    // Not run: the offer says first what a halt costs (T-50).
+    await expect(await canvas.findByText("If the network stops")).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.post).toHaveBeenCalledOnce();
+    // Still forced through L1: the run isn't a late one.
+    await expect(of.post.mock.calls[0]?.[4]).toBe(false);
+    // Far from the last-offer cutoff, the chain's time isn't read.
+    await expect(of.chainTime).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOfferWithdrawnAtTheLastOffer: Story = {
+  name: "Past the last-offer cutoff by this device's clock, nothing is offered for posting",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 1_700n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.getByText("It's too late to post the missing parts")).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(canvas.getByRole("button", { name: "Try the trustees again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOfferWithdrawnByTheHead: Story = {
+  name: "A finalized head past the last-offer cutoff withdraws the offer, though this device's clock is behind it",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_000n) * 1000,
+      chainTime: { ok: true, timestamp: ELECTION.closesAt - 1_700n },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    // Withdrawn once the read lands, the offer shown meanwhile.
+    await expect(await canvas.findByText("It's too late to post the missing parts")).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(of.chainTime).toHaveBeenCalled();
+    await expect(of.post).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOfferKeptPastAFarFutureHead: Story = {
+  name: "A head further ahead of this device's clock than the hold margin doesn't take the offer away",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_000n) * 1000,
+      chainTime: { ok: true, timestamp: ELECTION.closesAt - 1_399n },
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(of.chainTime).toHaveBeenCalled();
+    // 601 s ahead of the clock: the endpoint's word alone (T-25).
+    await expect(canvas.queryByText("It's too late to post the missing parts")).toBeNull();
+    await expect(canvas.getByText("The poll closes soon")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.post).toHaveBeenCalledOnce();
+    await expect(of.post.mock.calls[0]?.[4]).toBe(true);
+  },
+};
+
+export const PostingOfferShownWhileTheHeadHangs: Story = {
+  name: "An L2 endpoint that never answers the head's read doesn't keep the voter from the offer",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_000n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    of.chainTime.mockReturnValue(new Promise(() => {}));
+    await castInto(canvas, OFFER);
+    await expect(of.chainTime).toHaveBeenCalled();
+    // Trying the trustees again and leaving stay within reach (T-25, T-18).
+    await expect(canvas.getByRole("button", { name: "Try the trustees again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+  },
+};
+
+export const PostingOfferWithdrawnWhileOpen: Story = {
+  name: "An offer left open past the last-offer cutoff posts nothing when chosen, and says it's too late",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_500n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.getByText("The poll closes soon")).toBeVisible();
+    Object.assign(args.source, { now: () => Number(ELECTION.closesAt - 1_000n) * 1000 });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(await canvas.findByText("It's too late to post the missing parts")).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(of.post).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const PostingOfferWithdrawnByTheHeadWhenChosen: Story = {
+  name: "A head read when posting is chosen that is past the last-offer cutoff posts nothing",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_200n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.getByRole("button", { name: "Post publicly, then send" })).toBeVisible();
+    // The clock reaches the head's margin of `c_E`, and the head is past it.
+    Object.assign(args.source, { now: () => Number(ELECTION.closesAt - 2_000n) * 1000 });
+    of.chainTime.mockResolvedValue({ ok: true, timestamp: ELECTION.closesAt - 1_700n });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(await canvas.findByText("It's too late to post the missing parts")).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingChosen: Story = {
   name: "The voter posts the seat left: its share is checked again, posted, then the ballot sent",
   args: { source: offerSource({ posted: ["recorded"] }) },
@@ -2719,6 +2881,7 @@ export const NothingToResumeWithoutDelivery: Story = {
 const CUTOFFS = {
   ballot: ELECTION.closesAt - 3_600n,
   force: ELECTION.closesAt - 5_400n,
+  halt: ELECTION.closesAt - 50_400n,
   lastOffer: ELECTION.closesAt - 1_800n,
   send: ELECTION.closesAt - 600n,
 };

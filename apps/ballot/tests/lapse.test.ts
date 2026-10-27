@@ -70,14 +70,15 @@ describe("a lapsed posting", () => {
 });
 
 describe("the client's own posting cutoffs", () => {
-  test("c_B is min(c_D, closes_at − POSTING_BALLOT_MARGIN), c_L is c_B − MAX_SEQUENCER_DRIFT, c_E is closes_at − 1,800 (fast-check)", () => {
+  test("c_B is min(c_D, closes_at − POSTING_BALLOT_MARGIN), c_L is c_B − MAX_SEQUENCER_DRIFT, c_W is c_B − F, c_E is closes_at − 1,800 (fast-check)", () => {
     fc.assert(
       fc.property(u64, fc.bigInt({ min: 0n, max: 2n ** 32n - 1n }), u64, (closes, bound, f) => {
         const cD = postingCutoff(closes, bound, f);
         const margin = closes - POSTING_BALLOT_MARGIN;
-        const { ballot, force } = postingCutoffs(closes, bound, f);
+        const { ballot, force, halt } = postingCutoffs(closes, bound, f);
         expect(ballot).toBe(cD < margin ? cD : margin);
         expect(force).toBe(ballot - BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT));
+        expect(halt).toBe(ballot - f);
         expect(postingCutoffs(closes, bound, f).lastOffer).toBe(closes - 1_800n);
         expect(postingCutoffs(closes, bound, f).send).toBe(closes - 600n);
         // Never past the close, nor past `c_D`.
@@ -93,6 +94,7 @@ describe("the client's own posting cutoffs", () => {
     expect(postingCutoffs(closes, 3_600n, 46_800n)).toEqual({
       ballot: closes - 3_600n,
       force: closes - 5_400n,
+      halt: closes - 50_400n,
       lastOffer: closes - 1_800n,
       send: closes - 600n,
     });

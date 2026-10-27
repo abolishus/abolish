@@ -336,14 +336,15 @@ function QuestionFields({
           }}
           // One column of full-width choices on a phone, where five boxes of
           // their words' widths wrapped two, one, one and one (P2-29, creating
-          // a poll's iteration 6).
+          // a poll's iteration 6). Their words are the blank choice's size
+          // below them, where they were smaller (iteration 7).
           className="grid gap-2 sm:flex sm:flex-wrap"
         >
           {ANSWER_RULES.map((r) => (
             <Label
               key={r}
               className={cn(
-                "flex min-h-12 items-center gap-3 border px-4 text-sm leading-tight font-normal",
+                "flex min-h-12 items-center gap-3 border px-4 text-base leading-tight font-normal",
                 q.rule === r ? "border-2 border-primary px-[15px] font-semibold" : "border-border",
               )}
             >
@@ -1287,9 +1288,12 @@ export function PollFormPage({
               </p>
             }
           >
-            <ul className="m-0 grid list-none border-t border-border p-0">
+            {/* Rules only between tiers: around the one tier there is today they
+                drew an empty row above the next section's rule (P2-29,
+                creating a poll's iteration 7). */}
+            <ul className="m-0 grid list-none divide-y divide-border p-0">
               {form.tiers.map((tier) => (
-                <li key={tier} className="border-b border-border py-3 text-base font-semibold">
+                <li key={tier} className="py-3 text-base font-semibold first:pt-0 last:pb-0">
                   {whoName(t, tier, phoneVerification)}
                 </li>
               ))}

@@ -139,15 +139,15 @@ export interface SimulatedElection {
 /** The board-entry version the profile pins: 5, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3), and the close statements, the only one the election registry admits ([[contracts]], Registration, rule 9) and [[verifier]] 2.3 accepts ([[close]], Version). */
 export const SIMULATED_BOARD_ENTRY_VERSION = 5;
 
-/** The contract-event version the profile pins: 8, the one that archives every board event, the close rule's, the batches', the obligation root's and the availability records', and the group registry's Tier 1 and self-paid additions ([[contracts]], Contract-event record), and the only one 2.3 accepts ([[close]], Version). */
-export const SIMULATED_EVENT_VERSION = 8;
+/** The contract-event version the profile pins: 12, whose tables name every board event, the close rule's, the batches', the obligation root's and the availability records', the group registry's Tier 1 and self-paid additions and the trustee registry's kind-carrying `PanelPinned` ([[contracts]], Contract-event record), the only one the election registry serves (Registration, rule 9). */
+export const SIMULATED_EVENT_VERSION = 12;
 
 /**
  * The versions the profile pins where they aren't 1: the definition's own
  * (4), ballots that name their cell (2) and the openings of their cores (2),
  * the one combination definition version 4 allows (protocol.ts,
  * `profileCombinationRule`; [[verifier]] 2.3), and the board-entry and
- * contract-event versions the election registry serves (5 and 8).
+ * contract-event versions the election registry serves (5 and 12).
  */
 const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.electionDefinition, 4],

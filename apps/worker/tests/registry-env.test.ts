@@ -19,7 +19,7 @@ const full = {
   REGISTRY_SYNC_TRUSTEE_REGISTRY: address(0x11),
   REGISTRY_SYNC_GROUP_REGISTRY: address(0x12),
   REGISTRY_SYNC_BOARD: address(0x13),
-  REGISTRY_SYNC_EVENT_VERSION: "8",
+  REGISTRY_SYNC_EVENT_VERSION: "12",
 };
 
 const refusal = (env: Record<string, string>) => {
@@ -50,7 +50,7 @@ describe("the registry sync's configuration", () => {
       trusteeRegistry: "0x0000000000000000000000000000000000000011",
       groupRegistry: "0x0000000000000000000000000000000000000012",
       board: "0x0000000000000000000000000000000000000013",
-      eventVersion: 8,
+      eventVersion: 12,
     });
   });
 

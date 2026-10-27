@@ -172,6 +172,7 @@ beforeAll(async () => {
   const panelInput = (threshold: number) => ({
     threshold,
     quorum: 3,
+    kind: 2,
     keys: toHex(Buffer.concat(seats.map((s) => s.encoded))),
     points: seats.map((s) => [s.x, s.y]),
   });
@@ -205,7 +206,7 @@ beforeAll(async () => {
     board: stand(1),
     trusteeRegistry,
     groupRegistry: stand(3),
-    eventVersion: 8,
+    eventVersion: 12,
   };
   config = {
     panel: { threshold: 3, keys: seats.map((s) => s.encoded) },

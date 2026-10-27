@@ -73,7 +73,8 @@ function point(key: Uint8Array): readonly [bigint, bigint] {
 
 /**
  * The trustee registry's constructor argument `PanelInput[]`, one panel:
- * `(uint8 threshold, uint8 quorum, bytes keys, uint256[2][] points)`.
+ * `(uint8 threshold, uint8 quorum, uint8 kind, bytes keys, uint256[2][] points)`,
+ * kind 2 (`transitional`), as the launch panel is.
  */
 function panelInputs(panel: Panel, quorum: number): Uint8Array {
   const keys = concatBytes(...panel.keys);
@@ -85,8 +86,9 @@ function panelInputs(panel: Panel, quorum: number): Uint8Array {
   const tuple = concatBytes(
     word(BigInt(panel.threshold)),
     word(BigInt(quorum)),
-    word(128n),
-    word(128n + BigInt(keysPart.length)),
+    word(2n),
+    word(160n),
+    word(160n + BigInt(keysPart.length)),
     keysPart,
     pointsPart,
   );

@@ -88,7 +88,7 @@ const OFF_QUORUM: Panel = { threshold: 2, keys: [4, 5, 6].map((i) => identityKey
 /** Distinct non-zero stand-ins for the contracts nothing here calls. */
 const stand = (n: number) => getAddress(toHex(0xd0000 + n, { size: 20 }));
 
-/** The trustee registry's `PanelInput`, a seat's `(x, y)` from its secret. */
+/** The trustee registry's `PanelInput`, transitional, a seat's `(x, y)` from its secret. */
 function panelInput(secrets: readonly Uint8Array[], threshold: number, quorum: number) {
   const points = secrets.map((d) => {
     const ecdh = createECDH("prime256v1");
@@ -99,6 +99,7 @@ function panelInput(secrets: readonly Uint8Array[], threshold: number, quorum: n
   return {
     threshold,
     quorum,
+    kind: 2,
     keys: toHex(Buffer.concat(secrets.map(identityKey))),
     points,
   };

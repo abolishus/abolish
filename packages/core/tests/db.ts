@@ -90,14 +90,14 @@ const repin = (
 
 /**
  * The typical vector's definition under the profile 2.3 asks of definition
- * version 1: board-entry version 5 and contract-event version 8 in place of
+ * version 1: board-entry version 5 and contract-event version 12 in place of
  * the vector's 1s, so `storeDefinition` stores it.
  */
 export const typical: ElectionDefinition = repin(
   vector,
   new Map([
     [RECORD_TYPES.boardEntry, 5],
-    [RECORD_TYPES.contractEvent, 8],
+    [RECORD_TYPES.contractEvent, 12],
   ]),
 );
 

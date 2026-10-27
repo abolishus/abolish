@@ -34,7 +34,7 @@ export const ELECTION_CREATED = topic(
 export const DEFINITION_REGISTERED = topic(
   "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)",
 );
-export const PANEL_PINNED = topic("PanelPinned(bytes32,uint8,uint8,bytes)");
+export const PANEL_PINNED = topic("PanelPinned(bytes32,uint8,uint8,uint8,bytes)");
 export const AVAILABILITY_ATTESTATION_SUBMITTED = topic(
   "AvailabilityAttestationSubmitted(bytes32,uint8,bytes)",
 );
@@ -44,13 +44,12 @@ export const AVAILABILITY_COMPLAINT_SUBMITTED = topic(
 
 /**
  * The contract-event version this release reads: the newest whose tables hold
- * every event the deployable contracts emit, and these three are the same in
- * every version from 2 on. Version 12's `PanelPinned` logs a kind the
- * deployable trustee registry doesn't log until P2-16 part 5e-2, which moves
- * this to 12. The verifier judges the logs again under the version the
- * definition pins (4.4).
+ * every event the deployable contracts emit, version 12, whose `PanelPinned`
+ * logs the kind the trustee registry pins each panel with (P2-16 part 5e-2);
+ * the other events read here are the same in every version from 2 on. The
+ * verifier judges the logs again under the version the definition pins (4.4).
  */
-export const READ_VERSION: ContractEventVersion = 11;
+export const READ_VERSION: ContractEventVersion = 12;
 
 /** Why an election couldn't be read from L2; the election is reported and skipped. */
 export type L2ErrorCode =

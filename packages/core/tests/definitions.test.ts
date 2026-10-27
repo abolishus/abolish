@@ -173,7 +173,7 @@ describe("storeDefinition", () => {
 
   test("refuses the published vectors, whose profiles 2.3 fails, with nothing stored", async () => {
     // No well-formed version-1 vector pins board-entry version 5 and
-    // contract-event version 8, so none has close statements and the full
+    // contract-event version 12, so none has close statements and the full
     // event archive on its board (verifier 2.3; T-35, T-50); the maximal
     // one's pins are versions this release doesn't read.
     const good = vectors.filter((v) => v.hash !== undefined && v.illFormed === undefined);

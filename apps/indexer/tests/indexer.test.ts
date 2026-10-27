@@ -613,6 +613,7 @@ beforeAll(async () => {
       {
         threshold: 2,
         quorum: 2,
+        kind: 2,
         keys: `0x${keys.map((k) => k.encoded.slice(2)).join("")}`,
         points: keys.map((k) => [k.x, k.y]),
       },

@@ -834,7 +834,7 @@ describe("the group registry's log", () => {
   const HEAD = 140n;
   const WITH_REGISTRY: Deployment = {
     ...DEPLOYMENT,
-    groupRegistry: { address: GROUP_REGISTRY, deployedAt: DEPLOYED_AT, eventVersion: 8 },
+    groupRegistry: { address: GROUP_REGISTRY, deployedAt: DEPLOYED_AT, eventVersion: 12 },
   };
   const quantity = (n: bigint) => `0x${n.toString(16)}`;
 

@@ -198,8 +198,8 @@ export type ContractEventErrorCode = "evidence" | "events" | "runs" | "source";
 export class ContractEventError extends Error {
   override readonly name = "ContractEventError";
   readonly code: ContractEventErrorCode;
-  constructor(code: ContractEventErrorCode, message: string) {
-    super(`a contract's events can't be archived: ${message}`);
+  constructor(code: ContractEventErrorCode, message: string, options?: ErrorOptions) {
+    super(`a contract's events can't be archived: ${message}`, options);
     this.code = code;
   }
 }
@@ -244,7 +244,7 @@ export interface ArchiveRun {
   readonly written: readonly bigint[];
   /** Transactions posted, first uploads and reposts alike. */
   readonly posted: number;
-  /** Objects not posted because the board no longer gives the bytes their CID names. */
+  /** Objects and runs not posted because the board, or the run's row, no longer gives the bytes their CID names. */
   readonly refused: number;
   /** Contract-event evidence records written. */
   readonly evidence: number;
@@ -626,6 +626,7 @@ async function writeContractEvents(
             throw new ContractEventError(
               "events",
               `they don't encode as runs (${e instanceof Error ? e.message : String(e)})`,
+              { cause: e },
             );
           }
           // A record is listed with its runs, in one manifest.
@@ -1193,6 +1194,7 @@ async function post(
     .orderBy(asc(archiveManifests.sequence));
   for (const m of manifests)
     if (!live.has(hex(m.cid))) await send(m.cid, new Uint8Array(m.manifest));
+  let refused = 0;
   // Records and runs were checked when written and are posted as stored,
   // each read only when due: a run is up to 16 MiB.
   const records = await db
@@ -1218,11 +1220,13 @@ async function post(
       .select({ bytes: archiveRuns.run })
       .from(archiveRuns)
       .where(eq(archiveRuns.cid, cid));
+    if (row === undefined) continue;
     // Derived again: the table (0049) binds only a raw CID to its bytes.
-    if (row !== undefined && equal(objectCid(new Uint8Array(row.bytes)), cid))
+    // Reported, never posted, as an object the board no longer gives is.
+    if (equal(objectCid(new Uint8Array(row.bytes)), cid))
       await send(cid, new Uint8Array(row.bytes));
+    else refused++;
   }
-  let refused = 0;
   const objects = await db.select().from(archiveObjects).orderBy(asc(archiveObjects.cid));
   for (const o of objects) {
     if (live.has(hex(o.cid))) continue;

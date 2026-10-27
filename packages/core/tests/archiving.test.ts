@@ -1460,14 +1460,15 @@ describe("archiveBoards with contract events", () => {
     const arweave = new ModelArweave();
     const l2 = new ModelL2();
     l2.emit(BOARD);
+    l2.emit(REGISTRY);
     l2.advance(10n);
     l2.emit(BOARD);
     l2.advance(20n);
     await board(0, 1);
-    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 2, runs: 2 });
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 3, runs: 3 });
     // Every upload goes through but the first record's.
     const [row] = await app<{ cid: Uint8Array }[]>`
-      SELECT cid FROM archive_evidence ORDER BY count LIMIT 1`;
+      SELECT cid FROM archive_evidence WHERE contract = ${BOARD} ORDER BY count LIMIT 1`;
     const first = [...arweave.txs.entries()].find(
       ([, t]) => readArchivedObject(t.data, new Uint8Array(row!.cid), 1 << 20).ok,
     )![0];
@@ -1476,16 +1477,38 @@ describe("archiveBoards with contract events", () => {
     arweave.advance(DEPTH);
     await run(arweave, eventOptions(l2));
     const listed = await app<{ count: string; listed: boolean }[]>`
-      SELECT count::text, listed_in IS NOT NULL AS listed FROM archive_evidence ORDER BY count`;
+      SELECT count::text, listed_in IS NOT NULL AS listed FROM archive_evidence
+      WHERE contract = ${BOARD} ORDER BY count`;
     expect(listed).toEqual([
       { count: "1", listed: false },
       { count: "2", listed: false },
     ]);
+    // Another contract's record isn't held up.
+    const [registry] = await app<{ listed: boolean }[]>`
+      SELECT listed_in IS NOT NULL AS listed FROM archive_evidence WHERE contract = ${REGISTRY}`;
+    expect(registry!.listed).toBe(true);
     now += REPOST;
     await drain(arweave, eventOptions(l2));
     const { walk, replays } = await replay(arweave);
-    expect(walk.evidence).toHaveLength(2);
+    expect(walk.evidence).toHaveLength(3);
     expectReplays(replays, l2);
+  });
+
+  test("never posts a run whose bytes aren't its CID's, and reports it", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(0);
+    await drain(arweave, eventOptions(l2));
+    const [e] = await app<{ cid: Uint8Array }[]>`SELECT cid FROM archive_evidence LIMIT 1`;
+    // A dag-pb CID, which the table can't bind to its bytes (0049).
+    const cid = Uint8Array.from([1, 0x70, 0x12, 0x20, ...new Uint8Array(32).fill(5)]);
+    await app`INSERT INTO archive_runs (cid, contract, first, count, evidence, run)
+      VALUES (${cid}, ${BOARD}, 99, 1, ${e!.cid}, '\\x00')`;
+    const before = arweave.txs.size;
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ refused: 1, posted: 0 });
+    expect(arweave.txs.size).toBe(before);
   });
 
   test("refuses events that check but don't encode as runs, holding up only their contract", async () => {

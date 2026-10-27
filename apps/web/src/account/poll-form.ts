@@ -57,10 +57,16 @@ export interface PollForm {
   readonly questions: readonly FormQuestion[];
   /** The tiers that can answer, ascending. */
   readonly tiers: readonly number[];
-  /** `yyyy-mm-dd`, UTC; empty until chosen. */
+  /** `yyyy-mm-dd` in `timeZone`; empty until chosen. */
   readonly closesDate: string;
-  /** `hh:mm`, UTC; empty until chosen. */
+  /** `hh:mm` in `timeZone`; empty until chosen. */
   readonly closesTime: string;
+  /**
+   * The IANA time zone the closing date and time are read in: the author's
+   * own, since an everyday asker means their own clock (P2-29, creating a
+   * poll's iteration 3). The draft holds only the instant.
+   */
+  readonly timeZone: string;
 }
 
 /** Display text version 2's field bounds, in UTF-8 bytes (docs/spec/display-text.md). */
@@ -101,7 +107,7 @@ export const newQuestion = (): FormQuestion => ({
   options: [newOption(), newOption()],
 });
 
-export const newPollForm = (): PollForm => ({
+export const newPollForm = (timeZone: string): PollForm => ({
   language: LANGUAGE,
   title: "",
   description: "",
@@ -111,6 +117,7 @@ export const newPollForm = (): PollForm => ({
   tiers: OFFERED_TIERS,
   closesDate: "",
   closesTime: "",
+  timeZone,
 });
 
 /** A question's selection range for its rule. */
@@ -146,11 +153,67 @@ function ruleOf(min: number, max: number, m: number): Pick<FormQuestion, "rule" 
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** The draft's closing time as the form's UTC date and time; empty if no date can show it. */
-function closesFields(closesAt: bigint): Pick<PollForm, "closesDate" | "closesTime"> {
-  const date = new Date(Number(closesAt) * 1000);
-  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() > 9999)
+const DAY_MS = 86_400_000;
+
+// One formatter per zone: each conversion asks for several offsets, and a
+// formatter is slow to make.
+const clocks = new Map<string, Intl.DateTimeFormat>();
+
+/** How far `timeZone`'s clock is ahead of UTC at the instant `ms`, in milliseconds. */
+function offsetAt(ms: number, timeZone: string): number {
+  let clock = clocks.get(timeZone);
+  if (clock === undefined) {
+    clock = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    });
+    clocks.set(timeZone, clock);
+  }
+  const parts = clock.formatToParts(new Date(ms));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value);
+  const wall = Date.UTC(
+    part("year"),
+    part("month") - 1,
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second"),
+  );
+  return wall - (ms - (((ms % 1000) + 1000) % 1000));
+}
+
+/**
+ * The instant `timeZone`'s clock reads `wall` (a wall time written as if it
+ * were UTC), or `undefined` if it never does, in the hour a clock skips. In
+ * the hour a clock repeats, the earlier: an offset holds for longer than a
+ * day either side of a change, so the offsets a day before and after are the
+ * only ones `wall` can be in.
+ */
+function instantOf(wall: number, timeZone: string): number | undefined {
+  const fits = [offsetAt(wall - DAY_MS, timeZone), offsetAt(wall + DAY_MS, timeZone)]
+    .map((offset) => wall - offset)
+    .filter((ms) => offsetAt(ms, timeZone) === wall - ms);
+  return fits.length === 0 ? undefined : Math.min(...fits);
+}
+
+/** The draft's closing time as the form's date and time in `timeZone`; empty if no date can show it. */
+function closesFields(
+  closesAt: bigint,
+  timeZone: string,
+): Pick<PollForm, "closesDate" | "closesTime"> {
+  const ms = Number(closesAt) * 1000;
+  // Past year 9999 no date field can show it (and past 275760 no Date can hold it).
+  if (!Number.isFinite(ms) || ms > Date.UTC(9999, 11, 31, 23, 59))
     return { closesDate: "", closesTime: "" };
+  const date = new Date(ms + offsetAt(ms, timeZone));
+  if (date.getUTCFullYear() > 9999) return { closesDate: "", closesTime: "" };
   return {
     closesDate: `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
     closesTime: `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`,
@@ -166,8 +229,8 @@ function closesFields(closesAt: bigint): Pick<PollForm, "closesDate" | "closesTi
  */
 export const tidyPlace = (place: string) => place.replace(/\s+/gu, " ").trim().normalize("NFC");
 
-/** The form for a saved draft. A closing time is shown to the minute. */
-export function formOf(draft: PollDraft): PollForm {
+/** The form for a saved draft, its closing time shown to the minute in `timeZone`. */
+export function formOf(draft: PollDraft, timeZone: string): PollForm {
   return {
     language: draft.language,
     title: draft.title,
@@ -188,12 +251,15 @@ export function formOf(draft: PollDraft): PollForm {
       };
     }),
     tiers: draft.tiers,
-    ...closesFields(draft.closesAt),
+    ...closesFields(draft.closesAt, timeZone),
+    timeZone,
   };
 }
 
-/** The closing time as UNIX seconds, or `undefined` while the date or time isn't one. */
-export function closesAtOf(form: Pick<PollForm, "closesDate" | "closesTime">): bigint | undefined {
+type Closes = Pick<PollForm, "closesDate" | "closesTime" | "timeZone">;
+
+/** The closing date and time as a wall time written as if it were UTC, or `undefined` while they aren't one. */
+function wallOf(form: Closes): number | undefined {
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(form.closesDate);
   const time = /^(\d{2}):(\d{2})$/.exec(form.closesTime);
   if (date === null || time === null) return undefined;
@@ -212,11 +278,20 @@ export function closesAtOf(form: Pick<PollForm, "closesDate" | "closesTime">): b
     back.getUTCMonth() !== mo - 1 ||
     back.getUTCDate() !== d ||
     h > 23 ||
-    mi > 59 ||
-    ms < 0
+    mi > 59
   )
     return undefined;
-  return BigInt(ms / 1000);
+  return ms;
+}
+
+/**
+ * The closing time as UNIX seconds, or `undefined` while the date or time
+ * isn't one, or names a time the author's clock skips, or one before 1970.
+ */
+export function closesAtOf(form: Closes): bigint | undefined {
+  const wall = wallOf(form);
+  const ms = wall === undefined ? undefined : instantOf(wall, form.timeZone);
+  return ms === undefined || ms < 0 ? undefined : BigInt(ms / 1000);
 }
 
 /** The draft the form says, or `undefined` while it has no closing time. */
@@ -280,6 +355,7 @@ export type FormProblem =
   | "tooManyQuestions"
   | "rangeInvalid"
   | "closesMissing"
+  | "closesSkipped"
   | "closesTooSoon"
   | "closesTooLate"
   | "draftTooLong"
@@ -385,7 +461,13 @@ export function fieldErrors(form: PollForm): FieldError[] {
 export function closesErrors(form: PollForm, now: bigint): FieldError[] {
   const closesAt = closesAtOf(form);
   const at = (problem: FormProblem) => [{ id: fieldId.closes, problem }];
-  if (closesAt === undefined) return at("closesMissing");
+  if (closesAt === undefined) {
+    const wall = wallOf(form);
+    // A real date and time the author's clock skips, as it springs forward.
+    if (wall !== undefined && wall >= 0 && instantOf(wall, form.timeZone) === undefined)
+      return at("closesSkipped");
+    return at("closesMissing");
+  }
   if (closesAt < now + BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS)) return at("closesTooSoon");
   if (closesAt > now + BigInt(MAX_CLOSE_SECONDS)) return at("closesTooLate");
   return [];

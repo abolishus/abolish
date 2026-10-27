@@ -1115,7 +1115,6 @@ const enUS = {
   setupDraft: "This poll hasn't been submitted, so nothing is being set up.",
   setupFailed: "Your poll didn't open.",
   setupFailedNext: "Back to your polls, to try again or discard it",
-  pollFormAboutMark: "The poll",
   pollFormAboutTitle: "What is it about?",
   pollFormTitleLabel: "Title",
   pollFormTitleHelp: "What people see first, in lists and on the poll's page.",
@@ -1130,7 +1129,6 @@ const enUS = {
   pollFormTopicNone: "No topic",
   pollFormTagsNote:
     "The place and topic only decide where your poll is listed. They aren't part of the poll itself, and moderation can change them if they don't fit.",
-  pollFormQuestionsMark: "Questions",
   pollFormQuestionsTitle: "What are you asking?",
   pollFormQuestionsLede:
     "Each question has its options and a rule for how many an answer picks. Every answer to your poll answers all of its questions.",
@@ -1160,7 +1158,6 @@ const enUS = {
   pollFormRemove: "Remove {what}",
   pollFormWhatQuestion: "question {n}",
   pollFormWhatOption: "option {n} of question {q}",
-  pollFormWhoMark: "Who can answer",
   pollFormWhoTitle: "Who can answer?",
   pollFormWhoLede_email:
     "For now, every poll is open to the same people. Each verified e-mail address counts once, so someone with two addresses could answer twice: results count addresses, not people.",
@@ -1168,13 +1165,12 @@ const enUS = {
     "For now, every poll is open to the same people. Each verified phone number counts once, so someone with two numbers could answer twice: results count numbers, not people.",
   pollFormWho_email: "People with a verified e-mail address",
   pollFormWho_phone: "People with a verified e-mail address and phone number",
-  pollFormWhenMark: "When it closes",
   pollFormWhenTitle: "When does it close?",
   pollFormWhenLede:
-    "Times are in UTC, the clock every poll keeps. Your poll opens about half an hour after you submit it, once it is set up, and must then stay open for at least an hour, so choose a time at least 90 minutes from now and no more than a year ahead.",
-  pollFormDateLabel: "Closing date (UTC)",
-  pollFormTimeLabel: "Closing time (UTC)",
-  pollFormLocal: "That's {when} where you are.",
+    "Choose a time on your own clock ({zone}). Your poll opens about half an hour after you submit it, once it is set up, and must then stay open for at least an hour, so choose a time at least 90 minutes from now and no more than a year ahead.",
+  pollFormDateLabel: "Closing date",
+  pollFormTimeLabel: "Closing time",
+  pollFormUtc: "People answering see it as {when} UTC, the clock every poll keeps.",
   pollFormPreviewMark: "Preview",
   pollFormPreviewTitle: "What people will see",
   pollFormPreviewEmpty: "Your poll's title",
@@ -1207,12 +1203,11 @@ const enUS = {
   pollFormReviewTopic: "Topic",
   pollFormReviewNone: "None",
   pollFormReviewNotSet: "Not set",
-  pollFormReviewClosesAt: "{when} UTC",
+  pollFormReviewClosesAt: "{when} your time, {utc} UTC",
   pollFormReviewUntitled: "No title yet",
   pollFormReviewChange: "Change",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",
-  pollFormSubmitMark: "Submit",
   pollFormSubmitTitle: "Ready to ask?",
   pollFormSubmitLede:
     "Submitting sets your poll up on the public record, and it opens for answers when that's done. You can't change it after you submit.",
@@ -1251,6 +1246,8 @@ const enUS = {
   pollForm_rangeInvalid:
     "These numbers don't fit the options: an answer must be able to pick at least one, and no more than there are.",
   pollForm_closesMissing: "Choose a closing date and time.",
+  pollForm_closesSkipped:
+    "Your clock skips that time when it moves forward an hour. Choose another time.",
   pollForm_closesTooSoon: "Choose a time at least 90 minutes from now.",
   pollForm_closesTooLate: "Choose a time no more than a year from now.",
   pollForm_draftTooLong: "Your poll is too long altogether. Shorten its text or remove a question.",

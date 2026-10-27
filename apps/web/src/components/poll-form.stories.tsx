@@ -172,6 +172,9 @@ export const NewPoll: Story = {
     await expect(canvas.getByRole("heading", { level: 1, name: "Ask a question" })).toBeVisible();
     await expect(canvas.getByText("New poll")).toBeVisible();
     await expect(canvas.queryByRole("link", { name: "Back to your polls" })).toBeNull();
+    // The everyday register leaves its sections unnumbered (P2-29, creating
+    // a poll's iteration 3).
+    await expect(canvasElement.querySelector("[data-slot='section-mark']")).toBeNull();
     // Nothing to check through or submit before a first save, only the way to
     // it (P2-29, creating a poll's iteration 2).
     await expect(canvas.queryByRole("region", { name: "Check it through" })).toBeNull();
@@ -220,13 +223,16 @@ export const WriteAndSave: Story = {
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
     await userEvent.click(canvas.getByRole("button", { name: "Add an option to question 1" }));
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 3" }), "Gull");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
-    // The author's own time beside the UTC one.
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
+    // Typed on the author's own clock, with the time people answering see.
+    await expect(canvas.getByText(/on your own clock \(Eastern Time\)/)).toBeVisible();
     await expect(
-      canvas.getByText("That's November 4, 2026 at 10:00 AM where you are."),
+      canvas.getByText(
+        "People answering see it as November 4, 2026 at 3:00 PM UTC, the clock every poll keeps.",
+      ),
     ).toBeVisible();
     // The preview reads as the poll will.
     const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
@@ -293,10 +299,10 @@ export const TopicAndPlace: Story = {
     );
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
     const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
     await expect(preview.getByText("Not under any topic or place.")).toBeVisible();
     // Spacing as pasted is tidied to one line, as the draft will hold it.
@@ -324,7 +330,9 @@ export const TopicAndPlace: Story = {
       "Place",
       "Topic",
     ]);
-    await expect(review.getByText("November 4, 2026 at 3:00 PM UTC")).toBeVisible();
+    await expect(
+      review.getByText("November 4, 2026 at 10:00 AM your time, November 4, 2026 at 3:00 PM UTC"),
+    ).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
     // With phone verification off, Tier 0 is named by the e-mail alone, in words.
     await expect(review.getByText("People with a verified e-mail address")).toBeVisible();
@@ -401,6 +409,52 @@ export const PreviewBeforeSubmitPhone: Story = {
   },
 };
 
+export const OptionControlsPhone: Story = {
+  args: { client: fakeDrafts() },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    // An option's move and remove buttons share its label's row, so they
+    // never wrap between its field and its details (P2-29, creating a
+    // poll's iteration 3).
+    const label = canvas.getByText("Option 1", { selector: "label" }).getBoundingClientRect();
+    const field = (
+      await canvas.findByRole("textbox", { name: "Option 1" })
+    ).getBoundingClientRect();
+    const buttons = canvas.getAllByRole("button", { name: /option 1 of question 1/ });
+    await expect(buttons).toHaveLength(3);
+    for (const button of buttons) {
+      const box = button.getBoundingClientRect();
+      await expect(box.top).toBeLessThan(label.bottom);
+      await expect(box.bottom).toBeLessThanOrEqual(field.top);
+    }
+    const details = canvas
+      .getByRole("textbox", { name: "Details for option 1 (optional)" })
+      .getBoundingClientRect();
+    await expect(field.width).toBe(details.width);
+  },
+};
+
+export const ClosesSkipped: Story = {
+  args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const time = await canvas.findByLabelText("Closing time");
+    // New York's clocks go from 2:00 to 3:00 that night: 2:30 never comes.
+    fireEvent.change(canvas.getByLabelText("Closing date"), { target: { value: "2027-03-14" } });
+    fireEvent.change(time, { target: { value: "02:30" } });
+    await expect(canvas.queryByText(/People answering see it as/)).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(
+      await canvas.findByRole("region", { name: "Your draft wasn't saved" }),
+    ).toHaveTextContent(
+      "Your clock skips that time when it moves forward an hour. Choose another time.",
+    );
+    await expect(writes(args.client)).toEqual([]);
+  },
+};
+
 export const PlaceRefused: Story = {
   args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
   play: async ({ canvasElement, args }) => {
@@ -465,8 +519,8 @@ const editsADraft: Story["play"] = async ({ canvasElement, args }) => {
   await expect(
     canvas.getAllByRole("checkbox", { name: "People can leave this question blank" })[1],
   ).toBeChecked();
-  await expect(canvas.getByLabelText("Closing date (UTC)")).toHaveValue("2026-11-04");
-  await expect(canvas.getByLabelText("Closing time (UTC)")).toHaveValue("15:00");
+  await expect(canvas.getByLabelText("Closing date")).toHaveValue("2026-11-04");
+  await expect(canvas.getByLabelText("Closing time")).toHaveValue("10:00");
   const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
   await expect(
     preview.getByText("Choose up to 2. You can leave this question blank."),
@@ -539,11 +593,11 @@ export const ClosesTooSoon: Story = {
   args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const time = await canvas.findByLabelText("Closing time (UTC)");
-    const date = canvas.getByLabelText("Closing date (UTC)");
+    const time = await canvas.findByLabelText("Closing time");
+    const date = canvas.getByLabelText("Closing date");
     // Date and time fields take a whole value, as a picker gives one.
     fireEvent.change(date, { target: { value: "2026-10-18" } });
-    fireEvent.change(time, { target: { value: "13:00" } });
+    fireEvent.change(time, { target: { value: "09:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(
       await canvas.findByRole("region", { name: "Your draft wasn't saved" }),
@@ -615,10 +669,10 @@ export const TooManyDrafts: Story = {
     );
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "You have as many drafts as an account can hold.",
@@ -676,10 +730,10 @@ export const SubmitSavesFirst: Story = {
     );
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     // A change since the save: the stored draft isn't what the page shows.
@@ -911,10 +965,10 @@ export const ShowANewPollOnTheProfile: Story = {
     );
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     await expect(profileCalls(args.profiles)).toEqual([`show ${NEW_ID} true`]);
@@ -962,10 +1016,10 @@ export const ShownChoiceRefused: Story = {
     );
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 1" }), "Heron");
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 2" }), "Tern");
-    fireEvent.change(canvas.getByLabelText("Closing date (UTC)"), {
+    fireEvent.change(canvas.getByLabelText("Closing date"), {
       target: { value: "2026-11-04" },
     });
-    fireEvent.change(canvas.getByLabelText("Closing time (UTC)"), { target: { value: "15:00" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     await expect(await canvas.findByRole("alert")).toHaveTextContent(

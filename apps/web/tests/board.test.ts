@@ -4,7 +4,7 @@ import { encodeCheckpoint } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { anchorRows, boardRows } from "../src/board.ts";
+import { activityBars, type AnchorRow, anchorRows, boardRows } from "../src/board.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -238,6 +238,61 @@ describe("anchorRows (P2-19)", () => {
           if (rows !== undefined) expect(rows[which]!.hash).not.toBe(latestFirst[which]!.hash);
         },
       ),
+      runs,
+    );
+  });
+});
+
+describe("activityBars", () => {
+  const anchor = (segment: number, size: bigint): AnchorRow => ({
+    segment,
+    size: size.toString(),
+    head: "00".repeat(32),
+    root: "00".repeat(32),
+    hash: "00".repeat(32),
+  });
+
+  test("counts each period's entries from the checkpoint before it, earliest first", () => {
+    const anchors = [anchor(9, 12n), anchor(7, 12n), anchor(4, 10n), anchor(1, 3n)];
+    expect(activityBars(anchors, 6)).toEqual([
+      { segment: 1, added: "3" },
+      { segment: 4, added: "7" },
+      { segment: 7, added: "2" },
+      { segment: 9, added: "0" },
+    ]);
+  });
+
+  test("leaves out the earliest when as many came back as were asked for", () => {
+    const anchors = [anchor(9, 12n), anchor(4, 10n), anchor(1, 3n)];
+    expect(activityBars(anchors, 3)).toEqual([
+      { segment: 4, added: "7" },
+      { segment: 9, added: "2" },
+    ]);
+    expect(activityBars([anchor(1, 3n)], 1)).toEqual([]);
+    expect(activityBars([], 6)).toEqual([]);
+  });
+
+  test("the counts add up to the latest size less the earliest one kept out", () => {
+    const sizes = fc.array(fc.bigInt({ min: 1n, max: 2n ** 64n - 1n }), {
+      minLength: 1,
+      maxLength: 30,
+    });
+    fc.assert(
+      fc.property(sizes, fc.integer({ min: 1, max: 32 }), (raw, asked) => {
+        // Latest first: segments falling, sizes never growing back in time.
+        const desc = [...raw].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+        const anchors = desc.map((size, i) => anchor(1000 - i, size));
+        const bars = activityBars(anchors, asked);
+        const whole = anchors.length < asked;
+        expect(bars.length).toBe(whole ? anchors.length : anchors.length - 1);
+        const total = bars.reduce((sum, bar) => sum + BigInt(bar.added), 0n);
+        const floor = whole ? 0n : BigInt(anchors.at(-1)?.size ?? "0");
+        expect(total).toBe(BigInt(anchors[0]?.size ?? "0") - floor);
+        for (const [i, bar] of bars.entries()) {
+          expect(BigInt(bar.added) >= 0n).toBe(true);
+          if (i > 0) expect(bar.segment > (bars[i - 1]?.segment ?? -1)).toBe(true);
+        }
+      }),
       runs,
     );
   });

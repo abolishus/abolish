@@ -1,4 +1,12 @@
-import { BoardLedger, Count, Fingerprint, Hash, StatFigure, useTranslate } from "@abolishus/ui";
+import {
+  BoardLedger,
+  Count,
+  Fingerprint,
+  Hash,
+  StatFigure,
+  useI18n,
+  useTranslate,
+} from "@abolishus/ui";
 import {
   Pagination,
   PaginationContent,
@@ -8,7 +16,13 @@ import {
 } from "@abolishus/ui/ui/pagination";
 import { ArrowLeft } from "lucide-react";
 
-import type { AnchorRow, BoardRow, EntryKind } from "../board.ts";
+import {
+  type ActivityBar,
+  activityBars,
+  type AnchorRow,
+  type BoardRow,
+  type EntryKind,
+} from "../board.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
 import type { BoardHead } from "../server/load.ts";
@@ -26,6 +40,8 @@ export interface PollBoardProps {
   /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
   anchors: readonly AnchorRow[] | undefined;
   /** How many checkpoints the page asked for: as many back means there may be earlier ones. */
+  activityPage: number;
+  /** How many of them the anchors show. */
   anchorPage: number;
 }
 
@@ -57,6 +73,7 @@ export function PollBoard({
   rows,
   pageSize,
   anchors,
+  activityPage,
   anchorPage,
 }: PollBoardProps) {
   const t = useTranslate(catalogs);
@@ -118,6 +135,25 @@ export function PollBoard({
 
       <Section
         index="01"
+        mark={t("boardActivityMark")}
+        title={t("boardActivityTitle")}
+        id="activity-title"
+        lede={<p className="m-0">{t("boardActivityLede")}</p>}
+      >
+        <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
+          {t("boardActivityClaim")}
+        </p>
+        {anchors === undefined ? (
+          <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+            {t("boardActivityUndecodable")}
+          </p>
+        ) : (
+          <Activity bars={activityBars(anchors, activityPage)} />
+        )}
+      </Section>
+
+      <Section
+        index="02"
         mark={t("boardLedgerMark")}
         title={t("boardLedgerTitle")}
         id="ledger-title"
@@ -192,7 +228,7 @@ export function PollBoard({
       </Section>
 
       <Section
-        index="02"
+        index="03"
         mark={t("boardAnchorsMark")}
         title={t("boardAnchorsTitle")}
         id="anchors-title"
@@ -214,7 +250,7 @@ export function PollBoard({
             aria-label={t("boardAnchorsList")}
             className="m-0 grid list-none border-t border-foreground p-0"
           >
-            {anchors.map((anchor, i) => (
+            {anchors.slice(0, anchorPage).map((anchor, i) => (
               <li
                 key={anchor.segment}
                 className="grid gap-6 border-b border-border py-8 md:grid-cols-12 md:gap-x-6"
@@ -251,12 +287,128 @@ export function PollBoard({
             ))}
           </ol>
         )}
-        {anchors !== undefined && anchors.length >= anchorPage ? (
+        {anchors !== undefined && anchors.length > anchorPage ? (
           <p className="m-0 max-w-prose text-pretty">
             {t("boardAnchorsMore", { count: anchorPage })}
           </p>
         ) : null}
       </Section>
+    </div>
+  );
+}
+
+// The chart's own units: the SVG scales to its column.
+const CHART = { width: 640, height: 180, top: 4, bottom: 4, left: 0, right: 0 };
+
+/**
+ * The entries per period as bars, one per checkpointed period, earliest
+ * first, with every count in a table under it. Heights are SVG attributes,
+ * never inline styles, so the page keeps `style-src 'self'`; nothing moves.
+ */
+function Activity({ bars }: { bars: readonly ActivityBar[] }) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const period = new Intl.NumberFormat(locale);
+  const first = bars[0];
+  const last = bars.at(-1);
+  if (first === undefined || last === undefined)
+    return (
+      <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+        {t("boardActivityNone")}
+      </p>
+    );
+  const counts = bars.map((bar) => BigInt(bar.added));
+  const total = counts.reduce((sum, n) => sum + n, 0n);
+  const most = counts.reduce((top, n) => (n > top ? n : top), 0n);
+  // An all-zero run (re-anchors only) draws flat bars rather than divide by zero.
+  const max = most > 0n ? most : 1n;
+  const plot = CHART.height - CHART.top - CHART.bottom;
+  const band = (CHART.width - CHART.left - CHART.right) / bars.length;
+  const base = CHART.top + plot;
+  return (
+    <div className="grid gap-6">
+      <figure className="m-0 grid gap-2 border-t-2 border-foreground pt-3">
+        <p aria-hidden="true" className="m-0 text-sm text-muted-foreground">
+          {t("boardActivityMost", { count: most })}
+        </p>
+        <svg
+          viewBox={`0 0 ${CHART.width} ${CHART.height}`}
+          role="img"
+          aria-label={t("boardActivityChart", {
+            first: first.segment,
+            last: last.segment,
+            total,
+          })}
+          className="h-auto w-full"
+        >
+          {bars.map((bar, i) => {
+            // A ratio of u64 counts: scaled in bigint first, so a large board loses no precision.
+            const height = (Number((BigInt(bar.added) * 10_000n) / max) / 10_000) * plot;
+            return (
+              <rect
+                key={bar.segment}
+                x={CHART.left + i * band + band * 0.14}
+                width={band * 0.72}
+                y={base - height}
+                height={height}
+                className="fill-primary"
+              />
+            );
+          })}
+          <line
+            x1={CHART.left}
+            x2={CHART.width - CHART.right}
+            y1={base}
+            y2={base}
+            className="stroke-foreground"
+            strokeWidth={1.5}
+          />
+        </svg>
+        {/* HTML, not SVG text, so the labels keep their size as the chart scales down. */}
+        <div
+          aria-hidden="true"
+          className="flex justify-between gap-4 font-mono text-xs text-muted-foreground"
+        >
+          <span>{t("boardActivityPeriod", { segment: first.segment })}</span>
+          {bars.length > 1 ? (
+            <span>{t("boardActivityPeriod", { segment: last.segment })}</span>
+          ) : null}
+        </div>
+      </figure>
+      <details>
+        <summary className="inline-flex min-h-12 cursor-pointer items-center underline underline-offset-4">
+          {t("boardActivityTable")}
+        </summary>
+        <div className="min-w-0 overflow-x-auto">
+          <table className="w-full border-collapse text-sm tabular-nums">
+            <caption className="py-2 text-start text-muted-foreground">
+              {t("boardActivityCaption")}
+            </caption>
+            <thead>
+              <tr className="border-b border-foreground">
+                <th scope="col" className="py-2 text-start font-medium">
+                  {t("boardActivityColumnPeriod")}
+                </th>
+                <th scope="col" className="py-2 text-end font-medium">
+                  {t("boardActivityColumnAdded")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {bars.map((bar) => (
+                <tr key={bar.segment} className="border-b border-border">
+                  <th scope="row" className="py-2 text-start font-mono font-normal">
+                    {period.format(bar.segment)}
+                  </th>
+                  <td className="py-2 text-end">
+                    <Count value={BigInt(bar.added)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }

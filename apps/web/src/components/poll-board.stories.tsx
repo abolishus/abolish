@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 import type { AnchorRow, BoardRow, EntryKind } from "../board.ts";
 import type { PollView } from "../poll.ts";
@@ -37,8 +37,8 @@ const rows: BoardRow[] = Array.from({ length: 25 }, (_, i) => ({
   hash: (25 + i).toString(16).padStart(2, "0").repeat(32),
 }));
 
-/** The latest checkpoints, from period 8 back, as many as the page asks for. */
-const anchors: AnchorRow[] = Array.from({ length: 6 }, (_, i) => ({
+/** Every checkpoint of the board, from period 8 back to its first, fewer than the page asks for. */
+const anchors: AnchorRow[] = Array.from({ length: 9 }, (_, i) => ({
   segment: 8 - i,
   size: String(100 - 10 * i),
   head: (0x40 + i).toString(16).repeat(32),
@@ -50,7 +50,7 @@ const base = `/polls/${poll.electionId}/board`;
 
 const meta = {
   component: PollBoard,
-  args: { poll, head, from: "25", rows, pageSize: 25, anchors, anchorPage: 6 },
+  args: { poll, head, from: "25", rows, pageSize: 25, anchors, activityPage: 24, anchorPage: 6 },
 } satisfies Meta<typeof PollBoard>;
 
 export default meta;
@@ -97,14 +97,48 @@ export const Default: Story = {
       within(items[5]!).getByRole("figure", { name: "Checkpoint hash, the value to anchor" }),
     ).toHaveTextContent("65".repeat(32));
     await expect(canvas.getByText(/doesn't check that any of them is anchored/)).toBeVisible();
-    // As many as the page asked for: there may be earlier ones.
+    // More than the anchors show.
     await expect(canvas.getByText(/Only the latest 6 checkpoints/)).toBeVisible();
+    // Activity: one bar per checkpointed period, the first one's count its whole size.
+    await expect(
+      canvas.getByRole("img", {
+        name: "Entries per period, periods 0 to 8: 100 entries in all. Every period is in the table below.",
+      }),
+    ).toBeVisible();
+    await expect(canvasElement.querySelectorAll("rect.fill-primary")).toHaveLength(9);
+    const counts = canvas.getByRole("table", {
+      name: "Entries added in each period, earliest first",
+    });
+    await expect(counts.closest("details")).not.toHaveAttribute("open");
+    await userEvent.click(canvas.getByText("The count for each period"));
+    await expect(counts).toBeVisible();
+    const lines = within(counts).getAllByRole("row");
+    await expect(lines).toHaveLength(10);
+    await expect(lines[1]).toHaveTextContent(/^0\s*20$/);
+    await expect(lines[9]).toHaveTextContent(/^8\s*10$/);
+    // Heights are attributes, never inline styles (style-src 'self').
+    await expect(canvasElement.querySelector("svg [style]")).toBeNull();
+  },
+};
+
+/**
+ * As many checkpoints as the page asked for: the one before the earliest is
+ * unknown, so that period has no count.
+ */
+export const ActivityCut: Story = {
+  args: { activityPage: 9 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("img", { name: /^Entries per period, periods 1 to 8: 80 entries in all/ }),
+    ).toBeVisible();
+    await expect(canvasElement.querySelectorAll("rect.fill-primary")).toHaveLength(8);
   },
 };
 
 /** Fewer checkpoints than the page asks for: the first is among them. */
 export const FewAnchors: Story = {
-  args: { anchors: anchors.slice(4) },
+  args: { anchors: anchors.slice(7) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const list = canvas.getByRole("list", { name: "Checkpoints, latest first" });
@@ -118,10 +152,11 @@ export const NoAnchors: Story = {
   args: { anchors: [] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("status")).toHaveTextContent(
-      "No checkpoint has been taken of this board yet.",
-    );
+    const [activity, checkpoints] = canvas.getAllByRole("status");
+    await expect(activity).toHaveTextContent(/^No period's entries can be counted yet/);
+    await expect(checkpoints).toHaveTextContent("No checkpoint has been taken of this board yet.");
     await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
+    await expect(canvas.queryByRole("img", { name: /^Entries per period/ })).toBeNull();
   },
 };
 
@@ -130,7 +165,10 @@ export const AnchorsRefused: Story = {
   args: { anchors: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("status")).toHaveTextContent(/checkpoints for this board that/);
+    const [activity, checkpoints] = canvas.getAllByRole("status");
+    await expect(activity).toHaveTextContent(/^Without checkpoints that check/);
+    await expect(checkpoints).toHaveTextContent(/checkpoints for this board that/);
+    await expect(canvas.queryByRole("img", { name: /^Entries per period/ })).toBeNull();
     await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
     await expect(canvas.queryByText(/Only the latest/)).toBeNull();
     await expect(canvas.getByRole("table", { name: "Entries 25 to 49 of 100" })).toBeVisible();
@@ -145,7 +183,7 @@ export const Beyond: Story = {
     await expect(canvas.getByRole("status")).toHaveTextContent(
       "The board has 100 entries, numbered from 0, so there is no entry 125 yet.",
     );
-    await expect(canvas.queryByRole("table")).toBeNull();
+    await expect(canvas.queryByRole("table", { name: /^Entries \d/ })).toBeNull();
     await expect(canvas.queryByRole("link", { name: "Later entries" })).toBeNull();
     await expect(canvas.getByRole("link", { name: "Earlier entries" })).toHaveAttribute(
       "href",
@@ -166,6 +204,7 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getAllByText("No entries yet.")).toHaveLength(2);
+    await expect(canvas.getByText(/^No period's entries can be counted yet/)).toBeVisible();
     await expect(canvas.queryByRole("figure", { name: "Chain head" })).toBeNull();
     // Nowhere to go: no empty list of pages either.
     await expect(canvas.queryByRole("navigation", { name: "Pages of the board" })).toBeNull();

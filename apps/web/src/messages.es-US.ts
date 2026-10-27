@@ -638,6 +638,24 @@ export const esUS: Messages = {
     "Nuestro servidor envió entradas del tablero de esta encuesta que no pasan la comprobación: una no se decodifica según la definición de la encuesta, nombra otra encuesta o está en otro lugar. Esta página no muestra ninguna en vez de mostrar un tablero que no puede leer. Su tablero no se ve afectado en ningún otro lugar donde esté copiado.",
   fingerprintHead: "Huella de la cabeza de la cadena {prefix}",
   fingerprintEntry: "Huella de la entrada {entry}",
+  boardActivityMark: "Actividad",
+  boardActivityTitle: "Entradas por período",
+  boardActivityLede:
+    "Cuántas entradas agregó el tablero en cada uno de sus períodos de anclaje más recientes, de una hora cada uno, calculadas con los puntos de control de abajo: cada cuenta es cuántas entradas más tiene el punto de control de un período que el anterior. Un período sin punto de control no agregó nada.",
+  boardActivityClaim:
+    "Estas cuentas se calculan aquí a partir de los puntos de control de nuestro servidor, así que valen lo que valen ellos. El verificador cuenta cada período a partir del tablero y sus anclajes.",
+  boardActivityChart:
+    "Entradas por período, del período {first} al {last}: {total} entradas en total. Cada período está en la tabla de abajo.",
+  boardActivityPeriod: "Período {segment}",
+  boardActivityMost: "Lo más en un período: {count}",
+  boardActivityTable: "La cuenta de cada período",
+  boardActivityCaption: "Entradas agregadas en cada período, el más antiguo primero",
+  boardActivityColumnPeriod: "Período",
+  boardActivityColumnAdded: "Entradas agregadas",
+  boardActivityNone:
+    "Todavía no se pueden contar las entradas de ningún período: hace falta un punto de control, y el anterior o el primero del tablero.",
+  boardActivityUndecodable:
+    "Sin puntos de control que pasen la comprobación, esta página no puede contar las entradas del tablero por período.",
   boardAnchorsMark: "Anclajes",
   boardAnchorsTitle: "Puntos de control para Ethereum",
   boardAnchorsLede:

@@ -13,6 +13,13 @@ export const BOARD_PAGE = 25;
 /** The board page's latest checkpoints: earlier ones are the verifier's to read from L1. */
 export const ANCHOR_PAGE = 6;
 
+/**
+ * Checkpoints the board page asks for, the latest first: its activity counts
+ * the entries of each one's period, and its anchors show the first
+ * `ANCHOR_PAGE`. At P4-1's hourly periods, about a day of a busy board.
+ */
+export const ACTIVITY_PAGE = 24;
+
 /** Decisions per page of the moderation log. */
 export const LOG_PAGE = 50;
 

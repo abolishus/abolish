@@ -84,8 +84,8 @@ def det(label):
 
 
 def pins(version=6):
-    """verifier-ballots-v4.json's version-6 (or version-7) profile under board-entry version 7, which carries the approvals."""
-    p = vb4.pins_for(definition=version)
+    """verifier-ballots-v4.json's version-6 (or version-7) profile under board-entry version 7, which carries the approvals, beside contract-event version 8, as these files were made: 2.3 fails every author panel whatever its contract-event pin, so it decides no verdict here (P2-16 part 5e-5a)."""
+    p = vb4.pins_for(definition=version, events=8)
     return dict(p, pins=[(t, BOARD_VERSION if t == vb4.BOARD_ENTRY_TYPE else v) for t, v in p["pins"]])
 
 

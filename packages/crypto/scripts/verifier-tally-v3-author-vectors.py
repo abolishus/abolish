@@ -104,9 +104,9 @@ BALLOTS = [
 ]
 
 
-def pins():
+def pins(version=6):
     """verifier-ballots-v4-author-vectors.py's profile with tally-opening version 3, the one an author panel pins (tally.md, Author panel)."""
-    p = vba.base_pins()
+    p = vba.base_pins(version)
     return dict(p, pins=[(t, 3 if t == TALLY_OPENING_TYPE else v) for t, v in p["pins"]])
 
 

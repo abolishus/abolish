@@ -135,9 +135,13 @@ def combination(d):
         return COMBINATION_FAILS
     if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
         return UNSUPPORTED
-    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 9}
-    if any(pins[t] != v for t, v in wanted.items()):
+    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5}
+    # Contract-event versions 9 to 12 frame ballot version 4; 1 to 8 don't.
+    events = pins[vb.CONTRACT_EVENT_TYPE]
+    if any(pins[t] != v for t, v in wanted.items()) or events <= 8:
         return COMBINATION_FAILS
+    if events > 12:
+        return UNSUPPORTED
     return NOT_IMPLEMENTED
 
 

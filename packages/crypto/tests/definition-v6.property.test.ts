@@ -555,6 +555,7 @@ describe("2.3's profile combination under version 6", () => {
       // A failure is reported beside a version this package doesn't read.
       { [RECORD_TYPES.boardEntry]: 1, [RECORD_TYPES.spoiledBallotOpening]: 255 },
       { [RECORD_TYPES.ballot]: 3, [RECORD_TYPES.contractEvent]: 255 },
+      { [RECORD_TYPES.contractEvent]: 8, [RECORD_TYPES.spoiledBallotOpening]: 255 },
     ];
     for (const pins of fails)
       expect(profileCombinationRule(v6(pins)), JSON.stringify(pins)).toBe("profile-combination");

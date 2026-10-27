@@ -197,13 +197,11 @@ describe("registrationCheck", () => {
     fc.assert(
       fc.property(
         // Every honest record and some unrelated ones, in any order.
-        fc
-          .shuffledSubarray(unrelated)
-          .chain((extra) =>
-            fc.shuffledSubarray([...records, ...extra], {
-              minLength: records.length + extra.length,
-            }),
-          ),
+        fc.shuffledSubarray(unrelated).chain((extra) =>
+          fc.shuffledSubarray([...records, ...extra], {
+            minLength: records.length + extra.length,
+          }),
+        ),
         fc.integer({ min: 0, max: 1 }),
         (shuffled, dropped) => {
           expect(check(shuffled)).toEqual({ status: "pass" });

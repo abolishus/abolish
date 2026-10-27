@@ -558,7 +558,7 @@ export type LoadedChainTime =
 /**
  * The timestamp of the L2's finalized head, the chain's time as far as a
  * contract-path record's submission time is concerned ([[delivery]],
- * Windows): what the client judges a poll's posting cutoff by, beside the
+ * Windows): what the client judges a poll's close by, beside the
  * device's own clock, before it erases what a posting would need (T-18).
  * Finalized, so it lags the chain and never runs ahead of it.
  */

@@ -3,7 +3,8 @@
 // release's L2, names it in the transaction, is asked for an estimate before
 // it sends, and the client stands down only on the board's event at the
 // finalized head, never sending a posting the latest head already shows,
-// nor anything past `c_D` (T-13, T-18, T-25, T-34).
+// nor anything past the ballot cutoff `c_B`, nor depositing anything that
+// can't reach L1 by the force cutoff `c_L` (T-13, T-18, T-25, T-34, T-50).
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
@@ -20,6 +21,7 @@ import {
   WALLET_DEPOSIT_SPAN,
   WALLET_FORCE_MARGIN,
   WALLET_HOLD_MARGIN,
+  WALLET_LATE_MARGIN,
   WALLET_WAIT,
   type WalletAnswer,
   type WalletIo,
@@ -553,9 +555,10 @@ describe("postFromWallet", () => {
       },
     };
     let postings: readonly Uint8Array[] = [];
-    const run = (ps: readonly Uint8Array[], cutoff: bigint) => {
+    // The ballot cutoff `c_B`, and the force cutoff `c_L`, the same unless given.
+    const run = (ps: readonly Uint8Array[], cutoff: bigint, force = cutoff) => {
       postings = ps;
-      return postFromWallet(io, ps, ps, cutoff);
+      return postFromWallet(io, ps, ps, { ballot: cutoff, force });
     };
     return { io, run, sends, deposits, estimates, reads, l1Reads, elapsed: () => t() - START };
   }
@@ -678,6 +681,42 @@ describe("postFromWallet", () => {
     const slow = world({ safe: () => [], depositTakes: 2 * Number(POLL) * 1000 });
     expect(await slow.run([A], cutoff)).toBe("sent");
     expect(slow.deposits).toEqual([]);
+  });
+
+  test("sends until the ballot cutoff once the force cutoff passed, depositing nothing then", async () => {
+    // Past the deposit cutoff `c_L − WALLET_DEPOSIT_SPAN`, before `c_B`.
+    const w = world({ safe: () => [] });
+    expect(await w.run([A], START + 100n, START)).toBe("sent");
+    expect(w.sends).toHaveLength(1);
+    expect(w.deposits).toEqual([]);
+  });
+
+  test("answers forced only on a deposit in an L1 block by the force cutoff, never the ballot cutoff (T-50)", async () => {
+    const force = CUTOFF - 10_000n;
+    const late = world({ safe: () => [], landed: () => force + 1n });
+    expect(await late.run([A], CUTOFF, force)).toBe("sent");
+    const timely = world({ safe: () => [], landed: () => force });
+    expect(await timely.run([A], CUTOFF, force)).toBe("forced");
+    expect(START + (timely.deposits[0]?.at ?? 0n) + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(force);
+  });
+
+  test("lets no sighting hold a send back while it can still be forced, once c_L − WALLET_FORCE_MARGIN passed", async () => {
+    // A censoring sequencer's endpoint, showing what it never batches.
+    const w = world({ latest: () => [A], safe: () => [] });
+    const force = START + WALLET_FORCE_MARGIN - 1n;
+    expect(await w.run([A], CUTOFF, force)).toBe("forced");
+    expect(w.sends.map(({ at }) => at)).toEqual([0n]);
+  });
+
+  test("holds a send back on a sighting again once nothing can be forced, until c_B − WALLET_LATE_MARGIN (T-13)", async () => {
+    const w = world({ latest: () => [A] });
+    const ballot = START + WALLET_LATE_MARGIN + 3n * POLL;
+    expect(await w.run([A], ballot, START)).toBe("sent");
+    expect(w.sends).toHaveLength(1);
+    const at = START + (w.sends[0]?.at ?? 0n);
+    expect(at + WALLET_LATE_MARGIN).toBeGreaterThanOrEqual(ballot);
+    expect(at + WALLET_LATE_MARGIN).toBeLessThanOrEqual(ballot + POLL);
+    expect(w.deposits).toEqual([]);
   });
 
   test("ends the forcing, never the run, on a deposit the wallet doesn't make", async () => {
@@ -930,7 +969,8 @@ describe("postFromWallet", () => {
         ),
         fc.boolean(),
         fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
-        async (finals, safes, latests, answers, depositAnswers, estimates, cutoffIn) => {
+        fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
+        async (finals, safes, latests, answers, depositAnswers, estimates, cutoffIn, drift) => {
           const postings = [A, B, Uint8Array.of(0, 13, 1, 0xcc)];
           const at = (rounds: number[][], t: bigint) =>
             (rounds[Math.min(Number(t / POLL), rounds.length - 1)] ?? []).map(
@@ -958,13 +998,14 @@ describe("postFromWallet", () => {
             built: () => (estimates ? 2_000n : undefined),
           });
           const cutoff = START + cutoffIn;
-          const result = await w.run(postings, cutoff);
+          const force = cutoff - drift;
+          const result = await w.run(postings, cutoff, force);
           if (result === "recorded") for (const p of postings) expect(final).toContainEqual(p);
           // Each posting sent at most once, and only by the cutoff.
           expect(new Set(w.sends.map(({ call }) => call)).size).toBe(w.sends.length);
           for (const { at: sentAt } of w.sends) expect(START + sentAt).toBeLessThanOrEqual(cutoff);
           // Each deposited at most once, and only with a deposit's span left
-          // before the cutoff: one whose estimate the wallet's node refused
+          // before the force cutoff: one whose estimate the wallet's node refused
           // once given it, at once, with the build's own estimate; one whose
           // send failed `POSTING_FORCE_AFTER` later, with the build's
           // estimate too; any other the wallet sent `POSTING_FORCE_AFTER`
@@ -983,7 +1024,7 @@ describe("postFromWallet", () => {
               expect(estimates).toBe(true);
               expect(gas).toBe(2_500n);
             }
-            expect(START + depositedAt + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(cutoff);
+            expect(START + depositedAt + WALLET_DEPOSIT_SPAN).toBeLessThanOrEqual(force);
           }
           // The build's endpoint is given only a call the wallet's node
           // reverted, or one the wallet may have sent.
@@ -1008,6 +1049,8 @@ describe("postFromWallet", () => {
   });
 
   test("takes one call for each posting", async () => {
-    await expect(postFromWallet(world({}).io, [A, B], [A], CUTOFF)).rejects.toThrow(RangeError);
+    await expect(
+      postFromWallet(world({}).io, [A, B], [A], { ballot: CUTOFF, force: CUTOFF }),
+    ).rejects.toThrow(RangeError);
   });
 });

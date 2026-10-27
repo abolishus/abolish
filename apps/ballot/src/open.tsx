@@ -24,11 +24,12 @@ import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
 import type { IdentityRead, Membership } from "./identity.ts";
 import type { Delivery, IntakeAnswer } from "./intake.ts";
-import { passedOnDevice, postingCutoff, postingLapsed } from "./lapse.ts";
+import { passedOnDevice, type PostingCutoffs, postingCutoffs, postingLapsed } from "./lapse.ts";
 import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { Declined, PostingOffer } from "./posting-offer.tsx";
+import { POSTING_SEND_MARGIN } from "./posting.ts";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
@@ -48,7 +49,7 @@ import {
 } from "./sealed.tsx";
 import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
-import type { WalletAnswer } from "./wallet.ts";
+import { type WalletAnswer, WALLET_FORCE_MARGIN } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -165,8 +166,11 @@ export interface ElectionSource {
    * kept shares of the recorded cast whose bytes are `ballot`, through the
    * contract path, the only path a posting delivers by ([[delivery]],
    * Direct submit), answering `recorded` only once every one is recorded by
-   * the contract, and by `cutoff`, the poll's `c_D` in seconds, at the
-   * latest ([[posting-relay]], Outcome); absent while the build has no
+   * the contract, with its deadlines read from `cutoffs`, the poll's force
+   * cutoff `c_L` and, for a late run, the last-offer and send cutoffs `c_E`
+   * and `c_S`, a late run made only where `late` says the voter was told it
+   * is best effort ([[posting-relay]], Outcome, The ballot's own deadline);
+   * absent while the build has no
    * contract path, and then no posting is offered. The caller zeroes the
    * records once this settles.
    */
@@ -174,21 +178,23 @@ export interface ElectionSource {
     electionId: Uint8Array,
     ballot: Uint8Array,
     postings: readonly Uint8Array[],
-    cutoff: bigint,
+    cutoffs: PostingCutoffs,
+    late: boolean,
   ) => Promise<PostAnswer>;
   /**
    * Posts each of `postings` as `post` does, from the voter's own wallet
    * once a run through the relay fell back ([[posting-relay]], Own wallet;
    * [[0042-posting-relay]], rule 6), answering `recorded` only once every
-   * one is recorded by the contract, and sending nothing past `cutoff`, the
-   * poll's `c_D`; absent where `post` is, and then never offered. The caller
-   * zeroes the records once this settles.
+   * one is recorded by the contract, sending nothing past the ballot cutoff
+   * `c_B` and depositing nothing that can't reach L1 by the force cutoff
+   * `c_L` (`cutoffs`); absent where `post` is, and then never offered. The
+   * caller zeroes the records once this settles.
    */
   readonly postOwn?: (
     electionId: Uint8Array,
     ballot: Uint8Array,
     postings: readonly Uint8Array[],
-    cutoff: bigint,
+    cutoffs: PostingCutoffs,
   ) => Promise<WalletAnswer>;
   /**
    * The election's lock across this origin's tabs (`electionLock`), held
@@ -213,14 +219,14 @@ export interface ElectionSource {
   declineSeal(ballot: Uint8Array): Promise<DeclineResult>;
   /**
    * Erases every unreceipted seat's `ct_i` and `m_i` from the recorded casts
-   * (`eraseShares`), once the poll's posting cutoff passed.
+   * (`eraseShares`), once the poll closed.
    */
   eraseShares(electionId: Uint8Array, tier: number): Promise<EraseSharesOutcome>;
-  /** The timestamp of the L2's finalized head (`loadChainTime`), read only when a cutoff may have passed. */
+  /** The timestamp of the L2's finalized head (`loadChainTime`), read only when the close may have passed. */
   chainTime(): Promise<LoadedChainTime>;
   /** This device's clock, in milliseconds since the epoch. */
   now(): number;
-  /** The release's `F`, in seconds (`Deployment.forcedInclusion`): the posting cutoff is `t_D − F`. */
+  /** The release's `F`, in seconds (`Deployment.forcedInclusion`): `c_D = t_D − F` bounds the ballot cutoff. */
   readonly forcedInclusion: bigint;
   /** Keeps a checked receipt in place of its seat's `m_i` in the recorded casts (`recordReceipt`). */
   keepReceipt(
@@ -672,9 +678,20 @@ export function Ballot({
   const definitionHash = fromHex(election.definitionHash);
   const electionId = fromHex(election.electionId);
 
-  /** The poll's posting cutoff `c_D`, in seconds ([[delivery]], Client rule 4). */
-  const cutoff = () =>
-    postingCutoff(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
+  /** The poll's own posting cutoffs `c_B` and `c_L`, in seconds ([[posting-relay]], The ballot's own deadline). */
+  const cutoffs = () =>
+    postingCutoffs(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
+
+  /**
+   * Whether a run through the relay would be a late one, best effort: its
+   * send cutoff `c_L − POSTING_SEND_MARGIN` passed on this device.
+   */
+  const relayLate = () => passedOnDevice(cutoffs().force - POSTING_SEND_MARGIN, source.now());
+  /**
+   * Whether the wallet's send may no longer be forced in time: `c_L −
+   * WALLET_FORCE_MARGIN` passed on this device ([[posting-relay]], The offer).
+   */
+  const walletLate = () => passedOnDevice(cutoffs().force - WALLET_FORCE_MARGIN, source.now());
 
   /** Runs `steps` under the election's lock, where the build has one (`ElectionSource.exclusive`). */
   const locked = <T,>(steps: () => Promise<T>): Promise<T> =>
@@ -715,15 +732,16 @@ export function Ballot({
    * store refused after the worker erased its seal's copy is asked for once
    * more, and its node answers with the same receipt (T-18). Casts that
    * can't be read offer nothing here: the cast's own read stops on them.
-   * Once the poll's posting cutoff passed, every unreceipted seat's `ct_i`
-   * and `m_i` are erased first, and a cast holding an erased seat is never
-   * offered ([[delivery]], Client rule 4). With nothing to finish, a cast
+   * Once the poll closed, every unreceipted seat's `ct_i` and `m_i` are
+   * erased first, since no path admits its ballot any more, and a cast
+   * holding an erased seat is never offered ([[delivery]], Client rule 4;
+   * [[posting-relay]], The ballot's own deadline; T-18). With nothing to finish, a cast
    * the board took opens on "You've already answered" (P2-25 part 3).
    */
   async function resume(): Promise<Step> {
-    const c = cutoff();
+    const c = election.closesAt;
     // The chain's time, read at most once, and only for a tier that keeps a
-    // share past the cutoff by this device's clock: most visits read nothing.
+    // share past the close by this device's clock: most visits read nothing.
     let chain: Promise<LoadedChainTime> | undefined;
     // A cast the board took, in the first of the poll's tiers that has one:
     // said only once no tier has a cast left to finish, which comes first.
@@ -736,7 +754,7 @@ export function Ballot({
         const time = await chain;
         // An RPC that fails or answers wrongly leaves the shares kept: erasing
         // on its word alone could lose a posting still in time (T-25). Not
-        // under the election's lock: past the cutoff no posting is in time,
+        // under the election's lock: past the close no posting is in time,
         // and one still running posts from its own copies.
         if (time.ok && postingLapsed(c, time.timestamp, source.now())) {
           await source.eraseShares(electionId, tier);
@@ -1195,7 +1213,7 @@ export function Ballot({
           if (!checked.ok || checked.checked.seat !== seat.seat) return stopped("casts-unreadable");
           continue;
         }
-        // Erased since (a decline or the cutoff in another tab), or not the
+        // Erased since (a decline or the close in another tab), or not the
         // ciphertext delivered: nothing is posted from this record.
         if (kept === undefined || !("m" in kept) || !equalBytes(kept.ciphertext, seat.ciphertext))
           return stopped("cast-faulty");
@@ -1248,13 +1266,20 @@ export function Ballot({
    * earlier one (Client rule 4; [[revoting]], Selection). A posting that
    * doesn't go through returns to the offer.
    */
-  function post(sending: Sending, handed: boolean) {
+  function post(sending: Sending, handed: boolean, offered: Step, warned: boolean) {
     if (posting === undefined) return;
+    // A run that became late while the offer was open is chosen only once
+    // the offer has said so (T-15).
+    const late = relayLate();
+    if (late && !warned) {
+      setStep({ ...offered });
+      return;
+    }
     setStep({ kind: "posting" });
     run(
       async (current) => {
         const posted = await postChecked(sending, (postings) =>
-          posting(electionId, sending.ballot, postings, cutoff()).catch(
+          posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
             (): PostAnswer => "unreachable",
           ),
         );
@@ -1304,8 +1329,18 @@ export function Ballot({
    * `post`, then the wallet's run. A run that doesn't record them returns
    * to the offer with what the wallet met, the relay still there to try.
    */
-  function postFromOwnWallet(sending: Sending, relayed: boolean, handed: boolean) {
+  function postFromOwnWallet(
+    sending: Sending,
+    relayed: boolean,
+    handed: boolean,
+    offered: Step,
+    warned: boolean,
+  ) {
     if (postingOwn === undefined) return;
+    if (walletLate() && !warned) {
+      setStep({ ...offered });
+      return;
+    }
     setStep({ kind: "posting-wallet" });
     // Every answer but these may come after the wallet's estimate, which
     // carries the parts (Own wallet, step 3), so they count as handed.
@@ -1317,7 +1352,7 @@ export function Ballot({
       });
     run(async (current) => {
       const posted = await postChecked(sending, (postings) =>
-        postingOwn(electionId, sending.ballot, postings, cutoff()).catch(
+        postingOwn(electionId, sending.ballot, postings, cutoffs()).catch(
           (): WalletAnswer => "failed",
         ),
       );
@@ -1440,6 +1475,9 @@ export function Ballot({
       return <Working poll={poll} kind={step.kind} />;
     case "offer": {
       const { sending } = step;
+      // What the offer says now, which the choice is checked against when made.
+      const late = relayLate();
+      const lateWallet = walletLate();
       return (
         <PostingOffer
           poll={poll}
@@ -1450,13 +1488,26 @@ export function Ballot({
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
           handed={step.handed === true}
-          onPost={posting === undefined ? undefined : () => post(sending, step.handed === true)}
+          onPost={
+            posting === undefined
+              ? undefined
+              : () => post(sending, step.handed === true, step, late)
+          }
           onWallet={
             step.fallback === true && postingOwn !== undefined
-              ? () => postFromOwnWallet(sending, step.relayed === true, step.handed === true)
+              ? () =>
+                  postFromOwnWallet(
+                    sending,
+                    step.relayed === true,
+                    step.handed === true,
+                    step,
+                    lateWallet,
+                  )
               : undefined
           }
           wallet={step.wallet}
+          late={late}
+          lateWallet={lateWallet}
         />
       );
     }

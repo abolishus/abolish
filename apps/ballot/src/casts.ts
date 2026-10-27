@@ -14,9 +14,9 @@
 // receipted seat is never posted (Client rules 1 to 3); once the ballot is
 // boarded and the operator's board path answers for the receipt with an
 // entry that passes, that entry is kept beside it (Client rule 3). Once the
-// poll's posting cutoff passes, a seat still holding its `m_i` has its
-// `ct_i` and `m_i` erased from every cast: no posting of it can be in time
-// any more; and once the voter declines to post a cast's unreceipted seats,
+// poll closes, a seat still holding its `m_i` has its `ct_i` and `m_i`
+// erased from every cast: no path admits the ballot any more, so no
+// posting of it can help; and once the voter declines to post a cast's unreceipted seats,
 // theirs are erased from it and from every recast of the same seal (Client
 // rule 4).
 // Kept in this origin's IndexedDB and nowhere else: the records
@@ -54,7 +54,7 @@ export interface Boarded {
  * `m_i`, while no receipt for the ballot has passed, or that receipt once
  * one has, `m_i` then erased ([[delivery]], Client rule 2), with the board
  * entry the operator answered for it once that answer passed (Client rule
- * 3); or nothing but the seat, once the poll's posting cutoff passed with
+ * 3); or nothing but the seat, once the poll closed with
  * no receipt kept for it, its `ct_i` and `m_i` then erased (Client rule 4).
  */
 export type KeptShare =
@@ -481,9 +481,9 @@ export interface UnsentCast {
  * the newest: an older one is outranked by it wherever both are boarded, so
  * sending it could only matter if the newest never went, and then the
  * newest is the voter's last choice. `undefined` when the newest is
- * boarded, holds a share erased at the poll's posting cutoff (its seat can
- * then be neither delivered nor posted in time, and the poll closed days
- * before), or none is held; `other-election` for a newest cast that isn't
+ * boarded, holds a share erased at the poll's close (its seat can then be
+ * neither delivered nor posted in time, and its ballot no longer sent), or
+ * none is held; `other-election` for a newest cast that isn't
  * a version-3 record naming `definitionHash`, which the poll's own casts
  * never are, so nothing is sent from them (T-25, T-45).
  */
@@ -652,7 +652,7 @@ export function withCast(
         })
       : shares;
   const shape = asStored(() => ({ m: new Uint8Array(M_LENGTH), receipt: null }));
-  // A share is erased only in storage, at the posting cutoff: never one the worker hands over.
+  // A share is erased only in storage, at the close: never one the worker hands over.
   const judged = sharesFor(decoded, shape);
   if (judged === undefined || judged.some((share) => "erased" in share))
     throw new TypeError("not the ballot's qualified seats' shares");
@@ -714,7 +714,7 @@ export async function recordCast(
  * carries the same ballot hash and share (Client rule 2; T-18). A seat
  * already receipted keeps its first receipt, which passed as well.
  * `missing` if no cast has these bytes, or if that cast's seat was erased
- * at the posting cutoff. Throws on a receipt that doesn't
+ * at the close. Throws on a receipt that doesn't
  * name `seat` and exactly this ballot, which the worker never passes.
  */
 export function withReceipt(
@@ -731,7 +731,7 @@ export function withReceipt(
   )
     throw new TypeError("not a receipt for this ballot");
   const own = casts.find((cast) => equalBytes(cast.ballot, ballot));
-  // A seat erased at the posting cutoff has no share left to take the
+  // A seat erased at the close has no share left to take the
   // receipt's place: never answered as kept, so the caller stops rather
   // than counting the seat receipted (found by the in-session review).
   if (own === undefined || own.shares.some((share) => share.seat === seat && "erased" in share))
@@ -903,8 +903,9 @@ export const keepsShares = (casts: readonly CastRecord[]): boolean =>
 /**
  * `casts` with every seat still holding its `m_i` left with nothing but the
  * seat, its `ct_i` and `m_i` erased, in every cast: what the client does once
- * the poll's posting cutoff `c_D` passed, after which no posting delivers
- * ([[delivery]], Client rule 4; T-18). Receipted seats keep their `ct_i`,
+ * the poll closed, after which no posting helps one of its own ballots
+ * ([[delivery]], Client rule 4; [[posting-relay]], The ballot's own
+ * deadline; T-18). Receipted seats keep their `ct_i`,
  * receipt and board entry, which hold nothing a posting needs and are kept
  * to be seen onto the board (Client rule 3). `none` if no seat holds an
  * `m_i`.
@@ -922,7 +923,7 @@ export function withSharesErased(casts: readonly CastRecord[]): CastRecord[] | "
 /**
  * Erases every unreceipted seat's `ct_i` and `m_i` from the casts in
  * `electionId` at `tier` (`withSharesErased`), in one transaction with the
- * read; the caller has judged the poll's posting cutoff passed. As with a
+ * read; the caller has judged the poll's close passed. As with a
  * receipt, the browser may keep the replaced bytes on disk until it
  * compacts them (T-18). `none` if no seat holds one, `unreadable` for casts
  * this device can't read, which are never replaced, and `unwritable` for

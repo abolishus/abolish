@@ -52,6 +52,7 @@ import {
   pollLanguages,
   readChosenLocale,
 } from "./locales.ts";
+import type { PostingCutoffs } from "./lapse.ts";
 import { catalogs } from "./messages.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
@@ -312,7 +313,8 @@ const source: ElectionSource = {
           _electionId: Uint8Array,
           ballot: Uint8Array,
           postings: readonly Uint8Array[],
-          cutoff: bigint,
+          cutoffs: PostingCutoffs,
+          late: boolean,
         ) {
           const { definitionHash, ballotHash } = postingTopics(postings);
           // Each request bounded, so neither the relay nor the RPCs can hold
@@ -342,8 +344,9 @@ const source: ElectionSource = {
                 sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
               },
               postings,
-              cutoff,
+              cutoffs.force,
               STAGING.forcedInclusion,
+              late ? { lastOffer: cutoffs.lastOffer, send: cutoffs.send } : undefined,
             );
           } finally {
             for (const call of calls) call.fill(0);
@@ -357,7 +360,7 @@ const source: ElectionSource = {
           _electionId: Uint8Array,
           ballot: Uint8Array,
           postings: readonly Uint8Array[],
-          cutoff: bigint,
+          cutoffs: PostingCutoffs,
         ): Promise<WalletAnswer> {
           const wallet = injectedWallet();
           if (wallet === undefined) return "no-wallet";
@@ -390,7 +393,7 @@ const source: ElectionSource = {
               },
               postings,
               calls,
-              cutoff,
+              cutoffs,
             );
           } finally {
             for (const call of calls) call.fill(0);

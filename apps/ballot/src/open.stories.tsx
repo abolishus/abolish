@@ -269,7 +269,7 @@ interface Voter {
   readonly locks: boolean;
 }
 
-/** Before every story poll's posting cutoff, by both clocks. */
+/** Before every story poll's close, by both clocks. */
 const BEFORE_CUTOFF = 1_760_000_000n;
 
 const VOTER: Voter = {
@@ -1692,6 +1692,34 @@ export const PostingOfferWithoutAContractPath: Story = {
   },
 };
 
+export const PostingTurnsLateWhileOffered: Story = {
+  name: "An offer left open past the relay's send cutoff says the run is late before it can be chosen",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 12_100n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.queryByText("The poll closes soon")).toBeNull();
+    // The relay's send cutoff `c_L − POSTING_SEND_MARGIN` passes while the offer is open.
+    Object.assign(args.source, { now: () => Number(ELECTION.closesAt - 11_000n) * 1000 });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    // Not run: the offer says first that it is best effort (T-15).
+    await expect(await canvas.findByText("The poll closes soon")).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.post).toHaveBeenCalledOnce();
+    await expect(of.post.mock.calls[0]?.[4]).toBe(true);
+  },
+};
+
 export const PostingChosen: Story = {
   name: "The voter posts the seat left: its share is checked again, posted, then the ballot sent",
   args: { source: offerSource({ posted: ["recorded"] }) },
@@ -1713,8 +1741,11 @@ export const PostingChosen: Story = {
     await expect(
       posted.map((record) => of.ms.find(({ given }) => given === record)?.copy[0]),
     ).toEqual([3]);
-    // Within the poll's posting cutoff, the latest the contract path may take.
-    await expect(of.post.mock.calls[0]?.[3]).toBe(CUTOFF);
+    // Read from the close, never `c_D`: a posting recorded past it helps no
+    // ballot of this client's.
+    await expect(of.post.mock.calls[0]?.[3]).toEqual(CUTOFFS);
+    // Before the relay's send cutoff, no run is a late one.
+    await expect(of.post.mock.calls[0]?.[4]).toBe(false);
     // Posted before the ballot leaves: a ballot boarded with the seat neither
     // receipted nor posted would void the voter's earlier one.
     await expect(of.post.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1785,7 +1816,7 @@ export const PostingFromTheWallet: Story = {
     await expect(of.postOwn).toHaveBeenCalledOnce();
     await expect(of.postOwn.mock.calls[0]?.[0]).toEqual(fromHex(ELECTION_ID));
     await expect(of.postOwn.mock.calls[0]?.[1]).toEqual(CAST.ballot);
-    await expect(of.postOwn.mock.calls[0]?.[3]).toBe(CUTOFF);
+    await expect(of.postOwn.mock.calls[0]?.[3]).toEqual(CUTOFFS);
     // The share checked again before the wallet's run, both under one hold of the lock.
     const at = (step: string) =>
       of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);
@@ -2682,18 +2713,26 @@ export const NothingToResumeWithoutDelivery: Story = {
   },
 };
 
-// The story polls' posting cutoff, `c_D = closes_at + l1_inclusion_bound +
-// DELIVERY_WINDOW − F` ([[delivery]], Client rule 4), and a time past it.
-const CUTOFF = ELECTION.closesAt + ELECTION.l1InclusionBound + 172_800n - 46_800n;
+// The story polls' own posting cutoffs ([[posting-relay]], The ballot's own
+// deadline): `c_B = closes_at − POSTING_BALLOT_MARGIN`, well before `c_D`,
+// `c_L = c_B − MAX_SEQUENCER_DRIFT` and `c_E = closes_at − 1,800`.
+const CUTOFFS = {
+  ballot: ELECTION.closesAt - 3_600n,
+  force: ELECTION.closesAt - 5_400n,
+  lastOffer: ELECTION.closesAt - 1_800n,
+  send: ELECTION.closesAt - 600n,
+};
+// What the shares are erased at, the close, and a time past it.
+const CUTOFF = ELECTION.closesAt;
 const PAST_CUTOFF = {
   now: Number(CUTOFF + 1n) * 1000,
   chainTime: { ok: true, timestamp: CUTOFF + 1n },
 } as const;
-/** `RECORDED_SHARES` once the cutoff passed: the first seat's `ct_i` and `m_i` erased. */
+/** `RECORDED_SHARES` once the close passed: the first seat's `ct_i` and `m_i` erased. */
 const ERASED_SHARES: KeptShare[] = [{ seat: 1, erased: true }, ...RECORDED_SHARES.slice(1)];
 
-export const ErasedPastCutoff: Story = {
-  name: "Past the posting cutoff, an unsent cast's unreceipted shares are erased and nothing is resumed",
+export const ErasedPastClose: Story = {
+  name: "Past the close, an unsent cast's unreceipted shares are erased and nothing is resumed",
   args: {
     source: unsentSource(RECORDED_POLL, {
       ...PAST_CUTOFF,
@@ -2715,8 +2754,8 @@ export const ErasedPastCutoff: Story = {
   },
 };
 
-export const KeptBeforeCutoff: Story = {
-  name: "Before the posting cutoff by this device's clock, the chain isn't read and nothing is erased",
+export const KeptBeforeClose: Story = {
+  name: "Before the close by this device's clock, the chain isn't read and nothing is erased",
   args: {
     source: unsentSource(RECORDED_POLL, {
       chainTime: PAST_CUTOFF.chainTime,
@@ -2732,7 +2771,7 @@ export const KeptBeforeCutoff: Story = {
 };
 
 export const KeptOnTheChainsWord: Story = {
-  name: "Past the cutoff on this device but not on the chain, or with no answer from it, nothing is erased",
+  name: "Past the close on this device but not on the chain, or with no answer from it, nothing is erased",
   args: {
     source: unsentSource(RECORDED_POLL, {
       now: PAST_CUTOFF.now,
@@ -2748,7 +2787,7 @@ export const KeptOnTheChainsWord: Story = {
 };
 
 export const KeptWithoutTheChain: Story = {
-  name: "Past the cutoff on this device with the chain unreadable, nothing is erased",
+  name: "Past the close on this device with the chain unreadable, nothing is erased",
   args: {
     source: unsentSource(RECORDED_POLL, {
       now: PAST_CUTOFF.now,
@@ -2763,7 +2802,7 @@ export const KeptWithoutTheChain: Story = {
 };
 
 export const NothingToErase: Story = {
-  name: "Past the cutoff, a cast every trustee receipted reads no chain and erases nothing",
+  name: "Past the close, a cast every trustee receipted reads no chain and erases nothing",
   args: {
     source: unsentSource(RECORDED_POLL, {
       ...PAST_CUTOFF,

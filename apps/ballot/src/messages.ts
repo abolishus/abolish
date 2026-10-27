@@ -319,6 +319,9 @@ const enUS = {
   postingPostExplained:
     "The missing parts go on the public record with the key to their outer seal, so the trustees can open them without having taken them. Your vote stays secret today, but those parts lose their long-term protection: anyone who later breaks today's encryption can read them, and if enough of your ballot's parts are posted to open it, they can read your whole ballot. This can't be undone.",
   postingPost: "Post publicly, then send",
+  postingLateTitle: "The poll closes soon",
+  postingLate:
+    "Posting now is best effort: nothing can make sure the missing parts reach the public record in time. If the record doesn't show them ten minutes before the poll closes, your ballot isn't sent, and the parts are public for nothing.",
   postingDeclineTitle: "Leave this ballot",
   postingDeclineExplained:
     "This device erases the parts it kept for these trustees, and this ballot won't count. Whoever passed the parts on could still put it on the board, where it would replace your earlier ballot without counting, so answer again while the poll is open.",
@@ -333,6 +336,8 @@ const enUS = {
   postingWalletOffer:
     "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does, and so may the node this device reads the board through. If the network doesn't take the posting within ten minutes, or your wallet's node refuses it, your wallet asks you to force it through Ethereum from the same address, which needs ETH there too and costs more. This device sends your ballot only once the record shows them.",
   postingWalletPost: "Post from my wallet, then send",
+  postingWalletLate:
+    "It's now too late for your wallet to force the posting through Ethereum in time, so it reaches the public record only if the network takes it. If the record doesn't show it in time, your ballot isn't sent, and the parts are public for nothing.",
   postingHandedTitle: "The missing parts may still reach the board",
   postingHanded:
     "This try or an earlier one gave the missing parts to our posting relay or to your wallet, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back.",
@@ -341,7 +346,7 @@ const enUS = {
     "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Decline any request still open in your wallet, wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",
   walletForcedTitle: "Your wallet forced the posting through Ethereum",
   walletForced:
-    "The network didn't take your wallet's posting in time, or your wallet's node refused it, so your wallet sent it through Ethereum, which the network has to include. Count the missing parts as posted: they reach the public record by the poll's delivery deadline, which can take some hours, and leaving this ballot can't take them back. Keep this page open, and don't reload it or open this ballot in another tab: after the poll's posting cutoff that erases what this device kept for them, and your ballot can then no longer be sent from here. Post from your wallet again only once the record may show them: this device looks for them first, and sends your ballot once it finds them.",
+    "The network didn't take your wallet's posting in time, or your wallet's node refused it, so your wallet sent it through Ethereum, which the network has to include. Count the missing parts as posted: they reach the public record before the poll's last hour unless the whole network halts, and leaving this ballot can't take them back. Keep this page open, and don't reload it or open this ballot in another tab: after the poll closes that erases what this device kept for them, and your ballot can then no longer be sent from here. Post from your wallet again only once the record may show them: this device looks for them first, and sends your ballot once it finds them.",
   walletRejectedTitle: "Your wallet didn't send anything",
   walletRejected:
     "A request was declined in your wallet, so nothing more was sent from it. If your wallet had already shown you the posting, it and its node have seen the missing parts, and so may the node this device reads the board through. Choose again below.",
@@ -356,7 +361,7 @@ const enUS = {
     "This device found no Ethereum wallet to ask. Add one to this browser, or open the ballot in a browser that has one, then post from your wallet again.",
   walletLateTitle: "The time for posting has passed",
   walletLate:
-    "The poll's posting cutoff has passed, so nothing was sent from your wallet this time and nothing more can be posted for this ballot.",
+    "The poll closes too soon for a posting from your wallet to reach the public record in time, so nothing was sent from your wallet this time.",
   walletFailedTitle: "Your wallet didn't answer",
   walletFailed:
     "Your wallet or its node didn't answer in time, or answered with an error. It may have been given the missing parts, so count them as given. Decline any request still open in your wallet, then try again in a minute.",

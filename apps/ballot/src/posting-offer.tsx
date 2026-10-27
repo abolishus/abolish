@@ -43,7 +43,11 @@ const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["forced", "sent"]);
  * T-15). `onWallet` is present only once a run through the relay fell
  * back, and offers the voter's own wallet with what it costs: the paying
  * address is published beside the ballot ([[0042-posting-relay]], rule 6;
- * T-13); `wallet` is what that wallet last met.
+ * T-13); `wallet` is what that wallet last met. `late` says the relay's
+ * send cutoff passed, so a run through it is a late one, best effort,
+ * which the offer says before it can be chosen ([[posting-relay]], The
+ * ballot's own deadline; T-15, T-25), and `lateWallet` the same of the
+ * wallet once its send may no longer be forced through Ethereum in time.
  */
 export function PostingOffer({
   poll,
@@ -57,6 +61,8 @@ export function PostingOffer({
   onPost,
   onWallet,
   wallet,
+  late = false,
+  lateWallet = false,
 }: {
   poll: FramePoll;
   trackingCode: string;
@@ -71,6 +77,8 @@ export function PostingOffer({
   onPost?: (() => void) | undefined;
   onWallet?: (() => void) | undefined;
   wallet?: Exclude<WalletAnswer, "recorded"> | undefined;
+  late?: boolean;
+  lateWallet?: boolean;
 }) {
   const t = useTranslate(catalogs);
   const walletNote = wallet === undefined ? undefined : WALLET_NOTES[wallet];
@@ -129,6 +137,11 @@ export function PostingOffer({
       {onPost === undefined ? null : (
         <Part title={t("postingPostTitle")}>
           <p className="m-0">{t("postingPostExplained")}</p>
+          {late ? (
+            <Note tone="warn" title={t("postingLateTitle")}>
+              <p className="m-0">{t("postingLate")}</p>
+            </Note>
+          ) : null}
           <div>
             <Button size="lg" variant="outline" className={ACTION} onClick={onPost}>
               {t("postingPost")}
@@ -139,6 +152,11 @@ export function PostingOffer({
       {onWallet === undefined ? null : (
         <Part title={t("postingWalletOfferTitle")}>
           <p className="m-0">{t("postingWalletOffer")}</p>
+          {lateWallet ? (
+            <Note tone="warn" title={t("postingLateTitle")}>
+              <p className="m-0">{t("postingWalletLate")}</p>
+            </Note>
+          ) : null}
           <div>
             <Button size="lg" variant="outline" className={ACTION} onClick={onWallet}>
               {t("postingWalletPost")}

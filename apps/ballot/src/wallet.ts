@@ -21,6 +21,7 @@
 // only calls its `request`.
 
 import type { Deployment } from "./deployment.ts";
+import type { PostingCutoffs } from "./lapse.ts";
 import type { LoadedDeposits, LoadedPostings } from "./load.ts";
 import {
   POSTING_FINALITY,
@@ -61,26 +62,35 @@ export const WALLET_WAIT = POSTING_SEEN + POSTING_FINALITY;
 export const WALLET_HOLD_MARGIN = BigInt((2 * WALLET_REQUEST_MS) / 1000);
 
 /**
- * Seconds before `c_D` by which a deposit must be asked for: the estimate
- * and the voter's confirmation, `WALLET_REQUEST` each, then
- * `POSTING_DEPOSIT_SPAN` (five minutes) for L1 to include it, so its L1
- * block is by `c_D` and it reaches L2 by `t_D` ([[posting-relay]], Own
- * wallet, Forced through L1).
+ * Seconds before the force cutoff `c_L` by which a deposit must be asked
+ * for: the estimate and the voter's confirmation, `WALLET_REQUEST` each,
+ * then `POSTING_DEPOSIT_SPAN` (five minutes) for L1 to include it, so its L1
+ * block is by `c_L` and it reaches L2 by `c_B` unless the L2 halts
+ * ([[posting-relay]], Own wallet, Forced through L1, The ballot's own
+ * deadline).
  */
 export const WALLET_DEPOSIT_SPAN = BigInt((2 * WALLET_REQUEST_MS) / 1000) + 300n;
 
 /**
- * Seconds before `c_D` at which a latest-head sighting stops holding a
+ * Seconds before `c_L` at which a latest-head sighting stops holding a
  * posting back: the send's six requests at their longest (the account, the
  * chain read twice around a switch, the estimate and the confirmation),
  * then `POSTING_FORCE_AFTER` for the sequencer to take it, then a deposit's
  * span, which a prompt switch to L1 leaves whole (Known-weak). The latest head is the untrusted endpoint's word,
  * and a sequencer can show a call it never batches, so a sighting may delay
- * the voter's own send but never push it, or its forcing, past `c_D` (T-25,
+ * the voter's own send but never push it, or its forcing, past `c_L` (T-25,
  * T-50).
  */
 export const WALLET_FORCE_MARGIN =
   BigInt((6 * WALLET_REQUEST_MS) / 1000) + POSTING_FORCE_AFTER + WALLET_DEPOSIT_SPAN;
+
+/**
+ * Seconds before `c_B` at which a sighting stops holding a posting back once
+ * nothing can be forced in time: the send's six requests at their longest,
+ * so a held posting is still sent by `c_B` ([[posting-relay]], The ballot's
+ * own deadline).
+ */
+export const WALLET_LATE_MARGIN = BigInt((6 * WALLET_REQUEST_MS) / 1000);
 
 /**
  * A wallet run's outcome ([[posting-relay]], Own wallet):
@@ -88,7 +98,8 @@ export const WALLET_FORCE_MARGIN =
  * - `recorded`: every posting is recorded at the finalized head;
  * - `forced`: the wallet deposited a posting on L1, and every posting not
  *   recorded has a qualifying deposit there (`loadDeposits`) whose block is
- *   by `c_D`, so it reaches L2 by `t_D`, or the safe head shows it;
+ *   by `c_L`, so it reaches L2 by `c_B` unless the L2 halts, or the safe
+ *   head shows it;
  * - `sent`: the wallet sent one, or may have, and not every posting is
  *   recorded by the wait: it may still land, so sending again first looks
  *   for it;
@@ -96,7 +107,7 @@ export const WALLET_FORCE_MARGIN =
  * - `refused`: the board refuses the call at the wallet's estimate;
  * - `wrong-chain`: the wallet isn't on the release's L2 and didn't switch;
  * - `no-wallet`: this browser has no wallet;
- * - `late`: the poll's `c_D` passed;
+ * - `late`: the poll's ballot cutoff `c_B` passed;
  * - `failed`: the wallet or its node answered with an error, or nothing.
  *
  * Every outcome but `recorded` and `forced` with a send behind it is
@@ -446,14 +457,19 @@ interface Pending {
  * head, then the latest; a posting the latest head shows isn't sent but
  * waited on for `WALLET_WAIT`, so the voter's address isn't put beside a
  * posting the relay or its deposit already landed (T-13), and is sent once
- * that passes with no record, or once `c_D − WALLET_FORCE_MARGIN` passes;
- * every other is sent once, only while neither this device's clock nor a
- * head's time read is past `cutoff`, the poll's `c_D`, so it is in time
- * forced or not ([[delivery]], Client rule 4).
+ * that passes with no record, or once `c_L − WALLET_FORCE_MARGIN` passes,
+ * the force cutoff `cutoffs.force`; past the deposit cutoff `c_L −
+ * WALLET_DEPOSIT_SPAN`, when nothing can be forced in time, a sighting holds
+ * it back again, until `c_B − WALLET_LATE_MARGIN` at most. Every posting is
+ * sent once, only while neither this device's clock nor a head's time read
+ * is past `cutoffs.ballot`, the ballot cutoff `c_B`, so one recorded within
+ * `WALLET_WAIT` still leaves time to send the ballot before the close
+ * ([[delivery]], Client rule 4; [[posting-relay]], The ballot's own
+ * deadline).
  *
  * A posting the wallet sent that the L2's safe head doesn't show
  * `POSTING_FORCE_AFTER` later is deposited on L1 from the same account,
- * once, while the deposit can still be asked for by `c_D −
+ * once, while the deposit can still be asked for by `c_L −
  * WALLET_DEPOSIT_SPAN`: the safe head, since a censoring sequencer can show
  * a call at the latest head that it never batches (Forced through L1;
  * T-50). A deposit the wallet doesn't make ends the forcing for the run,
@@ -468,7 +484,7 @@ interface Pending {
  * It answers `recorded` only once the finalized head carries every
  * posting's exact bytes; otherwise, once every unrecorded posting was sent,
  * and deposited if it was, at least `WALLET_WAIT` ago, `forced` if one was
- * deposited and L1 then shows a qualifying deposit by `cutoff` for each the
+ * deposited and L1 then shows a qualifying deposit by `c_L` for each the
  * safe head doesn't, read once through the build's own L1 endpoint, else
  * `sent`; or what stopped the first send. A
  * read that fails or throws records and forces nothing, and each read is
@@ -478,7 +494,7 @@ export async function postFromWallet(
   io: WalletIo,
   postings: readonly Uint8Array[],
   calls: readonly Uint8Array[],
-  cutoff: bigint,
+  cutoffs: Pick<PostingCutoffs, "ballot" | "force">,
 ): Promise<WalletAnswer> {
   if (calls.length !== postings.length)
     throw new RangeError("postFromWallet: one call for each posting");
@@ -519,7 +535,17 @@ export async function postFromWallet(
       .find(head, head === "finalized" ? from : undefined, () => time() > horizon())
       .catch((): LoadedPostings => ({ ok: false, problem: "unreachable" }));
   const holds = (since: bigint | undefined) => since !== undefined && time() - since < WALLET_WAIT;
-  const forceable = () => forcing && time() + WALLET_DEPOSIT_SPAN <= cutoff;
+  const { ballot: cutoff, force } = cutoffs;
+  // Whether a deposit asked for now has its L1 block by `c_L`.
+  const depositable = () => time() + WALLET_DEPOSIT_SPAN <= force;
+  const forceable = () => forcing && depositable();
+  // A sighting holds a send back while that leaves time to force it, and
+  // again once nothing can be forced in time, while the send still makes
+  // `c_B`; between the two, never, so a send can still be forced (T-50).
+  const held = (p: Pending) =>
+    holds(p.seenAt) &&
+    (time() + WALLET_FORCE_MARGIN < force ||
+      (!depositable() && time() + WALLET_LATE_MARGIN < cutoff));
   const shows = (read: LoadedPostings, p: Pending) =>
     read.ok && read.records.some((record) => equalBytes(record, p.posting));
   // A deposit's gas limit from the build's own estimate, a quarter over as
@@ -572,8 +598,7 @@ export async function postFromWallet(
       for (const p of left) if (p.seenAt === undefined && shows(latest, p)) p.seenAt = time();
     }
     for (const p of left) {
-      if (p.sentAt !== undefined || (holds(p.seenAt) && time() + WALLET_FORCE_MARGIN < cutoff))
-        continue;
+      if (p.sentAt !== undefined || held(p)) continue;
       if (time() > cutoff) return sent ? "sent" : "late";
       let met: WalletSent;
       try {
@@ -635,17 +660,17 @@ export async function postFromWallet(
     if (left.every((p) => p.sentAt !== undefined && !holds(p.sentAt) && !holds(p.depositedAt))) {
       if (!left.some((p) => p.depositedAt !== undefined)) return "sent";
       // Once, through the build's own L1 endpoint: the wallet's word that it
-      // sent a deposit is no evidence it was mined, nor by `c_D`.
+      // sent a deposit is no evidence it was mined, nor by `c_L`.
       const ending = time();
       const l1 = await io
         .deposits(started, () => time() > ending + WALLET_WAIT)
         .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
-      // Each either batched to L1 by the sequencer or deposited there by `c_D`.
+      // Each either batched to L1 by the sequencer or deposited there by `c_L`.
       const forced =
         l1.ok &&
         left.every((p) => {
           const landed = l1.landed[pending.indexOf(p)];
-          return p.safe || (landed !== undefined && landed <= cutoff);
+          return p.safe || (landed !== undefined && landed <= force);
         });
       return forced ? "forced" : "sent";
     }

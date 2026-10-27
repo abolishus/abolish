@@ -45,6 +45,7 @@ export const Offered: Story = {
     // Leaving says what still happens to the ballot the relay holds (T-25).
     await expect(canvas.getByText(/replace your earlier ballot without counting/)).toBeVisible();
     await expect(canvas.queryByText("The posting didn't go through")).toBeNull();
+    await expect(canvas.queryByText("The poll closes soon")).toBeNull();
     await userEvent.click(canvas.getByRole("button", { name: "Try the trustees again" }));
     await expect(args.onRetry).toHaveBeenCalledOnce();
     await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
@@ -139,6 +140,29 @@ export const WalletSentNotRecorded: Story = {
   },
 };
 
+export const OfferedLate: Story = {
+  name: "Past the relay's send cutoff, posting is offered as best effort, said before it can be chosen",
+  args: { late: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("The poll closes soon")).toBeVisible();
+    await expect(canvas.getByText(/the parts are public for nothing/)).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(args.onPost).toHaveBeenCalledOnce();
+  },
+};
+
+export const OfferedLateWallet: Story = {
+  name: "Once the wallet's send may no longer be forced in time, its offer says so before it can be chosen",
+  args: { failed: true, onWallet: fn(), lateWallet: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText(/too late for your wallet to force the posting/)).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(args.onWallet).toHaveBeenCalledOnce();
+  },
+};
+
 export const WalletForced: Story = {
   name: "Parts the wallet forced through Ethereum are counted as posted, with the page kept open",
   args: { failed: true, handed: true, onWallet: fn(), wallet: "forced" },
@@ -147,6 +171,7 @@ export const WalletForced: Story = {
     await expect(canvas.getByText("Your wallet forced the posting through Ethereum")).toBeVisible();
     await expect(canvas.getByText(/Count the missing parts as posted/)).toBeVisible();
     await expect(canvas.getByText(/Keep this page open/)).toBeVisible();
+    await expect(canvas.getByText(/unless the whole network halts/)).toBeVisible();
     await expect(canvas.queryByText(/Nothing was posted/)).toBeNull();
     // Its own note says they were given, so the handed note isn't repeated.
     await expect(canvas.queryByText("The missing parts may still reach the board")).toBeNull();

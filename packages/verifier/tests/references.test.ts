@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { L1_REF_MARGIN } from "@abolishus/crypto";
+import { L1_REF_MARGIN, PARAMETERS } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -357,6 +357,82 @@ describe("the reference judge", () => {
           );
           const got = typeof judge === "function" ? judge(ref) : judge;
           expect(got).toBe(model(blocks, ref, opensAt, closesAt));
+        },
+      ),
+      { numRuns },
+    );
+  });
+});
+
+describe("the reference judge under ballot version 5", () => {
+  const PERIOD = BigInt(PARAMETERS.ROOT_PERIOD);
+  const OFFSET = BigInt(PARAMETERS.ROOT_OFFSET);
+  const WINDOW = BigInt(PARAMETERS.ROOT_WINDOW);
+  const tau = (step: number) => BigInt(step) * PERIOD + OFFSET;
+
+  // revoting.md, Admission, under ballot version 5: the reference's own
+  // steps, then `t − ROOT_WINDOW < τ_n ≤ t` for the named block's time `t`.
+  const window = (step: number, t: bigint) =>
+    tau(step) <= t - WINDOW ? "root-step-stale" : tau(step) > t ? "root-step-future" : "admitted";
+
+  test("holds the step to the window before the named block, at both edges", () => {
+    const step = 2_966_400;
+    const t = tau(step);
+    for (const [at, want] of [
+      [t, "admitted"],
+      [t - 1n, "root-step-future"],
+      [t + WINDOW - 1n, "admitted"],
+      [t + WINDOW, "root-step-stale"],
+    ] as const) {
+      const blocks = run(10n, [at - L1_REF_MARGIN - 12n, at, at + 12n]);
+      const judge = referenceJudge(
+        blocks.map((b) => decodeHeader(b.encoded)),
+        at - 1n,
+        at + 600n,
+      );
+      if (typeof judge !== "function") throw new Error("short");
+      const named = blocks[1] as TestHeader;
+      expect(judge({ l1RefNumber: named.number, l1RefHash: named.hash, step }), String(at)).toBe(
+        want,
+      );
+      // Without a step the same reference is version 4's, admitted whatever
+      // the step would be.
+      expect(judge({ l1RefNumber: named.number, l1RefHash: named.hash })).toBe("admitted");
+    }
+  });
+
+  test("judges the step only once the reference is admitted, on any run, reference and step", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 50n }),
+        fc.array(fc.bigInt({ min: 1n, max: 3000n }), { minLength: 1, maxLength: 12 }),
+        fc.bigInt({ min: 0n, max: 20_000n }),
+        fc.bigInt({ min: 1n, max: 20_000n }),
+        fc.bigInt({ min: 0n, max: 80n }),
+        fc.boolean(),
+        fc.integer({ min: 0, max: 80 }),
+        (first, gaps, base, length, refNumber, ownHash, step) => {
+          let t = base;
+          const blocks = run(
+            first,
+            gaps.map((g) => (t += g)),
+          );
+          const opensAt = base + L1_REF_MARGIN + length;
+          const closesAt = opensAt + length;
+          const named = blocks.find((b) => b.number === refNumber);
+          const ref = {
+            l1RefNumber: refNumber,
+            l1RefHash: ownHash && named !== undefined ? named.hash : new Uint8Array(32).fill(7),
+          };
+          const judge = referenceJudge(
+            blocks.map((b) => decodeHeader(b.encoded)),
+            opensAt,
+            closesAt,
+          );
+          if (typeof judge !== "function") return;
+          const v4 = judge(ref);
+          const want = v4 === "admitted" ? window(step, (named as TestHeader).timestamp) : v4;
+          expect(judge({ ...ref, step })).toBe(want);
         },
       ),
       { numRuns },

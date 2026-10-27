@@ -32,8 +32,6 @@
 // board's `submitPosting`, which the relay simulates before it pays.
 
 import {
-  type BallotCheck,
-  type BallotCheckV2,
   type BallotStep,
   type BoardEntryVersion,
   ballotHashV3,
@@ -57,7 +55,7 @@ import {
   type Panel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
+import { type AdmissionCode, type AnyBallotCheck, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
 import {
   authorRunOf,
@@ -341,7 +339,7 @@ export function electionAdmission(
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
   // Up to the membership proof: a payload decided before it, or its step.
-  const step = (payload: Uint8Array): BallotAdmission | BallotStep<BallotCheck | BallotCheckV2> => {
+  const step = (payload: Uint8Array): BallotAdmission | BallotStep<AnyBallotCheck> => {
     // The envelope's record type first: a payload of another type is no
     // ballot, whatever its bytes after the type would decode to.
     if (
@@ -356,7 +354,7 @@ export function electionAdmission(
       return { ok: false, code: "decode", decodeError: e.code };
     }
   };
-  const verdict = (checked: BallotCheck | BallotCheckV2): BallotAdmission =>
+  const verdict = (checked: AnyBallotCheck): BallotAdmission =>
     checked.ok
       ? {
           ok: true,
@@ -372,7 +370,7 @@ export function electionAdmission(
     const results: (BallotAdmission | undefined)[] = [];
     const waiting: {
       readonly at: number;
-      readonly step: BallotStep<BallotCheck | BallotCheckV2>;
+      readonly step: BallotStep<AnyBallotCheck>;
     }[] = [];
     for (const [at, payload] of payloads.entries()) {
       const s = step(payload);
@@ -387,7 +385,7 @@ export function electionAdmission(
     // verdicts: every decoding error was caught above, per payload.
     const finished = finishBallotSteps(waiting.map((w) => w.step));
     for (const [i, { at }] of waiting.entries())
-      results[at] = verdict(finished[i] as BallotCheck | BallotCheckV2);
+      results[at] = verdict(finished[i] as AnyBallotCheck);
     return results as BallotAdmission[];
   };
   // Only definition version 5's receipts (ballot version 3, the one the

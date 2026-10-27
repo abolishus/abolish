@@ -2,27 +2,32 @@
 // ballot's named L1 block is judged by @abolishus/crypto's `checkL1Reference`
 // against a run of finalized L1 headers, from a block before the window's
 // start (`opens_at − 3600`) to the finalized head, with `l1_ref_min` found in
-// the run by `l1RefMin` (docs/spec/revoting.md, Admission). The run is all
+// the run by `l1RefMin` (docs/spec/revoting.md, Admission); a version-5
+// ballot's, which names its root-clock step, by `checkL1ReferenceV5`, which
+// then holds the step to the window before the named block (P2-17). The run is all
 // the L1 the check reads: a ballot naming an ancient block is rejected by
 // number alone, and one beyond the head by the head's timestamp, so no ballot
 // can ask for evidence outside it (T-53, T-36).
 
 import {
   checkL1Reference,
+  checkL1ReferenceV5,
   type FinalizedL1,
   L1_REF_MARGIN,
-  type L1ReferenceVerdict,
+  type L1ReferenceVerdictV5,
   l1RefMin,
 } from "@abolishus/crypto";
 import type { L1Header } from "./l1.ts";
 
-/** Why a ballot's L1 reference rejects it (5.8). */
-export type L1RefCode = Exclude<L1ReferenceVerdict, "admitted" | "pending">;
+/** Why a ballot's L1 reference rejects it (5.8); the step's window only under ballot version 5. */
+export type L1RefCode = Exclude<L1ReferenceVerdictV5, "admitted" | "pending">;
 
 /** One ballot's L1 reference, as its admission check recomputed it into `M`. */
 export interface L1Reference {
   readonly l1RefNumber: bigint;
   readonly l1RefHash: Uint8Array;
+  /** Under ballot version 5, the step its membership proof used, which `M` binds through the ballot hash. */
+  readonly step?: number;
 }
 
 /**
@@ -35,7 +40,7 @@ export function referenceJudge(
   blocks: readonly L1Header[],
   opensAt: bigint,
   closesAt: bigint,
-): "l1-blocks-short" | ((ref: L1Reference) => L1ReferenceVerdict) {
+): "l1-blocks-short" | ((ref: L1Reference) => L1ReferenceVerdictV5) {
   const first = blocks[0];
   if (first === undefined) throw new RangeError("referenceJudge: no blocks");
   const threshold = opensAt > L1_REF_MARGIN ? opensAt - L1_REF_MARGIN : 0n;
@@ -47,7 +52,14 @@ export function referenceJudge(
   const min = l1RefMin(l1, first.number, opensAt);
   // The head is before the window: every reference waits for L1.
   if (min === undefined) return () => "pending";
-  return (ref) => checkL1Reference(ref, l1, { l1RefMin: min, closesAt });
+  const window = { l1RefMin: min, closesAt };
+  // A step is judged against the named block's timestamp only once the
+  // reference itself is admitted, so a version-5 ballot gets every code a
+  // version-4 one would first (T-08, T-25).
+  return (ref) =>
+    ref.step === undefined
+      ? checkL1Reference(ref, l1, window)
+      : checkL1ReferenceV5({ ...ref, step: ref.step }, l1, window);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  type BallotCheckV2,
   decodeBallot,
   decodeBoardEntry,
   encodeElectionDefinitionV6,
@@ -135,7 +136,8 @@ describe("the copies admission gives the running sets", () => {
         continue;
       }
       seen.push(at);
-      copies.judged(at, segment, payload, j.checked, j.tally);
+      // A version-6 definition's judge gives version 4's checks.
+      copies.judged(at, segment, payload, j.checked as BallotCheckV2, j.tally);
     }
     const rejected = c.ballots?.rejected ?? [];
     const code = new Map(rejected.map((r) => [r.entry, r.code]));

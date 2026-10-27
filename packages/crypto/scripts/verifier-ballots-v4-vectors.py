@@ -129,16 +129,19 @@ def v6_reading(d):
 
 
 def combination(d):
-    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 9 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
+    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll fits with display-text 2, ballot 4, spoiled-ballot opening 3, contract-event 9, and tally-opening 1 and board-entry 5 without an author panel, or tally-opening 3 and board-entry 7 with one (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll fails whatever it pins, here as with an author panel; a ballot version this verifier doesn't read is unsupported once no other pin fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
     pins = dict(d["profile"]["pins"])
-    if d["results_mode"] != d6.SEALED or d["author_keys"]:
+    if d["results_mode"] != d6.SEALED:
         return COMBINATION_FAILS
-    if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
-        return UNSUPPORTED
-    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5}
+    author = bool(d["author_keys"])
+    wanted = {DISPLAY_TEXT_TYPE: 2, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 3 if author else 1, BOARD_ENTRY_TYPE: 7 if author else 5}
     # Contract-event versions 9 to 12 frame ballot version 4; 1 to 8 don't.
     events = pins[vb.CONTRACT_EVENT_TYPE]
     if any(pins[t] != v for t, v in wanted.items()) or events <= 8:
+        return COMBINATION_FAILS
+    if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
+        return UNSUPPORTED
+    if pins[BALLOT_TYPE] != 4:
         return COMBINATION_FAILS
     if events > 12:
         return UNSUPPORTED

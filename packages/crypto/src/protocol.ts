@@ -519,30 +519,31 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * and ballot version 4 needs version 9 to 12, which frame it, and fails
  * beside version 8 (T-25, T-53); what follows of version 6
  * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
- * a version-6 definition with an author panel fails, as does tally-opening
- * version 3, which only it pins, until the author transcript's chosen-byte
- * channel is closed or accepted (T-17); a live version-6 definition fails
+ * a version-6 definition with an author panel must pin board-entry version
+ * 7, which carries its approvals, and tally-opening version 3, which sums
+ * both panels' halves, and no definition without one may pin either (T-17);
+ * a live definition with an author panel fails, until a tally-opening
+ * version fixes the nodes' withholding check (T-16, T-45); a live version-6 definition fails
  * unless `oursSeats`, the number of its default panel's seats the caller's
  * release pins as ours, is at least its threshold (the live restriction,
  * until a tally-opening version fixes the nodes' withholding check: T-16,
  * T-45, docs/spec/tally.md, Live results, What a node does), and must pin
  * tally-opening version 2 and board-entry version 6, which no sealed
  * definition may pin; ballot versions 1 to 5 need a board-entry
- * version that carries share receipts and complaints (3, 4 or 5) and the
+ * version that carries share receipts and complaints (3 to 7) and the
  * spoiled-ballot opening version that opens their cores (1 for version 1, 2
  * for versions 2 and 3, 3 for versions 4 and 5); and tally-opening version 1 needs one that carries
- * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
+ * destruction statements (4, 5 or 7, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
- * carries close statements (5) and contract-event version 8, which archives
+ * carries close statements (5, 6 for a live poll, or 7 with an author panel) and contract-event
+ * version 8 to 12, which archive
  * every board event (the close rule's, the batches', the obligation root's
  * and the availability records') and the group registry's Tier 1 and
  * self-paid additions, so a seat can always state the close, force what it
  * owes and attest what it fetched, and the verifier read all of it
  * ([[close]], Version; T-35, T-50, T-25, T-53, T-24): board-entry version 1,
- * 3 or 4 and contract-event version 1 to 7 fail, as
- * does board-entry version 7, which is only for a definition with an author
- * panel; a contract-event
+ * 3 or 4 and contract-event version 1 to 7 fail; a contract-event
  * version this package doesn't read is `unsupported-version` when the
  * profile fails on no other ground. A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to
@@ -589,13 +590,17 @@ export function profileCombinationRule(
   if (definition >= 6 !== "results_mode" in d || (definition === 7) !== "electorate_mode" in d)
     return "profile-combination";
   let live = false;
+  let author = false;
   if (definition >= 6 && "results_mode" in d) {
-    // An author panel fails until the author transcript's chosen-byte
-    // channel is closed or accepted ([[ceremony]], Author panel, Residuals;
-    // T-17), and so, until the nodes' withholding check exists, does a live
-    // poll with one (verifier 2.3).
-    if (d.author_keys.length > 0) return "profile-combination";
+    author = d.author_keys.length > 0;
     live = d.results_mode === RESULTS_MODES.live;
+    // A live poll with an author panel fails until a tally-opening version
+    // fixes the nodes' withholding check: the live restriction rests on our
+    // seats alone being able to open any ballot, which an author panel's
+    // half denies them, so withholding from a snapshot would gain the
+    // operator what the restriction assumes it already has (verifier 2.3;
+    // T-16, T-45).
+    if (author && live) return "profile-combination";
     // The live restriction: until a tally-opening version fixes the nodes'
     // withholding check, a live poll runs only under a default panel of
     // which the release pins at least `k` seats as ours, where the operator
@@ -608,13 +613,13 @@ export function profileCombinationRule(
     if (live && !(Number.isSafeInteger(oursSeats) && oursSeats >= d.threshold))
       return "profile-combination";
   }
-  // Board-entry version 7 carries an author panel's approvals, and no
-  // definition that reaches here has an author panel, so it is never theirs
-  // (verifier 2.3; T-17: no approvals record on a board that has no use for it).
-  if (board === 7) return "profile-combination";
-  // Version 3 sums an author panel's half and needs board-entry version 7,
-  // so it is no definition's that reaches here (T-17).
-  if (opening === 3) return "profile-combination";
+  // Board-entry version 7 carries an author panel's approvals and
+  // tally-opening version 3 sums its half beside the default half: a
+  // definition with an author panel pins both, so its approvals have a
+  // record and its half is counted, and one without pins neither, so no
+  // board carries an approvals record it has no use for (verifier 2.3;
+  // [[ceremony]], Author panel; [[tally]], Author panel; T-17, T-54).
+  if ((board === 7) !== author || (opening === 3) !== author) return "profile-combination";
   // Definition versions 1, 3 and 4 have one question, so display-text
   // version 1; version 2 carries questions and pairs with definition
   // versions 5 to 7. A display-text version this

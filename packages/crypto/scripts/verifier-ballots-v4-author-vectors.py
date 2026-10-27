@@ -84,8 +84,8 @@ def det(label):
 
 
 def pins(version=6):
-    """verifier-ballots-v4.json's version-6 (or version-7) profile under board-entry version 7, which carries the approvals, beside contract-event version 8, as these files were made: 2.3 fails every author panel whatever its contract-event pin, so it decides no verdict here (P2-16 part 5e-5a)."""
-    p = vb4.pins_for(definition=version, events=8)
+    """verifier-ballots-v4.json's version-6 (or version-7) profile, contract-event version 9 among its pins, under board-entry version 7, which carries the approvals; it keeps tally-opening version 1, which can't count an author panel's half, so 2.3 fails it (verifier-tally-v3-author-vectors.py's profile, with version 3, fits)."""
+    p = vb4.pins_for(definition=version)
     return dict(p, pins=[(t, BOARD_VERSION if t == vb4.BOARD_ENTRY_TYPE else v) for t, v in p["pins"]])
 
 
@@ -435,7 +435,7 @@ def assemble(constants, proofs_path, out_dir, version=6):
         assert part == bnd["approvals"], bnd["id"]
         rows = {
             "1.3": NOT_IMPLEMENTED,
-            "2.3": vb4.COMBINATION_FAILS,
+            "2.3": vb4.combination(d),
             # The bundle's panel stands in for the pins, and no author seat is a default seat.
             "2.5": NOT_IMPLEMENTED,
             # 3.1's last part, the default panel's registration on L2, is never read.

@@ -125,6 +125,8 @@ def build(constants, version=6):
     src = next(b for b in s["bundles"] if b["id"] == "author-mixed")
     d = src["definition"]
     assert dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] == 3 and vc.own_version(d) == version
+    # The profile an author panel pins, which 2.3 lets through (verifier.md, 2.3).
+    assert vba.vb4.combination(d) == vba.vb4.NOT_IMPLEMENTED
     ballots = [p for p in src["board"][3:6]]
     pids = [pid for _, pid in ballots]
     assert pids == [f"author/{label}" for label, _, _ in BALLOTS], pids

@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { type AnchorClock, decodeBoardEntry, RECORD_TYPES } from "@abolishus/crypto";
+import {
+  type AnchorClock,
+  decodeBoardEntry,
+  profileCombinationRule,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import { ballotChecks } from "../src/ballots.ts";
@@ -174,6 +179,9 @@ describe("7.1 to 7.4 and 8.5 beside an author panel against the independent impl
         expect(ceremony.registered?.map((k) => k.index)).toEqual([1, 2, 3]);
         expect(ceremony.authorRegistered?.map((k) => k.index)).toEqual([1, 2]);
         expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
+        // The profile an author panel pins, which 2.3 lets through since
+        // P2-16 part 5e-5c (verifier.md, 2.3; T-17).
+        expect(profileCombinationRule(definition.value)).toBeUndefined();
         const r = countedChecks(inputs());
         const opened = tallies(r);
         expect(

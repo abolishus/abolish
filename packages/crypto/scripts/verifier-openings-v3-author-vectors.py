@@ -277,7 +277,7 @@ def main(constants, out_dir, version=6):
             "definition": vc.encode(d).hex(),
             "clock": {k: str(v) for k, v in clock.items()},
             "board": b"".join(entries).hex(),
-            "expected": {"2.3": vb4.COMBINATION_FAILS, "6.2": row},
+            "expected": {"2.3": vb4.combination(d), "6.2": row},
         }
         if report is not None:
             c["openings"] = report

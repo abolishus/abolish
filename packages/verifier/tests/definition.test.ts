@@ -994,18 +994,36 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
     }
   });
 
-  test("a live poll and an author panel fail 2.3, and the board checks still run", () => {
+  const authorPins = { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 };
+
+  test("a live poll and an author panel's wrong pins fail 2.3, and the board checks still run", () => {
     for (const [fields, versions] of [
       [live, {}],
       [live, { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 }],
       [authorPanel, {}],
-      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3 }],
+      [authorPanel, { [RECORD_TYPES.boardEntry]: 7 }],
     ] as const) {
       const r = format3(v6For(closed.anchor, versions, fields), closed);
       expect(row(r, "2.1").status).not.toBe("fail");
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r.verdictAgainstInputs).toBe("failed");
       expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("a sealed poll with an author panel passes 2.3's combination under its own pins, in every poll class", () => {
+    for (const poll_class of Object.values(POLL_CLASSES)) {
+      const r = format3(v6For(closed.anchor, authorPins, { ...authorPanel, poll_class }), closed);
+      // 2.3's other checks aren't implemented, so it never passes here.
+      expect(row(r, "2.3")).toEqual({
+        id: "2.3",
+        kind: "election",
+        status: "unverifiable",
+        code: "not-implemented",
+      });
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+      expect(r.verdict).not.toBe("verified");
     }
   });
 
@@ -1068,14 +1086,16 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
     }
   });
 
-  test("an author panel and a live poll's wrong pins fail 2.3 whatever seats are ours", () => {
+  test("a live poll's wrong pins, and a live poll with an author panel, fail 2.3 whatever seats are ours", () => {
     for (const [fields, versions] of [
       [live, {}],
       [live, { [RECORD_TYPES.tallyOpening]: 2 }],
       [live, { [RECORD_TYPES.boardEntry]: 6 }],
       [{}, livePins],
+      // An author panel denies our seats the author half, so the live
+      // restriction can't hold beside one (T-16, T-45).
       [{ ...live, ...authorPanel }, livePins],
-      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+      [{ ...live, ...authorPanel }, authorPins],
     ] as const) {
       const r = format3(
         v6For(closed.anchor, versions, fields),
@@ -1243,16 +1263,38 @@ describe("definition version 7 under a fixed electorate (read as version 6)", ()
       }
   });
 
-  test("a live poll and an author panel fail 2.3 as under version 6, and the board checks still run", () => {
+  test("a live poll and an author panel's wrong pins fail 2.3 as under version 6, and the board checks still run", () => {
     for (const [fields, versions] of [
       [live, {}],
       [live, { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 }],
       [authorPanel, {}],
-      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+      [
+        { ...live, ...authorPanel },
+        { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 },
+      ],
     ] as const) {
       const r = format3(v7For(closed.anchor, versions, fields), closed);
       expect(row(r, "2.1").status).not.toBe("fail");
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("a sealed poll with an author panel passes 2.3's combination as under version 6", () => {
+    for (const events of [9, 10, 11, 12]) {
+      const r = format3(
+        v7For(
+          closed.anchor,
+          {
+            [RECORD_TYPES.tallyOpening]: 3,
+            [RECORD_TYPES.boardEntry]: 7,
+            [RECORD_TYPES.contractEvent]: events,
+          },
+          authorPanel,
+        ),
+        closed,
+      );
+      expect(row(r, "2.3"), String(events)).toEqual(NOT_IMPLEMENTED_23);
       expect(row(r, "4.1").code).not.toBe("not-reached");
     }
   });

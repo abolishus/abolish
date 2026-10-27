@@ -354,10 +354,11 @@ describe("author panels", () => {
 // cores; a sealed poll without an author panel pins tally-opening version 1
 // and board-entry version 5; a live poll pins tally-opening version 2 and
 // board-entry version 6 and runs only under the live restriction (at least
-// `k` default seats the caller's release pins as ours, T-16, T-45); an author
-// panel fails until its transcript's channel is closed (T-17); and nothing
-// else may pin their tally-opening versions (2, 3) or board-entry versions
-// (6, 7).
+// `k` default seats the caller's release pins as ours, T-16, T-45); a
+// sealed poll with an author panel pins tally-opening version 3 and
+// board-entry version 7 (T-17), and a live one fails (T-16, T-45); and
+// nothing else may pin their tally-opening versions (2, 3) or board-entry
+// versions (6, 7).
 describe("2.3's profile combination under version 6", () => {
   const minimal = decodeElectionDefinitionV6(
     hex(vector("election-definition-v6.json", "definition-v6-minimal").encoding),
@@ -411,18 +412,100 @@ describe("2.3's profile combination under version 6", () => {
   const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
   const livePins = { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 };
 
-  test("an author panel fails whatever it pins, live or sealed, and however many seats are ours", () => {
-    expect(electionDefinitionV6Rule(v6({}, authorPanel))).toBeUndefined();
-    for (const fields of [authorPanel, { ...live, ...authorPanel }])
-      for (const pins of [
-        {},
-        livePins,
-        { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 },
-        // Before a board-entry version this package reads or not.
-        { [RECORD_TYPES.contractEvent]: 255 },
-      ])
-        for (const ours of [0, minimal.threshold, 255])
-          expect(profileCombinationRule(v6(pins, fields), ours)).toBe("profile-combination");
+  const authorPins = { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 };
+
+  test("a sealed poll with an author panel fits with tally-opening version 3 and board-entry version 7", () => {
+    expect(electionDefinitionV6Rule(v6(authorPins, authorPanel))).toBeUndefined();
+    // However many seats are ours: the live restriction is a live poll's alone.
+    for (const ours of [0, minimal.threshold, 255])
+      expect(profileCombinationRule(v6(authorPins, authorPanel), ours)).toBeUndefined();
+    for (const events of [10, 11, 12])
+      expect(
+        profileCombinationRule(
+          v6({ ...authorPins, [RECORD_TYPES.contractEvent]: events }, authorPanel),
+        ),
+      ).toBeUndefined();
+    for (const poll_class of Object.values(POLL_CLASSES))
+      expect(
+        profileCombinationRule(v6(authorPins, { ...authorPanel, poll_class })),
+      ).toBeUndefined();
+  });
+
+  test("a sealed poll with an author panel pins only its own versions", () => {
+    for (const pins of [
+      // A poll without one's tally-opening or board-entry version, or a live poll's.
+      {},
+      { [RECORD_TYPES.tallyOpening]: 3 },
+      { [RECORD_TYPES.boardEntry]: 7 },
+      { [RECORD_TYPES.tallyOpening]: 1, [RECORD_TYPES.boardEntry]: 7 },
+      { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 5 },
+      livePins,
+      { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 7 },
+      { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 6 },
+      // No author half, no opening of version-4 cores, no questions.
+      { ...authorPins, [RECORD_TYPES.ballot]: 3 },
+      { ...authorPins, [RECORD_TYPES.spoiledBallotOpening]: 2 },
+      { ...authorPins, [RECORD_TYPES.displayText]: 1 },
+      // Contract-event versions 1 to 7 miss board or registry events, and
+      // version 8 frames no version-4 ballot (T-25, T-53).
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((events) => ({
+        ...authorPins,
+        [RECORD_TYPES.contractEvent]: events,
+      })),
+      // A failure is reported beside a version this package doesn't read.
+      { [RECORD_TYPES.boardEntry]: 7, [RECORD_TYPES.contractEvent]: 255 },
+    ])
+      for (const ours of [0, 255])
+        expect(profileCombinationRule(v6(pins, authorPanel), ours), JSON.stringify(pins)).toBe(
+          "profile-combination",
+        );
+    // Versions a later release may read stay unsupported (T-36).
+    for (const pins of [
+      { [RECORD_TYPES.ballot]: 255 },
+      { [RECORD_TYPES.spoiledBallotOpening]: 255 },
+      { [RECORD_TYPES.contractEvent]: 255 },
+    ])
+      expect(
+        profileCombinationRule(v6({ ...authorPins, ...pins }, authorPanel)),
+        JSON.stringify(pins),
+      ).toBe("unsupported-version");
+  });
+
+  test("a live poll with an author panel fails whatever it pins, however many seats are ours", () => {
+    for (const pins of [
+      {},
+      livePins,
+      authorPins,
+      { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 7 },
+      { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 6 },
+      // Before a version a later release may read: the refusal isn't one.
+      { ...livePins, [RECORD_TYPES.contractEvent]: 255 },
+      { ...authorPins, [RECORD_TYPES.ballot]: 255 },
+    ])
+      for (const ours of [0, minimal.threshold, 255])
+        expect(
+          profileCombinationRule(v6(pins, { ...live, ...authorPanel }), ours),
+          JSON.stringify(pins),
+        ).toBe("profile-combination");
+  });
+
+  test("an author panel decides tally-opening version 3 and board-entry version 7", () => {
+    fc.assert(
+      fc.property(
+        fc.boolean(),
+        fc.constantFrom(1, 3),
+        fc.constantFrom(5, 7),
+        (withAuthor, opening, board) => {
+          const d = v6(
+            { [RECORD_TYPES.tallyOpening]: opening, [RECORD_TYPES.boardEntry]: board },
+            withAuthor ? authorPanel : {},
+          );
+          const own = withAuthor ? opening === 3 && board === 7 : opening === 1 && board === 5;
+          expect(profileCombinationRule(d)).toBe(own ? undefined : "profile-combination");
+        },
+      ),
+      opts,
+    );
   });
 
   test("a live poll fits with its own pins under at least k seats pinned as ours", () => {

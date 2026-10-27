@@ -99,7 +99,13 @@ const keys = registryVectors.registrars.secretKeys.map(hex);
 type Logged = { readonly block: bigint; readonly timestamp: bigint } & (
   | { readonly kind: "created"; readonly groupId: bigint; readonly tier: number }
   | { readonly kind: "self-paid-created"; readonly groupId: bigint }
-  | { readonly kind: "added"; readonly groupId: bigint; readonly record: Uint8Array }
+  | {
+      readonly kind: "added";
+      readonly groupId: bigint;
+      readonly record: Uint8Array;
+      /** The event's `firstIndex` topic, where it isn't the record's own. */
+      readonly firstIndex?: bigint;
+    }
   | { readonly kind: "removed"; readonly groupId: bigint; readonly record: Uint8Array }
   | {
       readonly kind: "self-paid";
@@ -163,7 +169,7 @@ function logs(events: readonly Logged[], n = 0): ContractEventRecord[] {
           topics: [
             topic0("MembersAdded(uint64,uint64,bytes)"),
             word(e.groupId),
-            word(new DataView(e.record.buffer).getBigUint64(8, false)),
+            word(e.firstIndex ?? new DataView(e.record.buffer).getBigUint64(8, false)),
           ],
           data: abiBytes(e.record),
         };
@@ -343,9 +349,45 @@ describe("rollingTierEvents over rolling-tier-tree.json", () => {
         ),
       ),
     ).toBe("group-history");
+    const tier = { tier: 0, root_l2_block: 6n, groups: [1n, 2n] };
+    const close = at(7n).timestamp;
+    // A signed group's record naming the self-paid group.
+    const signed: Logged = {
+      ...at(7n),
+      kind: "added",
+      groupId: 2n,
+      record: addedRecord(2n, 1n, [commitment(4n)]),
+    };
+    expect(refusal(() => rollingTierEvents(logs([...log, signed]), tier, close, pins))).toBe(
+      "group-history",
+    );
+    // A self-paid addition before its group's creation.
+    const early = [log[0], log[2], log[1], ...log.slice(3)].map((e) => ({
+      ...(e as Logged),
+      ...at(1n),
+    }));
+    expect(refusal(() => rollingTierEvents(logs(early), tier, close, pins))).toBe("group-history");
+    // A MembersAdded whose firstIndex topic isn't its record's own.
+    const topic = log.map((e) => (e.kind === "added" ? { ...e, firstIndex: 1n } : e));
+    expect(refusal(() => rollingTierEvents(logs(topic), tier, close, pins))).toBe("group-history");
   });
 
-  test("is the listed groups' events for any strict history, through close only", () => {
+  test("reads every event up to root_l2_block even where it is after the close", () => {
+    const t = treeOf("chain-order");
+    // A root block past the close: its opening state is still the tree up to that block.
+    const last = t.log.at(-1) as Logged;
+    const closesAt = BigInt(t.closesAt);
+    expect(last.timestamp > closesAt).toBe(true);
+    const got = rollingTierEvents(
+      logs(t.log),
+      { ...t.choice, root_l2_block: last.block },
+      closesAt,
+      pins,
+    );
+    expect(got).toEqual(t.events.filter((e) => t.groups.includes(e.group)).map(tierEvent));
+  });
+
+  test("is the listed groups' events for any strict history, through close (or root_l2_block) only", () => {
     const COMMITMENT = 1_000_000_000_000n;
     const step = fc.record({
       group: fc.constantFrom(1n, 2n, 3n),
@@ -422,12 +464,12 @@ describe("rollingTierEvents over rolling-tier-tree.json", () => {
             closesAt,
             pins,
           );
-          // Exactly the listed groups' records at or before the close, in log order.
+          // Exactly the listed groups' records at or before the close or root_l2_block, in log order.
           const want = log.filter(
             (e) =>
               (e.kind === "added" || e.kind === "removed") &&
               e.groupId !== 2n &&
-              e.timestamp <= closesAt,
+              (e.timestamp <= closesAt || e.block <= rootBlock),
           );
           expect(got.map((e) => [e.blockNumber, e.timestamp, e.groupId, e.kind])).toEqual(
             want.map((e) => [

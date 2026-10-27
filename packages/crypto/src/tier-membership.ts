@@ -547,8 +547,9 @@ export interface RollingTierChoice {
  * group's strict replay, with its block and timestamp. The replay is the
  * fixed recount's (`statedTierElectorate`) under the same pins, taken
  * through close rather than to `root_l2_block`, since every accepted step
- * and every reported count reads events up to then; a record after the
- * close is never read, so boarding one fails nothing. Each listed group must
+ * and every reported count reads events up to then (and never short of
+ * `root_l2_block`); a record after both is never replayed, so one that
+ * breaks a group's history there fails nothing. Each listed group must
  * be created, once, by `root_l2_block`, for Tier 0. Records whose timestamps
  * decrease along `n`, or differ within one block, aren't the registry's (the
  * event accumulator binds both), and are refused (T-71, T-08, T-13). There
@@ -606,7 +607,10 @@ export function rollingTierEvents(
     ]),
   );
   for (const [at, e] of events.entries()) {
-    if ((timestamps[at] as bigint) > closesAt) break; // timestamps never decrease, checked above
+    // Through close, and never short of root_l2_block, so the opening state is
+    // the tree up to that block whatever the two bounds' order. Both blocks
+    // and timestamps never decrease (checked above), so this is a prefix.
+    if ((timestamps[at] as bigint) > closesAt && e.block > rootBlock) break;
     if (e.kind === "tier1-addition") continue;
     const bucket = listed.get(e.groupId);
     if (bucket === undefined) continue;

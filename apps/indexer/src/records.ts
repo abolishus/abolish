@@ -92,6 +92,37 @@ export async function readIndexedLogs(
   schema: string,
   contract: string,
 ): Promise<IndexedLog[]> {
+  return readLogs(sql, schema, contract, 0n, undefined);
+}
+
+/**
+ * Logs `from` to `to − 1` of a contract's sequence, as `readContractEvents`
+ * numbers them, read in one query rather than the whole sequence, so a
+ * reader replaying from a proven count needn't hold every earlier log. Rows
+ * are claims, as there, and a reader checks them against its own proof:
+ * `checkEventAccumulatorContinuation` from the proof before `from` fails a
+ * dropped, added, altered, reordered or moved log (T-71). Fewer rows than
+ * asked for come back as they are: the index may not have caught up.
+ */
+export async function readContractEventRange(
+  sql: Sql,
+  schema: string,
+  contract: string,
+  from: bigint,
+  to: bigint,
+): Promise<ContractEventRecord[]> {
+  if (from < 0n || to < from) throw new Error("the range must be 0 ≤ from ≤ to");
+  if (to === from) return [];
+  return (await readLogs(sql, schema, contract, from, to - from)).map((l) => l.record);
+}
+
+async function readLogs(
+  sql: Sql,
+  schema: string,
+  contract: string,
+  offset: bigint,
+  limit: bigint | undefined,
+): Promise<IndexedLog[]> {
   if (!/^0x[0-9a-fA-F]{40}$/.test(contract))
     throw new Error("contract must be 0x and 40 hex digits");
   const address = contract.toLowerCase();
@@ -106,7 +137,8 @@ export async function readIndexedLogs(
   >`
     select block_number::text, block_timestamp::text, topics, data, log_index
     from ${sql(schema)}.contract_log where contract = ${address}
-    order by id collate "C"`;
+    order by id collate "C"
+    offset ${offset.toString()} ${limit === undefined ? sql`` : sql`limit ${limit.toString()}`}`;
   const contractBytes = hexBytes(address, "contract");
   return rows.map((row, i) => {
     const topics = row.topics.map((t) => hexBytes(t, "contract_log: topic"));
@@ -115,7 +147,7 @@ export async function readIndexedLogs(
     return {
       record: {
         contract: contractBytes,
-        n: BigInt(i),
+        n: offset + BigInt(i),
         l2_block: BigInt(row.block_number),
         l2_timestamp: BigInt(row.block_timestamp),
         topics,

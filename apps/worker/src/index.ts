@@ -160,6 +160,12 @@ export {
   type OutputRootSource,
   ProvenRegistryAccumulator,
 } from "./output-roots.ts";
+export {
+  ChainContractEvents,
+  type ChainContractEventsOptions,
+  GAME_LEAD,
+  MAX_EVIDENCE_GAMES,
+} from "./contract-events.ts";
 export { POLL_ROOT_ENV, type PollRootConfig, pollRootFromEnv } from "./poll-root-env.ts";
 export {
   checkPostingDeployment,

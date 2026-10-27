@@ -366,6 +366,7 @@ const source: ElectionSource = {
           postings: readonly Uint8Array[],
           cutoffs: PostingCutoffs,
           late: boolean,
+          handed: bigint,
         ): Promise<WalletAnswer> {
           const wallet = injectedWallet();
           if (wallet === undefined) return "no-wallet";
@@ -400,6 +401,7 @@ const source: ElectionSource = {
               calls,
               cutoffs,
               late ? { lastOffer: cutoffs.lastOffer } : undefined,
+              { handed, forcedInclusion: STAGING.forcedInclusion },
             );
           } finally {
             for (const call of calls) call.fill(0);

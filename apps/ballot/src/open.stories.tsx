@@ -2298,6 +2298,9 @@ export const PostingFromTheWallet: Story = {
     await expect(of.postOwn.mock.calls[0]?.[3]).toEqual(CUTOFFS);
     // Far from the close: not a late run.
     await expect(of.postOwn.mock.calls[0]?.[4]).toBe(false);
+    // The cast's mark as the store answered it, the first run's: the wallet's
+    // run looks for an earlier run's deposit from there before it sends.
+    await expect(of.postOwn.mock.calls[0]?.[5]).toBe(HANDED_AT);
     // The share checked again before the wallet's run, both under one hold of the lock.
     const at = (step: string) =>
       of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);

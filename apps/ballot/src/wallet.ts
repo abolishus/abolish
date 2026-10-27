@@ -444,7 +444,16 @@ interface Pending {
   safe: boolean;
   /** When the wallet deposited it on L1, or may have, in seconds. */
   depositedAt: bigint | undefined;
+  /** When L1 showed an earlier run's qualifying deposit of it, in seconds. */
+  earlierAt: bigint | undefined;
 }
+
+/**
+ * Seconds the client reads L1 for an earlier run's deposit before a run's
+ * first send, at most: one wallet request's, so an L1 endpoint that answers
+ * slowly delays the send no more than a slow confirmation would (T-52).
+ */
+export const WALLET_EARLIER_READ = BigInt(WALLET_REQUEST_MS / 1000);
 
 /**
  * Posts each of `postings`, one ballot's posting records, whose
@@ -499,6 +508,18 @@ interface Pending {
  * ([[posting-relay]], The ballot's own deadline, The offer; T-13, T-25). A
  * send already under way when `c_B` passes is checked against `c_B` and
  * answers `late`, offering the voter again, the safe way round.
+ *
+ * Where `earlier` gives the cast's `handed` mark, the time the first run of
+ * its seal was about to hand the same bytes out, from before this run's
+ * start, the first round reads L1 once, from the mark, clamped to no earlier
+ * than the run's start less `earlier.forcedInclusion` (`F`), before any
+ * posting is sent: one an earlier run's relay or wallet deposited, which
+ * neither head shows yet, is held back as a sighting is, so the voter's
+ * address isn't put beside a deposit still landing and a second fee isn't
+ * paid for a no-op repeat (Outcome, The read; T-13). The read is the
+ * untrusted L1 endpoint's word, so, like a sighting, it only ever delays a
+ * send, never past the margins a sighting keeps, and is given up after
+ * `WALLET_EARLIER_READ`; one that fails holds nothing back (T-25, T-52).
  */
 export async function postFromWallet(
   io: WalletIo,
@@ -506,6 +527,7 @@ export async function postFromWallet(
   calls: readonly Uint8Array[],
   cutoffs: Pick<PostingCutoffs, "ballot" | "force">,
   late?: Pick<PostingCutoffs, "lastOffer">,
+  earlier?: { readonly handed: bigint; readonly forcedInclusion: bigint },
 ): Promise<WalletAnswer> {
   if (calls.length !== postings.length)
     throw new RangeError("postFromWallet: one call for each posting");
@@ -518,6 +540,7 @@ export async function postFromWallet(
     seenAt: undefined,
     safe: false,
     depositedAt: undefined,
+    earlierAt: undefined,
   }));
   const recorded = new Set<Pending>();
   let from: bigint | undefined;
@@ -534,6 +557,16 @@ export async function postFromWallet(
     if (timestamp > chainTime && timestamp <= seconds() + WALLET_HOLD_MARGIN) chainTime = timestamp;
   };
   const started = seconds();
+  // Where L1 is read for an earlier run's deposit from: never before `F`
+  // ahead of this run, by which an older deposit has had its time to land.
+  const since = (() => {
+    if (earlier === undefined) return undefined;
+    const { handed, forcedInclusion } = earlier;
+    if (handed >= started) return undefined;
+    const oldest = started > forcedInclusion ? started - forcedInclusion : 0n;
+    return handed > oldest ? handed : oldest;
+  })();
+  let looked = false;
   const { ballot: cutoff, force } = cutoffs;
   // Whether this is a late run: set past `c_B` while nothing was sent.
   let isLate = false;
@@ -543,7 +576,7 @@ export async function postFromWallet(
   // it is given up.
   const horizon = () => {
     const end = pending.reduce((end, p) => {
-      for (const since of [p.sentAt ?? p.seenAt, p.depositedAt])
+      for (const since of [p.sentAt ?? p.seenAt, p.sentAt ?? p.earlierAt, p.depositedAt])
         if (since !== undefined && since + WALLET_WAIT > end) end = since + WALLET_WAIT;
       return end;
     }, started + WALLET_WAIT);
@@ -564,8 +597,9 @@ export async function postFromWallet(
   // In a late run nothing is forced, so a sighting holds a send back for its
   // whole wait: sending beside a posting already landing would only put the
   // voter's address beside it (T-13).
+  // An earlier run's deposit on L1 holds a send back as a sighting does.
   const held = (p: Pending) =>
-    holds(p.seenAt) &&
+    (holds(p.seenAt) || holds(p.earlierAt)) &&
     (isLate ||
       time() + WALLET_FORCE_MARGIN < force ||
       (!depositable() && time() + WALLET_LATE_MARGIN < cutoff));
@@ -619,6 +653,21 @@ export async function postFromWallet(
     if (latest.ok) {
       heard(latest.timestamp);
       for (const p of left) if (p.seenAt === undefined && shows(latest, p)) p.seenAt = time();
+    }
+    // Once, before the first send: an earlier run's deposit of a posting
+    // neither head shows yet (Outcome, The read; T-13).
+    if (!looked && since !== undefined && left.some((p) => p.sentAt === undefined)) {
+      looked = true;
+      const begun = time();
+      const l1 = await io
+        .deposits(since, () => time() > begun + WALLET_EARLIER_READ)
+        .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
+      if (l1.ok) {
+        heard(l1.timestamp);
+        for (const p of left)
+          if (p.sentAt === undefined && l1.landed[pending.indexOf(p)] !== undefined)
+            p.earlierAt = time();
+      }
     }
     for (const p of left) {
       if (p.sentAt !== undefined) continue;

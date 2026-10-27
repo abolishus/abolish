@@ -595,13 +595,13 @@ describe("the author panel's registration on L2", () => {
     }
   }, 60_000);
 
-  test("under contract-event versions 10 and 11, which read it as version 9 does, it counts as there", () => {
-    // Versions 10 and 11 keep version 9's rows unchanged ([[contracts]],
-    // Event tables (versions 10 and 11)); a record of another version than
-    // the pin doesn't decode, so it carries no approval.
+  test("under contract-event versions 10 to 12, which read it as version 9 does, it counts as there", () => {
+    // Versions 10 to 12 keep version 9's election-registry rows unchanged
+    // ([[contracts]], Event tables (versions 10 to 12)); a record of another
+    // version than the pin doesn't decode, so it carries no approval.
     // One case per verdict keeps the run in budget: each check reruns the
     // transcript checks.
-    const relabel = (id: string, version: 10 | 11) =>
+    const relabel = (id: string, version: 10 | 11 | 12) =>
       encodeContractEvent(decodeContractEvent(eventOf(id), 9), version);
     const verdicts = new Set<string>();
     const cases = registrations.cases.filter((x) => {
@@ -628,7 +628,7 @@ describe("the author panel's registration on L2", () => {
           7,
         );
       const under9 = at(9, c.events.map(eventOf));
-      for (const version of [10, 11] as const) {
+      for (const version of [10, 11, 12] as const) {
         const r = at(
           version,
           c.events.map((id) => relabel(id, version)),

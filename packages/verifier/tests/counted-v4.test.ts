@@ -658,10 +658,10 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
   });
 });
 
-describe.each([9, 10, 11] as const)(
+describe.each([9, 10, 11, 12] as const)(
   "contract-path records under contract-event version %i, once 4.4 passes",
   (version) => {
-    // Versions 9 to 11 frame the version-2 delivery records ballot version 4 fixes,
+    // Versions 9 to 12 frame the version-2 delivery records ballot version 4 fixes,
     // so a single one through the contract path delivers or excludes as a
     // board-path one does, judged by its L2 timestamp, and so does each pair
     // or entry of a version-2 batch, reported with its index; a version-2 root

@@ -487,7 +487,7 @@ describe("2.3's profile combination under version 7", () => {
     }),
     [RECORD_TYPES.tallyOpening]: fc.integer({ min: 1, max: 4 }),
     [RECORD_TYPES.boardEntry]: fc.integer({ min: 1, max: 8 }),
-    [RECORD_TYPES.contractEvent]: fc.integer({ min: 1, max: 12 }),
+    [RECORD_TYPES.contractEvent]: fc.integer({ min: 1, max: 13 }),
     [RECORD_TYPES.displayText]: fc.integer({ min: 1, max: 3 }),
   });
   const anyFields = fc.record({

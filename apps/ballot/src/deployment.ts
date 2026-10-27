@@ -16,7 +16,8 @@ export interface Deployment {
    * The website's origin, where a poll's short link and flyer live
    * (docs/design/sharing.md), or `undefined` where the build names none, and
    * then the client offers no link to share. Only ever navigated to, never
-   * fetched, so it isn't in the CSP's `connect-src`.
+   * fetched, so it isn't in the CSP's `connect-src`: a build that pins one
+   * lists it among the bundle test's inert URLs instead.
    */
   readonly web: string | undefined;
   /** The L2's JSON-RPC endpoint. */

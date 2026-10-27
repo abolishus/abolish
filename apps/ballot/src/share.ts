@@ -6,10 +6,12 @@
 // served code is at least this poll's spelling (T-34). Which poll owns a
 // prefix two hashes share is the registry's order (`packages/core`,
 // short-codes.ts), which the client doesn't read, so an operator could serve
-// a shorter prefix an earlier poll owns. That gains it nothing: the link
-// opens the operator's own website, which resolves codes on its word anyway,
-// and every poll page there shows its seal and links into this client, which
-// checks the election itself.
+// a longer prefix, which no poll owns (a dead link), or a shorter one an
+// earlier poll owns, and the code would then name that poll wherever it is
+// entered, mirrors included. It needs an earlier poll sharing at least the
+// first 35 bits of the hash, and whoever follows the link opens that poll in
+// this client, which checks it and shows its own question; see Known-weak in
+// docs/status/P2-24.md.
 
 /** Crockford base32, lower case: no i, l, o or u (`packages/core`, short-codes.ts). */
 const ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";

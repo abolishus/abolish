@@ -273,6 +273,17 @@ const GAS_HEADROOM = 120n;
  */
 const REPLACEMENT_EIGHTHS = 9n;
 const bumped = (fee: bigint) => (fee * REPLACEMENT_EIGHTHS) / 8n + 1n;
+/**
+ * A replacement's fees are at most this many times today's (plus one wei).
+ * A pending transaction priced above that is over the market and is mined
+ * without one, and sends refused run after run (an executor short of
+ * funds) can't compound the fees past what it can pay once refunded.
+ */
+const REPLACEMENT_CAP = 2n;
+const replacing = (last: bigint, today: bigint) => {
+  const [want, cap] = [bumped(last), today * REPLACEMENT_CAP + 1n];
+  return want < today ? today : want > cap ? cap : want;
+};
 
 export interface SafeSenderOptions {
   /** One L1 node. */
@@ -412,9 +423,9 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
     let tip = estimate;
     let maxFee = block.baseFeePerGas * BASE_FEE_HEADROOM + estimate;
     if (last?.nonce === nextNonce) {
-      const [lastTip, lastMax] = [bumped(last.maxPriorityFeePerGas), bumped(last.maxFeePerGas)];
-      if (lastTip > tip) tip = lastTip;
-      if (lastMax > maxFee) maxFee = lastMax;
+      tip = replacing(last.maxPriorityFeePerGas, tip);
+      maxFee = replacing(last.maxFeePerGas, maxFee);
+      if (maxFee < tip) maxFee = tip;
     }
     const tx = await executor.signTransaction({
       type: "eip1559",

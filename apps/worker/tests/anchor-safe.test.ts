@@ -19,6 +19,7 @@ import {
   keccak256,
   pad,
   parseAbi,
+  parseTransaction,
   type PublicClient,
   toHex,
   zeroAddress,
@@ -678,6 +679,44 @@ describe("the sender", () => {
     });
     expect(count).toBe(0n);
     expect(await sent(f)).toBe(1);
+  }, 60_000);
+
+  test("caps the bump at twice today's fees when sends are refused run after run", async () => {
+    const f = await fixture();
+    const signed: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }[] = [];
+    const refusing = createPublicClient({
+      chain,
+      transport: custom(
+        {
+          async request({ method, params }: { method: string; params?: unknown }) {
+            if (method !== "eth_sendRawTransaction")
+              return client.request({ method, params } as never);
+            const tx = parseTransaction((params as [Hex])[0]);
+            signed.push({
+              maxFeePerGas: tx.maxFeePerGas!,
+              maxPriorityFeePerGas: tx.maxPriorityFeePerGas!,
+            });
+            throw new Error("insufficient funds");
+          },
+        },
+        { retryCount: 0 },
+      ),
+    }) as PublicClient;
+    const refused = adapter(f, sender(f, f.keys.map(signer), refusing));
+    for (let i = 0; i < 12; i++)
+      await expect(refused.anchor([segment(election(), 0)], undefined)).rejects.toThrow("refused");
+    const [today, second] = signed as [(typeof signed)[0], (typeof signed)[0]];
+    expect(second.maxFeePerGas * 8n).toBeGreaterThanOrEqual(today.maxFeePerGas * 9n);
+    expect(second.maxPriorityFeePerGas * 8n).toBeGreaterThanOrEqual(
+      today.maxPriorityFeePerGas * 9n,
+    );
+    for (const fees of signed) {
+      expect(fees.maxFeePerGas).toBeLessThanOrEqual(today.maxFeePerGas * 2n + 1n);
+      expect(fees.maxPriorityFeePerGas).toBeLessThanOrEqual(today.maxPriorityFeePerGas * 2n + 1n);
+      expect(fees.maxPriorityFeePerGas).toBeLessThanOrEqual(fees.maxFeePerGas);
+    }
+    expect(signed.at(-1)!.maxFeePerGas).toBe(today.maxFeePerGas * 2n + 1n);
+    expect(await sent(f)).toBe(0);
   }, 60_000);
 
   test("refuses signers that can't meet the threshold and malformed keys", async () => {

@@ -168,6 +168,25 @@ export async function anchorAt(
   });
 }
 
+/**
+ * Sends `locator` alone from the authority, in a block at `timestamp`: the
+ * locator-only call that follows a newly confirmed manifest
+ * (docs/spec/archive.md, Locator).
+ */
+export async function locateAt(
+  rpc: Rpc,
+  anchor: DeployedAnchor,
+  locator: Uint8Array,
+  timestamp: bigint,
+): Promise<void> {
+  await rpc.call("evm_setNextBlockTimestamp", [Number(timestamp)]);
+  await send(rpc, {
+    from: hex(anchor.authority),
+    to: hex(anchor.address),
+    data: hex(anchorCalldata(new Uint8Array(), locator)),
+  });
+}
+
 interface Block {
   readonly hash: string;
   readonly number: string;
@@ -377,6 +396,44 @@ export async function loggedAnchors(
     anchors.push({ checkpoint: checkpointFromLog(log), anchoredAt: BigInt(block.timestamp) });
   }
   return anchors;
+}
+
+/** One of the anchor's logs as a bundle's `anchorLogs` gives it (docs/spec/verifier.md, Bundle). */
+export interface AnchorLog {
+  readonly block: bigint;
+  readonly timestamp: bigint;
+  readonly topics: readonly Uint8Array[];
+  readonly data: Uint8Array;
+}
+
+/**
+ * Every log the anchor emitted up to the finalized block, in order, each
+ * with its block's number and timestamp: the sequence its event accumulator
+ * commits to, from which the verifier reads the earlier archive locators
+ * (docs/spec/contracts.md, Event accumulator; T-69).
+ */
+export async function allAnchorLogs(rpc: Rpc, anchor: Uint8Array): Promise<AnchorLog[]> {
+  const logs = await rpc.call<Log[]>("eth_getLogs", [
+    { address: hex(anchor), fromBlock: "earliest", toBlock: "finalized" },
+  ]);
+  const times = new Map<string, bigint>();
+  const out: AnchorLog[] = [];
+  for (const log of logs) {
+    if (log.blockNumber === undefined) throw new Error("a log without its block number");
+    let timestamp = times.get(log.blockNumber);
+    if (timestamp === undefined) {
+      const block = await rpc.call<Block>("eth_getBlockByNumber", [log.blockNumber, false]);
+      timestamp = BigInt(block.timestamp);
+      times.set(log.blockNumber, timestamp);
+    }
+    out.push({
+      block: BigInt(log.blockNumber),
+      timestamp,
+      topics: log.topics.map(unhex),
+      data: unhex(log.data),
+    });
+  }
+  return out;
 }
 
 function anchorLogs(rpc: Rpc, anchor: Uint8Array, electionId: Uint8Array): Promise<Log[]> {

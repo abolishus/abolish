@@ -60,6 +60,8 @@ export const STUBS = Object.freeze({
     "the panel's identity keys are fresh random keys, given to the verifier as a local file: no release pins a panel yet ([[0006-trustees]], P1-7)",
   anchorAuthority:
     "the anchoring authority is a one-byte contract Anvil lets the fixture send from, not the Safe (P4-1 part 2)",
+  archive:
+    "Arweave is a node of the fixture's own on loopback (apps/reference-election/src/arweave.ts) that checks each transaction's ID, signature, anchor and price and each chunk's proof as a node does, but keeps no wallets or balances, never forks and mines only when the fixture says; the wallet is a fresh key each run; the manifest is written by the fixture through @abolishus/crypto, one manifest listing every board's objects, not by core's archive run, which reads the board from the operator's database, where the fixture's boards aren't (P4-3 part 4b-2b-2b-3b); the locator is sent alone by the stub authority after the seal's anchor, not by the anchoring job (P4-1 part 2)",
   seal: "lastSegment is four segments after the ceremony's: the tally's opening follows the counted extent's floor, period(closes_at) + 1, by one segment and the destruction statements follow it by one, not tally.md's windows, since no seal is derived from the definition yet (P1-13, P1-15, P1-18)",
   l1References:
     "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name, and the poll's receipt keys are read at the latest block, not the latest finalized one; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",

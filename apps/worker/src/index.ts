@@ -24,6 +24,12 @@ export {
   archiveFromEnv,
 } from "./archive-env.ts";
 export {
+  type ArweaveWallet,
+  arweaveWallet,
+  HttpArweaveClient,
+  type HttpArweaveOptions,
+} from "./arweave-client.ts";
+export {
   type AnchorSafe,
   checkAnchorSafe,
   checkAnchorSafeHistory,

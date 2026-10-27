@@ -125,11 +125,11 @@ const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
 
 /**
  * Where the honest run's board copy must come from: by CID from the bundle's
- * `blocks.car`, or from a gateway alone. Never `board.bin`: the board is
- * rebuilt from the CIDs anchored on L1 (stage 8; docs/spec/verifier.md, Board
- * by CID).
+ * `blocks.car`, from a gateway alone, or from the objects the archive lists
+ * alone (`arweave`, with neither). Never `board.bin`: the board is rebuilt
+ * from the CIDs anchored on L1 (stage 8; docs/spec/verifier.md, Board by CID).
  */
-export type CopySource = "blocks.car" | "gateway";
+export type CopySource = "blocks.car" | "gateway" | "arweave";
 
 /**
  * Why an honest election's report isn't what the reference election
@@ -155,10 +155,12 @@ export function checkExpectations(
           byCid.storeBlocks > 0 &&
           byCid.storeUnreadableBytes === 0 &&
           byCid.gateways === undefined
-        : byCid.storeBlocks === undefined &&
-          byCid.gateways !== undefined &&
-          byCid.gateways.blocks > 0 &&
-          byCid.gateways.blocks === byCid.gateways.requests;
+        : source === "gateway"
+          ? byCid.storeBlocks === undefined &&
+            byCid.gateways !== undefined &&
+            byCid.gateways.blocks > 0 &&
+            byCid.gateways.blocks === byCid.gateways.requests
+          : byCid.storeBlocks === undefined && byCid.gateways === undefined;
     if (!read)
       problems.push(
         `${name}: the copy must be read from ${source} alone: ${JSON.stringify(byCid)}`,

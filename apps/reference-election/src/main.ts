@@ -37,6 +37,8 @@
 // exported from the node or from the node's gateway (stage 8's board, P4-3).
 // The node then verifies every election itself (`abolish-node verify`), from
 // its blocks and the two chains alone, and must find what the verifier found.
+// The same objects are archived on a local Arweave node, and the honest
+// election is read again from L1 and Arweave alone (stage 8's archive, P4-3).
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,6 +58,7 @@ import {
   encodeDisplayTextV2,
   identityKey,
   isReceiptAlarm,
+  objectCid,
   type Panel,
   receiptKeysCastCheck,
   type RegisteredKeys,
@@ -63,6 +66,8 @@ import {
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { startApi } from "./api.ts";
 import { type Anvil, startAnvil } from "./anvil.ts";
+import { archiveObjects } from "./archive.ts";
+import { type LocalArweave, startArweave } from "./arweave.ts";
 import {
   castingFor,
   castQuestions,
@@ -98,12 +103,15 @@ import {
 } from "./expectations.ts";
 import { blocksCar, segmentObjects } from "./blocks.ts";
 import {
+  allAnchorLogs,
   anchorAt,
+  type AnchorLog,
   type DeployedAnchor,
   deployAnchor,
   evidence,
   headers,
   l1RefAt,
+  locateAt,
   loggedAnchors,
   loggedCheckpoints,
   mineAt,
@@ -130,7 +138,7 @@ import {
   receiptElection,
   verdictIs,
 } from "./receipts.ts";
-import { anchorSlots, receiptKeySlot } from "./slots.ts";
+import { accumulatorSlots, anchorSlots, locatorSlots, receiptKeySlot } from "./slots.ts";
 import {
   deliver,
   electorateCheck,
@@ -239,6 +247,8 @@ function writeBundle(
      * `header` names; format 4 without.
      */
     blocks?: readonly Uint8Array[];
+    /** The anchor's every log up to `header`, for the earlier archive locators (4.3). */
+    logs?: readonly AnchorLog[];
   },
   copy: Copy,
 ): void {
@@ -260,6 +270,16 @@ function writeBundle(
     },
     panel: { threshold: e.panel.threshold.toString(), keys: e.panel.keys.map(hex) },
     ...(l1.blocks === undefined ? {} : { l1Blocks: l1.blocks.map(hex) }),
+    ...(l1.logs === undefined
+      ? {}
+      : {
+          anchorLogs: l1.logs.map((g) => ({
+            block: g.block.toString(),
+            timestamp: g.timestamp.toString(),
+            topics: g.topics.map(hex),
+            data: hex(g.data),
+          })),
+        }),
   };
   writeFileSync(join(dir, "bundle.json"), `${JSON.stringify(bundle, null, 2)}\n`);
   if (copy === "none") return;
@@ -281,6 +301,7 @@ function verify(
 async function run(
   anvil: Anvil,
   l2Anvil: Anvil,
+  arweave: LocalArweave,
   stores: string,
   failures: string[],
 ): Promise<void> {
@@ -795,6 +816,17 @@ async function run(
     for (const statement of destructionStatements(e.definition, e.secrets))
       board(e, statement, seal);
   await anchorAt(anvil, anchor, checkpointsAt(seal), end(seal) + ANCHOR_DELAY);
+  // Stage 8, the archive: every board's segment objects and entry-hash lists
+  // posted to the local Arweave through the worker's client, listed in
+  // manifest 0 once confirmed, and the locator naming it sent alone after
+  // the seal's anchor, as the worker's final anchor is (docs/spec/archive.md,
+  // Locator; T-51).
+  const archived = await archiveObjects(
+    arweave,
+    elections.flatMap((e) => segmentObjects(e.entries).flatMap((o) => [o.object, o.hashes])),
+    { l1ChainId: L1_CHAIN_ID, anchor: anchor.address },
+  );
+  await locateAt(anvil, anchor, archived.locator, end(seal) + ANCHOR_DELAY + 1n);
   log(
     `stage 6: ${tallies.map(({ e, ballots }) => `${e.name}'s cell opened over ${ballots.length} counted ballots`).join(", ")}, each from every seat's summed shares, in segment ${tallied}; every seat's destruction statement in segment ${seal}`,
   );
@@ -804,6 +836,9 @@ async function run(
   for (let i = 0n; i < 70n; i++) await mineAt(anvil, after + i * 12n);
 
   log(`stage 7: segments ${first} to ${seal} (the seal) anchored for each election`);
+  log(
+    `stage 8: ${archived.objects.length} segment objects and entry-hash lists posted to a local Arweave at ${arweave.url} through the worker's client and listed in manifest 0, whose locator the anchor holds`,
+  );
 
   // Stage 4's later checks: each receipt of the poll judged as its voter's
   // client would, from the anchors and the receipt key's record at the
@@ -918,6 +953,77 @@ async function run(
             node.url,
           ]),
         );
+        // The same election from L1 and Arweave alone, with no copy in the
+        // bundle and no IPFS gateway ([[0005-permanent-archive]], Reference
+        // election): the copy by CID is read from the objects the archive
+        // lists, found from the anchor's locator, which the anchor's logs
+        // show was never overwritten (4.3; T-49, T-51, T-69).
+        const archiveL1 = await evidence(anvil, anchor.address, [
+          ...anchorSlots(id, first, seal),
+          ...locatorSlots(archived.locator.length),
+          ...accumulatorSlots(),
+        ]);
+        const fromArweave = join(OUT, "honest", "bundle-from-arweave");
+        writeBundle(
+          fromArweave,
+          e,
+          clock,
+          {
+            ...evidenceFor,
+            header: archiveL1.header,
+            nodes: archiveL1.nodes,
+            blocks: await headers(anvil, archiveL1.number),
+            logs: await allAnchorLogs(anvil, anchor.address),
+          },
+          "none",
+        );
+        const fromArchive = ["--arweave", arweave.url];
+        failures.push(
+          ...verify(
+            fromArweave,
+            (r) => [
+              ...checkExpectations(r, "arweave", HONEST_BALLOTS, { passes: ["4.3"] }),
+              ...tallyRows("honest (arweave)")(r),
+            ],
+            fromArchive,
+          ),
+        );
+        // A control: the same, with the node withholding the voting window's
+        // segment object. The archive is then short and the copy stops at
+        // that run: unverifiable from Arweave, never failed (T-53).
+        const windowObject = segmentObjects(e.entries).find((s) => s.segment === cast);
+        const window =
+          windowObject &&
+          archived.objects.find((o) => hex(o.cid) === hex(objectCid(windowObject.object)));
+        if (window === undefined) throw new Error("the voting window's object isn't archived");
+        await arweave.withhold(window.transaction);
+        const withheldArchive = join(OUT, "honest", "control-withheld-archive");
+        writeBundle(
+          withheldArchive,
+          e,
+          clock,
+          {
+            ...evidenceFor,
+            header: archiveL1.header,
+            nodes: archiveL1.nodes,
+            logs: await allAnchorLogs(anvil, anchor.address),
+          },
+          "none",
+        );
+        failures.push(
+          ...verify(
+            withheldArchive,
+            (r) =>
+              checkControl("withheld-archive", r, {
+                "3.2": { status: "pass" },
+                "4.1": { status: "unverifiable", code: "checkpoint-missing" },
+                "4.2": { status: "unverifiable", code: "checkpoint-missing" },
+                "4.3": { status: "unverifiable", code: "object-unavailable" },
+              }),
+            fromArchive,
+          ),
+        );
+        await arweave.release(window.transaction);
         // A control: the honest bundle with one byte of its transcript flipped
         // in board.bin, and no logged checkpoint given. The copy no longer
         // matches its anchors, nor the definition's hash.
@@ -1112,7 +1218,12 @@ async function main(): Promise<number> {
       // outside the run's output, and removed however it ends.
       const stores = mkdtempSync(join(tmpdir(), "reference-election-seats-"));
       try {
-        await run(anvil, l2, stores, failures);
+        const arweave = await startArweave();
+        try {
+          await run(anvil, l2, arweave, stores, failures);
+        } finally {
+          await arweave.close();
+        }
       } finally {
         rmSync(stores, { recursive: true, force: true });
         await l2.stop();

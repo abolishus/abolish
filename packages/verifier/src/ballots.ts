@@ -30,22 +30,31 @@
 // stamp (docs/spec/close.md, Window; T-71, T-35). Under versions 10 to 12
 // the board's `RollingBallotSubmitted`, and under 11 and 12 its
 // `RelayedRollingBallotSubmitted`, carry a version-5 ballot by the ordinary
-// and the relayed path; this release reads no rolling definition yet
-// (P2-17 part 4), so such a ballot is never the pinned version and is
-// rejected as undecodable (`profile-mismatch`) by either path (T-31).
+// and the relayed path, with the root its submitter supplied. Beside any
+// definition but a rolling one such a ballot is never the pinned version and
+// is rejected as undecodable (`profile-mismatch`) by either path (T-31).
+// Under a rolling definition (version 7, `electorate_mode` 2) every ballot is
+// version 5 and names its root-clock step: `checkBallotV5` judges it against
+// the root of that step, which crypto computes from the group registry's
+// events the caller replayed through close (2.4), never against a root the
+// ballot, the event or the bundle states, and a supplied root other than it
+// is `root-step-mismatch` (5.1); 5.8 then holds the step to the window
+// before the named L1 block (P2-17; T-04, T-08, T-25). verify.ts still stops
+// a rolling poll at 2.3 until it gives those events (P2-17 part 4d-2b).
 
 import {
   type AdmittedBallot,
   type AnchorClock,
   type BallotCheck,
   type BallotCheckV2,
+  type BallotCheckV5,
   type BallotCode,
   type BallotMembership,
   type BallotCore,
   type CellBallotCoreV4,
   ballotElection,
   type BallotStep,
-  type BallotV2Code,
+  type BallotV5Code,
   type BoardEntryVersion,
   cellBallotElection,
   checkContractEvent,
@@ -67,15 +76,23 @@ import {
   RECORD_TYPES,
   type RegisteredKeys,
   RESULTS_MODES,
+  type RollingBallotChain,
+  rollingBallotElection,
   selectBallots,
   stepBallot,
   stepBallotV2,
   stepBallotV3,
   stepBallotV4,
+  stepBallotV5,
   stepMembershipV4,
   type SeatPanel,
 } from "@abolishus/crypto";
-import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
+import {
+  isPanelled,
+  isRolling,
+  type PanelledRecord,
+  type VerifiedDefinition,
+} from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
 import { type L1RefCode, referenceJudge } from "./references.ts";
@@ -196,8 +213,12 @@ export interface LiveBallotCopy {
   readonly tally?: BallotTally;
 }
 
-/** Every admission code: versions 2 to 4 have `ballot-cell` where version 1 has `ballot-tier`. */
-export type AdmissionCode = BallotCode | BallotV2Code;
+/**
+ * Every admission code: versions 2 to 5 have `ballot-cell` where version 1
+ * has `ballot-tier`, and version 5 the step's `root-step-range` and
+ * `root-step-mismatch`.
+ */
+export type AdmissionCode = BallotCode | BallotV5Code;
 
 /** The close rule's codes (docs/spec/close.md, Window), checked after 5.1 to 5.4. */
 export type WindowCode = "window-before-open" | "window-after-close" | "window-boarded-late";
@@ -230,6 +251,9 @@ const ROWS_OF: Readonly<Record<AdmissionCode, readonly (typeof ROWS)[number][]>>
   "ballot-stray": ["5.1"],
   "ballot-tier": ["5.1"],
   "ballot-cell": ["5.1"],
+  // No root to check the proof against, or a supplied one that isn't it.
+  "root-step-range": ["5.1"],
+  "root-step-mismatch": ["5.1"],
   "membership-proof": ["5.1", "5.2", "5.3"],
   "validity-shape": ["5.4"],
   "share-hash-unqualified": ["5.4"],
@@ -245,6 +269,8 @@ const L1_REF_CODES: ReadonlySet<string> = new Set<L1RefCode>([
   "l1-ref-before-open",
   "l1-ref-after-close",
   "l1-ref-unknown",
+  "root-step-stale",
+  "root-step-future",
 ]);
 
 // 5.8 joins the other rows only where the bundle gives L1 blocks: without
@@ -275,7 +301,8 @@ type Path =
  * can't be judged (T-37). `authorRegistered` is the author panel's, beside
  * one, as `ceremonyChecks` returned it. `clock` is the anchoring clock, which gives the
  * board path's last segment, `s_A = period(closes_at) + 1`. `blocks`, a
- * format-5 bundle's run of finalized L1 headers, adds 5.8.
+ * format-5 bundle's run of finalized L1 headers, adds 5.8. `rolling`, under
+ * a rolling definition, is `judgeFor`'s.
  */
 export function ballotChecks(
   definition: VerifiedDefinition,
@@ -285,6 +312,7 @@ export function ballotChecks(
   boardEntryVersion: BoardEntryVersion,
   clock: AnchorClock,
   blocks?: readonly L1Header[],
+  rolling?: RollingBallotChain,
 ): {
   readonly rows: ReadonlyMap<string, BallotOutcome>;
   readonly report?: BallotsReport;
@@ -296,7 +324,7 @@ export function ballotChecks(
   /** Under a live definition, where 5.5 runs: every copy the running sets read, in copy order. */
   readonly live?: readonly LiveBallotCopy[];
 } {
-  const judge = judgeFor(definition, registered, authorRegistered);
+  const judge = judgeFor(definition, registered, authorRegistered, rolling);
   if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
   const d = definition.value;
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
@@ -340,6 +368,8 @@ export function ballotChecks(
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
     let path: Path;
+    // The rolling paths' supplied root, which only ever rejects (5.1).
+    let supplied: bigint | undefined;
     try {
       const e = decodeBoardEntry(encoded, boardEntryVersion);
       // 4.1 reports an entry that doesn't decode or names another election.
@@ -353,23 +383,25 @@ export function ballotChecks(
         // and carries no ballot: only the board's own `BallotSubmitted`,
         // `RelayedBallotSubmitted` and their rolling kin, as its contract
         // framed them, carry an ordinary or a relayed ballot (T-71, T-17).
-        // A rolling one's supplied root is read only beside a rolling
-        // definition (5.1's `root-step-mismatch`, P2-17 part 4d-2): beside any
-        // other its version-5 ballot is unpinned, so admission rejects it
-        // before any root is read.
+        // A rolling one's supplied root is judged only beside a rolling
+        // definition (5.1's `root-step-mismatch`): beside any other its
+        // version-5 ballot is unpinned, so admission rejects it before any
+        // root is read.
         const record = decodeContractEvent(e.payload, eventVersion);
         const checked = checkContractEvent(record, contracts, eventVersion);
         if (!checked.ok || checked.role !== "board") continue;
-        const event = checked.event.event;
-        if (event === "BallotSubmitted" || event === "RollingBallotSubmitted") {
-          payload = checked.event.record;
+        const event = checked.event;
+        if (event.event === "BallotSubmitted" || event.event === "RollingBallotSubmitted") {
+          payload = event.record;
           path = { kind: "ordinary", segment: e.segment, l2Timestamp: record.l2_timestamp };
+          if (event.event === "RollingBallotSubmitted") supplied = event.root;
         } else if (
-          event === "RelayedBallotSubmitted" ||
-          event === "RelayedRollingBallotSubmitted"
+          event.event === "RelayedBallotSubmitted" ||
+          event.event === "RelayedRollingBallotSubmitted"
         ) {
-          payload = checked.event.record;
+          payload = event.record;
           path = { kind: "relayed", segment: e.segment };
+          if (event.event === "RelayedRollingBallotSubmitted") supplied = event.root;
         } else continue;
       } else continue;
     } catch (e) {
@@ -379,7 +411,7 @@ export function ballotChecks(
     if (path.kind === "ordinary") ordinary.push(at);
     let judged;
     try {
-      judged = judge(payload);
+      judged = judge(payload, supplied);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push({ entry: at, code: "decode", decodeError: e.code });
@@ -390,8 +422,9 @@ export function ballotChecks(
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
     // window (T-45, T-71). Only contract-event versions 9 to 12 frame a
-    // version-4 ballot's ordinary and relayed copies.
-    live?.judged(at, path.segment, payload, checked, judged.tally);
+    // version-4 ballot's ordinary and relayed copies. `live` is made only
+    // under a panelled definition, whose judge gives version 4's checks.
+    live?.judged(at, path.segment, payload, checked as BallotCheckV2, judged.tally);
     if (!checked.ok) {
       rejected.push({
         entry: at,
@@ -669,19 +702,32 @@ function windowCode(
   return undefined;
 }
 
-/** One ballot payload's strict decoding and admission checks, with its core. */
-export type Judge = (payload: Uint8Array) => {
+/** One ballot check of any version this verifier reads: versions 2 to 4 share `BallotCheckV2`. */
+export type AnyBallotCheck = BallotCheck | BallotCheckV2 | BallotCheckV5;
+
+/**
+ * One ballot payload's strict decoding and admission checks, with its core.
+ * `suppliedRoot` is the root a rolling path's event carries, judged only
+ * under a rolling definition (5.1's `root-step-mismatch`); leave it out for
+ * a board-path ballot and for every other path.
+ */
+export type Judge = (
+  payload: Uint8Array,
+  suppliedRoot?: bigint,
+) => {
   readonly core: AdmittedCore["core"];
-  /** Versions 2 to 4 share `BallotCheckV2`. */
-  readonly checked: BallotCheck | BallotCheckV2;
+  readonly checked: AnyBallotCheck;
   /** Read only once the ballot is admitted, whose tier or cell the partition then has. */
   readonly tally: BallotTally;
 };
 
 /** `Judge` with the checks stopped at the membership proof, for `finishBallotSteps` to batch. */
-export type SteppedJudge = (payload: Uint8Array) => {
+export type SteppedJudge = (
+  payload: Uint8Array,
+  suppliedRoot?: bigint,
+) => {
   readonly core: AdmittedCore["core"];
-  readonly step: BallotStep<BallotCheck | BallotCheckV2>;
+  readonly step: BallotStep<AnyBallotCheck>;
   readonly tally: BallotTally;
 };
 
@@ -704,17 +750,28 @@ export const UNSUPPORTED: BallotOutcome = {
  * author panel, never against the ballot's (T-17, T-37): without an author
  * panel any author half fails `validity-shape`, and beside one its seats are
  * judged against `authorRegistered`, the author panel's key set its
- * approvals approved, without which no ballot is judged.
+ * approvals approved, without which no ballot is judged. A rolling version 7
+ * pins ballot version 5, version 4's checks with the step its membership
+ * proof used: each ballot is judged against the root of that step of its
+ * cell's tier, which @abolishus/crypto's `rollingBallotElection` computes
+ * from `rolling`, the group registry's events the caller replayed through
+ * close and the definition's registration time, and only once the poll
+ * accepts that step (`root-step-range`), under the tier's rolling scope
+ * (5.1, 5.2; T-04, T-08, T-12). Without `rolling` no ballot is judged:
+ * the roots can't be computed. The caller passes it only once 2.4's rolling
+ * check passed over the same events; crypto checks again that they give
+ * every tier's opening state and throws `RangeError` if they don't.
  */
 export function judgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
   authorRegistered?: readonly RegisteredKeys[],
+  rolling?: RollingBallotChain,
 ): BallotOutcome | Judge {
-  const stepped = steppedJudgeFor(definition, registered, authorRegistered);
+  const stepped = steppedJudgeFor(definition, registered, authorRegistered, rolling);
   if (typeof stepped !== "function") return stepped;
-  return (payload) => {
-    const { core, step, tally } = stepped(payload);
+  return (payload, suppliedRoot) => {
+    const { core, step, tally } = stepped(payload, suppliedRoot);
     return { core, checked: finishBallotStep(step), tally };
   };
 }
@@ -724,11 +781,20 @@ export function steppedJudgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
   authorRegistered?: readonly RegisteredKeys[],
+  rolling?: RollingBallotChain,
 ): BallotOutcome | SteppedJudge {
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
   const own =
-    definition.version === 1 ? 1 : definition.version === 5 ? 3 : isPanelled(definition) ? 4 : 2;
+    definition.version === 1
+      ? 1
+      : definition.version === 5
+        ? 3
+        : isPanelled(definition)
+          ? 4
+          : isRolling(definition)
+            ? 5
+            : 2;
   // A ballot version this verifier doesn't read under this definition
   // version may be one a later release reads: unverifiable, never failed, so
   // releases agree (2.3; T-36).
@@ -761,6 +827,30 @@ export function steppedJudgeFor(
           vss,
           delivery: { tier: record.tier, nullifier: record.nullifier, vote: record.committed_vote },
         },
+      };
+    };
+  }
+  if (isRolling(definition)) {
+    // No stated root to refuse: each ballot's is its step's, computed from
+    // the events, and a step with no live member is never accepted
+    // (`root-step-range`), so no ballot proves against `Z_32` (T-04, T-05).
+    const author = definition.value.author_keys.length !== 0;
+    if (rolling === undefined || (author && authorRegistered === undefined)) return NOT_REACHED;
+    const election = rollingBallotElection(
+      definition.value,
+      registered,
+      rolling,
+      author ? authorRegistered : [],
+    );
+    return (payload, suppliedRoot) => {
+      const record = decodeBallot(payload, 5);
+      const { vss, author_vss: authorVss } = record.committed_vote;
+      return {
+        core: { definitionHash: record.definition_hash, vss, authorVss },
+        step: stepBallotV5(election, record, suppliedRoot),
+        // No delivery fields: 5.9 under ballot version 5, whose ballot hash
+        // binds the step, isn't read yet (P2-17 part 4d-2b).
+        tally: { cell: record.cell, vss },
       };
     };
   }

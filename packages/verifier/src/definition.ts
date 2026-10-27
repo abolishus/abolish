@@ -68,7 +68,7 @@ export const isPanelled = (record: VerifiedDefinition): record is PanelledRecord
   (record.version === 7 && record.value.electorate_mode === ELECTORATE_MODES.fixed);
 
 /** Whether the definition is version 7 under a rolling electorate (0028-rolling-electorates). */
-export const isRolling = (record: VerifiedDefinition): boolean =>
+export const isRolling = (record: VerifiedDefinition): record is ElectionDefinitionV7Record =>
   record.version === 7 && record.value.electorate_mode === ELECTORATE_MODES.rolling;
 
 /**

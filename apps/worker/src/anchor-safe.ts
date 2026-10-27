@@ -265,6 +265,25 @@ export function keySigner(key: Uint8Array): SafeSigner {
 const BASE_FEE_HEADROOM = 3n;
 /** Headroom over the node's gas estimate, in percent. */
 const GAS_HEADROOM = 120n;
+/**
+ * A replacement's least fee, as eighths of the pending transaction's: pools
+ * refuse one that doesn't raise both its fee cap and its tip by their
+ * margin (10% by geth's default), so 12.5% clears it with room. One wei
+ * more on top, so a zero tip is raised too.
+ */
+const REPLACEMENT_EIGHTHS = 9n;
+const bumped = (fee: bigint) => (fee * REPLACEMENT_EIGHTHS) / 8n + 1n;
+/**
+ * A replacement's fees are at most this many times today's (plus one wei).
+ * A pending transaction priced above that is over the market and is mined
+ * without one, and sends refused run after run (an executor short of
+ * funds) can't compound the fees past what it can pay once refunded.
+ */
+const REPLACEMENT_CAP = 2n;
+const replacing = (last: bigint, today: bigint) => {
+  const [want, cap] = [bumped(last), today * REPLACEMENT_CAP + 1n];
+  return want < today ? today : want > cap ? cap : want;
+};
 
 export interface SafeSenderOptions {
   /** One L1 node. */
@@ -310,6 +329,11 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
   // could show a Safe from before a change (T-49).
   let checkedThrough = safe.deploymentBlock - 1n;
   let seen = 0n;
+  // The fees of the last transaction signed and its nonce. One whose receipt
+  // didn't come in time can still be pending at the latest nonce, and the
+  // next call, a checkpoint's or a locator's, replaces it only at fees the
+  // pool takes as a replacement (T-49).
+  let last: { nonce: number; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined;
 
   return async (calldata) => {
     if (bytesToHex(calldata.subarray(0, 4)) !== ANCHOR_SELECTOR)
@@ -370,20 +394,39 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
     });
     // The estimate runs the execution: a stale nonce, a bad signature or
     // an anchor call the anchor refuses reverts it, before anything is
-    // sent. Its error would quote the calldata, signatures included.
+    // sent. At the block the Safe's nonce was read at, since a node
+    // estimating over its pending block would run it after our own stuck
+    // transaction, which spends that nonce. Its error would quote the
+    // calldata, signatures included.
     let gas: bigint;
     try {
-      gas = await client.estimateGas({ account: executor.address, to: address, data });
+      gas = await client.estimateGas({
+        account: executor.address,
+        to: address,
+        data,
+        blockNumber: block.number,
+      });
     } catch {
       throw new Error("the node's estimate of the Safe's transaction failed");
     }
     // The latest nonce, not the pending one: a transaction stuck under a
-    // fee rise is replaced at today's fees, never queued behind.
-    const [tip, nextNonce] = await Promise.all([
+    // fee rise is replaced at today's fees, or at its own bumped if they
+    // are higher, never queued behind. Read after the estimate, so a stuck
+    // transaction mined in between leaves this one at a spent Safe nonce:
+    // it reverts on chain, costing its gas, and the next run reads both
+    // afresh.
+    const [estimate, nextNonce] = await Promise.all([
       client.estimateMaxPriorityFeePerGas(),
       client.getTransactionCount({ address: executor.address, blockTag: "latest" }),
     ]);
     if (block.baseFeePerGas === null) throw new Error("the L1 has no base fee");
+    let tip = estimate;
+    let maxFee = block.baseFeePerGas * BASE_FEE_HEADROOM + estimate;
+    if (last?.nonce === nextNonce) {
+      tip = replacing(last.maxPriorityFeePerGas, tip);
+      maxFee = replacing(last.maxFeePerGas, maxFee);
+      if (maxFee < tip) maxFee = tip;
+    }
     const tx = await executor.signTransaction({
       type: "eip1559",
       chainId: Number(chainId),
@@ -391,9 +434,11 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
       to: address,
       data,
       gas: (gas * GAS_HEADROOM) / 100n,
-      maxFeePerGas: block.baseFeePerGas * BASE_FEE_HEADROOM + tip,
+      maxFeePerGas: maxFee,
       maxPriorityFeePerGas: tip,
     });
+    // Kept before sending: a send that fails may still have reached the pool.
+    last = { nonce: nextNonce, maxFeePerGas: maxFee, maxPriorityFeePerGas: tip };
     let sent: Hex;
     try {
       sent = await client.sendRawTransaction({ serializedTransaction: tx });

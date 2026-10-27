@@ -22,8 +22,9 @@ export interface Newest {
  */
 export function HomePage({ newest }: { newest: Newest | undefined }) {
   const t = useTranslate(catalogs);
+  const listed = newest !== undefined && newest.cards.length > 0;
   const answerable =
-    newest !== undefined && newest.ballot !== null && newest.cards.some((c) => c.kind === "poll");
+    listed && newest.ballot !== null && newest.cards.some((c) => c.kind === "poll");
   return (
     <div className="grid gap-16">
       <section className="grid gap-4 sm:gap-8 sm:pt-2 md:pt-10 lg:grid-cols-12 lg:gap-x-10">
@@ -72,7 +73,7 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
                 read the same two sentences three times down the page. Only
                 over cards: above the empty or unavailable note it promised
                 the questions that note then says aren't there. */}
-            {newest !== undefined && newest.cards.length > 0 ? (
+            {listed ? (
               <p className="m-0 max-w-prose text-lg text-pretty">
                 {t("homeStreamLede")}
                 {answerable ? <> {t("homeStreamPick")}</> : null}
@@ -81,10 +82,11 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
           </div>
           {/* Beside the title only where the cards share a row: where they
               stack, it follows them, so the first card comes straight after
-              the lede and the way on is where the list ends. Not when the
-              API didn't answer: Discover reads the same listing, so the link
-              would only open the error page. */}
-          {newest === undefined ? null : (
+              the lede and the way on is where the list ends. Only over
+              cards: Discover lists the same open polls, so with none open it
+              only says so again, and when the API didn't answer it is the
+              error page. */}
+          {listed ? (
             <a
               href="/discover"
               className={cn(buttonVariants({ variant: "outline" }), "hidden gap-2 lg:inline-flex")}
@@ -92,7 +94,7 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
               {t("homeStreamAll")}
               <ArrowRight aria-hidden="true" />
             </a>
-          )}
+          ) : null}
         </div>
         {newest === undefined ? (
           <p className="m-0 text-lg">{t("homeListUnavailable")}</p>
@@ -115,7 +117,7 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
             ))}
           </ol>
         )}
-        {newest === undefined ? null : (
+        {listed ? (
           <a
             href="/discover"
             className={cn(
@@ -126,7 +128,7 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
             {t("homeStreamAll")}
             <ArrowRight aria-hidden="true" />
           </a>
-        )}
+        ) : null}
       </section>
       <TrustScene />
     </div>

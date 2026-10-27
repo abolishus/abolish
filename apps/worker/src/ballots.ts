@@ -12,16 +12,28 @@
 // Its `{opening-submit}` side judges each tally opening on its own by core's
 // `OpeningBoardings.submitOpening` (docs/spec/tally.md, Opening record,
 // Boarding), against each election's counted tally, computed once.
+//
+// Its `{destruction-submit}` side judges each destruction statement on its
+// own by core's `DestructionBoardings.submitDestruction` (docs/spec/tally.md,
+// Destruction, Boarding): one signature check against the seats' statements
+// already boarded, at most one each.
 
 import {
   type BallotAdmissions,
+  type DestructionBoardings,
+  DestructionError,
   type OpeningBoardings,
   OpeningError,
   ReceiptError,
   type SubmitOutcome,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
-import type { BallotOutcome, OpeningOutcome, ReceiptOutcome } from "./ballot-queue.ts";
+import type {
+  BallotOutcome,
+  DestructionOutcome,
+  OpeningOutcome,
+  ReceiptOutcome,
+} from "./ballot-queue.ts";
 import type { Log } from "./log.ts";
 
 /** Ballots judged in one batch at most, and the queue's concurrency: `finishBallotSteps`' own batch. */
@@ -238,6 +250,47 @@ export class OpeningSubmissions {
       return { ok: true, index: boarded.index.toString() };
     } catch (e) {
       if (!(e instanceof OpeningError)) throw e;
+      return {
+        ok: false,
+        code: e.code,
+        ...(e.rejection === undefined ? {} : { rejection: e.rejection }),
+      };
+    }
+  }
+}
+
+/**
+ * Judges and boards destruction statements by the ballots' clock. A refusal
+ * is an outcome; a database error throws, and the seat's resend of the same
+ * bytes returns the entry if it was boarded.
+ */
+export class DestructionSubmissions {
+  readonly #sql: Sql;
+  readonly #boardings: DestructionBoardings;
+  readonly #now: () => bigint;
+
+  constructor({
+    sql,
+    boardings,
+    now,
+  }: Pick<BallotBatchOptions, "sql" | "now"> & { readonly boardings: DestructionBoardings }) {
+    this.#sql = sql;
+    this.#boardings = boardings;
+    this.#now = now;
+  }
+
+  /** The outcome for `statement` (hex) in `electionId` (hex). */
+  async submit(electionId: string, statement: string): Promise<DestructionOutcome> {
+    try {
+      const boarded = await this.#boardings.submitDestruction(
+        this.#sql,
+        bytes(electionId),
+        bytes(statement),
+        this.#now(),
+      );
+      return { ok: true, index: boarded.index.toString() };
+    } catch (e) {
+      if (!(e instanceof DestructionError)) throw e;
       return {
         ok: false,
         code: e.code,

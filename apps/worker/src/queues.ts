@@ -33,6 +33,12 @@ export const MAX_SHARE_RECEIPT = 256;
  */
 export const MAX_TALLY_OPENING = 8192;
 
+/**
+ * Bound on a destruction statement in a `{destruction-submit}` job: the API
+ * contract's `MAX_DESTRUCTION_STATEMENT`, which a test of apps/api ties to this.
+ */
+export const MAX_DESTRUCTION_STATEMENT = 128;
+
 export type Side = "board" | "account" | "operational";
 
 export interface QueueSpec<Data extends z.ZodObject = z.ZodObject> {
@@ -209,6 +215,26 @@ export const QUEUES = {
       opening: z
         .string()
         .max(2 * MAX_TALLY_OPENING)
+        .regex(/^(?:[0-9a-f]{2})*$/),
+    }),
+  },
+  /**
+   * Destruction statements the API received, to judge and board by the
+   * Boarding rule (core's DestructionBoardings.submitDestruction;
+   * docs/spec/tally.md, Destruction, Boarding; T-17, T-29, T-52). Queued by
+   * the API's `destructions.submit` through `DestructionQueue` and run only
+   * beside `{ballot-submit}`, by its clock. A job carries the election and
+   * the statement's bytes, never who sent them (T-10), and returns only the
+   * outcome (`DESTRUCTION_OUTCOME`).
+   */
+  destructionSubmit: {
+    name: "{destruction-submit}",
+    side: "board",
+    data: z.strictObject({
+      electionId: z.string().regex(/^[0-9a-f]{64}$/),
+      statement: z
+        .string()
+        .max(2 * MAX_DESTRUCTION_STATEMENT)
         .regex(/^(?:[0-9a-f]{2})*$/),
     }),
   },

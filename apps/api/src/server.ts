@@ -17,6 +17,7 @@ import { type IntakeRelayOptions, intakeRelay, intakeRoute } from "./intake.ts";
 import { hasDuplicateKey } from "./json.ts";
 import {
   type BallotSubmitter,
+  type DestructionSubmitter,
   type OpeningSubmitter,
   type ReceiptSubmitter,
   router,
@@ -217,6 +218,8 @@ export interface ApiOptions {
   readonly receipts?: ReceiptSubmitter;
   /** The worker's tally-opening queue; without it the server boards no opening (`ELECTION_NOT_OPEN`). */
   readonly openings?: OpeningSubmitter;
+  /** The worker's destruction-statement queue; without it the server boards no statement (`ELECTION_NOT_OPEN`). */
+  readonly destructions?: DestructionSubmitter;
   /** UNIX time in seconds; the system clock by default. Injected so tests can set it. */
   readonly now?: () => bigint;
   /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
@@ -286,6 +289,7 @@ export function createApiServer({
   ballots,
   receipts,
   openings,
+  destructions,
   now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
   tier1,
@@ -412,7 +416,18 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, receipts, openings, now, tier0, tier1, postings, boardClock },
+          context: {
+            sql,
+            ballots,
+            receipts,
+            openings,
+            destructions,
+            now,
+            tier0,
+            tier1,
+            postings,
+            boardClock,
+          },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

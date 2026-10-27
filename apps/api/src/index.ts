@@ -1,6 +1,7 @@
 export {
   type BallotSubmitter,
   type Context,
+  type DestructionSubmitter,
   type OpeningSubmitter,
   type ReceiptSubmitter,
   router,

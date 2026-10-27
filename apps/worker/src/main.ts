@@ -2,6 +2,8 @@ import {
   anchoredCountedTally,
   BallotAdmissions,
   CREATE_DAILY_CEILING,
+  DestructionBoardings,
+  destructionTargets,
   L1References,
   OpeningBoardings,
   openingTargets,
@@ -153,6 +155,7 @@ if (
 
 let ballots: WorkerOptions["ballots"];
 let openings: WorkerOptions["openings"];
+let destructions: WorkerOptions["destructions"];
 const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
 if (env.BALLOT_L1_RPC_URL !== undefined || env.BALLOT_L1_CHAIN_ID !== undefined) {
   if (ballotEnv.some((v) => v === undefined))
@@ -199,6 +202,13 @@ if (ballotEnv.some((v) => v !== undefined)) {
   };
   ballots = {
     admissions: new BallotAdmissions({ panels, clock, ...(l1 !== undefined && { l1 }) }),
+  };
+  // The trustees' destruction statements (P2-13 part 5c-3b), beside ballot
+  // admission and by its clock: the Boarding rule reads only the stored
+  // definition, its transcript and the statements already boarded, never
+  // the anchor or L1, since timing is the verifier's to report (T-17, T-52).
+  destructions = {
+    boardings: new DestructionBoardings({ target: destructionTargets(panels), clock }),
   };
   // The tally openings' boarding (P2-13 part 5b-2b-3b-2b-2), only once the
   // node is on the definitions' chain and the anchor there fixes this
@@ -565,6 +575,7 @@ const worker = await startWorker({
   ...(tier1 !== undefined && { tier1 }),
   ...(ballots !== undefined && { ballots }),
   ...(openings !== undefined && { openings }),
+  ...(destructions !== undefined && { destructions }),
   ...(registry !== undefined && { registry }),
   ...(pollRoots !== undefined && { pollRoots }),
   ...(pollStubs !== undefined && { pollStubs }),

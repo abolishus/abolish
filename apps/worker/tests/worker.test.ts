@@ -234,7 +234,8 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
   // This worker has no Tier 0 job or Tier 1 relay, pins no panel (so boards
-  // no opening either, tests/openings.test.ts), has no
+  // no opening or destruction statement either, tests/openings.test.ts and
+  // tests/destructions.test.ts), has no
   // registry sync, roots or stub step (nor the coordinator and the opening
   // step beside it) and holds no creation key, so those queues have no keys
   // here (tests/tier0.test.ts, tests/tier1.test.ts, tests/ballots.test.ts,
@@ -251,6 +252,7 @@ test("every key the worker uses is under its queue's hash tag", async () => {
           "ballotSubmit",
           "receiptSubmit",
           "openingSubmit",
+          "destructionSubmit",
           "registrySync",
           "pollCreate",
           "pollRoot",
@@ -318,6 +320,10 @@ test("a handler's own error message is neither logged nor kept, the events strea
       },
       // Not run: this worker boards no opening.
       openingSubmit: async () => {
+        throw new Error(`params: ${MARKER}`);
+      },
+      // Not run: this worker boards no destruction statement.
+      destructionSubmit: async () => {
         throw new Error(`params: ${MARKER}`);
       },
     },

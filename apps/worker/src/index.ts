@@ -38,6 +38,10 @@ export {
   BallotQueue,
   type BallotQueueOptions,
   type BallotUnavailable,
+  DESTRUCTION_OUTCOME,
+  type DestructionOutcome,
+  DestructionQueue,
+  type DestructionUnavailable,
   OPENING_OUTCOME,
   type OpeningOutcome,
   OpeningQueue,
@@ -52,6 +56,7 @@ export {
   BALLOT_BATCH_WAIT_MS,
   type BallotBatchOptions,
   BallotBatches,
+  DestructionSubmissions,
   OpeningSubmissions,
   ReceiptSubmissions,
 } from "./ballots.ts";
@@ -121,6 +126,7 @@ export {
   JOB_OPTIONS,
   type JobData,
   KEY_PREFIX,
+  MAX_DESTRUCTION_STATEMENT,
   MAX_SHARE_RECEIPT,
   MAX_TALLY_OPENING,
   QUEUES,
@@ -201,6 +207,7 @@ export {
 export { TIER1_ENV, type Tier1Config, tier1FromEnv } from "./tier1-env.ts";
 export {
   CEREMONY_COORDINATE_EVERY_MS,
+  DESTRUCTION_CONCURRENCY,
   POLL_CREATE_EVERY_MS,
   POLL_ROOT_EVERY_MS,
   OPENING_CONCURRENCY,

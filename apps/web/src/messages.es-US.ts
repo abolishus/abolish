@@ -1092,13 +1092,14 @@ export const esUS: Messages = {
     "La verificación de que eres una persona no se superó, así que no se envió nada. Envía de nuevo para hacer otra.",
   pollsFailure_challengeUnavailable:
     "La verificación de que eres una persona no pudo hacerse en este momento, así que no se envió nada. Inténtalo de nuevo en un rato.",
-  pollsCreate: "Crear una encuesta",
+  pollsCreate: "Hacer una pregunta",
   pollsEdit: "Editar borrador",
   pollFormEyebrow: "Tus encuestas",
-  pollFormNewTitle: "Crear una encuesta",
+  pollFormNewEyebrow: "Nueva encuesta",
+  pollFormNewTitle: "Hacer una pregunta",
   pollFormEditTitle: "Edita tu encuesta",
   pollFormLede:
-    "Escribe tu pregunta y sus respuestas, elige cuándo cierra y guárdala como borrador. Solo tú puedes ver un borrador. Puedes cambiarlo cuantas veces quieras hasta que lo envíes.",
+    "Solo tú puedes ver un borrador, y puedes cambiarlo cuantas veces quieras hasta que lo envíes.",
   pollFormBack: "Volver a tus encuestas",
   pollFormNeedsScript: "Para guardar un borrador se necesita el script de esta página.",
   pollFormLoading: "Cargando tu borrador…",

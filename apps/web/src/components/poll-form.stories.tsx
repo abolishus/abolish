@@ -164,7 +164,16 @@ export const NewPoll: Story = {
   args: { client: fakeDrafts(), onCreated: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { level: 1, name: "Create a poll" })).toBeVisible();
+    // Named as home's way in names it, with no list to go back to before a
+    // first save: a first-time asker has none (P2-29, creating a poll's
+    // iteration 1).
+    await expect(canvas.getByRole("heading", { level: 1, name: "Ask a question" })).toBeVisible();
+    await expect(canvas.getByText("New poll")).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "Back to your polls" })).toBeNull();
+    // The lede leaves the poll's title field on a small phone's first screen.
+    await expect(
+      canvas.getByRole("textbox", { name: "Title" }).getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(640);
     // Saving an empty form names every problem, linked to its field, and sends nothing.
     await userEvent.click(await canvas.findByRole("button", { name: "Save draft" }));
     const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
@@ -220,6 +229,9 @@ export const WriteAndSave: Story = {
     await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
     await expect(args.onCreated).toHaveBeenCalledWith(NEW_ID);
+    // Saved, it is a draft in the author's list, and the page says so.
+    await expect(canvas.getByRole("heading", { level: 1, name: "Edit your poll" })).toBeVisible();
+    await expect(canvas.getAllByRole("link", { name: "Back to your polls" })).toHaveLength(2);
     // A second save edits the draft the first one made.
     await userEvent.type(canvas.getByRole("textbox", { name: "Option 3" }), "s");
     await expect(canvas.queryByText("Your draft is saved.")).toBeNull();

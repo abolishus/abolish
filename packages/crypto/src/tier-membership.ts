@@ -26,10 +26,12 @@ import {
   applyGroupRecords,
   applySelfPaidRecords,
   type GroupLogRecord,
+  GroupRecordReplay,
   groupRegistryDomainSeparator,
   isForbiddenCommitment,
   type SelfPaidLogRecord,
 } from "./group-registry.ts";
+import type { RollingTierEvent } from "./rolling-tier-tree.ts";
 import { deriveTierCells, firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
 import { type GroupRegistryEvent, groupRegistryEvents } from "./vouch-count.ts";
 
@@ -227,6 +229,56 @@ interface ListedGroup {
   readonly chainOrder?: readonly bigint[];
 }
 
+/** The registry's events in log order, each with its record's L2 timestamp, under the pins read once. */
+interface RegistryRead {
+  readonly events: readonly GroupRegistryEvent[];
+  /** `timestamps[i]` is the `l2_timestamp` of the record `events[i]` was read from. */
+  readonly timestamps: readonly bigint[];
+  readonly domainSeparator: Uint8Array;
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+}
+
+/**
+ * The registry's records among `records`, read through the event check under
+ * `pins`, with every boarded `RegistrarsPinned` compared with the release's.
+ * Throws `TierMembershipError` (`board-event`, `registrars`).
+ */
+function readRegistry(
+  records: readonly ContractEventRecord[],
+  pins: GroupRegistryPins,
+): RegistryRead {
+  // Each field read once, so a getter can't show one check a value and the next another.
+  const { version, chainId, registry, registrars, threshold } = pins;
+  if (!(registry instanceof Uint8Array) || registry.length !== 20)
+    throw new RangeError("pins.registry: expected 20 bytes");
+  const pinned = { version, chainId, registry: new Uint8Array(registry), registrars, threshold };
+
+  const sorted = registryRecords(records, pinned);
+  const read = groupRegistryEvents(sorted, pinned.registry, version);
+  if (!read.ok) throw new TierMembershipError("board-event");
+  // The board need not carry `RegistrarsPinned` (verifier 4.4 doesn't require
+  // it): every record is replayed under the release's registrars whatever it
+  // says, so one is only compared, never relied on.
+  for (const p of read.pinned)
+    if (
+      p.threshold !== threshold ||
+      p.registrars.length !== registrars.length ||
+      p.registrars.some((r, i) => !equalBytes(r, registrars[i] as Uint8Array))
+    )
+      throw new TierMembershipError("registrars");
+  // Every record but a `RegistrarsPinned` is one event, in the same order.
+  const pinnedAt = new Set(read.pinned.map((p) => p.at));
+  const timestamps = sorted.flatMap((r, i) => (pinnedAt.has(i) ? [] : [r.l2_timestamp]));
+  return {
+    events: read.events,
+    timestamps,
+    domainSeparator: groupRegistryDomainSeparator(chainId, pinned.registry),
+    registrars,
+    threshold,
+  };
+}
+
 /**
  * Each of `groups`' leaves at `rootBlock`, in the order listed, before the
  * first-occurrence rule: a signed Tier 0 group replayed strictly from its
@@ -248,26 +300,8 @@ function listedGroupLeaves(
   groups: TierElectorate["groups"],
   pins: GroupRegistryPins,
 ): ListedGroup[] {
-  // Each field read once, so a getter can't show one check a value and the next another.
-  const { version, chainId, registry, registrars, threshold } = pins;
-  if (!(registry instanceof Uint8Array) || registry.length !== 20)
-    throw new RangeError("pins.registry: expected 20 bytes");
-  const pinned = { version, chainId, registry: new Uint8Array(registry), registrars, threshold };
-
-  const read = groupRegistryEvents(registryRecords(records, pinned), pinned.registry, version);
-  if (!read.ok) throw new TierMembershipError("board-event");
-  // The board need not carry `RegistrarsPinned` (verifier 4.4 doesn't require
-  // it): every record is replayed under the release's registrars whatever it
-  // says, so one is only compared, never relied on.
-  for (const p of read.pinned)
-    if (
-      p.threshold !== threshold ||
-      p.registrars.length !== registrars.length ||
-      p.registrars.some((r, i) => !equalBytes(r, registrars[i] as Uint8Array))
-    )
-      throw new TierMembershipError("registrars");
-
-  const domainSeparator = groupRegistryDomainSeparator(chainId, pinned.registry);
+  const read = readRegistry(records, pins);
+  const { domainSeparator, registrars, threshold } = read;
   // Events up to the tier's block, at their positions in the registry's log
   // order, and each listed group's creations and records, bucketed in one
   // pass: a paid flood of self-paid events is read once, not once per group (T-52).
@@ -493,6 +527,173 @@ export function statedTierElectorate(
     regions: [...derived.regions],
     cells: derived.cells.map((c) => ({ root: c.root, members: c.members })),
   };
+}
+
+/** A rolling tier as its definition lists it: which groups, and the block its opening state is read at. */
+export interface RollingTierChoice {
+  readonly tier: number;
+  readonly root_l2_block: bigint;
+  /** The tier's groups, in strictly ascending `group_id`. */
+  readonly groups: readonly bigint[];
+}
+
+/**
+ * A rolling Tier 0 tier's events ([[membership]], Rolling tier tree and
+ * Rolling checks; verifier 2.4; P2-17 part 4c), as `rollingTierSteps` and
+ * `rollingBallotElection` read them, from the group registry's own records
+ * (`records`, any order, other contracts' ignored): every listed group's
+ * `MembersAdded`, `MembersRemoved` and `SelfPaidMemberAdded` in L2 blocks
+ * whose timestamp is at or before `closesAt`, in log order, each after its
+ * group's strict replay, with its block and timestamp. The replay is the
+ * fixed recount's (`statedTierElectorate`) under the same pins, taken
+ * through close rather than to `root_l2_block`, since every accepted step
+ * and every reported count reads events up to then (and never short of
+ * `root_l2_block`); a record after both is never replayed, so one that
+ * breaks a group's history there fails nothing. Each listed group must
+ * be created, once, by `root_l2_block`, for Tier 0. Records whose timestamps
+ * decrease along `n`, or differ within one block, aren't the registry's (the
+ * event accumulator binds both), and are refused (T-71, T-08, T-13). There
+ * is no first-occurrence rule: a repeat keeps a leaf per occurrence.
+ *
+ * Only Tier 0, as `statedTierElectorate`: a Tier 1 group's leaves are the
+ * additions the deployment's count takes, which this doesn't decide, and
+ * Tier 2 has no addition path yet (`tier-unsupported`). Throws
+ * `TierMembershipError`; malformed arguments throw `TypeError` or
+ * `RangeError`.
+ */
+export function rollingTierEvents(
+  records: readonly ContractEventRecord[],
+  choice: RollingTierChoice,
+  closesAt: bigint,
+  pins: GroupRegistryPins,
+): RollingTierEvent[] {
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  if (choice === null || typeof choice !== "object")
+    throw new TypeError("choice: expected an object");
+  if (pins === null || typeof pins !== "object") throw new TypeError("pins: expected an object");
+  // Each field read once, so a getter can't show one check a value and the next another.
+  const { tier: tierId, root_l2_block: rootBlock } = choice;
+  const groups = Array.isArray(choice.groups) ? choice.groups.slice() : choice.groups;
+  if (typeof rootBlock !== "bigint" || rootBlock < 0n || rootBlock > MAX_U64)
+    throw new RangeError("choice.root_l2_block: expected a u64");
+  if (typeof closesAt !== "bigint" || closesAt < 0n || closesAt > MAX_U64)
+    throw new RangeError("closesAt: expected a u64");
+  if (!Array.isArray(groups) || groups.length === 0 || groups.length > MAX_TIER_GROUPS)
+    throw new RangeError(`choice.groups: expected 1 to ${MAX_TIER_GROUPS} groups`);
+  for (const [i, g] of groups.entries())
+    if (typeof g !== "bigint" || g < 0n || g > MAX_U64 || (i > 0 && (groups[i - 1] as bigint) >= g))
+      throw new RangeError("choice.groups: expected strictly ascending u64 group ids");
+  if (tierId !== 0) throw new TierMembershipError("tier-unsupported");
+
+  const read = readRegistry(records, pins);
+  const { events, timestamps } = read;
+  // T-71: the accumulator binds each record's block and timestamp, and an L2
+  // timestamp never decreases along the chain, so a board showing otherwise
+  // isn't the registry's, and the scans' steps would be read out of order.
+  for (let i = 1; i < events.length; i++) {
+    const sameBlock = events[i - 1]?.block === events[i]?.block;
+    const [before, now] = [timestamps[i - 1] as bigint, timestamps[i] as bigint];
+    if (now < before || (sameBlock && now !== before)) throw new TierMembershipError("board-event");
+  }
+  // Each listed group's creations and records through close, bucketed in
+  // one pass (T-52).
+  const listed = new Map(
+    groups.map((id) => [
+      id,
+      {
+        created: [] as { at: number; block: bigint; tier: number; selfPaid: boolean }[],
+        naming: [] as { at: number; e: GroupRegistryEvent }[],
+      },
+    ]),
+  );
+  for (const [at, e] of events.entries()) {
+    // Through close, and never short of root_l2_block, so the opening state is
+    // the tree up to that block whatever the two bounds' order. Both blocks
+    // and timestamps never decrease (checked above), so this is a prefix.
+    if ((timestamps[at] as bigint) > closesAt && e.block > rootBlock) break;
+    if (e.kind === "tier1-addition") continue;
+    const bucket = listed.get(e.groupId);
+    if (bucket === undefined) continue;
+    if (e.kind === "group-created" || e.kind === "self-paid-group-created")
+      bucket.created.push({
+        at,
+        block: e.block,
+        tier: e.kind === "group-created" ? e.tier : 0,
+        selfPaid: e.kind !== "group-created",
+      });
+    else bucket.naming.push({ at, e });
+  }
+
+  // What each listed group's records did, at their positions in log order.
+  const applied: {
+    at: number;
+    groupId: bigint;
+    change:
+      | { readonly kind: "add"; readonly commitments: readonly bigint[] }
+      | { readonly kind: "remove"; readonly indices: readonly bigint[] };
+  }[] = [];
+  for (const id of groups) {
+    const { created, naming } = listed.get(id) as NonNullable<ReturnType<typeof listed.get>>;
+    const only = created[0];
+    // The opening state is read at `root_l2_block`, so a group created only
+    // later can't be in it, as the fixed recount refuses one.
+    if (only === undefined || created.length !== 1 || only.block > rootBlock)
+      throw new TierMembershipError("group-created", id);
+    if (only.tier !== tierId) throw new TierMembershipError("group-tier", id);
+    if (naming.some((r) => r.at < only.at)) throw new TierMembershipError("group-history", id);
+    if (only.selfPaid) {
+      const log: SelfPaidLogRecord[] = [];
+      for (const { e } of naming) {
+        if (e.kind !== "self-paid-addition") throw new TierMembershipError("group-history", id);
+        log.push({ index: e.index, record: e.record });
+      }
+      const replay = applySelfPaidRecords(log, { groupId: id });
+      if (!replay.ok) throw new TierMembershipError("group-history", id);
+      // Each record appended exactly its own leaf, at its logged index.
+      for (const [k, { at }] of naming.entries())
+        applied.push({
+          at,
+          groupId: id,
+          change: { kind: "add", commitments: [replay.leaves[k] as bigint] },
+        });
+      continue;
+    }
+    const replay = new GroupRecordReplay({
+      groupId: id,
+      domainSeparator: read.domainSeparator,
+      tier: tierId,
+      registrars: read.registrars,
+      threshold: read.threshold,
+    });
+    for (const { at, e } of naming) {
+      let r: ReturnType<GroupRecordReplay["apply"]>;
+      if (e.kind === "members-added") {
+        // The event's `firstIndex` topic must be the record's own, as the fixed recount checks it.
+        if (e.record.length >= 16 && e.firstIndex !== u64At(e.record, 8))
+          throw new TierMembershipError("group-history", id);
+        r = replay.apply({ kind: "add", record: e.record });
+      } else if (e.kind === "members-removed")
+        r = replay.apply({ kind: "remove", record: e.record });
+      else throw new TierMembershipError("group-history", id);
+      if (!r.ok) throw new TierMembershipError("group-history", id);
+      applied.push({
+        at,
+        groupId: id,
+        change:
+          r.kind === "add"
+            ? { kind: "add", commitments: r.commitments }
+            : { kind: "remove", indices: r.indices },
+      });
+    }
+  }
+  return applied
+    .sort((a, b) => a.at - b.at)
+    .map(({ at, groupId, change }) => ({
+      blockNumber: (events[at] as GroupRegistryEvent).block,
+      timestamp: timestamps[at] as bigint,
+      groupId,
+      ...change,
+    }));
 }
 
 /** Where a Tier 0 registrant's commitment stands (docs/spec/registration.md, Outcome). */

@@ -200,9 +200,12 @@ export function additions(groupId: bigint, commitments: readonly bigint[]): Even
   return out;
 }
 
-/** The registry's log of `events`, numbered from `n` in order, at `block` unless given. */
+/**
+ * The registry's log of `events`, numbered from `n` in order, at `block`
+ * and `timestamp` unless given.
+ */
 export function logs(
-  events: readonly (Event & { readonly block?: bigint })[],
+  events: readonly (Event & { readonly block?: bigint; readonly timestamp?: bigint })[],
   n = 0,
 ): ContractEventRecord[] {
   return events.map((e, i) => {
@@ -211,7 +214,7 @@ export function logs(
       contract: registry,
       n: BigInt(n + i),
       l2_block: block,
-      l2_timestamp: 1_760_000_000n + block * 2n,
+      l2_timestamp: e.timestamp ?? 1_760_000_000n + block * 2n,
     };
     if (e.kind === "created")
       return {

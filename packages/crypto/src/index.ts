@@ -483,6 +483,8 @@ export {
 } from "./seal.ts";
 export {
   type GroupRegistryPins,
+  type RollingTierChoice,
+  rollingTierEvents,
   statedTierElectorate,
   type Tier0Groups,
   type Tier0Registration,

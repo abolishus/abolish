@@ -963,22 +963,23 @@ export function PollFormPage({
     element.scrollIntoView({ block: "center" });
   };
 
+  // A poll not yet saved has no list to go back to: a first-time asker has
+  // none, and the frame's own Account link is there for anyone who has.
+  const isNew = id === undefined && savedId.current === undefined;
+  const back = isNew ? null : (
+    <a href="/account" className="underline underline-offset-4">
+      {t("pollFormBack")}
+    </a>
+  );
+
   const header = (
     <PageHeader
-      eyebrow={t("pollFormEyebrow")}
-      title={t(
-        id === undefined && savedId.current === undefined
-          ? "pollFormNewTitle"
-          : "pollFormEditTitle",
-      )}
+      eyebrow={t(isNew ? "pollFormNewEyebrow" : "pollFormEyebrow")}
+      title={t(isNew ? "pollFormNewTitle" : "pollFormEditTitle")}
       titleRef={heading}
       lede={t("pollFormLede")}
     >
-      <p className="m-0">
-        <a href="/account" className="underline underline-offset-4">
-          {t("pollFormBack")}
-        </a>
-      </p>
+      {back === null ? null : <p className="m-0">{back}</p>}
       <noscript>
         <p className="m-0 text-lg">{t("pollFormNeedsScript")}</p>
       </noscript>
@@ -1292,9 +1293,7 @@ export function PollFormPage({
               >
                 {t("pollFormSave")}
               </Button>
-              <a href="/account" className="underline underline-offset-4">
-                {t("pollFormBack")}
-              </a>
+              {back}
             </div>
             <div role="status" className="min-h-6 text-base">
               {saved ? t("pollFormSaved") : null}

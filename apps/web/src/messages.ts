@@ -1067,13 +1067,14 @@ const enUS = {
     "The check that you're a person didn't pass, so nothing was submitted. Submit again to take a new one.",
   pollsFailure_challengeUnavailable:
     "The check that you're a person couldn't run just now, so nothing was submitted. Try again shortly.",
-  pollsCreate: "Create a poll",
+  pollsCreate: "Ask a question",
   pollsEdit: "Edit draft",
   pollFormEyebrow: "Your polls",
-  pollFormNewTitle: "Create a poll",
+  pollFormNewEyebrow: "New poll",
+  pollFormNewTitle: "Ask a question",
   pollFormEditTitle: "Edit your poll",
   pollFormLede:
-    "Write your question and its answers, choose when it closes, and save it as a draft. Only you can see a draft. You can change it as often as you like until you submit it.",
+    "Only you can see a draft, and you can change it as often as you like until you submit it.",
   pollFormBack: "Back to your polls",
   pollFormNeedsScript: "Saving a draft needs this page's script.",
   pollFormLoading: "Loading your draft…",

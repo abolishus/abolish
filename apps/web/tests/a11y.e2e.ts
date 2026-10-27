@@ -473,7 +473,16 @@ async function walk(page: Page, viewport: { width: number; height: number }) {
         ?.focus({ preventScroll: true });
     }, at.index);
     const changed = await changedAt3To1(on, off);
-    const perimeter = 2 * (Math.round(at.box.width) + Math.round(at.box.height));
+    // The perimeter of the part on the screen: a control the browser leaves
+    // straddling the screen's edge when focused (Chromium scrolls only one
+    // wholly out of sight) shows its ring only there, and `seen` has already
+    // judged whether enough of it is in sight.
+    const visible = (from: number, size: number, end: number) =>
+      Math.round(Math.min(end, from + size) - Math.max(0, from));
+    const perimeter =
+      2 *
+      (visible(at.box.x, at.box.width, viewport.width) +
+        visible(at.box.y, at.box.height, viewport.height));
     if (changed < perimeter)
       problems.push(
         `${name}: focus changes ${changed} px at 3:1, under its perimeter ${perimeter}`,

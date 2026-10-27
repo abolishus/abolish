@@ -1331,6 +1331,13 @@ describe("archiveBoards with contract events", () => {
       await refused(
         c`UPDATE archive_event_progress SET segment = segment + 1, accumulator = ${new Uint8Array(32)}`,
       );
+      // A raw run whose CID isn't its bytes' is refused whoever writes it.
+      const [e] = await c<{ cid: Uint8Array }[]>`SELECT cid FROM archive_evidence LIMIT 1`;
+      await expect(
+        c`INSERT INTO archive_runs (cid, contract, first, count, evidence, run)
+          VALUES (${Uint8Array.from([1, 0x55, 0x12, 0x20, ...new Uint8Array(32)])}, ${BOARD}, 9, 1,
+            ${e!.cid}, '\\x00')`,
+      ).rejects.toMatchObject({ code: "23514" });
       // A record whose CID isn't its bytes' is refused whoever writes it.
       await expect(
         c`INSERT INTO archive_evidence (cid, contract, segment, l2_block, count, record)
@@ -1447,6 +1454,58 @@ describe("archiveBoards with contract events", () => {
     ).toEqual([30n]);
     expectReplays(replays, l2);
     expect(replays.find((x) => x.role === "election-registry")?.held).toBe(1n);
+  });
+
+  test("lists a contract's records in count order, a later one waiting on an earlier one's upload", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(10n);
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(0, 1);
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 2, runs: 2 });
+    // Every upload goes through but the first record's.
+    const [row] = await app<{ cid: Uint8Array }[]>`
+      SELECT cid FROM archive_evidence ORDER BY count LIMIT 1`;
+    const first = [...arweave.txs.entries()].find(
+      ([, t]) => readArchivedObject(t.data, new Uint8Array(row!.cid), 1 << 20).ok,
+    )![0];
+    arweave.drop((id) => id === first);
+    arweave.mine();
+    arweave.advance(DEPTH);
+    await run(arweave, eventOptions(l2));
+    const listed = await app<{ count: string; listed: boolean }[]>`
+      SELECT count::text, listed_in IS NOT NULL AS listed FROM archive_evidence ORDER BY count`;
+    expect(listed).toEqual([
+      { count: "1", listed: false },
+      { count: "2", listed: false },
+    ]);
+    now += REPOST;
+    await drain(arweave, eventOptions(l2));
+    const { walk, replays } = await replay(arweave);
+    expect(walk.evidence).toHaveLength(2);
+    expectReplays(replays, l2);
+  });
+
+  test("refuses events that check but don't encode as runs, holding up only their contract", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(0);
+    // Topics an iterable but no array: the accumulator takes them, the run's codec doesn't.
+    const honest = l2.events.bind(l2);
+    l2.events = async (c, from, to) =>
+      (await honest(c, from, to)).map((e) => ({
+        ...e,
+        topics: new Set(e.topics) as unknown as Uint8Array[],
+      }));
+    const r = await run(arweave, eventOptions(l2));
+    expect(r).toMatchObject({ evidence: 0, posted: 2 });
+    expect(r.eventFailures.map((f) => [hex(f.contract), f.error.code])).toEqual([
+      [hex(BOARD), "events"],
+    ]);
   });
 
   test("refuses malformed contract-event options", async () => {

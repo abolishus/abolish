@@ -620,7 +620,14 @@ async function writeContractEvents(
         if (proven.count > last.count) {
           const events = await ask(() => ce.source.events(contract, last.count, proven.count));
           replayEvents(events, last, proven);
-          written = splitRuns(ce.l2ChainId, contract, last.count, events);
+          try {
+            written = splitRuns(ce.l2ChainId, contract, last.count, events);
+          } catch (e) {
+            throw new ContractEventError(
+              "events",
+              `they don't encode as runs (${e instanceof Error ? e.message : String(e)})`,
+            );
+          }
           // A record is listed with its runs, in one manifest.
           if (written.length > MAX_MANIFEST_RUNS)
             throw new ContractEventError("runs", `${written.length} runs for one record`);
@@ -929,8 +936,8 @@ interface EvidenceGroup {
 /**
  * The records and runs not yet listed, each record with its runs. A record
  * or run a resumed manifest already lists, written again after a wipe, is
- * marked as listed there rather than listed twice; a record is due once it
- * and every run of it has confirmed.
+ * marked as listed there rather than listed twice; a record is due once it,
+ * every run of it and every earlier record of its contract has confirmed.
  */
 async function waitingGroups(
   client: Sql,
@@ -948,6 +955,7 @@ async function waitingGroups(
     .where(isNull(archiveEvidence.listedIn))
     .orderBy(asc(archiveEvidence.contract), asc(archiveEvidence.count));
   const groups: EvidenceGroup[] = [];
+  const blocked = new Set<string>();
   for (const e of records) {
     const runs = await db
       .select({
@@ -970,7 +978,13 @@ async function waitingGroups(
       }
       continue;
     }
-    if (!confirmed.has(hex(e.cid)) || runs.some((r) => !confirmed.has(hex(r.cid)))) continue;
+    // A contract's records are listed in count order, so no manifest names
+    // a record whose runs a reader can't reach from index 0 (T-53).
+    if (blocked.has(hex(e.contract))) continue;
+    if (!confirmed.has(hex(e.cid)) || runs.some((r) => !confirmed.has(hex(r.cid)))) {
+      blocked.add(hex(e.contract));
+      continue;
+    }
     groups.push({
       evidence: {
         contract: new Uint8Array(e.contract),
@@ -1204,7 +1218,9 @@ async function post(
       .select({ bytes: archiveRuns.run })
       .from(archiveRuns)
       .where(eq(archiveRuns.cid, cid));
-    if (row !== undefined) await send(cid, new Uint8Array(row.bytes));
+    // Derived again: the table (0049) binds only a raw CID to its bytes.
+    if (row !== undefined && equal(objectCid(new Uint8Array(row.bytes)), cid))
+      await send(cid, new Uint8Array(row.bytes));
   }
   let refused = 0;
   const objects = await db.select().from(archiveObjects).orderBy(asc(archiveObjects.cid));

@@ -1,7 +1,8 @@
 import { bigint, boolean, integer, pgTable, text } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0046_archive.sql and 0048_archive_contract_events.sql;
+// Drizzle view of migrations/0046_archive.sql, 0048_archive_contract_events.sql
+// and 0049_archive_run_cids.sql;
 // a test checks the two agree. Operational: the worker's record of what it
 // archived on Arweave, its manifest chain, the transactions it posted
 // (P4-3 part 4b-1) and the contract-event evidence and runs it wrote

@@ -3,7 +3,10 @@
 
 Elections for the verifier's ballot admission beside an author panel
 (docs/spec/verifier.md, Key ceremony, step 5, and Ballot admission; 5.1 to
-5.5, 5.7): a version-6 definition with a 2-of-3 author panel, whose board
+5.5, 5.7): a version-6 definition, or, for
+docs/spec/vectors/verifier-ballots-v4-author-definition-v7.json, a version-7
+one with a fixed electorate, which the verifier reads as version 6 under
+version 7's own hashes and stubs (docs/spec/verifier.md, 2.3), with a 2-of-3 author panel, whose board
 carries the author panel's transcript, the default panel's and the author
 approvals record, and ballots (version 4) whose author halves are judged
 against the author panel's registered key set, the output of its own run,
@@ -14,11 +17,14 @@ and the default panel a bundle pins, with the rows 1.3, 2.3, 2.5, 3.1, 3.2,
 The author run binds the definition's own author stub (both transcript
 hashes zeroed) and the default run its default stub (which keeps
 `author_transcript_hash`), so both runs are of the definition they're
-checked against (election-definition.md, Author panel). It reuses this
-folder's independent Python implementations, which share no code with
+checked against (election-definition.md, Author panel). Under version 7 three
+cases are its own: a ballot, the author approvals and the author transcript
+each made for the same election read as version 6, none of which counts
+here. It reuses this folder's independent Python implementations, which share no code with
 packages/crypto or packages/verifier: verifier-ballots-v4-vectors.py (the
 electorate, the definition, the version-4 record and its admission order,
-through ballot-v4-records-vectors.py), ceremony-vectors.py (both runs and
+through ballot-v4-records-vectors.py, and version 7's layout and version-6
+reading, through rolling-electorate-vectors.py), ceremony-vectors.py (both runs and
 their transcript check), key-set-vectors.py (the key set hash and the
 registration statement) and author-ceremony-vectors.py (the author panel
 and the approvals record).
@@ -26,12 +32,13 @@ and the approvals record).
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for verifier-ballots-v4.json:
 
-  python3 -I -B verifier-ballots-v4-author-vectors.py statements <constants> <work>/statements.json
+  python3 -I -B verifier-ballots-v4-author-vectors.py statements <constants> <work>/statements.json [7]
   vp node ballot-proofs.mjs <artifacts-dir> <work>/statements.json <work>/proofs.json
-  python3 -I -B verifier-ballots-v4-author-vectors.py assemble <constants> <work>/proofs.json <out-dir>
+  python3 -I -B verifier-ballots-v4-author-vectors.py assemble <constants> <work>/proofs.json <out-dir> [7]
 
 where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json
-and ballot-proofs.mjs runs outside the workspace (see its header). Every value
+and ballot-proofs.mjs runs outside the workspace (see its header); a final
+`7` makes the definition-version-7 file, with its own proofs. Every value
 but the proofs is deterministic from fixed labels (test data, never keys);
 Groth16 proving is randomised, so the committed file is the record. Then
 `vp check --fix` formats it.
@@ -74,15 +81,15 @@ def det(label):
     return hashlib.sha256(b"abolish verifier ballots v4 author vectors " + label.encode()).digest()
 
 
-def pins():
-    """verifier-ballots-v4.json's version-6 profile under board-entry version 7, which carries the approvals."""
-    p = vb4.pins_for()
+def pins(version=6):
+    """verifier-ballots-v4.json's version-6 (or version-7) profile under board-entry version 7, which carries the approvals."""
+    p = vb4.pins_for(definition=version)
     return dict(p, pins=[(t, BOARD_VERSION if t == vb4.BOARD_ENTRY_TYPE else v) for t, v in p["pins"]])
 
 
 def author_stub_hash(d):
-    """The author panel's stub: the definition with both transcript hashes zeroed (election-definition.md, Stub hash)."""
-    return H(ds(STUB_TAG, d6.enc_definition_v6(dict(d, ceremony_transcript_hash=bytes(32), author_transcript_hash=bytes(32)))))
+    """The author panel's stub: the definition, under its own version's layout, with both transcript hashes zeroed (election-definition.md, Stub hash)."""
+    return H(ds(STUB_TAG, vc.encode(dict(d, ceremony_transcript_hash=bytes(32), author_transcript_hash=bytes(32)))))
 
 
 def context(d, stub):
@@ -93,10 +100,10 @@ def key_set_hash(result):
     return ks.key_set_hash([(s["index"], ks.kem_key_hash(bytes.fromhex(s["kemKey"])), bytes.fromhex(s["signingKey"])) for s in result["registered"]])
 
 
-def approval(d, author, index, transcript_hash, ksh):
-    """Author seat `index`'s signature on its ceremony registration statement (ceremony.md, Author panel, Approvals)."""
+def approval(d, author, index, transcript_hash, ksh, stub_of=None):
+    """Author seat `index`'s signature on its ceremony registration statement (ceremony.md, Author panel, Approvals), naming `stub_of`'s author stub where given, else `d`'s."""
     pid = cv.panel_id(author["k"], author["keys"], ac.AUTHOR_PANEL_TAG)
-    m = ks.statement(d["l2_chain_id"], d["trustee_registry"], pid, index, author_stub_hash(d), transcript_hash, ksh)
+    m = ks.statement(d["l2_chain_id"], d["trustee_registry"], pid, index, author_stub_hash(stub_of or d), transcript_hash, ksh)
     return (index, cv.sign(author["secrets"][index - 1], ac.REGISTRATION_TAG, m))
 
 
@@ -120,8 +127,8 @@ def approving(d, author, transcript_hash, ksh, records):
     return sorted(counted) if named else None
 
 
-def build(constants):
-    """Everything but the proofs' bytes, deterministically."""
+def build(constants, version=6):
+    """Everything but the proofs' bytes, deterministically, under definition version 6 or a fixed version 7."""
     b1.bjj_self_check()
     mem.self_check()
     pos = b1.Poseidon(constants)
@@ -144,28 +151,32 @@ def build(constants):
         electorate=electorate,
         membership_vk_hash=vb4.MEMBERSHIP_VK_HASH,
         questions=[d6.d5.q(*x) for x in vb4.QUESTIONS],
-        profile=pins(),
+        profile=pins(version),
         **d6.SEALED_EVERYDAY,
         author_threshold=author["k"],
         author_keys=list(author["keys"]),
         author_transcript_hash=bytes(32),
     )
+    if version == 7:
+        base.update(electorate_mode=vb4.rv.FIXED, rolling_electorate=[])
     proofs, checks, bundles = {}, [], []
 
-    def election_for(label, author_seats):
-        """The definition, both runs' transcripts and the author run's check: the author run first, over the author stub, then the default run over the default stub, which binds the author transcript."""
+    def election_for(label, author_seats, author_stub_of=None):
+        """The definition, both runs' transcripts and the author run's check: the author run first, over the author stub (or the stub of `author_stub_of`, a function of the zeroed definition, where given), then the default run over the default stub, which binds the author transcript."""
         # Both transcript hashes zeroed: the author stub, which no rule judges
         # (an author panel's transcript hash is never zero in a definition).
         zeroed = dict(base, panel_id=cv.panel_id(panel["k"], panel["keys"]), threshold=panel["k"], panel_size=len(panel["keys"]), ceremony_transcript_hash=bytes(32))
-        t_a = vc.transcript(f"verifier-ballots-v4-author/{label}/author", author, author_seats, context(zeroed, author_stub_hash(zeroed)))
+        stub = author_stub_hash(author_stub_of(zeroed) if author_stub_of else zeroed)
+        t_a = vc.transcript(f"verifier-ballots-v4-author/{label}/author", author, author_seats, context(zeroed, stub))
         fields = dict(base, author_transcript_hash=H(ds(vc.TRANSCRIPT_TAG, t_a)))
         # The default run's `duplicate-key` reads the author keys (ceremony.md, Author panel).
         own = dict(panel, otherKeys=list(author["keys"]))
         t_d = vc.transcript(f"verifier-ballots-v4-author/{label}/default", own, [1, 2, 3], vc.election_of(vc.definition_for(panel, bytes(32), fields)))
         d = vc.definition_for(panel, H(ds(vc.TRANSCRIPT_TAG, t_d)), fields)
-        assert vc.own_version(d) == 6 and author_stub_hash(d) == author_stub_hash(zeroed)
+        assert vc.own_version(d) == version and author_stub_hash(d) == author_stub_hash(zeroed)
         checked = cv.check(author, t_a, context(d, author_stub_hash(d)))
-        assert checked["ok"] and [s["index"] for s in checked["registered"]] == author_seats, checked
+        # A transcript made for another stub fails the author run's check (T-37).
+        assert (checked["ok"] and [s["index"] for s in checked["registered"]] == author_seats) != bool(author_stub_of), checked
         h = H(ds(vb4.DEFINITION_TAG, vc.encode(d)))
         e = dict(
             r4.rules(vb4.QUESTIONS, d["threshold"], d["panel_size"], d["author_threshold"], len(d["author_keys"])),
@@ -173,11 +184,11 @@ def build(constants):
             definitionHash=h,
             cells=[dict(c, root=r["root"]) for c, r in zip(cells, [c for t in d["electorate"] for c in t["cells"]])],
         )
-        run = {"transcript": t_a, "hash": H(ds(vc.TRANSCRIPT_TAG, t_a)), "keySetHash": key_set_hash(checked), "registered": author_seats}
+        run = {"transcript": t_a, "hash": H(ds(vc.TRANSCRIPT_TAG, t_a)), "keySetHash": key_set_hash(checked) if checked["ok"] else None, "registered": author_seats}
         return d, t_d, e, run
 
-    def records(d, run, seats):
-        return ac.enc_record(run["hash"], [approval(d, author, i, run["hash"], run["keySetHash"]) for i in seats])
+    def records(d, run, seats, stub_of=None):
+        return ac.enc_record(run["hash"], [approval(d, author, i, run["hash"], run["keySetHash"], stub_of) for i in seats])
 
     def where(label, cell):
         c = cells[cell]
@@ -241,7 +252,7 @@ def build(constants):
         return pid
 
     def bundle(bid, description, d, e, run, payloads, approvals):
-        """`payloads` is the board in order: bytes (a transcript or an approvals record) or (ballot, proof id). `approvals` is the author part of 3.1: "pass", "missing" or "short"."""
+        """`payloads` is the board in order: bytes (a transcript or an approvals record) or (ballot, proof id). `approvals` is the author part of 3.1: "pass", "missing" or "short", or "run" where the author run's check fails before any approval is read."""
         for i, p in enumerate(payloads):
             if isinstance(p, tuple):
                 b, pid = p
@@ -330,6 +341,39 @@ def build(constants):
         [run_all["transcript"], t_all, records(d_all, run_all, [1, 2, 3]), (b_all, p_all)],
         "pass",
     )
+
+    if version == 7:
+        # The same election read as version 6 (verifier-ballots-v4-vectors.py,
+        # `v6_reading`): its hash and both stubs are another definition's, so
+        # a ballot made for it is another election's (T-12, T-34), approvals
+        # naming its author stub approve nothing here, and an author
+        # transcript made for that stub registers no author key set (T-37).
+        e6 = dict(e, label="v6-reading", definitionHash=H(ds(vb4.DEFINITION_TAG, vc.encode(vb4.v6_reading(d)))))
+        assert e6["definitionHash"] != e["definitionHash"] and author_stub_hash(vb4.v6_reading(d)) != author_stub_hash(d)
+        b_v6 = ballot("v6-reading", e6, 0, nullifier("r0/0", e6, 0), [(3, [0]), (4, []), (2, [0])], zero4, a12)
+        p_v6 = prove("v6-reading", "r0/0", e6, 0, b_v6)
+        bundle(
+            "v6-reading",
+            "Definition version 7 under a fixed electorate, beside the author panel, with a ballot made for the same election read as version 6 (its version-6 hash, with a valid proof under that hash's scope) after an admitted one: 5.1 rejects it as another election's.",
+            d, e, run,
+            [run["transcript"], t_d, approved, (b_a, p_a), (b_v6, p_v6)],
+            "pass",
+        )
+        bundle(
+            "v6-approvals",
+            "Both author seats approve the author run under the version-6 reading's author stub: neither approval counts here, short of q_A = 2, so 3.1 fails with author-approvals and no ballot is judged.",
+            d, e, run,
+            [run["transcript"], t_d, records(d, run, [1, 2], stub_of=vb4.v6_reading(d)), (b_a, p_a)],
+            "short",
+        )
+        d_s6, t_s6, e_s6, run_s6 = election_for("author-v6-stub", [1, 2], author_stub_of=vb4.v6_reading)
+        bundle(
+            "v6-author-stub",
+            "The author transcript was made for the version-6 reading's author stub, and the definition and its default run bind it: the author run's check fails 3.1 with ceremony-signature, so no author key set is registered and no ballot is judged.",
+            d_s6, e_s6, run_s6,
+            [run_s6["transcript"], t_s6, (b_a, p_a)],
+            "run",
+        )
     return {"panel": panel, "author": author, "proofs": proofs, "checks": checks, "bundles": bundles}
 
 
@@ -346,13 +390,13 @@ def rows_for(rejected):
     return rows
 
 
-def statements(constants, out):
-    s = build(constants)
+def statements(constants, out, version=6):
+    s = build(constants, version)
     pathlib.Path(out).write_text(json.dumps({"proofs": list(s["proofs"].values()), "checks": s["checks"]}, indent=2) + "\n")
 
 
-def assemble(constants, proofs_path, out_dir):
-    s = build(constants)
+def assemble(constants, proofs_path, out_dir, version=6):
+    s = build(constants, version)
     got = json.loads(pathlib.Path(proofs_path).read_text())
     proof_bytes = {k: bytes.fromhex(v) for k, v in got["proofs"].items()}
     verdicts = got["verdicts"]
@@ -374,9 +418,18 @@ def assemble(constants, proofs_path, out_dir):
         ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass") and [x["index"] for x in ceremony["registered"]] == [1, 2, 3], bnd["id"]
         records = [p for p in payloads if int.from_bytes(p[:2], "big") == ac.APPROVALS_TYPE]
-        seats = approving(d, author, run["hash"], run["keySetHash"], records)
-        quorum = max(author["k"], len(author["keys"]) - 1)
-        part = "missing" if seats is None else "pass" if len(seats) >= quorum else "short"
+        # The author run's check comes first: its transcript, found by
+        # `author_transcript_hash`, against the definition's own author stub.
+        at_a = next(i for i, p in enumerate(payloads) if H(ds(vc.TRANSCRIPT_TAG, p)) == d["author_transcript_hash"])
+        checked = cv.check(author, payloads[at_a], context(d, author_stub_hash(d)))
+        if not checked["ok"]:
+            # A transcript made for another stub fails at its first seat's signature.
+            assert "seats" not in checked, checked
+            part, run_row = "run", outcome("fail", checked["code"], {"entry": at_a, **AUTHOR})
+        else:
+            seats = approving(d, author, run["hash"], run["keySetHash"], records)
+            quorum = max(author["k"], len(author["keys"]) - 1)
+            part = "missing" if seats is None else "pass" if len(seats) >= quorum else "short"
         assert part == bnd["approvals"], bnd["id"]
         rows = {
             "1.3": NOT_IMPLEMENTED,
@@ -388,8 +441,11 @@ def assemble(constants, proofs_path, out_dir):
                 "pass": NOT_IMPLEMENTED,
                 "missing": outcome("unverifiable", "author-approvals-missing", AUTHOR),
                 "short": outcome("fail", "author-approvals", AUTHOR),
-            }[part],
-            "3.2": outcome("pass"),
+            }[part]
+            if part != "run"
+            else run_row,
+            # The author run's 3.2 isn't reached where its check failed.
+            "3.2": NOT_REACHED if part == "run" else outcome("pass"),
         }
         ballots = None
         if part == "pass":
@@ -448,14 +504,23 @@ def assemble(constants, proofs_path, out_dir):
     assert [r["entry"] for r in mixed["rejected"] if r["code"] == "repeat"] == [12], mixed
     assert by["author-every-seat"]["ballots"] == {"admitted": 1, "rejected": [], "repeats": []}
     assert by["approvals-missing"]["expected"]["5.1"] == NOT_REACHED and by["approvals-short"]["expected"]["3.1"]["status"] == "fail"
+    if version == 7:
+        assert by["v6-reading"]["ballots"] == {"admitted": 1, "rejected": [{"entry": 4, "code": "ballot-stray"}], "repeats": []}
+        assert by["v6-approvals"]["expected"]["3.1"] == outcome("fail", "author-approvals", AUTHOR) and by["v6-approvals"]["expected"]["5.1"] == NOT_REACHED
+        assert by["v6-author-stub"]["expected"]["3.1"] == outcome("fail", "ceremony-signature", {"entry": 0, **AUTHOR})
+        assert by["v6-author-stub"]["expected"]["5.1"] == NOT_REACHED
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",
-        "title": "The verifier's ballot admission beside an author panel (definition version 6, ballot version 4): definitions, boards carrying both panels' transcripts and the author approvals, and the pinned default panel, with the rows 1.3, 2.3, 2.5, 3.1, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots",
+        "title": "The verifier's ballot admission beside an author panel ("
+        + ("definition version 6" if version == 6 else "definition version 7 with a fixed electorate, read as version 6 under version 7's hashes and stubs")
+        + ", ballot version 4): definitions, boards carrying both panels' transcripts and the author approvals, and the pinned default panel, with the rows 1.3, 2.3, 2.5, 3.1, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-ballots-v4-author-vectors.py, from verifier-ballots-v4-vectors.py, ceremony-vectors.py, "
-            "key-set-vectors.py and author-ceremony-vectors.py (independent Python implementations); membership proofs by "
+            "key-set-vectors.py"
+            + (" and author-ceremony-vectors.py" if version == 6 else ", author-ceremony-vectors.py and rolling-electorate-vectors.py")
+            + " (independent Python implementations); membership proofs by "
             "packages/crypto/scripts/ballot-proofs.mjs, run outside the workspace with Semaphore 4.14.3's depth-32 circuit artifacts "
             "and snarkjs 0.7.5, whose groth16.verify gives every pairing verdict on the signals derived here from each record"
         ),
@@ -463,19 +528,21 @@ def assemble(constants, proofs_path, out_dir):
         "panel": {"threshold": str(panel["k"]), "keys": [k.hex() for k in panel["keys"]]},
         "cases": cases,
     }
-    path = pathlib.Path(out_dir, "verifier-ballots-v4-author.json")
+    path = pathlib.Path(out_dir, "verifier-ballots-v4-author.json" if version == 6 else "verifier-ballots-v4-author-definition-v7.json")
     path.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"wrote {path}: {len(cases)} cases")
 
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "statements":
-        statements(sys.argv[2], sys.argv[3])
-    elif cmd == "assemble":
-        assemble(sys.argv[2], sys.argv[3], sys.argv[4])
+    version = 7 if sys.argv[-1] == "7" else 6
+    args = sys.argv[2:-1] if version == 7 else sys.argv[2:]
+    if cmd == "statements" and len(args) == 2:
+        statements(*args, version)
+    elif cmd == "assemble" and len(args) == 3:
+        assemble(*args, version)
     else:
-        raise SystemExit("usage: verifier-ballots-v4-author-vectors.py statements <constants> <out> | assemble <constants> <proofs> <out-dir>")
+        raise SystemExit("usage: verifier-ballots-v4-author-vectors.py statements <constants> <out> [7] | assemble <constants> <proofs> <out-dir> [7]")
 
 
 if __name__ == "__main__":

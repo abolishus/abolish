@@ -1403,67 +1403,74 @@ export function PollFormPage({
         </aside>
 
         <div className="grid min-w-0 content-start gap-12 lg:col-span-7">
-          <Section
-            title={t("pollFormSubmitTitle")}
-            id="poll-form-submit"
-            lede={
-              <div className="grid gap-3">
-                <p className="m-0">{t("pollFormSubmitLede")}</p>
-                {isNew ? null : (
-                  <p className="m-0 text-sm text-muted-foreground">
+          <Section title={t("pollFormSubmitTitle")} id="poll-form-submit">
+            {/* What submitting does follows the heading in the section's own
+                column: beside the heading from 768px, it and the Cloudflare
+                note made the heading's row 224px tall over an empty band
+                (P2-29, creating a poll's iteration 9). */}
+            <div className="grid gap-8">
+              <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
+                {t("pollFormSubmitLede")}
+              </p>
+              {/* Only a saved draft can be submitted, so before the first save
+                  there is nothing to check through and no button that could
+                  only refuse. */}
+              {isNew ? (
+                <p className="m-0 max-w-prose text-base font-semibold">
+                  {t("pollFormSubmitAfterSave")}
+                </p>
+              ) : (
+                <div className="grid gap-4">
+                  <PollReview
+                    t={t}
+                    form={form}
+                    phoneVerification={phoneVerification}
+                    onJump={jump}
+                  />
+                  {/* The note on Cloudflare's check sits by the button that
+                      starts it, where it was read a whole review earlier
+                      (T-11, iteration 9). */}
+                  <p className="m-0 max-w-prose text-sm text-muted-foreground">
                     {t("pollFormSubmitCloudflare")}
                   </p>
-                )}
-              </div>
-            }
-          >
-            {/* Only a saved draft can be submitted, so before the first save
-                there is nothing to check through and no button that could
-                only refuse. */}
-            {isNew ? (
-              <p className="m-0 max-w-prose text-base font-semibold">
-                {t("pollFormSubmitAfterSave")}
-              </p>
-            ) : (
-              <div className="grid gap-4">
-                <PollReview t={t} form={form} phoneVerification={phoneVerification} onJump={jump} />
-                <div>
-                  <Button
-                    type="button"
-                    size="lg"
-                    variant={ready ? "default" : "outline"}
-                    disabled={busy || submitting !== "idle"}
-                    onClick={() => void submit()}
-                  >
-                    {t("pollFormSubmit")}
-                  </Button>
+                  <div>
+                    <Button
+                      type="button"
+                      size="lg"
+                      variant={ready ? "default" : "outline"}
+                      disabled={busy || submitting !== "idle"}
+                      onClick={() => void submit()}
+                    >
+                      {t("pollFormSubmit")}
+                    </Button>
+                  </div>
+                  {/* Turnstile renders its frame here (src/account/challenge.ts). */}
+                  <div
+                    ref={checkBox}
+                    role="group"
+                    aria-label={t("pollFormSubmitCheckLabel")}
+                    hidden={submitting !== "checking"}
+                  />
+                  <div role="status" className="min-h-6 text-base">
+                    {submitting === "checking"
+                      ? t("pollFormSubmitChecking")
+                      : submitting === "sending"
+                        ? t("pollFormSubmitting")
+                        : submitting === "sent"
+                          ? t("pollFormSubmitted")
+                          : null}
+                  </div>
+                  {submitFailure === undefined ? null : (
+                    <p role="alert" className="m-0 text-destructive">
+                      {t(
+                        SUBMIT_MESSAGES[submitFailure] ??
+                          `pollsFailure_${submitFailure as DraftsFailure}`,
+                      )}
+                    </p>
+                  )}
                 </div>
-                {/* Turnstile renders its frame here (src/account/challenge.ts). */}
-                <div
-                  ref={checkBox}
-                  role="group"
-                  aria-label={t("pollFormSubmitCheckLabel")}
-                  hidden={submitting !== "checking"}
-                />
-                <div role="status" className="min-h-6 text-base">
-                  {submitting === "checking"
-                    ? t("pollFormSubmitChecking")
-                    : submitting === "sending"
-                      ? t("pollFormSubmitting")
-                      : submitting === "sent"
-                        ? t("pollFormSubmitted")
-                        : null}
-                </div>
-                {submitFailure === undefined ? null : (
-                  <p role="alert" className="m-0 text-destructive">
-                    {t(
-                      SUBMIT_MESSAGES[submitFailure] ??
-                        `pollsFailure_${submitFailure as DraftsFailure}`,
-                    )}
-                  </p>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </Section>
         </div>
       </form>

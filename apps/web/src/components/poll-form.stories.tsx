@@ -152,6 +152,18 @@ function fakeChallenge({ unavailable = false } = {}): Challenge & {
   };
 }
 
+/** Where an element's own text is drawn, by its lines rather than its box. */
+function textLines(element: Element) {
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  const rects = [...range.getClientRects()];
+  return {
+    count: new Set(rects.map((r) => Math.round(r.top))).size,
+    top: Math.min(...rects.map((r) => r.top)),
+    bottom: Math.max(...rects.map((r) => r.bottom)),
+  };
+}
+
 const solves = (challenge: unknown) => (challenge as ReturnType<typeof fakeChallenge>).solves;
 
 const meta = {
@@ -606,6 +618,58 @@ export const SubmitSectionDesktop: Story = {
   },
 };
 
+/**
+ * Every section's lede follows its heading in the section's own column: beside
+ * the heading from 768px, What are you asking? and When does it close? drew
+ * rows of 104px and 80px for a 45px heading, the band iterations 8 and 9 took
+ * out of the others (P2-29, creating a poll's iteration 10).
+ */
+export const SectionLedesDesktop: Story = {
+  args: { client: savedDraft(), id: ID },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(1280);
+    for (const [name, lede] of [
+      ["What are you asking?", /^Each question has its options/],
+      ["When does it close?", /^Choose a time on your own clock/],
+    ] as const) {
+      const heading = (
+        await canvas.findByRole("heading", { name, level: 2 })
+      ).getBoundingClientRect();
+      const text = canvas.getByText(lede).getBoundingClientRect();
+      await expect(text.left).toBe(heading.left);
+      await expect(text.top - heading.bottom).toBeGreaterThan(0);
+      await expect(text.top - heading.bottom).toBeLessThanOrEqual(40);
+    }
+  },
+};
+
+/**
+ * The problems after a refused save lie the same distance apart whether they
+ * wrap or not: at 360 two that wrapped sat 16px apart and one-line ones 28px
+ * (P2-29, creating a poll's iteration 10).
+ */
+export const ProblemsApartPhone: Story = {
+  args: { client: fakeDrafts(), onCreated: fn() },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    await userEvent.click(await canvas.findByRole("button", { name: "Save draft" }));
+    const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
+    const links = within(summary).getAllByRole("link");
+    const lines = links.map(textLines);
+    await expect(lines.some((l) => l.count > 1)).toBe(true);
+    await expect(lines.some((l) => l.count === 1)).toBe(true);
+    // Each target stays at least 48px tall.
+    for (const link of links)
+      await expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
+    const gaps = lines.slice(1).map((l, i) => l.top - lines[i]!.bottom);
+    for (const gap of gaps) await expect(Math.abs(gap - gaps[0]!)).toBeLessThanOrEqual(1);
+  },
+};
+
 export const SubmitIsTheNextStep: Story = {
   args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
   play: async ({ canvasElement }) => {
@@ -810,11 +874,9 @@ export const ProblemsInAQuestion: Story = {
       "Question 2: Another option of this question says the same. People couldn't tell them apart.",
     ]);
     // Apart, so problems that wrap don't read as one paragraph (P2-29,
-    // creating a poll's iteration 6).
-    const [one, two] = within(summary)
-      .getAllByRole("listitem")
-      .map((item) => item.getBoundingClientRect());
-    await expect((two?.top ?? 0) - (one?.bottom ?? 0)).toBeGreaterThanOrEqual(8);
+    // creating a poll's iteration 6): further apart than a problem's own lines.
+    const [one, two] = within(summary).getAllByRole("link").map(textLines);
+    await expect((two?.top ?? 0) - (one?.bottom ?? 0)).toBeGreaterThanOrEqual(24);
     await expect(writes(args.client)).toEqual([]);
   },
 };

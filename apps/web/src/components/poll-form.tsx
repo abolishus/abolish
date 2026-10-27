@@ -1117,14 +1117,17 @@ export function PollFormPage({
               </h2>
               <p className="m-0">{t("pollFormErrorsLede")}</p>
               {/* Apart, so problems that wrap don't read as one paragraph (P2-29,
-                  creating a poll's iteration 6). */}
-              <ul className="m-0 grid list-none gap-2 p-0">
+                  creating a poll's iteration 6), and by padding rather than a
+                  minimum height, which left a problem of two lines no room
+                  inside its target: wrapped ones sat 16px apart where one-line
+                  ones sat 40px apart (iteration 10). */}
+              <ul className="m-0 grid list-none p-0">
                 {errors.map((e) => (
                   <li key={`${e.id}-${e.problem}`}>
                     <a
                       href={`#${e.id}`}
                       onClick={(event) => jump(event, e.id)}
-                      className="inline-flex min-h-12 items-center text-destructive underline underline-offset-4"
+                      className="inline-flex py-3 text-destructive underline underline-offset-4"
                     >
                       {say(t, e)}
                     </a>
@@ -1250,12 +1253,15 @@ export function PollFormPage({
             </div>
           </Section>
 
-          <Section
-            title={t("pollFormQuestionsTitle")}
-            id="poll-form-questions"
-            lede={<p className="m-0">{t("pollFormQuestionsLede")}</p>}
-          >
+          <Section title={t("pollFormQuestionsTitle")} id="poll-form-questions">
+            {/* What a question holds follows the heading in the section's own
+                column, as in Who can answer and Ready to ask: beside the heading
+                from 768px, its four lines made the heading's row 104px tall
+                over an empty band (P2-29, creating a poll's iteration 10). */}
             <div className="grid gap-6">
+              <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
+                {t("pollFormQuestionsLede")}
+              </p>
               {form.questions.map((q, i) => (
                 <QuestionFields
                   key={q.key}
@@ -1308,16 +1314,13 @@ export function PollFormPage({
             </div>
           </Section>
 
-          <Section
-            title={t("pollFormWhenTitle")}
-            id="poll-form-when"
-            lede={
-              <p className="m-0">
+          <Section title={t("pollFormWhenTitle")} id="poll-form-when">
+            {/* Whose clock the time is on comes under the heading, before the
+                fields it explains (iteration 10). */}
+            <div className="grid gap-4">
+              <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
                 {t("pollFormWhenLede", { zone: zoneName(locale, form.timeZone, now()) })}
               </p>
-            }
-          >
-            <div className="grid gap-4">
               <Errors t={t} errors={errors} id={fieldId.closes} />
               <div className="flex flex-wrap gap-6">
                 <div className="grid gap-2">

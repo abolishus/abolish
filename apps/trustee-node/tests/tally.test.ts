@@ -21,6 +21,7 @@ import {
   type RegisteredKeys,
   sealSummedShares,
   SHARE_CIPHERTEXT,
+  shareCiphertextHash,
   sumShares,
   tallyOpeningStatement,
   tallyRules,
@@ -433,6 +434,40 @@ describe("the tally duty", () => {
     });
   });
 
+  test("a ciphertext matching a counted ballot's share hash that doesn't open under its commitments gives no shares", async () => {
+    const [first, second, third] = ballots as [Cast, Cast, Cast];
+    // Voter 3's ballot committing, for seat 3, to the hash of voter 1's
+    // ciphertext: the hash matches, but the ciphertext is bound to voter 1's
+    // commitments, so it opens nothing (a dishonest client's ballot, which
+    // only the seat's complaint would exclude).
+    const vote = third.record.committed_vote;
+    const crafted: Cast = {
+      ...third,
+      record: {
+        ...third.record,
+        committed_vote: {
+          ...vote,
+          share_hashes: vote.share_hashes.map((h, i) =>
+            i === 2 ? shareCiphertextHash(first.ciphertexts[2] as Uint8Array) : h,
+          ),
+        },
+      },
+      ciphertexts: [third.ciphertexts[0]!, third.ciphertexts[1]!, first.ciphertexts[2]!],
+    };
+    const bytes = encodeBallot(crafted.record);
+    const wire = new Wire();
+    const d = duties(wire, {
+      stores: fresh(),
+      counted: () => fixed([[first.bytes, second.bytes, bytes]], [postingOf(crafted, 3)]),
+    });
+    expect(await d[2]!.step()).toEqual({
+      state: "tallying",
+      cells: [{ state: "missing-shares", missing: 1, held: 0 }],
+      board: "unread",
+    });
+    expect(wire.sent).toEqual([]);
+  });
+
   test("a property: whatever other postings sit beside it, the seat sums exactly when the counted ballot's own ciphertext is among them", async () => {
     const [first, second, third] = ballots as [Cast, Cast, Cast];
     const others = [
@@ -833,7 +868,6 @@ describe("the board's openings read back", () => {
   });
 });
 
-/** The ballot hash a seat stores a ballot's intake under. */
 /** Fresh stores, seat 3's without its intake record of ballot 3. */
 function withoutThird(): SeatStore[] {
   const stores = fresh();
@@ -872,6 +906,7 @@ function postingOf(
   });
 }
 
+/** The ballot hash a seat stores a ballot's intake under. */
 function seatHash(b: Cast): Uint8Array {
   const r = b.record;
   return ballotHash(

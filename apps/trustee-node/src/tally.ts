@@ -448,13 +448,15 @@ export class TallyDuty {
   /**
    * The seat's shares of counted ballot `b`, opened from a posted ciphertext
    * of `ciphertexts` whose hash is `b`'s share hash for this seat, or
-   * `undefined` if none opens to shares that pass the share check. That hash
-   * fixes the ciphertext, so every one that matches opens alike, as the one
-   * delivered at intake would have (docs/spec/share-encryption.md,
-   * Decryption): the posting's `m_i` isn't needed. The share check against
-   * `b`'s own commitments is what keeps another ballot's shares out (T-38);
-   * the hash spares a decapsulation for every posting that can't be `b`'s,
-   * which anyone can make (T-52). Opened in memory each time the
+   * `undefined` if it doesn't open to shares that pass the share check. That
+   * hash fixes the ciphertext, so every one that matches opens alike, as the
+   * one delivered at intake would have (docs/spec/share-encryption.md,
+   * Decryption): the posting's `m_i` isn't needed, and only the first match
+   * is opened, so copies posted under other `m_i`, which anyone who saw
+   * `ct_i` can make, cost no decapsulation (T-52). The hash, and the
+   * associated data binding `b`'s commitments, keep another ballot's
+   * ciphertext out (T-38); the share check refuses a dishonest client's bad
+   * shares behind a matching hash. Opened in memory each time the
    * counted set is fixed and never stored, so destruction leaves none behind
    * (docs/spec/tally.md, Destruction, What; T-14, T-15). Shares that fail
    * are the complaint duty's to prove, never revealed here.
@@ -466,18 +468,16 @@ export class TallyDuty {
     const { election } = this.#o;
     const expected = b.shareHashes[election.index - 1];
     if (expected === undefined) return undefined;
-    for (const ciphertext of ciphertexts) {
-      if (!equal(shareCiphertextHash(ciphertext), expected)) continue;
-      const opened = openShares(
-        { definitionHash: election.definitionHash },
-        election.index,
-        election.kemKeyPair.secretKey,
-        b.vss,
-        ciphertext,
-      );
-      if (opened.ok) return opened.shares;
-    }
-    return undefined;
+    const ciphertext = ciphertexts.find((c) => equal(shareCiphertextHash(c), expected));
+    if (ciphertext === undefined) return undefined;
+    const opened = openShares(
+      { definitionHash: election.definitionHash },
+      election.index,
+      election.kemKeyPair.secretKey,
+      b.vss,
+      ciphertext,
+    );
+    return opened.ok ? opened.shares : undefined;
   }
 
   /** The election's definition, key set and counted cells, once the source fixes them. */

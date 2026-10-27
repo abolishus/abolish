@@ -7,9 +7,9 @@ Elections for the verifier's spoiled-ballot openings beside an author panel
 docs/spec/vectors/verifier-openings-v3-author-definition-v7.json, the same
 election under definition version 7 with a fixed electorate, which the
 verifier reads as version 6 under version 7's own hashes and stubs
-(docs/spec/verifier.md, Definition), with a 2-of-3 author panel whose seat 3 sent nothing, beside the 3-of-4 default panel whose
-seat 4 sent nothing, its board carrying both runs' transcripts and the author
-approvals record. Each opening's author half is checked against the author
+(docs/spec/verifier.md, Definition), with a 2-of-3 author panel whose seat
+3 sent nothing, beside the 3-of-4 default panel whose seat 4 sent nothing,
+its board carrying both runs' transcripts and the author approvals record. Each opening's author half is checked against the author
 panel's registered key set, the output of its own run, approved on the
 board, and each author seat's ciphertext rebuilt under its key there, never a
 key the opening or the default panel names (T-37, T-17). Each case is a

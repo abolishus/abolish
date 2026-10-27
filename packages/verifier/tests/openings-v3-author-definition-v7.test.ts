@@ -120,8 +120,8 @@ describe("2.3 and 6.2 against the independent implementation", () => {
       expect(row(r, "2.3")).toEqual(c.expected["2.3"]);
       expect(r.openings).toEqual(c.openings);
       if (c.openings !== undefined) {
-        // Admission ran against both panels under version 7's author stub:
-        // a ballot is rejected only for its segment (5.5).
+        // Admission ran under the author key set approved for version 7's
+        // author stub: a ballot is rejected only for its segment (5.5).
         expect(r.ballots?.admitted).toBeGreaterThan(0);
         expect(r.ballots?.rejected.every((b) => b.code === "window-boarded-late")).toBe(true);
       }

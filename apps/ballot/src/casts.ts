@@ -18,7 +18,10 @@
 // erased from every cast: no path admits the ballot any more, so no
 // posting of it can help; and once the voter declines to post a cast's unreceipted seats,
 // theirs are erased from it and from every recast of the same seal (Client
-// rule 4).
+// rule 4). Before a run through the relay or the voter's wallet may hand any
+// of a cast's postings out, the cast is marked `handed`, so a page that went
+// away still waits for them once the poll is opened again ([[posting-relay]],
+// Sending after a run).
 // Kept in this origin's IndexedDB and nowhere else: the records
 // say this device voted in these polls, as the identity says it can (T-18).
 //
@@ -89,6 +92,13 @@ export interface CastRecord {
   readonly shares: readonly KeptShare[];
   /** The operator's checked answer, once one passed. */
   readonly boarded?: Boarded;
+  /**
+   * A run may have handed its postings to the relay or a wallet: marked
+   * before any run starts, so the parts may reach the board whatever the
+   * run met, and the page waits for them across a reload ([[posting-relay]],
+   * Sending after a run; T-15, T-25).
+   */
+  readonly handed?: true;
 }
 
 /** The casts of one election and tier, oldest block first, or a store this device couldn't read. */
@@ -134,6 +144,9 @@ export type DeclinePostingOutcome = "declined" | "missing" | "unreadable" | "unw
 /** `eraseShares`'s outcome. */
 export type EraseSharesOutcome = "erased" | "none" | "unreadable" | "unwritable";
 
+/** `recordHanded`'s outcome. */
+export type RecordHandedOutcome = "recorded" | "missing" | "unreadable" | "unwritable";
+
 /** `recordBoarded`'s outcome. */
 export type RecordBoardedOutcome =
   | "recorded"
@@ -149,10 +162,11 @@ const STORE = "casts";
 /**
  * The stored record's version: another is unreadable, never migrated by
  * guessing. Version 1 kept no shares, version 2 no receipts, version 3 no
- * receipts' board entries and version 4 no erased shares; no build wrote
- * any of them, since none recorded a cast before it delivered.
+ * receipts' board entries, version 4 no erased shares and version 5 no
+ * `handed` mark; no build wrote any of them, since none recorded a cast
+ * before it delivered, and none delivers yet.
  */
-const RECORD_VERSION = 5;
+const RECORD_VERSION = 6;
 
 /** The length of an ML-KEM-768 message `m` ([[share-encryption]], Ciphertext). */
 const M_LENGTH = 32;
@@ -388,14 +402,20 @@ const entriesOf = (cast: CastRecord): Boarded[] => [
 const definitionOf = (ballot: Uint8Array) => ballot.subarray(3, 35);
 
 function castOf(v: unknown): CastRecord | undefined {
-  if (!isRecord(v) || !hasExactly(v, ["ballot", "shares", "boarded"])) return undefined;
-  const { ballot, shares, boarded } = v;
+  if (!isRecord(v) || !hasExactly(v, ["ballot", "shares", "boarded", "handed"])) return undefined;
+  const { ballot, shares, boarded, handed } = v;
   if (!(ballot instanceof Uint8Array) || ballot.length > MAX_BOARD_PAYLOAD) return undefined;
+  if (handed !== true && handed !== false) return undefined;
   const decoded = decodedOf(ballot);
   if (decoded === undefined) return undefined;
   const kept = sharesFor(decoded, shares);
   if (kept === undefined) return undefined;
-  const cast = { ballot: ballot.slice(), l1Number: decoded.l1_ref_number, shares: kept };
+  const cast = {
+    ballot: ballot.slice(),
+    l1Number: decoded.l1_ref_number,
+    shares: kept,
+    ...(handed ? { handed: true as const } : {}),
+  };
   if (boarded === null) return cast;
   const answer = boardedOf(boarded, ballot);
   return answer === undefined ? undefined : { ...cast, boarded: answer };
@@ -405,8 +425,9 @@ function castOf(v: unknown): CastRecord | undefined {
  * The casts a stored value holds, or `undefined` if it isn't exactly a
  * record this client writes: version 3 and a list of version-3 ballot
  * records naming strictly ascending L1 blocks, each with its qualified
- * seats' shares, each with its `m_i` or its receipt, and its checked board
- * entry or `null`. Every byte array is a copy.
+ * seats' shares, each with its `m_i` or its receipt, its checked board
+ * entry or `null`, and whether it is marked `handed`. Every byte array is a
+ * copy.
  */
 export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
   if (!isRecord(value) || !hasExactly(value, ["v", "casts"])) return undefined;
@@ -441,11 +462,12 @@ export function parseStoredCasts(value: unknown): CastRecord[] | undefined {
 export function storedCasts(casts: readonly CastRecord[]): Record<string, unknown> {
   const record = {
     v: RECORD_VERSION,
-    casts: casts.map(({ ballot, shares, boarded }) => ({
+    casts: casts.map(({ ballot, shares, boarded, handed }) => ({
       ballot: ballot.slice(),
       shares: shares.map(storedShare),
       boarded:
         boarded === undefined ? null : { entry: boarded.entry.slice(), link: boarded.link.slice() },
+      handed: handed === true,
     })),
   };
   const back = parseStoredCasts(record);
@@ -471,6 +493,8 @@ export interface UnsentCast {
   readonly trackingCode: Uint8Array;
   /** Its qualified seats with no receipt kept, each with its `ct_i`, in seat order. */
   readonly undelivered: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
+  /** A run may have handed its postings out (`CastRecord.handed`): the page waits for them. */
+  readonly handed?: true;
 }
 
 /**
@@ -506,6 +530,7 @@ export function unsentCast(
     undelivered: newest.shares.flatMap((share) =>
       "m" in share ? [{ seat: share.seat, ciphertext: share.ciphertext.slice() }] : [],
     ),
+    ...(newest.handed === true ? { handed: true as const } : {}),
   };
 }
 
@@ -616,7 +641,11 @@ async function updateCasts<T extends string>(
  * then keep neither the seat's `m_i` nor its receipt. Throws on bytes that
  * aren't a version-3 ballot record, and on shares that aren't exactly its
  * qualified seats', each hashing to its share hash with a 32-byte `m` or
- * none: the worker's own output, so a mismatch is this client's fault.
+ * none: the worker's own output, so a mismatch is this client's fault. A
+ * recast of a seal whose earlier cast is marked `handed` is marked too: it
+ * carries the same ballot hash and shares, so the postings a run may have
+ * handed out are its postings too, byte for byte ([[posting-relay]],
+ * Sending after a run).
  */
 export function withCast(
   casts: readonly CastRecord[],
@@ -683,7 +712,22 @@ export function withCast(
           boarded: { entry: held.boarded.entry.slice(), link: held.boarded.link.slice() },
         };
   });
-  return [...casts, { ballot: ballot.slice(), l1Number, shares: receipted }];
+  const hash = ballotHashOf(decoded);
+  const handed = casts.some(
+    (cast) =>
+      cast.handed === true &&
+      // Every cast held decoded when it was read.
+      equalBytes(ballotHashOf(decodedOf(cast.ballot) as BallotRecordV3), hash),
+  );
+  return [
+    ...casts,
+    {
+      ballot: ballot.slice(),
+      l1Number,
+      shares: receipted,
+      ...(handed ? { handed: true as const } : {}),
+    },
+  ];
 }
 
 /**
@@ -770,6 +814,42 @@ export async function recordReceipt(
   const key = keyOf(electionId, tier);
   withReceipt([], ballot, checked);
   return updateCasts(key, factory, (casts) => withReceipt(casts, ballot, checked));
+}
+
+/**
+ * `casts` with the cast whose bytes are exactly `ballot` marked `handed`,
+ * before a run through the relay or the voter's wallet may hand any of its
+ * postings out, so a page that went away before they were recorded still
+ * waits for them, and sends the ballot once they are, when the poll is
+ * opened again ([[posting-relay]], Sending after a run; T-25). A mark is
+ * never taken back: whatever a run met, its parts may still reach the board
+ * (T-15). `missing` if no cast has these bytes.
+ */
+export function withHanded(
+  casts: readonly CastRecord[],
+  ballot: Uint8Array,
+): CastRecord[] | "missing" {
+  const at = casts.findIndex((cast) => equalBytes(cast.ballot, ballot));
+  const cast = casts[at];
+  if (cast === undefined) return "missing";
+  return casts.with(at, { ...cast, handed: true });
+}
+
+/**
+ * Marks the recorded cast whose bytes are exactly `ballot` in `electionId`
+ * at `tier` as `handed` (`withHanded`), in one transaction with the read.
+ * `unreadable` for casts this device can't read, which are never replaced,
+ * and `unwritable` for storage the browser refuses: the caller then hands
+ * nothing out.
+ */
+export async function recordHanded(
+  electionId: Uint8Array,
+  tier: number,
+  ballot: Uint8Array,
+  factory: IDBFactory = indexedDB,
+): Promise<RecordHandedOutcome> {
+  const key = keyOf(electionId, tier);
+  return updateCasts(key, factory, (casts) => withHanded(casts, ballot));
 }
 
 /**

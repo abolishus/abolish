@@ -134,6 +134,7 @@ describe("the frame under the client's CSP", () => {
           deliver: () => new Promise<never>(() => {}),
           receipt: () => new Promise<never>(() => {}),
           posting: () => new Promise<never>(() => {}),
+          markHanded: () => new Promise<never>(() => {}),
           declinePosting: () => new Promise<never>(() => {}),
           declineSeal: () => new Promise<never>(() => {}),
           keepReceipt: () => new Promise<never>(() => {}),

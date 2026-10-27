@@ -278,6 +278,29 @@ export const Resuming: Story = {
   },
 };
 
+export const UnsentEarlierWaiting: Story = {
+  name: "A cast recorded on an earlier visit whose posting a run handed out: the page says it sends the ballot once posted",
+  render: () => (
+    <Unsent
+      poll={POLL}
+      trackingCode={CODE}
+      reason="earlier"
+      onSend={onSend}
+      onAgain={onAgain}
+      watching="March 3, 2027, 11:50 AM"
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("This page sends your ballot once they're posted")).toBeVisible();
+    // Said politely as it changes, with when the wait ends: the send cutoff.
+    await expect(canvas.getByRole("status")).toHaveTextContent("March 3, 2027, 11:50 AM");
+    // Both choices stay.
+    await expect(canvas.getByRole("button", { name: "Send again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Answer again" })).toBeVisible();
+  },
+};
+
 export const UnsentUndelivered: Story = {
   name: "A trustee didn't take its part: nothing sent, deliver the same ballot again",
   render: () => <Unsent poll={POLL} trackingCode={CODE} reason="undelivered" onSend={onSend} />,

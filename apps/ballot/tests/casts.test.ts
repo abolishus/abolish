@@ -26,6 +26,7 @@ import {
   unboardedReceipts,
   unsentCast,
   withCast,
+  withHanded,
   withPostingDeclined,
   withReceipt,
   withReceiptBoarded,
@@ -148,7 +149,7 @@ const receiptedBoarded = (): KeptShare[] =>
 const erased = (): KeptShare[] =>
   receipted().map((share) => ("m" in share ? { seat: share.seat, erased: true } : share));
 
-// Distinct blocks in ascending order, each cast boarded or not.
+// Distinct blocks in ascending order, each cast boarded or not, and marked handed or not.
 const casts = fc
   .uniqueArray(fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }), { maxLength: 6 })
   .chain((blocks) =>
@@ -157,21 +158,22 @@ const casts = fc
         .toSorted((a, b) => (a < b ? -1 : 1))
         .map((n) =>
           fc
-            .tuple(fc.boolean(), fc.constantFrom(0, 1, 2, 3))
-            .map(([boarded, receipt]): CastRecord => {
+            .tuple(fc.boolean(), fc.constantFrom(0, 1, 2, 3), fc.boolean())
+            .map(([boarded, receipt, handed]): CastRecord => {
               const ballot = naming(n);
               const list = [shares, receipted, receiptedBoarded, erased][receipt]!();
-              return boarded
+              const cast: CastRecord = boarded
                 ? { ballot, l1Number: n, shares: list, boarded: boardedFor(ballot) }
                 : { ballot, l1Number: n, shares: list };
+              return handed ? { ...cast, handed } : cast;
             }),
         ),
     ),
   );
 
 const record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  v: 5,
-  casts: [{ ballot: naming(10n), shares: kept(), boarded: null }],
+  v: 6,
+  casts: [{ ballot: naming(10n), shares: kept(), handed: false, boarded: null }],
   ...over,
 });
 
@@ -323,45 +325,63 @@ describe("the stored casts", () => {
 
   const ballot = naming(10n);
   // oxlint-disable-next-line no-sparse-arrays -- a hole is what is refused
-  const HOLED = [, { ballot, shares: kept(), boarded: null }];
+  const HOLED = [, { ballot, shares: kept(), handed: false, boarded: null }];
   test.each<[string, unknown]>([
     ["not an object", "casts"],
     ["a list", []],
     ["another version", record({ v: 2 })],
-    ["version as a string", record({ v: "5" })],
+    ["version as a string", record({ v: "6" })],
     ["version 3, which kept no receipts' entries", record({ v: 3 })],
     ["version 4, which kept no erased shares", record({ v: 4 })],
-    ["a key missing", { v: 5 }],
+    ["version 5, which kept no handed mark", record({ v: 5 })],
+    ["a key missing", { v: 6 }],
     ["a key more", record({ tier: 0 })],
     ["casts not a list", record({ casts: {} })],
     ["a list with a hole", record({ casts: HOLED })],
     [
       "a list with an extra property",
-      record({ casts: Object.assign([{ ballot, shares: kept(), boarded: null }], { x: 1 }) }),
+      record({
+        casts: Object.assign([{ ballot, shares: kept(), handed: false, boarded: null }], { x: 1 }),
+      }),
     ],
-    ["a cast without its answer", record({ casts: [{ ballot, shares: kept() }] })],
+    ["a cast without its answer", record({ casts: [{ ballot, shares: kept(), handed: false }] })],
+    [
+      "a cast without its handed mark",
+      record({ casts: [{ ballot, shares: kept(), boarded: null }] }),
+    ],
+    ...[1, 0, "true", null, undefined].map((handed): [string, unknown] => [
+      `a handed mark of ${String(handed)}`,
+      record({ casts: [{ ballot, shares: kept(), handed, boarded: null }] }),
+    ]),
     [
       "a cast with a key more",
-      record({ casts: [{ ballot, shares: kept(), boarded: null, tier: 0 }] }),
+      record({ casts: [{ ballot, shares: kept(), handed: false, boarded: null, tier: 0 }] }),
     ],
-    ["a cast without its shares", record({ casts: [{ ballot, boarded: null }] })],
+    ["a cast without its shares", record({ casts: [{ ballot, handed: false, boarded: null }] })],
     ...sharesRefused().map(([name, list]): [string, unknown] => [
       name,
-      record({ casts: [{ ballot, shares: list, boarded: null }] }),
+      record({ casts: [{ ballot, shares: list, handed: false, boarded: null }] }),
     ]),
     [
       "a ballot that isn't bytes",
-      record({ casts: [{ ballot: [...ballot], shares: kept(), boarded: null }] }),
+      record({ casts: [{ ballot: [...ballot], shares: kept(), handed: false, boarded: null }] }),
     ],
     [
       "a ballot that doesn't decode",
-      record({ casts: [{ ballot: ballot.subarray(0, -1), shares: kept(), boarded: null }] }),
+      record({
+        casts: [{ ballot: ballot.subarray(0, -1), shares: kept(), handed: false, boarded: null }],
+      }),
     ],
     [
       "a ballot of another record type",
       record({
         casts: [
-          { ballot: Uint8Array.of(0, 4, ...ballot.subarray(2)), shares: kept(), boarded: null },
+          {
+            ballot: Uint8Array.of(0, 4, ...ballot.subarray(2)),
+            shares: kept(),
+            handed: false,
+            boarded: null,
+          },
         ],
       }),
     ],
@@ -369,8 +389,8 @@ describe("the stored casts", () => {
       "two casts on the same block",
       record({
         casts: [
-          { ballot, shares: kept(), boarded: null },
-          { ballot: naming(10n), shares: kept(), boarded: null },
+          { ballot, shares: kept(), handed: false, boarded: null },
+          { ballot: naming(10n), shares: kept(), handed: false, boarded: null },
         ],
       }),
     ],
@@ -378,25 +398,29 @@ describe("the stored casts", () => {
       "casts out of order",
       record({
         casts: [
-          { ballot: naming(11n), shares: kept(), boarded: null },
-          { ballot, shares: kept(), boarded: null },
+          { ballot: naming(11n), shares: kept(), handed: false, boarded: null },
+          { ballot, shares: kept(), handed: false, boarded: null },
         ],
       }),
     ],
     [
       "an answer that isn't an object",
-      record({ casts: [{ ballot, shares: kept(), boarded: "x" }] }),
+      record({ casts: [{ ballot, shares: kept(), handed: false, boarded: "x" }] }),
     ],
     [
       "an answer without its link",
       record({
-        casts: [{ ballot, shares: kept(), boarded: { entry: boardedFor(ballot).entry } }],
+        casts: [
+          { ballot, shares: kept(), handed: false, boarded: { entry: boardedFor(ballot).entry } },
+        ],
       }),
     ],
     [
       "an answer with a key more",
       record({
-        casts: [{ ballot, shares: kept(), boarded: { ...boardedFor(ballot), index: 1n } }],
+        casts: [
+          { ballot, shares: kept(), handed: false, boarded: { ...boardedFor(ballot), index: 1n } },
+        ],
       }),
     ],
     [
@@ -406,6 +430,7 @@ describe("the stored casts", () => {
           {
             ballot,
             shares: kept(),
+            handed: false,
             boarded: { ...boardedFor(ballot), link: new Uint8Array(31) },
           },
         ],
@@ -418,6 +443,7 @@ describe("the stored casts", () => {
           {
             ballot,
             shares: kept(),
+            handed: false,
             boarded: {
               ...boardedFor(ballot),
               entry: new Uint8Array(ballot.length + ENTRY_OVERHEAD + 1),
@@ -428,14 +454,16 @@ describe("the stored casts", () => {
     ],
     [
       "an entry carrying other bytes than the cast's",
-      record({ casts: [{ ballot, shares: kept(), boarded: boardedFor(naming(11n)) }] }),
+      record({
+        casts: [{ ballot, shares: kept(), handed: false, boarded: boardedFor(naming(11n)) }],
+      }),
     ],
     [
       "casts naming two definitions",
       record({
         casts: [
-          { ballot, shares: kept(), boarded: null },
-          { ballot: otherDefinition(naming(11n)), shares: kept(), boarded: null },
+          { ballot, shares: kept(), handed: false, boarded: null },
+          { ballot: otherDefinition(naming(11n)), shares: kept(), handed: false, boarded: null },
         ],
       }),
     ],
@@ -443,10 +471,11 @@ describe("the stored casts", () => {
       "answers naming two elections",
       record({
         casts: [
-          { ballot, shares: kept(), boarded: boardedFor(ballot) },
+          { ballot, shares: kept(), handed: false, boarded: boardedFor(ballot) },
           {
             ballot: naming(11n),
             shares: kept(),
+            handed: false,
             boarded: boardedFor(naming(11n), new Uint8Array(32).fill(0x5f)),
           },
         ],
@@ -471,6 +500,7 @@ describe("the stored casts", () => {
                   }
                 : share,
             ),
+            handed: false,
             boarded: boardedFor(ballot),
           },
         ],
@@ -1147,6 +1177,7 @@ describe("the shares erased once the voter declines a posting", () => {
             const before = list[i] as CastRecord;
             expect(cast.ballot).toEqual(before.ballot);
             expect(cast.boarded).toEqual(before.boarded);
+            expect(cast.handed).toEqual(before.handed);
             // Every cast here is of one seal, so its shares are the declined one's.
             expect(cast.shares).toEqual(
               before.shares.map((share) =>
@@ -1194,5 +1225,94 @@ describe("the shares erased once the voter declines a posting", () => {
     expect(withPostingDeclined([], naming(10n))).toBe("missing");
     const list: CastRecord[] = [{ ballot: naming(11n), l1Number: 11n, shares: shares() }];
     expect(withPostingDeclined(list, naming(10n))).toBe("missing");
+  });
+});
+
+describe("a cast marked handed", () => {
+  const definition = DECODED.definition_hash;
+  const cast = (n: bigint): CastRecord => ({ ballot: naming(n), l1Number: n, shares: shares() });
+
+  test("is the cast with these bytes and every cast of its seal, stored and read back so (fast-check)", () => {
+    fc.assert(
+      fc.property(
+        casts.filter((list) => list.length > 0),
+        fc.nat(),
+        (list, pick) => {
+          const marked = list[pick % list.length] as CastRecord;
+          const changed = withHanded(list, marked.ballot);
+          if (changed === "missing") throw new Error("expected casts");
+          // Every cast here is of one seal, so each carries the marked one's postings.
+          expect(changed).toEqual(list.map((c) => ({ ...c, handed: true })));
+          expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
+        },
+      ),
+      { numRuns },
+    );
+  }, 600_000);
+
+  test("stays marked when marked again, and is missing for a ballot no cast has", () => {
+    const once = withHanded([cast(10n)], naming(10n));
+    if (once === "missing") throw new Error("expected casts");
+    expect(withHanded(once, naming(10n))).toEqual(once);
+    expect(withHanded([cast(11n)], naming(10n))).toBe("missing");
+    expect(withHanded([], naming(10n))).toBe("missing");
+  });
+
+  test("keeps its mark through a receipt, a decline and the erasure at the close", () => {
+    const marked = withHanded([cast(10n)], naming(10n));
+    if (marked === "missing") throw new Error("expected casts");
+    const receiptOf = withReceipt(marked, naming(10n), checkedOf(FIRST, receiptFor(FIRST)));
+    const declined = withPostingDeclined(marked, naming(10n));
+    const erasedAll = withSharesErased(marked);
+    for (const changed of [receiptOf, declined, erasedAll]) {
+      if (typeof changed === "string") throw new Error(changed);
+      expect(changed[0]?.handed).toBe(true);
+    }
+  });
+
+  test("is resumed as handed, so the page waits for its postings after a reload", () => {
+    const marked = withHanded([cast(9n), cast(10n)], naming(10n));
+    if (marked === "missing") throw new Error("expected casts");
+    const unsent = unsentCast(marked, definition);
+    if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
+    expect(unsent.handed).toBe(true);
+    // An older cast's mark isn't the newest's.
+    const newest = unsentCast([{ ...cast(9n), handed: true }, cast(10n)], definition);
+    if (newest === undefined || newest === "other-election") throw new Error("expected a cast");
+    expect(newest).not.toHaveProperty("handed");
+  });
+
+  test("carries its mark to a recast of the same seal, whose postings are its own byte for byte", () => {
+    const marked = withHanded([cast(10n)], naming(10n));
+    if (marked === "missing") throw new Error("expected casts");
+    const recast = withCast(marked, naming(11n), shares());
+    if (typeof recast === "string") throw new Error(recast);
+    expect(recast[1]?.handed).toBe(true);
+    // Unmarked casts carry nothing.
+    const plain = withCast([cast(10n)], naming(11n), shares());
+    if (typeof plain === "string") throw new Error(plain);
+    expect(plain[1]).not.toHaveProperty("handed");
+  });
+
+  test("marks a recast of the same seal recorded before it, and no other seal's cast", () => {
+    const otherSeal = BALLOT.slice();
+    otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
+    new DataView(otherSeal.buffer).setBigUint64(L1_AT, 12n);
+    const other: CastRecord = { ballot: otherSeal, l1Number: 12n, shares: shares() };
+    const changed = withHanded([cast(10n), cast(11n), other], naming(10n));
+    if (changed === "missing") throw new Error("expected casts");
+    expect(changed.map((c) => c.handed)).toEqual([true, true, undefined]);
+  });
+
+  test("doesn't carry its mark to another seal's cast, whose postings name another ballot hash", () => {
+    const marked = withHanded([cast(10n)], naming(10n));
+    if (marked === "missing") throw new Error("expected casts");
+    // Another nullifier: another seal's ballot hash, under the same shares.
+    const otherSeal = BALLOT.slice();
+    otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
+    new DataView(otherSeal.buffer).setBigUint64(L1_AT, 11n);
+    const recast = withCast(marked, otherSeal, shares());
+    if (typeof recast === "string") throw new Error(recast);
+    expect(recast[1]).not.toHaveProperty("handed");
   });
 });

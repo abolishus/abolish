@@ -17,6 +17,7 @@ import {
   readCasts,
   recordBoarded,
   recordCast,
+  recordHanded,
   recordReceipt,
   recordReceiptBoarded,
 } from "./casts.ts";
@@ -438,6 +439,7 @@ const source: ElectionSource = {
   // One lock per election across this origin's tabs; a browser without Web
   // Locks gets none, and is offered no posting (Client rule 2).
   ...(ELECTION_LOCK === undefined ? {} : { exclusive: ELECTION_LOCK }),
+  markHanded: (electionId, tier, ballot) => recordHanded(electionId, tier, ballot),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
   declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),

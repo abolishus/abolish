@@ -16,6 +16,7 @@ import {
   newestBlock,
   type RecordBoardedOutcome,
   type RecordCastOutcome,
+  type RecordHandedOutcome,
   type RecordReceiptOutcome,
   unboardedReceipts,
   unsentCast,
@@ -223,6 +224,17 @@ export interface ElectionSource {
    * offered, whatever `post` says.
    */
   readonly exclusive?: ElectionLock;
+  /**
+   * Marks the recorded cast whose bytes are `ballot` as one whose postings a
+   * run may hand out (`recordHanded`), under the election's lock before the
+   * run starts, so a reload still waits for them ([[posting-relay]], Sending
+   * after a run).
+   */
+  markHanded(
+    electionId: Uint8Array,
+    tier: number,
+    ballot: Uint8Array,
+  ): Promise<RecordHandedOutcome>;
   /**
    * Erases the unreceipted seats' `ct_i` and `m_i` of the recorded cast
    * whose bytes are `ballot`, once the voter declined to post them
@@ -594,6 +606,12 @@ interface Sending {
   readonly undelivered: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
   /** Found recorded on opening the poll, not cast on this page: the voter may leave it and answer anew. */
   readonly resumed?: true;
+  /**
+   * Its record is marked `handed` (casts.ts): some run, on this page or
+   * before a reload, may have handed its postings out, so the page waits
+   * for them to be recorded (`waitForRecord`).
+   */
+  readonly handed?: true;
 }
 
 /** Deliveries in flight at once: the relay takes a few at a time from everyone (T-52). */
@@ -769,6 +787,9 @@ export function Ballot({
   const postingOwn = posting === undefined ? undefined : source.postOwn;
 
   function again() {
+    // Whatever is under way for the last screen, a send after a wait among
+    // them, lands nothing on the new answer.
+    asked.current++;
     setStep({ kind: "answering" });
     setRound(round + 1);
   }
@@ -835,11 +856,20 @@ export function Ballot({
         continue;
       }
       if (unsent === "other-election") return stopped("cast-faulty");
-      const { ballot, trackingCode, undelivered } = unsent;
+      const { ballot, trackingCode, undelivered, handed } = unsent;
       return {
         kind: "unsent",
         reason: "earlier",
-        sending: { ballot, tier, trackingCode: toHex(trackingCode), undelivered, resumed: true },
+        sending: {
+          ballot,
+          tier,
+          trackingCode: toHex(trackingCode),
+          undelivered,
+          resumed: true,
+          // A run before the reload may have handed its postings out: the
+          // page waits for them as it did then (Sending after a run; T-25).
+          ...(handed === true ? { handed } : {}),
+        },
       };
     }
     return answered === undefined
@@ -1295,7 +1325,15 @@ export function Ballot({
         postings.push(verdict.record);
       }
       passed = true;
-      return { sending: { ...sending, undelivered: left }, postings };
+      return {
+        sending: {
+          ...sending,
+          undelivered: left,
+          // Marked by this tab or another, before a reload or since.
+          ...(cast.handed === true ? { handed: true as const } : {}),
+        },
+        postings,
+      };
     } finally {
       // Every `m` this read handed out goes now: the records carry the ones
       // posted, and go once used, or now if any failed.
@@ -1323,7 +1361,12 @@ export function Ballot({
     }
     // Not waited on: a head past `c_E` withdraws the offer once it is read.
     void readHead();
-    return { kind: "offer", sending: checked.sending };
+    // An offer reached again by delivery, after a run that handed its parts
+    // out (on this page or before a reload), says so and waits for them, as
+    // the offer that run fell back to did (T-15, T-25).
+    return checked.sending.handed === true
+      ? { kind: "offer", sending: checked.sending, handed: true }
+      : { kind: "offer", sending: checked.sending };
   }
 
   /**
@@ -1449,9 +1492,13 @@ export function Ballot({
    * changed since the offer, then `through` given the records, from the
    * check through the posting under the election's lock: a tab that keeps
    * a receipt for a seat between them would have this one post a receipted
-   * seat (Client rule 2; T-15). The records are zeroed once it settles. An
-   * offer withdrawn while the lock was waited for (`offerClosed`) posts
-   * nothing and returns to `offered`.
+   * seat (Client rule 2; T-15). Before `through` may hand any record out,
+   * the cast is marked `handed` under the same lock, so a page that goes
+   * away during or after the run still waits for its postings once the poll
+   * is opened again; a mark the store refuses hands nothing out (Sending
+   * after a run; T-25). The records are zeroed once it settles. An offer
+   * withdrawn while the lock was waited for (`offerClosed`) posts nothing
+   * and returns to `offered`.
    */
   async function postChecked<A extends PostAnswer | WalletAnswer>(
     sending: Sending,
@@ -1464,8 +1511,23 @@ export function Ballot({
       const checked = await postable(sending);
       if ("kind" in checked) return checked;
       try {
-        const answer = checked.postings.length === 0 ? "recorded" : await through(checked.postings);
-        return { checked: checked.sending, answer };
+        if (checked.postings.length === 0) return { checked: checked.sending, answer: "recorded" };
+        const marked = await source
+          .markHanded(electionId, sending.tier, sending.ballot)
+          .catch((): RecordHandedOutcome => "unwritable");
+        switch (marked) {
+          case "recorded":
+            break;
+          case "unreadable":
+            return stopped("casts-unreadable");
+          case "unwritable":
+            return stopped("casts-unwritable");
+          // Recorded before delivery, and read just now under this lock.
+          case "missing":
+            return stopped("cast-faulty");
+        }
+        const answer = await through(checked.postings);
+        return { checked: { ...checked.sending, handed: true }, answer };
       } finally {
         for (const record of checked.postings) record.fill(0);
       }
@@ -1483,7 +1545,8 @@ export function Ballot({
    * receipted or its posting recorded (`waitForRecord`), taking the
    * election's lock only now, and only while the wait still stands and the
    * cast is still kept unsent: neither declined nor erased since, which
-   * leaves a seat with nothing, nor boarded, and the send cutoff `c_S` not
+   * leaves a seat with nothing, nor outranked by a newer cast, nor boarded,
+   * and the send cutoff `c_S` not
    * passed on this device, since the lock may have been held long (Sending
    * after a run; T-25, T-52). The last checks are made just before the send,
    * with nothing awaited between, so a choice the voter made meanwhile wins.
@@ -1512,6 +1575,9 @@ export function Ballot({
           }
           if (cast === undefined || cast.shares.some((share) => "erased" in share))
             return undefined;
+          // A newer cast, recorded since by an answer anew (in another tab),
+          // is the voter's last choice: this one is no longer sent from here.
+          if (cast !== read.casts.at(-1)) return undefined;
           if (cast.boarded !== undefined)
             return { kind: "sent", trackingCode: sending.trackingCode } satisfies Step;
           if (ended() || !current() || passedOnDevice(cutoffs().send, source.now()))
@@ -1533,8 +1599,20 @@ export function Ballot({
   // the offer stands for a cast whose parts a run may have handed out, the
   // page waits for them to be recorded, with no lock and no offer of its own,
   // and sends the ballot once they are (`waitForRecord`). Choosing anything
-  // on the offer ends it; a run that falls back again starts it anew.
-  const waitingFor = step.kind === "offer" && step.handed === true ? step.sending : undefined;
+  // on the offer ends it; a run that falls back again starts it anew. So
+  // does the screen of a cast left unsent with seats still unreceipted whose
+  // record is marked `handed`: one resumed on opening the poll after a
+  // reload, or one whose delivery stopped, since the marked run's parts may
+  // still be recorded (T-25). Not once every seat is receipted: the voter
+  // sends that ballot again themselves, and a wait would resend it unasked.
+  const waitingFor =
+    step.kind === "offer" && step.handed === true
+      ? step.sending
+      : step.kind === "unsent" &&
+          step.sending.handed === true &&
+          step.sending.undelivered.length > 0
+        ? step.sending
+        : undefined;
   // The cast the wait is under way for, which the offer says it is.
   const [watched, setWatched] = useState<Sending | undefined>(undefined);
   useEffect(() => {
@@ -1546,6 +1624,9 @@ export function Ballot({
     setWatched(waitingFor);
     void (async () => {
       const outcome = await awaitPosted(
+        // For a cast resumed on opening the poll too, whose ballot, read from
+        // storage alone, no posting may name: the wait hands its records to
+        // no one, and only reads the board for their bytes (T-15, T-18).
         async () => {
           const checked = await postable(waitingFor);
           return "kind" in checked ? undefined : checked.postings;
@@ -1733,6 +1814,7 @@ export function Ballot({
           // went since: the voter may leave it and answer anew, which casts
           // a ballot that replaces it.
           onAgain={step.sending.resumed === true ? again : undefined}
+          watching={watched === step.sending ? formatTime(locale, cutoffs().send) : undefined}
         />
       );
     case "sent":

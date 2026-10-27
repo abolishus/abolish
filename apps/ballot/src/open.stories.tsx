@@ -24,6 +24,7 @@ import type {
   KeptShare,
   RecordBoardedOutcome,
   RecordCastOutcome,
+  RecordHandedOutcome,
   RecordReceiptOutcome,
 } from "./casts.ts";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
@@ -270,6 +271,8 @@ interface Voter {
   readonly awaited?: readonly (RecordWait | "fail" | "hold")[];
   /** This device's casts once a wait after a run ended, when they aren't otherwise. */
   readonly heldAfterWait?: CastsRead;
+  /** What marking a cast `handed` before a run answers. */
+  readonly marked: RecordHandedOutcome;
   /** What erasing a declined cast's shares answers. */
   readonly declined: DeclinePostingOutcome;
   /** What the worker's erasure of its seals' shares answers. */
@@ -304,6 +307,7 @@ const VOTER: Voter = {
   chainTime: { ok: true, timestamp: BEFORE_CUTOFF },
   erased: "erased",
   postings: () => ({ ok: true }),
+  marked: "recorded",
   declined: "declined",
   declinedSeal: { ok: true },
   locks: true,
@@ -343,6 +347,7 @@ const MOCKS = new WeakMap<
     readonly waits: { readonly ended: () => boolean; made: readonly Uint8Array[] | undefined }[];
     /** How many held the election's lock as each ballot was sent. */
     readonly sendHolders: number[];
+    readonly markHanded: Mock<ElectionSource["markHanded"]>;
     readonly declinePosting: Mock<ElectionSource["declinePosting"]>;
     readonly declineSeal: Mock<ElectionSource["declineSeal"]>;
     readonly exclusive: Mock<Lock>;
@@ -407,6 +412,7 @@ function source(
     ownPosted,
     awaited,
     heldAfterWait,
+    marked,
     declined,
     declinedSeal,
     locks,
@@ -530,6 +536,10 @@ function source(
     waited++;
     return answer(outcome ?? "fail");
   });
+  const markHanded = fn<ElectionSource["markHanded"]>(() => {
+    guard("markHanded");
+    return Promise.resolve(marked);
+  });
   const declinePosting = fn<ElectionSource["declinePosting"]>(() => {
     guard("declinePosting");
     return Promise.resolve(declined);
@@ -602,6 +612,7 @@ function source(
     ...(posted === undefined ? {} : { post }),
     ...(ownPosted === undefined ? {} : { postOwn }),
     ...(awaited === undefined ? {} : { awaitPosted }),
+    markHanded,
     declinePosting,
     declineSeal,
     // Each run answers what it was given, whatever its type, as Web Locks does.
@@ -636,6 +647,7 @@ function source(
     awaitPosted,
     waits,
     sendHolders,
+    markHanded,
     declinePosting,
     declineSeal,
     exclusive,
@@ -2120,6 +2132,36 @@ export const PostingDeclinedAfterTheWaitSent: Story = {
   },
 };
 
+/** `CAST_RECORDED` with a newer cast after it, recorded by an answer anew in another tab. */
+const CAST_OUTRANKED: CastsRead = {
+  kind: "read",
+  casts: [
+    ...CAST_RECORDED.casts,
+    { ballot: Uint8Array.of(0xb2), l1Number: L1.number + 1n, shares: [] },
+  ],
+};
+
+export const PostingWaitOutrankedSendsNothing: Story = {
+  name: "A record the wait found sends nothing once a newer cast was recorded, the voter's last choice",
+  args: {
+    source: offerSource({
+      posted: ["relayed"],
+      awaited: ["recorded"],
+      heldAfterWait: CAST_OUTRANKED,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await canvas.findByText("The posting isn't on the board yet");
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledOnce());
+    await waitFor(() => expect(canvas.queryByText(WATCHING)).toBeNull());
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingWaitFindsTheSeatErased: Story = {
   name: "A record the wait found sends nothing once the cast's seat was declined or erased elsewhere",
   args: {
@@ -2170,6 +2212,59 @@ export const PostingNothingHandedNoWait: Story = {
     await expect(await canvas.findByText("The posting didn't go through")).toBeVisible();
     await expect(canvas.queryByText(WATCHING)).toBeNull();
     await expect(of.awaitPosted).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+/** `CAST_RECORDED` marked `handed`: a run on this page or before a reload may have handed its parts out. */
+const CAST_HANDED: CastsRead = {
+  kind: "read",
+  casts: CAST_RECORDED.casts.map((cast) => ({ ...cast, handed: true as const })),
+};
+
+export const PostingMarkRefused: Story = {
+  name: "A store that refuses to mark the cast before a run hands nothing out",
+  args: { source: offerSource({ posted: ["recorded"], marked: "unwritable" }) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 1,
+        name: "This device couldn't record your ballot",
+      }),
+    ).toBeVisible();
+    await expect(of.markHanded).toHaveBeenCalledOnce();
+    await expect(of.post).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+    for (const { given } of of.ms) await expect(given).toEqual(new Uint8Array(given.length));
+  },
+};
+
+export const PostingMarkedOfferedAgainWaits: Story = {
+  name: "An offer reached by delivery for a cast marked handed says so and waits, and trying the trustees again waits anew",
+  args: {
+    source: offerSource({ posted: ["relayed"], awaited: ["hold"], heldAfterRecord: CAST_HANDED }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    // Marked by an earlier run: the parts may still reach the board (T-15).
+    await expect(
+      await canvas.findByText("The missing parts may still reach the board"),
+    ).toBeVisible();
+    await expect(await canvas.findByText(WATCHING)).toBeVisible();
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledOnce());
+    await userEvent.click(canvas.getByRole("button", { name: "Try the trustees again" }));
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledTimes(2));
+    // The first wait ended with the offer; the offer delivery reached again waits anew.
+    await expect(of.waits[0]?.ended()).toBe(true);
+    await expect(of.waits[1]?.ended()).toBe(false);
+    await expect(await canvas.findByText(WATCHING)).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
     await expect(of.send).not.toHaveBeenCalled();
   },
 };
@@ -2356,6 +2451,9 @@ export const PostingUnderTheLock: Story = {
     await expect(at("deliver")).toEqual([1, 1]);
     await expect(at("keepReceipt")).toEqual([1]);
     await expect(at("posting")).toEqual([0, 1]);
+    // Marked handed under the same lock before the run hands anything out
+    // (Sending after a run; T-25).
+    await expect(at("markHanded")).toEqual([1]);
     await expect(at("post")).toEqual([1]);
     await expect(of.guarded.map(({ step }) => step)).toEqual([
       "deliver",
@@ -2363,8 +2461,10 @@ export const PostingUnderTheLock: Story = {
       "keepReceipt",
       "posting",
       "posting",
+      "markHanded",
       "post",
     ]);
+    await expect(of.markHanded).toHaveBeenCalledWith(fromHex(ELECTION_ID), 0, CAST.ballot);
   },
 };
 
@@ -2975,6 +3075,138 @@ export const ResumedUndelivered: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
     await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+/** `RECORDED`'s cast marked `handed`: a run before the reload may have handed seat 1's posting out. */
+const RECORDED_HANDED: CastsRead = {
+  kind: "read",
+  casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES, handed: true }],
+};
+const RESUMED_WATCHING =
+  "A posting started before may still put the missing parts on the public record.";
+
+export const ResumedHandedWaits: Story = {
+  name: "A cast resumed on opening whose record is marked handed is waited for, and sent once the record shows its posting",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      held: RECORDED_HANDED,
+      posted: ["recorded"],
+      awaited: ["recorded"],
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    // The wait read for seat 1's record, made afresh by the worker, with no lock (T-25, T-52).
+    await expect(of.awaitPosted).toHaveBeenCalledOnce();
+    await expect(
+      of.waits[0]?.made?.map((record) => of.ms.find(({ given }) => given === record)?.copy[0]),
+    ).toEqual([1]);
+    const at = (step: string) =>
+      of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);
+    await expect(at("awaitPosted")).toEqual([0]);
+    // The ballot under the lock, with the stored bytes; no delivery, no posting of its own.
+    await expect(of.sendHolders).toEqual([1]);
+    await expect(of.send).toHaveBeenCalledWith(fromHex(ELECTION_ID), RECORDED);
+    await expect(of.deliver).not.toHaveBeenCalled();
+    await expect(of.post).not.toHaveBeenCalled();
+    for (const { given } of of.ms) await expect(given).toEqual(new Uint8Array(given.length));
+  },
+};
+
+export const ResumedHandedSaysItWaits: Story = {
+  name: "While a resumed cast is waited for, the screen says so, and answering again ends the wait",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      held: RECORDED_HANDED,
+      posted: ["recorded"],
+      awaited: ["hold"],
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(await canvas.findByText(RESUMED_WATCHING, { exact: false })).toBeVisible();
+    await expect(canvas.getByText(WATCHING)).toBeVisible();
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledOnce());
+    await expect(of.waits[0]?.ended()).toBe(false);
+    await userEvent.click(canvas.getByRole("button", { name: "Answer again" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(of.waits[0]?.ended()).toBe(true);
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const ResumedHandedUndeliveredStillWaits: Story = {
+  name: "A resumed cast marked handed whose trustee still refuses stays unsent, and is waited for again",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      held: RECORDED_HANDED,
+      posted: ["recorded"],
+      awaited: ["hold"],
+      delivered: () => ({ kind: "busy" }),
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledOnce());
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await canvas.findByRole("heading", {
+      level: 1,
+      name: "Your ballot hasn't reached every trustee yet",
+    });
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledTimes(2));
+    await expect(of.waits[0]?.ended()).toBe(true);
+    await expect(await canvas.findByText(WATCHING)).toBeVisible();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const ResumedUnmarkedNoWait: Story = {
+  name: "A resumed cast no run was marked for is not waited for",
+  args: {
+    source: unsentSource(RECORDED_POLL, { posted: ["recorded"], awaited: ["recorded"] }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(canvas.queryByText(WATCHING)).toBeNull();
+    await expect(of.awaitPosted).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
+export const ResumedHandedEveryTrusteeReceipted: Story = {
+  name: "A resumed cast marked handed with every seat receipted waits for nothing and is sent only on the voter's tap",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      held: {
+        kind: "read",
+        casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES.slice(1), handed: true }],
+      },
+      posted: ["recorded"],
+      awaited: ["recorded"],
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND });
+    await expect(of.awaitPosted).not.toHaveBeenCalled();
+    await expect(of.send).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Send again" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.send).toHaveBeenCalledOnce();
   },
 };
 

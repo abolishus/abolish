@@ -244,7 +244,10 @@ const UNSENT: Record<
  * again" sends the same sealed ballot, never a new one, so at worst the
  * board holds it twice and counts it once ([[revoting]], Client rule 3;
  * T-25, T-45). With `onAgain`, the voter may instead answer anew, which
- * casts a ballot that replaces this one.
+ * casts a ballot that replaces this one. `watching` is when the page's wait
+ * for parts an earlier run handed out ends, the send cutoff `c_S`, while it
+ * waits ([[posting-relay]], Sending after a run): the screen says the page
+ * sends the ballot once they are posted.
  */
 export function Unsent({
   poll,
@@ -252,12 +255,14 @@ export function Unsent({
   reason,
   onSend,
   onAgain,
+  watching,
 }: {
   poll: FramePoll;
   trackingCode: string;
   reason: UnsentReason;
   onSend: () => void;
   onAgain?: (() => void) | undefined;
+  watching?: string | undefined;
 }) {
   const t = useTranslate(catalogs);
   const { title, detail } = UNSENT[reason];
@@ -280,6 +285,15 @@ export function Unsent({
       <ScreenTitle title={t(title)} focus>
         <p className="m-0">{t(detail)}</p>
       </ScreenTitle>
+      {watching === undefined ? null : (
+        <div className="mt-6">
+          <Note title={t("postingWatchingTitle")}>
+            <p className="m-0" role="status">
+              {t("unsentWatching", { when: watching })}
+            </p>
+          </Note>
+        </div>
+      )}
       <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
         <Fingerprint
           value={trackingCode}

@@ -402,13 +402,10 @@ def main(constants, out_dir, version=6):
     case("none", "Ballots and no opening: 6.2 passes.", [(0, ["t", rec_a]), (4, [rec_t2])], "pass")
 
     if version == 7:
-        # The same election read as version 6: its fields without the mode
-        # and the empty list, pinning definition version 6. An honest opening
-        # made for that reading binds its hash, another election's, into the
-        # core and every ciphertext's associated data (T-12, T-34).
-        pinned = dict(d["profile"]["pins"])
-        pinned[1] = 6
-        v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(dict(vb4.rv.as_v6(d), profile={"protocol_major": 1, "pins": sorted(pinned.items())}))))
+        # An honest opening made for the same election read as version 6
+        # binds that reading's hash, another election's, into the core and
+        # every ciphertext's associated data (T-12, T-34).
+        v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(vb4.v6_reading(d))))
         assert v6_hash != e["definitionHash"]
         e6 = dict(e, definitionHash=v6_hash)
         v6_reading, _ = so3.make_opening("verifier-openings-v3/v6-reading", e6, keys, 2, b3.flat([(3, []), (4, [2]), (2, [0])]), None)

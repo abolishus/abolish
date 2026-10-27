@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import satori from "satori";
 import { beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 import { shortCode } from "@abolishus/core/short-codes";
@@ -21,7 +22,8 @@ import {
   shortLink,
 } from "../src/og/model.ts";
 import { pollPreview, previewLocale, previewPath, previewVersion } from "../src/og/poll.ts";
-import { renderPreview } from "../src/og/render.ts";
+import { DRAWABLE, drawable } from "../src/og/glyphs.ts";
+import { FONTS, renderPreview } from "../src/og/render.ts";
 import { previewText } from "../src/og/text.ts";
 import type { PollView } from "../src/poll.ts";
 import { fromHex } from "../src/values.ts";
@@ -115,6 +117,101 @@ describe("renderPreview", () => {
 
   test("draws a question in a script its fonts lack without failing", async () => {
     const model = { ...VARIANTS["sealed"]!, question: "Ελληνικά, 中文 und Ümlaute 🎉?" };
+    expect(pngSize(await renderPreview(model, "landscape"))).toEqual(PREVIEW_SIZE.landscape);
+  });
+});
+
+// P2-24 part 6: an author's words go on the image only when its fonts draw
+// every character, never with boxes in place of the letters they lack; the
+// text beside the image, which a chat draws in its own fonts, keeps them.
+describe("an author's words on the image", () => {
+  const isDrawn = (c: number) => DRAWABLE.some(([first, last]) => c >= first && c <= last);
+
+  test("every drawable character is a glyph of both weights the card draws in", async () => {
+    // As the card sets it (src/og/card.tsx): Oxanium, the Latin Extended
+    // subset reached only as satori's fallback.
+    const svg = (text: string, weight: 400 | 600) =>
+      satori(
+        createElement(
+          "div",
+          { style: { display: "flex", fontFamily: "Oxanium", fontSize: 40, fontWeight: weight } },
+          text,
+        ),
+        { width: 400, height: 80, fonts: FONTS },
+      );
+    for (const weight of [400, 600] as const) {
+      // A private-use character no font has: the box drawn for any missing glyph.
+      const missing = await svg("x\u{E000}x", weight);
+      for (const [first, last] of DRAWABLE)
+        for (let c = first; c <= last; c++)
+          expect(
+            await svg(`x${String.fromCodePoint(c)}x`, weight),
+            `U+${c.toString(16)} at ${weight}`,
+          ).not.toBe(missing);
+    }
+  }, 60_000);
+
+  test("takes text whole, composed, only when every character is drawable", () => {
+    fc.assert(
+      fc.property(fc.string({ unit: "binary", maxLength: 40 }), (text) => {
+        const drawn = drawable(text);
+        const composed = text.normalize("NFC");
+        const every = Array.from(composed).every((c) => isDrawn(c.codePointAt(0) ?? -1));
+        expect(drawn).toBe(every && composed.trim() !== "" ? composed : undefined);
+      }),
+      { numRuns },
+    );
+    expect(drawable("Cafe\u0301 on Ma\u0301ster Street?")).toBe("Café on Máster Street?");
+    expect(drawable("Ā or ā, ł, ő, ș and ẞ?")).toBe("Ā or ā, ł, ő, ș and ẞ?");
+    for (const text of [
+      "Ελληνικά?",
+      "中文",
+      "مرحبا",
+      "Yes 🎉",
+      "a\u202Eb",
+      "a\u200Bb",
+      "x\u0336",
+      " ",
+      "",
+    ])
+      expect(drawable(text)).toBeUndefined();
+  });
+
+  test("the card draws a drawable question, and names the poll by its code otherwise", () => {
+    const sealed = VARIANTS["sealed"]!;
+    expect(cardText(sealed, "landscape")).toContain(base.question);
+    for (const question of ["Ελληνικά, 中文 und Ümlaute 🎉?", "Should the park ⁦stay⁩ open?"]) {
+      const model = { ...sealed, question };
+      for (const format of FORMATS) {
+        const drawn = cardText(model, format);
+        expect(drawn).toContain(`Poll ${CODE}`);
+        expect(drawn).not.toContain("Ümlaute");
+        expect(drawn).not.toContain("park");
+      }
+      // A chat draws the text beside the image in its own fonts.
+      expect(previewText(model).title).toBe(question);
+    }
+    expect(cardText({ ...sealed, question: "Cafe\u0301?" }, "landscape")).toContain("Café?");
+    const civic = { ...VARIANTS["civic sealed"]!, question: "中文?" };
+    expect(cardText(civic, "landscape")).toContain(`Poll ${CODE}`);
+  });
+
+  test("the byline drops a name or place the card can't draw, keeping the rest", () => {
+    const sealed = VARIANTS["sealed"]!;
+    expect(cardText(sealed, "landscape")).toContain(
+      "Asked by Riverside Residents' Association · Riverside",
+    );
+    const text = cardText({ ...sealed, askedBy: "Ассоциация", place: "Москва" }, "landscape");
+    expect(text).toContain("Asked on abolish.us");
+    expect(text).not.toContain("·");
+    expect(cardText({ ...sealed, place: "東京" }, "landscape")).toContain(
+      "Asked by Riverside Residents' Association ",
+    );
+    expect(cardText({ ...sealed, place: "東京" }, "landscape")).not.toContain("東京");
+  });
+
+  test("draws a question in Latin Extended letters as a PNG", async () => {
+    const model = { ...VARIANTS["sealed"]!, question: "Czy Łódź i Kraków mają ścieżki?" };
     expect(pngSize(await renderPreview(model, "landscape"))).toEqual(PREVIEW_SIZE.landscape);
   });
 });
@@ -362,6 +459,19 @@ describe("a poll page's preview today", () => {
     expect(() => checkPreview(none)).not.toThrow();
   });
 
+  test("shows the words the page checked, and only those", () => {
+    const words = { question: "Should the park stay open late?", place: "Riverside" };
+    const shown = pollPreview(poll, CODE, "abolish.us", 0, "en-US", words);
+    expect(shown.question).toBe(words.question);
+    expect(shown.place).toBe(words.place);
+    expect(shown.askedBy).toBeUndefined();
+    expect(previewText(shown).title).toBe(words.question);
+    const none = pollPreview(poll, CODE, "abolish.us", 0, "en-US");
+    expect(none.question).toBeUndefined();
+    expect(none.place).toBeUndefined();
+    expect(previewText(none).title).toBe(`Poll ${CODE}`);
+  });
+
   test("gets a new version when what it draws changes, and only then", async () => {
     const open = pollPreview(poll, CODE, "abolish.us", closes - 1, "en-US");
     const version = await previewVersion(open, "landscape");
@@ -383,6 +493,16 @@ describe("a poll page's preview today", () => {
     // So is another language.
     expect(
       await previewVersion(pollPreview(poll, CODE, "abolish.us", closes - 1, "es-US"), "landscape"),
+    ).not.toBe(version);
+    // So are the poll's words, once they can be shown.
+    expect(
+      await previewVersion(
+        pollPreview(poll, CODE, "abolish.us", closes - 1, "en-US", {
+          question: "Should the park stay open late?",
+          place: undefined,
+        }),
+        "landscape",
+      ),
     ).not.toBe(version);
     expect(await previewVersion({ ...VARIANTS["live"]!, answers: 2419 }, "landscape")).not.toBe(
       await previewVersion(VARIANTS["live"]!, "landscape"),

@@ -22,7 +22,10 @@ export const Route = createFileRoute("/polls/$electionId")({
     const origin = siteOrigin();
     const preview =
       page.kind === "poll"
-        ? await previewMeta(page.poll, page.code, origin, Date.now(), locale)
+        ? await previewMeta(page.poll, page.code, origin, Date.now(), locale, {
+            question: page.text?.heading,
+            place: page.tags.place,
+          })
         : undefined;
     // The share sheet offers the short link only, the same for everyone
     // (docs/design/sharing.md), and none for a hidden poll, whose text

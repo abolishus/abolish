@@ -366,7 +366,8 @@ describe("poll page", () => {
       "x-forwarded-for": "203.0.113.9",
       "user-agent": "visitor-agent",
     });
-    expect(seen.length).toBe(5);
+    // The definition, head, moderation, code, tags and display text.
+    expect(seen.length).toBe(6);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(headers.authorization).toBeUndefined();
@@ -762,6 +763,34 @@ describe("flyer", () => {
     const sheet = sheetOf(await response.text());
     expect(sheet).toContain(`>Poll ${CODE}</h2>`);
     expect(sheet).not.toContain(CODE.toUpperCase());
+  });
+
+  // P2-24 part 6: the poll's words, checked as a stream card's are, in their
+  // own language and direction.
+  test("prints the poll's own words where its display text checks, in the page's translation", async () => {
+    const english = await (await get(`/p/${OPEN_ONE_CODE}/flyer`)).text();
+    expect(sheetOf(english)).toMatch(
+      /<h2 lang="en" dir="auto" class="[^"]+">Should the park stay open late\?<\/h2>/,
+    );
+    expect(english).not.toContain(`Poll ${OPEN_ONE_CODE}`);
+    // Isolated in the title, so right-to-left words can't reorder the site's (T-75).
+    expect(english).toContain(
+      "<title>Print a flyer · \u2068Should the park stay open late?\u2069 · Abolish</title>",
+    );
+    const spanish = await (
+      await get(`/p/${OPEN_ONE_CODE}/flyer`, { "accept-language": "es-MX" })
+    ).text();
+    expect(sheetOf(spanish)).toContain('<h2 lang="es-419" dir="auto" class="');
+    expect(sheetOf(spanish)).toContain(">¿Debe el parque abrir hasta tarde?</h2>");
+    // A poll of several is named by its title.
+    const many = await (await get(`/p/${OPEN_MANY_CODE}/flyer`)).text();
+    expect(sheetOf(many)).toContain(">Park and library</h2>");
+  });
+
+  test("a poll whose words can't be shown is named by its code, in our language", async () => {
+    const html = await (await get(`/p/${CODE}/flyer`)).text();
+    expect(sheetOf(html)).toMatch(/<h2 class="[^"]+">Poll [0-9a-z]+<\/h2>/);
+    expect(html).toContain(`<title>Print a flyer · Poll ${CODE} · Abolish</title>`);
   });
 
   test("a hidden poll gets no flyer, and says why", async () => {
@@ -1800,7 +1829,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${ID}`]: { html: 9, js: 201, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 191, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 192, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 247, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 166, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
@@ -1909,6 +1938,34 @@ describe("link preview", () => {
       bodies.push(Buffer.from(await response.arrayBuffer()).toString("base64"));
     }
     expect(new Set(bodies).size).toBe(1);
+  });
+
+  // P2-24 part 6: the question in the preview, from the display text checked
+  // against the definition, in the page's translation.
+  test("names a poll by its question where its display text checks, in the page's language", async () => {
+    const meta = async (id: string, headers: Record<string, string> = {}) => {
+      const html = await (await get(`/polls/${id}`, headers)).text();
+      return {
+        title: /<meta property="og:title" content="([^"]*)"/.exec(html)?.[1],
+        image: /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1],
+      };
+    };
+    const one = await meta(OPEN_ONE);
+    expect(one.title).toBe("Should the park stay open late?");
+    expect((await meta(OPEN_ONE, { "accept-language": "es-MX" })).title).toBe(
+      "¿Debe el parque abrir hasta tarde?",
+    );
+    expect((await meta(OPEN_MANY)).title).toBe("Park and library");
+    // Text that fails its check against the definition names no one's words (T-34).
+    expect((await meta(STREAM_BAD_TEXT)).title).toBe("A poll on localhost");
+    expect((await meta(STREAM_NO_TEXT)).title).toBe("A poll on localhost");
+    // The image the page names is the one served for it now.
+    if (one.image === undefined) throw new Error("no og:image");
+    const image = new URL(one.image.replaceAll("&amp;", "&"));
+    const response = await get(image.pathname + image.search);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(await pngSize(response)).toEqual([1200, 630]);
   });
 
   test.each([

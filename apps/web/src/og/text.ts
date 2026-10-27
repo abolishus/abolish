@@ -38,24 +38,14 @@ export const answersSoFar = (model: PollPreview, n: number) =>
 export const answersCounted = (model: PollPreview, n: number) =>
   words(model)("ogAnswersCounted", { count: n });
 
-/**
- * The headline: the question, or while it isn't served the poll's code, or
- * the host for a poll with no code yet.
- */
-export const headline = (model: PollPreview) =>
-  model.question ??
-  (model.code === undefined
+/** The headline with no question to show: the poll's code, or the host for a poll with no code yet. */
+export const unworded = (model: PollPreview) =>
+  model.code === undefined
     ? words(model)("ogHeadlineHost", { host: model.host })
-    : words(model)("ogHeadlineCode", { code: model.code }));
+    : words(model)("ogHeadlineCode", { code: model.code });
 
-export function byline(model: PollPreview): string {
-  const text = words(model);
-  const who =
-    model.askedBy === undefined
-      ? text("ogAskedOn", { host: model.host })
-      : text("ogAskedBy", { name: model.askedBy });
-  return model.place === undefined ? who : `${who} · ${model.place}`;
-}
+/** The headline in text: the question, or while none can be shown the poll's code. */
+export const headline = (model: PollPreview) => model.question ?? unworded(model);
 
 const isClosed = (model: PollPreview) =>
   model.results.state === "closed" || model.results.state === "counting";

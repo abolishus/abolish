@@ -20,7 +20,7 @@ import {
 import type { RemovalGround } from "../components/moderation-log.tsx";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
-import { streamCard } from "./stream-card.ts";
+import { checkedText, streamCard } from "./stream-card.ts";
 
 export interface BoardHead {
   /** Entries on the board, as a canonical decimal `u64`. */
@@ -45,6 +45,8 @@ export type PollPage =
       readonly tags: PollTags;
       /** Who asked it, as `askedByOf` reads it. */
       readonly askedBy: AskedBy | undefined;
+      /** Its words in the page's locale, as `wordsOf` reads them; `undefined` if none can be shown. */
+      readonly text: CardText | undefined;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -54,11 +56,13 @@ const notFound = (error: unknown) =>
 
 /**
  * The poll page for `electionId`, which the caller has checked is canonical
- * hex, saying who asked it as `readAskedBy` reads it.
+ * hex, with its words in `locale`'s translation, saying who asked it as
+ * `readAskedBy` reads it.
  */
 export async function loadPoll(
   api: Api,
   electionId: string,
+  locale: string,
   readAskedBy?: ReadAskedBy,
 ): Promise<PollPage> {
   let answers;
@@ -70,12 +74,13 @@ export async function loadPoll(
       codeOf(api, electionId),
       tagsOf(api, electionId),
       askedByOf(readAskedBy, electionId),
+      wordsOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation, claimed, tags, askedBy] = answers;
+  const [{ definition }, board, moderation, claimed, tags, askedBy, displayText] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   // A claim, checked as `/p/<code>` checks it: the code must be a prefix of
@@ -98,7 +103,27 @@ export async function loadPoll(
     // Core names no one for a hidden poll; dropped here too, since the page's
     // data reaches the browser whether or not it is shown (T-68).
     askedBy: moderation.state === "hidden" ? undefined : askedBy,
+    // The API withholds a hidden poll's text; dropped here too, should its
+    // answers to the two reads straddle the hiding (T-68).
+    text:
+      moderation.state === "hidden"
+        ? undefined
+        : checkedText(view.poll, definition, displayText, locale),
   };
+}
+
+/**
+ * The display text the API serves for `electionId`, as `displayTextOf`
+ * reads it, or `undefined` when the read fails: the words are optional on a
+ * page, as the code is, so a failed or slow read shows the poll by its code
+ * rather than taking the page down.
+ */
+async function wordsOf(api: Api, electionId: string): Promise<string | undefined> {
+  try {
+    return await displayTextOf(api, electionId);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -533,26 +558,10 @@ export type EmbedPage =
 export async function loadEmbed(api: Api, code: string, locale: string): Promise<EmbedPage> {
   const link = await resolveShortLink(api, code);
   if (link.kind === "not-found") return link;
-  const page = await loadPoll(api, link.electionId);
+  const page = await loadPoll(api, link.electionId, locale);
   if (page.kind !== "poll" || page.code !== code) return { kind: "not-found" };
   if (page.moderation.state === "hidden") return { kind: "hidden" };
-  let card: StreamCard;
-  try {
-    const [{ definition }, displayText] = await Promise.all([
-      api.elections.getDefinition({ electionId: link.electionId }),
-      displayTextOf(api, link.electionId),
-    ]);
-    card = streamCard(link.electionId, definition, displayText, locale, page.tags);
-  } catch (error) {
-    if (notFound(error)) return { kind: "not-found" };
-    throw error;
-  }
-  return {
-    kind: "poll",
-    poll: page.poll,
-    asOf: page.asOf,
-    text: card.kind === "poll" ? card.text : undefined,
-  };
+  return { kind: "poll", poll: page.poll, asOf: page.asOf, text: page.text };
 }
 
 /**

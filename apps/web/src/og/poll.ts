@@ -1,9 +1,12 @@
 // A poll page's link preview, from what the page's loader has: the decoded
-// definition and the board head. The API doesn't serve question text, who
-// asked, the board's answer count or released totals yet, so today's preview
-// shows the poll's seal, its canonical code and short link (once its
-// registration is recorded) and when it closes, and its results are `open` or
-// `counting`, never a result.
+// definition, the board head, and the poll's words where the display text
+// checked against the definition (src/server/stream-card.ts) and its place.
+// The preview doesn't yet say who asked, the board's answer count or released
+// totals, so today's preview shows the poll's seal, its question (on the
+// image only when its fonts draw it, src/og/glyphs.ts) and, on the image, its
+// place, its canonical code and short link (once its registration is
+// recorded) and when it closes, and its results are `open` or `counting`,
+// never a result.
 //
 // Its words are in the page's language (P2-28 part 4c-2), and the image's
 // address names that language, since a chat fetches the image with none of
@@ -20,7 +23,17 @@ import { previewText } from "./text.ts";
  * preview gets a new version: a model with no code serializes as one from
  * before codes were optional, since `JSON.stringify` drops `undefined`.
  */
-const LAYOUT = 3;
+const LAYOUT = 4;
+
+/** An author's words a preview shows, each `undefined` when none can be. */
+export interface PreviewWords {
+  /** The heading of the checked display text, in the page's translation. */
+  readonly question: string | undefined;
+  /** Where its author listed it, as the poll page shows it. */
+  readonly place: string | undefined;
+}
+
+export const NO_WORDS: PreviewWords = { question: undefined, place: undefined };
 
 export function pollPreview(
   poll: PollView,
@@ -28,6 +41,7 @@ export function pollPreview(
   host: string,
   now: number,
   locale: Locale,
+  { question, place }: PreviewWords = NO_WORDS,
 ): PollPreview {
   const closes = poll.closesAt.iso;
   const closed = closes !== undefined && Date.parse(closes) <= now;
@@ -36,9 +50,9 @@ export function pollPreview(
     seal: poll.definitionHash,
     code,
     host,
-    question: undefined,
+    question,
     askedBy: undefined,
-    place: undefined,
+    place,
     // An ill-formed version-5 definition can have no questions; its card
     // still draws one, as the page shows the broken rule beside it.
     questionCount: Math.max(1, poll.questions.length),
@@ -103,8 +117,9 @@ export async function previewMeta(
   origin: string,
   now: number,
   locale: Locale,
+  words: PreviewWords = NO_WORDS,
 ): Promise<PreviewMeta> {
-  const model = pollPreview(poll, code, new URL(origin).host, now, locale);
+  const model = pollPreview(poll, code, new URL(origin).host, now, locale, words);
   const version = await previewVersion(model, "landscape");
   return {
     image: `${origin}${previewPath(poll.electionId, "landscape", locale, version)}`,

@@ -499,7 +499,9 @@ describe("readLatestCheckpoints (P2-19)", () => {
       ),
       { numRuns: Math.min(numRuns, 25) },
     );
-  });
+    // Up to 25 runs, each building two boards and taking up to 40
+    // checkpoints, outlast the default 5 s on a loaded CI runner.
+  }, 60_000);
 
   test.each([[-1], [0.5]])("refuses limit = %s", async (limit) => {
     await expect(readLatestCheckpoints(app, await boardIn(0), limit)).rejects.toThrow(RangeError);

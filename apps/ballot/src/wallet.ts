@@ -494,9 +494,11 @@ interface Pending {
  * nothing can be forced in time, lets a sighting hold a send back for its
  * whole `WALLET_WAIT`, since forcing no longer needs the send, and answers
  * `sent` as soon as every unrecorded posting was sent, with no wait for the
- * record, so it never holds the election's lock toward the send cutoff
- * `c_S` ([[posting-relay]], The ballot's own deadline, The offer; T-13,
- * T-25).
+ * record, so it lets go of the election's lock by `c_E` plus one send's
+ * requests, never waiting toward the send cutoff `c_S` for the record
+ * ([[posting-relay]], The ballot's own deadline, The offer; T-13, T-25). A
+ * send already under way when `c_B` passes is checked against `c_B` and
+ * answers `late`, offering the voter again, the safe way round.
  */
 export async function postFromWallet(
   io: WalletIo,
@@ -620,8 +622,9 @@ export async function postFromWallet(
     }
     for (const p of left) {
       if (p.sentAt !== undefined) continue;
-      // Past `c_B`, a run with nothing sent goes on as a late one where the
-      // voter was told of it; a run that sent before `c_B` ends there.
+      // Past `c_B` at a send's start, a run with nothing sent goes on as a
+      // late one where the voter was told of it; a run that sent before
+      // `c_B` ends there.
       if (!isLate && !sent && late !== undefined && time() > cutoff) isLate = true;
       if (held(p)) continue;
       if (time() > sendCutoff()) return sent ? "sent" : "late";
@@ -652,8 +655,8 @@ export async function postFromWallet(
       p.gas = met.gas;
     }
     // A late run ends once its sends are answered, with no wait for the
-    // record, so it never holds the election's lock toward `c_S` (T-25,
-    // T-52).
+    // record, so it never waits toward `c_S` holding the election's lock
+    // (T-25, T-52).
     if (isLate && left.every((p) => p.sentAt !== undefined)) return "sent";
     // Nor past `c_E`, after which it sends nothing a sighting still holds.
     if (isLate && time() > sendCutoff()) return sent ? "sent" : "late";

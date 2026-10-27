@@ -22,6 +22,7 @@ import {
   WALLET_FORCE_MARGIN,
   WALLET_HOLD_MARGIN,
   WALLET_LATE_MARGIN,
+  WALLET_REQUEST_MS,
   WALLET_WAIT,
   type WalletAnswer,
   type WalletIo,
@@ -950,6 +951,19 @@ describe("postFromWallet", () => {
     expect(w.elapsed()).toBe(0n);
   });
 
+  test("a run that sent before c_B ends there, never going on as a late run", async () => {
+    const w = world({});
+    const send = w.io.send.bind(w.io);
+    // The first send's requests take the run past `c_B`.
+    w.io.send = async (call, late) => {
+      const met = await send(call, late);
+      await w.io.sleep(200_000);
+      return met;
+    };
+    expect(await w.run([A, B], START + 100n, START + 100n, START + 10_000n)).toBe("sent");
+    expect(w.sends.map(({ call }) => call)).toEqual([A]);
+  });
+
   test("a late run holds a send back on a sighting for its whole wait, and never past c_E (T-13)", async () => {
     const seen = world({ latest: (t) => (t < POLL ? [A] : []) });
     const lastOffer = START + WALLET_WAIT + 3n * POLL;
@@ -1007,6 +1021,7 @@ describe("postFromWallet", () => {
   });
 
   test("never recorded unless the finalized head carries every posting, never sending one twice or past its cutoff", async () => {
+    let lateRuns = 0;
     await fc.assert(
       fc.asyncProperty(
         fc.array(fc.uniqueArray(fc.integer({ min: 0, max: 2 }), { maxLength: 3 }), {
@@ -1038,7 +1053,8 @@ describe("postFromWallet", () => {
           { minLength: 1 },
         ),
         fc.boolean(),
-        fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
+        // From `WALLET_WAIT` past `c_B`, so some runs start late.
+        fc.bigInt({ min: -WALLET_WAIT, max: 2n * WALLET_WAIT }),
         fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
         fc.option(fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }), { nil: undefined }),
         async (
@@ -1089,6 +1105,7 @@ describe("postFromWallet", () => {
           expect(new Set(w.sends.map(({ call }) => call)).size).toBe(w.sends.length);
           const late = w.sends.some(({ at }) => START + at > cutoff);
           if (late) {
+            lateRuns++;
             expect(lastOffer).toBeDefined();
             for (const { at: sentAt } of w.sends) {
               expect(START + sentAt).toBeGreaterThan(cutoff);
@@ -1140,6 +1157,12 @@ describe("postFromWallet", () => {
       ),
       { numRuns },
     );
+    // Late runs are exercised, not only allowed.
+    expect(lateRuns).toBeGreaterThan(0);
+  });
+
+  test("counts heads within two wallet requests of the device's clock", () => {
+    expect(WALLET_HOLD_MARGIN).toBe(BigInt((2 * WALLET_REQUEST_MS) / 1000));
   });
 
   test("takes one call for each posting", async () => {

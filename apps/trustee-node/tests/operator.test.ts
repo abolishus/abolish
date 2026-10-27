@@ -1,10 +1,13 @@
-// The seat's side of the operator's opening route (`POST /openings`): the
-// request carries the election's id and the opening in lowercase hex and
-// nothing else, and each answer the route gives is read as what it says
-// (apps/api's openings.submit: 201 with the entry, 422 OPENING_REJECTED with
-// the Boarding rule's code, 503 OPENING_NOT_READY, 409 ELECTION_NOT_OPEN, 404
-// ELECTION_NOT_FOUND), anything else as unavailable, never trusted further.
-// A body past MAX_ANSWER is refused unread, and no redirect is followed.
+// The seat's side of the operator's opening and destruction routes
+// (`POST /openings`, `POST /destructions`): the request carries the
+// election's id and the record in lowercase hex and nothing else, and each
+// answer the route gives is read as what it says (apps/api's
+// openings.submit: 201 with the entry, 422 OPENING_REJECTED with the
+// Boarding rule's code, 503 OPENING_NOT_READY, 409 ELECTION_NOT_OPEN, 404
+// ELECTION_NOT_FOUND; destructions.submit's the same with DESTRUCTION_*),
+// anything else, another route's codes included, as unavailable, never
+// trusted further. A body past MAX_ANSWER is refused unread, and no
+// redirect is followed.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, describe, expect, test } from "vite-plus/test";
@@ -30,6 +33,7 @@ const json =
   };
 const ID = new Uint8Array(32).fill(0xab);
 const OPENING = Uint8Array.of(0, 6, 1, 0xfe);
+const STATEMENT = Uint8Array.of(0, 0x0f, 1, 9);
 const entry = "000501ab";
 
 describe("HttpOperator", () => {
@@ -149,6 +153,70 @@ describe("HttpOperator", () => {
     expect(await new HttpOperator(`http://127.0.0.1:${port}/`).submit(ID, OPENING)).toEqual({
       state: "unavailable",
       reason: "unreached (ECONNREFUSED)",
+    });
+  });
+
+  test("posts the election's id and the statement, in hex, to the base URL's destructions route", async () => {
+    let seen: { method?: string | undefined; url?: string | undefined; body: string } = {
+      body: "",
+    };
+    handler = (req, body, res) => {
+      seen = { method: req.method, url: req.url, body };
+      json(201, { entry, link: "cd".repeat(32), earlier: true })(req, body, res);
+    };
+    expect(await new HttpOperator(base).submitDestruction(ID, STATEMENT)).toEqual({
+      state: "boarded",
+      entry: Uint8Array.of(0, 5, 1, 0xab),
+      earlier: true,
+    });
+    expect(seen).toEqual({
+      method: "POST",
+      url: "/api/destructions",
+      body: JSON.stringify({ electionId: "ab".repeat(32), statement: "000f0109" }),
+    });
+  });
+
+  test.each([
+    [
+      422,
+      { code: "DESTRUCTION_REJECTED", data: { code: "destruction-repeat" } },
+      { state: "rejected", code: "destruction-repeat" },
+    ],
+    [503, { code: "DESTRUCTION_NOT_READY" }, { state: "not-ready" }],
+    [409, { code: "ELECTION_NOT_OPEN" }, { state: "not-open" }],
+    [404, { code: "ELECTION_NOT_FOUND" }, { state: "not-open" }],
+    [
+      503,
+      { code: "DESTRUCTIONS_UNAVAILABLE" },
+      { state: "unavailable", reason: "DESTRUCTIONS_UNAVAILABLE" },
+    ],
+    // The opening route's codes are no answer from this one.
+    [
+      422,
+      { code: "OPENING_REJECTED", data: { code: "tally-repeat" } },
+      { state: "unavailable", reason: "OPENING_REJECTED" },
+    ],
+    [503, { code: "OPENING_NOT_READY" }, { state: "unavailable", reason: "OPENING_NOT_READY" }],
+  ])("reads the destructions route's %i %j as what it says", async (status, body, answer) => {
+    handler = json(status, body);
+    expect(await new HttpOperator(base).submitDestruction(ID, STATEMENT)).toEqual(answer);
+  });
+
+  test("reads the destruction route's codes from the openings route as no answer", async () => {
+    handler = json(503, { code: "DESTRUCTION_NOT_READY" });
+    expect(await new HttpOperator(base).submit(ID, OPENING)).toEqual({
+      state: "unavailable",
+      reason: "DESTRUCTION_NOT_READY",
+    });
+  });
+
+  test("follows no redirect from the destructions route", async () => {
+    handler = (req, body, res) =>
+      req.url === "/api/destructions"
+        ? res.writeHead(307, { location: "/elsewhere" }).end()
+        : json(201, { entry, link: "cd".repeat(32), earlier: false })(req, body, res);
+    expect(await new HttpOperator(base).submitDestruction(ID, STATEMENT)).toMatchObject({
+      state: "unavailable",
     });
   });
 

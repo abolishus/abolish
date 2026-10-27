@@ -197,7 +197,8 @@ export interface TallyConfig {
   readonly timeoutMs: number;
   /**
    * The board operator's API base URL (`https:`, or `http:` on loopback),
-   * which the seat sends its signed tally openings to until the seal.
+   * which the seat sends its signed tally openings to until the seal, and
+   * its destruction statement to until the destruction window ends.
    */
   readonly operator: string;
 }

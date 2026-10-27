@@ -8,10 +8,12 @@
 // the tally duty (`TallyDuty`, docs/spec/tally.md; T-29, T-14, T-54),
 // which also takes the summed-share messages the channel hands it, and the
 // sending of the openings it signed (`OpeningSender`, Destruction, When;
-// T-54), and destruction (`DestructionDuty`, Destruction; T-14, T-40, T-69).
+// T-54), and destruction (`DestructionDuty`, Destruction; T-14, T-40, T-69)
+// with the sending of its statement (`StatementSender`, Destruction window).
 // Once the seat has begun destroying an election's material, every duty
 // that reads it is dropped unstepped, and with it whatever it held in
-// memory; the openings' sending and destruction itself go on.
+// memory; the openings' sending, destruction itself and the statement's
+// sending go on.
 // This file only schedules: what the seat decides, signs, stores and sends is
 // the duty's, so a crash, a restart or a step that fails midway resends the
 // stored record and never signs another.
@@ -33,6 +35,7 @@ import type { DestructionDuty, DestructionStatus } from "./destruction.ts";
 import { L1AnchorError } from "./l1.ts";
 import type { OpeningSender, OpeningSenderStatus } from "./opening-sender.ts";
 import { SendError } from "./send.ts";
+import type { StatementSender, StatementSenderStatus } from "./statement-sender.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
 import type { TallyDuty, TallyDutyStatus } from "./tally.ts";
 import { ViewError } from "./view.ts";
@@ -65,6 +68,7 @@ export type ComplaintEvent = KindEvent<"complaints", ComplaintDutyStatus>;
 export type TallyEvent = KindEvent<"tally", TallyDutyStatus>;
 export type OpeningEvent = KindEvent<"openings", OpeningSenderStatus>;
 export type DestructionEvent = KindEvent<"destruction", DestructionStatus>;
+export type StatementEvent = KindEvent<"statements", StatementSenderStatus>;
 /** What the duties report. */
 export type DutyEvent =
   | AvailabilityEvent
@@ -73,7 +77,8 @@ export type DutyEvent =
   | ComplaintEvent
   | TallyEvent
   | OpeningEvent
-  | DestructionEvent;
+  | DestructionEvent
+  | StatementEvent;
 
 // A status as logged: its times as decimal strings, so the line is JSON.
 type Logged<S> = S extends unknown
@@ -82,7 +87,8 @@ type Logged<S> = S extends unknown
 
 /**
  * What the schedule reads of the seat: a `CeremonySeat`, or for the duties
- * that outlast destruction (`OpeningSends`, `DestructionDuties`) the seat's
+ * that outlast destruction (`OpeningSends`, `DestructionDuties`,
+ * `StatementSends`) the seat's
  * elections without their secrets (`afterDestruction`).
  */
 export interface DutySeat<El extends ApprovedElectionInfo = ApprovedElection> {
@@ -159,6 +165,9 @@ interface Stepped<S> {
 
 /** What the schedule needs of an election's destruction: `DestructionDuty`, with `tallyDeadline`. */
 export type DestructionStep = Pick<DestructionDuty, "step"> & { readonly deadline: bigint };
+
+/** What the schedule needs of an election's statement sender: `StatementSender`, with `openingsDeadline`. */
+export type StatementStep = Pick<StatementSender, "step"> & { readonly deadline: bigint };
 
 /** What sets one kind of duty apart in the schedule. */
 interface Kind<K extends string, S> {
@@ -570,6 +579,40 @@ export class DestructionDuties extends ElectionDuties<
         name: "destruction",
         deadline: (e) => tallyDeadline(e, clock),
         settles: (status) => status.state === "destroyed",
+      },
+      options,
+    );
+  }
+}
+
+/**
+ * The sending of every approved election's destruction statement: each
+ * one's `StatementSender`, stepped from the approval (it sends nothing
+ * until the seat has destroyed and holds its statement) until the
+ * destruction window ends, `t_D + DESTRUCTION_WINDOW` (`openingsDeadline`,
+ * the same end), by when a statement must be on the board
+ * (docs/spec/tally.md, Destruction window). The seat reads no board after
+ * destruction, so it keeps resending, paced by the operator's answers,
+ * until then; and settles at once where the pinned board-entry version
+ * can't carry a statement. No step begins past the end, nor is a sender
+ * set up: a statement boarded later is outside the seal (T-14, T-54).
+ */
+export class StatementSends extends ElectionDuties<
+  "statements",
+  StatementSenderStatus,
+  StatementStep,
+  ApprovedElectionInfo
+> {
+  constructor(
+    options: DutyOptions<StatementStep, StatementEvent, ApprovedElectionInfo>,
+    clock: DeadlineClock,
+  ) {
+    super(
+      {
+        name: "statements",
+        deadline: (e) => openingsDeadline(e, clock),
+        noStepPast: true,
+        settles: (status, wall, deadline) => status.state === "unboardable" || wall > deadline,
       },
       options,
     );

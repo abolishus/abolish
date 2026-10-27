@@ -53,7 +53,7 @@ const question = (over: Partial<FormQuestion> = {}): FormQuestion => ({
 });
 
 const form = (over: Partial<PollForm> = {}): PollForm => ({
-  ...newPollForm(),
+  ...newPollForm("UTC"),
   title: "Harbor library hours",
   questions: [question()],
   closesDate: "2026-11-04",
@@ -134,6 +134,7 @@ const anyForm = fc.record({
   tiers: fc.constant([0]),
   closesDate: fc.constant("2026-11-04"),
   closesTime: fc.constant("15:00"),
+  timeZone: fc.constant("UTC"),
 });
 
 // A form the handler accepts, then at most one thing broken in it, so every
@@ -375,12 +376,14 @@ describe("the poll form's checks", () => {
       ["1969-12-31", "23:59"],
       ["2026-11-4", "12:00"],
     ] as const) {
-      expect(closesAtOf({ closesDate, closesTime })).toBeUndefined();
+      expect(closesAtOf({ closesDate, closesTime, timeZone: "UTC" })).toBeUndefined();
       expect(closesErrors(form({ closesDate, closesTime }), NOW)).toEqual([
         { id: fieldId.closes, problem: "closesMissing" },
       ]);
     }
-    expect(closesAtOf({ closesDate: "2026-11-04", closesTime: "15:00" })).toBe(1793804400n);
+    expect(closesAtOf({ closesDate: "2026-11-04", closesTime: "15:00", timeZone: "UTC" })).toBe(
+      1793804400n,
+    );
   });
 });
 
@@ -428,8 +431,8 @@ describe("a saved draft in the form", () => {
   test("reads back into the form and out again unchanged, whatever its ranges", () => {
     fc.assert(
       fc.property(savedDraft, (d) => {
-        expect(draftOf(formOf(d))).toEqual(d);
-        expect(fieldErrors(formOf(d))).toEqual([]);
+        expect(draftOf(formOf(d, "UTC"))).toEqual(d);
+        expect(fieldErrors(formOf(d, "UTC"))).toEqual([]);
       }),
       runs,
     );
@@ -437,18 +440,21 @@ describe("a saved draft in the form", () => {
 
   test("reads each range as the rule that says it", () => {
     const rule = (min: number, max: number, m = 4) => {
-      const [q] = formOf({
-        ...draftOf(form())!,
-        questions: [
-          {
-            question: "q",
-            description: "",
-            options: Array.from({ length: m }, (_, i) => ({ label: `${i}`, description: "" })),
-            minSelections: min,
-            maxSelections: max,
-          },
-        ],
-      }).questions;
+      const [q] = formOf(
+        {
+          ...draftOf(form())!,
+          questions: [
+            {
+              question: "q",
+              description: "",
+              options: Array.from({ length: m }, (_, i) => ({ label: `${i}`, description: "" })),
+              minSelections: min,
+              maxSelections: max,
+            },
+          ],
+        },
+        "UTC",
+      ).questions;
       return [q!.rule, q!.optional];
     };
     expect(rule(1, 1)).toEqual(["one", false]);
@@ -461,8 +467,106 @@ describe("a saved draft in the form", () => {
   });
 
   test("leaves the closing time empty when no date can show it", () => {
-    const f = formOf({ ...draftOf(form())!, closesAt: (1n << 64n) - 1n });
+    const f = formOf({ ...draftOf(form())!, closesAt: (1n << 64n) - 1n }, "UTC");
     expect([f.closesDate, f.closesTime]).toEqual(["", ""]);
     expect(closesErrors(f, NOW)).toEqual([{ id: fieldId.closes, problem: "closesMissing" }]);
+  });
+});
+
+// Zones with a clock that changes by an hour, by half an hour, not at all,
+// far ahead of UTC, and by a whole day (Apia skipped 30 December 2011).
+const ZONES = [
+  "UTC",
+  "America/New_York",
+  "Europe/Berlin",
+  "Asia/Kolkata",
+  "America/St_Johns",
+  "Australia/Lord_Howe",
+  "Pacific/Kiritimati",
+  "Pacific/Apia",
+] as const;
+
+describe("the closing time on the author's clock", () => {
+  const closes = (timeZone: string, closesDate: string, closesTime: string) =>
+    closesAtOf({ closesDate, closesTime, timeZone });
+  const shown = (closesAt: bigint, timeZone: string) => {
+    const f = formOf({ ...draftOf(form())!, closesAt }, timeZone);
+    return [f.closesDate, f.closesTime];
+  };
+
+  test("reads the date and time in the author's time zone", () => {
+    expect(closes("Asia/Kolkata", "2026-11-04", "15:00")).toBe(1793804400n - 19800n);
+    expect(closes("America/New_York", "2026-11-04", "15:00")).toBe(1793804400n + 18000n);
+    expect(closes("America/New_York", "2026-07-04", "15:00")).toBe(
+      BigInt(Date.UTC(2026, 6, 4, 19) / 1000),
+    );
+    expect(shown(1793804400n, "Asia/Kolkata")).toEqual(["2026-11-04", "20:30"]);
+    expect(shown(1793804400n, "Pacific/Kiritimati")).toEqual(["2026-11-05", "05:00"]);
+  });
+
+  test("names a time the clock skips, and reads a repeated one as its first", () => {
+    for (const [timeZone, closesDate, closesTime] of [
+      ["America/New_York", "2026-03-08", "02:30"],
+      ["Europe/Berlin", "2026-03-29", "02:00"],
+      ["Australia/Lord_Howe", "2026-10-04", "02:15"],
+      ["Pacific/Apia", "2011-12-30", "12:00"],
+    ] as const) {
+      expect(closes(timeZone, closesDate, closesTime)).toBeUndefined();
+      expect(closesErrors(form({ closesDate, closesTime, timeZone }), NOW)).toEqual([
+        { id: fieldId.closes, problem: "closesSkipped" },
+      ]);
+    }
+    // 01:30 comes twice in New York on 1 November 2026, first at 05:30 UTC.
+    expect(closes("America/New_York", "2026-11-01", "01:30")).toBe(
+      BigInt(Date.UTC(2026, 10, 1, 5, 30) / 1000),
+    );
+    // 02:30 comes twice in Berlin on 25 October 2026, first at 00:30 UTC.
+    expect(closes("Europe/Berlin", "2026-10-25", "02:30")).toBe(
+      BigInt(Date.UTC(2026, 9, 25, 0, 30) / 1000),
+    );
+  });
+
+  test("shows any instant as a date and time that read back to it, or to its first pass", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 4_000_000_000n / 60n }),
+        fc.constantFrom(...ZONES),
+        (minutes, timeZone) => {
+          const closesAt = minutes * 60n;
+          const [closesDate, closesTime] = shown(closesAt, timeZone) as [string, string];
+          const back = closes(timeZone, closesDate, closesTime);
+          expect(back).toBeDefined();
+          // Earlier only in the hour a clock repeats, where it shows the same.
+          expect(back! <= closesAt).toBe(true);
+          expect(closesAt - back!).toBeLessThanOrEqual(3600n);
+          expect(shown(back!, timeZone)).toEqual([closesDate, closesTime]);
+        },
+      ),
+      runs,
+    );
+  });
+
+  test("reads any real date and time to an instant that shows it, unless the clock skips it", () => {
+    fc.assert(
+      fc.property(
+        fc.date({
+          min: new Date("1971-01-01T00:00Z"),
+          max: new Date("2096-01-01T00:00Z"),
+          noInvalidDate: true,
+        }),
+        fc.constantFrom(...ZONES),
+        (date, timeZone) => {
+          const d = date.toISOString();
+          const [closesDate, closesTime] = [d.slice(0, 10), d.slice(11, 16)];
+          const closesAt = closes(timeZone, closesDate, closesTime);
+          if (closesAt === undefined)
+            expect(closesErrors(form({ closesDate, closesTime, timeZone }), NOW)).toEqual([
+              { id: fieldId.closes, problem: "closesSkipped" },
+            ]);
+          else expect(shown(closesAt, timeZone)).toEqual([closesDate, closesTime]);
+        },
+      ),
+      runs,
+    );
   });
 });

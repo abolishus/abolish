@@ -1142,7 +1142,6 @@ export const esUS: Messages = {
   setupDraft: "Esta encuesta no se ha enviado, así que no se está preparando nada.",
   setupFailed: "Tu encuesta no se abrió.",
   setupFailedNext: "Volver a tus encuestas para intentarlo de nuevo o descartarla",
-  pollFormAboutMark: "La encuesta",
   pollFormAboutTitle: "¿De qué trata?",
   pollFormTitleLabel: "Título",
   pollFormTitleHelp: "Lo primero que se ve, en las listas y en la página de la encuesta.",
@@ -1157,7 +1156,6 @@ export const esUS: Messages = {
   pollFormTopicNone: "Sin tema",
   pollFormTagsNote:
     "El lugar y el tema solo deciden dónde aparece tu encuesta. No forman parte de la encuesta en sí, y la moderación puede cambiarlos si no encajan.",
-  pollFormQuestionsMark: "Preguntas",
   pollFormQuestionsTitle: "¿Qué preguntas?",
   pollFormQuestionsLede:
     "Cada pregunta tiene sus opciones y una regla de cuántas elige una respuesta. Cada respuesta a tu encuesta responde a todas sus preguntas.",
@@ -1187,7 +1185,6 @@ export const esUS: Messages = {
   pollFormRemove: "Quitar {what}",
   pollFormWhatQuestion: "la pregunta {n}",
   pollFormWhatOption: "la opción {n} de la pregunta {q}",
-  pollFormWhoMark: "Quién puede responder",
   pollFormWhoTitle: "¿Quién puede responder?",
   pollFormWhoLede_email:
     "Por ahora, todas las encuestas están abiertas a las mismas personas. Cada correo electrónico verificado cuenta una vez, así que alguien con dos direcciones podría responder dos veces: los resultados cuentan direcciones, no personas.",
@@ -1195,13 +1192,13 @@ export const esUS: Messages = {
     "Por ahora, todas las encuestas están abiertas a las mismas personas. Cada número de teléfono verificado cuenta una vez, así que alguien con dos números podría responder dos veces: los resultados cuentan números, no personas.",
   pollFormWho_email: "Personas con un correo electrónico verificado",
   pollFormWho_phone: "Personas con un correo electrónico y un número de teléfono verificados",
-  pollFormWhenMark: "Cuándo cierra",
   pollFormWhenTitle: "¿Cuándo cierra?",
   pollFormWhenLede:
-    "Las horas están en UTC, el reloj que usan todas las encuestas. Tu encuesta se abre una media hora después de que la envíes, cuando ya está preparada, y luego debe seguir abierta al menos una hora, así que elige una hora al menos 90 minutos a partir de ahora y no más de un año después.",
-  pollFormDateLabel: "Fecha de cierre (UTC)",
-  pollFormTimeLabel: "Hora de cierre (UTC)",
-  pollFormLocal: "Donde estás, eso es el {when}.",
+    "Elige una hora de tu propio reloj ({zone}). Tu encuesta se abre una media hora después de que la envíes, cuando ya está preparada, y luego debe seguir abierta al menos una hora, así que elige una hora al menos 90 minutos a partir de ahora y no más de un año después.",
+  pollFormDateLabel: "Fecha de cierre",
+  pollFormTimeLabel: "Hora de cierre",
+  pollFormUtc:
+    "Quienes respondan la verán como el {when} UTC, el reloj que usan todas las encuestas.",
   pollFormPreviewMark: "Vista previa",
   pollFormPreviewTitle: "Lo que se verá",
   pollFormPreviewEmpty: "El título de tu encuesta",
@@ -1234,12 +1231,11 @@ export const esUS: Messages = {
   pollFormReviewTopic: "Tema",
   pollFormReviewNone: "Ninguno",
   pollFormReviewNotSet: "Sin definir",
-  pollFormReviewClosesAt: "{when} UTC",
+  pollFormReviewClosesAt: "{when} en tu hora, {utc} UTC",
   pollFormReviewUntitled: "Aún sin título",
   pollFormReviewChange: "Cambiar",
   pollFormSave: "Guardar borrador",
   pollFormSaved: "Tu borrador está guardado.",
-  pollFormSubmitMark: "Enviar",
   pollFormSubmitTitle: "¿Listo para preguntar?",
   pollFormSubmitLede:
     "Al enviarla, tu encuesta se prepara en el registro público y se abre a respuestas cuando eso termina. No puedes cambiarla después de enviarla.",
@@ -1276,6 +1272,8 @@ export const esUS: Messages = {
   pollForm_rangeInvalid:
     "Estos números no encajan con las opciones: una respuesta debe poder elegir al menos una, y no más de las que hay.",
   pollForm_closesMissing: "Elige una fecha y hora de cierre.",
+  pollForm_closesSkipped:
+    "Tu reloj se salta esa hora cuando se adelanta una hora. Elige otra hora.",
   pollForm_closesTooSoon: "Elige una hora al menos 90 minutos a partir de ahora.",
   pollForm_closesTooLate: "Elige una hora dentro del próximo año como máximo.",
   pollForm_draftTooLong:

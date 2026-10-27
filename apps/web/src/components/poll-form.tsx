@@ -78,6 +78,26 @@ const whoName = (t: Translate, tier: number, phoneVerification: boolean) =>
     ? t(phoneVerification ? "pollFormWho_phone" : "pollFormWho_email")
     : tierName(t, tier, phoneVerification);
 
+/** A date and time for `locale` on `timeZone`'s clock, for what only the browser shows. */
+function formatIn(locale: string, timeZone: string, date: Date): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone,
+  }).format(date);
+}
+
+/**
+ * `timeZone`'s name for `locale` as people say it ("Eastern Time"), or its
+ * IANA ID where the browser has no such name.
+ */
+function zoneName(locale: string, timeZone: string, at: Date): string {
+  const name = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "longGeneric" })
+    .formatToParts(at)
+    .find((p) => p.type === "timeZoneName")?.value;
+  return name ?? timeZone.replaceAll("_", " ");
+}
+
 /** A problem's words, saying which question it is in. */
 const say = (t: Translate, e: FieldError) => {
   const problem = t(`pollForm_${e.problem}`);
@@ -358,25 +378,13 @@ function QuestionFields({
             const detailId = fieldId.optionDescription(q.key, o.key);
             return (
               <li key={o.key} className="grid gap-2">
-                <Label htmlFor={labelId} className="text-sm font-semibold">
-                  {t("pollFormOption", { n: j + 1 })}
-                </Label>
-                <Errors t={t} errors={errors} id={labelId} />
-                <div className="flex flex-wrap gap-2">
-                  <Input
-                    id={labelId}
-                    className={cn(FIELD, "min-w-0 flex-1 basis-48")}
-                    {...described(errors, labelId)}
-                    value={o.label}
-                    onChange={(e) =>
-                      onChange({
-                        ...q,
-                        options: q.options.map((x) =>
-                          x.key === o.key ? { ...x, label: e.target.value } : x,
-                        ),
-                      })
-                    }
-                  />
+                {/* The controls share the label's row, as a question's share its
+                    heading's, so on a phone they never wrap between the option's
+                    field and its details (P2-29, creating a poll's iteration 3). */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor={labelId} className="text-sm font-semibold">
+                    {t("pollFormOption", { n: j + 1 })}
+                  </Label>
                   <ItemControls
                     t={t}
                     what={t("pollFormWhatOption", { n: j + 1, q: n })}
@@ -389,6 +397,21 @@ function QuestionFields({
                     }
                   />
                 </div>
+                <Errors t={t} errors={errors} id={labelId} />
+                <Input
+                  id={labelId}
+                  className={FIELD}
+                  {...described(errors, labelId)}
+                  value={o.label}
+                  onChange={(e) =>
+                    onChange({
+                      ...q,
+                      options: q.options.map((x) =>
+                        x.key === o.key ? { ...x, label: e.target.value } : x,
+                      ),
+                    })
+                  }
+                />
                 <Label htmlFor={detailId} className="text-sm font-normal text-muted-foreground">
                   {t("pollFormOptionDescriptionLabel", { n: j + 1 })}
                   <Optional t={t} />
@@ -632,7 +655,8 @@ function PollReview({
         ) : (
           <span suppressHydrationWarning>
             {t("pollFormReviewClosesAt", {
-              when: formatUtc(locale, new Date(Number(closesAt) * 1000)),
+              when: formatIn(locale, form.timeZone, new Date(Number(closesAt) * 1000)),
+              utc: formatUtc(locale, new Date(Number(closesAt) * 1000)),
             })}
           </span>
         ),
@@ -710,7 +734,7 @@ export interface PollFormPageProps {
   readonly phoneVerification: boolean;
   /** The clock; the system's by default. */
   readonly now?: () => Date;
-  /** The author's own time zone, for the local time beside the UTC one; the browser's by default. */
+  /** The author's own time zone, the closing time's clock; the browser's by default. */
   readonly timeZone?: string;
 }
 
@@ -793,7 +817,9 @@ export function PollFormPage({
     setUnavailable(undefined);
     setWantShown(false);
     setUnshown(false);
-    setForm(id === undefined ? newPollForm() : undefined);
+    // The author's own clock, as the browser knows it: the form only exists in the browser.
+    const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    setForm(id === undefined ? newPollForm(zone) : undefined);
     if (id === undefined) return setBusy(false);
     setBusy(true);
     if (!ID.test(id)) {
@@ -808,7 +834,7 @@ export function PollFormPage({
         if (!live) return;
         if (poll.state !== "drafted") return setUnavailable("notDraft");
         savedId.current = id;
-        setForm(formOf(draft));
+        setForm(formOf(draft, zone));
       })
       .catch((e: unknown) => {
         if (!live) return;
@@ -819,7 +845,7 @@ export function PollFormPage({
     return () => {
       live = false;
     };
-  }, [client, id]);
+  }, [client, id, timeZone]);
 
   useEffect(() => {
     if (attempt > 0) summary.current?.focus();
@@ -1023,14 +1049,6 @@ export function PollFormPage({
     );
 
   const closesAt = closesAtOf(form);
-  const local =
-    closesAt === undefined
-      ? undefined
-      : new Intl.DateTimeFormat(locale, {
-          dateStyle: "long",
-          timeStyle: "short",
-          ...(timeZone === undefined ? {} : { timeZone }),
-        }).format(new Date(Number(closesAt) * 1000));
   const setQuestion = (i: number, q: FormQuestion) =>
     change({ ...form, questions: form.questions.map((x, j) => (j === i ? q : x)) });
 
@@ -1074,12 +1092,7 @@ export function PollFormPage({
             </div>
           ) : null}
 
-          <Section
-            index="01"
-            mark={t("pollFormAboutMark")}
-            title={t("pollFormAboutTitle")}
-            id="poll-form-about"
-          >
+          <Section title={t("pollFormAboutTitle")} id="poll-form-about">
             <div className="grid gap-6">
               <div className="grid gap-2">
                 <Label htmlFor={fieldId.title} className="text-base font-semibold">
@@ -1196,8 +1209,6 @@ export function PollFormPage({
           </Section>
 
           <Section
-            index="02"
-            mark={t("pollFormQuestionsMark")}
             title={t("pollFormQuestionsTitle")}
             id="poll-form-questions"
             lede={<p className="m-0">{t("pollFormQuestionsLede")}</p>}
@@ -1234,8 +1245,6 @@ export function PollFormPage({
           </Section>
 
           <Section
-            index="03"
-            mark={t("pollFormWhoMark")}
             title={t("pollFormWhoTitle")}
             id="poll-form-who"
             lede={
@@ -1244,7 +1253,7 @@ export function PollFormPage({
               </p>
             }
           >
-            <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
+            <ul className="m-0 grid list-none border-t border-border p-0">
               {form.tiers.map((tier) => (
                 <li key={tier} className="border-b border-border py-3 text-base font-semibold">
                   {whoName(t, tier, phoneVerification)}
@@ -1254,11 +1263,13 @@ export function PollFormPage({
           </Section>
 
           <Section
-            index="04"
-            mark={t("pollFormWhenMark")}
             title={t("pollFormWhenTitle")}
             id="poll-form-when"
-            lede={<p className="m-0">{t("pollFormWhenLede")}</p>}
+            lede={
+              <p className="m-0">
+                {t("pollFormWhenLede", { zone: zoneName(locale, form.timeZone, now()) })}
+              </p>
+            }
           >
             <div className="grid gap-4">
               <Errors t={t} errors={errors} id={fieldId.closes} />
@@ -1290,9 +1301,11 @@ export function PollFormPage({
                   />
                 </div>
               </div>
-              {local === undefined ? null : (
+              {closesAt === undefined ? null : (
                 <p className="m-0 text-sm text-muted-foreground" suppressHydrationWarning>
-                  {t("pollFormLocal", { when: local })}
+                  {t("pollFormUtc", {
+                    when: formatUtc(locale, new Date(Number(closesAt) * 1000)),
+                  })}
                 </p>
               )}
             </div>
@@ -1344,8 +1357,6 @@ export function PollFormPage({
 
         <div className="grid min-w-0 content-start gap-12 lg:col-span-7">
           <Section
-            index="05"
-            mark={t("pollFormSubmitMark")}
             title={t("pollFormSubmitTitle")}
             id="poll-form-submit"
             lede={

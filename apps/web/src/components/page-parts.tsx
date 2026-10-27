@@ -36,7 +36,11 @@ export function PageHeader({
   );
 }
 
-/** A numbered section of a page, on the register's ruled grid. */
+/**
+ * A section of a page, on the register's ruled grid: numbered in the civic
+ * record, and without `index` and `mark` in the everyday register, which
+ * leaves its sections unnumbered (docs/design/language.md, Two registers).
+ */
 export function Section({
   index,
   mark,
@@ -46,8 +50,8 @@ export function Section({
   lede,
   children,
 }: {
-  index: string;
-  mark: string;
+  index?: string;
+  mark?: string;
   title: string;
   id: string;
   titleRef?: Ref<HTMLHeadingElement>;
@@ -57,9 +61,11 @@ export function Section({
   return (
     <section aria-labelledby={id} className="grid gap-8 border-t border-border pt-12 md:pt-16">
       <div className="grid gap-5 md:grid-cols-12">
-        <SectionMark index={index} className="md:col-span-12">
-          {mark}
-        </SectionMark>
+        {index === undefined || mark === undefined ? null : (
+          <SectionMark index={index} className="md:col-span-12">
+            {mark}
+          </SectionMark>
+        )}
         <h2
           id={id}
           ref={titleRef}

@@ -150,7 +150,7 @@ function steps(
         records,
         registry: definition.group_registry,
         chainId: definition.l2_chain_id,
-        version: 8,
+        version: 12,
         ...registrars,
       });
     },

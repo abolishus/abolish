@@ -493,7 +493,7 @@ const outcomeRequest = (change: Partial<Tier0OutcomeRequest> = {}): Tier0Outcome
   records: REGISTRY,
   registry: definition.group_registry,
   chainId: definition.l2_chain_id,
-  version: 8,
+  version: 12,
   ...registrars,
   ...change,
 });
@@ -602,7 +602,7 @@ const openRequest = (
   records: REGISTRY,
   registry: definition.group_registry,
   chainId: definition.l2_chain_id,
-  version: 8,
+  version: 12,
   ...registrars,
   ...change,
 });

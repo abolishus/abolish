@@ -1252,11 +1252,14 @@ contract TrusteeRegistryTest is TestBase {
 /// The events the registry emits against docs/spec/vectors/contract-event-v12.json
 /// (an independent Python generator): deployed at the file's address and
 /// chain with the panels its `PanelPinned` records log, at their block and
-/// time, then given the registration its `CeremonyRegistered` record carries,
-/// the registry emits exactly the file's six records, kind-carrying
-/// `PanelPinned` first, and its accumulator steps through the file's
-/// sequence (contracts.md, Contract-event record, Event tables (version 12);
-/// Trustee registry, Events; T-53, T-31).
+/// time, the registry emits exactly the file's five kind-carrying
+/// `PanelPinned` records and its accumulator reaches the file's after them
+/// (contracts.md, Contract-event record, Event tables (version 12); Trustee
+/// registry, Events; T-53, T-31). The inputs come from the records' own data,
+/// so the data's comparison checks the field order and types; the topics,
+/// emitter and accumulator are checked independently. The sequence's last
+/// record, a `CeremonyRegistered` copied from contract-event-v2.json, names a
+/// panel none of the five is, so no registry here can emit it.
 contract TrusteeRegistryEventVectorsTest is TestBase {
     string internal constant EVENTS = "../../docs/spec/vectors/contract-event-v12.json";
     /// The file's trustee-registry sequence starts with five panels.

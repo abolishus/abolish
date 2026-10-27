@@ -78,7 +78,7 @@ describe("the Tier 1 relay's configuration", () => {
       [{ TIER1_THRESHOLD: "2e0" }, "malformed TIER1_THRESHOLD"],
       // `Tier1MemberAdded` is named from version 6.
       [{ TIER1_EVENT_VERSION: "5" }, "malformed TIER1_EVENT_VERSION"],
-      [{ TIER1_EVENT_VERSION: "9" }, "malformed TIER1_EVENT_VERSION"],
+      [{ TIER1_EVENT_VERSION: "13" }, "malformed TIER1_EVENT_VERSION"],
       [{ TIER1_MAX_FEE_PER_GAS: "0" }, "malformed TIER1_MAX_FEE_PER_GAS"],
       [{ TIER1_MAX_FEE_PER_GAS: "1gwei" }, "malformed TIER1_MAX_FEE_PER_GAS"],
       [{ TIER1_MAX_FEE_PER_GAS: (2n ** 128n).toString() }, "malformed TIER1_MAX_FEE_PER_GAS"],

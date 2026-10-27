@@ -32,7 +32,12 @@ contract AuthorPanelHandler is TestBase {
     bytes32[] public tried;
     uint256 public plainRegistrations;
     uint256 public authorRegistrations;
+    /// Registrations of a civic-record class (2 or 3), which the trustee
+    /// registry's transitional panel never holds (rule 8).
+    uint256 public civicRegistrations;
     bool public unexpected;
+    /// Whether the definition being tried is of class 2 or 3.
+    bool internal civic;
 
     constructor(
         ElectionRegistry registry_,
@@ -62,12 +67,15 @@ contract AuthorPanelHandler is TestBase {
     /// Tries to register a definition for a created election. `variant`
     /// picks the author panel (none, 1-of-1, 2-of-3 or 3-of-4), the call
     /// (plain or with the author record), the record (honest, one approval
-    /// short of the quorum, or one bit flipped at `bit`) and the caller.
+    /// short of the quorum, or one bit flipped at `bit`) and the caller;
+    /// `idSeed`'s top bits the poll class (1 to 3).
     function register(uint256 idSeed, uint8 variant, uint256 bit) external {
         if (ids.length == 0) return;
         bytes32 id = ids[idSeed % ids.length];
         uint256 panel = variant % 4;
-        bytes memory enc = _approved(id, panel);
+        uint8 pollClass = uint8(1 + (idSeed >> 254) % 3);
+        civic = pollClass >= 2;
+        bytes memory enc = _approved(id, panel, pollClass);
         tried.push(lib.hash(enc));
         address caller = variant >= 200 ? OTHER : CREATOR;
         bool fresh = shadowHash[id] == bytes32(0) && caller == CREATOR;
@@ -82,10 +90,11 @@ contract AuthorPanelHandler is TestBase {
         return (ks[panel], ns[panel]);
     }
 
-    function _approved(bytes32 id, uint256 panel) internal returns (bytes memory) {
+    function _approved(bytes32 id, uint256 panel, uint8 pollClass) internal returns (bytes memory) {
         (uint8 k, uint8 n) = _panel(panel);
         ElectionDefinitionLib.Definition memory d =
             AuthorPanelFixture.definition(registry, id, k == 0 ? 1 : k, n == 0 ? 1 : n);
+        d.pollClass = pollClass;
         if (panel == 0) {
             d.authorThreshold = 0;
             d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
@@ -99,12 +108,13 @@ contract AuthorPanelHandler is TestBase {
     {
         vm.prank(caller);
         try registry.registerDefinition(enc) {
-            // Never a definition with an author panel.
-            if (panel != 0 || !fresh) unexpected = true;
+            // Never a definition with an author panel, nor a civic one.
+            if (panel != 0 || !fresh || civic) unexpected = true;
+            if (civic) civicRegistrations++;
             shadowHash[id] = lib.hash(enc);
             plainRegistrations++;
         } catch {
-            if (panel == 0 && fresh) unexpected = true;
+            if (panel == 0 && fresh && !civic) unexpected = true;
         }
     }
 
@@ -123,7 +133,8 @@ contract AuthorPanelHandler is TestBase {
         bool honest = recordKind == 0 || (recordKind == 1 && panel == 1);
         vm.prank(caller);
         try registry.registerDefinitionWithAuthorPanel(enc, reg) {
-            if (panel == 0 || !fresh || !honest) unexpected = true;
+            if (panel == 0 || !fresh || !honest || civic) unexpected = true;
+            if (civic) civicRegistrations++;
             bytes32 h = lib.hash(enc);
             shadowHash[id] = h;
             shadowAuthor[id] = true;
@@ -134,7 +145,7 @@ contract AuthorPanelHandler is TestBase {
                 unexpected = true;
             }
         } catch {
-            if (panel != 0 && fresh && honest) unexpected = true;
+            if (panel != 0 && fresh && honest && !civic) unexpected = true;
         }
     }
 
@@ -218,6 +229,12 @@ contract ElectionRegistryAuthorPanelInvariantTest is TestBase {
             assertTrue(registeredWithAuthor == (keySetHash != bytes32(0)), "key set hash");
             assertTrue(registeredWithAuthor == (mask != 0), "key set seats");
         }
+    }
+
+    /// Under the transitional panel no definition of class 2 or 3 is ever
+    /// registered (rule 8; T-14).
+    function invariant_NoCivicPollUnderATransitionalPanel() public view {
+        assertEq(handler.civicRegistrations(), 0, "a civic poll registered");
     }
 
     function invariant_DefinitionsAreWriteOnce() public view {

@@ -14,6 +14,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 import { STAGING } from "../src/deployment.ts";
+import { WALLET_HOLD_MARGIN } from "../src/lapse.ts";
 import type { Fetch, LoadedDeposits, LoadedPostings } from "../src/load.ts";
 import {
   POSTING_CLIENT_MARGIN,
@@ -418,6 +419,27 @@ describe("postThroughRelay", () => {
     const w = world({ relay: () => sent, chainAhead: 200_000n });
     expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F, LATE)).toBe("unreachable");
     expect(w.sends).toHaveLength(0);
+  });
+
+  test("a late run counts a head's time only within WALLET_HOLD_MARGIN of the device's clock (T-25)", async () => {
+    const start = CUTOFF - POSTING_SEND_MARGIN + 1n;
+    // An endpoint answering a head past c_S can't end the run before it sends.
+    const forged = world({
+      relay: () => sent,
+      finalized: (t) => (t >= 600n ? [POSTING] : []),
+      chainAhead: SEND - start + 1n,
+      start,
+    });
+    expect(await postThroughRelay(forged.io, [POSTING], CUTOFF, F, LATE)).toBe("recorded");
+    expect(forged.sends).toHaveLength(1);
+    // One within the margin still counts: a head past c_E ends the sends.
+    const near = world({
+      relay: () => ({ kind: "busy" }),
+      chainAhead: WALLET_HOLD_MARGIN,
+      start: LAST - WALLET_HOLD_MARGIN + 1n,
+    });
+    expect(await postThroughRelay(near.io, [POSTING], CUTOFF, F, LATE)).toBe("unreachable");
+    expect(near.sends).toHaveLength(0);
   });
 
   test("an RPC that can't be read, or whose read throws, records nothing, and the deadlines still end the run", async () => {

@@ -21,7 +21,7 @@
 // only calls its `request`.
 
 import type { Deployment } from "./deployment.ts";
-import type { PostingCutoffs } from "./lapse.ts";
+import { type PostingCutoffs, WALLET_HOLD_MARGIN } from "./lapse.ts";
 import type { LoadedDeposits, LoadedPostings } from "./load.ts";
 import {
   POSTING_FINALITY,
@@ -53,13 +53,8 @@ export const WALLET_REQUEST_MS = 300_000;
  */
 export const WALLET_WAIT = POSTING_SEEN + POSTING_FINALITY;
 
-/**
- * Seconds a head's time may be ahead of this device's clock and still count
- * toward the cutoff: two requests' time, for the wallet's account and chain
- * before a send. An endpoint answering a head further ahead could refuse
- * every send (T-25).
- */
-export const WALLET_HOLD_MARGIN = BigInt((2 * WALLET_REQUEST_MS) / 1000);
+// Kept in lapse.ts, which the relay's run reads too.
+export { WALLET_HOLD_MARGIN };
 
 /**
  * Seconds before the force cutoff `c_L` by which a deposit must be asked
@@ -107,7 +102,8 @@ export const WALLET_LATE_MARGIN = BigInt((6 * WALLET_REQUEST_MS) / 1000);
  * - `refused`: the board refuses the call at the wallet's estimate;
  * - `wrong-chain`: the wallet isn't on the release's L2 and didn't switch;
  * - `no-wallet`: this browser has no wallet;
- * - `late`: the poll's ballot cutoff `c_B` passed;
+ * - `late`: the poll's ballot cutoff `c_B` passed, or in a late run the
+ *   last-offer cutoff `c_E`, before anything was sent;
  * - `failed`: the wallet or its node answered with an error, or nothing.
  *
  * Every outcome but `recorded` and `forced` with a send behind it is
@@ -489,12 +485,27 @@ interface Pending {
  * `sent`; or what stopped the first send. A
  * read that fails or throws records and forces nothing, and each read is
  * given up once every wait is over (T-25, T-52).
+ *
+ * A run with nothing sent yet that finds `c_B` passed, by this device's
+ * clock or a head's time, is a **late** run, best effort, made only where
+ * `late` is given, once the offer told the voter so (else it answers
+ * `late` and sends nothing): it sends only while neither clock is past
+ * `late.lastOffer`, the last-offer cutoff `c_E`, deposits nothing, since
+ * nothing can be forced in time, lets a sighting hold a send back for its
+ * whole `WALLET_WAIT`, since forcing no longer needs the send, and answers
+ * `sent` as soon as every unrecorded posting was sent, with no wait for the
+ * record, so it lets go of the election's lock by `c_E` plus one send's
+ * requests, never waiting toward the send cutoff `c_S` for the record
+ * ([[posting-relay]], The ballot's own deadline, The offer; T-13, T-25). A
+ * send already under way when `c_B` passes is checked against `c_B` and
+ * answers `late`, offering the voter again, the safe way round.
  */
 export async function postFromWallet(
   io: WalletIo,
   postings: readonly Uint8Array[],
   calls: readonly Uint8Array[],
   cutoffs: Pick<PostingCutoffs, "ballot" | "force">,
+  late?: Pick<PostingCutoffs, "lastOffer">,
 ): Promise<WalletAnswer> {
   if (calls.length !== postings.length)
     throw new RangeError("postFromWallet: one call for each posting");
@@ -523,28 +534,40 @@ export async function postFromWallet(
     if (timestamp > chainTime && timestamp <= seconds() + WALLET_HOLD_MARGIN) chainTime = timestamp;
   };
   const started = seconds();
-  // The run ends once every wait has: a read past it is given up.
-  const horizon = () =>
-    pending.reduce((end, p) => {
+  const { ballot: cutoff, force } = cutoffs;
+  // Whether this is a late run: set past `c_B` while nothing was sent.
+  let isLate = false;
+  // The cutoff a send is checked against: `c_E` in a late run, else `c_B`.
+  const sendCutoff = () => (isLate && late !== undefined ? late.lastOffer : cutoff);
+  // The run ends once every wait has, and a late one by `c_E`: a read past
+  // it is given up.
+  const horizon = () => {
+    const end = pending.reduce((end, p) => {
       for (const since of [p.sentAt ?? p.seenAt, p.depositedAt])
         if (since !== undefined && since + WALLET_WAIT > end) end = since + WALLET_WAIT;
       return end;
     }, started + WALLET_WAIT);
+    return isLate && sendCutoff() < end ? sendCutoff() : end;
+  };
   const find = (head: "finalized" | "safe" | "latest") =>
     io
       .find(head, head === "finalized" ? from : undefined, () => time() > horizon())
       .catch((): LoadedPostings => ({ ok: false, problem: "unreachable" }));
   const holds = (since: bigint | undefined) => since !== undefined && time() - since < WALLET_WAIT;
-  const { ballot: cutoff, force } = cutoffs;
   // Whether a deposit asked for now has its L1 block by `c_L`.
   const depositable = () => time() + WALLET_DEPOSIT_SPAN <= force;
-  const forceable = () => forcing && depositable();
+  // A late run deposits nothing: past `c_B` none could land in time.
+  const forceable = () => !isLate && forcing && depositable();
   // A sighting holds a send back while that leaves time to force it, and
   // again once nothing can be forced in time, while the send still makes
   // `c_B`; between the two, never, so a send can still be forced (T-50).
+  // In a late run nothing is forced, so a sighting holds a send back for its
+  // whole wait: sending beside a posting already landing would only put the
+  // voter's address beside it (T-13).
   const held = (p: Pending) =>
     holds(p.seenAt) &&
-    (time() + WALLET_FORCE_MARGIN < force ||
+    (isLate ||
+      time() + WALLET_FORCE_MARGIN < force ||
       (!depositable() && time() + WALLET_LATE_MARGIN < cutoff));
   const shows = (read: LoadedPostings, p: Pending) =>
     read.ok && read.records.some((record) => equalBytes(record, p.posting));
@@ -598,11 +621,16 @@ export async function postFromWallet(
       for (const p of left) if (p.seenAt === undefined && shows(latest, p)) p.seenAt = time();
     }
     for (const p of left) {
-      if (p.sentAt !== undefined || held(p)) continue;
-      if (time() > cutoff) return sent ? "sent" : "late";
+      if (p.sentAt !== undefined) continue;
+      // Past `c_B` at a send's start, a run with nothing sent goes on as a
+      // late one where the voter was told of it; a run that sent before
+      // `c_B` ends there.
+      if (!isLate && !sent && late !== undefined && time() > cutoff) isLate = true;
+      if (held(p)) continue;
+      if (time() > sendCutoff()) return sent ? "sent" : "late";
       let met: WalletSent;
       try {
-        met = await io.send(p.call, () => time() > cutoff);
+        met = await io.send(p.call, () => time() > sendCutoff());
       } catch (error) {
         // A send that failed may follow a broadcast: sent, as one the
         // wallet never answered, and forced if the safe head doesn't show
@@ -626,6 +654,12 @@ export async function postFromWallet(
       p.sentAt = time();
       p.gas = met.gas;
     }
+    // A late run ends once its sends are answered, with no wait for the
+    // record, so it never waits toward `c_S` holding the election's lock
+    // (T-25, T-52).
+    if (isLate && left.every((p) => p.sentAt !== undefined)) return "sent";
+    // Nor past `c_E`, after which it sends nothing a sighting still holds.
+    if (isLate && time() > sendCutoff()) return sent ? "sent" : "late";
     // Forced through L1: what the wallet sent and the sequencer hasn't
     // batched by `POSTING_FORCE_AFTER`.
     const due = () =>

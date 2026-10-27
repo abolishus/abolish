@@ -187,14 +187,18 @@ export interface ElectionSource {
    * [[0042-posting-relay]], rule 6), answering `recorded` only once every
    * one is recorded by the contract, sending nothing past the ballot cutoff
    * `c_B` and depositing nothing that can't reach L1 by the force cutoff
-   * `c_L` (`cutoffs`); absent where `post` is, and then never offered. The
-   * caller zeroes the records once this settles.
+   * `c_L` (`cutoffs`), or, in a late run past `c_B`, made only where `late`
+   * says the voter was told it is best effort, sending until the last-offer
+   * cutoff `c_E` and depositing nothing ([[posting-relay]], The ballot's own
+   * deadline); absent where `post` is, and then never offered. The caller
+   * zeroes the records once this settles.
    */
   readonly postOwn?: (
     electionId: Uint8Array,
     ballot: Uint8Array,
     postings: readonly Uint8Array[],
     cutoffs: PostingCutoffs,
+    late: boolean,
   ) => Promise<WalletAnswer>;
   /**
    * The election's lock across this origin's tabs (`electionLock`), held
@@ -1400,6 +1404,7 @@ export function Ballot({
       setStep({ ...offered });
       return;
     }
+    const late = note === "late";
     setStep({ kind: "posting-wallet" });
     // Every answer but these may come after the wallet's estimate, which
     // carries the parts (Own wallet, step 3), so they count as handed.
@@ -1413,7 +1418,7 @@ export function Ballot({
       await readHead();
       if (offerClosed()) return { ...offered };
       const posted = await postChecked(sending, offered, (postings) =>
-        postingOwn(electionId, sending.ballot, postings, cutoffs()).catch(
+        postingOwn(electionId, sending.ballot, postings, cutoffs(), late).catch(
           (): WalletAnswer => "failed",
         ),
       );

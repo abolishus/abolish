@@ -1979,6 +1979,8 @@ export const PostingFromTheWallet: Story = {
     await expect(of.postOwn.mock.calls[0]?.[0]).toEqual(fromHex(ELECTION_ID));
     await expect(of.postOwn.mock.calls[0]?.[1]).toEqual(CAST.ballot);
     await expect(of.postOwn.mock.calls[0]?.[3]).toEqual(CUTOFFS);
+    // Far from the close: not a late run.
+    await expect(of.postOwn.mock.calls[0]?.[4]).toBe(false);
     // The share checked again before the wallet's run, both under one hold of the lock.
     const at = (step: string) =>
       of.guarded.filter((call) => call.step === step).map(({ holders }) => holders);
@@ -1989,6 +1991,37 @@ export const PostingFromTheWallet: Story = {
     );
     // Every copy of m the page handed on is zeroed once used (T-18).
     for (const { given } of of.ms) await expect(given).toEqual(new Uint8Array(given.length));
+  },
+};
+
+export const PostingFromTheWalletLate: Story = {
+  name: "Past the ballot cutoff the wallet is still offered, as a late run, once the offer said it is best effort",
+  args: {
+    source: offerSource({
+      posted: ["refused"],
+      ownPosted: ["recorded"],
+      // Past `c_B = closes_at − 3,600`, before `c_E = closes_at − 1,800`.
+      now: Number(ELECTION.closesAt - 3_000n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByText(
+        "It's now too late for your wallet to force the posting through Ethereum in time, so it reaches the public record only if the network takes it. If the record doesn't show it in time, your ballot isn't sent, and the parts are public for nothing.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.postOwn).toHaveBeenCalledOnce();
+    await expect(of.postOwn.mock.calls[0]?.[3]).toEqual(CUTOFFS);
+    // Told of, so the run may go on past `c_B` to `c_E`.
+    await expect(of.postOwn.mock.calls[0]?.[4]).toBe(true);
   },
 };
 

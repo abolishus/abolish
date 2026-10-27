@@ -638,6 +638,25 @@ export const esUS: Messages = {
     "Nuestro servidor envió entradas del tablero de esta encuesta que no pasan la comprobación: una no se decodifica según la definición de la encuesta, nombra otra encuesta o está en otro lugar. Esta página no muestra ninguna en vez de mostrar un tablero que no puede leer. Su tablero no se ve afectado en ningún otro lugar donde esté copiado.",
   fingerprintHead: "Huella de la cabeza de la cadena {prefix}",
   fingerprintEntry: "Huella de la entrada {entry}",
+  boardAnchorsMark: "Anclajes",
+  boardAnchorsTitle: "Puntos de control para Ethereum",
+  boardAnchorsLede:
+    "Después de cada hora que agregó entradas, nuestro servidor toma un punto de control del tablero: cuántas entradas tiene, la cabeza de su cadena y su raíz de Merkle al final de esa hora. El anclaje pone su hash en el contrato de anclaje en Ethereum, y desde entonces una entrada alterada ya no coincide con él. Un punto de control se toma antes de anclarse, y hasta que el anclaje lo tenga, solo cuenta con nuestra palabra.",
+  boardAnchorsClaim:
+    "Estos puntos de control vienen de nuestro servidor. Esta página decodifica cada uno, comprueba que nombra esta encuesta y que cada uno anterior no tiene más entradas, y calcula su hash por su cuenta. No comprueba que ninguno esté anclado ni que coincida con el tablero: eso lo determina el verificador, que lee el anclaje por su cuenta.",
+  boardAnchorsList: "Puntos de control, el más reciente primero",
+  boardAnchorPeriod: "Después del período {segment}",
+  boardAnchorLatest: "El más reciente",
+  boardAnchorSize: "Entradas hasta entonces",
+  boardAnchorHash: "Hash del punto de control, el valor por anclar",
+  boardAnchorHead: "Cabeza de la cadena hasta entonces",
+  boardAnchorRoot: "Raíz de Merkle hasta entonces",
+  boardAnchorsNone: "Todavía no se ha tomado ningún punto de control de este tablero.",
+  boardAnchorsMore:
+    "Aquí solo se muestran los {count} puntos de control más recientes. El verificador lee cada uno de los anclados, desde el primero.",
+  boardAnchorsUndecodable:
+    "Nuestro servidor envió puntos de control de este tablero que no pasan la comprobación: uno no se decodifica, nombra otra encuesta o tiene más entradas que uno posterior. Esta página no muestra ninguno en vez de mostrar puntos de control que no puede leer.",
+  fingerprintCheckpoint: "Huella del punto de control después del período {segment}",
   entryKind_ballot: "Boleta sellada",
   entryKind_spoiledOpening: "Boleta anulada, abierta",
   entryKind_ceremony: "Ceremonia de claves",

@@ -25,6 +25,7 @@ import {
   boardCheckpoints,
   readBoard,
   readCheckpoints,
+  readLatestCheckpoints,
   readDefinition,
   MAX_L1_CLOCK_LEAD,
   takeCheckpoints,
@@ -458,6 +459,55 @@ describe("takeCheckpoints", () => {
       );
     },
   );
+});
+
+describe("readLatestCheckpoints (P2-19)", () => {
+  test("pages the taken checkpoints back from the latest, as stored", async () => {
+    const e = await boardIn(0, 1, 3, 4, 6);
+    const taken = await takeCheckpoints(app, e, 6);
+    const latest = taken.toReversed().map(encodeCheckpoint);
+    expect(await readLatestCheckpoints(app, e, 10)).toEqual(latest);
+    expect(await readLatestCheckpoints(app, e, 2)).toEqual(latest.slice(0, 2));
+    expect(await readLatestCheckpoints(app, e, 2, 4n)).toEqual(latest.slice(2, 4));
+    expect(await readLatestCheckpoints(app, e, 10, 1n)).toEqual(latest.slice(4));
+    expect(await readLatestCheckpoints(app, e, 10, 0n)).toEqual([]);
+    expect(await readLatestCheckpoints(app, e, 0)).toEqual([]);
+    // A `before` past every u32 segment is no bound at all.
+    expect(await readLatestCheckpoints(app, e, 10, 2n ** 64n - 1n)).toEqual(latest);
+    expect(await readLatestCheckpoints(app, await newElection(app), 10)).toEqual([]);
+  });
+
+  test("never reaches another board's checkpoints", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uniqueArray(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 6 }),
+        fc.integer({ min: 0, max: 8 }),
+        fc.option(fc.bigInt({ min: 0n, max: 22n }), { nil: undefined }),
+        async (segments, limit, before) => {
+          const sorted = segments.toSorted((a, b) => a - b);
+          const e = await boardIn(...sorted);
+          // Another board with the same segments, so a missing election filter shows.
+          await takeCheckpoints(app, await boardIn(...sorted), 20);
+          const taken = await takeCheckpoints(app, e, 20);
+          const want = taken
+            .filter((c) => before === undefined || BigInt(c.segment) < before)
+            .toReversed()
+            .slice(0, limit)
+            .map(encodeCheckpoint);
+          expect(await readLatestCheckpoints(app, e, limit, before)).toEqual(want);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 25) },
+    );
+  });
+
+  test.each([[-1], [0.5]])("refuses limit = %s", async (limit) => {
+    await expect(readLatestCheckpoints(app, await boardIn(0), limit)).rejects.toThrow(RangeError);
+  });
+
+  test("refuses a negative before", async () => {
+    await expect(readLatestCheckpoints(app, await boardIn(0), 1, -1n)).rejects.toThrow(RangeError);
+  });
 });
 
 describe("anchorBoards", () => {

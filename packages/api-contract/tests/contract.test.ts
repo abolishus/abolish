@@ -231,6 +231,7 @@ describe("the generated OpenAPI document", () => {
 
   test("lists exactly the contract's operations", () => {
     expect(operations.map(({ method, path }) => `${method.toUpperCase()} ${path}`).sort()).toEqual([
+      "GET /board/checkpoints",
       "GET /board/entries",
       "GET /board/head",
       "GET /board/proofs/consistency",

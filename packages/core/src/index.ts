@@ -67,6 +67,7 @@ export {
   type AnchorRun,
   MAX_L1_CLOCK_LEAD,
   readCheckpoints,
+  readLatestCheckpoints,
   takeCheckpoints,
 } from "./anchoring.ts";
 export { auditBoard, BoardAuditError, type BoardAuditCode, listBoards } from "./audit.ts";

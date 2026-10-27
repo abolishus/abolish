@@ -8,7 +8,7 @@ import {
 } from "@abolishus/ui/ui/pagination";
 import { ArrowLeft } from "lucide-react";
 
-import type { BoardRow, EntryKind } from "../board.ts";
+import type { AnchorRow, BoardRow, EntryKind } from "../board.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
 import type { BoardHead } from "../server/load.ts";
@@ -23,6 +23,10 @@ export interface PollBoardProps {
   rows: readonly BoardRow[] | undefined;
   /** Entries per page: every page starts at a multiple of it. */
   pageSize: number;
+  /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
+  anchors: readonly AnchorRow[] | undefined;
+  /** How many checkpoints the page asked for: as many back means there may be earlier ones. */
+  anchorPage: number;
 }
 
 const KIND_TEXT = {
@@ -46,7 +50,15 @@ const KIND_TEXT = {
  * board needs no script. It never looks up an entry by number: asking our
  * server for your own would tell it which entry is yours (T-10).
  */
-export function PollBoard({ poll, head, from, rows, pageSize }: PollBoardProps) {
+export function PollBoard({
+  poll,
+  head,
+  from,
+  rows,
+  pageSize,
+  anchors,
+  anchorPage,
+}: PollBoardProps) {
   const t = useTranslate(catalogs);
   const base = `/polls/${poll.electionId}/board`;
   const size = BigInt(head.treeSize);
@@ -177,6 +189,73 @@ export function PollBoard({ poll, head, from, rows, pageSize }: PollBoardProps) 
           </Pagination>
         )}
         <p className="m-0 max-w-prose text-pretty">{t("boardOwnEntry")}</p>
+      </Section>
+
+      <Section
+        index="02"
+        mark={t("boardAnchorsMark")}
+        title={t("boardAnchorsTitle")}
+        id="anchors-title"
+        lede={<p className="m-0">{t("boardAnchorsLede")}</p>}
+      >
+        <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
+          {t("boardAnchorsClaim")}
+        </p>
+        {anchors === undefined ? (
+          <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+            {t("boardAnchorsUndecodable")}
+          </p>
+        ) : anchors.length === 0 ? (
+          <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+            {t("boardAnchorsNone")}
+          </p>
+        ) : (
+          <ol
+            aria-label={t("boardAnchorsList")}
+            className="m-0 grid list-none border-t border-foreground p-0"
+          >
+            {anchors.map((anchor, i) => (
+              <li
+                key={anchor.segment}
+                className="grid gap-6 border-b border-border py-8 md:grid-cols-12 md:gap-x-6"
+              >
+                <div className="grid content-start gap-1 md:col-span-3">
+                  <h3 className="m-0 font-heading text-xl font-semibold">
+                    {t("boardAnchorPeriod", { segment: anchor.segment })}
+                  </h3>
+                  {i === 0 ? (
+                    <p className="m-0 text-sm text-muted-foreground">{t("boardAnchorLatest")}</p>
+                  ) : null}
+                </div>
+                <div className="grid min-w-0 content-start gap-3 md:col-span-9">
+                  <dl className="m-0 grid gap-0.5">
+                    <dt className="text-xs text-muted-foreground">{t("boardAnchorSize")}</dt>
+                    <dd className="m-0 font-mono text-sm">
+                      <Count value={BigInt(anchor.size)} />
+                    </dd>
+                  </dl>
+                  <div className="flex min-w-0 items-start gap-4">
+                    <Fingerprint
+                      value={anchor.hash}
+                      label={t("fingerprintCheckpoint", { segment: anchor.segment })}
+                      size={36}
+                    />
+                    <div className="min-w-0">
+                      <Hash value={anchor.hash} label={t("boardAnchorHash")} />
+                    </div>
+                  </div>
+                  <Hash value={anchor.head} label={t("boardAnchorHead")} />
+                  <Hash value={anchor.root} label={t("boardAnchorRoot")} />
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+        {anchors !== undefined && anchors.length >= anchorPage ? (
+          <p className="m-0 max-w-prose text-pretty">
+            {t("boardAnchorsMore", { count: anchorPage })}
+          </p>
+        ) : null}
       </Section>
     </div>
   );

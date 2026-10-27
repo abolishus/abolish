@@ -25,7 +25,7 @@ import {
   encodeBoardEntry,
   encodeCheckpoint,
 } from "@abolishus/crypto";
-import { and, asc, desc, eq, gt, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { type ArchiveLocator, archiveLocator, archiveManifestSequence } from "./archiving.ts";
@@ -156,6 +156,36 @@ export async function readCheckpoints(
     .where(and(eq(boardCheckpoints.electionId, id), gt(boardCheckpoints.segment, BigInt(from - 1))))
     .orderBy(asc(boardCheckpoints.segment));
   return rows.map((r) => decodeCheckpoint(new Uint8Array(r.checkpoint)));
+}
+
+/**
+ * Up to `limit` of `electionId`'s taken checkpoints with a segment below
+ * `before` (every one without it), the latest first, as stored: what a board
+ * page shows of its anchors (P2-19). Each is this server's claim until the
+ * reader finds its hash in the anchor on L1 (T-23, T-24).
+ */
+export async function readLatestCheckpoints(
+  client: Sql,
+  electionId: Uint8Array,
+  limit: number,
+  before?: bigint,
+): Promise<Uint8Array[]> {
+  const id = checkId(electionId);
+  if (!Number.isInteger(limit) || limit < 0) throw new RangeError("limit must be a count");
+  if (before !== undefined && (typeof before !== "bigint" || before < 0n))
+    throw new RangeError("before must be a bigint ≥ 0");
+  if (limit === 0 || before === 0n) return [];
+  const rows = await drizzle({ client })
+    .select({ checkpoint: boardCheckpoints.checkpoint })
+    .from(boardCheckpoints)
+    .where(
+      before === undefined || before > BigInt(MAX_SEGMENT)
+        ? eq(boardCheckpoints.electionId, id)
+        : and(eq(boardCheckpoints.electionId, id), lt(boardCheckpoints.segment, before)),
+    )
+    .orderBy(desc(boardCheckpoints.segment))
+    .limit(limit);
+  return rows.map((r) => new Uint8Array(r.checkpoint));
 }
 
 /** The anchor contract's immutable clock (docs/spec/board.md, Timing). */

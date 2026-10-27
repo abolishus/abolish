@@ -10,6 +10,9 @@
  */
 export const BOARD_PAGE = 25;
 
+/** The board page's latest checkpoints: earlier ones are the verifier's to read from L1. */
+export const ANCHOR_PAGE = 6;
+
 /** Decisions per page of the moderation log. */
 export const LOG_PAGE = 50;
 

@@ -19,6 +19,7 @@ import {
   readHead,
   readIdentityBackup,
   readInclusionProof,
+  readLatestCheckpoints,
   readBoardedEntry,
   readEntryAt,
   readPollTags,
@@ -210,6 +211,16 @@ export const router = os.router({
         MAX_PAGE_BYTES,
       ).catch((e: unknown) => boardError(e, errors.OUT_OF_RANGE));
       return { entries: entries.map(toHex) };
+    }),
+    getCheckpoints: os.board.getCheckpoints.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      const checkpoints = await readLatestCheckpoints(
+        context.sql,
+        id,
+        Number(input.limit),
+        input.before === undefined ? undefined : BigInt(input.before),
+      );
+      return { checkpoints: checkpoints.map(toHex) };
     }),
     getInclusionProof: os.board.getInclusionProof.handler(async ({ input, context, errors }) => {
       const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);

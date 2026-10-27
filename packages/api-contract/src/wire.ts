@@ -74,6 +74,9 @@ export const POSTING_MAX_DATA = 120_000;
 /** Most entries one page of the board returns. */
 export const MAX_PAGE = 256;
 
+/** `encode(checkpoint)`, checkpoint version 2 (docs/spec/board.md, Segments and checkpoints). */
+export const CHECKPOINT_BYTES = 180;
+
 /**
  * Most entry bytes one page returns, unless the page holds a single entry
  * (which can be up to `MAX_BOARD_ENTRY`). A server returns fewer entries than

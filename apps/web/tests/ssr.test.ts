@@ -11,6 +11,8 @@ import { gzipSync } from "node:zlib";
 
 import {
   boardEntryHash,
+  checkpointHash,
+  decodeCheckpoint,
   decodeElectionDefinitionV5,
   electionDefinitionV5Hash,
 } from "@abolishus/crypto";
@@ -28,6 +30,7 @@ import { fromHex, toHex } from "../src/values.ts";
 import {
   BALLOT,
   BOARD,
+  CHECKPOINTS,
   CODE,
   CODE_FAILS_ID,
   codeOf,
@@ -519,6 +522,31 @@ describe("board page", () => {
     expect(html).toContain(`href="/polls/${ID}/board?from=25"`);
     // Never a lookup by entry number (T-10).
     expect(html).not.toMatch(/<input\b[^>]*name="from"/);
+  });
+
+  test("shows the latest checkpoints, the latest first, with the hashes this page computed (T-23, T-24)", async () => {
+    for (const from of ["0", "25", "50"]) {
+      const page = await text(`/polls/${ID}/board?from=${from}`);
+      const periods = [...page.matchAll(/After period (\d+)/g)].map((m) => Number(m[1]));
+      expect(periods).toEqual([5, 4, 3, 2, 1, 0]);
+      for (const c of CHECKPOINTS) {
+        const checkpoint = decodeCheckpoint(fromHex(c));
+        expect(page).toContain(toHex(checkpointHash(checkpoint)));
+        expect(page).toContain(toHex(checkpoint.root));
+      }
+      expect(page).toContain("that is for the verifier, which reads the anchor itself");
+      // As many as the page asked for: there may be earlier ones.
+      expect(page).toContain("Only the latest 6 checkpoints are shown here.");
+    }
+  });
+
+  test("refuses checkpoints that name another poll, showing none of them (T-31)", async () => {
+    // Past the end, so the entries (also the typical poll's) don't refuse the page first.
+    const page = await text(`/polls/${FILLER[3]}/board?from=50`);
+    expect(page).toContain("there is no entry 50 yet");
+    expect(page).toContain("sent checkpoints for this board that");
+    expect(page).not.toContain("After period");
+    expect(page).not.toContain(toHex(checkpointHash(decodeCheckpoint(fromHex(CHECKPOINTS[0]!)))));
   });
 
   test("pages by windows of 25, with links to the earlier ones", async () => {
@@ -1751,13 +1779,13 @@ const KB = 1024;
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 170, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 166, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 200, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 167, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 201, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
   "/account": { html: 6, js: 191, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 246, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 165, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 166, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

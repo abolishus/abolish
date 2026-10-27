@@ -12,6 +12,7 @@ export {
   RESTORE_REASONS,
 } from "./contract.ts";
 export {
+  CHECKPOINT_BYTES,
   Hash32,
   hexBytes,
   hexFixed,

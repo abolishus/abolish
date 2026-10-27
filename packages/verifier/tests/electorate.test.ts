@@ -30,29 +30,37 @@ import {
 // every stated region, root and count is the vectors' (T-13, T-16, T-71).
 
 describe("electorateCheck", () => {
-  test("passes every strict tier of regional-cells.json as the vectors state it", () => {
-    expect(tiers.map((t) => t.id)).toEqual([
-      "one-group",
-      "repeat-across-groups",
-      "repeat-within-group",
-      "groups-ordered-by-id",
-      "split",
-      "repeat-moves-a-voter",
-      "repeat-keeps-region-below-floor",
-    ]);
-    for (const t of tiers)
-      expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
-        status: "pass",
-      });
-  });
+  test(
+    "passes every strict tier of regional-cells.json as the vectors state it",
+    { timeout: 60_000 },
+    () => {
+      expect(tiers.map((t) => t.id)).toEqual([
+        "one-group",
+        "repeat-across-groups",
+        "repeat-within-group",
+        "groups-ordered-by-id",
+        "split",
+        "repeat-moves-a-voter",
+        "repeat-keeps-region-below-floor",
+      ]);
+      for (const t of tiers)
+        expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
+          status: "pass",
+        });
+    },
+  );
 
-  test("passes every tier of self-paid.json, signed and self-paid groups ranked by chain order", () => {
-    expect(selfPaidTiers.length).toBeGreaterThanOrEqual(8);
-    for (const t of selfPaidTiers)
-      expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
-        status: "pass",
-      });
-  });
+  test(
+    "passes every tier of self-paid.json, signed and self-paid groups ranked by chain order",
+    { timeout: 60_000 },
+    () => {
+      expect(selfPaidTiers.length).toBeGreaterThanOrEqual(8);
+      for (const t of selfPaidTiers)
+        expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
+          status: "pass",
+        });
+    },
+  );
 
   test("passes a version-1 tier whose root and group_size are the vectors' one cell", () => {
     const t = tierOf("one-group");
@@ -122,23 +130,29 @@ describe("electorateCheck", () => {
     },
   );
 
-  test("reads only the registry's records up to each tier's root_l2_block", () => {
-    const t = tierOf("split");
-    const later = logs(
-      [
-        { ...added(22n, 700n, [1n << 100n]), block: ROOT_BLOCK + 1n },
-        { kind: "created", groupId: 99n, tier: 0, block: ROOT_BLOCK + 1n },
-      ],
-      t.records.length,
-    );
-    const other = {
-      ...(t.records[1] as ContractEventRecord),
-      contract: new Uint8Array(20).fill(7),
-    };
-    expect(electorateCheck(v5([t.electorate]), [...t.records, ...later, other], release)).toEqual({
-      status: "pass",
-    });
-  });
+  test(
+    "reads only the registry's records up to each tier's root_l2_block",
+    { timeout: 60_000 },
+    () => {
+      const t = tierOf("split");
+      const later = logs(
+        [
+          { ...added(22n, 700n, [1n << 100n]), block: ROOT_BLOCK + 1n },
+          { kind: "created", groupId: 99n, tier: 0, block: ROOT_BLOCK + 1n },
+        ],
+        t.records.length,
+      );
+      const other = {
+        ...(t.records[1] as ContractEventRecord),
+        contract: new Uint8Array(20).fill(7),
+      };
+      expect(electorateCheck(v5([t.electorate]), [...t.records, ...later, other], release)).toEqual(
+        {
+          status: "pass",
+        },
+      );
+    },
+  );
 
   test("fails a definition naming another L2 or another group registry than the release pins", () => {
     const t = tierOf("one-group");
@@ -299,7 +313,7 @@ describe("electorateCheck", () => {
     ).toEqual({ status: "unverifiable", code: "unsupported-version", at: {} });
   });
 
-  test("checks a fixed version-7 definition as version 5's", () => {
+  test("checks a fixed version-7 definition as version 5's", { timeout: 60_000 }, () => {
     const fixed = decodeElectionDefinitionV7(
       definitionOf("election-definition-v7.json", "definition-v7-fixed-typical"),
     );

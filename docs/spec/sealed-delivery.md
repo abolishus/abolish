@@ -137,13 +137,13 @@ A receipt that passes goes on to Client rule 1's `share-receipt` check against t
 
 `POST /v1/sealed-intake` beside `POST /v1/intake`, taking a sealed delivery as `message/ohttp-req` (RFC 9458 §9.2) and answering a sealed answer as `message/ohttp-res`, the media types an RFC 9458 relay forwards:
 
-| Answer               | When                                                                                                             |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 200, a sealed answer | The request opened (Request check): a receipt, a refusal, `sealed-envelope` included, or busy                    |
-| 400, no body         | `sealed-malformed`, `sealed-key` or `sealed-decrypt`                                                             |
-| 413, no body         | A declared length past `MAX_SEALED_REQUEST`, before any of the body is read, or a streamed one once it passes it |
-| 415, no body         | Another media type                                                                                               |
-| 503, no body         | The node can't hold another body, before reading it, as `POST /v1/intake` answers                                |
+| Answer               | When                                                                                                                                                                                                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200, a sealed answer | The request opened (Request check): a receipt, a refusal, `sealed-envelope` included, or busy. An error inside the node after the request opened is answered as busy, never with a status of its own, so the relay can't tell a request that reached intake from one that didn't (T-13) |
+| 400, no body         | `sealed-malformed`, `sealed-key` or `sealed-decrypt`                                                                                                                                                                                                                                    |
+| 413, no body         | A declared length past `MAX_SEALED_REQUEST`, before any of the body is read, or a streamed one once it passes it                                                                                                                                                                        |
+| 415, no body         | Another media type                                                                                                                                                                                                                                                                      |
+| 503, no body         | The node can't hold another body, before reading it, as `POST /v1/intake` answers                                                                                                                                                                                                       |
 
 The route keeps `POST /v1/intake`'s bounds, with `MAX_SEALED_REQUEST` in place of `MAX_DELIVERY` (the bodies held at once, the headers' and the request's timeouts, the connections per place; T-52, T-54), and its TLS: 1.3 only, with `X25519MLKEM768` and no other group, or plain HTTP on a loopback address for a TLS proxy on the same host that holds to the same group. The sealed envelope is already protected while either half of the KEM holds; TLS keeps the relay's connection as strong as every other path a share takes ([[0002-everlasting-privacy]], Consequences; T-15). It allows no browser origin (no CORS header): its only peers are relays. It logs an outcome and nothing else, never a body, a key hash or an address, and caches nothing (`cache-control: no-store`).
 
@@ -168,7 +168,7 @@ The ballot client, for each qualified seat `i` of a cast that isn't receipted ([
 3. **The relay.** It sends only to a relay resource its release lists for that seat (part 2e-2b), on an origin its `connect-src` lists (T-43), never to the node's own origin.
 4. **Fresh every time.** Each attempt is a new request with fresh `μ` and `e`, so no two attempts share bytes beyond `kem_key_hash` and the length, and no `K` seals twice.
 5. **Timing.** Before each sealed request that follows an attempt through the operator's route for that cast it waits a whole number of milliseconds drawn uniformly from 0 to `SEALED_DELAY_MAX_MS` from its CSPRNG (by rejection, never by a modulus), so no attempt through the operator is followed at once by one through a relay, however the client interleaves its retries (T-13). The delay is cut short where it would carry the request past the client's deadline (rule 1). The seats it sends for after one delay are sent together.
-6. **Outcomes.** A receipt that passes rule 1's check receipts the seat. A refusal is handled as the same refusal through the operator's route is. Busy, a 400, 413, 415 or 503, a network failure, no answer within its timeout, and an answer that fails the Answer check are a failed attempt, retried by rule 1.
+6. **Outcomes.** A receipt that passes rule 1's check receipts the seat. A refusal is handled as the same refusal through the operator's route is. Busy, a 400, 413, 415, 500 or 503, a network failure, no answer within its timeout, and an answer that fails the Answer check are a failed attempt, retried by rule 1.
 
 ## Retention
 

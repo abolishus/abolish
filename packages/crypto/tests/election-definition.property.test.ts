@@ -572,10 +572,12 @@ describe("2.3's profile combination", () => {
 
   // The verifier reads version 9 whole since P2-16 part 5d-3b, so 2.3 judges
   // a profile pinning it ([[contracts]], Contract-event record, Event tables
-  // (version 9); T-36, T-37).
+  // (version 9); T-36, T-37). Versions 10 and 11 join 2.3's set when the
+  // verifier reads them (P2-17 part 4); until then a profile pinning either
+  // is unverifiable.
   test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
     const ascending = (a: number, b: number) => a - b;
-    expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
+    expect([...CONTRACT_EVENT_VERSIONS, 10, 11].sort(ascending)).toEqual(
       Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
     );
   });

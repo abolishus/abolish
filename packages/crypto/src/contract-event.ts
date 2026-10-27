@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 9
+// The contract-event record, record type 0x0008 versions 1 to 11
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -14,7 +14,10 @@
 // T-53, P4-3), and version 9 the election registry's author panel
 // registration with the board's framing of ballot version 4 and the
 // version-2 delivery records, which name their seat's panel (T-37, T-53,
-// P2-16).
+// P2-16), version 10 the board's rolling ballot event, which carries the
+// root a version-5 ballot was proved against (T-25, T-52, P2-17), and version
+// 11 its relayed rolling ballot event, which carries the relay call's fields
+// and root as well (T-50, T-71, P2-17).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -39,6 +42,7 @@ import {
   list,
   struct,
   bytesVar,
+  BN254_R,
   u64,
 } from "./codec.ts";
 import type { ArchivedContractLog } from "./event-accumulator.ts";
@@ -64,6 +68,7 @@ import {
   frameBallot,
   frameComplaintBatch,
   frameDelivery,
+  frameRollingBallot,
 } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
@@ -76,11 +81,13 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
 
 /**
  * `MAX_EVENT_DATA`: the framing bound on a record's `data`, checked before
- * anything is allocated (T-52). Every event of either version's tables is
- * far smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes,
- * version 2's a framed `BallotSubmitted`, about 175 KB, and version 9's a
- * framed `BallotSubmitted` carrying ballot version 4, about 209 KB. An event
- * that needs more is a new record version.
+ * anything is allocated (T-52). Every event of any version's tables is far
+ * smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes, version
+ * 2's a framed `BallotSubmitted`, about 175 KB, version 9's a framed
+ * `BallotSubmitted` carrying ballot version 4, about 209 KB, and versions
+ * 10's and 11's a rolling event carrying ballot version 5, that with the
+ * step's 4 bytes and the root's word (and, for the relayed one, its four call
+ * fields' 128 bytes). An event that needs more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 
@@ -97,7 +104,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 9 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 11 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -110,6 +117,8 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   7: contractEventV1,
   8: contractEventV1,
   9: contractEventV1,
+  10: contractEventV1,
+  11: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -117,7 +126,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -257,6 +266,34 @@ export type ContractEvent =
       readonly stamp: bigint;
       readonly gasLimit: bigint;
       /** The ballot record, framed as the board frames it. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "RollingBallotSubmitted";
+      readonly definitionHash: Uint8Array;
+      /** The ballot's hash, recomputed from its bytes. */
+      readonly ballotHash: Uint8Array;
+      /**
+       * The root the submitter supplied, a non-zero field element; whether it
+       * is the root of the step the ballot names is verifier 5.1's.
+       */
+      readonly root: bigint;
+      /** The version-5 ballot record, framed as the board frames it. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "RelayedRollingBallotSubmitted";
+      readonly definitionHash: Uint8Array;
+      /** The ballot's hash, recomputed from its bytes. */
+      readonly ballotHash: Uint8Array;
+      /** The relay call's index, L1 block, stamp and gas limit, as the deposit named them. */
+      readonly index: bigint;
+      readonly l1Block: bigint;
+      readonly stamp: bigint;
+      readonly gasLimit: bigint;
+      /** The root the relay call carried, a non-zero field element. */
+      readonly root: bigint;
+      /** The version-5 ballot record, framed as the board frames it. */
       readonly record: Uint8Array;
     }
   | {
@@ -722,6 +759,100 @@ function relayedBallotSubmitted(framing: BoardFraming): EventSpec {
 
 const RELAYED_BALLOT_SUBMITTED = relayedBallotSubmitted(8);
 
+// A rolling root as the board's membership check takes it (Membership
+// proofs, `signal` and `root`): a canonical `field<bn254>` word other than 0.
+function rollingRoot(word: Uint8Array): bigint | undefined {
+  const v = bigEndian(word);
+  return v !== 0n && v < BN254_R ? v : undefined;
+}
+
+// The ballot of either rolling event: version 5 alone, framed as the rolling
+// calls frame it, with the topics recomputed from its bytes (What the board
+// frames (version 10); T-31).
+function rollingBallot(
+  record: Uint8Array,
+  definitionHash: Uint8Array,
+  ballotHash: Uint8Array,
+): boolean {
+  const framed = frameRollingBallot(record);
+  return (
+    framed !== undefined &&
+    equalBytes(framed.definitionHash, definitionHash) &&
+    equalBytes(framed.ballotHash, ballotHash)
+  );
+}
+
+// A rolling poll's direct submission (Board, Rolling ballots):
+// `abi.encode(root, record)`, the record's offset 0x40.
+const ROLLING_BALLOT_SUBMITTED: EventSpec = {
+  signature: "RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, ballotHash] = topics;
+    if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+      return "event-topics";
+    const abi = readAbi(data, 2, [{ at: 1, words: false, max: MAX_EVENT_DATA }]);
+    const root = abi && rollingRoot(word(abi.words, 0));
+    const record = abi?.tails[0];
+    if (
+      root === undefined ||
+      record === undefined ||
+      !rollingBallot(record, definitionHash, ballotHash)
+    )
+      return "event-data";
+    return {
+      event: "RollingBallotSubmitted",
+      definitionHash: definitionHash.slice(),
+      ballotHash: ballotHash.slice(),
+      root,
+      record,
+    };
+  },
+};
+
+// A rolling ballot forced through the L1 relay (Board, Relayed rolling
+// ballots): `abi.encode(index, l1Block, stamp, gasLimit, root, record)`, the
+// record's offset 0xc0, so neither this event's data nor
+// `RelayedBallotSubmitted`'s (offset 0xa0) reads under the other's topic.
+// Verifier 4.5 matches the four fields and the root against the call hash
+// the relay stored under its rolling tag.
+const RELAYED_ROLLING_BALLOT_SUBMITTED: EventSpec = {
+  signature:
+    "RelayedRollingBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes32,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, ballotHash] = topics;
+    if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+      return "event-topics";
+    const abi = readAbi(data, 6, [{ at: 5, words: false, max: MAX_EVENT_DATA }]);
+    if (abi === undefined) return "event-data";
+    const [index, l1Block, stamp, gasLimit] = [0, 1, 2, 3].map((i) =>
+      uintWord(word(abi.words, i), 64),
+    );
+    const root = rollingRoot(word(abi.words, 4));
+    const record = abi.tails[0];
+    if (
+      index === undefined ||
+      l1Block === undefined ||
+      stamp === undefined ||
+      gasLimit === undefined ||
+      root === undefined ||
+      record === undefined ||
+      !rollingBallot(record, definitionHash, ballotHash)
+    )
+      return "event-data";
+    return {
+      event: "RelayedRollingBallotSubmitted",
+      definitionHash: definitionHash.slice(),
+      ballotHash: ballotHash.slice(),
+      index,
+      l1Block,
+      stamp,
+      gasLimit,
+      root,
+      record,
+    };
+  },
+};
+
 // A close statement through the contract path (Board, Close statements): the
 // record whole, which decodes strictly as version 1, the version contract-event
 // version 3 fixes, with its `definition_hash` and `signer` as the topics. The
@@ -1055,6 +1186,18 @@ function boardEvents(framing: BoardFraming): readonly EventSpec[] {
 
 const BOARD_EVENTS = boardEvents(8);
 
+// Version 9's board rows, which versions 10 and 11 keep in the same order.
+const BOARD_EVENTS_V9: readonly EventSpec[] = [
+  ...boardEvents(9),
+  relayedBallotSubmitted(9),
+  CLOSE_STATEMENT_SUBMITTED,
+  SHARE_RECEIPT_BATCH_SUBMITTED_V9,
+  SHARE_COMPLAINT_BATCH_SUBMITTED_V9,
+  OBLIGATION_ROOT_SUBMITTED_V9,
+  AVAILABILITY_ATTESTATION_SUBMITTED,
+  AVAILABILITY_COMPLAINT_SUBMITTED,
+];
+
 const GROUP_EVENTS: readonly EventSpec[] = [
   REGISTRARS_PINNED,
   GROUP_CREATED,
@@ -1180,21 +1323,38 @@ const TABLES: Readonly<
       SELF_PAID_GROUP_CREATED,
       SELF_PAID_MEMBER_ADDED,
     ],
-    board: [
-      ...boardEvents(9),
-      relayedBallotSubmitted(9),
-      CLOSE_STATEMENT_SUBMITTED,
-      SHARE_RECEIPT_BATCH_SUBMITTED_V9,
-      SHARE_COMPLAINT_BATCH_SUBMITTED_V9,
-      OBLIGATION_ROOT_SUBMITTED_V9,
-      AVAILABILITY_ATTESTATION_SUBMITTED,
-      AVAILABILITY_COMPLAINT_SUBMITTED,
+    board: BOARD_EVENTS_V9,
+  },
+  // Version 9's rows, every one unchanged, with the board's rolling ballot
+  // event added.
+  10: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2, AUTHOR_PANEL_REGISTERED],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
     ],
+    board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED],
+  },
+  // Version 10's rows, every one unchanged, with the board's relayed rolling
+  // ballot event added.
+  11: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2, AUTHOR_PANEL_REGISTERED],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED, RELAYED_ROLLING_BALLOT_SUBMITTED],
   },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -1230,6 +1390,8 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   7: signaturesOf(7),
   8: signaturesOf(8),
   9: signaturesOf(9),
+  10: signaturesOf(10),
+  11: signaturesOf(11),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

@@ -249,6 +249,7 @@ export {
   frameComplaintBatch,
   frameDelivery,
   type FramedRecord,
+  frameRollingBallot,
 } from "./direct-submit.ts";
 export {
   checkContractEvent,
@@ -1512,12 +1513,17 @@ export {
 export {
   ALIAS_OFFSET,
   decodeRelayBallotCalldata,
+  decodeRelayRollingBallotCalldata,
   frameRelayRecord,
+  frameRollingRelayRecord,
   l2Alias,
   MAX_RELAY_RECORD,
+  MAX_ROLLING_RELAY_RECORD,
   PORTAL_MAX_DATA,
   RELAY_DEPOSIT_SIGNATURE,
   RELAY_EVENT_SIGNATURE,
+  RELAY_ROLLING_DEPOSIT_SIGNATURE,
+  RELAY_ROLLING_SIGNATURE,
   RELAY_SIGNATURE,
   relayBallotCalldata,
   type RelayCall,
@@ -1526,4 +1532,8 @@ export {
   relayEvent,
   type RelayFraming,
   type RelayFramingCode,
+  relayRollingBallotCalldata,
+  type RelayRollingCall,
+  relayRollingCallHash,
+  relayRollingDepositData,
 } from "./relay.ts";

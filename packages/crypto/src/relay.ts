@@ -5,7 +5,10 @@
 // ballot's window is judged by the L1 block the relay recorded, and verifier
 // 4.5 matches each relayed ballot on the board with exactly one recorded call,
 // so a deposit forged from the relay's aliased address by L2 governance
-// matches none (T-50, T-71, T-35).
+// matches none (T-50, T-71, T-35). The rolling call (Rolling ballots) is the
+// same call with the root a rolling ballot was proved against beside the
+// record, under abolish/v1/relay-rolling-call, so neither call's word matches
+// the other's relayed event (T-31).
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ds } from "./domain-separation.ts";
@@ -20,6 +23,8 @@ export const PORTAL_MAX_DATA = 120_000;
 // The deposit's calldata before the record: the selector, five head words
 // and the record's length word.
 const DEPOSIT_HEAD = 4 + 32 * 6;
+// The rolling deposit's: one word more, the root's.
+const ROLLING_DEPOSIT_HEAD = DEPOSIT_HEAD + 32;
 
 /**
  * `MAX_RELAY_RECORD`: the longest record the relay takes, the longest whose
@@ -29,17 +34,28 @@ const DEPOSIT_HEAD = 4 + 32 * 6;
  */
 export const MAX_RELAY_RECORD: number = PARAMETERS.MAX_RELAY_RECORD;
 
+/**
+ * `MAX_ROLLING_RELAY_RECORD`: the rolling call's bound, 32 bytes below
+ * `MAX_RELAY_RECORD` since its deposit carries the root's word too (T-52).
+ */
+export const MAX_ROLLING_RELAY_RECORD: number = PARAMETERS.MAX_ROLLING_RELAY_RECORD;
+
 /** `alias(a) = (a + 0x1111…1111) mod 2¹⁶⁰`, the portal's L2 sender for a contract caller on L1. */
 export const ALIAS_OFFSET = 0x1111000000000000000000000000000000001111n;
 
 export const RELAY_SIGNATURE = "relayBallot(uint64,bytes)";
 export const RELAY_DEPOSIT_SIGNATURE = "submitRelayedBallot(uint64,uint64,uint64,uint64,bytes)";
 export const RELAY_EVENT_SIGNATURE = "BallotRelayed(bytes32,uint64,bytes32)";
+export const RELAY_ROLLING_SIGNATURE = "relayRollingBallot(uint64,bytes32,bytes)";
+export const RELAY_ROLLING_DEPOSIT_SIGNATURE =
+  "submitRelayedRollingBallot(uint64,uint64,uint64,uint64,bytes32,bytes)";
 
 const selector = (signature: string) => keccak_256(new TextEncoder().encode(signature)).slice(0, 4);
 
 const RELAY_SELECTOR = selector(RELAY_SIGNATURE);
 const DEPOSIT_SELECTOR = selector(RELAY_DEPOSIT_SIGNATURE);
+const ROLLING_SELECTOR = selector(RELAY_ROLLING_SIGNATURE);
+const ROLLING_DEPOSIT_SELECTOR = selector(RELAY_ROLLING_DEPOSIT_SIGNATURE);
 const EVENT_TOPIC0 = keccak_256(new TextEncoder().encode(RELAY_EVENT_SIGNATURE));
 
 const BALLOT_TYPE = 0x0002;
@@ -57,8 +73,21 @@ export type RelayFraming =
  * Nothing else is read; the board judges the rest (T-52).
  */
 export function frameRelayRecord(record: Uint8Array): RelayFraming {
+  return frameWithin(record, MAX_RELAY_RECORD);
+}
+
+/**
+ * The rolling call's framing (Rolling ballots, steps 2 and 3): the first
+ * call's, with `MAX_ROLLING_RELAY_RECORD` as the bound. The root is never
+ * read: the board judges it (T-52).
+ */
+export function frameRollingRelayRecord(record: Uint8Array): RelayFraming {
+  return frameWithin(record, MAX_ROLLING_RELAY_RECORD);
+}
+
+function frameWithin(record: Uint8Array, max: number): RelayFraming {
   if (!(record instanceof Uint8Array)) throw new TypeError("record must be a Uint8Array");
-  if (record.length > MAX_RELAY_RECORD) return { ok: false, code: "relay-too-large" };
+  if (record.length > max) return { ok: false, code: "relay-too-large" };
   if (record.length < 35) return { ok: false, code: "relay-truncated" };
   if ((((record[0] ?? 0) << 8) | (record[1] ?? 0)) !== BALLOT_TYPE)
     return { ok: false, code: "relay-record-type" };
@@ -101,6 +130,12 @@ function address(name: string, a: Uint8Array): Uint8Array {
   if (!(a instanceof Uint8Array) || a.length !== 20)
     throw new TypeError(`${name} must be a 20-byte Uint8Array`);
   return a;
+}
+
+function rootWord(root: Uint8Array): Uint8Array {
+  if (!(root instanceof Uint8Array) || root.length !== 32)
+    throw new TypeError("root must be a 32-byte Uint8Array");
+  return root;
 }
 
 /** One call as the relay records it. */
@@ -151,6 +186,39 @@ export function relayCallHash(call: RelayCall): Uint8Array {
   );
 }
 
+/** One rolling call as the relay records it: a call's fields and the root it carried. */
+export interface RelayRollingCall extends RelayCall {
+  /** The root's word as sent, any 32 bytes: the relay never judges it. */
+  readonly root: Uint8Array;
+}
+
+/**
+ * `H(DS("abolish/v1/relay-rolling-call", u64(l1_chain_id) ‖ bytes[20](relay)
+ * ‖ u64(index) ‖ u64(l1_block) ‖ u64(l1_timestamp) ‖ u64(gas_limit) ‖
+ * bytes[32](root) ‖ record))`, the word the relay stores for a rolling call.
+ * The root is bound, so a deposit forged with another root matches no call,
+ * and the tag is its own, so no `RelayedBallotSubmitted` matches it nor any
+ * `RelayedRollingBallotSubmitted` a first call's word (T-71, T-31).
+ */
+export function relayRollingCallHash(call: RelayRollingCall): Uint8Array {
+  if (!(call.record instanceof Uint8Array)) throw new TypeError("record must be a Uint8Array");
+  return H(
+    ds(
+      "abolish/v1/relay-rolling-call",
+      concat([
+        u64Bytes("l1ChainId", call.l1ChainId),
+        address("relay", call.relay),
+        u64Bytes("index", call.index),
+        u64Bytes("l1Block", call.l1Block),
+        u64Bytes("l1Timestamp", call.l1Timestamp),
+        u64Bytes("gasLimit", call.gasLimit),
+        rootWord(call.root),
+        call.record,
+      ]),
+    ),
+  );
+}
+
 /**
  * The deposit's `data`, `abi.encodeCall(submitRelayedBallot, (index,
  * l1_block, l1_timestamp, gas_limit, record))`: `196 + pad32(len(record))`
@@ -180,6 +248,45 @@ export function relayDepositData(
       word(l1Timestamp),
       word(gasLimit),
       word(0xa0n),
+      word(BigInt(record.length)),
+      record,
+    ]),
+  );
+  return out;
+}
+
+/**
+ * The rolling deposit's `data`, `abi.encodeCall(submitRelayedRollingBallot,
+ * (index, l1_block, l1_timestamp, gas_limit, root, record))`: `228 +
+ * pad32(len(record))` bytes, the record's offset `0xc0`.
+ */
+export function relayRollingDepositData(
+  index: bigint,
+  l1Block: bigint,
+  l1Timestamp: bigint,
+  gasLimit: bigint,
+  root: Uint8Array,
+  record: Uint8Array,
+): Uint8Array {
+  for (const [name, v] of [
+    ["index", index],
+    ["l1Block", l1Block],
+    ["l1Timestamp", l1Timestamp],
+    ["gasLimit", gasLimit],
+  ] as const)
+    u64Bytes(name, v);
+  rootWord(root);
+  if (!(record instanceof Uint8Array)) throw new TypeError("record must be a Uint8Array");
+  const out = new Uint8Array(ROLLING_DEPOSIT_HEAD + pad32(record.length));
+  out.set(
+    concat([
+      ROLLING_DEPOSIT_SELECTOR,
+      word(index),
+      word(l1Block),
+      word(l1Timestamp),
+      word(gasLimit),
+      root,
+      word(0xc0n),
       word(BigInt(record.length)),
       record,
     ]),
@@ -225,6 +332,53 @@ export function decodeRelayBallotCalldata(
   const end = 100 + Number(length);
   if (calldata.subarray(end).some((b) => b !== 0)) return null;
   return { gasLimit, record: calldata.slice(100, end) };
+}
+
+/** `relayRollingBallot(gasLimit, root, record)`'s calldata, as a client sends it. */
+export function relayRollingBallotCalldata(
+  gasLimit: bigint,
+  root: Uint8Array,
+  record: Uint8Array,
+): Uint8Array {
+  u64Bytes("gasLimit", gasLimit);
+  rootWord(root);
+  if (!(record instanceof Uint8Array)) throw new TypeError("record must be a Uint8Array");
+  const out = new Uint8Array(4 + 32 * 4 + pad32(record.length));
+  out.set(
+    concat([
+      ROLLING_SELECTOR,
+      word(gasLimit),
+      root,
+      word(0x60n),
+      word(BigInt(record.length)),
+      record,
+    ]),
+  );
+  return out;
+}
+
+/**
+ * The rolling call's calldata rule (Rolling ballots, step 1): exactly the ABI
+ * encoding of `(uint64, bytes32, bytes)`, a gas limit below 2⁶⁴, the root's
+ * word any 32 bytes, the record's offset `0x60`, zero padding and nothing
+ * after (T-17). `null` if any part differs.
+ */
+export function decodeRelayRollingBallotCalldata(calldata: Uint8Array): {
+  readonly gasLimit: bigint;
+  readonly root: Uint8Array;
+  readonly record: Uint8Array;
+} | null {
+  if (!(calldata instanceof Uint8Array)) throw new TypeError("calldata must be a Uint8Array");
+  if (calldata.length < 4 + 32 * 4) return null;
+  if (ROLLING_SELECTOR.some((b, i) => calldata[i] !== b)) return null;
+  const gasLimit = readWord(calldata, 4);
+  const length = readWord(calldata, 100);
+  if (gasLimit > U64_MAX || readWord(calldata, 68) !== 0x60n) return null;
+  if (length > BigInt(calldata.length) || calldata.length !== 132 + pad32(Number(length)))
+    return null;
+  const end = 132 + Number(length);
+  if (calldata.subarray(end).some((b) => b !== 0)) return null;
+  return { gasLimit, root: calldata.slice(36, 68), record: calldata.slice(132, end) };
 }
 
 /** `BallotRelayed(definitionHash, index, callHash)`: its topics and data as the relay emits it. */

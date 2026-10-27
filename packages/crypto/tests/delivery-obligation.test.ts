@@ -8,6 +8,7 @@ import {
   complaintScope,
   decodeElectionDefinitionV5,
   decodeElectionDefinitionV6,
+  decodeElectionDefinitionV7,
   definitionMembers,
   DELIVERY_WINDOW,
   type FinalizedL1,
@@ -466,21 +467,30 @@ describe("forcedPathElectionOf", () => {
   test("refuses an election its author seats push past the forced path", () => {
     // The default panel's cap alone, which the author seats' batches overrun.
     const cap = forcedPathMembersLimit(typical.panel_size, deployed);
-    const at = (members: bigint) => ({
+    const at = (members: bigint): typeof typical => ({
       ...typical,
-      electorate: [{ ...typical.electorate[0], regions: [members] }],
+      electorate: [
+        { ...typical.electorate[0], regions: [members] } as (typeof typical.electorate)[0],
+      ],
     });
-    expect(forcedPathFits([{ ...forcedPathElectionOf(at(cap)), seats: 7 }], deployed)).toBe(true);
+    expect(
+      forcedPathFits([{ ...forcedPathElectionOf(at(cap)), seats: typical.panel_size }], deployed),
+    ).toBe(true);
     expect(forcedPathFits([forcedPathElectionOf(at(cap))], deployed)).toBe(false);
     const both = forcedPathMembersLimit(typical.panel_size + 3, deployed);
     expect(forcedPathFits([forcedPathElectionOf(at(both))], deployed)).toBe(true);
     expect(forcedPathFits([forcedPathElectionOf(at(both + 1n))], deployed)).toBe(false);
   });
 
-  test("throws for a rolling electorate, as definitionMembers does", () => {
-    expect(() =>
-      forcedPathElectionOf({ ...typical, electorate_mode: 2, rolling_electorate: [{}] }),
-    ).toThrow(RangeError);
+  test("counts version 7's author seats, and throws for its rolling electorate", () => {
+    const fixed = decodeElectionDefinitionV7(
+      definition("election-definition-v7.json", "definition-v7-fixed-typical"),
+    );
+    expect(forcedPathElectionOf(fixed).seats).toBe(fixed.panel_size + fixed.author_keys.length);
+    const rolling = decodeElectionDefinitionV7(
+      definition("election-definition-v7.json", "definition-v7-rolling-typical"),
+    );
+    expect(() => forcedPathElectionOf(rolling)).toThrow(RangeError);
   });
 });
 

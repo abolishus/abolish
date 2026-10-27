@@ -60,15 +60,12 @@ contract BoardDeliveryV2Test is TestBase {
     /// A version-2 batch's or root's `panel` and `seat`.
     uint256 internal constant BATCH_PANEL_AT = 35;
     uint256 internal constant BATCH_SEAT_AT = 36;
-    /// Gas the forced path's figures keep back over a version-2 batch call
-    /// and root call measured against the stubs, for what real registries
-    /// cost more (test_ForcedPathCallGas): version 1's real registries cost
-    /// about 138,000 over the stubs for a full batch and 2,000 for a root
-    /// (Board.t.sol, `test_ForcedPath*CallGas`), and an author seat's key
-    /// set and signing key add a cold account and a few cold slots of the
-    /// election registry, under 10,000.
-    uint256 internal constant BATCH_HEADROOM = 200_000;
-    uint256 internal constant ROOT_HEADROOM = 30_000;
+    /// Gas the forced path's figures keep back over a version-2 call
+    /// measured against the stubs, for what real registries cost more
+    /// (test_ForcedPathCallGas): about 2,000 for version 1's batch and root
+    /// calls, measured as here without Solidity's copy of the calldata, so
+    /// this leaves a real registry's layout ten times that and more.
+    uint256 internal constant HEADROOM = 30_000;
 
     ElectionsStub internal elections;
     TrusteesStub internal trustees;
@@ -767,15 +764,18 @@ contract BoardDeliveryV2Test is TestBase {
     /// cost at most their pinned gas with their intrinsic gas, cold, where
     /// P-256 goes through `P256VERIFY`, and are accepted with exactly that
     /// figure as their deposit's gas limit. An author seat's key set and
-    /// signing key are the election registry's, so its calls read one more
-    /// contract than a default seat's. The stubs stand in for the registries:
+    /// signing key are the election registry's, which every call reads
+    /// already, so a default seat's calls, which also read the trustee
+    /// registry, are the dearer. The stubs stand in for the registries:
     /// rule 9 refuses every definition pinning ballot version 4 until P2-16
-    /// part 5e, so no real registry holds one yet, and `headroom` keeps back
-    /// what version 1's real registries cost over the stubs (Board.t.sol,
-    /// `test_ForcedPath*CallGas`) (T-25, T-52, T-54).
+    /// part 5e, so no real registry holds one yet, and `HEADROOM` keeps back
+    /// what real registries cost over them. The board has already accepted a
+    /// record, as any board a forced deposit reaches has, so no measurement
+    /// carries the accumulator count's first write (T-25, T-52, T-54).
     function test_ForcedPathCallGas() public {
         string memory fj = vm.readFile(OBLIGATION);
         string memory bj = vm.readFile(BATCHES);
+        _accept(_batchCall("share-receipt-batch", _byId(bj, ".records", "receipt-batch-default")));
         uint256 receipts = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptsPerCall"));
         uint256 complaints = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintsPerCall"));
         assertEq(receipts, DeliveryCheckLib.BATCH_MAX, "a call is one full receipt batch");
@@ -796,9 +796,7 @@ contract BoardDeliveryV2Test is TestBase {
                     _forcedCall(bj, kind, panel, sk, "forced path", receipts, complaints);
                 bytes memory next =
                     _forcedCall(bj, kind, panel, sk, "forced path, next", receipts, complaints);
-                _withinFigure(
-                    fj, first, next, figures[kind], kind == 2 ? ROOT_HEADROOM : BATCH_HEADROOM, what
-                );
+                _withinFigure(fj, first, next, figures[kind], what);
             }
         }
     }
@@ -857,7 +855,7 @@ contract BoardDeliveryV2Test is TestBase {
     }
 
     /// `first` fits a deposit's data and, where P-256 goes through its
-    /// precompile, costs at most `figure` less `headroom`, cold, with its
+    /// precompile, costs at most `figure` less `HEADROOM`, cold, with its
     /// intrinsic gas; `next`, new records of the same seat, is accepted with
     /// exactly `figure` as its gas limit.
     function _withinFigure(
@@ -865,14 +863,13 @@ contract BoardDeliveryV2Test is TestBase {
         bytes memory first,
         bytes memory next,
         uint256 figure,
-        uint256 headroom,
         string memory what
     ) internal {
         assertTrue(first.length <= vm.parseJsonUint(fj, ".portal.maxDepositData"), what);
         assertTrue(figure <= vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit")), what);
         if (!_expectPrecompile()) return;
         uint256 used = _withIntrinsic(first, _coldGas(first));
-        assertTrue(used + headroom <= figure, string.concat(what, ": ", vm.toString(used)));
+        assertTrue(used + HEADROOM <= figure, string.concat(what, ": ", vm.toString(used)));
         _acceptsWithin(next, figure, what);
     }
 

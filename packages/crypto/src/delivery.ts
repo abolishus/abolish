@@ -38,7 +38,15 @@ import {
 import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
 import { objectCid, readObject } from "./content-addressing.ts";
 import { ds } from "./domain-separation.ts";
-import { type ElectionDefinitionV6, electionDefinitionV6Rule } from "./election-definition.ts";
+import {
+  type ElectionDefinition,
+  type ElectionDefinitionV3,
+  type ElectionDefinitionV4,
+  type ElectionDefinitionV5,
+  type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
+  electionDefinitionV6Rule,
+} from "./election-definition.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
@@ -1782,16 +1790,20 @@ export function definitionMembers(definition: {
  * does for a rolling or empty electorate.
  */
 export function forcedPathElectionOf(
-  definition: Parameters<typeof definitionMembers>[0] & {
-    readonly panel_size: number;
-    readonly author_keys?: readonly unknown[];
-    readonly closes_at: bigint;
-    readonly l1_inclusion_bound: number;
-  },
+  definition:
+    | ElectionDefinition
+    | ElectionDefinitionV3
+    | ElectionDefinitionV4
+    | ElectionDefinitionV5
+    | ElectionDefinitionV6
+    | ElectionDefinitionV7,
 ): ForcedPathElection {
+  // Typed by the codec's versions rather than by shape, so a definition from
+  // version 6 on can't reach here without `author_keys` and count none.
   return {
     members: definitionMembers(definition),
-    seats: definition.panel_size + (definition.author_keys?.length ?? 0),
+    seats:
+      definition.panel_size + ("author_keys" in definition ? definition.author_keys.length : 0),
     closesAt: definition.closes_at,
     l1InclusionBound: BigInt(definition.l1_inclusion_bound),
   };

@@ -4,6 +4,7 @@ import { checkpointHash } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { expect, test } from "vite-plus/test";
 import {
+  allAnchorLogs,
   anchorCalldata,
   checkpointFromLog,
   headerRlp,
@@ -11,6 +12,12 @@ import {
   type Log,
   word,
 } from "../src/l1.ts";
+import {
+  ACCUMULATOR_SLOT,
+  ANCHOR_NAMESPACE,
+  accumulatorSlots,
+  locatorSlots,
+} from "../src/slots.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -184,4 +191,51 @@ test("a log in any other layout, of another event or with another hash is refuse
       topics: [...log.topics.slice(0, 2), `0x${w(1n << 32n)}`, ...log.topics.slice(3)],
     }),
   ).toThrow();
+});
+
+test("the locator's slots are its bytes' head and count, and for a long one its data words from keccak256(A + 2)", () => {
+  const head = ANCHOR_NAMESPACE + 2n;
+  expect(locatorSlots(31).map(hex)).toEqual([word(head), word(head + 1n)].map(hex));
+  const data = BigInt(`0x${hex(keccak_256(word(head)))}`);
+  // A version-3 locator is 70 bytes: three data words.
+  expect(locatorSlots(70).map(hex)).toEqual(
+    [word(head), word(head + 1n), word(data), word(data + 1n), word(data + 2n)].map(hex),
+  );
+  expect(locatorSlots(64)).toHaveLength(4);
+  expect(accumulatorSlots().map(hex)).toEqual(
+    [word(ACCUMULATOR_SLOT), word(ACCUMULATOR_SLOT + 1n)].map(hex),
+  );
+});
+
+test("the anchor's logs are every one in order, each with its block's number and timestamp", async () => {
+  const asked: string[] = [];
+  const logs: Log[] = [
+    { topics: [`0x${w(1)}`], data: `0x${w(2)}`, blockNumber: "0x5" },
+    { topics: [`0x${w(3)}`, `0x${w(4)}`], data: "0x", blockNumber: "0x5" },
+    { topics: [`0x${w(5)}`], data: `0x${w(6)}`, blockNumber: "0xa" },
+  ];
+  const rpc = {
+    call: async <T>(method: string, params: readonly unknown[] = []): Promise<T> => {
+      if (method === "eth_getLogs") {
+        expect(params).toEqual([
+          { address: `0x${"11".repeat(20)}`, fromBlock: "earliest", toBlock: "finalized" },
+        ]);
+        return logs as T;
+      }
+      expect(method).toBe("eth_getBlockByNumber");
+      asked.push(params[0] as string);
+      return { timestamp: params[0] === "0x5" ? "0x64" : "0xc8" } as T;
+    },
+  };
+  const got = await allAnchorLogs(rpc, new Uint8Array(20).fill(0x11));
+  expect(got.map((g) => [g.block, g.timestamp, g.topics.map(hex), hex(g.data)])).toEqual([
+    [5n, 100n, [w(1)], w(2)],
+    [5n, 100n, [w(3), w(4)], ""],
+    [10n, 200n, [w(5)], w(6)],
+  ]);
+  // Each block read once.
+  expect(asked).toEqual(["0x5", "0xa"]);
+  await expect(
+    allAnchorLogs({ call: async <T>() => [{ topics: [], data: "0x" }] as T }, new Uint8Array(20)),
+  ).rejects.toThrow(/block number/);
 });

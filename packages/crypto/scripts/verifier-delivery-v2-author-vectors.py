@@ -8,9 +8,9 @@ for docs/spec/vectors/verifier-delivery-v2-author-definition-v7.json, the
 same election under definition version 7 with a fixed electorate, which the
 verifier reads as version 6 under version 7's own hashes and stubs
 (docs/spec/verifier.md, Definition), with a 2-of-3 author panel whose seat 3
-sent nothing, beside the 3-of-4 default panel whose seat 4 sent nothing, its board carrying both runs' transcripts,
-the author approvals record, three admitted ballots and version-2 share
-receipts. A ballot is delivered only once every registered seat of both
+sent nothing, beside the 3-of-4 default panel whose seat 4 sent nothing, its
+board carrying both runs' transcripts, the author approvals record, three
+admitted ballots and version-2 share receipts. A ballot is delivered only once every registered seat of both
 panels has receipted it, each receipt checked against its own panel's
 share hash and its own run's signing key, and an author seat is registered
 only by the author panel's own run, approved on the board, never by the
@@ -285,18 +285,20 @@ def main(constants, out_dir, version=6):
     )
 
     if version == 7:
-        # Every seat of both panels receipts the cell-0 ballot as made for
+        # Every seat of both panels receipts the cell-0 ballot's fields under
         # the same election read as version 6: its receipts bind that
         # reading's hash, another election's, in the statement and in the
         # ballot hash they name, so none counts for the ballot boarded here,
-        # which isn't delivered (T-12, T-34, T-37).
+        # which isn't delivered (T-12, T-34, T-37). A ballot made for that
+        # reading would differ in more than its hash, but a receipt naming
+        # another definition is refused before anything else is compared.
         v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(vb4.v6_reading(d))))
         assert v6_hash != defh
         ctx6 = dict(b0["ctx"], definitionHash=v6_hash)
         b6 = dict(b0, ctx=ctx6, hash=b4.ballot_hash(ctx6, b0["vote"]))
         c = case(
             "v6-reading",
-            "Definition version 7 under a fixed electorate, beside the author panel: every registered seat of both panels receipts the cell-1 and tier-2 ballots in segment 3, but its receipts for the cell-0 ballot are made for the same election read as version 6 (that reading's hash in each statement and in the ballot hash it names): each is delivery-stray, so the cell-0 ballot misses every seat of both panels and isn't counted; the others are.",
+            "Definition version 7 under a fixed electorate, beside the author panel: every registered seat of both panels receipts the cell-1 and tier-2 ballots in segment 3, but its receipts for the cell-0 ballot name that ballot's fields under the same election read as version 6 (that reading's hash in each statement and in the ballot hash it names): each is delivery-stray, so the cell-0 ballot misses every seat of both panels and isn't counted; the others are.",
             [head, (3, every(b6, definition_hash=v6_hash) + every(b1) + every(b2))],
         )
         assert [(x["entry"], len(x["missing"])) for x in c["delivery"]["excluded"]] == [(3, 5)], c["delivery"]["excluded"]

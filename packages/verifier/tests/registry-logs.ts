@@ -9,6 +9,7 @@ import {
   type ElectionDefinitionV5,
   encodeGroupAddition,
   encodeGroupRemoval,
+  encodeSelfPaidAddition,
   groupAdditionDigest,
   groupRegistryDomainSeparator,
   groupRemovalDigest,
@@ -55,10 +56,10 @@ export const registryVectors = read<{
   };
 }>("group-registry.json");
 // Topic 0 of each group-registry event, from the independent generator of
-// contract-event-v6.json, so the logs built below are the registry's.
+// contract-event-v8.json, so the logs built below are the registry's.
 const eventVectors = read<{
   readonly events: readonly { readonly signature: string; readonly topic0: string }[];
-}>("contract-event-v6.json");
+}>("contract-event-v8.json");
 export const definitionOf = (file: string, id: string) => {
   const found = read<{ vectors: readonly { id: string; encoding?: string }[] }>(file).vectors.find(
     (v) => v.id === id,
@@ -154,6 +155,13 @@ export type Event =
   | { readonly kind: "created"; readonly groupId: bigint; readonly tier: number }
   | { readonly kind: "added"; readonly groupId: bigint; readonly record: Uint8Array }
   | { readonly kind: "removed"; readonly groupId: bigint; readonly record: Uint8Array }
+  | { readonly kind: "self-paid-created"; readonly groupId: bigint }
+  | {
+      readonly kind: "self-paid";
+      readonly groupId: bigint;
+      readonly index: bigint;
+      readonly record: Uint8Array;
+    }
   | {
       readonly kind: "pinned";
       readonly threshold: number;
@@ -221,6 +229,22 @@ export function logs(
         ],
         data: abiBytes(e.record),
       };
+    if (e.kind === "self-paid-created")
+      return {
+        ...base,
+        topics: [topic0("SelfPaidGroupCreated(uint64)"), word(e.groupId)],
+        data: new Uint8Array(0),
+      };
+    if (e.kind === "self-paid")
+      return {
+        ...base,
+        topics: [
+          topic0("SelfPaidMemberAdded(uint64,uint64,bytes)"),
+          word(e.groupId),
+          word(e.index),
+        ],
+        data: abiBytes(e.record),
+      };
     if (e.kind === "removed")
       return {
         ...base,
@@ -285,3 +309,65 @@ export const tierOf = (id: string) => {
   if (found === undefined) throw new Error(`no tier ${id}`);
   return found;
 };
+
+export const selfPaid = (groupId: bigint, index: bigint, commitment: bigint): Event => ({
+  kind: "self-paid",
+  groupId,
+  index,
+  record: encodeSelfPaidAddition({ groupId, commitment }),
+});
+
+const selfPaidVectors = read<{
+  readonly tiers: readonly {
+    readonly id: string;
+    readonly groups: readonly {
+      readonly groupId: string;
+      readonly region: number;
+      readonly kind: "signed" | "self-paid";
+    }[];
+    readonly log: readonly (
+      | { readonly group: string; readonly add: readonly string[] }
+      | { readonly group: string; readonly remove: readonly string[] }
+      | { readonly group: string; readonly selfPaid: string }
+    )[];
+    readonly regions: readonly string[];
+    readonly cells: readonly { readonly root: string; readonly members: string }[];
+  }[];
+}>("self-paid.json");
+
+// Every tier of self-paid.json (signed and self-paid groups, ranked by the
+// first-occurrence rule's chain order), logged as the registry logs it:
+// creations first, then the vector's log in chain order.
+export const selfPaidTiers = selfPaidVectors.tiers.map((t) => {
+  const events: Event[] = [
+    { kind: "pinned", threshold: release.threshold, registrars: release.registrars },
+    ...t.groups.map((g): Event =>
+      g.kind === "signed"
+        ? { kind: "created", groupId: decimal(g.groupId), tier: 0 }
+        : { kind: "self-paid-created", groupId: decimal(g.groupId) },
+    ),
+  ];
+  const count = new Map<bigint, bigint>();
+  for (const e of t.log) {
+    const id = decimal(e.group);
+    const c = count.get(id) ?? 0n;
+    if ("add" in e) {
+      events.push(added(id, c, e.add.map(decimal)));
+      count.set(id, c + BigInt(e.add.length));
+    } else if ("remove" in e) events.push(removed(id, c, e.remove.map(decimal)));
+    else {
+      events.push(selfPaid(id, c, decimal(e.selfPaid)));
+      count.set(id, c + 1n);
+    }
+  }
+  const electorate: TierElectorate = {
+    tier: 0,
+    root_l2_block: ROOT_BLOCK,
+    groups: [...t.groups]
+      .sort((a, b) => (decimal(a.groupId) < decimal(b.groupId) ? -1 : 1))
+      .map((g) => ({ group_id: decimal(g.groupId), region: g.region })),
+    regions: t.regions.map(decimal),
+    cells: t.cells.map((c) => ({ root: decimal(c.root), members: decimal(c.members) })),
+  };
+  return { id: t.id, events, records: logs(events), electorate };
+});

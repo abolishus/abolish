@@ -97,8 +97,10 @@ export interface Pins {
 
 /**
  * [[verifier]] 2.4 on a stub, against finalized L2 state at each tier's
- * `root_l2_block`: every tier's `root`, `group_id` and `group_size` match the
- * tier tree rebuilt from that tier's counted additions. It must resolve
+ * `root_l2_block`: every tier's groups, regions and cells (version 1: its
+ * `root`, `group_id` and `group_size`) match the tier rebuilt from its
+ * counted additions ([[verifier]], Electorate), and a tier it can't recount
+ * (Tier 1, Tier 2) is refused. It must resolve
  * `false` whenever it can't decide (a block not yet final, a node it can't
  * reach), since a node refuses a stub it hasn't checked. The check belongs
  * to `packages/verifier` (AGENTS.md, the verifier's trust base); the node

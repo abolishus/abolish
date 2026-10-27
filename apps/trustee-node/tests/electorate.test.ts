@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ContractEventRecord } from "@abolishus/crypto";
 import { type Rpc, RpcError } from "@abolishus/node";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -5,6 +6,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   chainId,
   logs,
+  selfPaidTiers,
   registry,
   release,
   ROOT_BLOCK,
@@ -23,6 +25,28 @@ import type { Stub } from "../src/stub.ts";
 // the vectors' (T-13, T-16, T-71).
 
 const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
+// Topic 0 of each group-registry event, from contract-event-v8.json's
+// independent generator rather than the node's constants.
+const GROUP_TOPICS = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/contract-event-v8.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { events: { signature: string; topic0: string }[] }
+).events
+  .filter((e) =>
+    [
+      "RegistrarsPinned(",
+      "GroupCreated(",
+      "MembersAdded(",
+      "MembersRemoved(",
+      "Tier1MemberAdded(",
+      "SelfPaidGroupCreated(",
+      "SelfPaidMemberAdded(",
+    ].some((s) => e.signature.startsWith(s)),
+  )
+  .map((e) => `0x${e.topic0}`);
 const FROM_BLOCK = 5n;
 
 interface Log {
@@ -40,17 +64,18 @@ const logOf = (r: ContractEventRecord): Log => ({
 });
 
 /** An L2 node answering `eth_getLogs` from `held` by address and range, as a real one does. */
-function l2Node(held: readonly ContractEventRecord[], finalized = ROOT_BLOCK) {
+function l2Node(held: readonly ContractEventRecord[], finalized = ROOT_BLOCK, chain = chainId) {
   const asked: unknown[] = [];
   const rpc: Rpc = {
     call: async (method, params) => {
+      if (method === "eth_chainId") return `0x${chain.toString(16)}`;
       if (method === "eth_getBlockByNumber") {
         expect(params).toEqual(["finalized", false]);
         return { number: `0x${finalized.toString(16)}` };
       }
       if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
       const [filter] = params as [
-        { address: string; fromBlock: string; toBlock: string; topics: unknown[] },
+        { address: string; fromBlock: string; toBlock: string; topics: string[][] },
       ];
       asked.push(filter);
       return held
@@ -59,7 +84,8 @@ function l2Node(held: readonly ContractEventRecord[], finalized = ROOT_BLOCK) {
           (l) =>
             l.address === filter.address &&
             BigInt(l.blockNumber) >= BigInt(filter.fromBlock) &&
-            BigInt(l.blockNumber) <= BigInt(filter.toBlock),
+            BigInt(l.blockNumber) <= BigInt(filter.toBlock) &&
+            (filter.topics[0] ?? []).includes(l.topics[0] as string),
         );
     },
   };
@@ -99,9 +125,37 @@ describe("l2ElectorateCheck", () => {
         address: hex(registry),
         fromBlock: `0x${FROM_BLOCK.toString(16)}`,
         toBlock: `0x${ROOT_BLOCK.toString(16)}`,
-        topics: [],
+        topics: [GROUP_TOPICS],
       },
     ]);
+  });
+
+  test("asks only for the group events, so another event of the registry can't fail the check", async () => {
+    const other = {
+      ...(one.records[1] as ContractEventRecord),
+      topics: [new Uint8Array(32).fill(0x4e), new Uint8Array(32)],
+    };
+    expect(await check(l2Node([...one.records, other]).rpc)(stubOf())).toBe(true);
+  });
+
+  test("passes self-paid.json's tiers, ranked in the order the log holds, and refuses them reordered", async () => {
+    let reordered = 0;
+    for (const t of selfPaidTiers) {
+      expect(await check(l2Node(t.records).rpc)(v5([t.electorate])), t.id).toBe(true);
+      // The self-paid additions after the creations, in reverse.
+      const created = t.records.filter((r) => r.data.length === 0 || r.topics.length === 1);
+      const rest = t.records.slice(created.length).reverse();
+      if (rest.filter((r) => r.topics.length === 3).length < 2) continue;
+      expect(await check(l2Node([...created, ...rest]).rpc)(v5([t.electorate])), t.id).toBe(false);
+      reordered++;
+    }
+    expect(reordered).toBeGreaterThanOrEqual(4);
+  });
+
+  test("refuses on a node of another chain, reading no log", async () => {
+    const other = l2Node(one.records, ROOT_BLOCK, chainId + 1n);
+    expect(await check(other.rpc)(stubOf())).toBe(false);
+    expect(other.asked).toEqual([]);
   });
 
   test("refuses a stub stating another count, and a history missing a log", async () => {

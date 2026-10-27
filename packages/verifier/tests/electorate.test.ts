@@ -18,6 +18,7 @@ import {
   release,
   removed,
   ROOT_BLOCK,
+  selfPaidTiers,
   tierOf,
   tiers,
   v1,
@@ -40,6 +41,14 @@ describe("electorateCheck", () => {
       "repeat-keeps-region-below-floor",
     ]);
     for (const t of tiers)
+      expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
+        status: "pass",
+      });
+  });
+
+  test("passes every tier of self-paid.json, signed and self-paid groups ranked by chain order", () => {
+    expect(selfPaidTiers.length).toBeGreaterThanOrEqual(8);
+    for (const t of selfPaidTiers)
       expect(electorateCheck(v5([t.electorate]), t.records, release), t.id).toEqual({
         status: "pass",
       });

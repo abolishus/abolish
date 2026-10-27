@@ -360,7 +360,9 @@ describe("2.3's profile combination under version 7", () => {
   test("a fixed electorate fits with ballot version 4 and version 6's pins", () => {
     expect(profileCombinationRule(v7(1))).toBeUndefined();
     for (const events of [9, 10, 11])
-      expect(profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: events }))).toBeUndefined();
+      expect(
+        profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: events })),
+      ).toBeUndefined();
     expect(profileCombinationRule(v7(1, livePins, live), fixedTypical.threshold)).toBeUndefined();
     // Ballot version 5 names a step, which a fixed electorate has none of.
     for (const events of [8, 9, 10, 11, 255])

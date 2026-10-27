@@ -131,9 +131,7 @@
           },
           {
             "index": 4,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           }
         ],
         "registered": [
@@ -188,15 +186,11 @@
           },
           {
             "index": 3,
-            "reasons": [
-              "wrong-answer"
-            ]
+            "reasons": ["wrong-answer"]
           },
           {
             "index": 4,
-            "reasons": [
-              "wrong-answer"
-            ]
+            "reasons": ["wrong-answer"]
           }
         ],
         "registered": []
@@ -437,9 +431,7 @@
           },
           {
             "index": 7,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           }
         ],
         "registered": [
@@ -518,15 +510,11 @@
           },
           {
             "index": 6,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           },
           {
             "index": 7,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           }
         ],
         "registered": [
@@ -601,15 +589,11 @@
           },
           {
             "index": 6,
-            "reasons": [
-              "wrong-answer"
-            ]
+            "reasons": ["wrong-answer"]
           },
           {
             "index": 7,
-            "reasons": [
-              "wrong-answer"
-            ]
+            "reasons": ["wrong-answer"]
           }
         ],
         "registered": [
@@ -680,21 +664,15 @@
           },
           {
             "index": 5,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           },
           {
             "index": 6,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           },
           {
             "index": 7,
-            "reasons": [
-              "absent"
-            ]
+            "reasons": ["absent"]
           }
         ],
         "registered": [

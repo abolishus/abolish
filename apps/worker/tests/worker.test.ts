@@ -1,5 +1,6 @@
 import {
   type AnchorChain,
+  type ArweaveClient,
   appendEntry,
   type BallotAdmissions,
   type CreationAnchors,
@@ -154,6 +155,15 @@ test("schedules no anchoring run without an anchor", async () => {
   }
 });
 
+test("schedules no archive run without an archive", async () => {
+  const queue = new Queue(QUEUES.archive.name, { connection, prefix });
+  try {
+    expect(await queue.getJobSchedulers()).toEqual([]);
+  } finally {
+    await queue.close();
+  }
+});
+
 test("schedules the identity-backup prune daily, and runs it once at start", async () => {
   expect(PRUNE_EVERY_MS).toBe(86_400_000);
   const schedulers = await prunes.getJobSchedulers();
@@ -292,6 +302,8 @@ test("a handler's own error message is neither logged nor kept, the events strea
       boardAnchor: async () => {
         throw new Error(`params: ${MARKER}`);
       },
+      // Not scheduled: this worker has no archive.
+      archive: async () => {},
       identityBackupPrune: async () => {
         throw new Error(`params: ${MARKER}`);
       },
@@ -453,6 +465,7 @@ test("a worker refuses the creation key beside any other job", async () => {
     pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors, panel: idlePanel },
   };
   const anchor = { chain: {} as AnchorChain, everyMs: 3_600_000 };
+  const archive = { client: {} as ArweaveClient, everyMs: 3_600_000 };
   const tier0 = { batches: {} as Tier0Batches };
   const tier1 = { batches: {} as Tier1Batches };
   const ballots = { admissions: {} as BallotAdmissions };
@@ -464,6 +477,7 @@ test("a worker refuses the creation key beside any other job", async () => {
   };
   for (const extra of [
     { anchor },
+    { anchor, archive },
     { tier0 },
     { tier1 },
     { ballots },
@@ -488,6 +502,19 @@ test("a worker refuses the anchoring keys beside a relay's keys", async () => {
     { tier1: { batches: {} as Tier1Batches } },
   ])
     await expect(startWorker({ ...base, ...extra })).rejects.toThrow("runs no relay");
+});
+
+test("a worker refuses the archive without the anchoring runner", async () => {
+  await expect(
+    startWorker({
+      connection,
+      sql: app,
+      log: () => {},
+      auditEveryMs: 3_600_000,
+      prefix: `abolish-test-${hex(randomBytes(6))}`,
+      archive: { client: {} as ArweaveClient, everyMs: 3_600_000 },
+    }),
+  ).rejects.toThrow("only beside the anchoring runner");
 });
 
 test("a worker refuses the roots step without the registry sync", async () => {

@@ -66,6 +66,25 @@ export interface AnchorFindingLine {
 }
 
 /**
+ * What an archive run did, in counts: objects first seen, transactions
+ * confirmed, manifests written, uploads posted and objects refused, with the
+ * sequence of the manifest the locator names once one does. Or that another
+ * run held the archive's lock. Everything counted is public: the objects are
+ * the board's, and the uploads are on Arweave.
+ */
+export type ArchiveLine =
+  | {
+      readonly queue: "{archive}";
+      readonly registered: number;
+      readonly confirmed: number;
+      readonly written: number;
+      readonly posted: number;
+      readonly refused: number;
+      readonly locator?: number;
+    }
+  | { readonly queue: "{archive}"; readonly finding: "archive-busy" };
+
+/**
  * What a Tier 0 boundary did to one published group. The group ID is public
  * (the deployment record lists it), and the line names a step, never a
  * commitment or a record (T-10, T-13).
@@ -242,6 +261,7 @@ export interface WorkerErrorLine {
 export type ErrorKind =
   | "board-audit-findings"
   | "board-anchor-findings"
+  | "archive-findings"
   | "invalid-job-data"
   | "stale-job"
   | "tier0-chain-unavailable"
@@ -255,6 +275,7 @@ export type LogLine =
   | JobLogLine
   | AuditFindingLine
   | AnchorFindingLine
+  | ArchiveLine
   | Tier0BoundaryLine
   | Tier1BoundaryLine
   | BallotL1Line

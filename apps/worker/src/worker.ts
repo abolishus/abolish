@@ -1,6 +1,6 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
 // schedules that queue the board audit, the identity-backup prune and, when
-// configured, the board anchoring and the Tier 0 and Tier 1 relay index
+// configured, the board anchoring, the archive and the Tier 0 and Tier 1 relay index
 // refreshes and boundaries.
 // The API's ballots are judged only when panels are pinned. Job data is parsed
 // against its queue's schema before it is handled, and every outcome is
@@ -8,6 +8,7 @@
 
 import type {
   AnchorChain,
+  ArweaveClient,
   BallotAdmissions,
   BoardClock,
   CreationAnchors,
@@ -54,6 +55,19 @@ export interface WorkerOptions {
    * Without it, nothing is anchored.
    */
   readonly anchor?: { readonly chain: AnchorChain; readonly everyMs: number };
+  /**
+   * The Arweave client every taken checkpoint's objects are archived
+   * through, and how often to run; only beside `anchor`, whose anchor every
+   * manifest names and whose calls carry the locator. The depth and repost
+   * wait are core's defaults unless a test sets them. Without it, nothing is
+   * archived.
+   */
+  readonly archive?: {
+    readonly client: ArweaveClient;
+    readonly everyMs: number;
+    readonly depth?: number;
+    readonly repostAfter?: bigint;
+  };
   /** The clock handlers judge time by; the system clock unless a test moves it. */
   readonly now?: () => Date;
   /** The first segment of every key; tests give each run its own. */
@@ -275,6 +289,8 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     throw new Error("the roots step runs only beside the registry sync");
   if (options.pollStubs !== undefined && options.registry === undefined)
     throw new Error("the stub step runs only beside the registry sync");
+  if (options.archive !== undefined && options.anchor === undefined)
+    throw new Error("the archive runs only beside the anchoring runner");
   if (options.openings !== undefined && options.ballots === undefined)
     throw new Error("tally openings are boarded only beside ballot admission");
   if (options.destructions !== undefined && options.ballots === undefined)
@@ -306,6 +322,17 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     log,
     now,
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
+    ...(options.archive === undefined
+      ? {}
+      : {
+          archive: {
+            client: options.archive.client,
+            ...(options.archive.depth === undefined ? {} : { depth: options.archive.depth }),
+            ...(options.archive.repostAfter === undefined
+              ? {}
+              : { repostAfter: options.archive.repostAfter }),
+          },
+        }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
     ...(options.tier1 === undefined ? {} : { tier1: options.tier1.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
@@ -370,16 +397,18 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             ? options.openings !== undefined
             : key === "destructionSubmit"
               ? options.destructions !== undefined
-              : key === "registrySync"
-                ? options.registry !== undefined
-                : key === "pollRoot"
-                  ? options.pollRoots !== undefined
-                  : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
-                    ? options.pollStubs !== undefined
-                    : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
-                      ? options.tier1 !== undefined
-                      : options.tier0 !== undefined ||
-                        !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+              : key === "archive"
+                ? options.archive !== undefined
+                : key === "registrySync"
+                  ? options.registry !== undefined
+                  : key === "pollRoot"
+                    ? options.pollRoots !== undefined
+                    : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
+                      ? options.pollStubs !== undefined
+                      : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
+                        ? options.tier1 !== undefined
+                        : options.tier0 !== undefined ||
+                          !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -511,6 +540,9 @@ function everyOtherSchedule(options: WorkerOptions) {
     ...(options.anchor === undefined
       ? []
       : ([{ key: "boardAnchor", id: "board-anchor", every: options.anchor.everyMs }] as const)),
+    ...(options.archive === undefined
+      ? []
+      : ([{ key: "archive", id: "archive", every: options.archive.everyMs }] as const)),
     ...(options.tier0 === undefined
       ? []
       : ([

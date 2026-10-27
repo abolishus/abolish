@@ -62,6 +62,15 @@ export const QUEUES = {
    */
   boardAnchor: { name: "{board-anchor}", side: "board", data: z.strictObject({}) },
   /**
+   * Posts every taken checkpoint's segment object and entry-hash list to
+   * Arweave, writes the manifests that list them once their uploads are
+   * deep, and posts those (core's archiveBoards; docs/spec/archive.md;
+   * T-49, T-51). Runs on a schedule, only beside the anchoring runner, whose
+   * anchor every manifest names and whose calls carry the locator, and takes
+   * no data.
+   */
+  archive: { name: "{archive}", side: "board", data: z.strictObject({}) },
+  /**
    * Deletes expired identity backups (core's pruneIdentityBackups; T-52,
    * T-66). Runs on a schedule and takes no data: the table is on neither
    * side's queues, and nothing about a backup is ever queued (T-10, T-20).

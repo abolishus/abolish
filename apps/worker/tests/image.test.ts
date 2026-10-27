@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,6 +39,15 @@ const POSTING = {
   POSTING_ELECTION_BUDGET: "1000000000000000",
   POSTING_L1_RPC_URL: "https://l1.example/v2/provider-api-key",
   POSTING_L1_FEE_CAP: "30000000000",
+};
+
+const WALLET = generateKeyPairSync("rsa", { modulusLength: 4096 }).privateKey.export({
+  format: "jwk",
+});
+const ARCHIVE = {
+  ARCHIVE_ARWEAVE_URL: "https://arweave.example/provider-api-key",
+  ARCHIVE_WALLET: JSON.stringify(WALLET),
+  ARCHIVE_MAX_REWARD: "5000000000",
 };
 
 let dir: string;
@@ -89,6 +99,16 @@ describe("the bundle", () => {
     }
   }, 60_000);
 
+  test("main.mjs refuses the archive without the anchoring runner, never quoting its wallet or node", async () => {
+    for (const other of [{}, CREATION]) {
+      const { code, output } = await run(["main.mjs"], { ...NOWHERE, ...ARCHIVE, ...other });
+      expect(code).not.toBe(0);
+      expect(output).toContain("the archive runs only beside the anchoring runner");
+      expect(output).not.toContain(WALLET.d);
+      expect(output).not.toContain("provider-api-key");
+    }
+  }, 60_000);
+
   test("main.mjs refuses the posting worker's variables, never quoting the key", async () => {
     const { code, output } = await run(["main.mjs"], { ...NOWHERE, ...POSTING });
     expect(code).not.toBe(0);
@@ -110,6 +130,7 @@ describe("the bundle", () => {
       { TIER1_RELAY_KEY: KEY },
       { REGISTRY_SYNC_CHAIN_ID: "84532" },
       { ANCHOR_EXECUTOR_KEY: KEY },
+      { ARCHIVE_WALLET: ARCHIVE.ARCHIVE_WALLET },
       { BALLOT_L1_CHAIN_ID: "11155111" },
     ]) {
       const { code, output } = await run(["posting.mjs"], {
@@ -120,6 +141,7 @@ describe("the bundle", () => {
       expect(code).not.toBe(0);
       expect(output).toContain("the posting worker runs nothing else");
       expect(output).not.toContain(KEY);
+      expect(output).not.toContain(WALLET.d);
       expect(output).not.toContain("provider-api-key");
       expect(output).not.toContain("store-password");
     }

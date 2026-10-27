@@ -14,6 +14,9 @@ import {
   type AnchorFinding,
   anchorBoards,
   anchorBusyLimit,
+  archiveBoards,
+  type ArchiveRun,
+  type ArweaveClient,
   auditBoard,
   BoardAuditError,
   DefinitionError,
@@ -73,6 +76,16 @@ export interface JobContext {
   readonly now: () => Date;
   /** The L1 anchor the anchoring job sends through; its queue runs only with one. */
   readonly anchor?: AnchorChain;
+  /**
+   * The archive's Arweave client, beside the anchor, whose locator and
+   * address its manifests are judged by; its queue runs only then. The depth
+   * and repost wait are core's defaults unless a test sets them.
+   */
+  readonly archive?: {
+    readonly client: ArweaveClient;
+    readonly depth?: number;
+    readonly repostAfter?: bigint;
+  };
   /** The Tier 0 batch job, when the worker is configured for it; its queues run only then. */
   readonly tier0?: Tier0Batches;
   /** The Tier 1 relay's job, when the worker is configured for it; its queues run only then. */
@@ -189,6 +202,66 @@ async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Prom
   } else anchorBusySince.delete(ctx);
   if (findings.some((f) => f.code !== "anchor-unserved" && f.code !== "anchor-busy"))
     throw new JobError("board-anchor-findings");
+}
+
+/**
+ * How long, in seconds, a worker's archive runs may meet another's lock
+ * without a break before the job fails: an hour, far longer than a run's
+ * uploads take, so only a worker that froze holding the lock trips it.
+ */
+export const ARCHIVE_BUSY_LIMIT = 3600n;
+
+/**
+ * When each worker's archive runs began meeting another's lock without a
+ * break, in the worker's seconds; absent while its last run held the lock.
+ */
+const archiveBusySince = new WeakMap<JobContext, bigint>();
+
+/**
+ * One archive run under the worker's clock, with the locator the anchor
+ * holds now, which keeps a database that lost its chain from starting
+ * another (T-69). What the run did is logged in counts; the job fails if an
+ * object was refused (the board no longer gives the bytes its anchored CID
+ * names, T-23), or if runs met another's lock without a break for longer
+ * than `ARCHIVE_BUSY_LIMIT`, since a worker that froze holding it stops the
+ * archive with nothing else raised (T-51). A run that throws (Arweave, L1 or
+ * the database failed) fails the job, and the next run takes up from there.
+ */
+async function archive(ctx: JobContext, _data: JobData<"archive">): Promise<void> {
+  if (ctx.archive === undefined || ctx.anchor === undefined) throw new JobError("internal");
+  const localNow = BigInt(Math.floor(ctx.now().getTime() / 1000));
+  let run: ArchiveRun;
+  try {
+    run = await archiveBoards(ctx.sql, ctx.archive.client, {
+      latestLocator: await ctx.anchor.latestLocator(),
+      l1ChainId: ctx.anchor.chainId,
+      anchor: ctx.anchor.address,
+      now: localNow,
+      ...(ctx.archive.depth === undefined ? {} : { depth: ctx.archive.depth }),
+      ...(ctx.archive.repostAfter === undefined ? {} : { repostAfter: ctx.archive.repostAfter }),
+    });
+  } catch (e) {
+    archiveBusySince.delete(ctx);
+    throw e;
+  }
+  if (run.busy) {
+    ctx.log({ queue: "{archive}", finding: "archive-busy" });
+    const since = archiveBusySince.get(ctx) ?? localNow;
+    archiveBusySince.set(ctx, since);
+    if (localNow - since > ARCHIVE_BUSY_LIMIT) throw new JobError("archive-findings");
+    return;
+  }
+  archiveBusySince.delete(ctx);
+  ctx.log({
+    queue: "{archive}",
+    registered: run.registered,
+    confirmed: run.confirmed,
+    written: run.written.length,
+    posted: run.posted,
+    refused: run.refused,
+    ...(run.locator === undefined ? {} : { locator: Number(run.locator) }),
+  });
+  if (run.refused > 0) throw new JobError("archive-findings");
 }
 
 /**
@@ -526,6 +599,7 @@ export const HANDLERS: {
 } = {
   boardAudit,
   boardAnchor,
+  archive,
   identityBackupPrune,
   tier0Index,
   tier0Boundary,

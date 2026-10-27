@@ -263,3 +263,75 @@ export function checkEventAccumulatorProofs(
       : "accumulator";
   });
 }
+
+/**
+ * Where a contract's archive stands after a proof that matched it: the
+ * proof's accumulator, count and block, and the block and timestamp of the
+ * last log it counts (both 0 while it counts none).
+ */
+export interface ProvenContinuation extends ProvenEventAccumulator {
+  readonly lastBlock: bigint;
+  readonly lastTimestamp: bigint;
+}
+
+/**
+ * `checkEventAccumulatorProof` for the logs after a proof already matched,
+ * without the logs before it: whether `logs`, the contract's from index
+ * `from.count` in order of `n`, extend an archive that matched `from` to one
+ * matching `proven`, exactly as the whole archive would be judged against
+ * both proofs. Rule 1 over the logs and against the last one `from` counts;
+ * rule 2 against both proofs' blocks, so no log counted by `proven` sits at
+ * or before `from`'s block (where `from` would have counted it) or after
+ * `proven`'s; rule 3 by stepping on from `from`'s accumulator. A writer
+ * that holds only where its archive stands checks each new proof with it,
+ * so what it archives always replays against every proof (T-71). `logs`
+ * must be all the logs `proven` counts past `from`; one more or fewer is
+ * `accumulator`. Throws as `checkEventAccumulatorProof` does, and on a
+ * `proven` count below `from`'s.
+ */
+export function checkEventAccumulatorContinuation(
+  from: ProvenContinuation,
+  archive: Iterable<ArchivedContractLog>,
+  proven: ProvenEventAccumulator,
+): EventAccumulatorProofError | null {
+  for (const [v, what] of [
+    [from.block, "from.block"],
+    [from.count, "from.count"],
+    [from.lastBlock, "from.lastBlock"],
+    [from.lastTimestamp, "from.lastTimestamp"],
+    [proven.block, "proven.block"],
+    [proven.count, "proven.count"],
+  ] as const)
+    u64Arg(v, what);
+  const start = copyBytes(from.accumulator, "from.accumulator");
+  const end = copyBytes(proven.accumulator, "proven.accumulator");
+  if (start.length !== 32) throw new RangeError("from.accumulator must be 32 bytes");
+  if (end.length !== 32) throw new RangeError("proven.accumulator must be 32 bytes");
+  if (proven.count < from.count) throw new RangeError("proven.count is below from.count");
+  const logs = Array.from(archive);
+  for (const log of logs) {
+    u64Arg(log.n, "n");
+    u64Arg(log.block, "block");
+    u64Arg(log.timestamp, "timestamp");
+  }
+  if (logs.some((log, i) => log.n !== from.count + BigInt(i))) return "index";
+  let block = from.lastBlock;
+  let timestamp = from.lastTimestamp;
+  for (const log of logs) {
+    if (log.block < block || log.timestamp < timestamp) return "order";
+    block = log.block;
+    timestamp = log.timestamp;
+  }
+  // Every log `from` counts is at or before `proven`'s block too.
+  if (proven.block < from.lastBlock) return "block-range";
+  const added = proven.count - from.count;
+  // Two proofs of one count agree on everything they count; one that counts
+  // more is at a later block than every log the earlier one counts, and
+  // the earlier one's block is before every log it doesn't.
+  if (added > 0n && proven.block <= from.block) return "block-range";
+  if (BigInt(logs.length) !== added) return "accumulator";
+  if (logs.some((l) => l.block <= from.block || l.block > proven.block)) return "block-range";
+  let accumulator: Uint8Array = start;
+  for (const log of logs) accumulator = eventAccumulatorStep(accumulator, log.n, log);
+  return equalBytes(accumulator, end) ? null : "accumulator";
+}

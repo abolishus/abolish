@@ -16,8 +16,16 @@
 // wallet; nothing here holds a key. Everything posted is bytes the board
 // already holds, each checked against the CID its checkpoint names before it
 // is posted, so the archive carries no display text and nothing the board's
-// validity checks didn't pass (T-17, T-52). The manifest's evidence and runs
-// are a later part's: until then the manifests list objects and links only.
+// validity checks didn't pass (T-17, T-52).
+//
+// With the deployment's L2 contracts behind `ContractEventSource`, each
+// manifest also lists their contract-event evidence and runs (part 4b-3a):
+// for each contract whose count changed in an anchored period, the record at
+// the first L2 block after the period's end that a respected game claims,
+// and the events from the count the contract's last record proved to this
+// one's. Each record is checked as a reader checks it and each run replayed
+// against it before anything is posted, so an upload always replays (T-71);
+// a source that gives anything else is reported, and the contract waits.
 //
 // The tables are operational, so a wipe of Postgres loses only the worker's
 // place in the chain. A run that holds no chain while the anchor names one
@@ -29,18 +37,39 @@ import {
   boardEntryHash,
   cidText,
   type ArchiveManifest,
+  type ContractEventEvidence,
   decodeArchiveLocator,
   decodeArchiveManifest,
   decodeCheckpoint,
+  decodeContractEventEvidence,
   encodeArchiveLocator,
   encodeArchiveManifest,
+  encodeContractEventEvidence,
+  encodeContractEventRun,
+  checkEventAccumulatorContinuation,
+  eventAccumulatorGenesis,
+  type EvidenceRef,
+  MAX_CONTRACT_EVENT_RUN,
+  MAX_EVENT_DATA,
+  MAX_MANIFEST_EVIDENCE,
   MAX_MANIFEST_LINKS,
+  MAX_MANIFEST_RUNS,
   MAX_BOARD_PAYLOAD,
   MAX_MANIFEST_OBJECTS,
+  MAX_RUN_EVENTS,
   objectCar,
   objectCid,
   readArchivedObject,
+  type RunEvent,
+  type RunRef,
 } from "@abolishus/crypto";
+import {
+  accumulatorAtOutputRoot,
+  checkContractEventEvidence,
+  MAX_EVIDENCE_RECORD,
+  OutputRootError,
+  runBound,
+} from "@abolishus/verifier";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
@@ -52,7 +81,16 @@ import {
 } from "./archive-chain.ts";
 import { readBoardRange } from "./board.ts";
 import { isBytes } from "./bytes.ts";
-import { archiveManifests, archiveObjects, archiveTransactions } from "./db/schema/index.ts";
+import type { AnchoringClock } from "./anchoring.ts";
+import {
+  archiveEventProgress,
+  archiveEvidence,
+  archiveManifests,
+  archiveObjects,
+  archiveRuns,
+  archiveTransactions,
+  boardCheckpoints,
+} from "./db/schema/index.ts";
 import { withSessionLock } from "./session-lock.ts";
 
 /**
@@ -103,6 +141,69 @@ export const ARCHIVE_REPOST_AFTER = 7200n;
  */
 export const ARCHIVE_RESUME_READS = 65_536;
 
+/**
+ * The most anchored periods one run examines for each contract by default:
+ * each costs the source a game lookup and a proof, and a database starting
+ * from none (after a wipe, say) would otherwise ask for every period since
+ * the first in one run.
+ */
+export const ARCHIVE_EVIDENCE_PERIODS = 64;
+
+/**
+ * Where the evidence and the events of the deployment's L2 contracts come
+ * from (docs/spec/archive.md, Contract-event evidence and Contract-event run,
+ * Who writes them): the dispute games on L1 and an L2 node for the records,
+ * the index ([[P3-5]]) for the events. Nothing it gives is trusted: every
+ * record is checked as a reader checks it and every event replayed against
+ * it before upload (`ContractEventError` otherwise).
+ */
+export interface ContractEventSource {
+  /**
+   * The evidence record proving `contract`'s accumulator at the first L2
+   * block with a timestamp of at least `after` for which a dispute game of
+   * the type the L2's portal respects claims an output root, with that
+   * game's index and address, or `undefined` while no such game exists.
+   */
+  evidence(contract: Uint8Array, after: bigint): Promise<ContractEventEvidence | undefined>;
+  /** Events `from` to `to − 1` of `contract`'s sequence, in order of their index. */
+  events(contract: Uint8Array, from: bigint, to: bigint): Promise<readonly RunEvent[]>;
+}
+
+/** The L2 contracts whose events the archive keeps, and where they are read. */
+export interface ContractEventArchive {
+  readonly source: ContractEventSource;
+  /** The L2's chain ID, which every record and run names. */
+  readonly l2ChainId: bigint;
+  /** The deployment's L2 contracts: its registries and its board, each 20 bytes. */
+  readonly contracts: readonly Uint8Array[];
+  /** The anchor's clock: period `s` ends at `epoch + (s + 1) · period`. */
+  readonly clock: Pick<AnchoringClock, "epoch" | "period">;
+  /** Anchored periods examined for each contract in one run; `ARCHIVE_EVIDENCE_PERIODS` by default. */
+  readonly maxPeriods?: number;
+}
+
+/**
+ * Why a contract's evidence or events weren't archived this run: the record
+ * isn't one a reader would take for the contract (`evidence`: the evidence
+ * check fails, it isn't canonical, its block is before the period's end, or
+ * it proves less than, or other than, the contract's last record), or the
+ * events don't replay to it (`events`: too few or too many, out of order,
+ * past its block, or another accumulator), they need more runs than one
+ * manifest lists (`runs`), or the source itself failed (`source`: a node
+ * down, say), which never holds up the board's objects. Nothing more of the
+ * contract is written until a later run's source gives what checks.
+ */
+export type ContractEventErrorCode = "evidence" | "events" | "runs" | "source";
+
+export class ContractEventError extends Error {
+  override readonly name = "ContractEventError";
+  readonly code: ContractEventErrorCode;
+  constructor(code: ContractEventErrorCode, message: string) {
+    super(`a contract's events can't be archived: ${message}`);
+    this.code = code;
+  }
+}
+
 export interface ArchiveOptions {
   /**
    * The locator the board anchor holds now (`latestLocator()`), or `undefined`
@@ -125,6 +226,8 @@ export interface ArchiveOptions {
   readonly repostAfter?: bigint;
   /** The most links a manifest carries, from 2 to `MAX_MANIFEST_LINKS` (the default). */
   readonly maxLinks?: number;
+  /** The L2 contracts whose evidence and runs the manifests list; none without it. */
+  readonly contractEvents?: ContractEventArchive;
 }
 
 /** What one run did. */
@@ -143,6 +246,15 @@ export interface ArchiveRun {
   readonly posted: number;
   /** Objects not posted because the board no longer gives the bytes their CID names. */
   readonly refused: number;
+  /** Contract-event evidence records written. */
+  readonly evidence: number;
+  /** Contract-event runs written. */
+  readonly runs: number;
+  /** Each contract whose source failed or gave what doesn't check, and why; its archive waits. */
+  readonly eventFailures: readonly {
+    readonly contract: Uint8Array;
+    readonly error: ContractEventError;
+  }[];
   /** The sequence the locator names, or `undefined` while no manifest meets the locator rule. */
   readonly locator: bigint | undefined;
 }
@@ -196,6 +308,21 @@ function checkOptions(o: ArchiveOptions) {
   const repostAfter = o.repostAfter ?? ARCHIVE_REPOST_AFTER;
   if (typeof repostAfter !== "bigint" || repostAfter < 1n)
     throw new RangeError("repostAfter must be at least 1 second");
+  const ce = o.contractEvents;
+  if (ce !== undefined) {
+    if (typeof ce.l2ChainId !== "bigint" || ce.l2ChainId < 0n || ce.l2ChainId >= 1n << 64n)
+      throw new RangeError("l2ChainId must be a u64");
+    if (ce.contracts.some((c) => !isBytes(c) || c.length !== 20))
+      throw new TypeError("every contract must be 20 bytes");
+    if (new Set(ce.contracts.map(hex)).size !== ce.contracts.length)
+      throw new RangeError("a contract is named twice");
+    const { epoch, period } = ce.clock;
+    if (typeof epoch !== "bigint" || epoch < 0n || typeof period !== "bigint" || period < 1n)
+      throw new RangeError("the clock needs a non-negative epoch and a period of at least 1");
+    const maxPeriods = ce.maxPeriods ?? ARCHIVE_EVIDENCE_PERIODS;
+    if (!Number.isSafeInteger(maxPeriods) || maxPeriods < 1)
+      throw new RangeError("maxPeriods must be at least 1");
+  }
   return { depth, repostAfter, maxLinks: o.maxLinks ?? MAX_MANIFEST_LINKS };
 }
 
@@ -239,6 +366,310 @@ async function register(client: Sql): Promise<number> {
   return inserted.length;
 }
 
+/** What a contract's last record proved, which its next record's events are replayed from. */
+interface Progress {
+  readonly segment: bigint;
+  readonly count: bigint;
+  readonly accumulator: Uint8Array;
+  readonly l2Block: bigint;
+  readonly lastBlock: bigint;
+  readonly lastTimestamp: bigint;
+}
+
+/** A run's encoding without its events (docs/spec/archive.md, Contract-event run, Layout (version 1)). */
+const RUN_FIXED = 3 + 8 + 20 + 8 + 4;
+
+/** What one event adds to a run's encoding. */
+const eventLength = (e: RunEvent) => 8 + 8 + 4 + 32 * e.topics.length + 4 + e.data.length;
+
+/**
+ * `events`, the contract's from index `first`, as consecutive runs within
+ * `MAX_RUN_EVENTS` and `MAX_CONTRACT_EVENT_RUN`, each as long as both allow
+ * (docs/spec/archive.md, Contract-event run, Who writes them), so the same
+ * events always split the same way.
+ */
+function splitRuns(
+  l2ChainId: bigint,
+  contract: Uint8Array,
+  first: bigint,
+  events: readonly RunEvent[],
+): { first: bigint; count: number; run: Uint8Array; cid: Uint8Array }[] {
+  const out = [];
+  for (let start = 0; start < events.length;) {
+    let end = start;
+    let length = RUN_FIXED;
+    while (end < events.length && end - start < MAX_RUN_EVENTS) {
+      const e = eventLength(events[end] as RunEvent);
+      if (end > start && length + e > MAX_CONTRACT_EVENT_RUN) break;
+      length += e;
+      end++;
+    }
+    const at = first + BigInt(start);
+    const run = encodeContractEventRun({
+      l2_chain_id: l2ChainId,
+      contract,
+      first: at,
+      events: events.slice(start, end),
+    });
+    out.push({ first: at, count: end - start, run, cid: objectCid(run) });
+    start = end;
+  }
+  return out;
+}
+
+/** What a record the writer takes proves, and its encoding. */
+interface Judged {
+  readonly bytes: Uint8Array;
+  readonly block: bigint;
+  readonly count: bigint;
+  readonly accumulator: Uint8Array;
+}
+
+/**
+ * The evidence check a reader applies (docs/spec/archive.md, The evidence
+ * check) to the record as decoded from the bytes to be posted, with the
+ * listing's block the header's own, and what the writer adds: the record is
+ * canonical, at or after the period's end, and proves no lower block or
+ * count than the contract's last. Returns what it proves, or `absent` for
+ * a record proving the contract had no code yet while it has counted no
+ * event, which moves its place on and writes nothing.
+ */
+function judgeEvidence(
+  record: ContractEventEvidence,
+  contract: Uint8Array,
+  l2ChainId: bigint,
+  end: bigint,
+  last: Progress,
+): Judged | "absent" {
+  const fail = (why: string) => new ContractEventError("evidence", why);
+  let bytes: Uint8Array;
+  let decoded: ContractEventEvidence;
+  try {
+    bytes = encodeContractEventEvidence(record);
+    decoded = decodeContractEventEvidence(bytes, 1);
+  } catch (e) {
+    throw fail(
+      `it isn't a canonical version-1 record (${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+  let block: bigint;
+  try {
+    block = accumulatorAtOutputRoot(
+      {
+        outputRoot: decoded.output_root,
+        messagePasserStorageRoot: decoded.message_passer_storage_root,
+        header: decoded.header,
+        nodes: decoded.nodes,
+      },
+      contract,
+    ).block;
+  } catch (e) {
+    if (!(e instanceof OutputRootError)) throw e;
+    // A contract deployed after the first anchored period has no account
+    // at that period's block; its sequence starts at genesis all the same.
+    if (
+      e.code === "l2-contract-absent" &&
+      last.count === 0n &&
+      decoded.l2_chain_id === l2ChainId &&
+      equal(decoded.contract, contract)
+    )
+      return "absent";
+    throw fail(e.code);
+  }
+  const check = checkContractEventEvidence(decoded, { contract, l2Block: block }, l2ChainId);
+  if (!check.ok) throw fail(check.code);
+  const { count, accumulator, timestamp } = check.accumulator;
+  if (timestamp < end) throw fail(`its block's timestamp ${timestamp} is before ${end}`);
+  if (block < last.l2Block || count < last.count)
+    throw fail(`it proves less than the contract's last record`);
+  return { bytes, block, count, accumulator };
+}
+
+/**
+ * Whether `events`, the contract's from the last record's count, take the
+ * archive from where the last record left it to `proven`, as the reader's
+ * replay of the whole sequence would judge it against both
+ * (`checkEventAccumulatorContinuation`; docs/spec/contracts.md, Event
+ * accumulator, Verification): so a record and the runs posted with it
+ * always replay, with every record before them (T-71).
+ */
+function replayEvents(events: readonly RunEvent[], last: Progress, proven: Judged): void {
+  const fail = (why: string) => new ContractEventError("events", why);
+  if (!Array.isArray(events)) throw fail("the source gave no list of events");
+  let broken: string | null;
+  try {
+    if (events.some((e) => e.data.length > MAX_EVENT_DATA))
+      throw new RangeError("an event's data is over MAX_EVENT_DATA");
+    broken = checkEventAccumulatorContinuation(
+      {
+        accumulator: last.accumulator,
+        count: last.count,
+        block: last.l2Block,
+        lastBlock: last.lastBlock,
+        lastTimestamp: last.lastTimestamp,
+      },
+      events.map((e, i) => ({
+        n: last.count + BigInt(i),
+        block: e.l2_block,
+        timestamp: e.l2_timestamp,
+        topics: e.topics,
+        data: e.data,
+      })),
+      proven,
+    );
+  } catch (e) {
+    throw fail(`an event is no log of ours (${e instanceof Error ? e.message : String(e)})`);
+  }
+  if (broken !== null) throw fail(`they don't replay to the record (${broken})`);
+}
+
+/**
+ * Writes each contract's evidence and runs for the anchored periods after
+ * the last it examined, at most `maxPeriods` of them a run, in order: the
+ * record at the first L2 block after the period's end that a respected game
+ * claims, and, where its count is above the last record's, the events
+ * between as runs (docs/spec/archive.md, Contract-event evidence and
+ * Contract-event run, Who writes them). A period with no change moves the
+ * contract's place on and writes nothing; one whose game doesn't exist yet
+ * stops the contract until a later run. Returns what it wrote, and the
+ * contracts whose source failed or gave what doesn't check, which write
+ * nothing more this run.
+ */
+async function writeContractEvents(
+  client: Sql,
+  ce: ContractEventArchive,
+): Promise<{
+  evidence: number;
+  runs: number;
+  failures: { contract: Uint8Array; error: ContractEventError }[];
+}> {
+  const db = drizzle({ client });
+  const anchored = await db
+    .selectDistinct({ segment: boardCheckpoints.segment })
+    .from(boardCheckpoints)
+    .orderBy(asc(boardCheckpoints.segment));
+  const maxPeriods = ce.maxPeriods ?? ARCHIVE_EVIDENCE_PERIODS;
+  let evidence = 0;
+  let runs = 0;
+  const failures: { contract: Uint8Array; error: ContractEventError }[] = [];
+  const ask = async <T>(read: () => Promise<T>) => {
+    try {
+      return await read();
+    } catch (e) {
+      throw new ContractEventError("source", e instanceof Error ? e.message : String(e));
+    }
+  };
+  for (const contract of ce.contracts) {
+    const [row] = await db
+      .select()
+      .from(archiveEventProgress)
+      .where(eq(archiveEventProgress.contract, Uint8Array.from(contract)));
+    let last: Progress = row
+      ? {
+          segment: row.segment,
+          count: row.count,
+          accumulator: new Uint8Array(row.accumulator),
+          l2Block: row.l2Block,
+          lastBlock: row.lastBlock,
+          lastTimestamp: row.lastTimestamp,
+        }
+      : {
+          segment: -1n,
+          count: 0n,
+          accumulator: eventAccumulatorGenesis(ce.l2ChainId, contract),
+          l2Block: 0n,
+          lastBlock: 0n,
+          lastTimestamp: 0n,
+        };
+    const periods = anchored
+      .map((r) => r.segment)
+      .filter((s) => s > last.segment)
+      .slice(0, maxPeriods);
+    try {
+      for (const segment of periods) {
+        const end = ce.clock.epoch + (segment + 1n) * ce.clock.period;
+        const record = await ask(() => ce.source.evidence(contract, end));
+        if (record === undefined) break;
+        const judged = judgeEvidence(record, contract, ce.l2ChainId, end, last);
+        if (judged === "absent") {
+          await db
+            .insert(archiveEventProgress)
+            .values({ contract: Uint8Array.from(contract), ...last, segment })
+            .onConflictDoUpdate({ target: archiveEventProgress.contract, set: { segment } });
+          last = { ...last, segment };
+          continue;
+        }
+        const proven = judged;
+        // A record is listed with all its runs, in one manifest, so a span
+        // more runs than that would need is refused before it is fetched.
+        if (proven.count - last.count > BigInt(MAX_MANIFEST_RUNS * MAX_RUN_EVENTS))
+          throw new ContractEventError("runs", "its events need more runs than a manifest lists");
+        // The same count again: `replayEvents` with no event holds it to
+        // the last record's accumulator and blocks.
+        if (proven.count === last.count)
+          try {
+            replayEvents([], last, proven);
+          } catch {
+            throw new ContractEventError(
+              "evidence",
+              "it proves another accumulator at the last record's count",
+            );
+          }
+        let next: Progress = { ...last, segment, l2Block: proven.block };
+        let written: ReturnType<typeof splitRuns> = [];
+        if (proven.count > last.count) {
+          const events = await ask(() => ce.source.events(contract, last.count, proven.count));
+          replayEvents(events, last, proven);
+          written = splitRuns(ce.l2ChainId, contract, last.count, events);
+          // A record is listed with its runs, in one manifest.
+          if (written.length > MAX_MANIFEST_RUNS)
+            throw new ContractEventError("runs", `${written.length} runs for one record`);
+          const final = events.at(-1) as RunEvent;
+          next = {
+            segment,
+            count: proven.count,
+            accumulator: proven.accumulator,
+            l2Block: proven.block,
+            lastBlock: final.l2_block,
+            lastTimestamp: final.l2_timestamp,
+          };
+        }
+        const cid = objectCid(proven.bytes);
+        await db.transaction(async (tx) => {
+          if (written.length > 0) {
+            await tx.insert(archiveEvidence).values({
+              cid,
+              contract: Uint8Array.from(contract),
+              segment,
+              l2Block: proven.block,
+              count: proven.count,
+              record: proven.bytes,
+            });
+            await tx
+              .insert(archiveRuns)
+              .values(
+                written.map((r) => ({ ...r, contract: Uint8Array.from(contract), evidence: cid })),
+              );
+          }
+          await tx
+            .insert(archiveEventProgress)
+            .values({ contract: Uint8Array.from(contract), ...next })
+            .onConflictDoUpdate({ target: archiveEventProgress.contract, set: next });
+        });
+        if (written.length > 0) {
+          evidence++;
+          runs += written.length;
+        }
+        last = next;
+      }
+    } catch (e) {
+      if (!(e instanceof ContractEventError)) throw e;
+      failures.push({ contract, error: e });
+    }
+  }
+  return { evidence, runs, failures };
+}
+
 interface ObjectRow {
   readonly cid: Uint8Array;
   readonly electionId: Uint8Array;
@@ -277,7 +708,7 @@ const carLimit = (bound: number) =>
 interface Chain {
   readonly manifests: ChainManifest[];
   readonly cids: Uint8Array[];
-  /** Each listed object's CID, by hex, with the lowest sequence listing it. */
+  /** Each listed object's, record's and run's CID, by hex, with the lowest sequence listing it. */
   readonly listed: Map<string, bigint>;
 }
 
@@ -382,8 +813,7 @@ async function resume(
     for (const [sequence, h] of chain) {
       await tx.insert(archiveManifests).values({ sequence, cid: h.cid, manifest: h.bytes });
       const m = decodeArchiveManifest(h.bytes, 3);
-      // Evidence and runs too, once a later part lists them, so a resumed
-      // database never posts them again.
+      // Evidence and runs too, so a resumed database never posts them again.
       const rows = [h, ...m.objects, ...m.evidence, ...m.runs].map((x) => ({
         transaction: x.transaction,
         cid: x.cid,
@@ -422,7 +852,8 @@ async function readChain(
       confirmed: confirmed.has(hex(r.cid)),
     });
     cids.push(new Uint8Array(r.cid));
-    for (const x of m.objects) if (!listed.has(hex(x.cid))) listed.set(hex(x.cid), r.sequence);
+    for (const x of [...m.objects, ...m.evidence, ...m.runs])
+      if (!listed.has(hex(x.cid))) listed.set(hex(x.cid), r.sequence);
   }
   return { manifests, cids, listed };
 }
@@ -489,12 +920,94 @@ async function confirm(
   return { confirmed, mined };
 }
 
+/** A record and its runs, listed together in one manifest. */
+interface EvidenceGroup {
+  readonly evidence: Omit<EvidenceRef, "transaction">;
+  readonly runs: readonly Omit<RunRef, "transaction">[];
+}
+
 /**
- * Writes manifests while confirmed objects wait to be listed, or every
- * manifest has confirmed but no locator names the latest, each linking the
- * roots `nextManifestLinks` gives (docs/spec/archive.md, Who writes them).
- * Objects are listed by the transaction that confirmed first, at most
- * `MAX_MANIFEST_OBJECTS` a manifest, in CID order as the layout requires.
+ * The records and runs not yet listed, each record with its runs. A record
+ * or run a resumed manifest already lists, written again after a wipe, is
+ * marked as listed there rather than listed twice; a record is due once it
+ * and every run of it has confirmed.
+ */
+async function waitingGroups(
+  client: Sql,
+  chain: Chain,
+  confirmed: ReadonlyMap<string, Uint8Array>,
+): Promise<EvidenceGroup[]> {
+  const db = drizzle({ client });
+  const records = await db
+    .select({
+      cid: archiveEvidence.cid,
+      contract: archiveEvidence.contract,
+      l2Block: archiveEvidence.l2Block,
+    })
+    .from(archiveEvidence)
+    .where(isNull(archiveEvidence.listedIn))
+    .orderBy(asc(archiveEvidence.contract), asc(archiveEvidence.count));
+  const groups: EvidenceGroup[] = [];
+  for (const e of records) {
+    const runs = await db
+      .select({
+        cid: archiveRuns.cid,
+        contract: archiveRuns.contract,
+        first: archiveRuns.first,
+        count: archiveRuns.count,
+        listedIn: archiveRuns.listedIn,
+      })
+      .from(archiveRuns)
+      .where(eq(archiveRuns.evidence, e.cid))
+      .orderBy(asc(archiveRuns.first));
+    const at = chain.listed.get(hex(e.cid));
+    if (at !== undefined) {
+      await db.update(archiveEvidence).set({ listedIn: at }).where(eq(archiveEvidence.cid, e.cid));
+      for (const r of runs) {
+        const runAt = chain.listed.get(hex(r.cid));
+        if (r.listedIn === null && runAt !== undefined)
+          await db.update(archiveRuns).set({ listedIn: runAt }).where(eq(archiveRuns.cid, r.cid));
+      }
+      continue;
+    }
+    if (!confirmed.has(hex(e.cid)) || runs.some((r) => !confirmed.has(hex(r.cid)))) continue;
+    groups.push({
+      evidence: {
+        contract: new Uint8Array(e.contract),
+        l2_block: e.l2Block,
+        cid: new Uint8Array(e.cid),
+      },
+      runs: runs.map((r) => ({
+        contract: new Uint8Array(r.contract),
+        first: r.first,
+        count: r.count,
+        cid: new Uint8Array(r.cid),
+      })),
+    });
+  }
+  return groups;
+}
+
+/** A manifest's evidence order (docs/spec/archive.md, Layout (version 2)): contract, block, CID. */
+const evidenceOrder = (a: EvidenceRef, b: EvidenceRef) =>
+  compareBytes(a.contract, b.contract) ||
+  (a.l2_block < b.l2_block ? -1 : a.l2_block > b.l2_block ? 1 : 0) ||
+  compareBytes(a.cid, b.cid);
+
+/** A manifest's run order (Layout (version 3)): contract, first, CID. */
+const runOrder = (a: RunRef, b: RunRef) =>
+  compareBytes(a.contract, b.contract) ||
+  (a.first < b.first ? -1 : a.first > b.first ? 1 : 0) ||
+  compareBytes(a.cid, b.cid);
+
+/**
+ * Writes manifests while confirmed objects or records wait to be listed, or
+ * every manifest has confirmed but no locator names the latest, each linking
+ * the roots `nextManifestLinks` gives (docs/spec/archive.md, Who writes
+ * them). Everything is listed by the transaction that confirmed first, at
+ * most `MAX_MANIFEST_OBJECTS` objects, `MAX_MANIFEST_EVIDENCE` records and
+ * `MAX_MANIFEST_RUNS` runs a manifest, each record beside its runs, in the
+ * orders the layout requires.
  */
 async function writeManifests(
   client: Sql,
@@ -519,6 +1032,7 @@ async function writeManifests(
     .map((r) => new Uint8Array(r.cid))
     .filter((cid) => confirmed.has(hex(cid)) && !chain.listed.has(hex(cid)))
     .sort(compareBytes);
+  const groups = await waitingGroups(client, chain, confirmed);
   const written: bigint[] = [];
   const txOf = (cid: Uint8Array) => {
     const t = confirmed.get(hex(cid));
@@ -527,9 +1041,29 @@ async function writeManifests(
     return t;
   };
   let at = 0;
-  while (at < waiting.length || needsLinkingManifest(chain.manifests)) {
+  let g = 0;
+  while (at < waiting.length || g < groups.length || needsLinkingManifest(chain.manifests)) {
     const objects = waiting.slice(at, at + MAX_MANIFEST_OBJECTS);
     at += objects.length;
+    const taken: EvidenceGroup[] = [];
+    let runCount = 0;
+    while (g < groups.length && taken.length < MAX_MANIFEST_EVIDENCE) {
+      const next = groups[g] as EvidenceGroup;
+      // Written within the bound (`writeContractEvents`), so only a row
+      // written by another hand can be over it, and never fits a manifest.
+      if (next.runs.length > MAX_MANIFEST_RUNS)
+        throw new Error(`${cidText(next.evidence.cid)} has more runs than a manifest lists`);
+      if (runCount + next.runs.length > MAX_MANIFEST_RUNS) break;
+      taken.push(next);
+      runCount += next.runs.length;
+      g++;
+    }
+    const evidence = taken
+      .map((t) => ({ ...t.evidence, transaction: txOf(t.evidence.cid) }))
+      .sort(evidenceOrder);
+    const runs = taken
+      .flatMap((t) => t.runs.map((r) => ({ ...r, transaction: txOf(r.cid) })))
+      .sort(runOrder);
     const links = nextManifestLinks(chain.manifests, maxLinks);
     const sequence = BigInt(chain.manifests.length);
     const manifest = encodeArchiveManifest(
@@ -542,34 +1076,68 @@ async function writeManifests(
           const cid = chain.cids[s] as Uint8Array;
           return { sequence: BigInt(s), cid, transaction: txOf(cid) };
         }),
-        evidence: [],
-        runs: [],
+        evidence,
+        runs,
       },
       3,
     );
     const cid = objectCid(manifest);
     await db.transaction(async (tx) => {
       await tx.insert(archiveManifests).values({ sequence, cid, manifest });
-      if (objects.length === 0) return;
-      const listed = await tx
-        .update(archiveObjects)
-        .set({ listedIn: sequence })
-        .where(and(inArray(archiveObjects.cid, objects), isNull(archiveObjects.listedIn)))
-        .returning({ cid: archiveObjects.cid });
       // The lock keeps every other run out, so nothing else lists them.
-      if (listed.length !== objects.length)
-        throw new Error("objects were listed under another manifest");
+      const check = (n: number, of: number, what: string) => {
+        if (n !== of) throw new Error(`${what} were listed under another manifest`);
+      };
+      if (objects.length > 0) {
+        const listed = await tx
+          .update(archiveObjects)
+          .set({ listedIn: sequence })
+          .where(and(inArray(archiveObjects.cid, objects), isNull(archiveObjects.listedIn)))
+          .returning({ cid: archiveObjects.cid });
+        check(listed.length, objects.length, "objects");
+      }
+      if (evidence.length > 0) {
+        const listed = await tx
+          .update(archiveEvidence)
+          .set({ listedIn: sequence })
+          .where(
+            and(
+              inArray(
+                archiveEvidence.cid,
+                evidence.map((e) => e.cid),
+              ),
+              isNull(archiveEvidence.listedIn),
+            ),
+          )
+          .returning({ cid: archiveEvidence.cid });
+        check(listed.length, evidence.length, "records");
+        const listedRuns = await tx
+          .update(archiveRuns)
+          .set({ listedIn: sequence })
+          .where(
+            and(
+              inArray(
+                archiveRuns.cid,
+                runs.map((r) => r.cid),
+              ),
+              isNull(archiveRuns.listedIn),
+            ),
+          )
+          .returning({ cid: archiveRuns.cid });
+        check(listedRuns.length, runs.length, "runs");
+      }
     });
     chain.manifests.push({ links, confirmed: false });
     chain.cids.push(cid);
-    for (const x of objects) chain.listed.set(hex(x), sequence);
+    for (const x of [...objects, ...evidence.map((e) => e.cid), ...runs.map((r) => r.cid)])
+      chain.listed.set(hex(x), sequence);
     written.push(sequence);
   }
   return written;
 }
 
 /**
- * Posts every object and manifest with no confirmed transaction and none
+ * Posts every manifest, record, run and object with no confirmed transaction and none
  * still live: in a block, or posted less than `repostAfter` ago. A repost
  * carries the same bytes, so the CID a manifest lists or links never changes
  * (docs/spec/archive.md, Who writes them). Returns how many it posted.
@@ -611,6 +1179,33 @@ async function post(
     .orderBy(asc(archiveManifests.sequence));
   for (const m of manifests)
     if (!live.has(hex(m.cid))) await send(m.cid, new Uint8Array(m.manifest));
+  // Records and runs were checked when written and are posted as stored,
+  // each read only when due: a run is up to 16 MiB.
+  const records = await db
+    .select({ cid: archiveEvidence.cid })
+    .from(archiveEvidence)
+    .orderBy(asc(archiveEvidence.cid));
+  for (const { cid } of records) {
+    if (live.has(hex(cid))) continue;
+    const [row] = await db
+      .select({ bytes: archiveEvidence.record })
+      .from(archiveEvidence)
+      .where(eq(archiveEvidence.cid, cid));
+    // Rows are never deleted (0048's triggers).
+    if (row !== undefined) await send(cid, new Uint8Array(row.bytes));
+  }
+  const runs = await db
+    .select({ cid: archiveRuns.cid })
+    .from(archiveRuns)
+    .orderBy(asc(archiveRuns.cid));
+  for (const { cid } of runs) {
+    if (live.has(hex(cid))) continue;
+    const [row] = await db
+      .select({ bytes: archiveRuns.run })
+      .from(archiveRuns)
+      .where(eq(archiveRuns.cid, cid));
+    if (row !== undefined) await send(cid, new Uint8Array(row.bytes));
+  }
   let refused = 0;
   const objects = await db.select().from(archiveObjects).orderBy(asc(archiveObjects.cid));
   for (const o of objects) {
@@ -639,7 +1234,8 @@ function locatorOf(
 
 /**
  * One archive run: takes up the anchor's chain if the database holds none
- * (`resume`), records the objects of new checkpoints, confirms the
+ * (`resume`), records the objects of new checkpoints, writes the contracts'
+ * evidence and runs for the anchored periods due, confirms the
  * transactions that reached `depth`, writes the manifests that are due,
  * posts what has no live upload, and reports the sequence the locator names.
  * Throws if Arweave or the database fails; what was done before stays done,
@@ -662,8 +1258,18 @@ export async function archiveBoards(
         ? await resume(client, arweave, options.latestLocator, options, depth)
         : 0;
     const registered = await register(client);
+    const events =
+      options.contractEvents === undefined
+        ? { evidence: 0, runs: 0, failures: [] }
+        : await writeContractEvents(client, options.contractEvents);
     const bounds = new Map<string, number>();
     for (const o of await db.select().from(archiveObjects)) bounds.set(hex(o.cid), objectBound(o));
+    for (const e of await db.select({ cid: archiveEvidence.cid }).from(archiveEvidence))
+      bounds.set(hex(e.cid), MAX_EVIDENCE_RECORD);
+    for (const r of await db
+      .select({ cid: archiveRuns.cid, count: archiveRuns.count })
+      .from(archiveRuns))
+      bounds.set(hex(r.cid), runBound(r.count));
     for (const m of await db.select({ cid: archiveManifests.cid }).from(archiveManifests))
       bounds.set(hex(m.cid), MANIFEST_BOUND);
     const { confirmed, mined } = await confirm(client, arweave, depth, bounds);
@@ -679,6 +1285,9 @@ export async function archiveBoards(
       written,
       posted,
       refused,
+      evidence: events.evidence,
+      runs: events.runs,
+      eventFailures: events.failures,
       locator: locatorOf(chain, held)?.sequence,
     };
   });
@@ -691,6 +1300,9 @@ export async function archiveBoards(
       written: [],
       posted: 0,
       refused: 0,
+      evidence: 0,
+      runs: 0,
+      eventFailures: [],
       locator: undefined,
     }
   );

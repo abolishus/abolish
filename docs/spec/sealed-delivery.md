@@ -26,7 +26,7 @@ What this page doesn't cover yet ([[P2-8]] part 3c-1b-2b-2b-2d-2b-2e):
 | `ANSWER_PLAINTEXT`    | 256                         | The length of every answer's plaintext                                                                                                                            |
 | `MAX_ANSWER_BODY`     | 251                         | The longest body an answer carries: `ANSWER_PLAINTEXT` less the outcome and the body's length. A share receipt record is 164 bytes (version 1) or 165 (version 2) |
 | `MAX_REFUSAL_CODE`    | 64                          | The longest refusal code an answer carries                                                                                                                        |
-| `SEALED_DELAY_MAX_MS` | 30,000                      | The longest random delay before the first sealed request of a cast's delivery (Client rules)                                                                      |
+| `SEALED_DELAY_MAX_MS` | 30,000                      | The longest random delay before each sealed request that follows an attempt through the operator's route (Client rules, rule 5)                                   |
 
 ## Delivery envelope
 

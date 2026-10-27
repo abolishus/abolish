@@ -483,7 +483,14 @@ if (registryConfig !== undefined) {
     }
   }
   const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
-  index = postgres(c.indexUrl, { onnotice: () => {}, max: 1 });
+  // Every read of the index ends within two minutes, so an index that hangs
+  // fails a run rather than hold the archive's lock, and the board's objects
+  // with it, for good (docs/spec/archive.md, Known-weak; T-51).
+  index = postgres(c.indexUrl, {
+    onnotice: () => {},
+    max: 1,
+    connection: { statement_timeout: 120_000 },
+  });
   registry = {
     sync: new RegistrySync({
       sql,

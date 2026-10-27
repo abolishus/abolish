@@ -111,10 +111,13 @@ function zoneName(locale: string, timeZone: string, at: Date): string {
   return name ?? timeZone.replaceAll("_", " ");
 }
 
-/** A problem's words, saying which question it is in. */
+/** A problem's words, saying which question, and which of its options, it is in. */
 const say = (t: Translate, e: FieldError) => {
   const problem = t(`pollForm_${e.problem}`);
-  return e.question === undefined ? problem : t("pollFormInQuestion", { n: e.question, problem });
+  if (e.question === undefined) return problem;
+  return e.option === undefined
+    ? t("pollFormInQuestion", { n: e.question, problem })
+    : t("pollFormInOption", { n: e.question, o: e.option, problem });
 };
 
 function Errors({ t, errors, id }: { t: Translate; errors: readonly FieldError[]; id: string }) {

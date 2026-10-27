@@ -1271,6 +1271,7 @@ const enUS = {
   pollFormSubmitErrorsTitle: "Your poll wasn't submitted",
   pollFormErrorsLede: "Fix these and save again:",
   pollFormInQuestion: "Question {n}: {problem}",
+  pollFormInOption: "Question {n}, option {o}: {problem}",
   pollForm_titleMissing: "Give your poll a title.",
   pollForm_tooLong: "This is too long.",
   pollForm_unstorable: "This holds a character that can't be saved. Retype it.",

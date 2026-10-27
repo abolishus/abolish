@@ -206,10 +206,13 @@ export const NewPoll: Story = {
     await expect(links.map((l) => l.textContent)).toEqual([
       "Give your poll a title.",
       "Question 1: Write the question.",
-      "Question 1: Give this option its words, or remove it.",
-      "Question 1: Give this option its words, or remove it.",
+      "Question 1, option 1: Give this option its words, or remove it.",
+      "Question 1, option 2: Give this option its words, or remove it.",
       "Choose a closing date and time.",
     ]);
+    // Two options' problems never read the same (P2-29, creating a poll's
+    // iteration 11).
+    await expect(new Set(links.map((l) => l.textContent)).size).toBe(links.length);
     await expect(writes(args.client)).toEqual([]);
     await userEvent.click(links[0]!);
     const title = canvas.getByRole("textbox", { name: "Title" });
@@ -871,7 +874,7 @@ export const ProblemsInAQuestion: Story = {
         .map((l) => l.textContent),
     ).toEqual([
       "Question 2: These numbers don't fit the options: an answer must be able to pick at least one, and no more than there are.",
-      "Question 2: Another option of this question says the same. People couldn't tell them apart.",
+      "Question 2, option 2: Another option of this question says the same. People couldn't tell them apart.",
     ]);
     // Apart, so problems that wrap don't read as one paragraph (P2-29,
     // creating a poll's iteration 6): further apart than a problem's own lines.

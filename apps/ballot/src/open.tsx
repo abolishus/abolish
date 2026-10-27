@@ -787,6 +787,9 @@ export function Ballot({
   const postingOwn = posting === undefined ? undefined : source.postOwn;
 
   function again() {
+    // Whatever is under way for the last screen, a send after a wait among
+    // them, lands nothing on the new answer.
+    asked.current++;
     setStep({ kind: "answering" });
     setRound(round + 1);
   }
@@ -1542,7 +1545,8 @@ export function Ballot({
    * receipted or its posting recorded (`waitForRecord`), taking the
    * election's lock only now, and only while the wait still stands and the
    * cast is still kept unsent: neither declined nor erased since, which
-   * leaves a seat with nothing, nor boarded, and the send cutoff `c_S` not
+   * leaves a seat with nothing, nor outranked by a newer cast, nor boarded,
+   * and the send cutoff `c_S` not
    * passed on this device, since the lock may have been held long (Sending
    * after a run; T-25, T-52). The last checks are made just before the send,
    * with nothing awaited between, so a choice the voter made meanwhile wins.
@@ -1571,6 +1575,9 @@ export function Ballot({
           }
           if (cast === undefined || cast.shares.some((share) => "erased" in share))
             return undefined;
+          // A newer cast, recorded since by an answer anew (in another tab),
+          // is the voter's last choice: this one is no longer sent from here.
+          if (cast !== read.casts.at(-1)) return undefined;
           if (cast.boarded !== undefined)
             return { kind: "sent", trackingCode: sending.trackingCode } satisfies Step;
           if (ended() || !current() || passedOnDevice(cutoffs().send, source.now()))

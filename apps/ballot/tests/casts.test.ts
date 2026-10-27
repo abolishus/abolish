@@ -1232,7 +1232,7 @@ describe("a cast marked handed", () => {
   const definition = DECODED.definition_hash;
   const cast = (n: bigint): CastRecord => ({ ballot: naming(n), l1Number: n, shares: shares() });
 
-  test("is the cast with exactly these bytes, and no other, stored and read back so (fast-check)", () => {
+  test("is the cast with these bytes and every cast of its seal, stored and read back so (fast-check)", () => {
     fc.assert(
       fc.property(
         casts.filter((list) => list.length > 0),
@@ -1241,9 +1241,8 @@ describe("a cast marked handed", () => {
           const marked = list[pick % list.length] as CastRecord;
           const changed = withHanded(list, marked.ballot);
           if (changed === "missing") throw new Error("expected casts");
-          expect(changed).toEqual(
-            list.map((c, i) => (i === pick % list.length ? { ...c, handed: true } : c)),
-          );
+          // Every cast here is of one seal, so each carries the marked one's postings.
+          expect(changed).toEqual(list.map((c) => ({ ...c, handed: true })));
           expect(parseStoredCasts(storedCasts(changed))).toEqual(changed);
         },
       ),
@@ -1278,9 +1277,7 @@ describe("a cast marked handed", () => {
     if (unsent === undefined || unsent === "other-election") throw new Error("expected a cast");
     expect(unsent.handed).toBe(true);
     // An older cast's mark isn't the newest's.
-    const older = withHanded([cast(9n), cast(10n)], naming(9n));
-    if (older === "missing") throw new Error("expected casts");
-    const newest = unsentCast(older, definition);
+    const newest = unsentCast([{ ...cast(9n), handed: true }, cast(10n)], definition);
     if (newest === undefined || newest === "other-election") throw new Error("expected a cast");
     expect(newest).not.toHaveProperty("handed");
   });
@@ -1295,6 +1292,16 @@ describe("a cast marked handed", () => {
     const plain = withCast([cast(10n)], naming(11n), shares());
     if (typeof plain === "string") throw new Error(plain);
     expect(plain[1]).not.toHaveProperty("handed");
+  });
+
+  test("marks a recast of the same seal recorded before it, and no other seal's cast", () => {
+    const otherSeal = BALLOT.slice();
+    otherSeal[3 + 32 + 1 + 31] = (otherSeal[3 + 32 + 1 + 31] as number) ^ 1;
+    new DataView(otherSeal.buffer).setBigUint64(L1_AT, 12n);
+    const other: CastRecord = { ballot: otherSeal, l1Number: 12n, shares: shares() };
+    const changed = withHanded([cast(10n), cast(11n), other], naming(10n));
+    if (changed === "missing") throw new Error("expected casts");
+    expect(changed.map((c) => c.handed)).toEqual([true, true, undefined]);
   });
 
   test("doesn't carry its mark to another seal's cast, whose postings name another ballot hash", () => {

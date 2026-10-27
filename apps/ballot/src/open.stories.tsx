@@ -2132,6 +2132,36 @@ export const PostingDeclinedAfterTheWaitSent: Story = {
   },
 };
 
+/** `CAST_RECORDED` with a newer cast after it, recorded by an answer anew in another tab. */
+const CAST_OUTRANKED: CastsRead = {
+  kind: "read",
+  casts: [
+    ...CAST_RECORDED.casts,
+    { ballot: Uint8Array.of(0xb2), l1Number: L1.number + 1n, shares: [] },
+  ],
+};
+
+export const PostingWaitOutrankedSendsNothing: Story = {
+  name: "A record the wait found sends nothing once a newer cast was recorded, the voter's last choice",
+  args: {
+    source: offerSource({
+      posted: ["relayed"],
+      awaited: ["recorded"],
+      heldAfterWait: CAST_OUTRANKED,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await canvas.findByText("The posting isn't on the board yet");
+    await waitFor(() => expect(of.awaitPosted).toHaveBeenCalledOnce());
+    await waitFor(() => expect(canvas.queryByText(WATCHING)).toBeNull());
+    await expect(of.send).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingWaitFindsTheSeatErased: Story = {
   name: "A record the wait found sends nothing once the cast's seat was declined or erased elsewhere",
   args: {

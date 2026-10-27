@@ -423,7 +423,7 @@ function castOf(v: unknown): CastRecord | undefined {
 
 /**
  * The casts a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 3 and a list of version-3 ballot
+ * record this client writes: version 6 and a list of version-3 ballot
  * records naming strictly ascending L1 blocks, each with its qualified
  * seats' shares, each with its `m_i` or its receipt, its checked board
  * entry or `null`, and whether it is marked `handed`. Every byte array is a
@@ -821,7 +821,8 @@ export async function recordReceipt(
  * before a run through the relay or the voter's wallet may hand any of its
  * postings out, so a page that went away before they were recorded still
  * waits for them, and sends the ballot once they are, when the poll is
- * opened again ([[posting-relay]], Sending after a run; T-25). A mark is
+ * opened again ([[posting-relay]], Sending after a run; T-25), and so is
+ * every other cast of the same seal, whose postings are these. A mark is
  * never taken back: whatever a run met, its parts may still reach the board
  * (T-15). `missing` if no cast has these bytes.
  */
@@ -829,10 +830,16 @@ export function withHanded(
   casts: readonly CastRecord[],
   ballot: Uint8Array,
 ): CastRecord[] | "missing" {
-  const at = casts.findIndex((cast) => equalBytes(cast.ballot, ballot));
-  const cast = casts[at];
-  if (cast === undefined) return "missing";
-  return casts.with(at, { ...cast, handed: true });
+  const own = casts.find((cast) => equalBytes(cast.ballot, ballot));
+  if (own === undefined) return "missing";
+  // Every cast held decoded when it was read.
+  const hashOf = (cast: CastRecord) => ballotHashOf(decodedOf(cast.ballot) as BallotRecordV3);
+  const hash = hashOf(own);
+  // A recast of the same seal recorded before the mark: its postings are
+  // these, byte for byte, so it is marked too.
+  return casts.map((cast) =>
+    cast.handed !== true && equalBytes(hashOf(cast), hash) ? { ...cast, handed: true } : cast,
+  );
 }
 
 /**

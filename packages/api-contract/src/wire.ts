@@ -52,6 +52,17 @@ export const MAX_TALLY_OPENING = 8192;
 export const MAX_TALLY_OPENING_ENTRY = MAX_TALLY_OPENING + BOARD_ENTRY_OVERHEAD;
 
 /**
+ * Bound on a destruction statement (`0x000f`, docs/spec/tally.md,
+ * Destruction) as the destruction route carries it: version 1 is 100 bytes
+ * and version 2 101, so this only keeps a request small before the Boarding
+ * rule decodes it strictly (T-52). A test ties it to both.
+ */
+export const MAX_DESTRUCTION_STATEMENT = 128;
+
+/** The largest board entry carrying a destruction statement. */
+export const MAX_DESTRUCTION_STATEMENT_ENTRY = MAX_DESTRUCTION_STATEMENT + BOARD_ENTRY_OVERHEAD;
+
+/**
  * `POSTING_MAX_DATA` from docs/spec/posting-relay.md (Values): the most bytes
  * of `submitPosting` calldata the posting relay sends. Each record the
  * posting route takes is bounded by it here, so a request stays small before

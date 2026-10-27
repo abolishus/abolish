@@ -14,7 +14,9 @@
 // So does the `{opening-submit}` queue for tally openings (`OpeningQueue`),
 // judged by the Boarding rule over the anchored counted set
 // (docs/spec/tally.md, Opening record, Boarding), whose admission of the
-// board's ballots the API never runs (T-52).
+// board's ballots the API never runs (T-52), and the `{destruction-submit}`
+// queue for destruction statements (`DestructionQueue`), judged by the
+// Boarding rule (docs/spec/tally.md, Destruction, Boarding).
 
 import { Queue, QueueEvents } from "bullmq";
 import { Redis } from "ioredis";
@@ -84,6 +86,26 @@ export const OPENING_OUTCOME = z.union([
 ]);
 export type OpeningOutcome = z.output<typeof OPENING_OUTCOME>;
 
+/**
+ * What the worker returns for each destruction statement: the board
+ * position of the entry that carries it, its own or, for a resend, the
+ * seat's statement boarded before, or the refusal's code (core's
+ * DestructionError), never the statement.
+ */
+export const DESTRUCTION_OUTCOME = z.union([
+  z.strictObject({ ok: z.literal(true), index: z.string().regex(/^(0|[1-9][0-9]{0,18})$/) }),
+  z.strictObject({
+    ok: z.literal(false),
+    code: z.enum(["unknown-election", "not-ready", "not-open", "rejected"]),
+    rejection: z
+      .string()
+      .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/)
+      .max(64)
+      .optional(),
+  }),
+]);
+export type DestructionOutcome = z.output<typeof DESTRUCTION_OUTCOME>;
+
 /** The worker gave no outcome in time, or the queue couldn't take the ballot. */
 export interface BallotUnavailable {
   readonly ok: false;
@@ -98,13 +120,16 @@ export type ReceiptUnavailable = BallotUnavailable;
 /** A tally opening's `BallotUnavailable`. */
 export type OpeningUnavailable = BallotUnavailable;
 
+/** A destruction statement's `BallotUnavailable`. */
+export type DestructionUnavailable = BallotUnavailable;
+
 /** About four events per job (added, waiting, active, completed). */
 export const BALLOT_EVENTS_MAX_LEN = 1024;
 
 /**
  * A job older than this is refused unjudged by the worker: its API has
  * answered it `unavailable` long ago (20 s by default), or was gone before it
- * could remove it, and a ballot, receipt or opening shouldn't sit in Redis to be
+ * could remove it, and a ballot, receipt, opening or statement shouldn't sit in Redis to be
  * boarded much later (T-10).
  */
 export const BALLOT_MAX_AGE_MS = 60_000;
@@ -128,7 +153,7 @@ export interface BallotQueueOptions {
 }
 
 /** The queues the API submits to and hears an outcome from. */
-type SubmitKey = "ballotSubmit" | "receiptSubmit" | "openingSubmit";
+type SubmitKey = "ballotSubmit" | "receiptSubmit" | "openingSubmit" | "destructionSubmit";
 
 /**
  * One submitting queue: queues a job of `key`'s data and waits for the
@@ -350,6 +375,44 @@ export class OpeningQueue {
   }
 
   /** Answers every waiting opening `unavailable` and disconnects. */
+  close(): Promise<void> {
+    return this.#queue.close();
+  }
+}
+
+export class DestructionQueue {
+  readonly #queue: SubmitQueue<DestructionOutcome>;
+
+  private constructor(queue: SubmitQueue<DestructionOutcome>) {
+    this.#queue = queue;
+  }
+
+  /** Connects, and resolves once outcomes can be heard. */
+  static async open(options: BallotQueueOptions): Promise<DestructionQueue> {
+    return new DestructionQueue(
+      await SubmitQueue.open("destructionSubmit", DESTRUCTION_OUTCOME, options),
+    );
+  }
+
+  /**
+   * Queues `statement`, a destruction statement's bytes, for `electionId`
+   * and answers the worker's outcome, or `unavailable`. Never throws for
+   * Redis's state: the seat's node sends it again until it is boarded or
+   * the destruction window ends.
+   */
+  submit(
+    electionId: Uint8Array,
+    statement: Uint8Array,
+  ): Promise<DestructionOutcome | DestructionUnavailable> {
+    return this.#queue.submit(
+      QUEUES.destructionSubmit.data.parse({
+        electionId: Buffer.from(electionId).toString("hex"),
+        statement: Buffer.from(statement).toString("hex"),
+      }),
+    );
+  }
+
+  /** Answers every waiting statement `unavailable` and disconnects. */
   close(): Promise<void> {
     return this.#queue.close();
   }

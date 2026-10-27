@@ -11,6 +11,7 @@ import type {
   BallotAdmissions,
   BoardClock,
   CreationAnchors,
+  DestructionBoardings,
   OpeningBoardings,
   PollCreationChain,
   PollRegistrationChain,
@@ -23,7 +24,13 @@ import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
 import { BALLOT_MAX_AGE_MS } from "./ballot-queue.ts";
-import { BALLOT_BATCH, BallotBatches, OpeningSubmissions, ReceiptSubmissions } from "./ballots.ts";
+import {
+  BALLOT_BATCH,
+  BallotBatches,
+  DestructionSubmissions,
+  OpeningSubmissions,
+  ReceiptSubmissions,
+} from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES, TIER1_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
@@ -90,6 +97,13 @@ export interface WorkerOptions {
    * opening unavailable once it times out.
    */
   readonly openings?: { readonly boardings: OpeningBoardings };
+  /**
+   * Destruction-statement boarding for the API's `{destruction-submit}`
+   * queue (T-17, T-52); only beside ballot admission, whose clock labels
+   * each entry. Without it, nothing takes that queue's jobs and the API
+   * answers each statement unavailable once it times out.
+   */
+  readonly destructions?: { readonly boardings: DestructionBoardings };
   /** The registry sync; without it, its queue has no worker and no schedule. */
   readonly registry?: {
     readonly sync: RegistrySync;
@@ -166,6 +180,15 @@ export const RECEIPT_CONCURRENCY = 8;
  * whatever this is (core's OpeningBoardings; T-52).
  */
 export const OPENING_CONCURRENCY = 4;
+
+/**
+ * Destruction statements judged at once. Each holds a database connection
+ * for one read of the seats' statements and a signature check and, if it
+ * passes, the board's lock for its append; there is at most one statement
+ * per seat to board, so few are ever in flight (core's DestructionBoardings;
+ * T-52).
+ */
+export const DESTRUCTION_CONCURRENCY = 4;
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
@@ -254,6 +277,8 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     throw new Error("the stub step runs only beside the registry sync");
   if (options.openings !== undefined && options.ballots === undefined)
     throw new Error("tally openings are boarded only beside ballot admission");
+  if (options.destructions !== undefined && options.ballots === undefined)
+    throw new Error("destruction statements are boarded only beside ballot admission");
   if (
     creating &&
     (options.anchor !== undefined ||
@@ -324,6 +349,15 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             now: unixNow,
           }),
         }),
+    ...(options.destructions === undefined
+      ? {}
+      : {
+          destructions: new DestructionSubmissions({
+            sql,
+            boardings: options.destructions.boardings,
+            now: unixNow,
+          }),
+        }),
   };
   const running = (key: QueueKey) =>
     creating
@@ -334,16 +368,18 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           ? options.ballots !== undefined
           : key === "openingSubmit"
             ? options.openings !== undefined
-            : key === "registrySync"
-              ? options.registry !== undefined
-              : key === "pollRoot"
-                ? options.pollRoots !== undefined
-                : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
-                  ? options.pollStubs !== undefined
-                  : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
-                    ? options.tier1 !== undefined
-                    : options.tier0 !== undefined ||
-                      !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+            : key === "destructionSubmit"
+              ? options.destructions !== undefined
+              : key === "registrySync"
+                ? options.registry !== undefined
+                : key === "pollRoot"
+                  ? options.pollRoots !== undefined
+                  : key === "pollStub" || key === "ceremonyCoordinate" || key === "pollOpen"
+                    ? options.pollStubs !== undefined
+                    : (TIER1_QUEUES as readonly QueueKey[]).includes(key)
+                      ? options.tier1 !== undefined
+                      : options.tier0 !== undefined ||
+                        !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -358,7 +394,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         // By the system clock, as the API stamped it: a ballot whose API gave
         // up on it is never judged late (T-10, T-25).
         if (
-          (key === "ballotSubmit" || key === "receiptSubmit" || key === "openingSubmit") &&
+          (key === "ballotSubmit" ||
+            key === "receiptSubmit" ||
+            key === "openingSubmit" ||
+            key === "destructionSubmit") &&
           Date.now() - job.timestamp > BALLOT_MAX_AGE_MS
         )
           throw new JobError("stale-job");
@@ -382,9 +421,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         prefix,
         autorun: false,
         // The ballots handled at once are what a batch gathers (T-52); a
-        // receipt costs one signature check, an opening a few once its
-        // election's tally is computed, and these bound how many share the
-        // database at once.
+        // receipt or a destruction statement costs one signature check, an
+        // opening a few once its election's tally is computed, and these
+        // bound how many share the database at once.
         concurrency:
           key === "ballotSubmit"
             ? batch
@@ -392,7 +431,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
               ? RECEIPT_CONCURRENCY
               : key === "openingSubmit"
                 ? OPENING_CONCURRENCY
-                : 1,
+                : key === "destructionSubmit"
+                  ? DESTRUCTION_CONCURRENCY
+                  : 1,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 0 },
       },

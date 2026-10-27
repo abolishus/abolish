@@ -11,6 +11,8 @@ import {
   IdentityBackupLocator,
   MAX_BOARD_ENTRY,
   MAX_BOARD_PAYLOAD,
+  MAX_DESTRUCTION_STATEMENT,
+  MAX_DESTRUCTION_STATEMENT_ENTRY,
   MAX_DISPLAY_TEXT,
   MAX_PAGE,
   MAX_PAGE_BYTES,
@@ -388,6 +390,47 @@ const submitOpening = oc
     }),
   );
 
+const submitDestruction = oc
+  .route({
+    method: "POST",
+    path: "/destructions",
+    successStatus: 201,
+    summary: "Board a trustee's destruction statement",
+    description:
+      "Appends one destruction statement (0x000f, version 1) to the board by the Boarding rule (docs/spec/tally.md, Destruction, Boarding): it decodes strictly as version 1, names this election's definition, is attributed by a registered seat's signature, and the board carries no statement by that seat yet. Timing is never judged here: the verifier's 8.5 reports a statement boarded early. A seat's node sends it until it is boarded or the destruction window ends, and needs no account or session (T-10). Returns the board entry that carries it and the chain link after it, as for a ballot. When the board already carries that seat's statement, in these bytes or others (another signature nonce over the same message), nothing is written and the entry returned carries it, with `earlier` true if its bytes are other than these; the caller checks that entry's statement against its own. While the segment it would join can't take it yet it is `DESTRUCTION_NOT_READY`; an election this server never boards a statement of is `ELECTION_NOT_OPEN`.",
+    tags: ["destructions"],
+  })
+  .errors({
+    ...electionNotFound,
+    ELECTION_NOT_OPEN: {
+      status: 409,
+      message: "The election takes no destruction statement on this board.",
+    },
+    DESTRUCTION_REJECTED: {
+      status: 422,
+      message: "The destruction statement failed decoding or the Boarding rule.",
+      data: z.strictObject({ code: ErrorCode }),
+    },
+    RATE_LIMITED: { status: 429, message: "Too many requests; retry later." },
+    DESTRUCTION_NOT_READY: {
+      status: 503,
+      message: "The board can't take the statement yet; send the same bytes again later.",
+    },
+    // The statement may still be boarded: the same bytes again return its entry.
+    DESTRUCTIONS_UNAVAILABLE: {
+      status: 503,
+      message: "The destruction statement couldn't be judged in time; submit the same bytes again.",
+    },
+  })
+  .input(z.strictObject({ electionId: Hash32, statement: hexBytes(MAX_DESTRUCTION_STATEMENT) }))
+  .output(
+    z.strictObject({
+      entry: hexBytes(MAX_DESTRUCTION_STATEMENT_ENTRY),
+      link: Hash32,
+      earlier: z.boolean(),
+    }),
+  );
+
 // Moderation (docs/moderation-policy.md; T-68). The log is public, so anyone
 // can see what we did to a poll's display text and why; it never names the
 // moderator or a reporter. Moderation never reaches a result: these routes
@@ -702,6 +745,7 @@ export const contract = {
   ballots: { submit: submitBallot },
   receipts: { submit: submitReceipt },
   openings: { submit: submitOpening },
+  destructions: { submit: submitDestruction },
   postings: { submit: submitPosting },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },

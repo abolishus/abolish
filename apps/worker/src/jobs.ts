@@ -38,8 +38,18 @@ import {
 import { type Panel, TierMembershipError } from "@abolishus/crypto";
 import { OutputRootError } from "@abolishus/verifier";
 import type { Sql } from "postgres";
-import type { BallotOutcome, OpeningOutcome, ReceiptOutcome } from "./ballot-queue.ts";
-import type { BallotBatches, OpeningSubmissions, ReceiptSubmissions } from "./ballots.ts";
+import type {
+  BallotOutcome,
+  DestructionOutcome,
+  OpeningOutcome,
+  ReceiptOutcome,
+} from "./ballot-queue.ts";
+import type {
+  BallotBatches,
+  DestructionSubmissions,
+  OpeningSubmissions,
+  ReceiptSubmissions,
+} from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import { GameBlockError } from "./output-roots.ts";
 import type { JobData, QueueKey } from "./queues.ts";
@@ -73,6 +83,8 @@ export interface JobContext {
   readonly receipts?: ReceiptSubmissions;
   /** Tally-opening boarding, when the worker reads the anchor and finalized L1; its queue runs only then. */
   readonly openings?: OpeningSubmissions;
+  /** Destruction-statement boarding, beside ballot admission and by its clock; its queue runs only then. */
+  readonly destructions?: DestructionSubmissions;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
   readonly registry?: RegistrySync;
   /** The roots step, beside the registry sync; its queue runs only then. */
@@ -486,6 +498,18 @@ async function openingSubmit(
   return ctx.openings.submit(data.electionId, data.opening);
 }
 
+/**
+ * Judges one destruction statement by the Boarding rule and returns its
+ * outcome, a refusal's code or the entry's position, as for a ballot.
+ */
+async function destructionSubmit(
+  ctx: JobContext,
+  data: JobData<"destructionSubmit">,
+): Promise<DestructionOutcome> {
+  if (ctx.destructions === undefined) throw new JobError("internal");
+  return ctx.destructions.submit(data.electionId, data.statement);
+}
+
 /** What a job returns: nothing, but the submitting queues' outcomes. */
 export type JobResult<K extends QueueKey> = K extends "ballotSubmit"
   ? BallotOutcome
@@ -493,7 +517,9 @@ export type JobResult<K extends QueueKey> = K extends "ballotSubmit"
     ? ReceiptOutcome
     : K extends "openingSubmit"
       ? OpeningOutcome
-      : void;
+      : K extends "destructionSubmit"
+        ? DestructionOutcome
+        : void;
 
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<JobResult<K>>;
@@ -514,4 +540,5 @@ export const HANDLERS: {
   ballotSubmit,
   receiptSubmit,
   openingSubmit,
+  destructionSubmit,
 };

@@ -385,6 +385,15 @@ export const EmailVerification: Story = {
     await expect(who.getByText("People with a verified e-mail address")).toBeVisible();
     await expect(who.getByText(/Each verified e-mail address counts once/)).toBeVisible();
     await expect(canvas.queryByText(/Tier 0|voting identity/)).toBeNull();
+    // The one tier is a statement, not a row between two rules: with the next
+    // section's own rule, those drew an empty band (P2-29, creating a poll's
+    // iteration 7).
+    const item = who.getByRole("listitem");
+    for (const box of [item, item.parentElement]) {
+      if (box === null) throw new Error("a tier outside its list");
+      await expect(getComputedStyle(box).borderTopWidth).toBe("0px");
+      await expect(getComputedStyle(box).borderBottomWidth).toBe("0px");
+    }
   },
 };
 
@@ -459,6 +468,16 @@ export const RuleChoicesPhone: Story = {
       await expect(box.left).toBe(field.left);
       await expect(box.width).toBe(field.width);
       if (i > 0) await expect(box.top).toBeGreaterThan(choices[i - 1]?.bottom ?? 0);
+    }
+    // Their words are the size of the blank choice's under them, where they
+    // were smaller (P2-29, creating a poll's iteration 7).
+    const blank = first.getByText("People can leave this question blank");
+    const size = getComputedStyle(blank).fontSize;
+    await expect(size).toBe("16px");
+    for (const radio of first.getAllByRole("radio")) {
+      const label = radio.closest("label");
+      if (label === null) throw new Error("a rule without its label");
+      await expect(getComputedStyle(label).fontSize).toBe(size);
     }
     // The preview is framed by the everyday register's soft rule, not the
     // civic record's heavy one.

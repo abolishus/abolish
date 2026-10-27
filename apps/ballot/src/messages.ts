@@ -322,6 +322,12 @@ const enUS = {
   postingLateTitle: "The poll closes soon",
   postingLate:
     "Posting now is best effort: nothing can make sure the missing parts reach the public record in time. If the record doesn't show them ten minutes before the poll closes, your ballot isn't sent, and the parts are public for nothing.",
+  postingHaltTitle: "If the network stops",
+  postingHalt:
+    "If the whole network the board is on stops before the poll closes, the missing parts may reach the public record only after the close. Your ballot is then never sent, and the parts are public for nothing.",
+  postingClosedTitle: "It's too late to post the missing parts",
+  postingClosed:
+    "The poll closes too soon for a posting to reach the public record in time, so this device no longer offers one. Your ballot can still be sent if the trustees take their parts before the poll closes: try them again, or leave this ballot.",
   postingDeclineTitle: "Leave this ballot",
   postingDeclineExplained:
     "This device erases the parts it kept for these trustees, and this ballot won't count. Whoever passed the parts on could still put it on the board, where it would replace your earlier ballot without counting, so answer again while the poll is open.",

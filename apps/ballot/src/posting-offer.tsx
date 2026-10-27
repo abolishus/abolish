@@ -48,6 +48,11 @@ const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["forced", "sent"]);
  * which the offer says before it can be chosen ([[posting-relay]], The
  * ballot's own deadline; T-15, T-25), and `lateWallet` the same of the
  * wallet once its send may no longer be forced through Ethereum in time.
+ * `halt` says the halt cutoff `c_W` passed, so a posting forced through
+ * Ethereum lands in time only while the L2 keeps running, which each
+ * choice not already late says (T-25, T-50). `closed` says the last-offer
+ * cutoff `c_E` passed: nothing is offered for posting, and the voter is
+ * told the ballot can be sent only if delivery succeeds before the close.
  */
 export function PostingOffer({
   poll,
@@ -63,6 +68,8 @@ export function PostingOffer({
   wallet,
   late = false,
   lateWallet = false,
+  halt = false,
+  closed = false,
 }: {
   poll: FramePoll;
   trackingCode: string;
@@ -79,6 +86,8 @@ export function PostingOffer({
   wallet?: Exclude<WalletAnswer, "recorded"> | undefined;
   late?: boolean;
   lateWallet?: boolean;
+  halt?: boolean;
+  closed?: boolean;
 }) {
   const t = useTranslate(catalogs);
   const walletNote = wallet === undefined ? undefined : WALLET_NOTES[wallet];
@@ -134,12 +143,23 @@ export function PostingOffer({
       <Part title={t("postingRetryTitle")}>
         <p className="m-0">{t("postingRetryExplained")}</p>
       </Part>
-      {onPost === undefined ? null : (
+      {onPost !== undefined && closed ? (
+        <div className="mt-6">
+          <Note tone="warn" title={t("postingClosedTitle")}>
+            <p className="m-0">{t("postingClosed")}</p>
+          </Note>
+        </div>
+      ) : null}
+      {onPost === undefined || closed ? null : (
         <Part title={t("postingPostTitle")}>
           <p className="m-0">{t("postingPostExplained")}</p>
           {late ? (
             <Note tone="warn" title={t("postingLateTitle")}>
               <p className="m-0">{t("postingLate")}</p>
+            </Note>
+          ) : halt ? (
+            <Note tone="warn" title={t("postingHaltTitle")}>
+              <p className="m-0">{t("postingHalt")}</p>
             </Note>
           ) : null}
           <div>
@@ -149,12 +169,16 @@ export function PostingOffer({
           </div>
         </Part>
       )}
-      {onWallet === undefined ? null : (
+      {onWallet === undefined || closed ? null : (
         <Part title={t("postingWalletOfferTitle")}>
           <p className="m-0">{t("postingWalletOffer")}</p>
           {lateWallet ? (
             <Note tone="warn" title={t("postingLateTitle")}>
               <p className="m-0">{t("postingWalletLate")}</p>
+            </Note>
+          ) : halt ? (
+            <Note tone="warn" title={t("postingHaltTitle")}>
+              <p className="m-0">{t("postingHalt")}</p>
             </Note>
           ) : null}
           <div>

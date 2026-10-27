@@ -163,6 +163,55 @@ export const OfferedLateWallet: Story = {
   },
 };
 
+export const OfferedPastHalt: Story = {
+  name: "Past the halt cutoff, each choice not already late says a halted network keeps the parts out until after the close",
+  args: { failed: true, onWallet: fn(), halt: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // Once beside the relay and once beside the wallet (T-50).
+    await expect(canvas.getAllByText("If the network stops")).toHaveLength(2);
+    await expect(
+      canvas.getAllByText(/may reach the public record only after the close/),
+    ).toHaveLength(2);
+    await expect(canvas.queryByText("The poll closes soon")).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(args.onPost).toHaveBeenCalledOnce();
+  },
+};
+
+export const OfferedLatePastHalt: Story = {
+  name: "A late choice says it is best effort in place of the halt warning, which it already covers",
+  args: { failed: true, onWallet: fn(), halt: true, late: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("The poll closes soon")).toBeVisible();
+    // The wallet's send may still be forced: only it says the halt.
+    await expect(canvas.getAllByText("If the network stops")).toHaveLength(1);
+  },
+};
+
+export const OfferClosed: Story = {
+  name: "Past the last-offer cutoff nothing is offered for posting, and trying the trustees is said to be what can still send the ballot",
+  args: { failed: true, handed: true, onWallet: fn(), closed: true, halt: true, late: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("It's too late to post the missing parts")).toBeVisible();
+    await expect(
+      canvas.getByText(/if the trustees take their parts before the poll closes/),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
+    await expect(
+      canvas.queryByRole("button", { name: "Post from my wallet, then send" }),
+    ).toBeNull();
+    await expect(canvas.queryByText("The poll closes soon")).toBeNull();
+    // What an earlier run handed out is still said (T-15).
+    await expect(canvas.getByText("The missing parts may still reach the board")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Try the trustees again" }));
+    await expect(args.onRetry).toHaveBeenCalledOnce();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+  },
+};
+
 export const WalletForced: Story = {
   name: "Parts the wallet forced through Ethereum are counted as posted, with the page kept open",
   args: { failed: true, handed: true, onWallet: fn(), wallet: "forced" },

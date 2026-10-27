@@ -325,6 +325,12 @@ export const esUS: Messages = {
   postingLateTitle: "La encuesta cierra pronto",
   postingLate:
     "Publicar ahora es un intento sin garantía: nada puede asegurar que las partes que faltan lleguen a tiempo al registro público. Si el registro no las muestra diez minutos antes del cierre de la encuesta, tu boleta no se envía, y las partes quedan públicas para nada.",
+  postingHaltTitle: "Si la red se detiene",
+  postingHalt:
+    "Si toda la red en la que está el tablero se detiene antes del cierre de la encuesta, las partes que faltan pueden llegar al registro público solo después del cierre. Entonces tu boleta nunca se envía, y las partes quedan públicas para nada.",
+  postingClosedTitle: "Ya es tarde para publicar las partes que faltan",
+  postingClosed:
+    "La encuesta cierra demasiado pronto para que una publicación llegue a tiempo al registro público, así que este dispositivo ya no la ofrece. Tu boleta todavía se puede enviar si los custodios toman sus partes antes del cierre de la encuesta: intenta otra vez con ellos, o deja esta boleta.",
   postingDeclineTitle: "Dejar esta boleta",
   postingDeclineExplained:
     "Este dispositivo borra las partes que guardó para estos custodios, y esta boleta no contará. Quien pasó las partes todavía podría ponerla en el tablero, donde reemplazaría tu boleta anterior sin contar, así que responde otra vez mientras la encuesta esté abierta.",

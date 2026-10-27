@@ -49,7 +49,7 @@ import {
 } from "./sealed.tsx";
 import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
-import { type WalletAnswer, WALLET_FORCE_MARGIN } from "./wallet.ts";
+import { type WalletAnswer, WALLET_FORCE_MARGIN, WALLET_HOLD_MARGIN } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -507,6 +507,9 @@ export function BrokenLink() {
 }
 
 /** Where a voter is between answering and sending. */
+/** The note the offer shows for a run before it can be chosen ([[posting-relay]], The ballot's own deadline). */
+type OfferNote = "late" | "halt" | undefined;
+
 type Step =
   | { readonly kind: "resuming" }
   | { readonly kind: "answering" }
@@ -678,7 +681,7 @@ export function Ballot({
   const definitionHash = fromHex(election.definitionHash);
   const electionId = fromHex(election.electionId);
 
-  /** The poll's own posting cutoffs `c_B` and `c_L`, in seconds ([[posting-relay]], The ballot's own deadline). */
+  /** The poll's own posting cutoffs, in seconds ([[posting-relay]], The ballot's own deadline). */
   const cutoffs = () =>
     postingCutoffs(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
 
@@ -692,6 +695,38 @@ export function Ballot({
    * WALLET_FORCE_MARGIN` passed on this device ([[posting-relay]], The offer).
    */
   const walletLate = () => passedOnDevice(cutoffs().force - WALLET_FORCE_MARGIN, source.now());
+  /**
+   * Whether a posting forced through L1 lands in time only while the L2
+   * keeps running: the halt cutoff `c_W` passed on this device (T-50).
+   */
+  const halted = () => passedOnDevice(cutoffs().halt, source.now());
+  /** What the offer says of a run through the relay before it can be chosen, and of one from the wallet. */
+  const relayNote = (): OfferNote => (relayLate() ? "late" : halted() ? "halt" : undefined);
+  const walletNote = (): OfferNote => (walletLate() ? "late" : halted() ? "halt" : undefined);
+
+  // The latest finalized head's time read near the last-offer cutoff `c_E`,
+  // counted only within `WALLET_HOLD_MARGIN` of this device's clock, as for
+  // the wallet's sends: an endpoint answering a far-future head can't take
+  // the offer away (T-25).
+  const head = useRef(0n);
+  /** Reads the finalized head's time, only once `c_E` may have passed by it. */
+  async function readHead() {
+    if (!passedOnDevice(cutoffs().lastOffer - WALLET_HOLD_MARGIN, source.now())) return;
+    const time = await source.chainTime().catch(() => undefined);
+    const ahead = BigInt(Math.floor(source.now() / 1000)) + WALLET_HOLD_MARGIN;
+    if (time?.ok === true && time.timestamp > head.current && time.timestamp <= ahead)
+      head.current = time.timestamp;
+  }
+  /**
+   * Whether the offer is withdrawn: the last-offer cutoff `c_E` passed by
+   * this device's clock or by a head's time read (`readHead`), past which a
+   * posting is rarely recorded in time to send the ballot ([[posting-relay]],
+   * The offer; T-15, T-25).
+   */
+  const offerClosed = () => {
+    const { lastOffer } = cutoffs();
+    return passedOnDevice(lastOffer, source.now()) || head.current > lastOffer;
+  };
 
   /** Runs `steps` under the election's lock, where the build has one (`ElectionSource.exclusive`). */
   const locked = <T,>(steps: () => Promise<T>): Promise<T> =>
@@ -1254,6 +1289,7 @@ export function Ballot({
       if (current()) setStep({ kind: "sending" });
       return send(checked.sending);
     }
+    await readHead();
     return { kind: "offer", sending: checked.sending };
   }
 
@@ -1264,20 +1300,26 @@ export function Ballot({
    * path, and only once every one is recorded is the ballot sent: a ballot
    * boarded with a seat neither receipted nor posted would void the voter's
    * earlier one (Client rule 4; [[revoting]], Selection). A posting that
-   * doesn't go through returns to the offer.
+   * doesn't go through returns to the offer. `said` is the note the offer
+   * showed for the relay when chosen.
    */
-  function post(sending: Sending, handed: boolean, offered: Step, warned: boolean) {
+  function post(sending: Sending, handed: boolean, offered: Step, said: OfferNote) {
     if (posting === undefined) return;
-    // A run that became late while the offer was open is chosen only once
-    // the offer has said so (T-15).
-    const late = relayLate();
-    if (late && !warned) {
+    // A run that became late, or forced only while the L2 runs, while the
+    // offer was open is chosen only once the offer has said so, and none
+    // once the offer is withdrawn (T-15, T-25).
+    const note = relayNote();
+    if (offerClosed() || (note !== undefined && note !== said)) {
       setStep({ ...offered });
       return;
     }
+    const late = note === "late";
     setStep({ kind: "posting" });
     run(
       async (current) => {
+        // The head's time read before the run: one past `c_E` withdraws the offer.
+        await readHead();
+        if (offerClosed()) return { ...offered };
         const posted = await postChecked(sending, (postings) =>
           posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
             (): PostAnswer => "unreachable",
@@ -1290,6 +1332,7 @@ export function Ballot({
         // ([[posting-relay]], Outcome), so the voter's own wallet may now
         // be offered beside trying the relay again.
         const relayed = answer === "relayed";
+        await readHead();
         return fellBack(checked, { relayed, handed: handed || relayed });
       },
       handed
@@ -1334,10 +1377,11 @@ export function Ballot({
     relayed: boolean,
     handed: boolean,
     offered: Step,
-    warned: boolean,
+    said: OfferNote,
   ) {
     if (postingOwn === undefined) return;
-    if (walletLate() && !warned) {
+    const note = walletNote();
+    if (offerClosed() || (note !== undefined && note !== said)) {
       setStep({ ...offered });
       return;
     }
@@ -1351,6 +1395,8 @@ export function Ballot({
         wallet,
       });
     run(async (current) => {
+      await readHead();
+      if (offerClosed()) return { ...offered };
       const posted = await postChecked(sending, (postings) =>
         postingOwn(electionId, sending.ballot, postings, cutoffs()).catch(
           (): WalletAnswer => "failed",
@@ -1359,6 +1405,7 @@ export function Ballot({
       if ("kind" in posted) return posted;
       const { checked, answer } = posted;
       if (answer === "recorded") return sendPosted(checked, current);
+      await readHead();
       return { ...back(answer), sending: checked };
     }, back("failed"));
   }
@@ -1476,8 +1523,8 @@ export function Ballot({
     case "offer": {
       const { sending } = step;
       // What the offer says now, which the choice is checked against when made.
-      const late = relayLate();
-      const lateWallet = walletLate();
+      const relaySays = relayNote();
+      const walletSays = walletNote();
       return (
         <PostingOffer
           poll={poll}
@@ -1491,7 +1538,7 @@ export function Ballot({
           onPost={
             posting === undefined
               ? undefined
-              : () => post(sending, step.handed === true, step, late)
+              : () => post(sending, step.handed === true, step, relaySays)
           }
           onWallet={
             step.fallback === true && postingOwn !== undefined
@@ -1501,13 +1548,15 @@ export function Ballot({
                     step.relayed === true,
                     step.handed === true,
                     step,
-                    lateWallet,
+                    walletSays,
                   )
               : undefined
           }
           wallet={step.wallet}
-          late={late}
-          lateWallet={lateWallet}
+          late={relaySays === "late"}
+          lateWallet={walletSays === "late"}
+          halt={halted()}
+          closed={offerClosed()}
         />
       );
     }

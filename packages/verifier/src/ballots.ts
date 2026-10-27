@@ -34,7 +34,7 @@
 // definition but a rolling one such a ballot is never the pinned version and
 // is rejected as undecodable (`profile-mismatch`) by either path (T-31).
 // Under a rolling definition (version 7, `electorate_mode` 2) every ballot is
-// version 5 and names its root-clock step: `checkBallotV5` judges it against
+// version 5 and names its root-clock step: `stepBallotV5` judges it against
 // the root of that step, which crypto computes from the group registry's
 // events the caller replayed through close (2.4), never against a root the
 // ballot, the event or the bundle states, and a supplied root other than it
@@ -340,6 +340,7 @@ export function ballotChecks(
     board: d.board,
   };
   const lastBoardSegment = countedFloor(d.closes_at, clock);
+  const rollingDefinition = isRolling(definition);
   // References are judged only where every copy's window is: a row 5.5
   // can't decide can't let 5.8 pass either (T-36).
   const references =
@@ -459,7 +460,12 @@ export function ballotChecks(
     // the same verdict, and a pending one stays among the ballots 5.7
     // compares: whatever L1 later decides for it, it decides for its copies.
     if (typeof references === "function") {
-      const verdict = references(checked);
+      // Under a rolling definition the step is passed by name, never left
+      // to the check's shape, so 5.8 never judges a version-5 ballot as a
+      // version-4 one (T-08, T-25).
+      const verdict = references(
+        rollingDefinition ? { ...checked, step: stepOf(checked as BallotCheckV5) } : checked,
+      );
       if (verdict === "pending") pending.push({ entry: at });
       else if (verdict !== "admitted") {
         rejected.push({ entry: at, code: verdict });
@@ -582,6 +588,12 @@ export function ballotChecks(
     ordinary,
     ...(live !== undefined && windows && settled && { live: live.finish(rejected) }),
   };
+}
+
+/** An admitted version-5 check's step: its judge always gives one. */
+function stepOf(checked: BallotCheckV5): number {
+  if (!checked.ok) throw new Error("ballotChecks: a rejected ballot reached 5.8");
+  return checked.step;
 }
 
 /** Whether a definition is live: version 6, or a fixed version 7, with `results_mode` 2. */
@@ -830,7 +842,7 @@ export function steppedJudgeFor(
       };
     };
   }
-  if (isRolling(definition)) {
+  if (definition.version === 7 && isRolling(definition)) {
     // No stated root to refuse: each ballot's is its step's, computed from
     // the events, and a step with no live member is never accepted
     // (`root-step-range`), so no ballot proves against `Z_32` (T-04, T-05).

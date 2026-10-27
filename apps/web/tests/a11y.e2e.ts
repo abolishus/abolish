@@ -1083,7 +1083,16 @@ describe("the page's language", () => {
   });
 
   test("changes with the footer's switch, which outlasts the browser's choice and every page after", async () => {
-    const { context, page } = await open("/", { ...VIEWS[0], locale: "en-US" });
+    // Without the offline worker: switching language registers the other
+    // locale's, and on a loaded runner the later `goto` sometimes never saw
+    // its page load while that worker installed and took over. Whether
+    // the language holds is the server's and the router's; the worker's
+    // switch is offline.e2e.ts's.
+    const { context, page } = await open("/", {
+      ...VIEWS[0],
+      locale: "en-US",
+      serviceWorkers: "block",
+    });
     try {
       const switcher = page.getByRole("navigation", { name: en("footerLanguage") });
       await expect

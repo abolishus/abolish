@@ -289,7 +289,10 @@ def main(root):
     fail("event-topics-panel-pinned-kind-topic", "PanelPinned with the kind as a second indexed topic", tr,
          tp + [word(TRANSITIONAL)], data)
     for value, rid, desc in ((0, "zero", "0, no kind"), (3, "three", "3, no kind"),
-                             (256, "over-u8", "256, above a uint8"), (2**256 - 1, "max", "2^256 - 1")):
+                             (256, "over-u8", "256, above a uint8"),
+                             (257, "257", "257, whose low byte is 1"),
+                             (2**255 + 2, "high-bit", "2^255 + 2, whose low byte is 2"),
+                             (2**256 - 1, "max", "2^256 - 1")):
         fail(f"event-data-panel-pinned-kind-{rid}", f"PanelPinned whose kind word is {desc}: the registry pins only "
              "kinds 1 and 2", tr, tp, pinned_data(4, 6, value, keys))
     fail("event-data-panel-pinned-threshold-over-u8", "PanelPinned's threshold word at 256", tr, tp,

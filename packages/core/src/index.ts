@@ -19,6 +19,7 @@ export {
 export {
   ARCHIVE_DEPTH,
   ARCHIVE_REPOST_AFTER,
+  ARCHIVE_RESUME_READS,
   archiveBoards,
   type ArchiveLocator,
   archiveLocator,

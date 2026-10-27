@@ -95,6 +95,14 @@ export const ARCHIVE_DEPTH = 25;
  */
 export const ARCHIVE_REPOST_AFTER = 7200n;
 
+/**
+ * The most transactions a resume reads before it gives up: the locator's
+ * chain is the anchor's, which a seized authority sets, so its length and
+ * links are bounded only here (T-52). A deployment writes about one manifest
+ * a run, so this covers more than a year of ten-minute runs.
+ */
+export const ARCHIVE_RESUME_READS = 65_536;
+
 export interface ArchiveOptions {
   /**
    * The locator the board anchor holds now (`latestLocator()`), or `undefined`
@@ -301,9 +309,15 @@ async function resume(
       "locator",
       `its locator isn't one this worker writes (${named.kind})`,
     );
+  let reads = 0;
   const read = async (cid: Uint8Array, transaction: Uint8Array) => {
+    if (++reads > ARCHIVE_RESUME_READS)
+      throw new ArchiveResumeError("unavailable", `over ${ARCHIVE_RESUME_READS} reads`);
     const n = await arweave.confirmations(transaction);
-    if (n === undefined || n < depth) return undefined;
+    if (n === undefined) return undefined;
+    if (!Number.isSafeInteger(n) || n < 1)
+      throw new Error("the Arweave client gave a depth below 1");
+    if (n < depth) return undefined;
     const data = await arweave.data(transaction, carLimit(MANIFEST_BOUND));
     if (data === undefined) return undefined;
     const r = readArchivedObject(data, cid, MANIFEST_BOUND);
@@ -324,10 +338,7 @@ async function resume(
     );
   const latest = decode(top, named.manifest);
 
-  const held = new Map<
-    bigint,
-    { cid: Uint8Array; transaction: Uint8Array; bytes: Uint8Array; m: ArchiveManifest }
-  >();
+  const held = new Map<bigint, { cid: Uint8Array; transaction: Uint8Array; bytes: Uint8Array }>();
   // Each sequence's CID, as its first link names it.
   const cidAt = new Map<bigint, Uint8Array>();
   const queue: { sequence: bigint; cid: Uint8Array; transaction: Uint8Array }[] = [];
@@ -343,7 +354,7 @@ async function resume(
         "foreign",
         `${cidText(cid)} isn't this deployment's manifest ${sequence}`,
       );
-    held.set(sequence, { cid, transaction, bytes, m });
+    held.set(sequence, { cid, transaction, bytes });
     for (const l of m.links) {
       const fixed = cidAt.get(l.sequence);
       if (fixed !== undefined && !equal(fixed, l.cid))
@@ -370,10 +381,13 @@ async function resume(
   await drizzle({ client }).transaction(async (tx) => {
     for (const [sequence, h] of chain) {
       await tx.insert(archiveManifests).values({ sequence, cid: h.cid, manifest: h.bytes });
-      const rows = [
-        { transaction: h.transaction, cid: h.cid },
-        ...h.m.objects.map((x) => ({ transaction: x.transaction, cid: x.cid })),
-      ];
+      const m = decodeArchiveManifest(h.bytes, 3);
+      // Evidence and runs too, once a later part lists them, so a resumed
+      // database never posts them again.
+      const rows = [h, ...m.objects, ...m.evidence, ...m.runs].map((x) => ({
+        transaction: x.transaction,
+        cid: x.cid,
+      }));
       await tx
         .insert(archiveTransactions)
         .values(rows.map((r) => ({ ...r, postedAt: o.now, confirmed: true })))

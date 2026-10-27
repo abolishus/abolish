@@ -574,6 +574,21 @@ describe("archiveBoards", () => {
     expect(await count("archive_manifests")).toBe(0);
   });
 
+  test("takes up the chain over objects a run posted before the anchor's locator was known", async () => {
+    const arweave = new ModelArweave();
+    const { taken } = await board(0);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    await wipe();
+    // A run without the locator registers and posts the objects again.
+    expect(await run(arweave)).toMatchObject({ resumed: 0, registered: 2, posted: 2 });
+    const r = await run(arweave, { latestLocator: latest!.locator });
+    expect(r).toMatchObject({ resumed: 1, registered: 0, posted: 0, written: [], locator: 0n });
+    const settled = await drain(arweave, { latestLocator: latest!.locator });
+    expect(settled.locator).toBe(0n);
+    expect((await walk(arweave, cidsOf(taken), [latest!.locator])).findings).toEqual([]);
+  });
+
   test("once its own chain exists, the anchor naming it is what is expected", async () => {
     const arweave = new ModelArweave();
     await board(0);

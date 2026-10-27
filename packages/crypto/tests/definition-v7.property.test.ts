@@ -293,8 +293,8 @@ describe("definition version 7", () => {
 // and spoiled-ballot opening version 3, as version 6; ballot version 4 under
 // `electorate_mode` 1 and ballot version 5, which names its step, under 2;
 // ballot version 5 beside contract-event version 8, 9 or 10, which name no
-// relayed rolling ballot, fails, and beside 11, which this package doesn't
-// read yet, is unverifiable; and what the row says of version 6's author
+// relayed rolling ballot, fails, and beside 11 is unverifiable until the
+// verifier's rolling checks (P2-17 parts 4c and 4d); and what the row says of version 6's author
 // panel, results mode and tally-opening version holds under either mode
 // (T-16, T-17, T-25, T-34, T-36, T-50, T-53). Ballot version 5 beside a
 // definition before version 7 is still judged as a version 2.3 doesn't know
@@ -359,7 +359,8 @@ describe("2.3's profile combination under version 7", () => {
 
   test("a fixed electorate fits with ballot version 4 and version 6's pins", () => {
     expect(profileCombinationRule(v7(1))).toBeUndefined();
-    expect(profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: 9 }))).toBeUndefined();
+    for (const events of [9, 10, 11])
+      expect(profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: events }))).toBeUndefined();
     expect(profileCombinationRule(v7(1, livePins, live), fixedTypical.threshold)).toBeUndefined();
     // Ballot version 5 names a step, which a fixed electorate has none of.
     for (const events of [8, 9, 10, 11, 255])
@@ -370,7 +371,7 @@ describe("2.3's profile combination under version 7", () => {
       ).toBe("profile-combination");
   });
 
-  test("a rolling electorate pins ballot version 5 beside contract-event version 11, unverifiable until it is read", () => {
+  test("a rolling electorate pins ballot version 5 beside contract-event version 11, unverifiable until the rolling checks are read", () => {
     expect(profileCombinationRule(v7(2))).toBe("unsupported-version");
     expect(profileCombinationRule(v7(2, livePins, live), rollingTypical.threshold)).toBe(
       "unsupported-version",
@@ -510,7 +511,7 @@ describe("2.3's profile combination under version 7", () => {
     );
   });
 
-  test("a rolling version 7's ballot version 5 is judged as a fixed one's 4, and fails beside contract-event versions 1 to 10", () => {
+  test("a rolling version 7's ballot version 5 is judged as a fixed one's 4, fails beside contract-event versions 1 to 10 and is unverifiable where it fits", () => {
     fc.assert(
       fc.property(anyPins, anyFields, (pins, f) => {
         const ballot = pins[RECORD_TYPES.ballot];
@@ -525,6 +526,9 @@ describe("2.3's profile combination under version 7", () => {
         if (unread) expect(rolling).toBe("unsupported-version");
         else if (ballot === 4) expect(rolling).toBe("profile-combination");
         else if (ballot === 5 && events <= 10) expect(rolling).toBe("profile-combination");
+        // What fits waits on the verifier's rolling checks (P2-17 parts 4c
+        // and 4d): unsupported, never passed (T-36).
+        else if (ballot === 5 && fixed === undefined) expect(rolling).toBe("unsupported-version");
         else expect(rolling).toBe(fixed);
       }),
       opts,

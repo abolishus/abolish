@@ -12,7 +12,7 @@
 // panel: the author panel's transcript, found by `author_transcript_hash`,
 // is checked under its own context, quorum and participation, and its
 // approvals are counted from the author approvals records on the board and,
-// under contract-event version 9, from the election registry's
+// under contract-event versions 9 to 11, from the election registry's
 // `AuthorPanelRegistered` records there (docs/spec/ceremony.md, Author
 // panel; T-37, T-54, T-17). The default panel's L2 side (the trustee
 // registry's registration and its approvals) isn't read yet, so 3.1 and 2.5
@@ -197,13 +197,14 @@ const typeOf = (payload: Uint8Array) => ((payload[0] as number) << 8) | (payload
 
 /**
  * The `registration` of every contract-event record of this election in the
- * copy, wherever it sits, that decodes under contract-event version 9 and
- * passes its event check as the definition's election registry's
+ * copy, wherever it sits, that decodes under the pinned contract-event
+ * version, 9 to 11, and passes its event check as the definition's election registry's
  * `AuthorPanelRegistered` naming `definitionHash` (Key ceremony, step 5).
  * An approval is a seat's signed statement whoever boarded it, so, like an
  * approvals record, it counts outside the anchored extent too; a record
  * that doesn't decode or fails the check carries nothing here and is 4.4's
- * to report. No earlier version names the event. None of them is known to
+ * to report. No earlier version names the event, and versions 10 and 11
+ * read it as version 9 does ([[contracts]], Event tables (version 10)). None of them is known to
  * be the one the registry recorded until 4.4's replay or the L2 reads
  * authenticate it, so they only add approvals, never fail 3.1 (T-53).
  */
@@ -213,7 +214,8 @@ function authorRegistrations(
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
 ): Uint8Array[] {
-  if (pinnedVersion(d, RECORD_TYPES.contractEvent) !== 9) return [];
+  const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  if (version !== 9 && version !== 10 && version !== 11) return [];
   const contracts = {
     electionRegistry: d.election_registry,
     trusteeRegistry: d.trustee_registry,
@@ -225,12 +227,12 @@ function authorRegistrations(
     if (typeOf(payload) !== RECORD_TYPES.contractEvent) continue;
     let record;
     try {
-      record = decodeContractEvent(payload, 9);
+      record = decodeContractEvent(payload, version);
     } catch (e) {
       if (e instanceof DecodeError) continue;
       throw e;
     }
-    const checked = checkContractEvent(record, contracts, 9);
+    const checked = checkContractEvent(record, contracts, version);
     if (
       checked.ok &&
       checked.event.event === "AuthorPanelRegistered" &&

@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import {
   ceremonyTranscriptHash,
+  decodeContractEvent,
   decodeElectionDefinition,
   decodeElectionDefinitionV6,
   encodeBoardEntry,
+  encodeContractEvent,
   encodeElectionDefinitionV6,
   panelId,
   POLL_CLASSES,
@@ -592,6 +594,45 @@ describe("the author panel's registration on L2", () => {
       });
     }
   }, 60_000);
+
+  test("under contract-event versions 10 and 11, which read it as version 9 does, it counts as there", () => {
+    // Versions 10 and 11 keep version 9's rows unchanged ([[contracts]],
+    // Event tables (versions 10 and 11)); a record of another version than
+    // the pin doesn't decode, so it carries no approval.
+    const relabel = (id: string, version: 10 | 11) =>
+      encodeContractEvent(decodeContractEvent(eventOf(id), 9), version);
+    for (const c of registrations.cases.filter(
+      (x) => x.recordedKeySetHash === undefined && x.events.length > 0,
+    )) {
+      const at = (version: number, events: readonly Uint8Array[]) =>
+        ceremonyChecks(
+          pinning(version),
+          hex(election.stubHash),
+          defaultPanel,
+          authorRun(c.transcript),
+          board(
+            defaultTranscript,
+            hex(transcriptOf(c.transcript).transcript),
+            ...c.records.map(recordOf),
+            ...events,
+          ),
+          7,
+        );
+      const under9 = at(9, c.events.map(eventOf));
+      for (const version of [10, 11] as const) {
+        const r = at(
+          version,
+          c.events.map((id) => relabel(id, version)),
+        );
+        expect(r.rows, c.id).toEqual(under9.rows);
+        expect(r.authorRegistered, c.id).toEqual(under9.authorRegistered);
+        expect(r.report?.author?.approvals, c.id).toEqual(under9.report?.author?.approvals);
+        expect(at(version, c.events.map(eventOf)).report?.author?.approvals, c.id).toEqual(
+          at(version, []).report?.author?.approvals,
+        );
+      }
+    }
+  }, 120_000);
 
   test("a registration counts wherever it sits, and another election's entry doesn't", () => {
     const all = eventOf("all");

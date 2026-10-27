@@ -387,24 +387,25 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Only versions 8 and 9 name every board event (the close rule's, the
+// Only versions 8 to 11 name every board event (the close rule's, the
 // batches', the obligation root's and the availability records') and every
 // group-registry event (the Tier 1 addition and the self-paid group and
 // addition), which land in the sequence every election shares, so 2.3 fails
 // a profile pinning version 1 to 7 ([[close]], Version; [[contracts]],
 // Contract-event record; [[availability]]; T-35, T-50, T-25, T-53, T-24).
-// Version 9 reads every record version 8 passes as version 8 does, so it
-// fits wherever version 8 does ([[contracts]], Event tables (version 9)).
+// Each of versions 9 to 11 reads every record the one before passes as it
+// does, so each fits wherever version 8 does ([[contracts]], Event tables
+// (versions 9 to 11)).
 // Version 8 frames no version-4 ballot or version-2 delivery record, so a
 // profile pinning it beside ballot version 4 fails 4.4 at the first one
 // boarded through the contract path; failing it here instead waits on
 // verifier-ballots-v4.json and its kin moving to version 9 ([[P2-16]] part
 // 5e, before rule 9 serves version 6).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
-  1, 2, 3, 4, 5, 6, 7, 8, 9,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
 ]);
 // The versions 2.3 passes: those whose tables name every event.
-const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9]);
+const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9, 10, 11]);
 // The contract-event versions whose tables name no relayed rolling ballot:
 // beside ballot version 5 they leave a rolling poll's voters no direct
 // submission the board's events archive (8 and 9) or none forced through L1
@@ -439,9 +440,10 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version 5 under 2 (rolling), and each of those ballot versions pairs with
  * those definitions only (ballot version 5 beside a definition before
  * version 7 is still a version this package doesn't know, below, until the
- * verifier admits it: P2-17 part 4); ballot version 5 also needs contract-event version
- * 11, the only one whose tables name the relayed rolling ballot, and fails
- * beside version 8, 9 or 10 (T-25, T-50, T-53); what follows of version 6
+ * verifier admits it: P2-17 part 4, and a rolling profile that fits is
+ * `unsupported-version` until then); ballot version 5 also needs
+ * contract-event version 11, the only one whose tables name the relayed
+ * rolling ballot, and fails beside version 8, 9 or 10 (T-25, T-50, T-53); what follows of version 6
  * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
  * a version-6 definition with an author panel fails, as does tally-opening
  * version 3, which only it pins, until the author transcript's chosen-byte
@@ -577,7 +579,7 @@ export function profileCombinationRule(
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
   // Every profile needs the close statement on the board (board-entry
-  // version 5) and every event archived (contract-event version 8 or 9),
+  // version 5) and every event archived (contract-event versions 8 to 11),
   // whatever its definition version, or its seats have no way
   // to state the close and 5.5 and 6.3 can't be checked ([[close]],
   // Version; T-35, T-50). A contract-event version this package doesn't
@@ -605,6 +607,12 @@ export function profileCombinationRule(
   // 6.2 can't be checked, never a failure (T-36).
   if (spoiled !== undefined && !SPOILED_OPENING_VERSIONS.has(spoiled)) return "unsupported-version";
   if (!knownEvents) return "unsupported-version";
+  // A rolling profile that fits waits on the verifier's rolling checks
+  // (2.4's replay through close, 5.1 and 5.2 against step roots: P2-17
+  // parts 4c and 4d), when ballot version 5 joins BALLOT_VERSIONS: until
+  // then it is unverifiable, never passed (T-36). Beside definition version
+  // 1 an unknown ballot version isn't judged here, as above.
+  if (ballot === 5 && !unknownBallot) return "unsupported-version";
   return undefined;
 }
 

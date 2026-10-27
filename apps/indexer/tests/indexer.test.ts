@@ -53,7 +53,12 @@ import {
   toHex,
 } from "viem";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { readContractEvents, readIndexedGroups, readIndexedLogs } from "../src/records.ts";
+import {
+  readContractEventRange,
+  readContractEvents,
+  readIndexedGroups,
+  readIndexedLogs,
+} from "../src/records.ts";
 
 const ballotVectors = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
@@ -527,6 +532,22 @@ async function expectLogsComplete(schema: string): Promise<void> {
       (await readIndexedLogs(sql, schema, contract)).map((l) => [l.record, l.logIndex]),
       contract,
     ).toEqual(logs.map((log, i) => [log, onChain[i]?.logIndex]));
+    // Any range is the whole sequence's slice, numbered as there; past the
+    // index's end it is short, never padded.
+    const n = BigInt(logs.length);
+    for (const [from, to] of [
+      [0n, n],
+      [1n, n],
+      [0n, 1n],
+      [n / 2n, n],
+      [n - 1n, n + 3n],
+      [n, n + 2n],
+      [2n, 2n],
+    ] as const)
+      expect(await readContractEventRange(sql, schema, contract, from, to), contract).toEqual(
+        logs.slice(Number(from), Number(to)),
+      );
+    await expect(readContractEventRange(sql, schema, contract, 2n, 1n)).rejects.toThrow("range");
   }
   const [first] = await readContractEvents(sql, schema, registry);
   expect(first && checkContractEvent(first, eventContracts(), EVENTS)).toMatchObject({

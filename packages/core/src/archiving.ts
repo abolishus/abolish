@@ -160,11 +160,19 @@ export const ARCHIVE_EVIDENCE_PERIODS = 64;
 export interface ContractEventSource {
   /**
    * The evidence record proving `contract`'s accumulator at the first L2
-   * block with a timestamp of at least `after` for which a dispute game of
-   * the type the L2's portal respects claims an output root, with that
-   * game's index and address, or `undefined` while no such game exists.
+   * block numbered at least `atLeast`, with a timestamp of at least `after`,
+   * for which a dispute game of the type the L2's portal respects claims an
+   * output root, with that game's index and address, or `undefined` while no
+   * such game exists. `atLeast` is the contract's last record's block, which
+   * a record must not go below: a game anyone creates later for an older
+   * block would otherwise be the first at or after a later period's end and
+   * be refused, that period after period.
    */
-  evidence(contract: Uint8Array, after: bigint): Promise<ContractEventEvidence | undefined>;
+  evidence(
+    contract: Uint8Array,
+    after: bigint,
+    atLeast: bigint,
+  ): Promise<ContractEventEvidence | undefined>;
   /** Events `from` to `to − 1` of `contract`'s sequence, in order of their index. */
   events(contract: Uint8Array, from: bigint, to: bigint): Promise<readonly RunEvent[]>;
 }
@@ -588,7 +596,7 @@ async function writeContractEvents(
     try {
       for (const segment of periods) {
         const end = ce.clock.epoch + (segment + 1n) * ce.clock.period;
-        const record = await ask(() => ce.source.evidence(contract, end));
+        const record = await ask(() => ce.source.evidence(contract, end, last.l2Block));
         if (record === undefined) break;
         const judged = judgeEvidence(record, contract, ce.l2ChainId, end, last);
         if (judged === "absent") {

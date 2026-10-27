@@ -902,6 +902,8 @@ class ModelL2 implements ContractEventSource {
   forgeState: { accumulator?: Uint8Array; count?: bigint } | undefined;
   /** How many times `events` was asked. */
   eventReads = 0;
+  /** The bound each record was asked for the board under: its last record's block. */
+  readonly boardBounds: bigint[] = [];
   /** Rewrites the board's record or events before they are given. */
   tamper: {
     evidence?: (e: ContractEventEvidence) => ContractEventEvidence;
@@ -934,9 +936,11 @@ class ModelL2 implements ContractEventSource {
     return this.history(contract).filter((e) => e.l2_block <= block);
   }
 
-  async evidence(contract: Uint8Array, after: bigint) {
+  async evidence(contract: Uint8Array, after: bigint, atLeast: bigint) {
     if (this.failing) throw new Error("the L2 node is down");
+    if (equalBytes(contract, BOARD)) this.boardBounds.push(atLeast);
     let block = (after - T0 + 1n) / 2n;
+    if (block < atLeast) block = atLeast;
     block = ((block + 4n) / 5n) * 5n;
     if (block > this.head || block > this.gamesTo) return undefined;
     const logs = this.counted(contract, block);
@@ -1093,6 +1097,12 @@ describe("archiveBoards with contract events", () => {
       [1n, 2],
     ]);
     expectReplays(replays, l2);
+    // Each record is asked for at or above the last one's block, so a game
+    // created later for an older block can't be picked and refused.
+    expect(l2.boardBounds[0]).toBe(0n);
+    expect(l2.boardBounds.at(-1)).toBeGreaterThan(0n);
+    for (const [i, b] of l2.boardBounds.entries())
+      expect(b).toBeGreaterThanOrEqual(l2.boardBounds[i - 1] ?? 0n);
   });
 
   test("examines at most maxPeriods periods a run, in order", async () => {
@@ -1197,7 +1207,9 @@ describe("archiveBoards with contract events", () => {
     l2.emit(BOARD);
     l2.advance(30n);
     await board(0, 1);
-    const honest = l2.evidence.bind(l2);
+    // A lying source ignores the bound, as `honest` given 0 does.
+    const model = l2.evidence.bind(l2);
+    const honest = (c: Uint8Array, after: bigint) => model(c, after, 0n);
     // Period 0's end, asked of a source that answers with block 5's record.
     l2.evidence = (c, after) => honest(c, equalBytes(c, BOARD) ? after - 10n : after);
     const early = await run(arweave, eventOptions(l2));
@@ -1205,7 +1217,7 @@ describe("archiveBoards with contract events", () => {
       [hex(BOARD), "evidence"],
     ]);
     expect(early.eventFailures[0]!.error.message).toMatch(/before/);
-    l2.evidence = honest;
+    l2.evidence = model;
     expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 1, eventFailures: [] });
     await board(2);
     // Period 2 answered with period 0's block: less than the last record.
@@ -1221,7 +1233,7 @@ describe("archiveBoards with contract events", () => {
     // A record dated after the period's end but at a block below the last
     // record's: period 2 is answered with block 60's record, then period 3
     // with block 45's.
-    l2.evidence = honest;
+    l2.evidence = model;
     l2.advance(30n);
     await board(5);
     l2.evidence = (c, after) =>

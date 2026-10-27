@@ -246,6 +246,8 @@ describe("arweaveWallet", () => {
     ).toBe(true);
   });
 
+  // Three keys are generated, one of 4096 bits: a random prime search that
+  // took past the default five seconds on a CI runner.
   test("anything but a 4096-bit RSA private key with exponent 65537 is refused, never quoted", () => {
     const small = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
       format: "jwk",
@@ -271,7 +273,7 @@ describe("arweaveWallet", () => {
       expect(message).not.toBe("");
       expect(message).not.toContain(jwk.d!.slice(0, 12));
     }
-  });
+  }, 60_000);
 });
 
 // One Arweave node's HTTP API, as much of it as the client uses: it checks a

@@ -2,8 +2,8 @@
 // Archived objects): `ArweaveClient` over one Arweave node's HTTP API, with
 // the deployment's wallet. Each post is one format-2 base-layer transaction
 // carrying the data and nothing else (no tags, no transfer), signed here and
-// uploaded as its header and then its chunks, as Arweave's own client does
-// for data of any size. The transaction format, its signature data (the
+// uploaded as its header and then its chunks (Arweave's own client sends
+// data of one chunk inline instead; nodes take either). The transaction format, its signature data (the
 // SHA-384 "deep hash"), the chunking and the data root's Merkle tree are
 // Arweave's, written from its reference client (arweave-js 1.15,
 // `lib/transaction.ts`, `lib/deepHash.ts`, `lib/merkle.ts`) and checked
@@ -61,7 +61,9 @@ function note(n: number): Uint8Array {
 /**
  * Where each chunk of `size` bytes ends: 256 KiB chunks, except that a
  * remainder past the last full chunk shorter than 32 KiB is shared with that
- * chunk, which is split in two, the first half rounded up.
+ * chunk, which is split in two, the first half rounded up. Data of a whole
+ * number of full chunks ends with an empty one, as arweave-js's `chunkData`
+ * cuts it: its leaf is in the data root, but nothing is uploaded for it.
  */
 export function chunkEnds(size: number): number[] {
   if (!Number.isSafeInteger(size) || size < 1)
@@ -74,17 +76,16 @@ export function chunkEnds(size: number): number[] {
     start += next > 0 && next < MIN_CHUNK_SIZE ? Math.ceil(rest / 2) : MAX_CHUNK_SIZE;
     ends.push(start);
   }
-  if (start < size) ends.push(size);
+  ends.push(size);
   return ends;
 }
 
 interface TreeNode {
   readonly id: Uint8Array;
   readonly end: number;
-  /** A branch's children and the offset between them; a leaf's chunk hash. */
+  /** A branch's children; a leaf's chunk hash. */
   readonly left?: TreeNode;
   readonly right?: TreeNode;
-  readonly split?: number;
   readonly chunkHash?: Uint8Array;
 }
 
@@ -123,7 +124,6 @@ export function chunkTree(leaves: readonly { hash: Uint8Array; end: number }[]):
               end: right.end,
               left,
               right,
-              split: left.end,
             },
       );
     }
@@ -141,7 +141,7 @@ export function chunkTree(leaves: readonly { hash: Uint8Array; end: number }[]):
       });
       return;
     }
-    const step = [...path, node.left.id, node.right.id, note(node.split!)];
+    const step = [...path, node.left.id, node.right.id, note(node.left.end)];
     walk(node.left, step);
     walk(node.right, step);
   };
@@ -260,8 +260,36 @@ export interface HttpArweaveOptions {
   readonly maxReward: bigint;
   /** How long one request may take; default 30 s. */
   readonly timeoutMs?: number;
+  /** How long the first retry of a chunk waits, growing with each; default 1 s. */
+  readonly retryDelayMs?: number;
   /** Where requests go: the platform's `fetch` unless a test supplies one. */
   readonly fetch?: typeof globalThis.fetch;
+}
+
+/** The most bytes read from an answer but the raw route's: an anchor, a price or a status. */
+const ANSWER_LIMIT = 4096;
+
+/** How many times a chunk is sent before the post gives up on it. */
+const CHUNK_ATTEMPTS = 3;
+
+// An answer's text if it is at most `ANSWER_LIMIT` bytes, counted as the
+// stream arrives and cancelled past it, as the verifier's `bodyWithin` reads.
+async function answerText(res: Response): Promise<string | undefined> {
+  if (res.body === null) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.length;
+    if (length > ANSWER_LIMIT) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(concat(chunks));
 }
 
 /** One Arweave node's HTTP API with the deployment's wallet. */
@@ -270,13 +298,15 @@ export class HttpArweaveClient implements ArweaveClient {
   readonly #wallet: ArweaveWallet;
   readonly #maxReward: bigint;
   readonly #timeoutMs: number;
+  readonly #retryDelayMs: number;
   readonly #fetch: typeof globalThis.fetch;
   readonly #raw: ReturnType<typeof arweaveSource>["source"];
 
   /** `node` is parsed as the verifier parses a gateway: http(s), no credentials, query or fragment. */
   constructor(node: URL, wallet: ArweaveWallet, options: HttpArweaveOptions) {
     const url = parseGateway(node.href);
-    this.#base = `${url.origin}${url.pathname}`;
+    // `parseGateway` leaves a root URL's path as "/", which would double it.
+    this.#base = `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
     this.#wallet = wallet;
     if (typeof options.maxReward !== "bigint" || options.maxReward < 1n)
       throw new RangeError("maxReward must be a positive bigint");
@@ -284,13 +314,21 @@ export class HttpArweaveClient implements ArweaveClient {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_GATEWAY_TIMEOUT_MS;
     if (!Number.isSafeInteger(this.#timeoutMs) || this.#timeoutMs < 1)
       throw new RangeError("timeoutMs must be a positive integer");
+    this.#retryDelayMs = options.retryDelayMs ?? 1000;
+    if (!Number.isSafeInteger(this.#retryDelayMs) || this.#retryDelayMs < 0)
+      throw new RangeError("retryDelayMs must be a non-negative integer");
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#raw = arweaveSource([url], { timeoutMs: this.#timeoutMs, fetch: this.#fetch }).source;
   }
 
-  async #request(path: string, body?: unknown): Promise<Response> {
+  // One request and its answer's body, at most `ANSWER_LIMIT` bytes, so a
+  // node can't stream the worker out of memory (T-52). Every failure is one
+  // of our messages, never the platform's, which may name the host.
+  async #ask(path: string, body?: unknown): Promise<{ status: number; text: string }> {
+    const route = path.split("/", 2).join("/");
+    let res: Response;
     try {
-      return await this.#fetch(`${this.#base}${path}`, {
+      res = await this.#fetch(`${this.#base}${path}`, {
         ...(body === undefined
           ? {}
           : {
@@ -303,14 +341,21 @@ export class HttpArweaveClient implements ArweaveClient {
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch {
-      throw new Error(`the Arweave node didn't answer ${path.split("/", 2).join("/")}`);
+      throw new Error(`the Arweave node didn't answer ${route}`);
     }
+    let text: string | undefined;
+    try {
+      text = await answerText(res);
+    } catch {
+      throw new Error(`the Arweave node didn't answer ${route}`);
+    }
+    if (text === undefined) throw new Error(`the Arweave node's answer to ${route} is too long`);
+    return { status: res.status, text };
   }
 
   async #text(path: string): Promise<string> {
-    const res = await this.#request(path);
-    const text = await res.text();
-    if (res.status !== 200) throw new Error(`the Arweave node refused ${path} (${res.status})`);
+    const { status, text } = await this.#ask(path);
+    if (status !== 200) throw new Error(`the Arweave node refused ${path} (${status})`);
     return text;
   }
 
@@ -322,7 +367,8 @@ export class HttpArweaveClient implements ArweaveClient {
     if ((lastTx.length !== 48 && lastTx.length !== 32) || b64url(lastTx) !== anchorText)
       throw new Error("the Arweave node's anchor is malformed");
     const price = await this.#text(`/price/${data.length}`);
-    if (!/^[0-9]{1,30}$/u.test(price)) throw new Error("the Arweave node's price is malformed");
+    if (!/^[1-9][0-9]{0,29}$/u.test(price))
+      throw new Error("the Arweave node's price is malformed");
     const reward = BigInt(price);
     if (reward > this.#maxReward)
       throw new Error(`the Arweave node's price, ${reward} winston, is over maxReward`);
@@ -338,7 +384,7 @@ export class HttpArweaveClient implements ArweaveClient {
     };
     const signature = this.#wallet.sign(signatureData(header));
     const id = transactionId(signature);
-    const accepted = await this.#request("/tx", {
+    const accepted = await this.#ask("/tx", {
       format: 2,
       id: b64url(id),
       last_tx: anchorText,
@@ -349,51 +395,56 @@ export class HttpArweaveClient implements ArweaveClient {
       data: "",
       data_size: String(data.length),
       data_root: b64url(tree.root),
-      reward: price,
+      reward: reward.toString(),
       signature: b64url(signature),
     });
-    await accepted.body?.cancel();
     // 208: the node already holds this very transaction.
     if (accepted.status !== 200 && accepted.status !== 208)
       throw new Error(`the Arweave node refused the transaction (${accepted.status})`);
-    // The header is accepted and will be mined, paid, whether or not its
-    // chunks arrive; one that didn't is never confirmed and is posted again.
+    // From here the header is taken and will be mined and paid for whether or
+    // not its chunks arrive, so a chunk the node won't take is tried again,
+    // and then the ID is still given: the archive then waits out the depth
+    // and `repostAfter` before paying for the object again, where a throw
+    // would have it pay on the next run. Data that never arrived is never
+    // confirmed, since the archive confirms only data that reads as its CID.
     for (const chunk of tree.chunks) {
-      const res = await this.#request("/chunk", {
+      if (chunk.end === chunk.start) continue;
+      const upload = {
         data_root: b64url(tree.root),
         data_size: String(data.length),
         data_path: b64url(chunk.path),
         offset: String(chunk.end - 1),
         chunk: b64url(data.subarray(chunk.start, chunk.end)),
-      });
-      await res.body?.cancel();
-      if (res.status !== 200)
-        throw new Error(`the Arweave node refused a chunk of ${arweaveId(id)} (${res.status})`);
+      };
+      for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
+        const taken = await this.#ask("/chunk", upload).then(
+          (r) => r.status === 200,
+          () => false,
+        );
+        if (taken) break;
+        if (attempt === CHUNK_ATTEMPTS) return id;
+        await new Promise((r) => setTimeout(r, this.#retryDelayMs * attempt));
+      }
     }
     return id;
   }
 
   async confirmations(transaction: Uint8Array): Promise<number | undefined> {
-    const res = await this.#request(`/tx/${arweaveId(transaction)}/status`);
-    // 202: pending in the mempool; 404: unknown, dropped or reorganised away.
-    if (res.status === 202 || res.status === 404) {
-      await res.body?.cancel();
-      return undefined;
-    }
-    if (res.status !== 200) {
-      await res.body?.cancel();
-      throw new Error(`the Arweave node refused a status read (${res.status})`);
-    }
+    const { status, text } = await this.#ask(`/tx/${arweaveId(transaction)}/status`);
+    // 202: pending in the mempool; 404: unknown, dropped or reorganised away
+    // (or a node that hasn't caught up: the object is then paid for again).
+    if (status === 202 || status === 404) return undefined;
+    if (status !== 200) throw new Error(`the Arweave node refused a status read (${status})`);
     let count: unknown;
     try {
-      count = ((await res.json()) as { number_of_confirmations?: unknown }).number_of_confirmations;
+      count = (JSON.parse(text) as { number_of_confirmations?: unknown }).number_of_confirmations;
     } catch {
       count = undefined;
     }
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)
       throw new Error("the Arweave node's status is malformed");
-    // Nodes have counted the tip block as 0 or as 1; either is at most one
-    // short of the depth, so a transaction is confirmed a block late at worst.
+    // Nodes count the tip block as 1; a 0 from a gateway that counts it as 0
+    // is read as 1, so the depth is never more than the node's.
     return Math.max(count, 1);
   }
 

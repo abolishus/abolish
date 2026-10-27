@@ -151,7 +151,9 @@ describe("chunks and the data tree", () => {
   test("chunkEnds: 256 KiB chunks, a short remainder shared with the chunk before it", () => {
     const K = 1024;
     expect(chunkEnds(1)).toEqual([1]);
-    expect(chunkEnds(256 * K)).toEqual([256 * K]);
+    // A whole number of full chunks ends with an empty leaf, as arweave-js cuts it.
+    expect(chunkEnds(256 * K)).toEqual([256 * K, 256 * K]);
+    expect(chunkEnds(512 * K)).toEqual([256 * K, 512 * K, 512 * K]);
     expect(chunkEnds(256 * K + 1)).toEqual([128 * K + 1, 256 * K + 1]);
     expect(chunkEnds(288 * K)).toEqual([256 * K, 288 * K]);
     expect(chunkEnds(288 * K - 1)).toEqual([144 * K, 288 * K - 1]);
@@ -165,13 +167,15 @@ describe("chunks and the data tree", () => {
       fc.property(fc.integer({ min: 1, max: 40 * MAX_CHUNK_SIZE }), (size) => {
         const ends = chunkEnds(size);
         expect(ends.at(-1)).toBe(size);
+        const full = size % MAX_CHUNK_SIZE === 0;
         let start = 0;
-        for (const end of ends) {
+        ends.forEach((end, i) => {
           const length = end - start;
           expect(length).toBeLessThanOrEqual(MAX_CHUNK_SIZE);
-          if (ends.length > 1) expect(length).toBeGreaterThanOrEqual(MIN_CHUNK_SIZE);
+          if (full && i === ends.length - 1) expect(length).toBe(0);
+          else if (ends.length > 1) expect(length).toBeGreaterThanOrEqual(MIN_CHUNK_SIZE);
           start = end;
-        }
+        });
       }),
       { numRuns },
     );
@@ -279,6 +283,8 @@ class FakeNode {
   readonly requests: { path: string; redirect: RequestInit["redirect"] }[] = [];
   anchor = b64(new Uint8Array(48).fill(7));
   price = "1000";
+  txStatus = 200;
+  chunkFailures = 0;
   status: Record<string, Response | (() => Response)> = {};
   refuse = new Set<string>();
 
@@ -329,12 +335,16 @@ class FakeNode {
     )
       return new Response("Transaction verification failed.", { status: 400 });
     this.txs.set(body["id"]!, { header: body, chunks: new Map() });
-    return new Response("OK");
+    return new Response("OK", { status: this.txStatus });
   }
 
   #chunk(body: Record<string, string>): Response {
     const tx = [...this.txs.values()].find((t) => t.header["data_root"] === body["data_root"]);
     if (tx === undefined) return new Response("data_root_not_found", { status: 400 });
+    if (this.chunkFailures > 0) {
+      this.chunkFailures--;
+      return new Response("Service Unavailable", { status: 503 });
+    }
     const size = Number(body["data_size"]);
     const offset = Number(body["offset"]);
     const chunk = bytes(body["chunk"]!);
@@ -374,8 +384,8 @@ class FakeNode {
 
 const NODE = new URL("https://arweave.example/secret-key");
 
-function client(node: FakeNode, maxReward = 10_000n) {
-  return new HttpArweaveClient(NODE, wallet, { maxReward, fetch: node.fetch });
+function client(node: FakeNode, maxReward = 10_000n, url = NODE) {
+  return new HttpArweaveClient(url, wallet, { maxReward, fetch: node.fetch, retryDelayMs: 1 });
 }
 
 async function thrown(p: Promise<unknown>): Promise<string> {
@@ -446,8 +456,58 @@ describe("HttpArweaveClient", () => {
     expect(node.txs.size).toBe(1);
   });
 
-  test("a refused transaction, chunk, anchor or price throws, naming neither the node's URL nor its key", async () => {
-    for (const route of ["tx", "chunk", "tx_anchor", "price"]) {
+  test("a node at a root URL is asked at its routes, and a 208 for the transaction is taken", async () => {
+    const node = new FakeNode();
+    node.txStatus = 208;
+    const id = await client(node, 10_000n, new URL("https://arweave.example")).post(
+      new Uint8Array(10),
+    );
+    expect(node.requests.map((r) => r.path)).toEqual(["/tx_anchor", "/price/10", "/tx", "/chunk"]);
+    expect(node.data(b64(id))).toEqual(new Uint8Array(10));
+  });
+
+  test("a chunk the node won't take is sent again, and after three tries the ID is still given", async () => {
+    const node = new FakeNode();
+    node.chunkFailures = 2;
+    const data = new Uint8Array(MAX_CHUNK_SIZE + 1).fill(5);
+    const id = await client(node).post(data);
+    expect(hex(sha256(node.data(b64(id))!))).toBe(hex(sha256(data)));
+    expect(node.requests.filter((r) => r.path === "/chunk")).toHaveLength(4);
+
+    const stuck = new FakeNode();
+    stuck.refuse.add("chunk");
+    const lost = await client(stuck).post(new Uint8Array(10));
+    expect(stuck.txs.has(b64(lost))).toBe(true);
+    expect(stuck.data(b64(lost))).toBeUndefined();
+    expect(stuck.requests.filter((r) => r.path === "/chunk")).toHaveLength(3);
+  });
+
+  test("an answer past 4 KiB, a node that never answers, and a price of 0 or with leading zeros are refused", async () => {
+    const node = new FakeNode();
+    node.price = "1".padStart(4097, " ");
+    expect(await thrown(client(node).post(new Uint8Array(10)))).toBe(
+      "the Arweave node's answer to /price is too long",
+    );
+    for (const price of ["0", "007"]) {
+      node.price = price;
+      expect(await thrown(client(node).post(new Uint8Array(10)))).toMatch(/malformed/u);
+    }
+    expect(node.txs.size).toBe(0);
+    const silent = new HttpArweaveClient(NODE, wallet, {
+      maxReward: 1n,
+      timeoutMs: 20,
+      fetch: ((_: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+        )) as typeof fetch,
+    });
+    expect(await thrown(silent.post(new Uint8Array(10)))).toBe(
+      "the Arweave node didn't answer /tx_anchor",
+    );
+  });
+
+  test("a refused transaction, anchor or price throws, naming neither the node's URL nor its key", async () => {
+    for (const route of ["tx", "tx_anchor", "price"]) {
       const node = new FakeNode();
       node.refuse.add(route);
       const message = await thrown(client(node).post(new Uint8Array(10)));
@@ -481,6 +541,8 @@ describe("HttpArweaveClient", () => {
         Response.json({ block_height: 5, block_indep_hash: "x", number_of_confirmations: count });
       expect(await c.confirmations(tx)).toBe(depth);
     }
+    await expect(c.confirmations(new Uint8Array(31))).rejects.toThrow(RangeError);
+    expect(await c.data(new Uint8Array(31), 100)).toBeUndefined();
     for (const bad of [
       () => new Response("oops", { status: 500 }),
       () => new Response("not json"),
@@ -490,7 +552,7 @@ describe("HttpArweaveClient", () => {
       () => Response.json({}),
     ]) {
       node.status[id] = bad;
-      await expect(c.confirmations(tx)).rejects.toThrow();
+      expect(await thrown(c.confirmations(tx))).not.toMatch(/secret-key|arweave\.example/u);
     }
   });
 

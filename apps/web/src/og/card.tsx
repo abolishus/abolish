@@ -14,18 +14,18 @@ import {
   shortLink,
 } from "./model.ts";
 import { titles } from "../titles.ts";
+import { drawable } from "./glyphs.ts";
 import {
   answersCounted,
   answersSoFar,
-  byline,
   closing,
   countingLines,
   countOf,
   dayOf,
-  headline,
   longDayOf,
   openLines,
   sealedLines,
+  unworded,
 } from "./text.ts";
 
 /** The light palette's tokens (packages/ui/src/styles.css) as sRGB. */
@@ -69,6 +69,24 @@ const column = (style: CSSProperties = {}): CSSProperties => ({
   flexDirection: "column",
   ...style,
 });
+
+/**
+ * The headline as the image draws it: the question only when the card's
+ * fonts draw all of it (src/og/glyphs.ts), since a box in place of a letter
+ * would misquote it.
+ */
+const drawnHeadline = (model: PollPreview) =>
+  (model.question === undefined ? undefined : drawable(model.question)) ?? unworded(model);
+
+/** The byline: who asked, and where, each when the card's fonts draw it. */
+function byline(model: PollPreview): string {
+  const { text } = titles(model.locale);
+  const name = model.askedBy === undefined ? undefined : drawable(model.askedBy);
+  const who =
+    name === undefined ? text("ogAskedOn", { host: model.host }) : text("ogAskedBy", { name });
+  const place = model.place === undefined ? undefined : drawable(model.place);
+  return place === undefined ? who : `${who} · ${place}`;
+}
 
 /** The poll's seal: its fingerprint, framed as packages/ui draws it. */
 function Seal({ seal, size }: { seal: string; size: number }) {
@@ -267,7 +285,7 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
           lineClamp: t.lines,
         }}
       >
-        {headline(model)}
+        {drawnHeadline(model)}
       </div>
       <div style={row({ flex: 1 })} />
       {block}
@@ -382,7 +400,7 @@ function CivicCard({ model, format }: { model: CivicPreview; format: PreviewForm
               lineClamp: square ? 4 : 2,
             }}
           >
-            {headline(model)}
+            {drawnHeadline(model)}
           </div>
         </div>
         <Seal seal={model.seal} size={square ? 96 : 76} />

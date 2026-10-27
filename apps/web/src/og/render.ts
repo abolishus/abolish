@@ -24,11 +24,16 @@ const bytesOf = (base64: string): Uint8Array<ArrayBuffer> =>
 const font = (name: string, weight: 400 | 600, base64: string) =>
   ({ name, weight, style: "normal", data: bytesOf(base64).buffer }) as const;
 
-const FONTS: SatoriOptions["fonts"] = [
+/**
+ * Satori takes the first font of a name for the whole name, so the Latin
+ * Extended subset has a name of its own, which it falls back to for the
+ * characters Oxanium's Latin subset lacks (src/og/glyphs.ts).
+ */
+export const FONTS: SatoriOptions["fonts"] = [
   font("Oxanium", 400, oxanium400),
   font("Oxanium", 600, oxanium600),
-  font("Oxanium", 400, oxanium400Ext),
-  font("Oxanium", 600, oxanium600Ext),
+  font("Oxanium Latin Extended", 400, oxanium400Ext),
+  font("Oxanium Latin Extended", 600, oxanium600Ext),
   font("JetBrains Mono", 400, jetbrainsMono400),
 ];
 

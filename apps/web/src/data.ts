@@ -49,7 +49,11 @@ export const fetchPoll = createServerFn({ method: "GET" })
   })
   // Who asked it is read through the front's reader in the request's
   // context (src/start.ts), never the API (T-10); without one, no poll says.
-  .handler(({ data, context }) => opaque(() => loadPoll(api(), data, context.readAskedBy)));
+  // The poll's words are in the translation the request's language picks, as
+  // the page's own words are.
+  .handler(({ data, context }) =>
+    opaque(() => loadPoll(api(), data, context.locale, context.readAskedBy)),
+  );
 
 export const fetchBoardPage = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {

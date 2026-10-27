@@ -10,7 +10,7 @@ import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { previewMeta } from "../og/poll.ts";
 import { PREVIEW_SIZE } from "../og/model.ts";
-import { titles } from "../titles.ts";
+import { isolated, titles } from "../titles.ts";
 import { isElectionId } from "../values.ts";
 
 export const Route = createFileRoute("/polls/$electionId")({
@@ -22,7 +22,10 @@ export const Route = createFileRoute("/polls/$electionId")({
     const origin = siteOrigin();
     const preview =
       page.kind === "poll"
-        ? await previewMeta(page.poll, page.code, origin, Date.now(), locale)
+        ? await previewMeta(page.poll, page.code, origin, Date.now(), locale, {
+            question: page.text?.heading,
+            place: page.tags.place,
+          })
         : undefined;
     // The share sheet offers the short link only, the same for everyone
     // (docs/design/sharing.md), and none for a hidden poll, whose text
@@ -75,7 +78,11 @@ export const Route = createFileRoute("/polls/$electionId")({
               { property: "og:image:type", content: "image/png" },
               { property: "og:image:width", content: String(PREVIEW_SIZE.landscape.width) },
               { property: "og:image:height", content: String(PREVIEW_SIZE.landscape.height) },
-              { property: "og:image:alt", content: `${preview.title}. ${preview.description}` },
+              // Isolated: the title can be an author's words, which mustn't reorder ours (T-75).
+              {
+                property: "og:image:alt",
+                content: `${isolated(preview.title)}. ${preview.description}`,
+              },
               { name: "twitter:card", content: "summary_large_image" },
               { name: "twitter:image", content: preview.image },
             ]),

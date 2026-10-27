@@ -28,5 +28,8 @@ export function titles(locale: Locale) {
 /**
  * Text an author wrote, isolated (U+2068 … U+2069) so a right-to-left name
  * can't reorder the title's other words, as `<bdi>` does on the page (T-75).
+ * Its own embedding, override and isolate controls are dropped first, since
+ * one of them could close the isolate early and reorder what follows.
  */
-export const isolated = (s: string) => `⁨${s}⁩`;
+export const isolated = (s: string) =>
+  `\u2068${s.replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")}\u2069`;

@@ -65,6 +65,10 @@ export const Letter: Story = {
       "page",
     );
     await expect(page.getByTestId("flyer")).toHaveClass("aspect-[17/22]");
+    // Named by its code, in our own words and the page's language.
+    const heading = within(page.getByTestId("flyer")).getByRole("heading", { level: 2 });
+    await expect(heading).not.toHaveAttribute("lang");
+    await expect(heading).not.toHaveAttribute("dir");
   },
 };
 
@@ -139,5 +143,36 @@ export const Questions: Story = {
   play: async ({ canvasElement }) => {
     const sheet = within(within(canvasElement).getByTestId("flyer"));
     await expect(sheet.getByText("3 short questions, answered together.")).toBeVisible();
+  },
+};
+
+export const Worded: Story = {
+  name: "The poll's own words",
+  args: { title: "Should the park stay open late?", titleLanguage: "en" },
+  play: async (context) => {
+    await play(context);
+    const heading = within(within(context.canvasElement).getByTestId("flyer")).getByRole(
+      "heading",
+      { level: 2 },
+    );
+    await expect(heading).toHaveAttribute("lang", "en");
+    await expect(heading).toHaveAttribute("dir", "auto");
+  },
+};
+
+export const RightToLeft: Story = {
+  name: "Words written right to left",
+  args: { title: "هل يبقى المنتزه مفتوحاً حتى وقت متأخر؟", titleLanguage: "ar" },
+  play: async (context) => {
+    await play(context);
+    const heading = within(within(context.canvasElement).getByTestId("flyer")).getByRole(
+      "heading",
+      { level: 2 },
+    );
+    await expect(heading).toHaveAttribute("lang", "ar");
+    // Its own direction, while the rest of the sheet stays left to right.
+    await expect(getComputedStyle(heading).direction).toBe("rtl");
+    const sheet = within(context.canvasElement).getByTestId("flyer");
+    await expect(getComputedStyle(sheet).direction).toBe("ltr");
   },
 };

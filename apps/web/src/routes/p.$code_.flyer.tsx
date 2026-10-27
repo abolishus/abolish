@@ -10,7 +10,7 @@ import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { pollPreview } from "../og/poll.ts";
 import { headline } from "../og/text.ts";
-import { titles } from "../titles.ts";
+import { isolated, titles } from "../titles.ts";
 import { searchText } from "../values.ts";
 
 // A poll's printable flyer, `/p/<code>/flyer?paper=<a4|letter>&ink=<color|mono>`
@@ -44,7 +44,14 @@ export const Route = createFileRoute("/p/$code_/flyer")({
       code,
       url: `${origin}/p/${code}`,
       // The link preview's headline, so the flyer and a chat name the poll alike.
-      title: headline(pollPreview(page.poll, code, new URL(origin).host, Date.now(), locale)),
+      title: headline(
+        pollPreview(page.poll, code, new URL(origin).host, Date.now(), locale, {
+          question: page.text?.heading,
+          place: page.tags.place,
+        }),
+      ),
+      // The language of the poll's own words, when the headline is them.
+      titleLanguage: page.text?.language,
       // A hidden poll's text was withheld by moderation, so we print nothing
       // to spread it (docs/moderation-policy.md); a delisted one keeps its flyer.
       hidden: page.moderation.state === "hidden",
@@ -61,7 +68,12 @@ export const Route = createFileRoute("/p/$code_/flyer")({
           : [
               loaderData.hidden
                 ? pageTitle(text("flyerTitle"))
-                : pageTitle(text("flyerTitle"), loaderData.title),
+                : pageTitle(
+                    text("flyerTitle"),
+                    loaderData.titleLanguage === undefined
+                      ? loaderData.title
+                      : isolated(loaderData.title),
+                  ),
             ]),
       ],
     };

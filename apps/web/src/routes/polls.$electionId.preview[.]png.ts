@@ -38,11 +38,14 @@ export const Route = createFileRoute("/polls/$electionId/preview.png")({
         if (format !== null && format !== "square") return plain(400);
         const locale = previewLocale(url.searchParams.get("lang"));
         if (locale === undefined) return plain(400);
-        const page = await loadPoll(api(), params.electionId);
+        const page = await loadPoll(api(), params.electionId, locale);
         if (page.kind !== "poll") return plain(404);
         const shape = format === "square" ? "square" : "landscape";
         await loadCatalog(locale);
-        const model = pollPreview(page.poll, page.code, url.host, Date.now(), locale);
+        const model = pollPreview(page.poll, page.code, url.host, Date.now(), locale, {
+          question: page.text?.heading,
+          place: page.tags.place,
+        });
         const current = await previewVersion(model, shape);
         const etag = `"${current}"`;
         const headers = {

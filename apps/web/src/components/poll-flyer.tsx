@@ -14,8 +14,10 @@ export interface PollFlyerProps {
   code: string;
   /** Its short link, `<origin>/p/<code>`, the same for everyone. */
   url: string;
-  /** The link preview's headline: the question once the API serves it. */
+  /** The link preview's headline: the poll's words where they can be shown, else its code. */
   title: string;
+  /** The language of `title` when it is the poll's own words; absent when it is ours. */
+  titleLanguage?: string | undefined;
   paper: Paper;
   ink: Ink;
 }
@@ -61,7 +63,16 @@ function useWhen() {
  * about answers: no count, no lead. Always the light palette, as paper is;
  * `mono` drops the emerald band and frame for office printers.
  */
-export function FlyerSheet({ poll, asOf, code, url, title, paper, ink }: PollFlyerProps) {
+export function FlyerSheet({
+  poll,
+  asOf,
+  code,
+  url,
+  title,
+  titleLanguage,
+  paper,
+  ink,
+}: PollFlyerProps) {
   const t = useTranslate(catalogs);
   const when = useWhen();
   const status = pollStatus(poll, asOf);
@@ -95,7 +106,12 @@ export function FlyerSheet({ poll, asOf, code, url, title, paper, ink }: PollFly
           </span>
         </div>
         <div className="grid gap-[1.4cqw]">
-          <h2 className="m-0 line-clamp-4 font-heading text-[length:5.8cqw] leading-[1.08] font-semibold tracking-tight text-balance break-words">
+          {/* The poll's words in their own language and direction, as on a stream card. */}
+          <h2
+            lang={titleLanguage}
+            dir={titleLanguage === undefined ? undefined : "auto"}
+            className="m-0 line-clamp-4 font-heading text-[length:5.8cqw] leading-[1.08] font-semibold tracking-tight text-balance break-words"
+          >
             {title}
           </h2>
           {many ? (

@@ -8,7 +8,7 @@ import {EventAccumulatorLib} from "../src/EventAccumulator.sol";
 import {TrusteeIdentityLib, TrusteeRegistry} from "../src/TrusteeRegistry.sol";
 import {DefinitionEncoder, DefinitionHarness} from "./utils/DefinitionHarness.sol";
 import {RegistryFixture} from "./utils/RegistryFixture.sol";
-import {AuthorPanelFixture, ServingVersion6Registry} from "./utils/AuthorPanelFixture.sol";
+import {AuthorPanelFixture} from "./utils/AuthorPanelFixture.sol";
 import {TrusteeFixture, TrusteeHarness} from "./utils/TrusteeFixture.sol";
 import {TestBase, Vm} from "./utils/Vm.sol";
 
@@ -37,7 +37,7 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
         panel = trustees.panelIds(0);
         lib = new DefinitionHarness();
         tlib = new TrusteeHarness();
-        registry = new ServingVersion6Registry(RegistryFixture.deployment(address(trustees)));
+        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
         vm.warp(RegistryFixture.NOW);
         vm.roll(RegistryFixture.BLOCK);
     }
@@ -168,9 +168,7 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
     /// 9: a version-6 poll without one, and every earlier version.
     function test_RefusesADefinitionWithoutAnAuthorPanel() public {
         (bytes32 id, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
-        d.authorThreshold = 0;
-        d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
-        d.authorTranscriptHash = bytes32(0);
+        _withoutAuthorPanel(d);
         bytes memory enc = _approve(d);
         bytes memory reg = _authorRegistration(enc, _authorSeats(_range(1, 1)), _range(1, 1));
         _expectRefused(
@@ -295,29 +293,51 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
         }
     }
 
-    /// The deployed registry refuses every author panel at rule 9's
-    /// board-entry pin, before the author panel's checks or
-    /// `AuthorRegistrationMissing`, so it records no author key set until
-    /// P2-16 part 5e-5d serves board-entry version 7.
-    function test_TheDeployedRegistryRefusesItAtRule9() public {
-        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
-        (, bytes memory enc) = _approved(2, 3);
-        bytes memory reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
-        bytes memory unserved =
-            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 7);
-        _expectRefused(enc, reg, unserved);
-        _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
-        // Pinning board-entry version 5 doesn't help it: the author panel
-        // itself is refused there, so its key set is never recorded (T-17).
-        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
-        d.pinVersions[6] = 5;
-        enc = _approve(d);
-        reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
-        unserved =
-            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 5);
-        _expectRefused(enc, reg, unserved);
-        _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
-        _assertNothingRecorded(enc);
+    /// Rule 9 serves an author panel exactly tally-opening version 3 and
+    /// board-entry version 7, which verifier 2.3 requires beside it: any other
+    /// version of either is refused at its pin, in type order, before the
+    /// author panel's checks, recording nothing (docs/spec/contracts.md,
+    /// Registration, rule 9; T-17).
+    function test_Rule9ServesItTallyOpening3AndBoardEntry7() public {
+        for (uint8 v = 1; v <= 13; v++) {
+            for (uint256 t = 5; t <= 6; t++) {
+                if (v == 3 && t == 5 || v == 7 && t == 6) continue;
+                (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+                d.pinVersions[t] = v;
+                bytes memory enc = _approve(d);
+                bytes memory reg =
+                    _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
+                bytes memory unserved = abi.encodeWithSelector(
+                    ElectionRegistry.ProfileNotServed.selector, uint16(t + 1), v
+                );
+                _expectRefused(enc, reg, unserved);
+                _expectCallRefused(
+                    abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved
+                );
+                _assertNothingRecorded(enc);
+            }
+        }
+    }
+
+    /// A live poll with an author panel is refused at its board-entry pin
+    /// whatever it pins, board-entry version 7 included: 2.3 fails it until a
+    /// tally-opening version fixes the nodes' withholding check (T-16, T-45).
+    function test_RefusesALiveAuthorPanel() public {
+        for (uint8 v = 1; v <= 8; v++) {
+            (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+            d.resultsMode = 2;
+            d.liveEvery = 1;
+            d.liveBatch = 20;
+            d.pinVersions[6] = v;
+            bytes memory enc = _approve(d);
+            bytes memory reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
+            _expectRefused(
+                enc,
+                reg,
+                abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(7), v)
+            );
+            _assertNothingRecorded(enc);
+        }
     }
 
     // --- checks 1 to 5 -------------------------------------------------------------
@@ -622,17 +642,21 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
     // --- helpers -----------------------------------------------------------------
 
     /// A trustee registry pinning the default panel with kind `kind`, and a
-    /// registry serving version 6 over it.
+    /// registry over it.
     function _useKind(uint8 kind) internal {
         trustees = AuthorPanelFixture.trusteeRegistry(kind);
-        registry = new ServingVersion6Registry(RegistryFixture.deployment(address(trustees)));
+        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
         assertEq(trustees.panelIds(0), panel, "the same panel");
     }
 
+    /// `d` without its author panel, pinning what rule 9 then serves:
+    /// tally-opening version 1 and board-entry version 5.
     function _withoutAuthorPanel(ElectionDefinitionLib.Definition memory d) internal pure {
         d.authorThreshold = 0;
         d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
         d.authorTranscriptHash = bytes32(0);
+        d.pinVersions[5] = 1;
+        d.pinVersions[6] = 5;
     }
 
     function _create() internal returns (bytes32 id) {

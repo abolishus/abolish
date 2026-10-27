@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 import {ElectionDefinitionLib} from "../../src/ElectionDefinition.sol";
 import {ElectionRegistry} from "../../src/ElectionRegistry.sol";
 import {TrusteeRegistry} from "../../src/TrusteeRegistry.sol";
-import {AuthorPanelFixture, ServingVersion6Registry} from "../utils/AuthorPanelFixture.sol";
+import {AuthorPanelFixture} from "../utils/AuthorPanelFixture.sol";
 import {DefinitionHarness} from "../utils/DefinitionHarness.sol";
 import {RegistryFixture} from "../utils/RegistryFixture.sol";
 import {TrusteeFixture, TrusteeHarness} from "../utils/TrusteeFixture.sol";
@@ -99,6 +99,9 @@ contract AuthorPanelHandler is TestBase {
             d.authorThreshold = 0;
             d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
             d.authorTranscriptHash = bytes32(0);
+            // What rule 9 serves a sealed poll without one.
+            d.pinVersions[5] = 1;
+            d.pinVersions[6] = 5;
         }
         return AuthorPanelFixture.approve(trustees, lib, tlib, d);
     }
@@ -198,7 +201,7 @@ contract ElectionRegistryAuthorPanelInvariantTest is TestBase {
     function setUp() public {
         RegistryFixture.installL1Block(vm);
         TrusteeRegistry trustees = AuthorPanelFixture.trusteeRegistry();
-        registry = new ServingVersion6Registry(RegistryFixture.deployment(address(trustees)));
+        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
         vm.warp(RegistryFixture.NOW);
         vm.roll(RegistryFixture.BLOCK);
         handler = new AuthorPanelHandler(

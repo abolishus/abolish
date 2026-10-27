@@ -62,10 +62,10 @@ const CHIP =
  * works before the page's script loads, or without it (the kit's toggle group
  * and radio group need the script, and the toggle group sets an inline style
  * the CSP refuses). One value per group keeps each filter a single search
- * parameter, which the router keeps as sent. Each option says how many polls
- * on this page it matches.
+ * parameter, which the router keeps as sent. Each option says how many
+ * items on this page it matches.
  */
-function FilterGroup<T extends string>({
+export function FilterGroup<T extends string>({
   name,
   legend,
   options,

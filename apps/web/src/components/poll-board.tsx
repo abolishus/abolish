@@ -1,5 +1,6 @@
 import {
   BoardLedger,
+  buttonVariants,
   Count,
   Fingerprint,
   Hash,
@@ -23,10 +24,12 @@ import {
   type BoardRow,
   type EntryKind,
 } from "../board.ts";
+import { ENTRY_KINDS } from "../entry-kinds.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
 import type { BoardHead, Histories } from "../server/load.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
+import { FilterGroup } from "./poll-register.tsx";
 
 export interface PollBoardProps {
   poll: PollView;
@@ -35,6 +38,8 @@ export interface PollBoardProps {
   from: string;
   /** The checked entries from `from`, or `undefined` when `from` is past the end. */
   rows: readonly BoardRow[] | undefined;
+  /** The kind of entry the page shows, or every kind with `"all"` or `undefined`. */
+  kind: EntryKind | "all" | undefined;
   /** Entries per page: every page starts at a multiple of it. */
   pageSize: number;
   /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
@@ -66,13 +71,16 @@ const KIND_TEXT = {
  * and a page of entries this page decoded and hashed itself (src/board.ts).
  * Every link is a plain one to another page of the same route, so reading the
  * board needs no script. It never looks up an entry by number: asking our
- * server for your own would tell it which entry is yours (T-10).
+ * server for your own would tell it which entry is yours (T-10). The kind
+ * filter works on the page in hand, as the register's filters do, so the
+ * server is asked for the same 25 entries whatever a visitor filters by.
  */
 export function PollBoard({
   poll,
   head,
   from,
   rows,
+  kind,
   pageSize,
   anchors,
   histories,
@@ -92,6 +100,11 @@ export function PollBoard({
   // Never a second link to a page another one already reaches.
   const toLatest =
     size > 0n && start !== latest && earlier !== latest && later !== latest ? latest : undefined;
+  const only = kind === "all" ? undefined : kind;
+  // Values are canonical decimals and kinds from a fixed list: nothing needs escaping.
+  const pageHref = (at: bigint, of: EntryKind | undefined) =>
+    `${base}?from=${at}${of === undefined ? "" : `&kind=${of}`}`;
+  const shown = only === undefined ? rows : rows?.filter((row) => row.kind === only);
   return (
     <div className="grid gap-16">
       <PageHeader
@@ -179,24 +192,64 @@ export function PollBoard({
             {t(size === 0n ? "boardEmpty" : "boardEnd")}
           </p>
         ) : (
-          <div className="min-w-0 overflow-x-auto">
-            <BoardLedger
-              caption={t("boardCaption", { first: start, last: end - 1n, count: size })}
-              columns={{
-                index: t("boardColumnEntry"),
-                time: t("boardColumnPeriod"),
-                kind: t("boardColumnKind"),
-                hash: t("boardColumnHash"),
-              }}
-              fingerprintLabel={(row) => t("fingerprintEntry", { entry: BigInt(row.index) })}
-              entries={rows.map((row) => ({
-                index: BigInt(row.index),
-                time: String(row.segment),
-                kind: t(KIND_TEXT[row.kind]),
-                hash: row.hash,
-              }))}
-            />
-          </div>
+          <>
+            <form method="get" action={base} className="grid gap-4">
+              {start === 0n ? null : <input type="hidden" name="from" value={from} />}
+              <FilterGroup
+                name="kind"
+                legend={t("boardKindLegend")}
+                // Only the kinds on this page, and the one chosen: offering a
+                // kind no entry here has would only ever show nothing.
+                options={ENTRY_KINDS.filter(
+                  (k) => k === only || rows.some((row) => row.kind === k),
+                )}
+                checked={only}
+                count={(k) =>
+                  k === "all" ? rows.length : rows.filter((row) => row.kind === k).length
+                }
+                label={(k) => t(KIND_TEXT[k])}
+              />
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border pt-4">
+                <button type="submit" className={buttonVariants()}>
+                  {t("boardKindApply")}
+                </button>
+                {only === undefined ? null : (
+                  <a className="underline underline-offset-4" href={pageHref(start, undefined)}>
+                    {t("filterClear")}
+                  </a>
+                )}
+              </div>
+            </form>
+            {only === undefined ? null : (
+              <p className="m-0 text-sm font-medium">
+                {t("boardKindMatches", { shown: shown?.length ?? 0, total: rows.length })}
+              </p>
+            )}
+            {shown === undefined || shown.length === 0 ? (
+              <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+                {t("boardKindNone")}
+              </p>
+            ) : (
+              <div className="min-w-0 overflow-x-auto">
+                <BoardLedger
+                  caption={t("boardCaption", { first: start, last: end - 1n, count: size })}
+                  columns={{
+                    index: t("boardColumnEntry"),
+                    time: t("boardColumnPeriod"),
+                    kind: t("boardColumnKind"),
+                    hash: t("boardColumnHash"),
+                  }}
+                  fingerprintLabel={(row) => t("fingerprintEntry", { entry: BigInt(row.index) })}
+                  entries={shown.map((row) => ({
+                    index: BigInt(row.index),
+                    time: String(row.segment),
+                    kind: t(KIND_TEXT[row.kind]),
+                    hash: row.hash,
+                  }))}
+                />
+              </div>
+            )}
+          </>
         )}
         {earlier === undefined && later === undefined && toLatest === undefined ? null : (
           <Pagination aria-label={t("boardPages")} className="flex-wrap justify-between gap-4">
@@ -204,7 +257,7 @@ export function PollBoard({
               {earlier === undefined ? null : (
                 <PaginationItem>
                   <PaginationPrevious
-                    href={`${base}?from=${earlier}`}
+                    href={pageHref(earlier, only)}
                     text={t("boardEarlier")}
                     aria-label={t("boardEarlier")}
                   />
@@ -213,7 +266,7 @@ export function PollBoard({
               {later === undefined ? null : (
                 <PaginationItem>
                   <PaginationNext
-                    href={`${base}?from=${later}`}
+                    href={pageHref(later, only)}
                     text={t("boardLater")}
                     aria-label={t("boardLater")}
                   />
@@ -223,7 +276,7 @@ export function PollBoard({
                 <PaginationItem>
                   <a
                     className="inline-flex min-h-12 items-center px-2 underline underline-offset-4"
-                    href={`${base}?from=${toLatest}`}
+                    href={pageHref(toLatest, only)}
                   >
                     {t("boardLatest")}
                   </a>

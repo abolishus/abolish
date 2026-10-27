@@ -19,21 +19,10 @@ import {
   verifyConsistency,
 } from "@abolishus/crypto";
 
+import type { EntryKind } from "./entry-kinds.ts";
 import { fromHex, toHex } from "./values.ts";
 
-/** What an entry records, named by its payload's record type (docs/spec/board.md, Allowed payloads). */
-export type EntryKind =
-  | "ballot"
-  | "spoiled-opening"
-  | "ceremony"
-  | "tally-opening"
-  | "contract-event"
-  | "share-receipt"
-  | "share-complaint"
-  | "destruction"
-  | "close-statement"
-  | "running-opening"
-  | "author-approvals";
+export type { EntryKind } from "./entry-kinds.ts";
 
 const KINDS: ReadonlyMap<number, EntryKind> = new Map([
   [RECORD_TYPES.ballot, "ballot"],

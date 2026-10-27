@@ -4,15 +4,7 @@ import { PollRegister, type RegisterFilters } from "../components/poll-register.
 import { fetchPollList } from "../data.ts";
 import { COUNTINGS, POLL_STATUSES } from "../poll.ts";
 import { titles } from "../titles.ts";
-import { isElectionId, normalizeElectionId, searchText } from "../values.ts";
-
-/** A filter's value if it is `"all"` or in `allowed`; anything else, a repeat included, is dropped. */
-function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | "all" | undefined {
-  const given = searchText(value);
-  return given === "all" || allowed.some((option) => option === given)
-    ? (given as T | "all")
-    : undefined;
-}
+import { isElectionId, normalizeElectionId, oneOf, searchText } from "../values.ts";
 
 // The lookup form's target, and the register of polls: a poll ID goes to its
 // page under the one spelling that names it; anything else comes back to the

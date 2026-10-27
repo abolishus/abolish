@@ -55,6 +55,7 @@ const meta = {
     head,
     from: "25",
     rows,
+    kind: undefined,
     pageSize: 25,
     anchors,
     histories: { head: true, anchors: [true, true, true, true, true] },
@@ -76,7 +77,26 @@ export const Default: Story = {
     const table = canvas.getByRole("table", { name: "Entries 25 to 49 of 100" });
     await expect(within(table).getAllByRole("row")).toHaveLength(26);
     await expect(canvas.getByRole("img", { name: "Fingerprint of entry 25" })).toBeVisible();
-    await expect(canvas.getAllByText("Trustee receipt")).toHaveLength(5);
+    await expect(within(table).getAllByText("Trustee receipt")).toHaveLength(5);
+    // The kind filter offers only the kinds on this page, each with its count, All chosen.
+    const kinds = canvas.getByRole("radiogroup", { name: "Kind" });
+    const options = within(kinds).getAllByRole("radio");
+    await expect(options.map((o) => (o as HTMLInputElement).value)).toEqual([
+      "all",
+      "ballot",
+      "spoiled-opening",
+      "share-receipt",
+    ]);
+    await expect(options[0]).toBeChecked();
+    await expect(within(kinds).getByText("Sealed ballot").closest("label")).toHaveTextContent(
+      /Sealed ballot\s*15$/,
+    );
+    await expect(options[0]!.closest("form")).toHaveAttribute("action", base);
+    await expect(canvasElement.querySelector('input[type="hidden"][name="from"]')).toHaveValue(
+      "25",
+    );
+    await expect(canvas.queryByText(/entries on this page are of this kind/)).toBeNull();
+    await expect(canvas.queryByRole("link", { name: "Clear filters" })).toBeNull();
     await expect(canvas.getByRole("link", { name: "Earlier entries" })).toHaveAttribute(
       "href",
       `${base}?from=0`,
@@ -141,6 +161,63 @@ export const Default: Story = {
     await expect(lines[9]).toHaveTextContent(/^8\s*10$/);
     // Heights are attributes, never inline styles (style-src 'self').
     await expect(canvasElement.querySelector("svg [style]")).toBeNull();
+  },
+};
+
+/**
+ * One kind chosen: only this page's entries of that kind show, and every
+ * page link keeps the filter. The page is the same 25 entries, so the
+ * caption still names them all.
+ */
+export const KindChosen: Story = {
+  args: { kind: "spoiled-opening" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const table = canvas.getByRole("table", { name: "Entries 25 to 49 of 100" });
+    await expect(within(table).getAllByRole("row")).toHaveLength(6);
+    await expect(within(table).getAllByText("Spoiled ballot, opened")).toHaveLength(5);
+    await expect(within(table).queryByText("Sealed ballot")).toBeNull();
+    await expect(
+      canvas.getByText("5 of the 25 entries on this page are of this kind."),
+    ).toBeVisible();
+    await expect(
+      within(canvas.getByRole("radiogroup", { name: "Kind" })).getByRole("radio", {
+        name: /^Spoiled ballot, opened/,
+      }),
+    ).toBeChecked();
+    await expect(canvas.getByRole("link", { name: "Earlier entries" })).toHaveAttribute(
+      "href",
+      `${base}?from=0&kind=spoiled-opening`,
+    );
+    await expect(canvas.getByRole("link", { name: "Later entries" })).toHaveAttribute(
+      "href",
+      `${base}?from=50&kind=spoiled-opening`,
+    );
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      `${base}?from=25`,
+    );
+  },
+};
+
+/** A kind with no entry on this page: it stays offered, at 0, and the page says so. */
+export const KindNone: Story = {
+  args: { kind: "destruction" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByRole("table", { name: /^Entries \d/ })).toBeNull();
+    await expect(canvas.getByRole("status")).toHaveTextContent(
+      "No entries on this page are of this kind. Earlier or later pages may have some.",
+    );
+    const chosen = within(canvas.getByRole("radiogroup", { name: "Kind" })).getByRole("radio", {
+      name: /^Key destroyed/,
+    });
+    await expect(chosen).toBeChecked();
+    await expect(chosen.closest("label")).toHaveTextContent(/Key destroyed\s*0$/);
+    await expect(canvas.getByRole("link", { name: "Later entries" })).toHaveAttribute(
+      "href",
+      `${base}?from=50&kind=destruction`,
+    );
   },
 };
 

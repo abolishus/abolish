@@ -625,6 +625,41 @@ describe("board page", () => {
     expect(page).not.toContain("Later entries");
   });
 
+  test("filters the page in hand by kind, asking the API for the same entries (T-10)", async () => {
+    seen.length = 0;
+    await get(`/polls/${ID}/board?from=0`);
+    const plain = seen.map((r) => `${r.path}?${r.query}`).toSorted();
+    seen.length = 0;
+    const html = await (await get(`/polls/${ID}/board?from=0&kind=ceremony`)).text();
+    expect(seen.map((r) => `${r.path}?${r.query}`).toSorted()).toEqual(plain);
+    const page = html.replace(/<[^>]+>/g, "");
+    // The vector's first payload is the ceremony, the next a chain event.
+    expect(page).toContain(short(BOARD[0]!));
+    expect(page).not.toContain(short(BOARD[1]!));
+    expect(page).toContain("Entries 0 to 24 of 30");
+    expect(page).toMatch(/\d+ of the 25 entries on this page are of this kind\./);
+    expect(html).toMatch(
+      /<input[^>]*value="ceremony"[^>]*checked=""|<input[^>]*checked=""[^>]*value="ceremony"/,
+    );
+    expect(html).toContain(`href="/polls/${ID}/board?from=25&amp;kind=ceremony"`);
+    expect(html).toContain(`href="/polls/${ID}/board?from=0"`);
+    // The form keeps the page it filters, and still offers no lookup by entry number.
+    const later = await (await get(`/polls/${ID}/board?from=25&kind=all`)).text();
+    expect(later).toMatch(/<input type="hidden" name="from" value="25"\/>/);
+    expect(later).not.toMatch(/<input\b(?![^>]*type="hidden")[^>]*name="from"/);
+  });
+
+  test("shows every kind for an unknown or repeated kind", async () => {
+    for (const search of ["kind=vote", "kind=ceremony&kind=ballot", "kind=Ceremony"]) {
+      const page = (await (await follow(`/polls/${ID}/board?${search}`)).text()).replace(
+        /<[^>]+>/g,
+        "",
+      );
+      expect(page).toContain(short(BOARD[1]!));
+      expect(page).not.toContain("entries on this page are of this kind");
+    }
+  });
+
   test("says where the board ends, and when an entry isn't on it yet", async () => {
     expect(await text(`/polls/${ID}/board?from=50`)).toContain("there is no entry 50 yet");
   });
@@ -1874,13 +1909,13 @@ const KB = 1024;
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 170, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 167, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 201, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 168, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 202, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 166, css: 40, fonts: 58 },
   "/account": { html: 6, js: 192, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 248, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 167, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 168, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

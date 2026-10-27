@@ -23,9 +23,7 @@ import { countedResults, type FixedCountedTally } from "../src/index.ts";
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 /** Fixed per-election signing secrets for seats 1 to 3 (test data, never keys). */
-const SECRETS = [1, 2, 3].map((i) =>
-  Uint8Array.from({ length: 32 }, (_, b) => (b === 31 ? i : 7)),
-);
+const SECRETS = [1, 2, 3].map((i) => Uint8Array.from({ length: 32 }, (_, b) => (b === 31 ? i : 7)));
 
 type Votes = readonly (readonly (0 | 1)[])[];
 
@@ -113,9 +111,22 @@ const RULES = { optionCount: 2, threshold: 2, panelSize: 3 } as const;
 describe("countedResults", () => {
   test("every cell's counts, and each tier's summed from its own cells only", () => {
     const cells = [
-      { tier: 0, votes: [[1, 0], [1, 0], [0, 1]] as Votes },
+      {
+        tier: 0,
+        votes: [
+          [1, 0],
+          [1, 0],
+          [0, 1],
+        ] as Votes,
+      },
       { tier: 0, votes: [[1, 1]] as Votes },
-      { tier: 2, votes: [[0, 1], [0, 0]] as Votes },
+      {
+        tier: 2,
+        votes: [
+          [0, 1],
+          [0, 0],
+        ] as Votes,
+      },
     ];
     const { tally, payloads } = tallyOf(RULES, cells, 2);
     const r = countedResults(tally, payloads);
@@ -148,7 +159,13 @@ describe("countedResults", () => {
     const r = countedResults(tally, payloads);
     expect(r.ok).toBe(false);
     expect(r.failure).toEqual({ cell: 2, code: "tally-missing" });
-    expect(r.cells[2]).toEqual({ cell: 2, tier: 1, counted: 1, code: "tally-missing", signers: [] });
+    expect(r.cells[2]).toEqual({
+      cell: 2,
+      tier: 1,
+      counted: 1,
+      code: "tally-missing",
+      signers: [],
+    });
     expect(r.tiers).toEqual([
       { tier: 0, counted: 1, counts: ["1", "0"] },
       { tier: 1, counted: 2 },
@@ -186,7 +203,15 @@ describe("countedResults", () => {
   });
 
   test("an undercounted cell fails tally-range rather than showing its opening", () => {
-    const { tally, payloads } = tallyOf(RULES, [{ tier: 0, votes: [[1, 0], [1, 1]] }]);
+    const { tally, payloads } = tallyOf(RULES, [
+      {
+        tier: 0,
+        votes: [
+          [1, 0],
+          [1, 1],
+        ],
+      },
+    ]);
     const r = countedResults({ ...tally, counted: [1] }, payloads);
     expect(r.failure).toEqual({ cell: 0, code: "tally-range", option: 0 });
     expect(r.cells[0]?.counts).toBeUndefined();
@@ -200,9 +225,12 @@ describe("countedResults", () => {
           .array(
             fc.record({
               tier: fc.integer({ min: 0, max: 2 }),
-              votes: fc.array(fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: 2, maxLength: 2 }), {
-                maxLength: 3,
-              }),
+              votes: fc.array(
+                fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: 2, maxLength: 2 }),
+                {
+                  maxLength: 3,
+                },
+              ),
             }),
             { minLength: 1, maxLength: 3 },
           )

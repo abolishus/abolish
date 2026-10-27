@@ -1123,6 +1123,9 @@ describe("archiveBoards with contract events", () => {
     expectReplays((await replay(arweave)).replays, l2);
   });
 
+  // Each case clears the archive, drains a fresh one and replays it, so the cases
+  // take about a second together locally and more than the 5 s default on CI's
+  // shared runner, where a run left going holds the lock every later test waits on.
   test("refuses a record or events that don't check, writes nothing of the contract, archives the board, and carries on once they check", async () => {
     const cases: [string, ModelL2["tamper"], string][] = [
       [
@@ -1199,7 +1202,7 @@ describe("archiveBoards with contract events", () => {
       expect(replays.find((x) => x.role === "board")?.held, what).toBe(2n);
       expect((await walk(arweave, cidsOf(taken))).findings, what).toEqual([]);
     }
-  });
+  }, 30_000);
 
   test("refuses a record dated before the period's end, or proving less than the last", async () => {
     const arweave = new ModelArweave();

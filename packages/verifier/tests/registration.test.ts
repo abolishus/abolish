@@ -184,14 +184,33 @@ describe("registrationCheck", () => {
     });
   });
 
-  test("passes whatever order the records come in, and fails on any one of them dropped", () => {
+  test("passes the honest records shuffled among unrelated ones, and fails with either dropped", () => {
     const records = honest();
+    const elsewhere = { ...v5, value: { ...v5.value, election_id: flip(v5.value.election_id) } };
+    const unrelated: ContractEventRecord[] = [
+      // Another election's registration and another stub's ceremony.
+      definitionRegistered(elsewhere),
+      ceremonyRegistered(v5, { stubHash: new Uint8Array(32).fill(7) }),
+      // Whatever another contract logs.
+      { ...(records[1] as ContractEventRecord), contract: new Uint8Array(20).fill(9) },
+    ];
     fc.assert(
-      fc.property(fc.boolean(), fc.integer({ min: 0, max: 1 }), (reversed, dropped) => {
-        const ordered = reversed ? [...records].reverse() : records;
-        expect(check(ordered)).toEqual({ status: "pass" });
-        expect(check(ordered.filter((_, i) => i !== dropped)).status).toBe("fail");
-      }),
+      fc.property(
+        // Every honest record and some unrelated ones, in any order.
+        fc
+          .shuffledSubarray(unrelated)
+          .chain((extra) =>
+            fc.shuffledSubarray([...records, ...extra], {
+              minLength: records.length + extra.length,
+            }),
+          ),
+        fc.integer({ min: 0, max: 1 }),
+        (shuffled, dropped) => {
+          expect(check(shuffled)).toEqual({ status: "pass" });
+          const without = shuffled.filter((r) => r !== records[dropped]);
+          expect(check(without).status).toBe("fail");
+        },
+      ),
       { numRuns },
     );
   });

@@ -14,7 +14,7 @@
 // block misses no ceremony of this deployment's: a stub names an election
 // the election registry created, and the panel approves only a stub it can
 // check, so no honest ceremony is recorded before the registry existed; one
-// that was would only add a second record, which refuses.
+// that was would be missed, and the seat refuses (`ceremony-unregistered`).
 //
 // The L2 node is trusted for which logs exist, as for the electorate check
 // (src/electorate.ts) and the node's other L2 reads: hiding a registration
@@ -56,6 +56,7 @@ export function l2RegistrationCheck(options: L2RegistrationOptions): Registratio
       // T-71: a node on another chain could show any contract's logs at the
       // pinned addresses.
       if ((await chainId(l2)) !== release.chainId) return false;
+      // Nothing is asked of a range that is empty.
       const top = await l2Finalized(l2);
       if (top < fromBlock) return false;
       // Only the election's registration and its ceremony's, by their

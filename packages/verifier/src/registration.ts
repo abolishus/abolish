@@ -9,7 +9,7 @@
 // other than the ones the registered ceremony approved (T-34, T-37, T-71).
 //
 // The records are the caller's: a trustee node's finalized L2 read of those
-// two events (docs/spec/ceremony.md, Intake), or the subset a board carries.
+// two events (docs/spec/share-encryption.md, Intake and receipts), or the subset a board carries.
 // This decides only what they show: whether they are the registries' own,
 // and all of them, is the caller's to know (4.4 and the archive's replay),
 // so a pass here is a pass over those records, never 2.1's or 3.1's pass on

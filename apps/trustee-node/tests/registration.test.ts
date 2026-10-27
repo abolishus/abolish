@@ -125,8 +125,10 @@ describe("l2RegistrationCheck", () => {
     // Registered in block 20: not final while the finalized block is 19.
     expect(await check(l2Node(honest(), v5, 19n).rpc)(v5, KEY_SET)).toBe(false);
     expect(await check(l2Node(honest(), v5, 20n).rpc)(v5, KEY_SET)).toBe(true);
-    // Nor before the registry's deployment block.
-    expect(await check(l2Node(honest(), v5, FROM_BLOCK - 1n).rpc)(v5, KEY_SET)).toBe(false);
+    // Nor before the registry's deployment block, where nothing is asked.
+    const early = l2Node(honest(), v5, FROM_BLOCK - 1n);
+    expect(await check(early.rpc)(v5, KEY_SET)).toBe(false);
+    expect(early.asked).toEqual([]);
   });
 
   test("refuses a node of another chain, or a definition naming other registries", async () => {

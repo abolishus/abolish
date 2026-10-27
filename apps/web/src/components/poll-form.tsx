@@ -726,6 +726,19 @@ function PollReview({
         ),
       field: fieldId.title,
     },
+    // The description is in the definition as the title is, so it is
+    // recorded for good too; the review left it out, as if it could change
+    // after submitting (P2-29, creating a poll's iteration 17).
+    {
+      label: t("pollFormReviewDescription"),
+      value:
+        form.description === "" ? (
+          <span className="text-muted-foreground">{t("pollFormReviewNoDescription")}</span>
+        ) : (
+          <span className="whitespace-pre-line">{form.description}</span>
+        ),
+      field: fieldId.description,
+    },
     {
       label: t("pollFormReviewQuestions"),
       value: (

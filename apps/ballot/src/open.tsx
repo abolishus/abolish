@@ -194,8 +194,10 @@ export interface ElectionSource {
    * `c_L` (`cutoffs`), or, in a late run past `c_B`, made only where `late`
    * says the voter was told it is best effort, sending until the last-offer
    * cutoff `c_E` and depositing nothing ([[posting-relay]], The ballot's own
-   * deadline); absent where `post` is, and then never offered. The caller
-   * zeroes the records once this settles.
+   * deadline), and an earlier run's deposit looked for on L1 from `handed`,
+   * the cast's mark, before the first send (Outcome, The read); absent where
+   * `post` is, and then never offered. The caller zeroes the records once
+   * this settles.
    */
   readonly postOwn?: (
     electionId: Uint8Array,
@@ -203,6 +205,7 @@ export interface ElectionSource {
     postings: readonly Uint8Array[],
     cutoffs: PostingCutoffs,
     late: boolean,
+    handed: bigint,
   ) => Promise<WalletAnswer>;
   /**
    * Waits, without the election's lock, until the board records the posting
@@ -1478,8 +1481,8 @@ export function Ballot({
     run(async (current) => {
       await readHead();
       if (offerClosed()) return { ...offered };
-      const posted = await postChecked(sending, offered, (postings) =>
-        postingOwn(electionId, sending.ballot, postings, cutoffs(), late).catch(
+      const posted = await postChecked(sending, offered, (postings, marked) =>
+        postingOwn(electionId, sending.ballot, postings, cutoffs(), late, marked).catch(
           (): WalletAnswer => "failed",
         ),
       );

@@ -1449,6 +1449,14 @@ export const electionRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [
+      { name: "panelId", internalType: "bytes32", type: "bytes32" },
+      { name: "kind", internalType: "uint8", type: "uint8" },
+    ],
+    name: "CivicPanelNotIndependent",
+  },
+  {
+    type: "error",
     inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
     name: "DataTooLong",
   },
@@ -2445,6 +2453,7 @@ export const trusteeRegistryAbi = [
         components: [
           { name: "threshold", internalType: "uint8", type: "uint8" },
           { name: "quorum", internalType: "uint8", type: "uint8" },
+          { name: "kind", internalType: "uint8", type: "uint8" },
           { name: "keys", internalType: "bytes", type: "bytes" },
           {
             name: "points",
@@ -2517,6 +2526,13 @@ export const trusteeRegistryAbi = [
       { name: "keySetHash", internalType: "bytes32", type: "bytes32" },
       { name: "seats", internalType: "uint256", type: "uint256" },
     ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "panelId", internalType: "bytes32", type: "bytes32" }],
+    name: "kindOf",
+    outputs: [{ name: "", internalType: "uint8", type: "uint8" }],
     stateMutability: "view",
   },
   {
@@ -2623,6 +2639,7 @@ export const trusteeRegistryAbi = [
         indexed: false,
       },
       { name: "quorum", internalType: "uint8", type: "uint8", indexed: false },
+      { name: "kind", internalType: "uint8", type: "uint8", indexed: false },
       { name: "keys", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "PanelPinned",

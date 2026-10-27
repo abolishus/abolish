@@ -127,7 +127,8 @@ library TrusteeFixture {
         onCurve = true;
     }
 
-    /// The panel `id` of the vectors, as a deployment input with quorum `quorum`.
+    /// The panel `id` of the vectors, as a deployment input with quorum
+    /// `quorum`, transitional (kind 2) as the launch panel is.
     function panel(string memory json, string memory id, uint8 quorum)
         internal
         view
@@ -138,6 +139,7 @@ library TrusteeFixture {
         string[] memory keys = vm.parseJsonStringArray(json, string.concat(at, ".keys"));
         input.threshold = uint8(vm.parseJsonUint(json, string.concat(at, ".threshold")));
         input.quorum = quorum;
+        input.kind = 2;
         input.points = new uint256[2][](keys.length);
         for (uint256 k; k < keys.length; k++) {
             bytes memory enc = vm.parseBytes(keys[k]);

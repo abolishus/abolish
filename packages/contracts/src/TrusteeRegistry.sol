@@ -138,6 +138,10 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
         /// How many distinct seats must sign a ceremony registration,
         /// `threshold ≤ quorum ≤ n` (docs/spec/contracts.md, Trustee registry).
         uint8 quorum;
+        /// Whether the panel may hold a poll on the civic record: 1
+        /// (`independent`) or 2 (`transitional`), the deployment record's
+        /// `kind` (docs/spec/contracts.md, Trustee registry, The kind).
+        uint8 kind;
         /// The seats' `p256-key` encodings, in seat order (`n × 33` bytes).
         bytes keys;
         /// Each seat's key as `(x, y)`, checked against its encoding.
@@ -159,12 +163,16 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
         Key,
         DuplicateKey,
         Quorum,
-        DuplicatePanel
+        DuplicatePanel,
+        Kind
     }
 
-    /// @notice A panel is pinned: its threshold, quorum and keys, so the board
-    /// and any verifier read the deployment's panels from the chain alone.
-    event PanelPinned(bytes32 indexed panelId, uint8 threshold, uint8 quorum, bytes keys);
+    /// @notice A panel is pinned: its threshold, quorum, kind and keys, so the
+    /// board and any verifier read the deployment's panels from the chain
+    /// alone (contract-event version 12).
+    event PanelPinned(
+        bytes32 indexed panelId, uint8 threshold, uint8 quorum, uint8 kind, bytes keys
+    );
 
     /// @notice A quorum of the panel approved `transcriptHash` for `stubHash`.
     /// `registration` is the whole submitted record, signatures included, so
@@ -190,6 +198,10 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     error InvalidSignature(uint8 index);
     error AlreadyRecorded(bytes32 stubHash, bytes32 panelId);
 
+    /// The panel kinds (docs/spec/contracts.md, Trustee registry, The kind).
+    uint8 private constant INDEPENDENT = 1;
+    uint8 private constant TRANSITIONAL = 2;
+
     /// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(seats)`.
     uint256 private constant HEADER_LENGTH = 97;
     /// `u8(index) ‖ p256-sig`.
@@ -205,6 +217,8 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     /// The pinned panels' identifiers, in deployment order.
     bytes32[] public panelIds;
     mapping(bytes32 panelId => Panel) public panelOf;
+    /// @inheritdoc ITrusteeRegistry
+    mapping(bytes32 panelId => uint8) public kindOf;
     mapping(bytes32 panelId => mapping(uint256 index => uint256[2])) private _keyOf;
     mapping(bytes32 stubHash => mapping(bytes32 panelId => bytes32)) public transcriptOf;
     mapping(bytes32 stubHash => mapping(bytes32 panelId => KeySet)) private _keySetOf;
@@ -444,7 +458,8 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
     }
 
     /// Checks one panel in trustee-identity.md's order (size, threshold, each
-    /// key and its duplicates), then its quorum and that it is new, and
+    /// key and its duplicates), then its quorum, that it is new and its kind
+    /// (contracts.md, Trustee registry, Deployment, checks 5 to 7), and
     /// stores it.
     function _pin(uint256 position, PanelInput memory input) private {
         uint256 n = input.points.length;
@@ -476,11 +491,20 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry, ITrusteePanels {
         // n ≤ 16, so it fits a u8.
         bytes32 id = TrusteeIdentityLib.panelId(input.threshold, uint8(n), input.keys);
         if (panelOf[id].size != 0) revert InvalidPanel(position, PanelError.DuplicatePanel);
+        // Only the two kinds a deployment record names; 0 stays "not pinned".
+        if (input.kind != INDEPENDENT && input.kind != TRANSITIONAL) {
+            revert InvalidPanel(position, PanelError.Kind);
+        }
         panelOf[id] = Panel({threshold: input.threshold, size: uint8(n), quorum: input.quorum});
+        kindOf[id] = input.kind;
         panelIds.push(id);
         for (uint256 i; i < n; i++) {
             _keyOf[id][i + 1] = input.points[i];
         }
-        _log2(PanelPinned.selector, id, abi.encode(input.threshold, input.quorum, input.keys));
+        _log2(
+            PanelPinned.selector,
+            id,
+            abi.encode(input.threshold, input.quorum, input.kind, input.keys)
+        );
     }
 }

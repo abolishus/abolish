@@ -72,6 +72,7 @@ contract TrusteeIdentityVectorsTest is TestBase {
             TrusteeRegistry.PanelInput[] memory panels = new TrusteeRegistry.PanelInput[](1);
             panels[0].threshold = 2;
             panels[0].quorum = 2;
+            panels[0].kind = 2;
             panels[0].keys = bytes.concat(enc, partner);
             panels[0].points = new uint256[2][](2);
             panels[0].points[0] = [x, y];
@@ -382,6 +383,7 @@ contract TrusteeRegistryTest is TestBase {
         TrusteeRegistry.PanelInput[] memory panels = new TrusteeRegistry.PanelInput[](2);
         panels[0] = TrusteeFixture.panel(json, "panel-4-of-7", 5);
         panels[1] = TrusteeFixture.panel(json, "panel-2-of-2", 2);
+        panels[1].kind = 1;
         vm.recordLogs();
         TrusteeRegistry reg = new TrusteeRegistry(panels);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -394,9 +396,14 @@ contract TrusteeRegistryTest is TestBase {
             assertEq(logs[i].topics[1], id, "panel topic");
             assertTrue(
                 keccak256(logs[i].data)
-                    == keccak256(abi.encode(panels[i].threshold, panels[i].quorum, panels[i].keys)),
+                    == keccak256(
+                        abi.encode(
+                            panels[i].threshold, panels[i].quorum, panels[i].kind, panels[i].keys
+                        )
+                    ),
                 "data"
             );
+            assertEq(reg.kindOf(id), panels[i].kind, "kind");
             for (uint256 s; s < panels[i].points.length; s++) {
                 (uint256 x, uint256 y) = reg.keyOf(id, s + 1);
                 assertTrue(x == panels[i].points[s][0] && y == panels[i].points[s][1], "key");
@@ -407,6 +414,85 @@ contract TrusteeRegistryTest is TestBase {
         (,, uint8 quorum) = reg.panelOf(reg.panelIds(0));
         assertEq(quorum, 5, "quorum");
         _assertAccumulated(reg, logs);
+    }
+
+    /// Check 7: a panel's kind is 1 (`independent`) or 2 (`transitional`),
+    /// stored for `kindOf`, which is 0 for a panel the registry doesn't pin
+    /// (contracts.md, Trustee registry, Deployment, The kind; T-14).
+    function test_DeploymentPinsEachKind() public {
+        for (uint8 kind = 1; kind <= 2; kind++) {
+            TrusteeRegistry.PanelInput[] memory panels = _withQuorum(4);
+            panels[0].kind = kind;
+            TrusteeRegistry reg = new TrusteeRegistry(panels);
+            assertEq(reg.kindOf(reg.panelIds(0)), kind, "kind");
+            assertEq(reg.kindOf(bytes32(0)), 0, "no panel");
+            assertEq(reg.kindOf(panel), kind, "same panel, another deployment");
+        }
+        assertEq(registry.kindOf(keccak256("not pinned")), 0, "not pinned");
+    }
+
+    /// Kinds 0 and 3 to 255 are refused at the panel's position, after the
+    /// quorum and duplicate-panel checks; a kind word above 255 isn't a
+    /// `uint8`, so the constructor's decoder refuses it before any check,
+    /// even when its low byte is a valid kind.
+    function testFuzz_DeploymentRefusesOtherKinds(uint8 kind) public {
+        vm.assume(kind != 1 && kind != 2);
+        TrusteeRegistry.PanelInput[] memory panels = _withQuorum(4);
+        panels[0].kind = kind;
+        _expectPanelError(panels, 0, TrusteeRegistry.PanelError.Kind);
+    }
+
+    function test_DeploymentRefusesKindsZeroThreeAnd256() public {
+        uint8[2] memory small = [0, 3];
+        for (uint256 i; i < 2; i++) {
+            TrusteeRegistry.PanelInput[] memory panels = _withQuorum(4);
+            panels[0].kind = small[i];
+            _expectPanelError(panels, 0, TrusteeRegistry.PanelError.Kind);
+        }
+        // `kind` is the third word of the panel's tuple (threshold, quorum,
+        // kind, keys' offset, points' offset), after the array's offset,
+        // length and the tuple's own offset.
+        bytes memory args = abi.encode(_withQuorum(4));
+        uint256 word;
+        assembly ("memory-safe") {
+            word := mload(add(args, add(0x20, 0xa0)))
+        }
+        assertEq(word, 2, "the kind's word");
+        uint256[2] memory words = [uint256(256), 258];
+        for (uint256 i; i < 2; i++) {
+            bytes memory wide = bytes.concat(args);
+            assembly ("memory-safe") {
+                mstore(add(wide, add(0x20, 0xa0)), mload(add(words, mul(i, 0x20))))
+            }
+            bytes memory code = bytes.concat(type(TrusteeRegistry).creationCode, wide);
+            address created;
+            assembly ("memory-safe") {
+                created := create(0, add(code, 0x20), mload(code))
+            }
+            assertTrue(created == address(0), "kind word above 255 accepted");
+        }
+        // The same bytes with kind 2 in that word deploy.
+        bytes memory honest = bytes.concat(type(TrusteeRegistry).creationCode, args);
+        address ok;
+        assembly ("memory-safe") {
+            ok := create(0, add(honest, 0x20), mload(honest))
+        }
+        assertTrue(ok != address(0), "honest arguments refused");
+    }
+
+    /// Check 7 runs after the quorum (5) and duplicate-panel (6) checks.
+    function test_DeploymentChecksTheKindLast() public {
+        TrusteeRegistry.PanelInput[] memory panels = _withQuorum(3);
+        panels[0].kind = 0;
+        _expectPanelError(panels, 0, TrusteeRegistry.PanelError.Quorum);
+        panels = new TrusteeRegistry.PanelInput[](2);
+        panels[0] = TrusteeFixture.panel(json, "panel-4-of-7", 4);
+        panels[1] = TrusteeFixture.panel(json, "panel-4-of-7", 5);
+        panels[1].kind = 0;
+        _expectPanelError(panels, 1, TrusteeRegistry.PanelError.DuplicatePanel);
+        // Another kind doesn't make another panel either.
+        panels[1].kind = 1;
+        _expectPanelError(panels, 1, TrusteeRegistry.PanelError.DuplicatePanel);
     }
 
     function test_DeploymentRefusesNoPanels() public {
@@ -1160,5 +1246,145 @@ contract TrusteeRegistryTest is TestBase {
         for (uint256 i; i < len; i++) {
             out[i] = b[from + i];
         }
+    }
+}
+
+/// The events the registry emits against docs/spec/vectors/contract-event-v12.json
+/// (an independent Python generator): deployed at the file's address and
+/// chain with the panels its `PanelPinned` records log, at their block and
+/// time, then given the registration its `CeremonyRegistered` record carries,
+/// the registry emits exactly the file's six records, kind-carrying
+/// `PanelPinned` first, and its accumulator steps through the file's
+/// sequence (contracts.md, Contract-event record, Event tables (version 12);
+/// Trustee registry, Events; T-53, T-31).
+contract TrusteeRegistryEventVectorsTest is TestBase {
+    string internal constant EVENTS = "../../docs/spec/vectors/contract-event-v12.json";
+    /// The file's trustee-registry sequence starts with five panels.
+    uint256 internal constant PANELS = 5;
+
+    string internal json;
+
+    function setUp() public {
+        json = vm.readFile(EVENTS);
+    }
+
+    function test_EmitsVersion12sRecords() public {
+        assertTrue(
+            keccak256(bytes(vm.parseJsonString(json, ".format")))
+                == keccak256("abolish-contract-event-vectors/12"),
+            "format"
+        );
+        assertTrue(
+            keccak256(bytes(vm.parseJsonString(json, ".sequences[0].role")))
+                == keccak256("trustee-registry"),
+            "sequence role"
+        );
+        address at = address(bytes20(_hex(".contracts.trustee-registry")));
+        vm.chainId(vm.parseJsonUint(json, ".chainId"));
+
+        TrusteeRegistry.PanelInput[] memory panels = new TrusteeRegistry.PanelInput[](PANELS);
+        for (uint256 i; i < PANELS; i++) {
+            panels[i] = _panelOf(_record(i));
+        }
+        vm.recordLogs();
+        _moveTo(_record(0));
+        _deployAt(at, abi.encode(panels));
+        TrusteeRegistry reg = TrusteeRegistry(at);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs.length, PANELS, "one log per panel");
+        for (uint256 i; i < PANELS; i++) {
+            string memory r = _record(i);
+            string memory id = vm.parseJsonString(json, string.concat(r, ".id"));
+            assertTrue(logs[i].emitter == at, id);
+            string[] memory topics =
+                vm.parseJsonStringArray(json, string.concat(r, ".fields.topics"));
+            assertEq(logs[i].topics.length, topics.length, id);
+            for (uint256 t; t < topics.length; t++) {
+                assertEq(
+                    logs[i].topics[t], bytes32(vm.parseBytes(string.concat("0x", topics[t]))), id
+                );
+            }
+            assertTrue(
+                keccak256(logs[i].data) == keccak256(_hex(string.concat(r, ".fields.data"))), id
+            );
+            assertEq(logs[i].topics[0], TrusteeRegistry.PanelPinned.selector, id);
+            assertEq(reg.kindOf(logs[i].topics[1]), panels[i].kind, id);
+        }
+        (bytes32 acc, uint64 n) = reg.eventAccumulator();
+        assertEq(n, PANELS, "accumulator count");
+        assertEq(
+            acc,
+            bytes32(
+                vm.parseBytes(
+                    string.concat(
+                        "0x",
+                        vm.parseJsonString(
+                            json,
+                            string.concat(
+                                ".sequences[0].accumulators[", vm.toString(PANELS - 1), "]"
+                            )
+                        )
+                    )
+                )
+            ),
+            "accumulator"
+        );
+    }
+
+    /// The sequence's `i`th record, found by its id.
+    function _record(uint256 i) internal view returns (string memory) {
+        string memory id =
+            vm.parseJsonString(json, string.concat(".sequences[0].records[", vm.toString(i), "]"));
+        for (
+            uint256 j;
+            vm.keyExistsJson(json, string.concat(".records[", vm.toString(j), "]"));
+            j++
+        ) {
+            string memory r = string.concat(".records[", vm.toString(j), "]");
+            if (
+                keccak256(bytes(vm.parseJsonString(json, string.concat(r, ".id"))))
+                    == keccak256(bytes(id))
+            ) {
+                return r;
+            }
+        }
+        revert("record not found");
+    }
+
+    /// The deployment input a `PanelPinned` record logs: its threshold,
+    /// quorum, kind and keys, each key's point decompressed from its encoding.
+    function _panelOf(string memory r) internal view returns (TrusteeRegistry.PanelInput memory p) {
+        (p.threshold, p.quorum, p.kind, p.keys) =
+            abi.decode(_hex(string.concat(r, ".fields.data")), (uint8, uint8, uint8, bytes));
+        uint256 n = p.keys.length / TrusteeIdentityLib.KEY_LENGTH;
+        p.points = new uint256[2][](n);
+        for (uint256 s; s < n; s++) {
+            bytes memory enc = new bytes(TrusteeIdentityLib.KEY_LENGTH);
+            for (uint256 b; b < enc.length; b++) {
+                enc[b] = p.keys[s * TrusteeIdentityLib.KEY_LENGTH + b];
+            }
+            (uint256 x, uint256 y, bool onCurve) = TrusteeFixture.point(enc);
+            assertTrue(onCurve, "key");
+            p.points[s] = [x, y];
+        }
+    }
+
+    function _moveTo(string memory r) internal {
+        vm.roll(vm.parseJsonUint(json, string.concat(r, ".fields.l2Block")));
+        vm.warp(vm.parseJsonUint(json, string.concat(r, ".fields.l2Timestamp")));
+    }
+
+    /// Runs the registry's constructor at `at`, as a deployment to that
+    /// address would: its events and accumulator are `at`'s.
+    function _deployAt(address at, bytes memory args) internal {
+        vm.etch(at, bytes.concat(type(TrusteeRegistry).creationCode, args));
+        (bool ok, bytes memory runtime) = at.call("");
+        assertTrue(ok, "deployment");
+        vm.etch(at, runtime);
+    }
+
+    function _hex(string memory key) internal view returns (bytes memory) {
+        return vm.parseBytes(string.concat("0x", vm.parseJsonString(json, key)));
     }
 }

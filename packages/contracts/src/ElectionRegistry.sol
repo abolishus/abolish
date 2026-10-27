@@ -217,6 +217,7 @@ contract ElectionRegistry is EventAccumulator {
     error SequencerDriftTooLarge(uint64 maxSequencerDrift);
     error RootNotInPast(uint8 tier, uint64 rootL2Block, uint256 blockNumber);
     error CeremonyNotRecorded(bytes32 stubHash, bytes32 transcriptHash);
+    error CivicPanelNotIndependent(bytes32 panelId, uint8 kind);
     error AuthorRegistrationMissing();
     error AuthorPanelAbsent();
     /// 1 the panel, 2 the stub, 3 the transcript.
@@ -477,6 +478,13 @@ contract ElectionRegistry is EventAccumulator {
                 stub, def.ceremonyTranscriptHash, def.panelId, def.threshold, def.panelSize
             );
         if (!recorded) revert CeremonyNotRecorded(stub, def.ceremonyTranscriptHash);
+        // Only an independent panel holds a poll on the civic record, classes
+        // 2 and 3; `pollClass` is 0 below definition version 6, which has
+        // none (rule 8; T-14).
+        if (def.pollClass >= 2) {
+            uint8 kind = ITrusteeRegistry(trusteeRegistry).kindOf(def.panelId);
+            if (kind != 1) revert CivicPanelNotIndependent(def.panelId, kind);
+        }
         _requireServedProfile(def);
     }
 
@@ -643,11 +651,12 @@ contract ElectionRegistry is EventAccumulator {
     /// for 3 and 4, 3 for 5; none for 6, whose ballot version 4 the board
     /// can't check), the spoiled-ballot opening version that opens that
     /// ballot's cores, board-entry version 5, the only one that allows the
-    /// close statement, contract-event version 8, the only one that archives
-    /// every event of the board (the close rule's, the batches', the
-    /// obligation root's and the availability records') and of the group
-    /// registry (its Tier 1 additions and its self-paid groups and
-    /// additions), and the display-text version the
+    /// close statement, contract-event version 12, whose tables name every
+    /// event of the board (the close rule's, the batches', the obligation
+    /// root's and the availability records'), of the group registry (its
+    /// Tier 1 additions and its self-paid groups and additions) and the
+    /// trustee registry's kind-carrying `PanelPinned`, which versions 1 to 11
+    /// don't, and the display-text version the
     /// definition's layout needs. So no registered election leaves a voter's
     /// direct submission, a seat's statement or a challenge without a path
     /// the verifier reads (T-25, T-50, T-42, T-53). `profile-types` fixed the
@@ -668,7 +677,7 @@ contract ElectionRegistry is EventAccumulator {
         // Opening version 2 opens the cores of ballot versions 2 and 3.
         if (pins[2] != (ballot == 1 ? 1 : 2)) revert ProfileNotServed(0x0003, pins[2]);
         if (pins[6] != 5) revert ProfileNotServed(0x0007, pins[6]);
-        if (pins[7] != 8) revert ProfileNotServed(0x0008, pins[7]);
+        if (pins[7] != 12) revert ProfileNotServed(0x0008, pins[7]);
         // Display-text version 2 carries definition version 5's questions.
         if (pins[8] != (v == 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
     }

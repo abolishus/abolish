@@ -234,6 +234,11 @@ library DefinitionEncoder {
 /// as recorded once a test records it.
 contract MockTrusteeRegistry is ITrusteeRegistry {
     mapping(bytes32 => bool) internal recorded;
+    mapping(bytes32 panelId => uint8) public kindOf;
+
+    function setKind(bytes32 panelId, uint8 kind) external {
+        kindOf[panelId] = kind;
+    }
 
     function record(
         bytes32 stubHash,

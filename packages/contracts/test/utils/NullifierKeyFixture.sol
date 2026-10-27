@@ -25,7 +25,8 @@ library NullifierKeyFixture {
         0x8602de41042b8fe8d503f4ac0dd274559ebca3a0248d305ef6e9a4f1d04dfca2;
 
     /// Panel `name` of the vectors as a deployment input. The ceremony
-    /// quorum is the threshold: the group registry never reads it.
+    /// quorum is the threshold and the kind transitional: the group registry
+    /// reads neither.
     function panel(string memory json, string memory name)
         internal
         pure
@@ -35,6 +36,7 @@ library NullifierKeyFixture {
         string[] memory keys = vm.parseJsonStringArray(json, string.concat(at, ".keys"));
         input.threshold = uint8(vm.parseJsonUint(json, string.concat(at, ".threshold")));
         input.quorum = input.threshold;
+        input.kind = 2;
         input.points = new uint256[2][](keys.length);
         for (uint256 i; i < keys.length; i++) {
             input.keys = bytes.concat(input.keys, vm.parseBytes(keys[i]));

@@ -246,10 +246,10 @@ contract ElectionRegistryTest is TestBase {
     /// decodes, by pin (type 0x0001 to 0x0009), written from the spec: 0
     /// where any version is admitted. Version 6 has none.
     function _served(uint8 version) internal pure returns (uint8[9] memory v) {
-        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 8, 1];
-        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 8, 1];
-        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 8, 1];
-        return [5, 3, 2, 0, 0, 0, 5, 8, 2];
+        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 12, 1];
+        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 12, 1];
+        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 12, 1];
+        return [5, 3, 2, 0, 0, 0, 5, 12, 2];
     }
 
     function _templateOf(bytes32 id, uint8 version)
@@ -285,12 +285,13 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// Each served pin set to any other version from 1 to 9 is refused with
+    /// Each served pin set to any other version from 1 to 13 is refused with
     /// its record type and the version pinned, and nothing is recorded:
-    /// contract-event versions 1 to 7, which can't read every event of the
-    /// board and the group registry (version 5 names no Tier 1 addition,
-    /// version 6 no self-paid group or addition, version 7 no availability
-    /// record);
+    /// contract-event versions 1 to 11, which can't read every event of the
+    /// board, the group registry and the trustee registry (version 5 names no
+    /// Tier 1 addition, version 6 no self-paid group or addition, version 7
+    /// no availability record, versions 1 to 11 no kind-carrying
+    /// `PanelPinned`), and 13, which no release specifies;
     /// board-entry versions without the close statement; ballot versions the
     /// board can't check, or that don't name the definition's cells; opening
     /// versions that don't open the ballot's cores; and display-text versions
@@ -301,7 +302,7 @@ contract ElectionRegistryTest is TestBase {
             uint8[9] memory served = _served(versions[i]);
             for (uint256 t = 1; t < 9; t++) {
                 if (served[t] == 0) continue;
-                for (uint8 v = 1; v <= 9; v++) {
+                for (uint8 v = 1; v <= 13; v++) {
                     if (v == served[t]) continue;
                     bytes32 id = _create();
                     ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
@@ -317,6 +318,22 @@ contract ElectionRegistryTest is TestBase {
                     _assertNoParameters(lib.hash(enc));
                 }
             }
+        }
+    }
+
+    /// Definitions below version 6 carry no poll class, so rule 8 never asks
+    /// their panel's kind: each registers under a panel whose kind is 0, as
+    /// the trustee registry reports for one it doesn't know.
+    function test_VersionsBelow6NeedNoKind() public {
+        uint8[4] memory versions = [1, 3, 4, 5];
+        for (uint256 i; i < 4; i++) {
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
+            assertEq(trustees.kindOf(d.panelId), 0, "no kind");
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            assertEq(registry.definitionHashOf(id), lib.hash(enc), "registered");
         }
     }
 

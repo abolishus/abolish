@@ -111,6 +111,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   9: load("contract-event-v9.json"),
   10: load("contract-event-v10.json"),
   11: load("contract-event-v11.json"),
+  12: load("contract-event-v12.json"),
 };
 const vectors = FILES[1];
 
@@ -164,6 +165,7 @@ function project(e: ContractEvent): unknown {
         panelId: bytesToHex(e.panelId),
         threshold: e.threshold,
         quorum: e.quorum,
+        ...(e.kind === undefined ? {} : { kind: e.kind }),
         keys: e.keys.map(bytesToHex),
       };
     case "CeremonyRegistered":
@@ -471,6 +473,7 @@ describe.each([
   [9, "contract-event-v9.json"],
   [10, "contract-event-v10.json"],
   [11, "contract-event-v11.json"],
+  [12, "contract-event-v12.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -1450,6 +1453,119 @@ describe("contract-event version 11 against version 10", () => {
       });
       expect(bytesToHex(callHash), m.record).toBe(m.callHash);
       expect(m.callHash === call.callHash ? "match" : "relay-unmatched", m.record).toBe(m.result);
+    }
+  });
+});
+
+// docs/spec/vectors/contract-event-v12.json (version 12, the trustee
+// registry's `PanelPinned` with each panel's kind) from
+// scripts/contract-event-v12-vectors.py, an independent generator over
+// version 11's check. Its records, failures, decode rejections and
+// accumulator run above; these are its relation to version 11 and the kind
+// word's strictness.
+const V12 = FILES[12] as Vectors & {
+  readonly underVersion11: Readonly<Record<string, string>>;
+};
+const PANEL_PINNED_V1 = "PanelPinned(bytes32,uint8,uint8,bytes)";
+const PANEL_PINNED_V12 = "PanelPinned(bytes32,uint8,uint8,uint8,bytes)";
+
+describe("contract-event version 12 against version 11", () => {
+  test("its tables are version 11's with the trustee registry's PanelPinned replaced in place", () => {
+    for (const role of [
+      "election-registry",
+      "trustee-registry",
+      "group-registry",
+      "board",
+    ] as const)
+      expect(CONTRACT_EVENT_SIGNATURES[12][role]).toEqual(
+        CONTRACT_EVENT_SIGNATURES[11][role].map((s) =>
+          role === "trustee-registry" && s === PANEL_PINNED_V1 ? PANEL_PINNED_V12 : s,
+        ),
+      );
+    expect(CONTRACT_EVENT_SIGNATURES[11]["trustee-registry"]).toContain(PANEL_PINNED_V1);
+    expect(V12.events.find((e) => e.signature === PANEL_PINNED_V12)?.indexed).toEqual(["panelId"]);
+  });
+
+  // Version 12 reads every record version 11 does alike, but version 1's
+  // `PanelPinned`, which its table no longer names (Event tables (version
+  // 12)). Version 11's file has no trustee-registry record, so version 2's
+  // (the registry's layouts since) are checked too.
+  test("every version-11 vector and version-2 trustee-registry vector keeps its verdict, but version 1's PanelPinned", () => {
+    const v1Topic = bytesToHex(sigTopic(PANEL_PINNED_V1));
+    const all: [VectorRecord, ContractEventVersion][] = [
+      ...[...FILES[11].records, ...FILES[11].eventFailures].map(
+        (v) => [v, 11] as [VectorRecord, ContractEventVersion],
+      ),
+      ...[...FILES[2].records, ...FILES[2].eventFailures]
+        .filter((v) => v.fields.contract === FILES[2].contracts["trustee-registry"])
+        .map((v) => [v, 2] as [VectorRecord, ContractEventVersion]),
+    ];
+    expect(all.length).toBeGreaterThan(90);
+    let panels = 0;
+    for (const [v, from] of all) {
+      const v1Panel =
+        v.fields.topics[0] === v1Topic &&
+        v.fields.contract === FILES[from].contracts["trustee-registry"];
+      if (v1Panel) panels++;
+      expect(verdictUnder(v, from, 12), v.id).toEqual(
+        v1Panel ? { ok: false, error: "unknown-event" } : expected(v),
+      );
+    }
+    expect(panels).toBeGreaterThan(0);
+  });
+
+  // Under version 11 the kind-carrying event is no event of the trustee
+  // registry's, so versions 1 to 11 must be retired before a registry that
+  // logs the kind is deployed (T-53).
+  test("underVersion11 gives each kind-carrying record's verdict under version 11, and the rest pass it alike", () => {
+    const topic0 = bytesToHex(sigTopic(PANEL_PINNED_V12));
+    for (const v of V12.records) {
+      const kinded = v.fields.topics[0] === topic0;
+      expect(V12.underVersion11[v.id]).toBe(kinded ? "unknown-event" : undefined);
+      expect(verdictUnder(v, 12, 11), v.id).toEqual(
+        kinded ? { ok: false, error: "unknown-event" } : expected(v),
+      );
+    }
+    const failing = V12.eventFailures.filter(
+      (v) =>
+        v.fields.topics[0] === topic0 && v.fields.contract === V12.contracts["trustee-registry"],
+    );
+    expect(failing.length).toBeGreaterThan(20);
+    for (const v of failing)
+      expect(verdictUnder(v, 12, 11), v.id).toEqual({ ok: false, error: "unknown-event" });
+  });
+
+  // Only words 1 and 2 are kinds the registry pins (Trustee registry,
+  // Deployment, check 7): every other word in the kind's place fails
+  // `event-data`, so no record carries a kind the registry can't log (T-31,
+  // T-53).
+  test("a PanelPinned record passes with exactly the kind words 1 and 2", () => {
+    const honest = V12.records.find((r) => r.id === "panel-pinned-4-of-7");
+    if (honest === undefined) throw new Error("no panel-pinned-4-of-7");
+    const v12 = contractsOf(V12);
+    const record = recordOf(honest.fields);
+    fc.assert(
+      fc.property(fc.bigInt({ min: 0n, max: (1n << 256n) - 1n }), (kind) => {
+        const data = record.data.slice();
+        data.set(uintWord(kind), 64);
+        const result = checkContractEvent({ ...record, data }, v12, 12);
+        if (kind === 1n || kind === 2n) {
+          if (!result.ok || result.event.event !== "PanelPinned") return false;
+          return result.event.kind === Number(kind);
+        }
+        return !result.ok && result.error === "event-data";
+      }),
+      { numRuns },
+    );
+    for (const kind of [0n, 1n, 2n, 3n, 255n, 256n, 257n, (1n << 255n) + 2n]) {
+      const data = record.data.slice();
+      data.set(uintWord(kind), 64);
+      const result = checkContractEvent({ ...record, data }, v12, 12);
+      expect(result.ok ? result.event : result, String(kind)).toEqual(
+        kind === 1n || kind === 2n
+          ? expect.objectContaining({ event: "PanelPinned", kind: Number(kind) })
+          : { ok: false, error: "event-data" },
+      );
     }
   });
 });

@@ -14,7 +14,6 @@
 import {
   type AnyElectionDefinitionRecord,
   checkContractEvent,
-  CONTRACT_EVENT_SIGNATURES,
   type ContractEvent,
   type ContractEventRecord,
   type ContractEventVersion,
@@ -44,14 +43,14 @@ export const AVAILABILITY_COMPLAINT_SUBMITTED = topic(
 );
 
 /**
- * The newest contract-event version this release reads: its tables hold
+ * The contract-event version this release reads: the newest whose tables hold
  * every event the deployable contracts emit, and these three are the same in
- * every version from 2 on. The verifier judges the logs again under the
- * version the definition pins (4.4).
+ * every version from 2 on. Version 12's `PanelPinned` logs a kind the
+ * deployable trustee registry doesn't log until P2-16 part 5e-2, which moves
+ * this to 12. The verifier judges the logs again under the version the
+ * definition pins (4.4).
  */
-export const READ_VERSION = Math.max(
-  ...Object.keys(CONTRACT_EVENT_SIGNATURES).map(Number),
-) as ContractEventVersion;
+export const READ_VERSION: ContractEventVersion = 11;
 
 /** Why an election couldn't be read from L2; the election is reported and skipped. */
 export type L2ErrorCode =

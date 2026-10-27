@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 11
+// The contract-event record, record type 0x0008 versions 1 to 12
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -17,7 +17,10 @@
 // P2-16), version 10 the board's rolling ballot event, which carries the
 // root a version-5 ballot was proved against (T-25, T-52, P2-17), and version
 // 11 its relayed rolling ballot event, which carries the relay call's fields
-// and root as well (T-50, T-71, P2-17).
+// and root as well (T-50, T-71, P2-17), and version 12 replaces the trustee
+// registry's `PanelPinned` with one that logs each panel's kind, which the
+// election registry reads to refuse a civic-record poll under a panel that
+// isn't independent (T-14, T-53, P2-16).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -87,7 +90,9 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
  * `BallotSubmitted` carrying ballot version 4, about 209 KB, and versions
  * 10's and 11's a rolling event carrying ballot version 5, that with the
  * step's 4 bytes and the root's word (and, for the relayed one, its four call
- * fields' 128 bytes). An event that needs more is a new record version.
+ * fields' 128 bytes); version 12's `PanelPinned` is 32 bytes more than
+ * version 1's, its kind's word. An event that needs more is a new record
+ * version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 
@@ -104,7 +109,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 11 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 12 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -119,6 +124,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   9: contractEventV1,
   10: contractEventV1,
   11: contractEventV1,
+  12: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -126,7 +132,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -207,6 +213,13 @@ export type ContractEvent =
       readonly panelId: Uint8Array;
       readonly threshold: number;
       readonly quorum: number;
+      /**
+       * The panel's kind, 1 (`independent`) or 2 (`transitional`), under
+       * version 12, whose `PanelPinned` logs it; absent under versions 1 to
+       * 11. Verifier 2.5 judges `panel-kind` by the kind its release pins,
+       * never this one.
+       */
+      readonly kind?: PanelKindWord;
       readonly keys: readonly Uint8Array[];
     }
   | {
@@ -498,36 +511,69 @@ const DEFINITION_REGISTERED_V2 = definitionRegistered(
   decodeRegistrableElectionDefinition,
 );
 
-const PANEL_PINNED: EventSpec = {
-  signature: "PanelPinned(bytes32,uint8,uint8,bytes)",
-  decode(topics, data) {
-    const [, panelId] = topics;
-    if (topics.length !== 2 || panelId === undefined) return "event-topics";
-    const abi = readAbi(data, 3, [{ at: 2, words: false, max: 33 * MAX_TRUSTEES }]);
-    const threshold = abi && uintWord(word(abi.words, 0), 8);
-    const quorum = abi && uintWord(word(abi.words, 1), 8);
-    const encodings = abi?.tails[0];
-    if (threshold === undefined || quorum === undefined || encodings === undefined)
-      return "event-data";
-    if (encodings.length === 0 || encodings.length % 33 !== 0) return "event-data";
-    const keys: Uint8Array[] = [];
-    for (let i = 0; i < encodings.length; i += 33) {
-      try {
-        keys.push(decode(p256Key, encodings.subarray(i, i + 33)));
-      } catch (e) {
-        if (e instanceof DecodeError) return "event-data";
-        throw e;
+/** A panel's kind as the trustee registry logs it: 1 `independent`, 2 `transitional`. */
+export type PanelKindWord = 1 | 2;
+
+// The kinds the trustee registry pins (docs/spec/contracts.md, Trustee
+// registry, Deployment, check 7). Any other word, 0 and 3 included, is no
+// kind the registry emits, so it fails `event-data`, and a canonical `uint8`
+// word with a valid low byte but a high bit set never reads as that kind
+// (T-31, T-53).
+function panelKindWord(w: Uint8Array): PanelKindWord | undefined {
+  const v = uintWord(w, 8);
+  return v === 1n || v === 2n ? (Number(v) as PanelKindWord) : undefined;
+}
+
+// Version 1's `PanelPinned(bytes32,uint8,uint8,bytes)`, data `abi.encode(k,
+// q, keys)`; and version 12's `PanelPinned(bytes32,uint8,uint8,uint8,bytes)`,
+// data `abi.encode(k, q, kind, keys)` with the keys' offset `0x80`. Version
+// 1's data under version 12's topic fails, since its third word is the
+// offset `0x60`, never a kind (T-31).
+function panelPinned(withKind: boolean): EventSpec {
+  const head = withKind ? 4 : 3;
+  return {
+    signature: withKind
+      ? "PanelPinned(bytes32,uint8,uint8,uint8,bytes)"
+      : "PanelPinned(bytes32,uint8,uint8,bytes)",
+    decode(topics, data) {
+      const [, panelId] = topics;
+      if (topics.length !== 2 || panelId === undefined) return "event-topics";
+      const abi = readAbi(data, head, [{ at: head - 1, words: false, max: 33 * MAX_TRUSTEES }]);
+      const threshold = abi && uintWord(word(abi.words, 0), 8);
+      const quorum = abi && uintWord(word(abi.words, 1), 8);
+      const kind = withKind ? abi && panelKindWord(word(abi.words, 2)) : undefined;
+      const encodings = abi?.tails[0];
+      if (
+        threshold === undefined ||
+        quorum === undefined ||
+        (withKind && kind === undefined) ||
+        encodings === undefined
+      )
+        return "event-data";
+      if (encodings.length === 0 || encodings.length % 33 !== 0) return "event-data";
+      const keys: Uint8Array[] = [];
+      for (let i = 0; i < encodings.length; i += 33) {
+        try {
+          keys.push(decode(p256Key, encodings.subarray(i, i + 33)));
+        } catch (e) {
+          if (e instanceof DecodeError) return "event-data";
+          throw e;
+        }
       }
-    }
-    return {
-      event: "PanelPinned",
-      panelId: panelId.slice(),
-      threshold: Number(threshold),
-      quorum: Number(quorum),
-      keys,
-    };
-  },
-};
+      return {
+        event: "PanelPinned",
+        panelId: panelId.slice(),
+        threshold: Number(threshold),
+        quorum: Number(quorum),
+        ...(kind === undefined ? {} : { kind }),
+        keys,
+      };
+    },
+  };
+}
+
+const PANEL_PINNED = panelPinned(false);
+const PANEL_PINNED_V12 = panelPinned(true);
 
 // `panel_id ‖ stub_hash ‖ ceremony_transcript_hash`, then version 1's
 // `u8(count) ‖ (u8 ‖ p256-sig) × count`, or version 2's `u8(seats) ‖ seat ×
@@ -1351,10 +1397,23 @@ const TABLES: Readonly<
     ],
     board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED, RELAYED_ROLLING_BALLOT_SUBMITTED],
   },
+  // Version 11's rows, every one unchanged but the trustee registry's
+  // `PanelPinned`, replaced in place by the one that logs the kind.
+  12: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2, AUTHOR_PANEL_REGISTERED],
+    "trustee-registry": [PANEL_PINNED_V12, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED, RELAYED_ROLLING_BALLOT_SUBMITTED],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -1392,6 +1451,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   9: signaturesOf(9),
   10: signaturesOf(10),
   11: signaturesOf(11),
+  12: signaturesOf(12),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

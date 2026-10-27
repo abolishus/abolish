@@ -465,6 +465,10 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]
 // boarded through the contract path; failing it here instead waits on
 // verifier-ballots-v4.json and its kin moving to version 9 ([[P2-16]] part
 // 5e, before rule 9 serves version 6).
+// Version 12, whose `PanelPinned` logs each panel's kind, is read by the
+// event check but not listed: a profile pinning it stays unverifiable
+// (`unsupported-version`) until the verifier reads it in 4.4 and reports its
+// logged kind in 2.5 ([[P2-16]] part 5e-4; [[verifier]] 2.3; T-36).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
 ]);

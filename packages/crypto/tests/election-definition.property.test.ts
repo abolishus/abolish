@@ -528,14 +528,14 @@ describe("2.3's profile combination", () => {
       events !== 6 &&
       events !== 7;
     if (!fits) return "profile-combination";
-    return events >= 8 && events <= 11 ? undefined : "unsupported-version";
+    return events >= 8 && events <= 12 ? undefined : "unsupported-version";
   };
 
   test("board-entry versions 1 to 8 against ballot, tally-opening and contract-event versions", () => {
     for (let board = 1; board <= 8; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)
-          for (const events of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 255])
+          for (const events of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 255])
             expect(profileCombinationRule(pinning(board, ballot, opening, events))).toBe(
               expected(board, ballot, opening, events),
             );
@@ -562,30 +562,29 @@ describe("2.3's profile combination", () => {
     // A contract-event version this package doesn't read may be a later
     // release's that names those events: unsupported, never a failure, unless
     // the profile fails on another ground (T-36).
-    expect(profileCombinationRule(pinning(5, 1, 1, 12))).toBe("unsupported-version");
-    expect(profileCombinationRule(pinning(4, 1, 1, 12))).toBe("profile-combination");
-    expect(profileCombinationRule(pinning(5, 2, 1, 12))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 1, 1, 13))).toBe("unsupported-version");
+    expect(profileCombinationRule(pinning(4, 1, 1, 13))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 2, 1, 13))).toBe("profile-combination");
     // Each of versions 9 to 11 reads every record the one before passes as it
-    // does, so each fits wherever version 8 does ([[contracts]], Event tables
-    // (versions 9 to 11)).
-    for (const events of [9, 10, 11]) {
+    // does, and version 12 every one version 11 passes but the `PanelPinned`
+    // it replaces, so each fits wherever version 8 does ([[contracts]], Event
+    // tables (versions 9 to 12)).
+    for (const events of [9, 10, 11, 12]) {
       expect(profileCombinationRule(pinning(5, 1, 1, events))).toBeUndefined();
       expect(profileCombinationRule(pinning(4, 1, 1, events))).toBe("profile-combination");
     }
   });
 
-  // The verifier reads version 9 whole since P2-16 part 5d-3b, and versions
-  // 10 and 11 since P2-17 part 4b-1, so 2.3 judges a profile pinning any of
-  // them ([[contracts]], Contract-event record, Event tables (versions 9 to
-  // 11); T-36, T-37). Version 12 is read by the event check since P2-16
-  // part 5e-3, but 2.3 leaves it unverifiable until the verifier reads it
-  // (part 5e-4), so a profile pinning it is never passed early.
-  test("the contract-event versions 2.3 knows are the ones its codec reads, but version 12", () => {
+  // The verifier reads version 9 whole since P2-16 part 5d-3b, versions 10
+  // and 11 since P2-17 part 4b-1 and version 12 since P2-16 part 5e-4, so
+  // 2.3 judges a profile pinning any of them ([[contracts]], Contract-event
+  // record, Event tables (versions 9 to 12); T-36, T-37).
+  test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
     const ascending = (a: number, b: number) => a - b;
-    expect([...CONTRACT_EVENT_VERSIONS, 12].sort(ascending)).toEqual(
+    expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
       Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
     );
-    expect(profileCombinationRule(pinning(5, 1, 1, 12))).toBe("unsupported-version");
+    expect(profileCombinationRule(pinning(5, 1, 1, 12))).toBeUndefined();
   });
 
   test("a contract-event type pinned twice or not at all is refused, never a fit", () => {

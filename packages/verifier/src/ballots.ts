@@ -21,14 +21,14 @@
 // (5.8) is judged against it before repeats, as docs/spec/revoting.md's
 // Selection takes the ballots that passed every admission check; selection
 // (6.1) is decided over the admitted ballots by selection.ts. Under
-// contract-event versions 3 to 11 a ballot can also come by the relayed path, as
+// contract-event versions 3 to 12 a ballot can also come by the relayed path, as
 // the board's `RelayedBallotSubmitted` event, judged by its relay call's
 // stamp; only 4.5's match with the call the L1 relay recorded makes that
 // stamp the relay's rather than the event's word, and 4.5 isn't built
 // (P1-19), so a relayed ballot that passes 5.1 to 5.4 leaves 5.5, 5.7, 5.8
 // and everything after admission unverifiable, never judged by an unproven
-// stamp (docs/spec/close.md, Window; T-71, T-35). Under versions 10 and 11
-// the board's `RollingBallotSubmitted`, and under 11 its
+// stamp (docs/spec/close.md, Window; T-71, T-35). Under versions 10 to 12
+// the board's `RollingBallotSubmitted`, and under 11 and 12 its
 // `RelayedRollingBallotSubmitted`, carry a version-5 ballot by the ordinary
 // and the relayed path; this release reads no rolling definition yet
 // (P2-17 part 4), so such a ballot is never the pinned version and is
@@ -258,9 +258,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 
 // The contract-event versions this verifier reads; under version 1 the board
 // emits no event, so every ballot is a board-path one, and only versions 3
-// to 11 have the relayed path.
+// to 12 have the relayed path.
 export const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 11;
+  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 12;
 
 /** Where one ballot copy came from: its own path decides its window (5.5). */
 type Path =
@@ -389,7 +389,7 @@ export function ballotChecks(
     // Every path's copy, the relayed one's too: a member's ballot 5.4
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
-    // window (T-45, T-71). Only contract-event versions 9 to 11 frame a
+    // window (T-45, T-71). Only contract-event versions 9 to 12 frame a
     // version-4 ballot's ordinary and relayed copies.
     live?.judged(at, path.segment, payload, checked, judged.tally);
     if (!checked.ok) {

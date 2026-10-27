@@ -484,7 +484,7 @@ describe("2.3: the profile's versions fit together", () => {
       expect(r.verdict).toBe("unverifiable");
     });
 
-  test("every profile pins contract-event version 8 to 11, every board and registry event", () => {
+  test("every profile pins contract-event version 8 to 12, every board and registry event", () => {
     // Versions 1 and 2 name none of the close rule's board events, version 3
     // not the batches', version 4 not the obligation root's, version 5 not
     // the group registry's Tier 1 addition, version 6 not its self-paid
@@ -502,8 +502,10 @@ describe("2.3: the profile's versions fit together", () => {
       );
     expect(at(5, 8)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
     // Each of versions 9 to 11 reads every record the one before passes as
-    // it does ([[contracts]], Event tables (versions 9 to 11)).
-    for (const events of [9, 10, 11])
+    // it does, and version 12 every one version 11 passes but the
+    // `PanelPinned` it replaces ([[contracts]], Event tables (versions 9 to
+    // 12)).
+    for (const events of [9, 10, 11, 12])
       expect(at(5, events)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
     for (const events of [1, 2, 3, 4, 5, 6, 7]) {
       const r = format3(
@@ -513,7 +515,7 @@ describe("2.3: the profile's versions fit together", () => {
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r.verdictAgainstInputs).toBe("failed");
     }
-    for (const events of [12, 255])
+    for (const events of [13, 255])
       expect(at(5, events)).toEqual({
         id: "2.3",
         kind: "election",
@@ -521,7 +523,7 @@ describe("2.3: the profile's versions fit together", () => {
         code: "unsupported-version",
         at: {},
       });
-    for (const events of [8, 9, 10, 11]) expect(at(4, events)).toEqual(COMBINATION_FAILS);
+    for (const events of [8, 9, 10, 11, 12]) expect(at(4, events)).toEqual(COMBINATION_FAILS);
   });
 
   test("board-entry versions 6 and 7 are read, and fail 2.3 here", () => {
@@ -1227,7 +1229,7 @@ describe("definition version 7 under a fixed electorate (read as version 6)", ()
 
   test("a sealed poll without an author panel passes 2.3's combination, in every poll class", () => {
     for (const poll_class of Object.values(POLL_CLASSES))
-      for (const events of [8, 9, 10, 11]) {
+      for (const events of [8, 9, 10, 11, 12]) {
         const r = format3(
           v7For(closed.anchor, { [RECORD_TYPES.contractEvent]: events }, { poll_class }),
           closed,
@@ -1283,7 +1285,7 @@ describe("definition version 7 under a fixed electorate (read as version 6)", ()
       [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
       [{ [RECORD_TYPES.contractEvent]: 7 }, "profile-combination"],
       [{ [RECORD_TYPES.ballot]: 255 }, "unsupported-version"],
-      [{ [RECORD_TYPES.contractEvent]: 12 }, "unsupported-version"],
+      [{ [RECORD_TYPES.contractEvent]: 13 }, "unsupported-version"],
     ] as const) {
       const r = format3(v7For(closed.anchor, versions), closed);
       expect(row(r, "2.3"), JSON.stringify(versions)).toEqual(

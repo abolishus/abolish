@@ -155,11 +155,11 @@ def combination(defn):
         return unsupported
     definition = pins[0x0001]
     # Every profile pins board-entry version 5, the one that allows the close
-    # statement, and contract-event version 8 to 11, whose tables name every
+    # statement, and contract-event version 8 to 12, whose tables name every
     # board event, the close rule's, the batches', the obligation root's and
     # the availability records', and the group registry's Tier 1 and
     # self-paid additions; versions 1 to 7 don't, and a later one may
-    # (close.md, Version; contracts.md, Event tables (versions 8 to 11)).
+    # (close.md, Version; contracts.md, Event tables (versions 8 to 12)).
     # Judged with the other
     # failures; an unknown contract-event version is unsupported only once
     # nothing fails.
@@ -193,7 +193,7 @@ def combination(defn):
         # Opening version 1 opens version 1's cores only; version 2 opens
         # theirs, and any other is one a later release may read.
         return failed if spoiled == 1 else unsupported
-    if events not in (8, 9, 10, 11):
+    if events not in (8, 9, 10, 11, 12):
         return unsupported
     return NOT_IMPLEMENTED
 
@@ -422,7 +422,10 @@ def main(out):
         r = add(f"board-v5-events-v{ev}", f"The profile pins board-entry version 5 beside contract-event version {ev}, which reads every record version {before} passes as version {before} does: the pins fit, and the transcript check runs.", t_ev, [t_ev], board_version=5, events=ev)
         assert r["2.3"] == NOT_IMPLEMENTED and r["3.2"] == outcome("pass"), r
     t_ev, _ = for_board(5, 12, "verifier/board-v5-events-v12")
-    r = add("board-v5-events-v12", "The profile pins board-entry version 5 beside contract-event version 12, which this verifier doesn't read: 2.3 is unverifiable (unsupported-version), since a later release may read it; the transcript check still runs.", t_ev, [t_ev], board_version=5, events=12)
+    r = add("board-v5-events-v12", "The profile pins board-entry version 5 beside contract-event version 12, which reads every record version 11 passes as version 11 does but version 1's `PanelPinned`, which it replaces with the one that logs each panel's kind: the pins fit, and the transcript check runs.", t_ev, [t_ev], board_version=5, events=12)
+    assert r["2.3"] == NOT_IMPLEMENTED and r["3.2"] == outcome("pass"), r
+    t_ev, _ = for_board(5, 13, "verifier/board-v5-events-v13")
+    r = add("board-v5-events-v13", "The profile pins board-entry version 5 beside contract-event version 13, which this verifier doesn't read: 2.3 is unverifiable (unsupported-version), since a later release may read it; the transcript check still runs.", t_ev, [t_ev], board_version=5, events=13)
     assert r["2.3"] == outcome("unverifiable", "unsupported-version", {}) and r["3.2"] == outcome("pass"), r
     t_ev, _ = for_board(4, 8, "verifier/board-v4-events-v8")
     r = add("board-v4-events-v8", "The profile pins contract-event version 8 beside board-entry version 4, which doesn't allow the close statement: 2.3 fails profile-combination.", t_ev, [t_ev], board_version=4, events=8)

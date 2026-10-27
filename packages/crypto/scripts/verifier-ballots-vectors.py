@@ -22,8 +22,8 @@ code with packages/crypto or packages/verifier: verifier-ceremony-vectors.py
 (the definitions, transcripts, board entries and the ceremony rows) and
 ballot-vectors.py (Baby Jubjub, tier trees, the ballot record and its
 admission checks in order) and contract-event-v2-vectors.py to
-contract-event-v11-vectors.py (the contract-event record, versions 2 to 11,
-and their event checks). Under versions 10 and 11 the board's rolling events
+contract-event-v12-vectors.py (the contract-event record, versions 2 to 12,
+and their event checks). Under versions 10 to 12 the board's rolling events
 carry contract-event-v10.json's version-5 ballot, which no profile here pins,
 so admission rejects it as undecodable (profile-mismatch) whichever path
 boarded it.
@@ -68,6 +68,7 @@ ce8 = _load("contract_event_v8_vectors", "contract-event-v8-vectors.py")
 ce9 = _load("contract_event_v9_vectors", "contract-event-v9-vectors.py")
 ce10 = _load("contract_event_v10_vectors", "contract-event-v10-vectors.py")
 ce11 = _load("contract_event_v11_vectors", "contract-event-v11-vectors.py")
+ce12 = _load("contract_event_v12_vectors", "contract-event-v12-vectors.py")
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 cv, dv, bv, rev, mem = vc.cv, vc.dv, bal.bv, bal.rev, bal.mem
 
@@ -82,8 +83,8 @@ CLOCK = {"epoch": 1767225600, "period": 3600, "deadline": 7200, "lastSegment": 2
 BALLOT_SUBMITTED = "BallotSubmitted(bytes32,bytes32,bytes)"
 # The contract-event versions this generator reads, and the relayed path's
 # call fields: any, since the board carries them unjudged.
-READ_EVENTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-EVENT_MODULES = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6, 7: ce7, 8: ce8, 9: ce9, 10: ce10, 11: ce11}
+READ_EVENTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+EVENT_MODULES = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6, 7: ce7, 8: ce8, 9: ce9, 10: ce10, 11: ce11, 12: ce12}
 # The board-entry version every profile here pins: 5, the one that allows the
 # close statement, and reads every other record as version 4 does.
 BOARD_VERSION = 5
@@ -136,7 +137,7 @@ def combination(d):
     # a contract-event version this verifier doesn't read is a later
     # release's, once nothing else fails.
     closes = board == 5 and events not in (1, 2, 3, 4, 5, 6, 7, None)
-    settled = NOT_IMPLEMENTED if events in (8, 9, 10, 11) else outcome("unverifiable", "unsupported-version", {})
+    settled = NOT_IMPLEMENTED if events in (8, 9, 10, 11, 12) else outcome("unverifiable", "unsupported-version", {})
     # A board-entry version this verifier can't read is a later release's,
     # before any combination (verifier.md, Definition, step 2).
     if board not in (1, 3, 4, 5):
@@ -179,7 +180,7 @@ def window(d, path):
 
 
 def via(kind, inner, segment=0, time=None):
-    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 11), or of its `RollingBallotSubmitted` with L2 timestamp `time` ("rolling", versions 10 and 11) or `RelayedRollingBallotSubmitted` with stamp `time` ("relayed-rolling", version 11) carrying a version-5 ballot given as {"record": bytes, "root": int}, or a contract-event record that carries no ballot, given whole as {"record": bytes} ("record")."""
+    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 12), or of its `RollingBallotSubmitted` with L2 timestamp `time` ("rolling", versions 10 to 12) or `RelayedRollingBallotSubmitted` with stamp `time` ("relayed-rolling", versions 11 and 12) carrying a version-5 ballot given as {"record": bytes, "root": int}, or a contract-event record that carries no ballot, given whole as {"record": bytes} ("record")."""
     return {"via": kind, "item": inner, "segment": segment, "time": time}
 
 
@@ -188,7 +189,7 @@ def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
     framed = ce2.frame_ballot(rec)
     assert framed is not None
     if relayed:
-        assert version in range(3, 12)
+        assert version in range(3, 13)
         index, l1_block, gas = RELAY_CALL
         topics = [ce3.sig_topic(ce3.RELAYED), framed[0], framed[1]]
         data = ce3.word(index) + ce3.word(l1_block) + ce3.word(time) + ce3.word(gas) + ce3.word(0xA0) + ce3.abi_bytes(rec)
@@ -199,17 +200,17 @@ def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
 
 
 def rolling_event_record(d, rolling, n, time, version, relayed=False):
-    """A contract-event record of `version` (10 or 11) of the board's `RollingBallotSubmitted` carrying `rolling`'s version-5 ballot and supplied root at L2 timestamp `time`, or under version 11 of its `RelayedRollingBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames them (contracts.md, Board, Rolling ballots and Relayed rolling ballots)."""
+    """A contract-event record of `version` (10 to 12) of the board's `RollingBallotSubmitted` carrying `rolling`'s version-5 ballot and supplied root at L2 timestamp `time`, or under version 11 or 12 of its `RelayedRollingBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames them (contracts.md, Board, Rolling ballots and Relayed rolling ballots)."""
     rec, root = rolling["record"], rolling["root"]
     framed = ce10.frame_rolling_ballot(rec)
     assert framed is not None
     if relayed:
-        assert version == 11
+        assert version in (11, 12)
         index, l1_block, gas = RELAY_CALL
         topics = [ce11.sig_topic(ce11.RELAYED_ROLLING), framed[0], framed[1]]
         data = ce11.word(index) + ce11.word(l1_block) + ce11.word(time) + ce11.word(gas) + ce11.word(root) + ce11.word(0xC0) + ce11.abi_bytes(rec)
-        return ce11.encode(d["board"], n, 5_000_000 + n, d["opens_at"] + n, topics, data)
-    assert version in (10, 11)
+        return EVENT_MODULES[version].encode(d["board"], n, 5_000_000 + n, d["opens_at"] + n, topics, data)
+    assert version in (10, 11, 12)
     topics = [ce10.sig_topic(ce10.ROLLING), framed[0], framed[1]]
     data = ce10.word(root) + ce10.word(64) + ce10.abi_bytes(rec)
     return EVENT_MODULES[version].encode(d["board"], n, 5_000_000 + n, time, topics, data)
@@ -663,14 +664,15 @@ def build(constants):
         ],
         "relayed",
     )
-    # Contract-event versions 10 and 11, which read every record version 9
-    # passes as version 9 does, and add the board's rolling events: under
-    # this fixed poll their version-5 ballot is unpinned, so admission
-    # rejects it by either path, and a relayed one is never set aside
-    # (contracts.md, Event tables (versions 10 and 11); verifier.md, Ballot
-    # admission, step 2; T-31).
+    # Contract-event versions 10 to 12, which read every record version 9
+    # passes as version 9 does (version 12 but the trustee registry's
+    # `PanelPinned`, which no ballot check reads), and add the board's
+    # rolling events: under this fixed poll their version-5 ballot is
+    # unpinned, so admission rejects it by either path, and a relayed one is
+    # never set aside (contracts.md, Event tables (versions 10 to 12);
+    # verifier.md, Ballot admission, step 2; T-31).
     rolling = rolling_ballot()
-    for ev in (10, 11):
+    for ev in (10, 11, 12):
         ev_pins = [(ty, ev if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
         d_ev, t_ev, e_ev = election_for(f"events-v{ev}", [1, 2, 3], profile={"protocol_major": 1, "pins": ev_pins})
         ev_ok0 = ballot(f"events-v{ev}-tier-0", e_ev, 0, nullifier("tier-0", 0, e_ev, 0), [0, 1, 0], zero4)
@@ -679,7 +681,7 @@ def build(constants):
         p_ev_ok2 = prove(f"events-v{ev}-tier-2", "tier-2", 1, e_ev, 2, ev_ok2)
         ev_inside = d_ev["opens_at"] + 3600
         rolled = [via("rolling", rolling, time=ev_inside + 2)]
-        if ev == 11:
+        if ev >= 11:
             rolled.append(via("relayed-rolling", rolling, time=ev_inside + 3))
         bundle(
             f"events-v{ev}",
@@ -715,13 +717,13 @@ def build(constants):
     )
     # A contract-event version this verifier doesn't read: ordinary ballots
     # can't be found, so the window and repeats can't be decided (T-36).
-    ce12_pins = [(ty, 12 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
-    d_c4, t_c4, e_c4 = election_for("events-unread-v12", [1, 2, 3], profile={"protocol_major": 1, "pins": ce12_pins})
-    x_ok0 = ballot("events-unread-v12", e_c4, 0, nullifier("tier-0", 0, e_c4, 0), [0, 1, 0], zero4)
-    p_x_ok0 = prove("events-unread-v12", "tier-0", 0, e_c4, 0, x_ok0)
+    ce13_pins = [(ty, 13 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
+    d_c4, t_c4, e_c4 = election_for("events-unread-v13", [1, 2, 3], profile={"protocol_major": 1, "pins": ce13_pins})
+    x_ok0 = ballot("events-unread-v13", e_c4, 0, nullifier("tier-0", 0, e_c4, 0), [0, 1, 0], zero4)
+    p_x_ok0 = prove("events-unread-v13", "tier-0", 0, e_c4, 0, x_ok0)
     bundle(
         "events-unread",
-        "The profile pins contract-event version 12, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
+        "The profile pins contract-event version 13, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
         d_c4, t_c4, e_c4, [1, 2, 3],
         [t_c4, (x_ok0, p_x_ok0), (x_ok0, p_x_ok0)],
         "candidates",
@@ -803,7 +805,7 @@ def assemble(constants, proofs_path, out_dir):
                 # as the board's event (or the same log from an address the
                 # definition doesn't name, which carries no ballot).
                 version = pins[CONTRACT_EVENT_TYPE]
-                assert version in (2, 3, 8, 9, 10, 11)
+                assert version in (2, 3, 8, 9, 10, 11, 12)
                 contract = bal.det("verifier foreign contract")[:20] if wrap["via"] == "foreign" else d["board"]
                 rec = event_record(d, rec, len(payloads), wrap["time"], contract, version, wrap["via"] == "relayed")
             payloads.append((kind, rec, b, pid, wrap["segment"]))

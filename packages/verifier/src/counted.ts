@@ -338,7 +338,7 @@ const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 11;
+  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 12;
 
 const U32_MAX = 0xffffffff;
 
@@ -472,7 +472,7 @@ export function deliverSelected(
       // ballot version 4, 1 under the others) delivers or excludes
       // ([[delivery]], Versions): any other is a rejected entry wherever it
       // sits, so one above the floor isn't read, as a board-path one isn't,
-      // and can't hold the rows open. Versions 9 to 11 frame both.
+      // and can't hold the rows open. Versions 9 to 12 frame both.
       const fixed = checked.event.record[2] === (isPanelled(definition) ? 2 : 1);
       if (BigInt(segment) > floor && !fixed) continue;
       // Under ballot version 4 one naming another definition is stray
@@ -488,7 +488,7 @@ export function deliverSelected(
         continue;
       if (BigInt(segment) > floor)
         return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
-      // A version-2 batch of this election (contract-event versions 9 to 11 frame
+      // A version-2 batch of this election (contract-event versions 9 to 12 frame
       // them) goes to the check as version 1's do, each pair or entry read as
       // the record it states. A version-2 root may deliver or exclude any
       // ballot of its seat's panel by its leaves, which, as version 1's,

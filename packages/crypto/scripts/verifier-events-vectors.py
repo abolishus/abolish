@@ -20,9 +20,9 @@ The verifier's tests show the `fail` status over l1-anchor.json's anchored
 boards, whose entry 1 is a placeholder of type 0x0008 that doesn't decode.
 
 The records and their verdicts are contract-event.json's,
-contract-event-v2.json's to contract-event-v11.json's
+contract-event-v2.json's to contract-event-v12.json's
 (contract-event-vectors.py and contract-event-v2-vectors.py to
-contract-event-v11-vectors.py, independent Python implementations): a record
+contract-event-v12-vectors.py, independent Python implementations): a record
 of `records` passes, one of `eventFailures` fails with its `error`, and one
 of `decodeErrors` doesn't decode, with its `error`, each under its own file's
 version and against its own file's contracts. The only verdict computed here
@@ -56,6 +56,7 @@ def _load(name, file):
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 dv, rc, d4 = vc.dv, vc.rc, vc.d4
 ce10 = _load("contract_event_v10_vectors", "contract-event-v10-vectors.py")
+ce11 = _load("contract_event_v11_vectors", "contract-event-v11-vectors.py")
 outcome = vc.outcome
 
 CONTRACT_EVENT_TYPE = 0x0008
@@ -99,7 +100,8 @@ V8 = load_events("contract-event-v8.json", 8)
 V9 = load_events("contract-event-v9.json", 9)
 V10 = load_events("contract-event-v10.json", 10)
 V11 = load_events("contract-event-v11.json", 11)
-FILES = {1: V1, 2: V2, 3: V3, 4: V4, 5: V5, 6: V6, 7: V7, 8: V8, 9: V9, 10: V10, 11: V11}
+V12 = load_events("contract-event-v12.json", 12)
+FILES = {1: V1, 2: V2, 3: V3, 4: V4, 5: V5, 6: V6, 7: V7, 8: V8, 9: V9, 10: V10, 11: V11, 12: V12}
 
 
 def relabel_under_10(id_):
@@ -116,6 +118,23 @@ def relabel_under_10(id_):
         bytes.fromhex(f["data"]),
     )
     V10["verdicts"][f"v11/{id_}"] = (encoded, doc["underVersion10"][id_])
+    return encoded
+
+
+def relabel_under_11(id_):
+    """contract-event-v12.json's record `id_`, a trustee registry's kind-carrying `PanelPinned`, as a board copy pinning version 11 would record it: the same log, from version 11's file's trustee registry, in a version-11 record, with the verdict that file's `underVersion11` gives (contracts.md, Event tables (version 12))."""
+    doc = json.loads((VECTORS / V12["file"]).read_bytes())
+    f = next(r["fields"] for r in doc["records"] if r["id"] == id_)
+    assert bytes.fromhex(f["contract"]) == V12["contracts"]["trustee-registry"]
+    encoded = ce11.encode(
+        V11["contracts"]["trustee-registry"],
+        int(f["n"]),
+        int(f["l2Block"]),
+        int(f["l2Timestamp"]),
+        [bytes.fromhex(t) for t in f["topics"]],
+        bytes.fromhex(f["data"]),
+    )
+    V11["verdicts"][f"v12/{id_}"] = (encoded, doc["underVersion11"][id_])
     return encoded
 
 
@@ -217,6 +236,8 @@ def main(out_dir):
             return ("group-created", "an honest group creation")
         if "group-created-signed" in f["verdicts"]:
             return ("group-created-signed", "an honest signed group creation")
+        if "panel-pinned-4-of-7" in f["verdicts"]:
+            return ("panel-pinned-4-of-7", "an honest 4-of-7 panel pinned with its kind")
         return ("ballot-submitted", "an honest ballot submission")
 
     d1 = definition(dv.TYPICAL, 1, V1)
@@ -232,6 +253,7 @@ def main(out_dir):
     d9_v4 = definition(d4.TYPICAL, 9, V9, board_version=4)
     d10_v4 = definition(d4.TYPICAL, 10, V10, board_version=4)
     d11_v4 = definition(d4.TYPICAL, 11, V11, board_version=4)
+    d12_v4 = definition(d4.TYPICAL, 12, V12, board_version=4)
     honest1 = [rec(V1, i) for i in V1["records"]]
     honest2 = [rec(V2, i) for i in V2["records"]]
     honest3 = [rec(V3, i) for i in V3["records"]]
@@ -243,6 +265,7 @@ def main(out_dir):
     honest9 = [rec(V9, i) for i in V9["records"]]
     honest10 = [rec(V10, i) for i in V10["records"]]
     honest11 = [rec(V11, i) for i in V11["records"]]
+    honest12 = [rec(V12, i) for i in V12["records"]]
 
     case("v1-records", "Definition version 1 pinning contract-event version 1: every honest record of contract-event.json, in its order, each passing the event check. 4.4 stays unverifiable (not-implemented): the required entries and the accumulator's replay wait on L2 reads and the archive.", d1, honest1, NOT_IMPLEMENTED)
     case("v2-records", "Definition version 4 pinning board-entry version 4 and contract-event version 2: every honest record of contract-event-v2.json, the board's events included, each passing. 4.4 is not-implemented.", d2, honest2, NOT_IMPLEMENTED)
@@ -261,6 +284,14 @@ def main(out_dir):
         "Contract-event version 10, which doesn't name the relayed rolling ballot: an honest version-1 ballot submission, then contract-event-v11.json's `relayed-rolling-call` log in a version-10 record, as a board with the relayed rolling call emits into the sequence every election shares: unknown-event at entry 1, so a profile pinning version 10 fails 4.4 at the first rolling ballot forced through L1 (contracts.md, Event tables (version 11); T-53).",
         d10_v4,
         [rec(V10, "ballot-submitted-v1"), relabel_under_10("relayed-rolling-call")],
+        outcome("unverifiable", "unknown-event", {"entry": 1}),
+    )
+    case("events-v12-records", "Definition version 4 pinning board-entry version 4 and contract-event version 12: every honest record of contract-event-v12.json, the trustee registry's panels pinned with each kind (one whose logged quorum is `k` included: whether it is the release's is 3.1's, and whether the kind is the release's 2.5's, never the event check's) and a ceremony registration, each passing. 4.4 is not-implemented.", d12_v4, honest12, NOT_IMPLEMENTED)
+    case(
+        "v11-panel-pinned-kind",
+        "Contract-event version 11, which doesn't name the kind-carrying `PanelPinned`: contract-event-v11.json's honest relayed version-1 ballot, then contract-event-v12.json's `panel-pinned-4-of-7` log in a version-11 record, as a trustee registry that logs the kind emits at deployment into the sequence every election shares: unknown-event at entry 1, so a profile pinning version 11 fails 4.4 at that registry's first event (contracts.md, Event tables (version 12); T-53).",
+        d11_v4,
+        [rec(V11, "relayed-ballot-v1"), relabel_under_11("panel-pinned-4-of-7")],
         outcome("unverifiable", "unknown-event", {"entry": 1}),
     )
     case("none", "No contract-event record on the copy: 4.4 is not-implemented, never a pass, since which events must be boarded isn't known yet.", d1, [], NOT_IMPLEMENTED)
@@ -284,6 +315,7 @@ def main(out_dir):
         (V9, d9_v4, ["unknown-event-author-panel-from-board", "event-topics-author-panel-two", "event-data-author-panel-topic", "event-data-ballot-v5", "event-data-ballot-v4-hash-topic", "event-data-ballot-v4-author-element-zero", "event-data-receipt-v2-panel-0", "event-data-receipt-v2-ballot-topic"]),
         (V10, d10_v4, ["unknown-event-rolling-from-election-registry", "unknown-contract-rolling", "event-topics-rolling-root-indexed", "unknown-event-rolling-without-root", "event-data-rolling-root-zero", "event-data-rolling-root-r", "event-data-rolling-record-first", "event-data-rolling-v4-hash-topic", "event-data-rolling-v4-ballot", "event-data-rolling-as-v4", "event-data-rolling-without-step", "event-data-ballot-v5", "event-data-relayed-ballot-v5"]),
         (V11, d11_v4, ["unknown-event-relayed-rolling-from-group-registry", "unknown-contract-relayed-rolling", "unknown-event-relayed-rolling-without-root", "event-topics-relayed-rolling-four", "event-data-relayed-rolling-stamp-over-u64", "event-data-relayed-rolling-root-zero", "event-data-relayed-rolling-root-first", "event-data-relayed-rolling-as-v4", "event-data-rolling-topic-relayed-data", "event-data-relayed-rolling-topic-rolling-data", "event-data-relayed-topic-relayed-rolling-data", "event-data-relayed-ballot-v5"]),
+        (V12, d12_v4, ["unknown-event-panel-pinned-v1", "unknown-event-panel-pinned-v2-record", "unknown-event-panel-pinned-kind-last", "unknown-event-panel-pinned-from-board", "unknown-contract-panel-pinned", "event-topics-panel-pinned-kind-topic", "event-data-panel-pinned-kind-zero", "event-data-panel-pinned-kind-three", "event-data-panel-pinned-kind-257", "event-data-panel-pinned-v1-data", "event-data-panel-pinned-ceremony-data"]),
     ]:
         for id_ in ids:
             error = f["verdicts"][id_][1]
@@ -306,6 +338,7 @@ def main(out_dir):
         (V9, d9_v4, ["version-eight", "version-ten", "truncated-data", "trailing-bytes"]),
         (V10, d10_v4, ["version-nine", "version-eleven", "truncated-data", "trailing-bytes"]),
         (V11, d11_v4, ["version-ten", "version-twelve", "truncated-data", "trailing-bytes"]),
+        (V12, d12_v4, ["version-eleven", "version-thirteen", "truncated-data", "trailing-bytes"]),
     ]:
         for id_ in ids:
             code = f["verdicts"][f"decode/{id_}"][1][1]
@@ -361,7 +394,7 @@ def main(out_dir):
         NOT_IMPLEMENTED,
         entry_version=3,
     )
-    for events in (12, 255):
+    for events in (13, 255):
         case(
             f"events-v{events}",
             f"The profile pins contract-event version {events}, unknown here: 4.4 is unverifiable (unsupported-version) whatever the copy holds, failing records included (T-36).",
@@ -376,7 +409,7 @@ def main(out_dir):
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-events-vectors.py, from verifier-ceremony-vectors.py and the records of "
-            "contract-event.json and contract-event-v2.json to contract-event-v11.json (independent Python implementations)"
+            "contract-event.json and contract-event-v2.json to contract-event-v12.json (independent Python implementations)"
         ),
         "inputs": {f["file"]: f["sha256"] for f in FILES.values()},
         "cases": cases,

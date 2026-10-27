@@ -129,12 +129,29 @@ test("a fixed version 7 gets version 6's verdict on every ballot and row beside 
   }
 });
 
-test("no definition, ballot or run is both readings'", () => {
-  for (const c6 of v6.cases) {
-    const c7 = byId(v7, c6.id);
-    expect(c7.definition, c6.id).not.toBe(c6.definition);
-    expect(c7.board, c6.id).not.toBe(c6.board);
-  }
+test("no transcript, approvals record or ballot is both readings'", () => {
+  // Each entry holds one payload under the same election, index and segment
+  // in both files, so a shared payload would be a shared entry: both runs,
+  // the approvals and every ballot bind version 7's hashes and stubs (T-37).
+  const entries = (file: File) =>
+    new Set(
+      file.cases.flatMap((c) =>
+        parseBundle(
+          JSON.stringify({
+            format: BUNDLE_FORMAT_CEREMONY,
+            definition: c.definition,
+            clock: file.clock,
+            l1,
+            panel: file.panel,
+          }),
+          hex(c.board),
+        ).entries.map((e) => Buffer.from(e).toString("hex")),
+      ),
+    );
+  const six = entries(v6);
+  const seven = [...entries(v7)];
+  expect(seven.length).toBeGreaterThan(0);
+  for (const e of seven) expect(six.has(e)).toBe(false);
 });
 
 test("a ballot made for the version-6 reading of the same election is another election's", () => {

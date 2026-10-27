@@ -6,28 +6,30 @@ Elections for the verifier's ballot admission beside an author panel
 5.5, 5.7): a version-6 definition, or, for
 docs/spec/vectors/verifier-ballots-v4-author-definition-v7.json, a version-7
 one with a fixed electorate, which the verifier reads as version 6 under
-version 7's own hashes and stubs (docs/spec/verifier.md, 2.3), with a 2-of-3 author panel, whose board
-carries the author panel's transcript, the default panel's and the author
-approvals record, and ballots (version 4) whose author halves are judged
-against the author panel's registered key set, the output of its own run,
-approved on the board (T-37, T-17). Each case is a definition, a board copy
-and the default panel a bundle pins, with the rows 1.3, 2.3, 2.5, 3.1, 3.2,
-5.1 to 5.5, 5.7, 6.2 and 7.4 a verifier reports and the report's `ballots`.
+version 7's own hashes and stubs (docs/spec/verifier.md, Definition), with a
+2-of-3 author panel, whose board carries the author panel's transcript, the
+default panel's and the author approvals record, and ballots (version 4)
+whose author halves are judged against the author panel's registered key
+set, the output of its own run, approved on the board (T-37, T-17). Each case
+is a definition, a board copy and the default panel a bundle pins, with the
+rows 1.3, 2.3, 2.5, 3.1, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 a verifier reports
+and the report's `ballots`.
 
 The author run binds the definition's own author stub (both transcript
 hashes zeroed) and the default run its default stub (which keeps
 `author_transcript_hash`), so both runs are of the definition they're
-checked against (election-definition.md, Author panel). Under version 7 three
-cases are its own: a ballot, the author approvals and the author transcript
-each made for the same election read as version 6, none of which counts
-here. It reuses this folder's independent Python implementations, which share no code with
-packages/crypto or packages/verifier: verifier-ballots-v4-vectors.py (the
-electorate, the definition, the version-4 record and its admission order,
-through ballot-v4-records-vectors.py, and version 7's layout and version-6
-reading, through rolling-electorate-vectors.py), ceremony-vectors.py (both runs and
-their transcript check), key-set-vectors.py (the key set hash and the
-registration statement) and author-ceremony-vectors.py (the author panel
-and the approvals record).
+checked against (election-definition.md, Author panel). Under version 7
+three cases are its own: a ballot, the author approvals and the author
+transcript each made for the same election read as version 6, none of which
+counts here. It reuses this folder's independent Python implementations,
+which share no code with packages/crypto or packages/verifier:
+verifier-ballots-v4-vectors.py (the electorate, the definition, the version-4
+record and its admission order, through ballot-v4-records-vectors.py, and
+version 7's layout and version-6 reading, through
+rolling-electorate-vectors.py), ceremony-vectors.py (both runs and their
+transcript check), key-set-vectors.py (the key set hash and the registration
+statement) and author-ceremony-vectors.py (the author panel and the approvals
+record).
 
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for verifier-ballots-v4.json:
@@ -424,7 +426,7 @@ def assemble(constants, proofs_path, out_dir, version=6):
         checked = cv.check(author, payloads[at_a], context(d, author_stub_hash(d)))
         if not checked["ok"]:
             # A transcript made for another stub fails at its first seat's signature.
-            assert "seats" not in checked, checked
+            assert checked["code"] == "ceremony-signature", checked
             part, run_row = "run", outcome("fail", checked["code"], {"entry": at_a, **AUTHOR})
         else:
             seats = approving(d, author, run["hash"], run["keySetHash"], records)

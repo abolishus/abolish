@@ -162,12 +162,8 @@ export {
   parseConfig,
   readIdentityKey,
 } from "./config.ts";
-export {
-  l1OutputRootAccumulator,
-  type L2ElectorateOptions,
-  l2ElectorateCheck,
-  type RegistryAccumulator,
-} from "./electorate.ts";
+export { type L2ElectorateOptions, l2ElectorateCheck } from "./electorate.ts";
+export { l1OutputRootAccumulators, provenLog, type RegistryAccumulators } from "./output-root.ts";
 export { type L2RegistrationOptions, l2RegistrationCheck } from "./registration.ts";
 export { type NodeEvent, type NodeOptions, TrusteeNode } from "./node.ts";
 export {

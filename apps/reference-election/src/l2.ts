@@ -32,6 +32,7 @@ import {
   type Trustees,
 } from "./election.ts";
 import { padded, send, word } from "./l1.ts";
+import { accumulatorSlots } from "./slots.ts";
 import { encodeRlp, uintBytes } from "./rlp.ts";
 
 const OUT = new URL("../../../packages/contracts/out/", import.meta.url);
@@ -374,15 +375,19 @@ export async function registerDefinition(
 
 /**
  * The nodes' registration check: apps/trustee-node's own
- * `l2RegistrationCheck`, reading the registries' `DefinitionRegistered` and
- * `CeremonyRegistered` logs from the fixture's L2 from block 0 and judging
- * them through `packages/verifier`'s `registrationCheck`. Anvil's latest
- * block stands in for finalized L2, whose finalized block trails the latest
- * by two epochs the run doesn't wait out. A failed read throws, stopping the
- * run rather than reading as a refusal.
+ * `l2RegistrationCheck`, reading both registries' whole logs from the
+ * fixture's L2 from block 0, replaying each to the accumulator and count the
+ * contract holds, and judging the election's `DefinitionRegistered` and
+ * `CeremonyRegistered` through `packages/verifier`'s `registrationCheck`.
+ * The fixture's L2 posts no output roots, so the accumulators are read from
+ * the contracts' storage at the latest block, standing in for the ones a
+ * root proves (apps/node's tests prove one under a root), and Anvil's latest
+ * block for finalized L2, whose finalized block trails the latest by two
+ * epochs the run doesn't wait out. A failed read
+ * throws, stopping the run rather than reading as a refusal.
  */
 export function registrationCheck(l2: L2, l2ChainId: bigint): RegistrationCheck {
-  const latest = {
+  const rpc = {
     call: (method: string, params: readonly unknown[]) =>
       l2.rpc.call<unknown>(
         method,
@@ -392,10 +397,29 @@ export function registrationCheck(l2: L2, l2ChainId: bigint): RegistrationCheck 
       ),
   };
   return l2RegistrationCheck({
-    l2: latest,
+    l2: rpc,
     chainId: l2ChainId,
     electionRegistry: l2.electionRegistry,
     trusteeRegistry: l2.trusteeRegistry,
     fromBlock: 0n,
+    trusteeFromBlock: 0n,
+    accumulators: async (registries) => {
+      const block = BigInt(await l2.rpc.call<string>("eth_blockNumber"));
+      const at = `0x${block.toString(16)}`;
+      const proven = [];
+      for (const registry of registries) {
+        const [accumulator, count] = await Promise.all(
+          accumulatorSlots().map((slot) =>
+            l2.rpc.call<string>("eth_getStorageAt", [hex(registry), hex(slot), at]),
+          ),
+        );
+        proven.push({
+          block,
+          accumulator: hexToBytes((accumulator as string).slice(2)),
+          count: BigInt(count as string),
+        });
+      }
+      return proven;
+    },
   });
 }

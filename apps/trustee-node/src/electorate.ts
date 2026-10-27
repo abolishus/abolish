@@ -23,23 +23,10 @@
 // posted root, a node that can't be read or doesn't prove, a Tier 1 or
 // Tier 2 tier) is a refusal, never a pass.
 
-import {
-  checkEventAccumulatorProof,
-  contractEventLog,
-  type ProvenEventAccumulator,
-} from "@abolishus/crypto";
-import {
-  accumulatorUnderRoot,
-  chainId,
-  contractSequence,
-  GameBlockError,
-  l2Finalized,
-  respectedOutputRoots,
-  type Rpc,
-  RpcError,
-} from "@abolishus/node";
+import { chainId, GameBlockError, l2Finalized, type Rpc, RpcError } from "@abolishus/node";
 import { electorateCheck, type GroupRegistryRelease, OutputRootError } from "@abolishus/verifier";
 import { bytesToHex, keccak256, toBytes } from "viem";
+import { provenLog, type RegistryAccumulators } from "./output-root.ts";
 import type { ElectorateCheck } from "./stub.ts";
 
 // Topic 0 of each event the recount reads ([[contracts]], Group registry):
@@ -56,13 +43,6 @@ const GROUP_EVENTS = [
   "SelfPaidMemberAdded(uint64,uint64,bytes)",
 ].map((s) => keccak256(toBytes(s)));
 
-/**
- * The group registry's accumulator and count proven at an L2 block at or
- * after `atLeast`, or undefined if no root there can be had yet.
- * `l1OutputRootAccumulator` in production.
- */
-export type RegistryAccumulator = (atLeast: bigint) => Promise<ProvenEventAccumulator | undefined>;
-
 export interface L2ElectorateOptions extends GroupRegistryRelease {
   /** The seat's own L2 node, deriving its finalized chain from L1. */
   readonly l2: Rpc;
@@ -71,42 +51,8 @@ export interface L2ElectorateOptions extends GroupRegistryRelease {
    * later block leaves the replay short and refuses every stub.
    */
   readonly fromBlock: bigint;
-  readonly accumulator: RegistryAccumulator;
-}
-
-/**
- * The registry's accumulator under the output root of the highest block at
- * or after `atLeast` that a respected game on the seat's L1 node claims
- * (`respectedOutputRoots`) and the seat's L2 node proves
- * (`accumulatorUnderRoot`); undefined when there is none. A claim that
- * doesn't prove is passed over for the next, so whoever posts a false root
- * or a block far ahead can't stop the check until the game is shown false.
- */
-export function l1OutputRootAccumulator(options: {
-  readonly l1: Rpc;
-  readonly l1ChainId: bigint;
-  /** The L2's `OptimismPortal` on L1, 20 bytes. */
-  readonly portal: Uint8Array;
-  readonly l2: Rpc;
-  /** The group registry, 20 bytes. */
-  readonly registry: Uint8Array;
-}): RegistryAccumulator {
-  const { l1, l1ChainId, portal, l2, registry } = options;
-  return async (atLeast) => {
-    // A node on another L1 could name any games at the portal's address.
-    if ((await chainId(l1)) !== l1ChainId) throw new RpcError("the L1 node is on another chain");
-    for (const root of await respectedOutputRoots(l1, portal)) {
-      if (root.l2Block < atLeast) break;
-      try {
-        return await accumulatorUnderRoot(l2, root, registry);
-      } catch (e) {
-        if (e instanceof OutputRootError || e instanceof GameBlockError || e instanceof RpcError)
-          continue;
-        throw e;
-      }
-    }
-    return undefined;
-  };
+  /** `l1OutputRootAccumulators` in production. */
+  readonly accumulators: RegistryAccumulators;
 }
 
 /**
@@ -118,7 +64,7 @@ export function l1OutputRootAccumulator(options: {
  * read or its answers don't prove.
  */
 export function l2ElectorateCheck(options: L2ElectorateOptions): ElectorateCheck {
-  const { l2, fromBlock, accumulator, ...release } = options;
+  const { l2, fromBlock, accumulators, ...release } = options;
   return async (stub) => {
     const top = stub.value.electorate.reduce(
       (m, t) => (t.root_l2_block > m ? t.root_l2_block : m),
@@ -131,15 +77,13 @@ export function l2ElectorateCheck(options: L2ElectorateOptions): ElectorateCheck
       // Finality isn't what makes the log safe (the proven root is), but
       // the root's own L2 block may not be final either.
       if (top < fromBlock || top > (await l2Finalized(l2))) return false;
-      const proven = await accumulator(top);
+      const [proven] = (await accumulators([release.registry], top)) ?? [];
       if (proven === undefined || proven.block < top) return false;
       // T-71: the whole log to the proven block, every event of the
       // registry, must be the one the accumulator commits to; the recount
       // takes its group events, each tier's up to its own root block.
-      const logs = await contractSequence(l2, release.registry, fromBlock, proven.block);
-      const replay = logs.map(contractEventLog);
-      if (checkEventAccumulatorProof(release.chainId, release.registry, replay, proven) !== null)
-        return false;
+      const logs = await provenLog(l2, release.chainId, release.registry, fromBlock, proven);
+      if (logs === undefined) return false;
       const records = logs.filter((r) => {
         const topic = r.topics[0];
         return topic !== undefined && GROUP_EVENTS.includes(bytesToHex(topic));

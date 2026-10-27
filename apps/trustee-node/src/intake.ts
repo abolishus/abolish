@@ -131,7 +131,8 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 export class IntakeSeat {
   readonly #config: IntakeConfig;
   // Elections that passed every check, by stub hash and transcript hash. Each
-  // check reads finalized state, so a pass stays one; a refusal isn't kept,
+  // check judges only finalized records, so a pass stays one (but for a pass
+  // under a root later shown false, T-71); a refusal isn't kept,
   // since a check that couldn't decide yet may pass later. No secret is kept
   // here: each delivery reads them (`withSecrets`), so none outlives destruction.
   readonly #opened = new Map<string, Opened>();

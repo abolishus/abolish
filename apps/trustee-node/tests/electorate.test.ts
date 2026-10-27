@@ -21,7 +21,7 @@ import {
   v1,
   v5,
 } from "../../../packages/verifier/tests/registry-logs.ts";
-import { l1OutputRootAccumulator, l2ElectorateCheck } from "../src/electorate.ts";
+import { l2ElectorateCheck } from "../src/electorate.ts";
 import type { Stub } from "../src/stub.ts";
 
 // The deployment's electorate check (P2-13 part 3): the group registry's
@@ -116,7 +116,13 @@ const check = (
     ...release,
     l2: node.rpc,
     fromBlock: options.fromBlock ?? FROM_BLOCK,
-    accumulator: options.accumulator ?? (async () => provenOf(options.honest ?? node.held)),
+    accumulators: async (registries) => {
+      expect(registries).toEqual([registry]);
+      const proven = await (
+        options.accumulator ?? (async () => provenOf(options.honest ?? node.held))
+      )();
+      return proven === undefined ? undefined : [proven];
+    },
   });
 
 const nodeOf = (held: readonly ContractEventRecord[], finalized?: bigint, chain?: bigint) => ({
@@ -311,27 +317,5 @@ describe("l2ElectorateCheck", () => {
     }
     const bug = () => Promise.reject(new TypeError("bug"));
     await expect(check(nodeOf(one.records), { accumulator: bug })(stubOf())).rejects.toThrow("bug");
-  });
-});
-
-describe("l1OutputRootAccumulator", () => {
-  test("refuses an L1 node of another chain, reading nothing else", async () => {
-    const asked: string[] = [];
-    const l1: Rpc = {
-      call: async (method) => {
-        asked.push(method);
-        if (method === "eth_chainId") return "0x1";
-        throw new Error(`unexpected ${method}`);
-      },
-    };
-    const accumulator = l1OutputRootAccumulator({
-      l1,
-      l1ChainId: 11_155_111n,
-      portal: new Uint8Array(20).fill(0x90),
-      l2: l2Node(one.records).rpc,
-      registry,
-    });
-    await expect(accumulator(0n)).rejects.toThrow(RpcError);
-    expect(asked).toEqual(["eth_chainId"]);
   });
 });

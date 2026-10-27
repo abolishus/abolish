@@ -23,6 +23,7 @@ import {
 } from "../src/og/model.ts";
 import { pollPreview, previewLocale, previewPath, previewVersion } from "../src/og/poll.ts";
 import { DRAWABLE, drawable } from "../src/og/glyphs.ts";
+import { isolated } from "../src/titles.ts";
 import { FONTS, renderPreview } from "../src/og/render.ts";
 import { previewText } from "../src/og/text.ts";
 import type { PollView } from "../src/poll.ts";
@@ -142,6 +143,10 @@ describe("an author's words on the image", () => {
     for (const weight of [400, 600] as const) {
       // A private-use character no font has: the box drawn for any missing glyph.
       const missing = await svg("x\u{E000}x", weight);
+      // So the comparison can't pass vacuously: a letter both subsets lack is
+      // that box, and two letters alone are not.
+      expect(await svg("x\u0108x", weight)).toBe(missing);
+      expect(await svg("xx", weight)).not.toBe(missing);
       for (const [first, last] of DRAWABLE)
         for (let c = first; c <= last; c++)
           expect(
@@ -208,6 +213,20 @@ describe("an author's words on the image", () => {
       "Asked by Riverside Residents' Association ",
     );
     expect(cardText({ ...sealed, place: "東京" }, "landscape")).not.toContain("東京");
+  });
+
+  test("a title isolates an author's words, dropping any control that could end the isolate early", () => {
+    const controls = /[\u202a-\u202e\u2066-\u2069]/u;
+    fc.assert(
+      fc.property(fc.string({ unit: "binary", maxLength: 40 }), (text) => {
+        const out = isolated(text);
+        expect(out.startsWith("\u2068") && out.endsWith("\u2069")).toBe(true);
+        expect(controls.test(out.slice(1, -1))).toBe(false);
+        expect(out.slice(1, -1)).toBe(text.replace(new RegExp(controls, "gu"), ""));
+      }),
+      { numRuns },
+    );
+    expect(isolated("Q\u2069\u202e")).toBe("\u2068Q\u2069");
   });
 
   test("draws a question in Latin Extended letters as a PNG", async () => {

@@ -99,7 +99,9 @@ export async function loadPoll(
     moderation,
     asOf: now(),
     code,
-    tags,
+    // The API withholds a hidden poll's tags; dropped here too, should its
+    // answers straddle the hiding, since the place now reaches the preview (T-68).
+    tags: moderation.state === "hidden" ? NO_TAGS : tags,
     // Core names no one for a hidden poll; dropped here too, since the page's
     // data reaches the browser whether or not it is shown (T-68).
     askedBy: moderation.state === "hidden" ? undefined : askedBy,

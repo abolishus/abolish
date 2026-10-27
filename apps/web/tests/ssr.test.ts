@@ -1952,6 +1952,11 @@ describe("link preview", () => {
     };
     const one = await meta(OPEN_ONE);
     expect(one.title).toBe("Should the park stay open late?");
+    // Beside our words in the image's description, the author's are isolated (T-75).
+    const html = await (await get(`/polls/${OPEN_ONE}`)).text();
+    expect(html).toContain(
+      '<meta property="og:image:alt" content="\u2068Should the park stay open late?\u2069. ',
+    );
     expect((await meta(OPEN_ONE, { "accept-language": "es-MX" })).title).toBe(
       "¿Debe el parque abrir hasta tarde?",
     );

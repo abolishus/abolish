@@ -41,7 +41,7 @@ import {
   DecodeError,
   type DecodeErrorCode,
   decodeReceipt,
-  type ElectionDefinitionV6Rule,
+  type ElectionDefinitionV7Rule,
   encodeBoardEntry,
   EncodeError,
   membershipVkHash,
@@ -94,6 +94,7 @@ import {
   authorRunOf,
   decodeDefinition,
   isReadable,
+  isRolling,
   readDefinition,
   type VerifiedDefinition,
 } from "./definition.ts";
@@ -133,7 +134,7 @@ export type Verdict = "verified" | "failed" | "unverifiable";
 export type CheckCode =
   | BoardErrorCode
   | L1ErrorCode
-  | ElectionDefinitionV6Rule
+  | ElectionDefinitionV7Rule
   | CeremonyCode
   | AdmissionCode
   | WindowCode
@@ -173,7 +174,7 @@ export type CheckAt =
   /** 3.1's author panel transcript or approvals, where no entry is named. */
   | { readonly panel: "author" }
   | { readonly decodeError: DecodeErrorCode }
-  /** 2.1's first failing question under definition versions 5 and 6. */
+  /** 2.1's first failing question under definition versions 5 to 7. */
   | { readonly question: number }
   | { readonly checkpoint: number }
   | { readonly segment: number }
@@ -228,7 +229,7 @@ export interface Report {
   readonly cells?: readonly CellReport[];
   /** A format-5 bundle's per-tier results, derived from the cells, once 7.1 passed. */
   readonly tiers?: readonly TierReport[];
-  /** Under definition versions 5 and 6, beside `cells`, each question's limits and method (8.1). */
+  /** Under definition versions 5 to 7, beside `cells`, each question's limits and method (8.1). */
   readonly questions?: readonly QuestionReport[];
   /** A format-5 bundle's destruction report, once 8.5 ran. */
   readonly destruction?: DestructionReport;
@@ -533,6 +534,13 @@ function fromDefinition(
       throw new Error(`unmapped profile rule ${String(unknown)}`);
     }
   }
+  // A rolling electorate's roots are its steps', which only 2.4's rolling
+  // replay computes, and its ballots are version 5, which 5.1 and 5.2 don't
+  // read yet: a later release verifies it, so a profile that fits is
+  // unverifiable, never failed, and the board checks have no election to
+  // run for until then (P2-17 parts 4c and 4d; T-36). One that doesn't fit
+  // fails 2.3 under every release, as any other definition's does.
+  if (isRolling(record)) return stopped("2.3", combination ?? UNSUPPORTED, hash);
   return {
     hash,
     definition: record,

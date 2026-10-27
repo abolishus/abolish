@@ -67,10 +67,11 @@ import {
   type SeatPanel,
   type TallyRules,
   tallyRules,
+  ELECTORATE_MODES,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { BallotTally } from "./ballots.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
 import { type CloseCandidate, closeChecks, type CloseReport } from "./close.ts";
 import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
@@ -207,7 +208,7 @@ export interface CellReport {
   readonly counted: number;
   /** For a cell that passes 7.2, its count per option, as decimal strings. */
   readonly counts?: readonly string[];
-  /** Under definition versions 5 and 6, beside `counts`, each question's slice of them, in question order. */
+  /** Under definition versions 5 to 7, beside `counts`, each question's slice of them, in question order. */
   readonly byQuestion?: readonly (readonly string[])[];
   /**
    * For a cell that fails 7.2, its code; beside an author panel, neither this
@@ -235,7 +236,7 @@ export interface TierReport {
   readonly counted: number;
   /** Per option, the sum of its cells' counts, as decimal strings; only where every cell passes 7.2. */
   readonly counts?: readonly string[];
-  /** Under definition versions 5 and 6, beside `counts`, each question's slice of them, in question order. */
+  /** Under definition versions 5 to 7, beside `counts`, each question's slice of them, in question order. */
   readonly byQuestion?: readonly (readonly string[])[];
 }
 
@@ -288,7 +289,7 @@ export interface CountedResult {
   readonly delivery?: DeliveryReport | DeliveryReportV2;
   readonly cells?: readonly CellReport[];
   readonly tiers?: readonly TierReport[];
-  /** Under definition versions 5 and 6, beside `cells`, each question's limits and method. */
+  /** Under definition versions 5 to 7, beside `cells`, each question's limits and method. */
   readonly questions?: readonly QuestionReport[];
   readonly destruction?: DestructionReport;
   /** 7.4's breaks that need the counted set, by entry (tally.md, Boarding). */
@@ -400,7 +401,7 @@ export function deliverSelected(
   // Beside an author panel delivery (5.9) reads the author seats' key set,
   // their own run's, approved on the board: without it nothing is decided,
   // never with a key set taken on trust or the default panel's alone (T-37).
-  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
   if (author && inputs.authorRegistered === undefined)
     return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   // Ordinary ballots can't be found under a contract-event version this
@@ -472,7 +473,7 @@ export function deliverSelected(
       // ([[delivery]], Versions): any other is a rejected entry wherever it
       // sits, so one above the floor isn't read, as a board-path one isn't,
       // and can't hold the rows open. Versions 9 to 11 frame both.
-      const fixed = checked.event.record[2] === (definition.version === 6 ? 2 : 1);
+      const fixed = checked.event.record[2] === (isPanelled(definition) ? 2 : 1);
       if (BigInt(segment) > floor && !fixed) continue;
       // Under ballot version 4 one naming another definition is stray
       // wherever it sits and delivers nothing here, so above the floor it
@@ -480,7 +481,7 @@ export function deliverSelected(
       // open from the board's shared sequence (T-53).
       if (
         BigInt(segment) > floor &&
-        definition.version === 6 &&
+        isPanelled(definition) &&
         "definitionHash" in checked.event &&
         !equal(checked.event.definitionHash, definitionHash)
       )
@@ -499,7 +500,7 @@ export function deliverSelected(
       // election's seat can't stall this one's rows from the board's shared
       // sequence.
       if (
-        definition.version === 6 &&
+        isPanelled(definition) &&
         fixed &&
         checked.event.event === "ObligationRootSubmitted" &&
         equal(checked.event.definitionHash, definitionHash)
@@ -507,7 +508,7 @@ export function deliverSelected(
         return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
       // A root of another version is a rejected entry the delivery check
       // lists, whatever it names.
-      if (checked.event.event === "ObligationRootSubmitted" && definition.version !== 6 && fixed) {
+      if (checked.event.event === "ObligationRootSubmitted" && !isPanelled(definition) && fixed) {
         // A root for this election may deliver for every ballot by its leaves,
         // which only the counted-extent attestations make available and
         // `checkDelivery` doesn't read yet (P1-12f parts 2 and 3; P4-3 part
@@ -530,10 +531,9 @@ export function deliverSelected(
   }
 
   const against: DeliveryWindow = { definitionHash, registered, segments, deadlines };
-  const delivered =
-    definition.version === 6
-      ? deliveryV2(inputs, against, records, recordAt)
-      : deliveryV1(inputs, against, records, recordAt, strays);
+  const delivered = isPanelled(definition)
+    ? deliveryV2(inputs, against, records, recordAt)
+    : deliveryV1(inputs, against, records, recordAt, strays);
   return { eventVersion, own, floor, ...delivered };
 }
 
@@ -545,7 +545,7 @@ export function deliverSelected(
 export function countedChecks(inputs: CountedInputs): CountedResult {
   const { definition, definitionHash, registered, clock } = inputs;
   const d = definition.value;
-  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
   const delivered = deliverSelected(inputs, undefined);
   if ("stop" in delivered) return countedRows(delivered.stop, inputs.destruction);
   const { eventVersion, own, floor, delivery } = delivered;
@@ -597,7 +597,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
 
   const openings = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.tallyOpening);
   if (author) {
-    const rules = panelTallyRules(definition as Extract<VerifiedDefinition, { version: 6 }>, 1);
+    const rules = panelTallyRules(definition as PanelledRecord, 1);
     const tally = panelTally(inputs, delivered.ballots, openings, floor, rules);
     for (const [id, outcome] of tally.rows) rows.set(id, outcome);
     const result = {
@@ -917,7 +917,7 @@ function deliveryV2(
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],
 ): { readonly ballots: DeliveryCheckV2["ballots"]; readonly delivery: DeliveryReportV2 } {
-  const d = inputs.definition.value as Extract<VerifiedDefinition, { version: 6 }>["value"];
+  const d = (inputs.definition as PanelledRecord).value;
   const delivered = checkDeliveryV2(
     {
       definitionHash: window.definitionHash,
@@ -1000,7 +1000,7 @@ function tierResults(
 }
 
 /**
- * A passing cell's or tier's counts, and under definition versions 5 and 6
+ * A passing cell's or tier's counts, and under definition versions 5 to 7
  * each question's slice of them by crypto's `questionResults`: each question
  * on its own, never a figure joining two, since none is opened (8.1;
  * ADR 0026, No cross-tabulation; T-29, T-16).
@@ -1015,7 +1015,7 @@ function countsOf(
     : { counts: text(counts), byQuestion: questionResults(rules, counts).map(text) };
 }
 
-/** Under definition versions 5 and 6, each question's limits and its method (8.1). */
+/** Under definition versions 5 to 7, each question's limits and its method (8.1). */
 function questionReports(rules: TallyRules): { readonly questions?: readonly QuestionReport[] } {
   if (rules.questions === undefined) return {};
   return {
@@ -1091,7 +1091,7 @@ function panelTally(
     readonly author: number | null;
   }[];
 } {
-  const definition = inputs.definition as Extract<VerifiedDefinition, { version: 6 }>;
+  const definition = inputs.definition as PanelledRecord;
   const { definitionHash, registered, clock } = inputs;
   const halves: BallotHalves[][] = Array.from({ length: partitionSize(definition) }, () => []);
   ballots.forEach((b, i) => {
@@ -1184,8 +1184,9 @@ function panelTally(
 
 /**
  * Each cell's tier, in partition order: under definition version 1 the
- * cells are the tiers, under versions 3 to 6 every tier's cells in
- * `electorate` order (election-definition.md, Notes, Tally partition).
+ * cells are the tiers, under versions 3 to 6 and a fixed version 7 every
+ * tier's cells in `electorate` order, and under a rolling version 7 each
+ * rolling tier is one cell (election-definition.md, Notes, Tally partition).
  */
 export function cellTiers(definition: VerifiedDefinition): readonly number[] {
   switch (definition.version) {
@@ -1196,6 +1197,10 @@ export function cellTiers(definition: VerifiedDefinition): readonly number[] {
     case 5:
     case 6:
       return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
+    case 7:
+      return definition.value.electorate_mode === ELECTORATE_MODES.rolling
+        ? definition.value.rolling_electorate.map((t) => t.tier)
+        : definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     default: {
       const unread: never = definition;
       throw new Error(`unread definition version ${String(unread)}`);

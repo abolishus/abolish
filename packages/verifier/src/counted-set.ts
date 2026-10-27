@@ -31,7 +31,7 @@ import {
 import { type ElectionAdmissionCode, readElection } from "./admission.ts";
 import { ALL_ROWS, ballotChecks, type BallotOutcome, type BallotTally } from "./ballots.ts";
 import { type CountedOutcome, deliverSelected } from "./counted.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isPanelled, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
@@ -169,7 +169,7 @@ export function countedTally(inputs: CountedExtentInputs): CountedTallyResult {
  * Tally-opening version 2, Author panel; T-36, T-37).
  */
 export function wholeOpeningPin(record: VerifiedDefinition): WholeOpeningVersion | undefined {
-  if (record.version === 6 && record.value.author_keys.length !== 0) return undefined;
+  if (isPanelled(record) && record.value.author_keys.length !== 0) return undefined;
   const v = pinnedVersion(record.value, RECORD_TYPES.tallyOpening);
   return v === 1 || v === 2 ? v : undefined;
 }

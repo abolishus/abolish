@@ -51,7 +51,7 @@ import {
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { AdmittedCore } from "./ballots.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isPanelled, type VerifiedDefinition } from "./definition.ts";
 
 /** A publication rule an opening is known to break (docs/spec/challenge.md, Publication). */
 export type OpeningBreak =
@@ -149,7 +149,8 @@ const UNSUPPORTED: OpeningOutcome = { status: "unverifiable", code: "unsupported
 // pins (2.3): definition version 1's ballots (version 1) are opened by
 // opening version 1, ballot versions 2 (definition versions 3 and 4) and 3
 // (version 5) by opening version 2, which names a cell, and ballot version 4
-// (version 6) by opening version 3, which opens both halves.
+// (version 6, and version 7 under a fixed electorate) by opening version 3,
+// which opens both halves.
 const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
 
 /**
@@ -166,8 +167,8 @@ function judgeFor(
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
   const ownBallot =
-    definition.version === 1 ? 1 : definition.version === 5 ? 3 : definition.version === 6 ? 4 : 2;
-  const ownOpening = definition.version === 1 ? 1 : definition.version === 6 ? 3 : 2;
+    definition.version === 1 ? 1 : definition.version === 5 ? 3 : isPanelled(definition) ? 4 : 2;
+  const ownOpening = definition.version === 1 ? 1 : isPanelled(definition) ? 3 : 2;
   // An opening version this verifier doesn't read may be one a later release
   // reads, and so may a ballot version, whose cores a later opening version
   // may open: unverifiable, never failed, so releases agree (2.3; T-36). As
@@ -187,7 +188,7 @@ function judgeFor(
     admitted === undefined
   )
     return NOT_REACHED;
-  if (definition.version === 6) {
+  if (isPanelled(definition)) {
     // Opening version 3 rebuilds the author seats' ciphertexts under the
     // author panel's own run's key set, approved on the board, as admission
     // judges its share hashes: never under keys no transcript check gave, or

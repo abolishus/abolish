@@ -44,8 +44,9 @@ import {
   sortTallyOpenings,
   tallyOpeningStatement,
   tallyRules,
+  ELECTORATE_MODES,
 } from "@abolishus/crypto";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
 
 /** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
 export type TallyBreak =
@@ -106,10 +107,11 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /**
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
- * versions 3 to 6's cells of every tier, as the definition states them.
- * 2.1's rules keep it from 1 to 256, as `sortTallyOpenings` requires: a
- * non-empty electorate, and under versions 3 to 6 the `cells` rule, which
- * caps the total and gives every tier at least one cell.
+ * versions 3 to 7's cells of every tier, as the definition states them, or
+ * a rolling version 7's tiers, each one cell. 2.1's rules keep it from 1 to
+ * 256, as `sortTallyOpenings` requires: a non-empty electorate, and under
+ * versions 3 to 7 the `cells` rule, which caps the total and gives every
+ * tier at least one cell.
  */
 export function partitionSize(definition: VerifiedDefinition): number {
   switch (definition.version) {
@@ -120,6 +122,10 @@ export function partitionSize(definition: VerifiedDefinition): number {
     case 5:
     case 6:
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+    case 7:
+      return definition.value.electorate_mode === ELECTORATE_MODES.rolling
+        ? definition.value.rolling_electorate.length
+        : definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     default: {
       const unread: never = definition;
       throw new Error(`unread definition version ${String(unread)}`);
@@ -156,12 +162,12 @@ export function tallyChecks(
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
-  // Under definition version 6 tally-opening version 1 opens ballot version
+  // Under definition version 6 (and a fixed version 7) tally-opening version 1 opens ballot version
   // 4's default half, which without an author panel is the whole sharing
   // (tally.md, Context); beside one the profile pins version 3, whose
   // partial openings are per panel, and a version-1 opening there would be
   // judged against the default panel's rules alone (T-37).
-  const author = definition.version === 6 && definition.value.author_keys.length !== 0;
+  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
   // A tally-opening version this verifier doesn't read here, or none pinned
   // (a later tally scheme's record), may be one a later release reads:
   // unverifiable, never failed, so releases agree (2.3; T-36). Version 2, a
@@ -248,11 +254,8 @@ export function tallyChecks(
   // and 6 the total over the questions, for each panel's partial opening as
   // for a whole one (tally.md, Context). 2.1 passed, so the definition is
   // well formed.
-  const m = (
-    author
-      ? panelTallyRules(definition as Extract<VerifiedDefinition, { version: 6 }>, 1)
-      : tallyRules(definition)
-  ).optionCount;
+  const m = (author ? panelTallyRules(definition as PanelledRecord, 1) : tallyRules(definition))
+    .optionCount;
   const report: TallyReport[] = [];
   // Each (cell, panel, seat)'s first attributed opening: its entry and signed message.
   const first = new Map<string, { readonly entry: number; readonly signed: Uint8Array }>();

@@ -2,7 +2,10 @@
 """Independent generator for docs/spec/vectors/verifier-ballots-v4.json.
 
 Elections for the verifier's ballot admission under definition version 6,
-whose ballots (version 4) name their cell, carry one range proof per question
+or, for docs/spec/vectors/verifier-ballots-v4-definition-v7.json, the same
+elections under definition version 7 with a fixed electorate, which the
+verifier reads as version 6 under version 7's own hashes (docs/spec/verifier.md,
+2.3), whose ballots (version 4) name their cell, carry one range proof per question
 and split each vote into a default half and an author half (docs/spec/verifier.md,
 Ballot admission; 5.1 to 5.5, 5.7): each is a definition, a board copy and the
 panel a bundle pins, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4
@@ -24,12 +27,13 @@ regional electorate with its cell trees by the first-occurrence rule).
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for verifier-ballots-v3.json:
 
-  python3 -I -B verifier-ballots-v4-vectors.py statements <constants> <work>/statements.json
+  python3 -I -B verifier-ballots-v4-vectors.py statements <constants> <work>/statements.json [7]
   vp node ballot-proofs.mjs <artifacts-dir> <work>/statements.json <work>/proofs.json
-  python3 -I -B verifier-ballots-v4-vectors.py assemble <constants> <work>/proofs.json <out-dir>
+  python3 -I -B verifier-ballots-v4-vectors.py assemble <constants> <work>/proofs.json <out-dir> [7]
 
 where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json
-and ballot-proofs.mjs runs outside the workspace (see its header). Every value
+and ballot-proofs.mjs runs outside the workspace (see its header); a final
+`7` makes the definition-version-7 file, with its own proofs. Every value
 but the proofs is deterministic from fixed labels (test data, never keys);
 Groth16 proving is randomised, so the committed file is the record. Then
 `vp check --fix` formats it.
@@ -67,6 +71,12 @@ cv = vc.cv
 # `vc.stub_hash` makes it.
 vc.ENCODE[6] = d6.enc_definition_v6
 vc.RULE[6] = d6.definition_rule
+# Version 7's layout and rules are rolling-electorate-vectors.py's: under a
+# fixed electorate, version 6's fields with the mode and an empty list
+# appended, so its hashes and stubs are its own.
+rv = _load("rolling_electorate_vectors", "rolling-electorate-vectors.py")
+vc.ENCODE[7] = rv.enc_definition_v7
+vc.RULE[7] = rv.definition_rule
 
 H, ds = cv.H, cv.ds
 BALLOT_TYPE = 0x0002
@@ -105,18 +115,18 @@ def det(label):
     return hashlib.sha256(b"abolish verifier ballots v4 vectors " + label.encode()).digest()
 
 
-def pins_for(ballot=4, opening=3):
-    """A version-6 profile: board-entry version 5, contract-event version 8 (close.md, Version), display-text version 2, tally-opening version 1, and the given ballot and spoiled-opening pins."""
-    own = {1: 6, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 8, DISPLAY_TEXT_TYPE: 2}
+def pins_for(ballot=4, opening=3, definition=6):
+    """A version-6 (or version-7) profile: board-entry version 5, contract-event version 8 (close.md, Version), display-text version 2, tally-opening version 1, and the given ballot and spoiled-opening pins."""
+    own = {1: definition, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 8, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
 def combination(d):
-    """2.3 under definition version 6 (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 8 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails; any other pin fails."""
+    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 8 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails."""
     pins = dict(d["profile"]["pins"])
     if d["results_mode"] != d6.SEALED or d["author_keys"]:
         return COMBINATION_FAILS
-    if pins[BALLOT_TYPE] not in (1, 2, 3, 4):
+    if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
         return UNSUPPORTED
     wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 8}
     if any(pins[t] != v for t, v in wanted.items()):
@@ -132,8 +142,8 @@ def negated(proof):
     return b"".join(w.to_bytes(32, "big") for w in words)
 
 
-def build(constants):
-    """Everything but the proofs' bytes, deterministically."""
+def build(constants, version=6):
+    """Everything but the proofs' bytes, deterministically, under definition version 6 or a fixed version 7."""
     b1.bjj_self_check()
     mem.self_check()
     pos = b1.Poseidon(constants)
@@ -161,18 +171,24 @@ def build(constants):
         **d6.SEALED_EVERYDAY,
         **d6.NO_AUTHOR,
     )
+    if version == 7:
+        base.update(electorate_mode=rv.FIXED, rolling_electorate=[])
     eid = base["election_id"]
+
+    def pins(**kw):
+        return pins_for(definition=version, **kw)
     proofs, checks, bundles = {}, [], []
 
     def election_for(label, seats, cheat=None, **changes):
-        """A version-6 definition for the panel and its transcript, made for the definition's own default stub."""
+        """A definition of `version` for the panel and its transcript, made for the definition's own default stub, or for `stub_of`'s."""
         panel = panels["panel-4"]
         fields = dict(copy.deepcopy(base))
+        stub_of = changes.pop("stub_of", None)
         fields.update(changes)
-        ctx = vc.election_of(vc.definition_for(panel, bytes(32), fields))
+        ctx = vc.election_of(stub_of or vc.definition_for(panel, bytes(32), fields))
         t = vc.transcript(f"verifier-ballots-v4/{label}", panel, seats, ctx, cheat)
         d = vc.definition_for(panel, H(ds(vc.TRANSCRIPT_TAG, t)), fields)
-        assert vc.own_version(d) == 6
+        assert vc.own_version(d) == version
         h = H(ds(DEFINITION_TAG, vc.encode(d)))
         e = dict(
             r4.rules(
@@ -268,6 +284,8 @@ def build(constants):
                         if len(p) == 3:
                             check["negate"] = True
                         checks.append(check)
+        if version == 7:
+            description = description.replace("Definition version 6", "Definition version 7 under a fixed electorate").replace("version-6 poll", "fixed version-7 poll")
         bundles.append(
             {"id": bid, "description": description, "definition": d, "transcript": t, "election": e, "registered": registered, "board": payloads, "expect": expect, "ceremonyRow": ceremony_row}
         )
@@ -295,13 +313,13 @@ def build(constants):
     # and contract-event version 8, so 2.3's combination passes. Seat 4 sends
     # nothing, so the registered key set is seats 1 to 3 and seat 4's share
     # hash must be zero.
-    d, t, e = election_for("v6", [1, 2, 3], profile=pins_for())
+    d, t, e = election_for("v6", [1, 2, 3], profile=pins())
     assert e["authorPanelSize"] == 0
     ok = honest(e)
     b_a, p_a = ok["cell-0"]
     b_r2 = ballot("remainder-region-2", e, 1, nullifier("r2/1", e, 1), [(3, [0]), (4, [1, 2]), (2, [1])], zero4)
     p_r2 = prove("v6/remainder-region-2", "r2/1", e, 1, b_r2)
-    d_o, _, e_o = election_for("v6-other", [1, 2, 3], profile=pins_for(), election_id=det("other election"))
+    d_o, _, e_o = election_for("v6-other", [1, 2, 3], profile=pins(), election_id=det("other election"))
     assert e_o["definitionHash"] != e["definitionHash"]
     b_stray = ballot("stray", e_o, 0, nullifier("r0/0", e_o, 0), [(3, [0]), (4, []), (2, [0])], zero4)
     p_stray = prove("v6/stray", "r0/0", e_o, 0, b_stray)
@@ -382,14 +400,14 @@ def build(constants):
     )
     bundle("no-ballots", "The transcript and no ballot: 5.1 to 5.5 and 5.7 pass, with nothing admitted.", d, t, e, [1, 2, 3], [t], "ballots")
 
-    d_all, t_all, e_all = election_for("v6-every-seat", [1, 2, 3, 4], profile=pins_for())
+    d_all, t_all, e_all = election_for("v6-every-seat", [1, 2, 3, 4], profile=pins())
     b_all = ballot("every-seat", e_all, 0, nullifier("r0/2", e_all, 0), [(3, [2]), (4, [3]), (2, [0])], full4)
     p_all = prove("v6-every-seat/every-seat", "r0/2", e_all, 0, b_all)
     bundle("every-seat", "Every seat registered: a share hash at seat 4 is admitted.", d_all, t_all, e_all, [1, 2, 3, 4], [t_all, (b_all, p_all)], "ballots")
 
     # Spoiled-ballot opening version 2 beside ballot version 4: 2.3 fails,
     # and, as under definition versions 1 and 3 to 5, admission still runs.
-    d_o2, t_o2, e_o2 = election_for("v6-opening-2", [1, 2, 3], profile=pins_for(opening=2))
+    d_o2, t_o2, e_o2 = election_for("v6-opening-2", [1, 2, 3], profile=pins(opening=2))
     ok_o2 = honest(e_o2)
     bundle(
         "opening-2",
@@ -401,7 +419,7 @@ def build(constants):
 
     # A live poll: 2.3 fails it until the live release's checks exist
     # (P2-15 part 3), but its key set is registered, so admission runs.
-    d_l, t_l, e_l = election_for("v6-live", [1, 2, 3], profile=pins_for(), results_mode=d6.LIVE, live_every=3600, live_batch=d6.MIN_LIVE_BATCH)
+    d_l, t_l, e_l = election_for("v6-live", [1, 2, 3], profile=pins(), results_mode=d6.LIVE, live_every=3600, live_batch=d6.MIN_LIVE_BATCH)
     ok_l = honest(e_l)
     bundle(
         "live",
@@ -418,7 +436,7 @@ def build(constants):
     d_ap, t_ap, e_ap = election_for(
         "v6-author-panel",
         [1, 2, 3],
-        profile=pins_for(),
+        profile=pins(),
         author_threshold=2,
         author_keys=d6.AUTHOR_KEYS[:3],
         author_transcript_hash=det("author transcript"),
@@ -432,25 +450,66 @@ def build(constants):
     def two_bad(i, answers, *_):
         return [bytes(32)] * len(answers) if i in (3, 4) else answers
 
-    d_qu, t_qu, e_qu = election_for("v6-quorum", [1, 2, 3, 4], cheat={"answers": two_bad}, profile=pins_for())
+    d_qu, t_qu, e_qu = election_for("v6-quorum", [1, 2, 3, 4], cheat={"answers": two_bad}, profile=pins())
     bundle("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so no ballot is checked.", d_qu, t_qu, e_qu, None, [t_qu, (b_a, None)], "not-reached")
 
-    d_vk, t_vk, e_vk = election_for("v6-other-key", [1, 2, 3], profile=pins_for(), membership_vk_hash=det("other key"))
+    d_vk, t_vk, e_vk = election_for("v6-other-key", [1, 2, 3], profile=pins(), membership_vk_hash=det("other key"))
     bundle("other-key", "Ballot version 4's proofs are checked under the same pinned key as versions 1 to 3's: a definition naming another fails 1.3, and no ballot is checked under it.", d_vk, t_vk, e_vk, [1, 2, 3], [t_vk, (b_a, None)], "not-reached")
 
     zero_root = copy.deepcopy(electorate)
     zero_root[1]["cells"][0]["root"] = 0
-    d_z, t_z, e_z = election_for("v6-root-zero", [1, 2, 3], profile=pins_for(), electorate=zero_root)
+    d_z, t_z, e_z = election_for("v6-root-zero", [1, 2, 3], profile=pins(), electorate=zero_root)
     bundle("root-zero", "The definition gives tier 2's cell a root of 0, which anyone can prove membership of (T-04): no ballot is checked under it.", d_z, t_z, e_z, [1, 2, 3], [t_z, (b_a, None)], "not-reached")
 
-    d_b1, t_b1, e_b1 = election_for("v6-ballot-1", [1, 2, 3], profile=pins_for(ballot=1, opening=1))
+    d_b1, t_b1, e_b1 = election_for("v6-ballot-1", [1, 2, 3], profile=pins(ballot=1, opening=1))
     bundle("ballot-v1", "Definition version 6 pinning ballot version 1, which names a tier and carries one range, beside opening version 1: 2.3 fails profile-combination, and no ballot or opening can be judged against the cells and questions.", d_b1, t_b1, e_b1, [1, 2, 3], [t_b1, (b_a, None)], "not-reached")
 
-    d_b3, t_b3, e_b3 = election_for("v6-ballot-3", [1, 2, 3], profile=pins_for(ballot=3, opening=2))
+    d_b3, t_b3, e_b3 = election_for("v6-ballot-3", [1, 2, 3], profile=pins(ballot=3, opening=2))
     bundle("ballot-v3", "Definition version 6 pinning ballot version 3, which carries no author half: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b3, t_b3, e_b3, [1, 2, 3], [t_b3, (b_a, None)], "unsupported")
 
-    d_b5, t_b5, e_b5 = election_for("v6-ballot-5", [1, 2, 3], profile=pins_for(ballot=5))
-    bundle("ballot-v5", "Definition version 6 pinning ballot version 5, which this release doesn't read: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+    d_b5, t_b5, e_b5 = election_for("v6-ballot-5", [1, 2, 3], profile=pins(ballot=5))
+    if version == 6:
+        bundle("ballot-v5", "Definition version 6 pinning ballot version 5, which this release doesn't read: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+    else:
+        bundle(
+            "ballot-v5",
+            "Definition version 7 under a fixed electorate pinning ballot version 5, a rolling electorate's: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.",
+            d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported",
+        )
+
+    if version == 7:
+        # The same election read as version 6: its fields without the mode
+        # and the empty list, pinning definition version 6. Its hash and
+        # stubs are another definition's, so a ballot made for it is another
+        # election's (T-12, T-34), and a transcript made for its stub
+        # registers nothing here (T-37).
+        def v6_reading(x):
+            pinned = dict(x["profile"]["pins"])
+            pinned[1] = 6
+            return dict(rv.as_v6(x), profile={"protocol_major": 1, "pins": sorted(pinned.items())})
+
+        e6 = dict(e, label="v6-reading", definitionHash=H(ds(DEFINITION_TAG, vc.encode(v6_reading(d)))))
+        assert e6["definitionHash"] != e["definitionHash"]
+        b_v6 = ballot("v6-reading", e6, 0, nullifier("r0/0", e6, 0), [(3, [0]), (4, []), (2, [0])], zero4)
+        p_v6 = prove("v7/v6-reading", "r0/0", e6, 0, b_v6)
+        bundle(
+            "v6-reading",
+            "Definition version 7 under a fixed electorate, with a ballot made for the same election read as version 6 (its version-6 hash, with a valid proof under that hash's scope) after an admitted one: 5.1 rejects it as another election's.",
+            d, t, e, [1, 2, 3],
+            [t, ok["cell-0"], (b_v6, p_v6)],
+            "ballots",
+        )
+        d_s6, t_s6, e_s6 = election_for(
+            "v7-v6-stub",
+            [1, 2, 3],
+            profile=pins(),
+            stub_of=v6_reading(vc.definition_for(panels["panel-4"], bytes(32), dict(copy.deepcopy(base), profile=pins()))),
+        )
+        bundle(
+            "v6-stub",
+            "Definition version 7 under a fixed electorate whose transcript was made for the version-6 reading's stub: no key set is registered, so no ballot is checked.",
+            d_s6, t_s6, e_s6, None, [t_s6, (b_a, None)], "not-reached",
+        )
 
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
@@ -491,13 +550,13 @@ def rows_for(kind, rejected=()):
     return rows
 
 
-def statements(constants, out):
-    s = build(constants)
+def statements(constants, out, version=6):
+    s = build(constants, version)
     pathlib.Path(out).write_text(json.dumps({"proofs": list(s["proofs"].values()), "checks": s["checks"]}, indent=2) + "\n")
 
 
-def assemble(constants, proofs_path, out_dir):
-    s = build(constants)
+def assemble(constants, proofs_path, out_dir, version=6):
+    s = build(constants, version)
     got = json.loads(pathlib.Path(proofs_path).read_text())
     proof_bytes = {k: bytes.fromhex(v) for k, v in got["proofs"].items()}
     verdicts = got["verdicts"]
@@ -538,7 +597,8 @@ def assemble(constants, proofs_path, out_dir):
             assert ceremony_rows["3.2"] == outcome("pass"), bnd["id"]
             assert [x["index"] for x in ceremony["registered"]] == bnd["registered"], bnd["id"]
         else:
-            assert ceremony_rows["3.2"]["status"] == "fail", bnd["id"]
+            # A transcript made for another stub fails 3.1 before 3.2 is reached.
+            assert "fail" in (ceremony_rows["3.1"]["status"], ceremony_rows["3.2"]["status"]), (bnd["id"], ceremony_rows)
         pins = dict(d["profile"]["pins"])
         # 1.3: ballot versions 1 to 4 are proved under the one pinned key; a
         # later version may pin another (docs/spec/verifier.md, Procedure).
@@ -548,6 +608,12 @@ def assemble(constants, proofs_path, out_dir):
             "2.3": combination(d),
             "3.2": ceremony_rows["3.2"],
         }
+        # The definition-version-7 file reports 3.1 too, for its transcript
+        # made for the version-6 reading's stub.
+        if version == 7:
+            # Beside an author panel 3.1 holds for its run too, whose
+            # transcript these boards never carry (Key ceremony, step 5).
+            rows["3.1"] = ceremony_rows["3.1"] if bnd["ceremonyRow"] is None else outcome("unverifiable", "ceremony-transcript-missing", {"panel": "author"})
         ballots = None
         if bnd["expect"] == "ballots":
             admitted, rejected, repeats, firsts = [], [], [], set()
@@ -632,7 +698,10 @@ def assemble(constants, proofs_path, out_dir):
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"] == COMBINATION_FAILS
     assert by["ballot-v3"]["expected"]["2.3"] == COMBINATION_FAILS
-    assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
+    assert by["ballot-v5"]["expected"]["2.3"] == (UNSUPPORTED if version == 6 else COMBINATION_FAILS)
+    if version == 7:
+        assert by["v6-reading"]["ballots"] == {"admitted": 1, "rejected": [{"entry": 2, "code": "ballot-stray"}], "repeats": []}
+        assert by["v6-stub"]["expected"]["3.1"] == outcome("fail", "ceremony-signature", {"entry": 0}) and by["v6-stub"]["expected"]["5.1"] == NOT_REACHED
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
     assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-2"]["expected"]["6.2"] == NOT_REACHED
     assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
@@ -640,11 +709,16 @@ def assemble(constants, proofs_path, out_dir):
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",
-        "title": "The verifier's ballot admission under definition version 6 (ballot version 4): definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots",
+        "title": (
+            "The verifier's ballot admission under definition version 6 (ballot version 4): definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots"
+            if version == 6
+            else "The verifier's ballot admission under definition version 7 with a fixed electorate (ballot version 4), read as version 6 under version 7's hashes: definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots"
+        ),
         "spec": "docs/spec/verifier.md",
         "generator": (
-            "packages/crypto/scripts/verifier-ballots-v4-vectors.py, from verifier-ceremony-vectors.py, ballot-v4-records-vectors.py "
-            "and definition-v6-vectors.py (independent Python implementations); membership proofs by packages/crypto/scripts/ballot-proofs.mjs, "
+            "packages/crypto/scripts/verifier-ballots-v4-vectors.py, from verifier-ceremony-vectors.py, ballot-v4-records-vectors.py"
+            + (" and definition-v6-vectors.py" if version == 6 else ", definition-v6-vectors.py and rolling-electorate-vectors.py")
+            + " (independent Python implementations); membership proofs by packages/crypto/scripts/ballot-proofs.mjs, "
             "run outside the workspace with Semaphore 4.14.3's depth-32 circuit artifacts and snarkjs 0.7.5, whose groth16.verify gives "
             "every pairing verdict on the signals derived here from each record"
         ),
@@ -652,19 +726,21 @@ def assemble(constants, proofs_path, out_dir):
         "panels": {name: {"threshold": str(p["k"]), "keys": [k.hex() for k in p["keys"]]} for name, p in s["panels"].items()},
         "cases": cases,
     }
-    path = pathlib.Path(out_dir, "verifier-ballots-v4.json")
+    path = pathlib.Path(out_dir, "verifier-ballots-v4.json" if version == 6 else "verifier-ballots-v4-definition-v7.json")
     path.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"wrote {path}: {len(cases)} cases")
 
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "statements":
-        statements(sys.argv[2], sys.argv[3])
-    elif cmd == "assemble":
-        assemble(sys.argv[2], sys.argv[3], sys.argv[4])
+    version = 7 if sys.argv[-1] == "7" else 6
+    args = sys.argv[2:-1] if version == 7 else sys.argv[2:]
+    if cmd == "statements" and len(args) == 2:
+        statements(*args, version)
+    elif cmd == "assemble" and len(args) == 3:
+        assemble(*args, version)
     else:
-        raise SystemExit("usage: verifier-ballots-v4-vectors.py statements <constants> <out> | assemble <constants> <proofs> <out-dir>")
+        raise SystemExit("usage: verifier-ballots-v4-vectors.py statements <constants> <out> [7] | assemble <constants> <proofs> <out-dir> [7]")
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ import {
   stepMembershipV4,
   type SeatPanel,
 } from "@abolishus/crypto";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
 import { type L1RefCode, referenceJudge } from "./references.ts";
@@ -551,11 +551,9 @@ export function ballotChecks(
   };
 }
 
-/** Whether a definition is live: version 6 with `results_mode` 2 (this release reads no version 7). */
-export function isLive(
-  definition: VerifiedDefinition,
-): definition is Extract<VerifiedDefinition, { readonly version: 6 }> {
-  return definition.version === 6 && definition.value.results_mode === RESULTS_MODES.live;
+/** Whether a definition is live: version 6, or a fixed version 7, with `results_mode` 2. */
+export function isLive(definition: VerifiedDefinition): definition is PanelledRecord {
+  return isPanelled(definition) && definition.value.results_mode === RESULTS_MODES.live;
 }
 
 /**
@@ -566,8 +564,8 @@ export function isLive(
  * counts toward the one-ballot rule whatever else rejects it
  * (docs/spec/tally.md, Running set, condition 1; T-45). One naming another
  * definition or cell isn't the tier's, and a `membership-proof` failure
- * never counts under definition version 6, which has no rolling step to
- * leave it pending: neither is read. Exported for its tests; the package
+ * never counts under definition version 6 or a fixed version 7, which have
+ * no rolling step to leave it pending: neither is read. Exported for its tests; the package
  * entry point doesn't export it.
  */
 export class LiveCopies {
@@ -730,7 +728,7 @@ export function steppedJudgeFor(
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
   const own =
-    definition.version === 1 ? 1 : definition.version === 5 ? 3 : definition.version === 6 ? 4 : 2;
+    definition.version === 1 ? 1 : definition.version === 5 ? 3 : isPanelled(definition) ? 4 : 2;
   // A ballot version this verifier doesn't read under this definition
   // version may be one a later release reads: unverifiable, never failed, so
   // releases agree (2.3; T-36).
@@ -768,7 +766,7 @@ export function steppedJudgeFor(
   }
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
-  if (definition.version === 6) {
+  if (isPanelled(definition)) {
     // Beside an author panel its shares are judged only against its own
     // run's key set, approved on the board: never against keys no
     // transcript check gave, or the default panel's (T-37, T-17).

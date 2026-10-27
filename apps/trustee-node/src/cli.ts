@@ -64,6 +64,7 @@ import {
   openingsDeadline,
   ReceiptDuties,
   runInTurn,
+  StatementSends,
   TallyDuties,
   tallyDeadline,
 } from "./duties.ts";
@@ -75,6 +76,7 @@ import { LocalCoordinator, localStub, serveCoordinator } from "./local.ts";
 import { type NodeEvent, TrusteeNode } from "./node.ts";
 import { OpeningSender, PublishedReads } from "./opening-sender.ts";
 import { HttpOperator } from "./operator.ts";
+import { StatementSender } from "./statement-sender.ts";
 import {
   l2AvailabilityRecords,
   l2Postings,
@@ -259,6 +261,8 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
             ...(availability.tally ? [availability.tally] : []),
           ]),
           ...(availability.openings ? [availability.openings.run(signal, ms)] : []),
+          // Beside destruction, since it only reads the statement destruction wrote.
+          ...(availability.statements ? [availability.statements.run(signal, ms)] : []),
         ]
       : []),
   ].map((loop) =>
@@ -348,6 +352,8 @@ interface Duties {
   readonly tally: TallyDuties | undefined;
   /** With `availability.tally` only. */
   readonly openings: OpeningSends | undefined;
+  /** With `availability.tally` only, whose `operator` it sends to. */
+  readonly statements: StatementSends | undefined;
   readonly channel: Endpoint | undefined;
   readonly server: Server;
 }
@@ -502,7 +508,12 @@ async function availabilityDuties(
   );
   io.out({ event: "serving", address: server.address() });
   let tally:
-    | { readonly duties: TallyDuties; readonly openings: OpeningSends; readonly channel: Endpoint }
+    | {
+        readonly duties: TallyDuties;
+        readonly openings: OpeningSends;
+        readonly statements: StatementSends;
+        readonly channel: Endpoint;
+      }
     | undefined;
   if (a.tally !== undefined && records !== undefined) {
     try {
@@ -526,6 +537,7 @@ async function availabilityDuties(
     destruction,
     tally: tally?.duties,
     openings: tally?.openings,
+    statements: tally?.statements,
     channel: tally?.channel,
     server,
   };
@@ -541,7 +553,8 @@ async function availabilityDuties(
  * set from the counted extent the seat attested (T-14, T-54, T-15). Beside
  * it, the sending of the openings it signs to the operator's API, until the
  * duty reads every cell published on the anchored board or the seal's
- * tally term (T-54).
+ * tally term (T-54), and of the seat's destruction statement, once it has
+ * destroyed, until the destruction window ends (T-14).
  */
 async function tallyDuties(
   config: NodeConfig,
@@ -559,6 +572,7 @@ async function tallyDuties(
 ): Promise<{
   readonly duties: TallyDuties;
   readonly openings: OpeningSends;
+  readonly statements: StatementSends;
   readonly channel: Endpoint;
 }> {
   let ca: string | undefined;
@@ -653,6 +667,26 @@ async function tallyDuties(
     },
     a.anchorClock,
   );
+  const statements = new StatementSends(
+    {
+      // Sent only once destruction has finished (docs/spec/tally.md, Destruction, What).
+      seat: afterDestruction(seat),
+      clock,
+      log: (e: DutyEvent) => io.out(e),
+      build: async (election) => {
+        const { boardVersion } = await l1BoardAnchors(wiring.anchors, election, "tally");
+        const sender = new StatementSender({
+          election,
+          boardVersion,
+          statement: () => seat.destructionStatement(election.stubHash),
+          operator,
+          clock,
+        });
+        return { step: () => sender.step(), deadline: openingsDeadline(election, a.anchorClock) };
+      },
+    },
+    a.anchorClock,
+  );
   const tls = await tlsOf(t.tls);
   let channel;
   try {
@@ -669,7 +703,7 @@ async function tallyDuties(
     throw new ConfigError(`availability.tally: ${code}`);
   }
   io.out({ event: "summed-shares", url: channel.url });
-  return { duties, openings, channel };
+  return { duties, openings, statements, channel };
 }
 
 /** What `run` builds the duty over, besides the configuration. */

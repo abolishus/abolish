@@ -673,6 +673,26 @@ export class CeremonySeat {
     return statement;
   }
 
+  /**
+   * The seat's signed destruction statement for sending, once `destroy` has
+   * finished: undefined until the approved run's secrets record is gone, so
+   * a crash between the signature and the secrets' removal sends nothing
+   * until a later `destroy` completes it, and the statement never leaves
+   * the node while the material it claims gone is still held. Only reads,
+   * so it may run beside `destroy`.
+   */
+  async destructionStatement(stubHash: Uint8Array): Promise<Uint8Array | undefined> {
+    if (!(await this.destroying(stubHash))) return undefined;
+    const name = hex(stubHash);
+    const statement = await this.#durable(`destruction/${name}`);
+    if (statement === undefined) return undefined;
+    const runId = await this.#approvedRunId(name);
+    // A plain read, as `#run`'s: the record must not be put back.
+    if ((await this.#config.store.get(`runs/${name}/${hex(runId)}/secrets`)) !== undefined)
+      return undefined;
+    return statement;
+  }
+
   async #approvedRunId(name: string): Promise<Uint8Array> {
     const runRecord = await this.#durable(`approved-runs/${name}`);
     if (runRecord === undefined)

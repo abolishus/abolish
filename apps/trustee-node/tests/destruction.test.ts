@@ -157,6 +157,41 @@ describe("the seat's destruction", () => {
   });
 });
 
+describe("the statement held for sending", () => {
+  test("is nothing before destruction, and the bytes `destroy` returned once it has finished", async () => {
+    const a = await approved();
+    expect(await a.seat.destructionStatement(a.e.stubHash)).toBeUndefined();
+    const statement = await a.seat.destroy(a.e.stubHash);
+    expect(await a.seat.destructionStatement(a.e.stubHash)).toEqual(statement);
+  });
+
+  test("is nothing while a crash left the secrets after the statement, until destruction finishes", async () => {
+    const store = crashingAt("runs/", "remove");
+    const a = await approved(store);
+    await expect(a.seat.destroy(a.e.stubHash)).rejects.toThrow("crash");
+    expect(await store.get(`destruction/${a.stub}`)).toBeDefined();
+    expect(await a.seat.destructionStatement(a.e.stubHash)).toBeUndefined();
+    // Reading it never puts back what destruction removes, nor signs.
+    expect(await store.get(a.secrets)).toBeDefined();
+    const statement = await a.seat.destroy(a.e.stubHash);
+    expect(await a.seat.destructionStatement(a.e.stubHash)).toEqual(statement);
+  });
+
+  test("is nothing while a crash cut destruction short before the statement", async () => {
+    const store = crashingAt("destruction/", "putOnce");
+    const a = await approved(store);
+    await expect(a.seat.destroy(a.e.stubHash)).rejects.toThrow("crash");
+    expect(await a.seat.destroying(a.e.stubHash)).toBe(true);
+    expect(await a.seat.destructionStatement(a.e.stubHash)).toBeUndefined();
+    expect(await store.list("destruction")).toEqual([]);
+  });
+
+  test("is nothing for a stub the seat didn't approve", async () => {
+    const e = election(4, 3);
+    expect(await (e.seats[0] as CeremonySeat).destructionStatement(e.stubHash)).toBeUndefined();
+  });
+});
+
 describe("uses of the secrets and destruction", () => {
   test("destruction waits for a use of the secrets already begun, and none begins after it", async () => {
     const a = await approved();

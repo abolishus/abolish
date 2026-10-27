@@ -44,12 +44,19 @@ export {
   RESEND_AFTER,
 } from "./opening-sender.ts";
 export {
+  type DestructionOperator,
   HttpOperator,
   type HttpOperatorOptions,
   MAX_ANSWER,
   type OpeningOperator,
   type OperatorAnswer,
 } from "./operator.ts";
+export {
+  type StatementSend,
+  StatementSender,
+  type StatementSenderOptions,
+  type StatementSenderStatus,
+} from "./statement-sender.ts";
 export {
   type BoardOpening,
   type BoardOpenings,

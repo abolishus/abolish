@@ -33,6 +33,8 @@ import {
   ReceiptDuties,
   type ReceiptEvent,
   runInTurn,
+  type StatementEvent,
+  StatementSends,
   TallyDuties,
   tallyDeadline,
   type TallyEvent,
@@ -40,6 +42,7 @@ import {
 import { L1AnchorError } from "../src/l1.ts";
 import type { OpeningSenderStatus } from "../src/opening-sender.ts";
 import { SendError } from "../src/send.ts";
+import type { StatementSenderStatus } from "../src/statement-sender.ts";
 import type { TallyDutyStatus } from "../src/tally.ts";
 import { MemoryStore } from "../src/store.ts";
 import { ViewError } from "../src/view.ts";
@@ -940,6 +943,79 @@ describe("the opening senders", () => {
     await h.duties.step();
     expect(h.built()).toBe(0);
     expect(h.events).toEqual([{ event: "openings-abandoned", stubHash: name(1) }]);
+  });
+});
+
+describe("the statement senders", () => {
+  const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n };
+  const sending: StatementSenderStatus = { state: "sending", send: { state: "not-ready" } };
+
+  function senders(scripts: Map<number, StatementSenderStatus[]>, clock: () => bigint) {
+    const events: StatementEvent[] = [];
+    const stepped: string[] = [];
+    let built = 0;
+    const duties = new StatementSends(
+      {
+        seat: {
+          approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+          approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+          destroying: async () => false,
+        },
+        build: async (e) => {
+          built++;
+          const n = e.stubHash[0] as number;
+          return {
+            deadline: openingsDeadline(e, CLOCK),
+            step: async () => {
+              stepped.push(name(n));
+              const script = scripts.get(n) as StatementSenderStatus[];
+              return (script.length > 1 ? script.shift() : script[0]) as StatementSenderStatus;
+            },
+          };
+        },
+        clock,
+        log: (e) => events.push(e),
+      },
+      CLOCK,
+    );
+    return { duties, events, stepped, built: () => built };
+  }
+
+  test("send until the destruction window ends, past an entry the operator claims, and never past it", async () => {
+    let wall = tallyDeadline(approvedOf(1), CLOCK);
+    const boarded: StatementSenderStatus = {
+      state: "sending",
+      send: { state: "boarded", earlier: false },
+    };
+    const h = senders(new Map([[1, [{ state: "none" }, sending, boarded]]]), () => wall);
+    for (let i = 0; i < 4; i++) await h.duties.step();
+    expect(h.stepped).toHaveLength(4);
+    wall = openingsDeadline(approvedOf(1), CLOCK);
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(5);
+    wall += 1n;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(5);
+    expect(h.events).toEqual([
+      { event: "statements", stubHash: name(1), state: "none" },
+      { event: "statements", stubHash: name(1), ...sending },
+      { event: "statements", stubHash: name(1), ...boarded },
+    ]);
+  });
+
+  test("settle at once under a board-entry version that can't carry a statement", async () => {
+    const h = senders(new Map([[1, [{ state: "unboardable" }]]]), () => 0n);
+    for (let i = 0; i < 3; i++) await h.duties.step();
+    expect(h.stepped).toHaveLength(1);
+  });
+
+  test("set nothing up once the destruction window has ended", async () => {
+    const h = senders(new Map([[1, [sending]]]), () => openingsDeadline(approvedOf(1), CLOCK) + 1n);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.built()).toBe(0);
+    expect(h.events).toEqual([{ event: "statements-abandoned", stubHash: name(1) }]);
   });
 });
 

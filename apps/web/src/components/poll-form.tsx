@@ -550,7 +550,10 @@ function ListingPreview({ t, form }: { t: Translate; form: PollForm }) {
   if (form.topic === "" && place === "")
     return <p className="m-0 text-sm text-muted-foreground">{t("pollFormPreviewNotListed")}</p>;
   return (
-    <ul className="m-0 flex list-none flex-wrap gap-2 p-0 text-sm">
+    <ul
+      aria-labelledby="poll-form-listed"
+      className="m-0 flex list-none flex-wrap gap-2 p-0 text-sm"
+    >
       {form.topic === "" ? null : (
         <li className="border border-border px-2 py-1">{t(POLL_TOPIC_MESSAGES[form.topic])}</li>
       )}
@@ -585,9 +588,12 @@ function ReviewList({
       {rows.map((r) => (
         // Below sm, "Change" shares its label's row rather than taking a 48px
         // row of its own under every value (P2-29, creating a poll's iteration 4).
+        // From sm the columns share a baseline, so "Change", centred in its
+        // 48px target, reads on its label's line rather than 12px under it
+        // (iteration 5).
         <div
           key={r.label}
-          className="grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-border py-3 first:border-t sm:grid-cols-[9rem_1fr_auto] sm:items-start"
+          className="grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-border py-3 first:border-t sm:grid-cols-[9rem_1fr_auto] sm:items-baseline"
         >
           <dt className="font-semibold">{r.label}</dt>
           <dd className="col-span-2 m-0 min-w-0 text-pretty wrap-anywhere sm:col-span-1">
@@ -1066,6 +1072,10 @@ export function PollFormPage({
     );
 
   const closesAt = closesAtOf(form);
+  // A saved draft with nothing unsaved has one next step, submitting, so its
+  // button is the page's primary one and "Save draft" steps back; any edit
+  // gives the primary back to saving (P2-29, creating a poll's iteration 5).
+  const ready = !isNew && !dirty;
   const setQuestion = (i: number, q: FormQuestion) =>
     change({ ...form, questions: form.questions.map((x, j) => (j === i ? q : x)) });
 
@@ -1333,6 +1343,7 @@ export function PollFormPage({
               <Button
                 type="submit"
                 size="lg"
+                variant={ready ? "outline" : "default"}
                 disabled={busy || submitting === "sending" || submitting === "sent"}
               >
                 {t("pollFormSave")}
@@ -1357,17 +1368,17 @@ export function PollFormPage({
           aria-labelledby="poll-form-preview"
           className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1"
         >
+          {/* No mono marks over the preview or the listing: the everyday
+              register keeps them for evidence, and "Preview" only repeated the
+              heading (P2-29, creating a poll's iteration 5). */}
           <div className="grid gap-4 lg:sticky lg:top-6">
-            <p className="m-0 font-mono text-xs tracking-widest uppercase">
-              {t("pollFormPreviewMark")}
-            </p>
             <h2 id="poll-form-preview" className="m-0 font-heading text-2xl font-semibold">
               {t("pollFormPreviewTitle")}
             </h2>
             <PollPreview t={t} form={form} />
-            <p className="m-0 font-mono text-xs tracking-widest uppercase">
+            <h3 id="poll-form-listed" className="m-0 mt-2 text-base font-semibold">
               {t("pollFormPreviewListed")}
-            </p>
+            </h3>
             <ListingPreview t={t} form={form} />
           </div>
         </aside>
@@ -1401,7 +1412,7 @@ export function PollFormPage({
                   <Button
                     type="button"
                     size="lg"
-                    variant="outline"
+                    variant={ready ? "default" : "outline"}
                     disabled={busy || submitting !== "idle"}
                     onClick={() => void submit()}
                   >

@@ -51,6 +51,7 @@ const preview: Preview = {
     viewport: {
       options: {
         phone: { name: "Small phone", styles: { width: "360px", height: "780px" }, type: "mobile" },
+        desktop: { name: "Desktop", styles: { width: "1280px", height: "800px" }, type: "desktop" },
       },
     },
     // Fail the story's test on any axe violation (WCAG 2.2 AA, AGENTS.md "Testing").

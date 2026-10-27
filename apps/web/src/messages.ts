@@ -1170,7 +1170,6 @@ const enUS = {
   pollFormDateLabel: "Closing date",
   pollFormTimeLabel: "Closing time",
   pollFormUtc: "People answering see it as {when} UTC, the clock every poll keeps.",
-  pollFormPreviewMark: "Preview",
   pollFormPreviewTitle: "What people will see",
   pollFormPreviewEmpty: "Your poll's title",
   pollFormPreviewQuestionEmpty: "Your question",

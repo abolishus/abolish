@@ -269,10 +269,22 @@ describe("the poll form's checks", () => {
       max: 4,
     });
     expect(fieldErrors(form({ title: "", questions: [question(), q] }))).toEqual([
-      { id: fieldId.title, problem: "titleMissing" },
+      { id: fieldId.title, problem: "titleMissing", field: "title" },
       { id: fieldId.max("q2"), problem: "rangeInvalid", question: 2 },
-      { id: fieldId.label("q2", "Yes"), problem: "labelRepeated", question: 2, option: 2 },
-      { id: fieldId.label("q2", ""), problem: "labelMissing", question: 2, option: 3 },
+      {
+        id: fieldId.label("q2", "Yes"),
+        problem: "labelRepeated",
+        field: "label",
+        question: 2,
+        option: 2,
+      },
+      {
+        id: fieldId.label("q2", ""),
+        problem: "labelMissing",
+        field: "label",
+        question: 2,
+        option: 3,
+      },
     ]);
     expect(problems(form({ questions: [question(), question({ key: "b" })] }))).toEqual([
       "questionRepeated",
@@ -289,6 +301,34 @@ describe("the poll form's checks", () => {
     expect(problems(form({ title: "é".repeat(513) }))).toEqual(["tooLong"]);
   });
 
+  test("say which text field a problem is in, so the summary can name it", () => {
+    const long = "x".repeat(8193);
+    const q = question({
+      key: "q1",
+      description: long,
+      options: [option("Yes", long), option("No")],
+    });
+    expect(fieldErrors(form({ description: long, questions: [q] }))).toEqual([
+      { id: fieldId.description, problem: "tooLong", field: "description" },
+      {
+        id: fieldId.questionDescription("q1"),
+        problem: "tooLong",
+        field: "questionDescription",
+        question: 1,
+      },
+      {
+        id: fieldId.optionDescription("q1", "Yes"),
+        problem: "tooLong",
+        field: "optionDescription",
+        question: 1,
+        option: 1,
+      },
+    ]);
+    expect(fieldErrors(form({ place: "a\0b" }))).toEqual([
+      { id: fieldId.place, problem: "unstorable", field: "place" },
+    ]);
+  });
+
   test("tidy a place's spacing and name what tidying can't fix", () => {
     expect(fieldErrors(form({ place: "  Riverside \n North  " }))).toEqual([]);
     expect(draftOf(form({ place: "  Riverside \n North  " }))?.place).toBe("Riverside North");
@@ -299,7 +339,7 @@ describe("the poll form's checks", () => {
     expect(draftOf(form({ place: "Sa\u0303o Paulo" }))?.place).toBe("São Paulo");
     expect(problems(form({ place: "x".repeat(MAX_PLACE_LENGTH) }))).toEqual([]);
     expect(fieldErrors(form({ place: "x".repeat(MAX_PLACE_LENGTH + 1) }))).toEqual([
-      { id: fieldId.place, problem: "placeTooLong" },
+      { id: fieldId.place, problem: "placeTooLong", field: "place" },
     ]);
     // Counted in code points after composing: 80 decomposed é are 80 letters.
     expect(problems(form({ place: "e\u0301".repeat(MAX_PLACE_LENGTH) }))).toEqual([]);

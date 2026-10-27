@@ -372,7 +372,23 @@ export interface FieldError {
    * options' problems don't read the same (P2-29, creating a poll's iteration 11).
    */
   readonly option?: number;
+  /**
+   * The text field it is about, so the summary can name it where the
+   * problem's own words don't: "This is too long." was the same for a
+   * question and its explanation (P2-29, creating a poll's iteration 16).
+   */
+  readonly field?: TextField;
 }
+
+/** A field of the author's own text. */
+export type TextField =
+  | "title"
+  | "description"
+  | "place"
+  | "question"
+  | "questionDescription"
+  | "label"
+  | "optionDescription";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -409,6 +425,7 @@ export function fieldErrors(form: PollForm): FieldError[] {
   const add = (
     id: string,
     problem: FormProblem | undefined,
+    field?: TextField,
     question?: number,
     option?: number,
   ) => {
@@ -416,13 +433,18 @@ export function fieldErrors(form: PollForm): FieldError[] {
     errors.push({
       id,
       problem,
+      ...(field === undefined ? {} : { field }),
       ...(question === undefined ? {} : { question }),
       ...(option === undefined ? {} : { option }),
     });
   };
-  add(fieldId.title, textProblem(form.title, TEXT_BYTES.title, "titleMissing"));
-  add(fieldId.description, textProblem(form.description, TEXT_BYTES.description, undefined));
-  add(fieldId.place, placeProblem(form.place));
+  add(fieldId.title, textProblem(form.title, TEXT_BYTES.title, "titleMissing"), "title");
+  add(
+    fieldId.description,
+    textProblem(form.description, TEXT_BYTES.description, undefined),
+    "description",
+  );
+  add(fieldId.place, placeProblem(form.place), "place");
   let options = 0;
   form.questions.forEach((q, i) => {
     const n = i + 1;
@@ -432,18 +454,20 @@ export function fieldErrors(form: PollForm): FieldError[] {
       fieldId.question(q.key),
       textProblem(q.question, TEXT_BYTES.question, "questionMissing") ??
         (repeated ? "questionRepeated" : undefined),
+      "question",
       n,
     );
     add(
       fieldId.questionDescription(q.key),
       textProblem(q.description, TEXT_BYTES.questionDescription, undefined),
+      "questionDescription",
       n,
     );
     const m = q.options.length;
     options += m;
     const { min, max } = selectionRange(q);
     if (m >= 2 && (min > max || max > m || max < 1))
-      add(fieldId[q.rule === "between" ? "min" : "max"](q.key), "rangeInvalid", n);
+      add(fieldId[q.rule === "between" ? "min" : "max"](q.key), "rangeInvalid", undefined, n);
     q.options.forEach((o, j) => {
       const label = o.label;
       const again = label.length > 0 && q.options.slice(0, j).some((p) => p.label === label);
@@ -451,18 +475,20 @@ export function fieldErrors(form: PollForm): FieldError[] {
         fieldId.label(q.key, o.key),
         textProblem(label, TEXT_BYTES.label, "labelMissing") ??
           (again ? "labelRepeated" : undefined),
+        "label",
         n,
         j + 1,
       );
       add(
         fieldId.optionDescription(q.key, o.key),
         textProblem(o.description, TEXT_BYTES.optionDescription, undefined),
+        "optionDescription",
         n,
         j + 1,
       );
     });
-    if (m < 2) add(fieldId.addOption(q.key), "tooFewOptions", n);
-    else if (options > MAX_OPTIONS) add(fieldId.addOption(q.key), "tooManyOptions", n);
+    if (m < 2) add(fieldId.addOption(q.key), "tooFewOptions", undefined, n);
+    else if (options > MAX_OPTIONS) add(fieldId.addOption(q.key), "tooManyOptions", undefined, n);
   });
   if (form.questions.length === 0) add(fieldId.addQuestion, "questionMissing");
   else if (form.questions.length > MAX_QUESTIONS) add(fieldId.addQuestion, "tooManyQuestions");

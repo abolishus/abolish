@@ -978,6 +978,76 @@ export const ProblemsInAQuestion: Story = {
   },
 };
 
+export const TooLongNamesItsField: Story = {
+  args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // Words, not one long one: a field too long, not too wide.
+    const long = "word ".repeat(1700);
+    fireEvent.change(await canvas.findByRole("textbox", { name: "Title" }), {
+      target: { value: long },
+    });
+    fireEvent.change(canvas.getByRole("textbox", { name: "Description (optional)" }), {
+      target: { value: long },
+    });
+    const second = within(canvas.getByRole("region", { name: "Question 2" }));
+    for (const name of [
+      "What do you want to ask?",
+      "Explanation (optional)",
+      "Option 3",
+      "Details for option 3 (optional)",
+    ])
+      fireEvent.change(second.getByRole("textbox", { name }), { target: { value: long } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    const summary = await canvas.findByRole("region", { name: "Your draft wasn't saved" });
+    // Each problem names its field: "This is too long." alone read the same
+    // for a question and its explanation, or an option and its details
+    // (P2-29, creating a poll's iteration 16).
+    await expect(
+      within(summary)
+        .getAllByRole("link")
+        .map((l) => l.textContent),
+    ).toEqual([
+      "Title: This is too long.",
+      "Description: This is too long.",
+      "Question 2: This is too long.",
+      "Question 2, explanation: This is too long.",
+      "Question 2, option 3: This is too long.",
+      "Question 2, details for option 3: This is too long.",
+    ]);
+    await expect(writes(args.client)).toEqual([]);
+  },
+};
+
+export const LinkInTheTextPhone: Story = {
+  args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link =
+      "https://harbor-library.example.org/council/minutes/2026-10-14/longer-opening-hours.pdf";
+    fireEvent.change(await canvas.findByRole("textbox", { name: "Description (optional)" }), {
+      target: { value: `The proposal: ${link}` },
+    });
+    const second = within(canvas.getByRole("region", { name: "Question 2" }));
+    fireEvent.change(second.getByRole("textbox", { name: "Details for option 3 (optional)" }), {
+      target: { value: link },
+    });
+    // A link is one word as wide as the screen several times over: the
+    // preview broke it only where its column allowed, so its column took
+    // the link's width and the page scrolled sideways (P2-29, creating a
+    // poll's iteration 16). The story's own check fails on any sideways
+    // scroll; the preview's text also keeps inside its frame.
+    const preview = await canvas.findByRole("complementary", { name: "What people will see" });
+    const frame = preview.getBoundingClientRect();
+    for (const text of within(preview).getAllByText(link, { exact: false }))
+      await expect(text.getBoundingClientRect().right).toBeLessThanOrEqual(frame.right);
+    await expect(frame.right).toBeLessThanOrEqual(
+      canvasElement.ownerDocument.documentElement.clientWidth,
+    );
+  },
+};
+
 export const ClosesTooSoon: Story = {
   args: { client: fakeDrafts({ read: { summary: SUMMARY, draft: SAVED } }), id: ID },
   play: async ({ canvasElement }) => {

@@ -12,6 +12,13 @@ import type { ContractEventVersion, Panel } from "@abolishus/crypto";
 export interface Deployment {
   /** The API's origin: definitions and display text (`packages/api-contract`). */
   readonly api: string;
+  /**
+   * The website's origin, where a poll's short link and flyer live
+   * (docs/design/sharing.md), or `undefined` where the build names none, and
+   * then the client offers no link to share. Only ever navigated to, never
+   * fetched, so it isn't in the CSP's `connect-src`.
+   */
+  readonly web: string | undefined;
   /** The L2's JSON-RPC endpoint. */
   readonly rpc: string;
   /**
@@ -160,6 +167,9 @@ export function onL1(deployment: Deployment): Deployment {
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
 export const STAGING: Deployment = {
   api: "https://api-staging.abolish.us",
+  // Staging's website has no origin pinned here yet; with no election
+  // registry either, a staging build shows no poll to share.
+  web: undefined,
   rpc: "https://sepolia.base.org",
   // Allnodes' public Base Sepolia endpoint, beside Coinbase's (T-43).
   confirmRpc: "https://base-sepolia-rpc.publicnode.com",

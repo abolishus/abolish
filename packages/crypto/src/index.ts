@@ -1323,6 +1323,7 @@ export {
   FORCED_PATH,
   forcedPathDemand,
   type ForcedPathElection,
+  forcedPathElectionOf,
   forcedPathFits,
   type ForcedPathInterval,
   forcedPathMembersLimit,

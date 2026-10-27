@@ -6,6 +6,9 @@ import {
   COMPLAINT_WINDOW,
   CONTRACT_EVENT_WINDOW,
   complaintScope,
+  decodeElectionDefinitionV5,
+  decodeElectionDefinitionV6,
+  decodeElectionDefinitionV7,
   definitionMembers,
   DELIVERY_WINDOW,
   type FinalizedL1,
@@ -13,13 +16,14 @@ import {
   RECEIPT_BATCH_MAX,
   forcedPathDemand,
   type ForcedPathElection,
+  forcedPathElectionOf,
   forcedPathFits,
   forcedPathMembersLimit,
   type ForcedPathWindows,
   owedReceipts,
   type ViewBallot,
 } from "../src/index.ts";
-import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
+import { hex, readVectorFile, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/delivery-obligation.json comes from an independent Python
 // implementation of What a node owes and Capacity
@@ -414,6 +418,82 @@ describe("forcedPathFits", () => {
       }),
       { numRuns },
     );
+  });
+});
+
+describe("forcedPathElectionOf", () => {
+  const definition = (file: string, id: string) => {
+    const v = readVectorFile(file).vectors.find((x) => x.id === id);
+    if (v?.encoding === undefined) throw new Error(`no ${id}`);
+    return hex(v.encoding);
+  };
+  const typical = decodeElectionDefinitionV6(
+    definition("election-definition-v6.json", "definition-v6-typical"),
+  );
+
+  test("counts the author panel's seats beside the default panel's", () => {
+    expect(typical.author_keys.length).toBe(3);
+    expect(forcedPathElectionOf(typical)).toEqual({
+      members: definitionMembers(typical),
+      seats: typical.panel_size + 3,
+      closesAt: typical.closes_at,
+      l1InclusionBound: BigInt(typical.l1_inclusion_bound),
+    });
+    // Both panels at MAX_TRUSTEES: the most seats the check takes.
+    const full = decodeElectionDefinitionV6(
+      definition("election-definition-v6.json", "definition-v6-lists-at-max"),
+    );
+    expect(forcedPathElectionOf(full).seats).toBe(32);
+    // Its members are past the forced path's cap; with none it fits, so 32
+    // seats are an input the check takes rather than refuses.
+    expect(forcedPathFits([forcedPathElectionOf(full)], deployed)).toBe(false);
+    expect(forcedPathFits([{ ...forcedPathElectionOf(full), members: 0n }], deployed)).toBe(true);
+  });
+
+  test("counts only the default panel without an author panel, and under version 5", () => {
+    const minimal = decodeElectionDefinitionV6(
+      definition("election-definition-v6.json", "definition-v6-minimal"),
+    );
+    expect(minimal.author_keys.length).toBe(0);
+    expect(forcedPathElectionOf(minimal).seats).toBe(minimal.panel_size);
+    const v5 = decodeElectionDefinitionV5(
+      definition("election-definition-v5.json", "definition-v5-typical"),
+    );
+    expect(forcedPathElectionOf(v5)).toEqual({
+      members: definitionMembers(v5),
+      seats: v5.panel_size,
+      closesAt: v5.closes_at,
+      l1InclusionBound: BigInt(v5.l1_inclusion_bound),
+    });
+  });
+
+  test("refuses an election its author seats push past the forced path", () => {
+    // The default panel's cap alone, which the author seats' batches overrun.
+    const cap = forcedPathMembersLimit(typical.panel_size, deployed);
+    const at = (members: bigint): typeof typical => ({
+      ...typical,
+      electorate: [
+        { ...typical.electorate[0], regions: [members] } as (typeof typical.electorate)[0],
+      ],
+    });
+    expect(
+      forcedPathFits([{ ...forcedPathElectionOf(at(cap)), seats: typical.panel_size }], deployed),
+    ).toBe(true);
+    expect(forcedPathFits([forcedPathElectionOf(at(cap))], deployed)).toBe(false);
+    const both = forcedPathMembersLimit(typical.panel_size + 3, deployed);
+    expect(forcedPathFits([forcedPathElectionOf(at(both))], deployed)).toBe(true);
+    expect(forcedPathFits([forcedPathElectionOf(at(both + 1n))], deployed)).toBe(false);
+  });
+
+  test("counts version 7's author seats, and throws for its rolling electorate", () => {
+    const fixed = decodeElectionDefinitionV7(
+      definition("election-definition-v7.json", "definition-v7-fixed-typical"),
+    );
+    expect(forcedPathElectionOf(fixed).seats).toBe(fixed.panel_size + fixed.author_keys.length);
+    const rolling = decodeElectionDefinitionV7(
+      definition("election-definition-v7.json", "definition-v7-rolling-typical"),
+    );
+    expect(() => forcedPathElectionOf(rolling)).toThrow(RangeError);
   });
 });
 

@@ -31,6 +31,8 @@ contract BoardDeliveryV2Test is TestBase {
     string internal constant INTAKE = "../../docs/spec/vectors/intake-v4.json";
     string internal constant BALLOTS = "../../docs/spec/vectors/ballot-v4-records.json";
     string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch-v2.json";
+    string internal constant OBLIGATION = "../../docs/spec/vectors/delivery-obligation.json";
+    string internal constant ROOTS = "../../docs/spec/vectors/delivery-root.json";
 
     bytes32 internal constant RECEIPT_SUBMITTED =
         keccak256("ShareReceiptSubmitted(bytes32,bytes32,bytes)");
@@ -58,6 +60,12 @@ contract BoardDeliveryV2Test is TestBase {
     /// A version-2 batch's or root's `panel` and `seat`.
     uint256 internal constant BATCH_PANEL_AT = 35;
     uint256 internal constant BATCH_SEAT_AT = 36;
+    /// Gas the forced path's figures keep back over a version-2 call
+    /// measured against the stubs, for what real registries cost more
+    /// (test_ForcedPathCallGas): about 2,000 for version 1's batch and root
+    /// calls, measured as here without Solidity's copy of the calldata, so
+    /// this leaves a real registry's layout ten times that and more.
+    uint256 internal constant HEADROOM = 30_000;
 
     ElectionsStub internal elections;
     TrusteesStub internal trustees;
@@ -745,7 +753,241 @@ contract BoardDeliveryV2Test is TestBase {
         assertTrue(!ok, "a changed record was accepted");
     }
 
+    // --- the forced path's figures -------------------------------------------
+
+    /// The forced path's call figures (docs/spec/delivery.md, Capacity;
+    /// Version 2, What a node owes) hold for version 2's records, which the
+    /// capacity check sizes ballot version 4's seats by: for a default seat
+    /// and an author seat, a full version-2 receipt batch of
+    /// `receiptsPerCall` pairs, a full complaint batch of `complaintsPerCall`
+    /// entries and a root with dense calldata each fit one deposit's data,
+    /// cost at most their pinned gas with their intrinsic gas, cold, where
+    /// P-256 goes through `P256VERIFY`, and are accepted with exactly that
+    /// figure as their deposit's gas limit. An author seat's key set and
+    /// signing key are the election registry's, which every call reads
+    /// already, so a default seat's calls, which also read the trustee
+    /// registry, are the dearer. The stubs stand in for the registries:
+    /// rule 9 refuses every definition pinning ballot version 4 until P2-16
+    /// part 5e, so no real registry holds one yet, and `HEADROOM` keeps back
+    /// what real registries cost over them. The board has already accepted a
+    /// record, as any board a forced deposit reaches has, so no measurement
+    /// carries the accumulator count's first write (T-25, T-52, T-54).
+    function test_ForcedPathCallGas() public {
+        string memory fj = vm.readFile(OBLIGATION);
+        string memory bj = vm.readFile(BATCHES);
+        _accept(_batchCall("share-receipt-batch", _byId(bj, ".records", "receipt-batch-default")));
+        uint256 receipts = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptsPerCall"));
+        uint256 complaints = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintsPerCall"));
+        assertEq(receipts, DeliveryCheckLib.BATCH_MAX, "a call is one full receipt batch");
+        assertEq(complaints, DeliveryCheckLib.COMPLAINT_BATCH_MAX, "and one full complaint batch");
+        uint256[3] memory figures = [
+            vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptCallGas")),
+            vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintCallGas")),
+            vm.parseUint(vm.parseJsonString(vm.readFile(ROOTS), ".rootCallGas"))
+        ];
+        for (uint8 panel = 1; panel <= 2; panel++) {
+            uint256 sk = secrets[panel][1];
+            for (uint256 kind; kind < 3; kind++) {
+                string memory what = string.concat(
+                    panel == 1 ? "default " : "author ",
+                    kind == 0 ? "receipt batch" : kind == 1 ? "complaint batch" : "root"
+                );
+                bytes memory first =
+                    _forcedCall(bj, kind, panel, sk, "forced path", receipts, complaints);
+                bytes memory next =
+                    _forcedCall(bj, kind, panel, sk, "forced path, next", receipts, complaints);
+                _withinFigure(fj, first, next, figures[kind], what);
+            }
+        }
+    }
+
+    /// The `kind`th call of test_ForcedPathCallGas (a receipt batch, a
+    /// complaint batch, a root) by seat 1 of `panel`, signed with `sk`, its
+    /// contents from `label`. A root's second call is the seat's complaint
+    /// root, since its receipt root's slot is then full.
+    function _forcedCall(
+        string memory bj,
+        uint256 kind,
+        uint8 panel,
+        uint256 sk,
+        string memory label,
+        uint256 receipts,
+        uint256 complaints
+    ) internal view returns (bytes memory) {
+        bytes memory ds = _ds(_str(bj, _tagKey(kind)));
+        if (kind == 0) {
+            bytes memory head =
+                abi.encodePacked(uint16(0x0016), uint8(2), h, panel, uint8(1), uint32(receipts));
+            return abi.encodeCall(
+                Board.submitReceiptBatch,
+                (_resigned(bytes.concat(head, _densePairs(receipts, label)), ds, sk))
+            );
+        }
+        if (kind == 1) {
+            bytes memory head =
+                abi.encodePacked(uint16(0x0017), uint8(2), h, panel, uint8(1), uint32(complaints));
+            return abi.encodeCall(
+                Board.submitComplaintBatch,
+                (_resigned(bytes.concat(head, _denseEntries(complaints, label)), ds, sk))
+            );
+        }
+        uint8 rootKind = keccak256(bytes(label)) == keccak256("forced path") ? 1 : 2;
+        return _rootCall(_resigned(_denseRoot(panel, rootKind), ds, sk));
+    }
+
+    /// A version-2 root by seat 1 of `panel` up to its signature, with no
+    /// zero byte in its count, root or CID digest: the calldata's dearest
+    /// form. Either kind's leaves at this count are a DAG-PB object.
+    function _denseRoot(uint8 panel, uint8 kind) internal view returns (bytes memory) {
+        bytes32 dense = bytes32(type(uint256).max / 255);
+        return abi.encodePacked(
+            uint16(0x001a),
+            uint8(2),
+            h,
+            panel,
+            uint8(1),
+            kind,
+            uint32(0x01010101),
+            dense,
+            bytes4(0x01701220),
+            dense
+        );
+    }
+
+    /// `first` fits a deposit's data and, where P-256 goes through its
+    /// precompile, costs at most `figure` less `HEADROOM`, cold, with its
+    /// intrinsic gas; `next`, new records of the same seat, is accepted with
+    /// exactly `figure` as its gas limit.
+    function _withinFigure(
+        string memory fj,
+        bytes memory first,
+        bytes memory next,
+        uint256 figure,
+        string memory what
+    ) internal {
+        assertTrue(first.length <= vm.parseJsonUint(fj, ".portal.maxDepositData"), what);
+        assertTrue(figure <= vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit")), what);
+        if (!_expectPrecompile()) return;
+        uint256 used = _withIntrinsic(first, _coldGas(first));
+        assertTrue(used + HEADROOM <= figure, string.concat(what, ": ", vm.toString(used)));
+        _acceptsWithin(next, figure, what);
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /// `count` pairs ascending by ballot hash, dense as honest hashes are:
+    /// each ballot hash leads with its index's two bytes (Board.t.sol,
+    /// `_batchPairs`).
+    function _densePairs(uint256 count, string memory label)
+        internal
+        pure
+        returns (bytes memory pairs)
+    {
+        pairs = new bytes(64 * count);
+        for (uint256 i; i < count; i++) {
+            bytes32 ballot = bytes32(
+                (i + 1) << 240 | (uint256(keccak256(abi.encode(label, "ballot", i))) >> 16)
+            );
+            bytes32 share = keccak256(abi.encode(label, "share", i));
+            assembly ("memory-safe") {
+                let at := add(add(pairs, 32), mul(i, 64))
+                mstore(at, ballot)
+                mstore(add(at, 32), share)
+            }
+        }
+    }
+
+    /// `count` complaint entries ascending by ballot hash, each proof framed
+    /// and dense, as Board.t.sol's `_complaintEntries`: `D` even and below
+    /// `2²⁵⁵ − 19`, `c` and `z` below `ℓ`, little-endian; the board frames
+    /// them only.
+    function _denseEntries(uint256 count, string memory label)
+        internal
+        pure
+        returns (bytes memory entries)
+    {
+        entries = new bytes(128 * count);
+        for (uint256 i; i < count; i++) {
+            bytes32 ballot = bytes32(
+                (i + 1) << 240 | (uint256(keccak256(abi.encode(label, "ballot", i))) >> 16)
+            );
+            uint256 d = uint256(keccak256(abi.encode(label, "D", i)));
+            d = ((d & ~uint256(0xff)) | 0x2a) & ~(uint256(1) << 248);
+            uint256 c = uint256(keccak256(abi.encode(label, "c", i)));
+            c = (c & ~uint256(0xff)) | 0x05;
+            uint256 z = uint256(keccak256(abi.encode(label, "z", i)));
+            z = (z & ~uint256(0xff)) | 0x07;
+            assembly ("memory-safe") {
+                let at := add(add(entries, 32), mul(i, 128))
+                mstore(at, ballot)
+                mstore(add(at, 32), d)
+                mstore(add(at, 64), c)
+                mstore(add(at, 96), z)
+            }
+        }
+    }
+
+    /// Whether P-256 goes through the precompile at 0x100 here, asserted
+    /// where the test script expects it (`EXPECT_P256VERIFY`).
+    function _expectPrecompile() internal view returns (bool precompile) {
+        bytes32 digest = sha256("forced path");
+        (uint256 r, uint256 s) = TrusteeFixture.sign(secrets[1][1], digest);
+        (bool ok, bytes memory ret) =
+            address(0x100).staticcall(abi.encodePacked(digest, r, s, keys[1][1][0], keys[1][1][1]));
+        precompile = ok && ret.length == 32 && uint256(bytes32(ret)) == 1;
+        if (vm.envOr("EXPECT_P256VERIFY", false)) assertTrue(precompile, "no P256VERIFY");
+    }
+
+    /// The gas the board's call of `data` executes, with the board and both
+    /// stubs cold, accounts and slots, as in a deposit of its own.
+    function _coldGas(bytes memory data) internal returns (uint256 used) {
+        vm.cool(address(board));
+        vm.cool(address(elections));
+        vm.cool(address(trustees));
+        // The call reads `data` where it lies: Solidity's `.call` would copy
+        // it first, and that copy's memory expansion, quadratic in the
+        // test's whole memory, would be counted as the board's.
+        address target = address(board);
+        bool ok;
+        assembly ("memory-safe") {
+            let before := gas()
+            ok := call(gas(), target, 0, add(data, 32), mload(data), 0, 0)
+            used := sub(before, gas())
+        }
+        assertTrue(ok, "gas call refused");
+    }
+
+    /// A transaction's gas for `data` that executed `used`: 21,000, then
+    /// EIP-2028's 4 per zero byte and 16 per other, or EIP-7623's floor of 10
+    /// per token when that is higher (Board.t.sol, `_withIntrinsic`).
+    function _withIntrinsic(bytes memory data, uint256 used) internal pure returns (uint256) {
+        uint256 tokens = _tokens(data);
+        uint256 standard = 21_000 + 4 * tokens + used;
+        uint256 floor = 21_000 + 10 * tokens;
+        return standard > floor ? standard : floor;
+    }
+
+    /// The call is accepted, cold, with `gasLimit` as its transaction's
+    /// limit: what is left after the intrinsic gas is what the call gets,
+    /// and EIP-7623's floor fits the limit too.
+    function _acceptsWithin(bytes memory data, uint256 gasLimit, string memory what) internal {
+        uint256 tokens = _tokens(data);
+        assertTrue(21_000 + 10 * tokens <= gasLimit, string.concat(what, ": the floor fits"));
+        vm.cool(address(board));
+        vm.cool(address(elections));
+        vm.cool(address(trustees));
+        vm.recordLogs();
+        (bool ok,) = address(board).call{gas: gasLimit - 21_000 - 4 * tokens}(data);
+        assertTrue(ok, string.concat(what, ": accepted within the deposit's gas limit"));
+        assertTrue(vm.getRecordedLogs().length > 0, string.concat(what, ": the call emitted"));
+    }
+
+    /// EIP-7623's tokens: a zero byte one, any other four.
+    function _tokens(bytes memory data) internal pure returns (uint256 tokens) {
+        for (uint256 i; i < data.length; i++) {
+            tokens += data[i] == 0 ? 1 : 4;
+        }
+    }
 
     /// Alice's version-4 record: delivery-v2.json's cell, nullifier and
     /// committed vote, with ballot-v4-records.json's first L1 reference and

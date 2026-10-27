@@ -38,7 +38,15 @@ import {
 import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
 import { objectCid, readObject } from "./content-addressing.ts";
 import { ds } from "./domain-separation.ts";
-import { type ElectionDefinitionV6, electionDefinitionV6Rule } from "./election-definition.ts";
+import {
+  type ElectionDefinition,
+  type ElectionDefinitionV3,
+  type ElectionDefinitionV4,
+  type ElectionDefinitionV5,
+  type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
+  electionDefinitionV6Rule,
+} from "./election-definition.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
@@ -1767,6 +1775,38 @@ export function definitionMembers(definition: {
     members +=
       "group_size" in tier ? tier.group_size : tier.regions.reduce((sum, n) => sum + n, 0n);
   return members;
+}
+
+/**
+ * One election as the capacity check reads it, from its definition
+ * (docs/spec/delivery.md, Capacity): `M` from `definitionMembers`, and `s`
+ * every seat that may force records, the default panel's `panel_size` and,
+ * from definition version 6, the author panel's `n_A`, the length of
+ * `author_keys`. Ballot version 4's author seats owe and send exactly what
+ * default seats do, in version-2 batches and roots whose calls the release's
+ * figures bound (Version 2, What a node owes), so a check that counted only
+ * the default panel would let a stub with an author panel through at up to
+ * twice the gas it sized (T-25, T-52, T-54). Throws as `definitionMembers`
+ * does for a rolling or empty electorate.
+ */
+export function forcedPathElectionOf(
+  definition:
+    | ElectionDefinition
+    | ElectionDefinitionV3
+    | ElectionDefinitionV4
+    | ElectionDefinitionV5
+    | ElectionDefinitionV6
+    | ElectionDefinitionV7,
+): ForcedPathElection {
+  // Typed by the codec's versions rather than by shape, so a definition from
+  // version 6 on can't reach here without `author_keys` and count none.
+  return {
+    members: definitionMembers(definition),
+    seats:
+      definition.panel_size + ("author_keys" in definition ? definition.author_keys.length : 0),
+    closesAt: definition.closes_at,
+    l1InclusionBound: BigInt(definition.l1_inclusion_bound),
+  };
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

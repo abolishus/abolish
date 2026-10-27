@@ -289,7 +289,7 @@ describe("electorateCheck", () => {
     });
     const t = tierOf("one-group");
     const d = v5([t.electorate]);
-    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 12 } : p));
+    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 13 } : p));
     expect(
       electorateCheck(
         { ...d, value: { ...d.value, profile: { protocol_major: 1, pins } } },
@@ -313,7 +313,7 @@ describe("electorateCheck", () => {
     };
     const version = value.profile.pins.find((p) => p.record_type === 8)?.version;
     // Its vector pins a contract-event version this release reads.
-    expect(version !== undefined && version <= 11).toBe(true);
+    expect(version !== undefined && version <= 12).toBe(true);
     expect(electorateCheck({ version: 7, value }, t.records, release)).toEqual({ status: "pass" });
   });
 });

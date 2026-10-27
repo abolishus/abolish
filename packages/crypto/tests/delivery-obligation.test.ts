@@ -444,7 +444,10 @@ describe("forcedPathElectionOf", () => {
       definition("election-definition-v6.json", "definition-v6-lists-at-max"),
     );
     expect(forcedPathElectionOf(full).seats).toBe(32);
-    expect(() => forcedPathFits([forcedPathElectionOf(full)], deployed)).not.toThrow();
+    // Its members are past the forced path's cap; with none it fits, so 32
+    // seats are an input the check takes rather than refuses.
+    expect(forcedPathFits([forcedPathElectionOf(full)], deployed)).toBe(false);
+    expect(forcedPathFits([{ ...forcedPathElectionOf(full), members: 0n }], deployed)).toBe(true);
   });
 
   test("counts only the default panel without an author panel, and under version 5", () => {

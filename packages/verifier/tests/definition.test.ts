@@ -931,13 +931,14 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
   const minimal = decodeElectionDefinitionV6(hex(vector("definition-v6-minimal").encoding));
   // A sealed version-6 poll without an author panel: ballot version 4,
   // spoiled-ballot opening version 3, tally-opening version 1, display-text
-  // version 2, board-entry version 5 and contract-event version 8 (2.3).
+  // version 2, board-entry version 5 and contract-event version 9, the first
+  // that frames ballot version 4 (2.3).
   const FITTING: Readonly<Record<number, number>> = {
     [RECORD_TYPES.ballot]: 4,
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 8,
+    [RECORD_TYPES.contractEvent]: 9,
     [RECORD_TYPES.displayText]: 2,
   };
   const v6For = (
@@ -1092,6 +1093,8 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
       [{ [RECORD_TYPES.displayText]: 1 }, "profile-combination"],
       [{ [RECORD_TYPES.tallyOpening]: 3 }, "profile-combination"],
       [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
+      // Version 8 frames no version-4 ballot (T-25, T-53).
+      [{ [RECORD_TYPES.contractEvent]: 8 }, "profile-combination"],
       [{ [RECORD_TYPES.ballot]: 255 }, "unsupported-version"],
       [{ [RECORD_TYPES.spoiledBallotOpening]: 255 }, "unsupported-version"],
     ] as const) {
@@ -1229,7 +1232,7 @@ describe("definition version 7 under a fixed electorate (read as version 6)", ()
 
   test("a sealed poll without an author panel passes 2.3's combination, in every poll class", () => {
     for (const poll_class of Object.values(POLL_CLASSES))
-      for (const events of [8, 9, 10, 11, 12]) {
+      for (const events of [9, 10, 11, 12]) {
         const r = format3(
           v7For(closed.anchor, { [RECORD_TYPES.contractEvent]: events }, { poll_class }),
           closed,
@@ -1284,6 +1287,8 @@ describe("definition version 7 under a fixed electorate (read as version 6)", ()
       [{ [RECORD_TYPES.displayText]: 1 }, "profile-combination"],
       [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
       [{ [RECORD_TYPES.contractEvent]: 7 }, "profile-combination"],
+      // Version 8 frames no version-4 ballot (T-25, T-53).
+      [{ [RECORD_TYPES.contractEvent]: 8 }, "profile-combination"],
       [{ [RECORD_TYPES.ballot]: 255 }, "unsupported-version"],
       [{ [RECORD_TYPES.contractEvent]: 13 }, "unsupported-version"],
     ] as const) {

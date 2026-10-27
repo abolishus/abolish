@@ -368,7 +368,7 @@ describe("2.3's profile combination under version 6", () => {
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 8,
+    [RECORD_TYPES.contractEvent]: 9,
     [RECORD_TYPES.displayText]: 2,
   };
   const v6 = (
@@ -399,9 +399,10 @@ describe("2.3's profile combination under version 6", () => {
   test("a sealed poll without an author panel fits", () => {
     expect(electionDefinitionV6Rule(v6())).toBeUndefined();
     expect(profileCombinationRule(v6())).toBeUndefined();
-    // Contract-event version 9 frames ballot version 4, and reads every
-    // record version 8 passes as version 8 does.
-    expect(profileCombinationRule(v6({ [RECORD_TYPES.contractEvent]: 9 }))).toBeUndefined();
+    // Contract-event versions 10 to 12 read every record version 9 passes,
+    // the version-4 ballots among them, as version 9 does.
+    for (const events of [10, 11, 12])
+      expect(profileCombinationRule(v6({ [RECORD_TYPES.contractEvent]: events }))).toBeUndefined();
     // Every poll class: the default panel's kind is 2.5's, not 2.3's.
     for (const poll_class of Object.values(POLL_CLASSES))
       expect(profileCombinationRule(v6({}, { poll_class }))).toBeUndefined();
@@ -479,8 +480,9 @@ describe("2.3's profile combination under version 6", () => {
       { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 7 },
       // No close statement, no delivery records or no destruction.
       ...[1, 3, 4].map((board) => ({ ...livePins, [RECORD_TYPES.boardEntry]: board })),
-      // Contract-event versions 1 to 7 miss board or registry events.
-      ...[1, 2, 3, 4, 5, 6, 7].map((events) => ({
+      // Contract-event versions 1 to 7 miss board or registry events, and
+      // version 8 frames no version-4 ballot.
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((events) => ({
         ...livePins,
         [RECORD_TYPES.contractEvent]: events,
       })),
@@ -547,8 +549,9 @@ describe("2.3's profile combination under version 6", () => {
       { [RECORD_TYPES.displayText]: 1 },
       { [RECORD_TYPES.displayText]: 3 },
       { [RECORD_TYPES.displayText]: undefined },
-      // Contract-event versions 1 to 7 miss board or registry events.
-      ...[1, 2, 3, 4, 5, 6, 7].map((events) => ({ [RECORD_TYPES.contractEvent]: events })),
+      // Contract-event versions 1 to 7 miss board or registry events, and
+      // version 8 frames no version-4 ballot (T-25, T-53).
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((events) => ({ [RECORD_TYPES.contractEvent]: events })),
       // A failure is reported beside a version this package doesn't read.
       { [RECORD_TYPES.boardEntry]: 1, [RECORD_TYPES.spoiledBallotOpening]: 255 },
       { [RECORD_TYPES.ballot]: 3, [RECORD_TYPES.contractEvent]: 255 },

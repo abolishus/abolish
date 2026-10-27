@@ -115,9 +115,9 @@ def det(label):
     return hashlib.sha256(b"abolish verifier ballots v4 vectors " + label.encode()).digest()
 
 
-def pins_for(ballot=4, opening=3, definition=6):
-    """A version-6 (or version-7) profile: board-entry version 5, contract-event version 8 (close.md, Version), display-text version 2, tally-opening version 1, and the given ballot and spoiled-opening pins."""
-    own = {1: definition, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 8, DISPLAY_TEXT_TYPE: 2}
+def pins_for(ballot=4, opening=3, definition=6, events=9):
+    """A version-6 (or version-7) profile: board-entry version 5, contract-event version 9, the first that frames ballot version 4 (close.md, Version; contracts.md, Event tables (version 9)), display-text version 2, tally-opening version 1, and the given ballot, spoiled-opening and contract-event pins."""
+    own = {1: definition, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: events, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
@@ -129,13 +129,13 @@ def v6_reading(d):
 
 
 def combination(d):
-    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 8 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails."""
+    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 9 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
     pins = dict(d["profile"]["pins"])
     if d["results_mode"] != d6.SEALED or d["author_keys"]:
         return COMBINATION_FAILS
     if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
         return UNSUPPORTED
-    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 8}
+    wanted = {DISPLAY_TEXT_TYPE: 2, BALLOT_TYPE: 4, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 1, BOARD_ENTRY_TYPE: 5, vb.CONTRACT_EVENT_TYPE: 9}
     if any(pins[t] != v for t, v in wanted.items()):
         return COMBINATION_FAILS
     return NOT_IMPLEMENTED
@@ -436,6 +436,19 @@ def build(constants, version=6):
         "ballots",
     )
 
+    # Contract-event version 8 frames no version-4 ballot, so this
+    # election's contract-path ballots would fail 4.4 (T-25, T-53): 2.3
+    # fails it, and admission still judges the board's ballots.
+    d_e8, t_e8, e_e8 = election_for("v6-events-8", [1, 2, 3], profile=pins(events=8))
+    ok_e8 = honest(e_e8)
+    bundle(
+        "events-8",
+        "Definition version 6 pinning contract-event version 8, which frames no version-4 ballot: 2.3 fails profile-combination, and admission still judges every ballot.",
+        d_e8, t_e8, e_e8, [1, 2, 3],
+        [t_e8, ok_e8["cell-0"]],
+        "ballots",
+    )
+
     # An author panel: 3.2 holds per panel, and this board carries no
     # transcript that hashes to `author_transcript_hash`, so the author run
     # isn't reached, 3.2 is unverifiable and no key set is registered; no
@@ -637,7 +650,7 @@ def assemble(constants, proofs_path, out_dir, version=6):
                 assert sig is not None or verdict is None, (bnd["id"], i)
                 # Every ballot here is a board-path one in segment 0, and no
                 # contract-event record carries one.
-                assert pins[vb.CONTRACT_EVENT_TYPE] == 8
+                assert pins[vb.CONTRACT_EVENT_TYPE] in (8, 9)
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})
